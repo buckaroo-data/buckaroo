@@ -25,16 +25,16 @@ import 'paddy-react-edit-list/css/dcf-npm.css';
 import '../style/widget.css';
 
 
-export class DCFWidgetModel extends DOMWidgetModel {
+export class DCEFWidgetModel extends DOMWidgetModel {
     defaults() {
 	return {
 	    ...super.defaults(),
-	    _model_name: DCFWidgetModel.model_name,
-	    _model_module: DCFWidgetModel.model_module,
-	    _model_module_version: DCFWidgetModel.model_module_version,
-	    _view_name: DCFWidgetModel.view_name,
-	    _view_module: DCFWidgetModel.view_module,
-	    _view_module_version: DCFWidgetModel.view_module_version,
+	    _model_name: DCEFWidgetModel.model_name,
+	    _model_module: DCEFWidgetModel.model_module,
+	    _model_module_version: DCEFWidgetModel.model_module_version,
+	    _view_name: DCEFWidgetModel.view_name,
+	    _view_module: DCEFWidgetModel.view_module,
+	    _view_module_version: DCEFWidgetModel.view_module_version,
 	    //add typing from OperationUtils
 	    command_config: {} as CommandConfigT,
 	    commands: [] as Operation[],
@@ -48,7 +48,7 @@ export class DCFWidgetModel extends DOMWidgetModel {
 	// Add any extra serializers here
     };
 
-    static model_name = 'DCFWidgetModel';
+    static model_name = 'DCEFWidgetModel';
     static model_module = MODULE_NAME;
     static model_module_version = MODULE_VERSION;
     static view_name = 'ExampleView'; // Set to null if no view
@@ -57,7 +57,7 @@ export class DCFWidgetModel extends DOMWidgetModel {
 }
 
 
-export class DCFWidgetView extends DOMWidgetView {
+export class DCEFWidgetView extends DOMWidgetView {
     render() {
 	console.log('DCFWidget View... renamed ')
 	this.el.classList.add('custom-widget');

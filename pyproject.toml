@@ -34,7 +34,7 @@ classifiers = [
 dependencies = [
     "ipywidgets>=7.6.0,<9"
 ]
-version = "0.2.1"
+version = "0.2.3"
 
 [project.license]
 file = "LICENSE.txt"
@@ -48,18 +48,18 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/bloomberg/ipydatagrid"
+Homepage = "https://github.com/bloomberg/dcef"
 
 [tool.hatch.build]
 artifacts = [
-    "ipydatagrid/nbextension/index.*",
-    "ipydatagrid/labextension",
+    "dcef/nbextension/index.*",
+    "dcef/labextension",
 ]
 
 [tool.hatch.build.targets.wheel.shared-data]
-"ipydatagrid/nbextension" = "share/jupyter/nbextensions/ipydatagrid"
-"ipydatagrid/labextension" = "share/jupyter/labextensions/ipydatagrid"
-"ipydatagrid.json" = "etc/jupyter/nbconfig/notebook.d/ipydatagrid.json"
+"dcef/nbextension" = "share/jupyter/nbextensions/dcef"
+"dcef/labextension" = "share/jupyter/labextensions/dcef"
+"dcef.json" = "etc/jupyter/nbconfig/notebook.d/dcef.json"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
@@ -81,8 +81,8 @@ exclude = [
 
 [tool.hatch.build.hooks.jupyter-builder]
 ensured-targets = [
-    "ipydatagrid/nbextension/index.js",
-    "ipydatagrid/labextension/package.json",
+    "dcef/nbextension/index.js",
+    "dcef/labextension/package.json",
 ]
 dependencies = [
     "hatch-jupyter-builder>=0.8.1",
@@ -99,7 +99,7 @@ npm = [
 [tool.isort]
 profile = "black"
 known_first_party = [
-    "ipydatagrid",
+    "dcef",
     "tests",
 ]
 line_length = 80
@@ -121,7 +121,7 @@ field = [
 ]
 
 [tool.tbump.version]
-current = "1.1.15"
+current = "0.2.2"
 regex = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)((?P<channel>a|b|rc|.dev)(?P<release>\\d+))?"
 
 [tool.tbump.git]
@@ -133,7 +133,7 @@ src = "pyproject.toml"
 version_template = "version = \"{major}.{minor}.{patch}{channel}{release}\""
 
 [[tool.tbump.file]]
-src = "ipydatagrid/_version.py"
+src = "dcef/_version.py"
 
 [[tool.tbump.file]]
 src = "package.json"
