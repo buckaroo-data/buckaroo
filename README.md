@@ -16,16 +16,9 @@ Using `pip`:
 pip install dcef
 ```
 
-## Caveats
-DCEF is in beta form.  At this point, it is based on from Bloomberg's [ipydatagrid](https://github.com/bloomberg/ipydatagrid) for the basis of the widget build.
-
-If you install ipydatagrid with dcef at this point, expect errors.
-
-
-
 # Using DCEF
 
-in a jupylter notebook just add the following to a cell
+in a jupyter lab notebook just add the following to a cell
 
 ```python
 from dcef.dcef_widget import DCEFWidget
@@ -235,23 +228,5 @@ Have you had a good experience with this project? Why not share some love and co
 We welcome issue reports [here](../../issues); be sure to choose the proper issue template for your issue, so that we can be sure you're providing the necessary information.
 
 Before sending a [Pull Request](../../pulls), please make sure you read our
-[Contribution Guidelines](https://github.com/bloomberg/.github/blob/master/CONTRIBUTING.md).
 
-## License
-
-Please read the [LICENSE](LICENSE.txt) file.
-
-## Code of Conduct
-
-This project has adopted a [Code of Conduct](https://github.com/bloomberg/.github/blob/master/CODE_OF_CONDUCT.md).
-If you have any concerns about the Code, or behavior which you have experienced in the project, please
-contact us at opensource@bloomberg.net.
-
-## Security Vulnerability Reporting
-
-If you believe you have identified a security vulnerability in this project, please send email to the project
-team at opensource@bloomberg.net, detailing the suspected issue and any methods you've found to reproduce it.
-
-Please do NOT open an issue in the GitHub repository, as we'd prefer to keep vulnerability reports private until
-we've had an opportunity to review and address them.
 

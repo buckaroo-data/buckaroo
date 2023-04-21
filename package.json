@@ -1,6 +1,6 @@
 {
-  "name": "ipydatagrid",
-  "version": "1.1.15",
+  "name": "dcef",
+  "version": "0.2.1",
   "description": "Fast Datagrid widget for the Jupyter Notebook and JupyterLab",
   "keywords": [
     "jupyter",
@@ -17,20 +17,20 @@
     "dist/*.png",
     "style/**/*.*"
   ],
-  "homepage": "https://github.com/Bloomberg/ipydatagrid",
+  "homepage": "https://github.com/paddymul/dcef",
   "bugs": {
-    "url": "https://github.com/Bloomberg/ipydatagrid/issues"
+    "url": "https://github.com/paddymul/dcef/issues"
   },
   "license": "BSD-3-Clause",
   "author": {
-    "name": "Bloomberg",
+    "name": "Paddy Mullen",
     "email": ""
   },
   "main": "lib/index.js",
   "types": "./lib/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Bloomberg/ipydatagrid"
+    "url": "https://github.com/paddymul/dcef"
   },
   "scripts": {
     "build": "yarn run build:lib && yarn run build:nbextension && yarn run build:labextension",
@@ -43,8 +43,8 @@
     "build:all": "yarn run build:labextension && yarn run build:nbextension && yarn run build:widget-examples",
     "clean": "rimraf dist && yarn run clean:lib && yarn run clean:labextension && yarn run clean:nbextension",
     "clean:lib": "rimraf lib",
-    "clean:labextension": "rimraf ipydatagrid/labextension",
-    "clean:nbextension": "rimraf ipydatagrid/nbextension/index.*",
+    "clean:labextension": "rimraf dcef/labextension",
+    "clean:nbextension": "rimraf dcef/nbextension/index.*",
     "lint": "eslint 'js/**/*.{js,ts}' --quiet --fix",
     "prepack": "yarn run build:labextension && yarn run build:nbextension",
     "test": "jest --verbose",
@@ -101,7 +101,7 @@
   "jupyterlab": {
     "extension": "lib/plugin",
     "webpackConfig": "webpack.lab.config.js",
-    "outputDir": "./ipydatagrid/labextension",
+    "outputDir": "./dcef/labextension",
     "sharedPackages": {
       "@jupyter-widgets/base": {
         "bundled": false,

@@ -12,6 +12,6 @@
 (window as any).__webpack_public_path__ =
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   document.querySelector('body')!.getAttribute('data-base-url') +
-  'nbextensions/ipydatagrid';
+  'nbextensions/dcef';
 
 export * from './index';

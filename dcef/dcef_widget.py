@@ -18,10 +18,10 @@ import json
 class DCEFWidget(DOMWidget):
     """TODO: Add docstring here
     """
-    _model_name = Unicode('DCFWidgetModel').tag(sync=True)
+    _model_name = Unicode('DCEFWidgetModel').tag(sync=True)
     _model_module = Unicode(module_name).tag(sync=True)
     _model_module_version = Unicode(module_version).tag(sync=True)
-    _view_name = Unicode('DCFWidgetView').tag(sync=True)
+    _view_name = Unicode('DCEFWidgetView').tag(sync=True)
     _view_module = Unicode(module_name).tag(sync=True)
     _view_module_version = Unicode(module_version).tag(sync=True)
 
@@ -33,13 +33,6 @@ class DCEFWidget(DOMWidget):
     command_classes = DefaultCommandKlsList
 
     js_df = Dict({}).tag(sync=True)
-
-    # transformed_df = Dict({}).tag(sync=True)
-    # transform_error = Unicode('').tag(sync=True)
-
-    # generated_py_code = Unicode('').tag(sync=True)
-    # generated_py_error = Unicode('').tag(sync=True)
-    
 
     operation_results = Dict({}).tag(sync=True)
 

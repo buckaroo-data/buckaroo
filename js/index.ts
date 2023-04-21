@@ -4,5 +4,4 @@
 // In case of classic Jupyter Notebook and embed, we provide the PhosphorJS CSS
 
 export * from './version';
-export * from './paddywidget';
-export * from './dcfwidget';
+export * from './dcefwidget';
