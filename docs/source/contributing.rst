@@ -6,6 +6,43 @@ Contributing to DCEF
 
 DCEF is actively looking for contributors.  All forms of participation are welcome, from bug reports, to suggestions, to code contributions.
 
+
+Developing in the Jupyter Lab environment
+=========================================
+
+The easiest way to develop and contribute to DCEF is to add ``Commands``.  When I use DCEF to clean and explore a new dataset, I firt try to use the built in DCEF commands in the UI.  When I want to perform a manipulation that doesn't yet exist in DCEF, I first drop down to raw pandas/python like I would before DCEF... Then I figure out how to expose that functionality as a ``Command``.  While working with manatee data, I recognized that a column was probably date times, but a ``to_datetime``  ``Command`` didn't exist.  So I wrote one.
+
+.. code-block:: python
+
+    pd.to_datetime(df['REPDATE']).head()
+    #outputs ->
+    #0   1974-04-03 00:00:00+00:00
+    #1   1974-06-27 00:00:00+00:00
+    #Name: REPDATE, dtype: datetime64[ns, UTC]
+
+    #pd.to_datetime is the transform I want... so I write it as a Command
+    #and add it to the w widget with the @w.add_command decorator
+    @w.add_command
+    class to_datetime(Command):
+        command_default = [s('to_datetime'), s('df'), "col"]
+        command_pattern = [None]
+    
+        @staticmethod 
+        def transform(df, col):
+            df[col] = pd.to_datetime(df[col])
+            return df
+    
+        @staticmethod 
+        def transform_to_py(df, col):
+            return "    df['%s'] = pd.to_datetime(df['%s'])" % (col, col)
+
+
+When you use the ``add_command`` decorator, the command is instantly added to the UI of the corresponding widget.  Subsequent re-evalutations of the same cell, will replace a ``Command`` in the widget with the same name.  This allows you to iteratively develop commands.
+
+Once you have developed a ``Command`` you can either continue to use it internally as with the ``add_command`` decorator or you can open a PR and add it to the builtin commands for DCEF `all_transforms.py <https://github.com/paddymul/dcef/blob/main/dcef/all_transforms.py>`_.
+
+The upside of just using the @add_command decorator is that you don't have to setup a development environment.
+
 Setting up a development environment
 ====================================
 
@@ -43,6 +80,8 @@ First, you need to fork the project. Then setup your environment:
 
 .. note::
    Getting typescript updates from the widget into a jupyter lab notebook is a little tricky.  The following steps ensure that typescript code changes are picked up.
+
+
 
 Loading typescript changes
 ==========================
