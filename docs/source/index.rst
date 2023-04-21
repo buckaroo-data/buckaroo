@@ -26,6 +26,7 @@ We all know how awkward it is to clean data in jupyter notebooks.  Multiple cell
 
    using
    install
+   contributing
    FAQ
 
 Indices and tables

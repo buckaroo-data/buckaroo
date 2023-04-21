@@ -16,6 +16,13 @@ Using `pip`:
 pip install dcef
 ```
 
+## Documentation
+
+To get started with using DCEF, check out the full documentation:
+
+https://dcef.readthedocs.io/
+
+
 # Using DCEF
 
 in a jupyter lab notebook just add the following to a cell
@@ -44,7 +51,7 @@ Builtin commands are found in [all_transforms.py](dcef/all_transforms.py)
 ### Simple example
 Here is a simple example command
 ```python
-class DropCol(Transform):
+class DropCol(Command):
     command_default = [s('dropcol'), s('df'), "col"]
     command_pattern = [None]
 
