@@ -122,8 +122,38 @@ class GroupBy(Command):
     
 
 
-    
+class to_datetime(Command):
+    #argument_names = ["df", "col"]
+    command_default = [s('to_datetime'), s('df'), "col"]
+    command_pattern = [None]
 
-DefaultCommandKlsList = [FillNA, DropCol, OneHot, GroupBy]
+    @staticmethod 
+    def transform(df, col):
+        df[col] = pd.to_datetime(df[col])
+        return df
+
+    @staticmethod 
+    def transform_to_py(df, col):
+        return "    df['%s'] = pd.to_datetime(df['%s'])" % (col, col)    
+
+class reindex(Command):
+    command_default = [s('reindex'), s('df'), "col"]
+    command_pattern = [None]
+
+    @staticmethod 
+    def transform(df, col):
+        old_col = df[col]
+        df.drop(col, axis=1, inplace=True)
+        df.index = old_col.values
+        return df
+
+    @staticmethod 
+    def transform_to_py(df, col):
+        return "\n".join(
+            ["    old_col = df['%s']" % col,
+             "    df.drop('%s', axis=1, inplace=True)" % col,
+             "    df.index = old_col.values"])
+
+DefaultCommandKlsList = [DropCol, to_datetime, SafeInt, FillNA, reindex, OneHot, GroupBy]
 command_defaults, command_patterns, dcef_transform, dcef_to_py_core = configure_dcef(DefaultCommandKlsList)
 

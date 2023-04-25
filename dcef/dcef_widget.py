@@ -36,6 +36,15 @@ class DCEFWidget(DOMWidget):
 
     operation_results = Dict({}).tag(sync=True)
 
+
+    #config for the python pre-processing, waiting for inspiration for a better name
+    python_massaging = Dict({
+        sample_threshold=20000,
+        reorder_columns=True,
+        max_rows=500,
+        default_display='rows', #rows, summary, header+rows
+        }).tag(sync=True)
+
     def __init__(self, df):
         super().__init__()
         self.df = df
@@ -44,6 +53,16 @@ class DCEFWidget(DOMWidget):
             'transformed_df':self.js_df,
             'generated_py_code':'#from py widget init'}
         self.setup_from_command_kls_list()
+
+
+    @property
+    def df(self):
+        return self._df
+
+    @df.setter
+    def df(self, new_df):
+        self._raw_df = new_df #  in case we want to change the metadata generation live
+        
 
     @observe('commands')
     def interpret_operations(self, change):
