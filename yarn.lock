@@ -6387,10 +6387,10 @@ package-json@^6.5.0:
     registry-url "^5.0.0"
     semver "^6.2.0"
 
-paddy-react-edit-list@>=1.1.25:
-  version "1.1.25"
-  resolved "https://registry.yarnpkg.com/paddy-react-edit-list/-/paddy-react-edit-list-1.1.25.tgz#a1d925100dfa3df792b778369437b1343a242886"
-  integrity sha512-QqwWCPc09ue2ljy6ZuSfsWBm1NbFOxS6pDZNSygVZmoZUVMbiAKltwF8sPtDqIouJ+s6qbri3SpIWU0io2367Q==
+paddy-react-edit-list@>=1.1.29:
+  version "1.1.29"
+  resolved "https://registry.yarnpkg.com/paddy-react-edit-list/-/paddy-react-edit-list-1.1.29.tgz#b65157a17aed4d7f506d7ef77069dea233433d13"
+  integrity sha512-0SxoPp/hZuEfzbx+i9axUt/yAjOFsSISFmI4GYtdMajETMBY0JDdYN+85wtM2AM+2GKUCF5exNRgDAo86w1oUg==
   dependencies:
     "@ag-grid-community/client-side-row-model" "^29.2.0"
     "@types/lodash" "^4.14.191"
