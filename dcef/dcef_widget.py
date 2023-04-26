@@ -12,6 +12,7 @@ from ipywidgets import DOMWidget
 from traitlets import Unicode, List, Dict, observe
 from ._frontend import module_name, module_version
 from .all_transforms import configure_dcef, DefaultCommandKlsList
+from summary_stats import summarize_df
 import json
 
 
@@ -28,14 +29,14 @@ class DCEFWidget(DOMWidget):
     value = Unicode('Hello World').tag(sync=True)
     command_config = Dict({}).tag(sync=True)
 
-    commands = List().tag(sync=True)
+    operations = List().tag(sync=True)
 
     command_classes = DefaultCommandKlsList
 
     js_df = Dict({}).tag(sync=True)
 
     operation_results = Dict({}).tag(sync=True)
-
+        
 
     #config for the python pre-processing, waiting for inspiration for a better name
     python_massaging = Dict({
@@ -54,7 +55,6 @@ class DCEFWidget(DOMWidget):
             'generated_py_code':'#from py widget init'}
         self.setup_from_command_kls_list()
 
-
     @property
     def df(self):
         return self._df
@@ -64,7 +64,8 @@ class DCEFWidget(DOMWidget):
         self._raw_df = new_df #  in case we want to change the metadata generation live
         
 
-    @observe('commands')
+
+    @observe('operations')
     def interpret_operations(self, change):
         print("interpret_operations")
         try:
