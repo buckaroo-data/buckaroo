@@ -37,7 +37,7 @@ export class DCEFWidgetModel extends DOMWidgetModel {
 	    _view_module_version: DCEFWidgetModel.view_module_version,
 	    //add typing from OperationUtils
 	    command_config: {} as CommandConfigT,
-	    commands: [] as Operation[],
+	    operations: [] as Operation[],
 	    operation_results: {} // {transformed_df:DFWhole, generated_py_code:string}
 	};
     }
@@ -81,7 +81,7 @@ export class DCEFWidgetView extends DOMWidgetView {
 	    
 	    const retFunc = (passedOperations:Operation[]) => {
 		console.log("orRequester passed operations", passedOperations)
-		widgetModel.set('commands', passedOperations)
+		widgetModel.set('operations', passedOperations)
 		widgetModel.save_changes()
 
 	    }

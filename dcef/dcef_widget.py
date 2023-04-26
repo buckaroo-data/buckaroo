@@ -28,7 +28,7 @@ class DCEFWidget(DOMWidget):
     value = Unicode('Hello World').tag(sync=True)
     command_config = Dict({}).tag(sync=True)
 
-    commands = List().tag(sync=True)
+    operations = List().tag(sync=True)
 
     command_classes = DefaultCommandKlsList
 
@@ -45,7 +45,7 @@ class DCEFWidget(DOMWidget):
             'generated_py_code':'#from py widget init'}
         self.setup_from_command_kls_list()
 
-    @observe('commands')
+    @observe('operations')
     def interpret_operations(self, change):
         print("interpret_operations")
         try:
