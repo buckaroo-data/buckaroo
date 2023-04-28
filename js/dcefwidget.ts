@@ -93,13 +93,28 @@ export class DCEFWidgetView extends DOMWidgetView {
 	const plumbCommandConfig:CommandConfigSetterT = (setter) => {
 	    widget.setCommandConfig = setter
 	}
-	
+
+    const dfConfig = {
+        totalRows: 1309,
+        columns: 30,
+        rowsShown: 500,
+        sampleSize: 10_000,
+        summaryStats: false,
+        reorderdColumns: false
+    };
+
+      const on_dfConfig = (newVal:any) => {
+	console.log("on_dfConfig called with", newVal)
+      }
 	const reactEl = React.createElement(WidgetDCFCell, {
 	    origDf:widgetModel.get('js_df'),
 	    getOrRequester:widgetGetOrRequester,
 	    commandConfig,
-	    exposeCommandConfigSetter:plumbCommandConfig,
+	  exposeCommandConfigSetter:plumbCommandConfig,
+	  dfConfig:dfConfig,
+	  on_dfConfig:on_dfConfig
 	}, null)
+
 	
 	root.render(reactEl);
     }
