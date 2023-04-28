@@ -26,13 +26,14 @@ class DCEFWidget(DOMWidget):
     _view_module_version = Unicode(module_version).tag(sync=True)
 
     value = Unicode('Hello World').tag(sync=True)
-    command_config = Dict({}).tag(sync=True)
+    commandConfig = Dict({}).tag(sync=True)
 
     operations = List().tag(sync=True)
 
     command_classes = DefaultCommandKlsList
 
-    js_df = Dict({}).tag(sync=True)
+    #js_df = Dict({}).tag(sync=True)
+    origDf = Dict({}).tag(sync=True)
 
     operation_results = Dict({}).tag(sync=True)
     dfConfig = Dict(
@@ -48,9 +49,9 @@ class DCEFWidget(DOMWidget):
     def __init__(self, df):
         super().__init__()
         self.df = df
-        self.js_df = json.loads(df.to_json(orient='table', indent=2))
+        self.origDf = json.loads(df.to_json(orient='table', indent=2))
         self.operation_results = {
-            'transformed_df':self.js_df,
+            'transformed_df':self.origDf,
             'generated_py_code':'#from py widget init'}
         self.setup_from_command_kls_list()
 
@@ -63,7 +64,7 @@ class DCEFWidget(DOMWidget):
             results = {}
             if len(operations) == 1:
 
-                results['transformed_df'] = self.js_df
+                results['transformed_df'] = self.origDf
                 results['generated_py_code'] = 'no operations'
                 print('exiting early')
                 return
@@ -82,7 +83,7 @@ class DCEFWidget(DOMWidget):
     def setup_from_command_kls_list(self):
         command_defaults, command_patterns, self.dcef_transform, self.dcef_to_py_core = configure_dcef(
             self.command_classes)
-        self.command_config = dict(
+        self.commandConfig = dict(
             argspecs=command_patterns, defaultArgs=command_defaults)
 
 

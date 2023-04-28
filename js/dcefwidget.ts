@@ -37,9 +37,9 @@ export class DCEFWidgetModel extends DOMWidgetModel {
 	    _view_module: DCEFWidgetModel.view_module,
 	    _view_module_version: DCEFWidgetModel.view_module_version,
 	    //add typing from OperationUtils
-	    command_config: {} as CommandConfigT,
+	    commandConfig: {} as CommandConfigT,
 	    operations: [] as Operation[],
-	    operation_results: {} // {transformed_df:DFWhole, generated_py_code:string}
+	  operation_results: {}, // {transformed_df:DFWhole, generated_py_code:string}
 	    dfConfig: {} // provided on df ingest
 	};
     }
@@ -75,18 +75,10 @@ export class DCEFWidgetView extends DOMWidgetView {
     setPyCode = (newPyCode:string) => console.log("default setPyCode")
     setTransformedDf = (newDf:DFWhole) => console.log("default setTransformedDf")
     render() {
-	console.log('DCFWidget View... renamed ')
 	this.el.classList.add('custom-widget');
 
-	
 	const widgetModel = this.model
 	const widget = this
-	widgetModel.on(
-	    'change:command_config',
-	    () => {
-		widget.setCommandConfig(widgetModel.get('command_config'))},
-	    this)
-
 	const widgetGetOrRequester:DependentTabs.getOperationResultSetterT = (setOpResult) => {
 	    widgetModel.on('change:operation_results', () => {
 	    	const opResults:DependentTabs.OperationResult = widgetModel.get('operation_results')
@@ -98,37 +90,26 @@ export class DCEFWidgetView extends DOMWidgetView {
 		console.log("orRequester passed operations", passedOperations)
 		widgetModel.set('operations', passedOperations)
 		widgetModel.save_changes()
-
 	    }
 	    return retFunc
 	};
 
-	const commandConfig = widgetModel.get('command_config')
-	console.log("widget, commandConfig", commandConfig, widgetModel)
+        // these following lines probably aren't necessary given the ipyReact integration to the end of plumbCommandConfig
+	widgetModel.on(
+	    'change:commandConfig',
+	    () => {
+		widget.setCommandConfig(widgetModel.get('commandConfig'))},
+	    this)
+
 	const plumbCommandConfig:CommandConfigSetterT = (setter) => {
 	    widget.setCommandConfig = setter
 	}
 
-    // const dfConfig = {
-    //     totalRows: 1309,
-    //     columns: 30,
-    //     rowsShown: 500,
-    //     sampleSize: 10_000,
-    //     summaryStats: false,
-    //     reorderdColumns: false
-    // };
-
-      //const on_dfConfig = (newVal:any) => console.log("on_dfConfig called with", newVal)
-
       const outerProps = {
-	    origDf:widgetModel.get('js_df'),
-	    getOrRequester:widgetGetOrRequester,
-	    commandConfig,
-	  exposeCommandConfigSetter:plumbCommandConfig,
-	  //dfConfig:dfConfig,
-	  //on_dfConfig:on_dfConfig
+	//origDf:widgetModel.get('js_df'),
+	getOrRequester:widgetGetOrRequester,
+	exposeCommandConfigSetter:plumbCommandConfig,
       };
-
 
       const Component = () => {
       // @ts-ignore
@@ -140,7 +121,6 @@ export class DCEFWidgetView extends DOMWidgetView {
         this.listenTo(this.model, 'change', forceRerender);
       }, []);
 
-
       const props : any = {...outerProps}
       for (const key of Object.keys(this.model.attributes)) {
         props[key] = this.model.get(key);
@@ -149,48 +129,11 @@ export class DCEFWidgetView extends DOMWidgetView {
           this.touch();
         };
       }
-	const el = React.createElement(WidgetDCFCell, props)
-	return el
+	return React.createElement(WidgetDCFCell, props)
       }
-
 
   const root = ReactDOMClient.createRoot(this.el);
   const componentEl = React.createElement(Component, {});
   root.render(componentEl)
-    
     }
 }
-
-/*
-console.log("144")
-
-	const widgetGetTransformRequester = (setDf:any) => {
-	    widget.setTransformedDf = (inputDf:DFWhole) => {
-		const opResults = widgetModel.get('operation_results')
-		const generated_py_code = opResults.generated_py_code
-		console.log("setDf Wrapper being called - generated_py_code", generated_py_code)
-		setDf(inputDf)
-	    };
-	    // widgetModel.on('change:transformed_df', () => {
-	    // 	setDf(widgetModel.get('transformed_df') as DFWhole)
-	    // }, this)
-	    
-	    const baseRequestTransform = (passedInstructions:any) => {
-		console.log("transform passedInstructions", passedInstructions)
-		widgetModel.set('commands', passedInstructions)
-		widgetModel.save_changes()
-	    };
-	    return baseRequestTransform;
-	};
-	//_.delay(() => {widget.setPyCode("widget level getPyRequester")}, 500)
-	//this onChange gets called, the one inside of widgetGetPyRequester doesn't get called
-
-	widgetModel.on('change:operation_results', () => {
-	    const opResults = widgetModel.get('operation_results')
-	    console.log("operation_results", opResults)
-	    widget.setPyCode(opResults.generated_py_code)
-	    widget.setTransformedDf(opResults.transformed_df)
-	    //widget.setPyCode("padddy")
-	    //widgetModel.save_changes()
-	}, this)
-*/
