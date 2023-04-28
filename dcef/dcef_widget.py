@@ -32,12 +32,11 @@ class DCEFWidget(DOMWidget):
 
     command_classes = DefaultCommandKlsList
 
-    #js_df = Dict({}).tag(sync=True)
     origDf = Dict({}).tag(sync=True)
 
     operation_results = Dict({}).tag(sync=True)
     dfConfig = Dict(
-{
+        {
         'totalRows': 5309,
         'columns': 30,
         'rowsShown': 500,
@@ -49,11 +48,37 @@ class DCEFWidget(DOMWidget):
     def __init__(self, df):
         super().__init__()
         self.df = df
+        self.setup_dfconfig(df)
         self.origDf = json.loads(df.to_json(orient='table', indent=2))
         self.operation_results = {
             'transformed_df':self.origDf,
             'generated_py_code':'#from py widget init'}
         self.setup_from_command_kls_list()
+
+    
+    #Maybe tie this to a watcher on DF?
+    def setup_dfconfig(self, df):
+        self.dfConfig = dict(
+            totalRows=len(df),
+            columns=len(df.columns),
+            sampleSize=self.dfConfig['sampleSize'],
+            summaryStats=self.dfConfig['summaryStats'],
+            reorderdColumns=self.dfConfig['reorderdColumns']
+            )
+
+    @observe('dfConfig')
+    def update_based_on_df_config(self, change):
+        old = change['old']
+        new = change['new']
+        if not old['summaryStats'] == new['summaryStats']:
+            self.reset_summary_stats()
+
+    def reset_summary_stats(self):
+        if self.dfConfig['summaryStats']:
+            temp_df = self.df.head()
+        else:
+            temp_df = self.df
+        self.origDf = json.loads(temp_df.to_json(orient='table', indent=2))
 
     @observe('operations')
     def interpret_operations(self, change):
@@ -63,7 +88,6 @@ class DCEFWidget(DOMWidget):
             print("interpret_operations", operations)
             results = {}
             if len(operations) == 1:
-
                 results['transformed_df'] = self.origDf
                 results['generated_py_code'] = 'no operations'
                 print('exiting early')
