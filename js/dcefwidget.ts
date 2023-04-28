@@ -12,9 +12,10 @@ import _ from 'lodash';
 
 import {WidgetDCFCell, CommandConfigT, DFWhole, CommandConfigSetterT, Operation, DependentTabs  } from 'paddy-react-edit-list';
 
-import { createRoot } from "react-dom/client";
-import React from "react";
-
+//import { createRoot } from "react-dom/client";
+import React, {useEffect, useState} from "react";
+//import * as ReactDOM from 'react-dom';
+import * as ReactDOMClient from 'react-dom/client';
 import { MODULE_NAME, MODULE_VERSION } from './version';
 
 // Import the CSS
@@ -57,12 +58,25 @@ export class DCEFWidgetModel extends DOMWidgetModel {
 }
 
 
+	// const reactEl = React.createElement(WidgetDCFCell, {
+	//     origDf:widgetModel.get('js_df'),
+	//     getOrRequester:widgetGetOrRequester,
+	//     commandConfig,
+	//   exposeCommandConfigSetter:plumbCommandConfig,
+	//   dfConfig:dfConfig,
+	//   on_dfConfig:on_dfConfig
+	// }, null)
+	// root.render(reactEl);
+
 export class DCEFWidgetView extends DOMWidgetView {
+
+    setCommandConfig = (conf:CommandConfigT) => console.log("default setCommandConfig")
+    setPyCode = (newPyCode:string) => console.log("default setPyCode")
+    setTransformedDf = (newDf:DFWhole) => console.log("default setTransformedDf")
     render() {
 	console.log('DCFWidget View... renamed ')
 	this.el.classList.add('custom-widget');
-	//this.value_changed();
-	const root = createRoot(this.el as HTMLElement)
+
 	
 	const widgetModel = this.model
 	const widget = this
@@ -103,30 +117,46 @@ export class DCEFWidgetView extends DOMWidgetView {
         reorderdColumns: false
     };
 
-      const on_dfConfig = (newVal:any) => {
-	console.log("on_dfConfig called with", newVal)
-      }
-	const reactEl = React.createElement(WidgetDCFCell, {
+      //const on_dfConfig = (newVal:any) => console.log("on_dfConfig called with", newVal)
+
+      const outerProps = {
 	    origDf:widgetModel.get('js_df'),
 	    getOrRequester:widgetGetOrRequester,
 	    commandConfig,
 	  exposeCommandConfigSetter:plumbCommandConfig,
 	  dfConfig:dfConfig,
-	  on_dfConfig:on_dfConfig
-	}, null)
+	  //on_dfConfig:on_dfConfig
+      };
 
-	
-	root.render(reactEl);
-    }
 
-    setCommandConfig = (conf:CommandConfigT) => {
-	console.log("default setCommandConfig")
-    }
-    setPyCode = (newPyCode:string) => {
-	console.log("default setPyCode")
-    }
-    setTransformedDf = (newDf:DFWhole) => {
-	console.log("default setTransformedDf")
+      const Component = () => {
+      // @ts-ignore
+      const [_, setCounter] = useState(0);
+      const forceRerender = () => {
+        setCounter((x:number) => x + 1);
+      }
+      useEffect(() => {
+        this.listenTo(this.model, 'change', forceRerender);
+      }, []);
+
+
+      const props : any = {...outerProps}
+      for (const key of Object.keys(this.model.attributes)) {
+        props[key] = this.model.get(key);
+        props["on_" + key] = (value: any) => {
+          this.model.set(key, value);
+          this.touch();
+        };
+      }
+	const el = React.createElement(WidgetDCFCell, props)
+	return el
+      }
+
+
+  const root = ReactDOMClient.createRoot(this.el);
+  const componentEl = React.createElement(Component, {});
+  root.render(componentEl)
+    
     }
 }
 
