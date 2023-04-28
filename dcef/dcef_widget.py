@@ -35,6 +35,15 @@ class DCEFWidget(DOMWidget):
     js_df = Dict({}).tag(sync=True)
 
     operation_results = Dict({}).tag(sync=True)
+    dfConfig = Dict(
+{
+        'totalRows': 5309,
+        'columns': 30,
+        'rowsShown': 500,
+        'sampleSize': 10_000,
+        'summaryStats': False,
+        'reorderdColumns': False
+    }).tag(sync=True)
 
     def __init__(self, df):
         super().__init__()

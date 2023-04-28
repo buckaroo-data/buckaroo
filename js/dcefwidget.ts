@@ -40,6 +40,7 @@ export class DCEFWidgetModel extends DOMWidgetModel {
 	    command_config: {} as CommandConfigT,
 	    operations: [] as Operation[],
 	    operation_results: {} // {transformed_df:DFWhole, generated_py_code:string}
+	    dfConfig: {} // provided on df ingest
 	};
     }
 
@@ -108,14 +109,14 @@ export class DCEFWidgetView extends DOMWidgetView {
 	    widget.setCommandConfig = setter
 	}
 
-    const dfConfig = {
-        totalRows: 1309,
-        columns: 30,
-        rowsShown: 500,
-        sampleSize: 10_000,
-        summaryStats: false,
-        reorderdColumns: false
-    };
+    // const dfConfig = {
+    //     totalRows: 1309,
+    //     columns: 30,
+    //     rowsShown: 500,
+    //     sampleSize: 10_000,
+    //     summaryStats: false,
+    //     reorderdColumns: false
+    // };
 
       //const on_dfConfig = (newVal:any) => console.log("on_dfConfig called with", newVal)
 
@@ -124,7 +125,7 @@ export class DCEFWidgetView extends DOMWidgetView {
 	    getOrRequester:widgetGetOrRequester,
 	    commandConfig,
 	  exposeCommandConfigSetter:plumbCommandConfig,
-	  dfConfig:dfConfig,
+	  //dfConfig:dfConfig,
 	  //on_dfConfig:on_dfConfig
       };
 
