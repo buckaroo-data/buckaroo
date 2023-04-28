@@ -58,17 +58,6 @@ export class DCEFWidgetModel extends DOMWidgetModel {
     static view_module_version = MODULE_VERSION;
 }
 
-
-	// const reactEl = React.createElement(WidgetDCFCell, {
-	//     origDf:widgetModel.get('js_df'),
-	//     getOrRequester:widgetGetOrRequester,
-	//     commandConfig,
-	//   exposeCommandConfigSetter:plumbCommandConfig,
-	//   dfConfig:dfConfig,
-	//   on_dfConfig:on_dfConfig
-	// }, null)
-	// root.render(reactEl);
-
 export class DCEFWidgetView extends DOMWidgetView {
 
     setCommandConfig = (conf:CommandConfigT) => console.log("default setCommandConfig")
@@ -94,7 +83,8 @@ export class DCEFWidgetView extends DOMWidgetView {
 	    return retFunc
 	};
 
-        // these following lines probably aren't necessary given the ipyReact integration to the end of plumbCommandConfig
+        // these following lines probably aren't necessary given the
+        // ipyReact integration to the end of plumbCommandConfig
 	widgetModel.on(
 	    'change:commandConfig',
 	    () => {
@@ -131,7 +121,13 @@ export class DCEFWidgetView extends DOMWidgetView {
       }
 	return React.createElement(WidgetDCFCell, props)
       }
-
+      //console.log("widget el", this.el)
+      const notebookEl = document.getElementsByClassName("jp-NotebookPanel-notebook")[0]
+      const elTop = this.el.getBoundingClientRect()['y']
+      const notebookTop = notebookEl.getBoundingClientRect()['y']
+      const scrollOffset = (notebookTop - elTop) + 50;
+      //console.log("scrollOffset", scrollOffset);
+      notebookEl.scroll(0, scrollOffset)
   const root = ReactDOMClient.createRoot(this.el);
   const componentEl = React.createElement(Component, {});
   root.render(componentEl)
