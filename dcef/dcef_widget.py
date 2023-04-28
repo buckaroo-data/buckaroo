@@ -12,6 +12,7 @@ from ipywidgets import DOMWidget
 from traitlets import Unicode, List, Dict, observe
 from ._frontend import module_name, module_version
 from .all_transforms import configure_dcef, DefaultCommandKlsList
+from .summary_stats import summarize_df
 import json
 
 
@@ -35,6 +36,8 @@ class DCEFWidget(DOMWidget):
     origDf = Dict({}).tag(sync=True)
 
     operation_results = Dict({}).tag(sync=True)
+
+
     dfConfig = Dict(
         {
         'totalRows': 5309,
@@ -44,6 +47,16 @@ class DCEFWidget(DOMWidget):
         'summaryStats': False,
         'reorderdColumns': False
     }).tag(sync=True)
+        
+
+    # #config for the python pre-processing, waiting for inspiration for a better name
+    # python_massaging = Dict({
+    #     sample_threshold=20000,
+    #     reorder_columns=True,
+    #     max_rows=500,
+    #     default_display='rows', #rows, summary, header+rows
+    #     }).tag(sync=True)
+
 
     def __init__(self, df):
         super().__init__()
@@ -55,7 +68,6 @@ class DCEFWidget(DOMWidget):
             'generated_py_code':'#from py widget init'}
         self.setup_from_command_kls_list()
 
-    
     #Maybe tie this to a watcher on DF?
     def setup_dfconfig(self, df):
         self.dfConfig = dict(
@@ -75,10 +87,10 @@ class DCEFWidget(DOMWidget):
 
     def reset_summary_stats(self):
         if self.dfConfig['summaryStats']:
-            temp_df = self.df.head()
+            temp_df = summarize_df(self.df)
         else:
             temp_df = self.df
-        self.origDf = json.loads(temp_df.to_json(orient='table', indent=2))
+        self.origDf = json.loads(temp_df.to_json(orient='table', indent=2, default_handler=str))
 
     @observe('operations')
     def interpret_operations(self, change):

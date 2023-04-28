@@ -31,5 +31,5 @@ def configure_dcef(transforms):
         #print("individual_instructions", individual_instructions)
         code_block =  '\n'.join(individual_instructions)
 
-        return "def clean(df):\n" + code_block
+        return "def clean(df):\n" + code_block + "\n    return df"
     return command_defaults, command_patterns, dcef_transform, dcef_to_py
