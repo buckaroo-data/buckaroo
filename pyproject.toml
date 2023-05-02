@@ -6,8 +6,8 @@ requires = [
 build-backend = "hatchling.build"
 
 [project]
-name = "dcef"
-description = "Data Cleaning Framework - UI for quickly cleaning pandas dataframes "
+name = "buckaroo"
+description = "Herder - GUI Data wrangling for pandas"
 readme = "README.md"
 requires-python = ">=3.7"
 authors = [
@@ -34,7 +34,7 @@ classifiers = [
 dependencies = [
     "ipywidgets>=7.6.0,<9"
 ]
-version = "0.2.4"
+version = "0.2.6"
 
 [project.license]
 file = "LICENSE.txt"

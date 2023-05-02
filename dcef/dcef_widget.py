@@ -96,7 +96,8 @@ class DCEFWidget(DOMWidget):
     def interpret_operations(self, change):
         print("interpret_operations")
         try:
-            operations = change['new']
+            operations = [{'symbol': 'begin'}]
+            operations.extend(change['new'])
             print("interpret_operations", operations)
             results = {}
             if len(operations) == 1:
