@@ -10,9 +10,7 @@ import {
 import {
   WidgetDCFCell,
   CommandConfigT,
-  CommandConfigSetterT,
   Operation,
-  DependentTabs,
 } from 'paddy-react-edit-list';
 
 //import { createRoot } from "react-dom/client";
@@ -63,52 +61,7 @@ export class DCEFWidgetView extends DOMWidgetView {
   render(): void {
     this.el.classList.add('custom-widget');
 
-    const widgetModel = this.model;
-    const widget = this;
-    const widgetGetOrRequester: DependentTabs.getOperationResultSetterT = (
-      setOpResult
-    ) => {
-      widgetModel.on(
-        'change:operation_results',
-        () => {
-          const opResults: DependentTabs.OperationResult =
-            widgetModel.get('operation_results');
-          console.log('about to call setOpResult with', opResults);
-          setOpResult(opResults);
-        },
-        this
-      );
-
-      const retFunc = (passedOperations: Operation[]) => {
-        console.log('orRequester passed operations', passedOperations);
-        widgetModel.set('operations', passedOperations);
-        widgetModel.save_changes();
-      };
-      return retFunc;
-    };
-
-    // these following lines probably aren't necessary given the
-    // ipyReact integration to the end of plumbCommandConfig
-    widgetModel.on(
-      'change:commandConfig',
-      () => {
-        widget.setCommandConfig(widgetModel.get('commandConfig'));
-      },
-      this
-    );
-
-    const plumbCommandConfig: CommandConfigSetterT = (setter) => {
-      widget.setCommandConfig = setter;
-    };
-
-    const outerProps = {
-      //origDf:widgetModel.get('js_df'),
-      getOrRequester: widgetGetOrRequester,
-      exposeCommandConfigSetter: plumbCommandConfig,
-    };
-
     const Component = () => {
-      // @ts-ignore
       const [_, setCounter] = useState(0);
       const forceRerender = () => {
         setCounter((x: number) => x + 1);
@@ -117,7 +70,7 @@ export class DCEFWidgetView extends DOMWidgetView {
         this.listenTo(this.model, 'change', forceRerender);
       }, []);
 
-      const props: any = { ...outerProps };
+      const props: any = {};
       for (const key of Object.keys(this.model.attributes)) {
         props[key] = this.model.get(key);
         props['on_' + key] = (value: any) => {
