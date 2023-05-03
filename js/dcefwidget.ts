@@ -12,10 +12,9 @@ import {
   CommandConfigT,
   Operation,
 } from 'paddy-react-edit-list';
+import * as Backbone from 'backbone';
 
-//import { createRoot } from "react-dom/client";
 import React, { useEffect, useState } from 'react';
-//import * as ReactDOM from 'react-dom';
 import * as ReactDOMClient from 'react-dom/client';
 import { MODULE_NAME, MODULE_VERSION } from './version';
 
@@ -27,7 +26,7 @@ import 'paddy-react-edit-list/css/dcf-npm.css';
 import '../style/widget.css';
 
 export class DCEFWidgetModel extends DOMWidgetModel {
-  defaults() {
+  defaults(): Backbone.ObjectHash {
     return {
       ...super.defaults(),
       _model_name: DCEFWidgetModel.model_name,
