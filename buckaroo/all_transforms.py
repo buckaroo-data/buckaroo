@@ -1,5 +1,5 @@
 from .lispy import s
-from .configure_utils import configure_dcef
+from .configure_utils import configure_buckaroo
 import pandas as pd
 import numpy as np
 
@@ -155,5 +155,5 @@ class reindex(Command):
              "    df.index = old_col.values"])
 
 DefaultCommandKlsList = [DropCol, to_datetime, SafeInt, FillNA, reindex, OneHot, GroupBy]
-command_defaults, command_patterns, dcef_transform, dcef_to_py_core = configure_dcef(DefaultCommandKlsList)
+command_defaults, command_patterns, buckaroo_transform, buckaroo_to_py_core = configure_buckaroo(DefaultCommandKlsList)
 

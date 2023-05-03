@@ -1,5 +1,5 @@
 from .lispy import make_interpreter
-def configure_dcef(transforms):
+def configure_buckaroo(transforms):
     command_defaults = {}
     command_patterns = {}
 
@@ -13,15 +13,15 @@ def configure_dcef(transforms):
         transform_lisp_primitives[transform_name] = T.transform
         to_py_lisp_primitives[transform_name] = T.transform_to_py
     
-    dcef_eval, raw_parse = make_interpreter(transform_lisp_primitives)
-    def dcef_transform(instructions, df):
+    buckaroo_eval, raw_parse = make_interpreter(transform_lisp_primitives)
+    def buckaroo_transform(instructions, df):
         df_copy = df.copy()
-        ret_val =  dcef_eval(instructions, {'df':df_copy})
+        ret_val =  buckaroo_eval(instructions, {'df':df_copy})
         #print(ret_val)
         return ret_val
 
     convert_to_python, __unused = make_interpreter(to_py_lisp_primitives)
-    def dcef_to_py(instructions):
+    def buckaroo_to_py(instructions):
         #I would prefer to implement this with a macro named something
         #like 'clean' that is implemented for the _convert_to_python
         #interpreter to return a string code block, and for the real DCF
@@ -32,4 +32,4 @@ def configure_dcef(transforms):
         code_block =  '\n'.join(individual_instructions)
 
         return "def clean(df):\n" + code_block + "\n    return df"
-    return command_defaults, command_patterns, dcef_transform, dcef_to_py
+    return command_defaults, command_patterns, buckaroo_transform, buckaroo_to_py

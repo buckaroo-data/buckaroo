@@ -1,15 +1,15 @@
 import pandas as pd
-from dcef.dcef_widget import DCEFWidget
+from buckaroo.buckaroo_widget import BuckarooWidget
 
 
 def test_basic_instantiation():
     df = pd.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
-    w = DCEFWidget(df)
+    w = BuckarooWidget(df)
     assert w.dfConfig['totalRows'] == 499
 
 def test_interpreter():    
     df = pd.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
-    w = DCEFWidget(df)
+    w = BuckarooWidget(df)
     assert w.operation_results['generated_py_code']  == '#from py widget init'
     w.operations = [[{"symbol":"dropcol"},{"symbol":"df"},"starttime"]]
 

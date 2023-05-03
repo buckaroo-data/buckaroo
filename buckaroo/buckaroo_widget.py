@@ -11,12 +11,12 @@ TODO: Add module docstring
 from ipywidgets import DOMWidget
 from traitlets import Unicode, List, Dict, observe
 from ._frontend import module_name, module_version
-from .all_transforms import configure_dcef, DefaultCommandKlsList
+from .all_transforms import configure_buckaroo, DefaultCommandKlsList
 from .summary_stats import summarize_df
 import json
 
 
-class DCEFWidget(DOMWidget):
+class BuckarooWidget(DOMWidget):
     """TODO: Add docstring here
     """
     _model_name = Unicode('DCEFWidgetModel').tag(sync=True)
@@ -106,10 +106,10 @@ class DCEFWidget(DOMWidget):
                 print('exiting early')
                 return
             
-            transformed_df = self.dcef_transform(operations, self.df)
+            transformed_df = self.buckaroo_transform(operations, self.df)
             results['transformed_df'] = json.loads(transformed_df.to_json(orient='table', indent=2))
 
-            results['generated_py_code'] = self.dcef_to_py_core(operations[1:])
+            results['generated_py_code'] = self.buckaroo_to_py_core(operations[1:])
             self.operation_results = results
             print("operations_results", results.keys())
         except Exception as e:
@@ -118,7 +118,7 @@ class DCEFWidget(DOMWidget):
             raise
 
     def setup_from_command_kls_list(self):
-        command_defaults, command_patterns, self.dcef_transform, self.dcef_to_py_core = configure_dcef(
+        command_defaults, command_patterns, self.buckaroo_transform, self.buckaroo_to_py_core = configure_buckaroo(
             self.command_classes)
         self.commandConfig = dict(
             argspecs=command_patterns, defaultArgs=command_defaults)
