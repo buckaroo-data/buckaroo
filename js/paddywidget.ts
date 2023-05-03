@@ -9,16 +9,14 @@ import {
 
 import { MODULE_NAME, MODULE_VERSION } from './version';
 
+import { createRoot } from 'react-dom/client';
+import React from 'react';
 
-import { createRoot } from "react-dom/client";
-import React from "react";
-
-function ExampleComponent(props:any) {
+function ExampleComponent(props: any) {
   return React.createElement('h1', null, `Hello ${props.name}`);
 }
 
-
-console.log("paddy model module level");
+console.log('paddy model module level');
 
 //export const localModuleName = "PaddyModule"
 export class PaddyModel extends DOMWidgetModel {
@@ -50,15 +48,17 @@ export class PaddyModel extends DOMWidgetModel {
 
 export class PaddyView extends DOMWidgetView {
   render() {
-      console.log("paddy 5555735")
+    console.log('paddy 5555735');
     this.el.classList.add('custom-widget');
     this.value_changed();
     try {
-      const root = createRoot(this.el as HTMLElement)
-      root.render(React.createElement(ExampleComponent, { name: "Paddy" }, null));
-	console.log("react calls worked fine")
+      const root = createRoot(this.el as HTMLElement);
+      root.render(
+        React.createElement(ExampleComponent, { name: 'Paddy' }, null)
+      );
+      console.log('react calls worked fine');
     } catch (e) {
-      console.log("error instatiating React components", e)
+      console.log('error instatiating React components', e);
     }
     this.model.on('change:value', this.value_changed, this);
   }

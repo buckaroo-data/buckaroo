@@ -10,7 +10,9 @@ module.exports = {
     project: "tsconfig.json",
     sourceType: 'module'
   },
-  plugins: ['@typescript-eslint'],
+    plugins: ['@typescript-eslint',
+	      'prettier'
+	     ],
   rules: {
     '@typescript-eslint/no-unused-vars': ['warn', { args: 'none' }],
     '@typescript-eslint/no-explicit-any': 'off',
@@ -24,5 +26,9 @@ module.exports = {
     curly: ['error', 'all'],
     eqeqeq: 'error',
     'prefer-arrow-callback': 'error'
-  }
+  },
+    "ignorePatterns": [
+        "webpack.config.ts",
+        "jest.config.js"
+    ]
 };

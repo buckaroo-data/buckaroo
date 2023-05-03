@@ -46,7 +46,7 @@
     "clean:labextension": "rimraf dcef/labextension",
     "clean:nbextension": "rimraf dcef/nbextension/index.*",
     "lint": "eslint 'js/**/*.{ts,tsx}'",
-    "lint:fix": "eslint 'js/**/*.{ts,tsx} --fix'",
+    "lint:fix": "eslint 'js/**/*.{ts,tsx}' --fix",
     "prepack": "yarn run build:labextension && yarn run build:nbextension",
     "test": "jest --verbose",
     "watch": "npm-run-all -p watch:*",
