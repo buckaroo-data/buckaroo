@@ -7,12 +7,9 @@ import {
   ISerializers,
 } from '@jupyter-widgets/base';
 
-import _ from 'lodash';
-
 import {
   WidgetDCFCell,
   CommandConfigT,
-  DFWhole,
   CommandConfigSetterT,
   Operation,
   DependentTabs,
@@ -63,12 +60,7 @@ export class DCEFWidgetModel extends DOMWidgetModel {
 }
 
 export class DCEFWidgetView extends DOMWidgetView {
-  setCommandConfig = (conf: CommandConfigT) =>
-    console.log('default setCommandConfig');
-  setPyCode = (newPyCode: string) => console.log('default setPyCode');
-  setTransformedDf = (newDf: DFWhole) =>
-    console.log('default setTransformedDf');
-  render() {
+  render(): void {
     this.el.classList.add('custom-widget');
 
     const widgetModel = this.model;
