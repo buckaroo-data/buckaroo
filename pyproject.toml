@@ -35,7 +35,7 @@ classifiers = [
 dependencies = [
     "ipywidgets>=7.6.0,<9"
 ]
-version = "0.2.8"
+version = "0.2.9"
 
 [project.license]
 file = "LICENSE.txt"
