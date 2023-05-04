@@ -59,3 +59,39 @@ Builtin commands are found in `all_transforms.py <https://github.com/paddymul/bu
 ``command_default`` is the base configuration of the command when first added, ``s('dropcol')`` is a special notation for the function name.  ``s('df')`` is a symbol notation for the dataframe argument (see LISP section of the `FAQ` for details).  ``"col"`` is a placeholder for the selected column.
 
 since ``dropcol`` does not take any extra arguments, ``command_pattern`` is ``[None]``
+
+
+Designing your own commands
+===========================
+
+The builtin commands and transforms are written to require no extra libraries for the python code.  Writing the ``transform_to_py`` code  generation can be tricky.  If you are using this with your own analytics library, your ``transform`` function should mirror your actual library code with the same arguments.
+
+so if you have a library function like
+
+.. code-block:: python
+
+   def something_complex(df, column, arg1, arg2, arg3):
+       #many lines of python code
+
+
+Your ``transform`` function can still be simple, as is your ``transform_to_py`` function.  You don't have to regenerate the complex python body of ``something_complex``
+
+
+.. code-block:: python
+
+    class SomethingComplex(Command):
+        command_default = [s('dropcol'), s('df'), "col"]
+	command_pattern = [
+	    [3, 'colMap', 'colEnum', ['null', 'sum', 'mean', 'median', 'count']],
+	    [4, 'arg2', 'enum', ['null', 'level', 'flow']],
+    	    [3, 'arg3', 'float']
+	]
+        command_pattern = [None]
+    
+        @staticmethod 
+        def transform(df, col, arg1, arg2, arg3):
+	    return something_complex(df, col, arg1, arg2, arg3)
+    
+        @staticmethod 
+        def transform_to_py(df, col, arg1, arg2, arg3):
+            return "    something_complex(df, '%s', %r, %r, %r)" % (col, arg1, arg2, arg3)

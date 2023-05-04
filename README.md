@@ -20,7 +20,7 @@ pip install buckaroo
 
 To get started with using Buckaroo, check out the full documentation:
 
-https://buckaroo.readthedocs.io/
+https://buckaroo-data.readthedocs.io/en/latest/
 
 
 # Using Buckaroo

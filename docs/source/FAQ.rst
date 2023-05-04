@@ -5,6 +5,14 @@
 
 Buckaroo - FAQ
 ==========================================
+*  **Is DCF meant to repalce knowledge of python/pandas**
+
+   No, DCF helps experienced pandas devs quickly build and try the transformations they already know.  Transformation names stay very close to the underlying pandas names.  DCF makes different transforms more discoverable than reading obscure blogposts and half working stackoverflow submissions.  Different transformations can be quickly tried without a lot of reading and tinkering to see if it is the transform you want.  Finally, all transformations are emitted as python code.  That python code can be a starting point.
+
+
+* **How well does Buckaroo perform on large dataframes**
+
+  If Buckaroo is configured to send the entire dataframe to the frontend table widget, performance can be slow. But because Buckaroo is built to seamlessly present summary statistics and use sampling. You can operate on just a representative subset of the data, this is much more performant.  Manually scanning through more than 500 rows makes it way to easy to miss data anomalies.  Furthermore, Buckaroo separates the intent of a transform from the implementation.  Python code gen that does the same transform can be improved.  It also makes it quick to generate more complex code that is faster than a shorter implementation.  If you are coding yourself, you're more likely to write the short version vs painstakingly reproducing a fast implementation.
 
 
 * **Why did you use LISP?**
@@ -40,10 +48,4 @@ If you want to work on code transformations, then a knowledge of lisp and partic
   You could write a transform which reads all `dropcol` forms and rewrites it to a single `dropcols` command.
 
   Alternatively, you could write a command that instead of subtractively reducing a dataframe, builds up a new dataframe from an explicit list of columns.  That is also a type of transform that could be written.
-
-*  **Is DCF meant to repalce knowledge of python/pandas**
-
-   No, DCF helps experienced pandas devs quickly build and try the transformations they already know.  Transformation names stay very close to the underlying pandas names.  DCF makes different transforms more discoverable than reading obscure blogposts and half working stackoverflow submissions.  Different transformations can be quickly tried without a lot of reading and tinkering to see if it is the transform you want.  Finally, all transformations are emitted as python code.  That python code can be a starting point.
-
-
 
