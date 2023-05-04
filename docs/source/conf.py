@@ -6,10 +6,10 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'DCEF'
+project = 'Buckaroo'
 copyright = '2023, Paddy Mullen'
 author = 'Paddy Mullen'
-release = '0.2'
+release = '0.2.8'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
