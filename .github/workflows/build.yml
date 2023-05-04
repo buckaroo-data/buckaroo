@@ -39,6 +39,6 @@ jobs:
         if: ${{ matrix.os == 'ubuntu-latest' }}
         working-directory: docs
         run: |
-	  pip install sphinx
+          sudo apt install -y pandoc
           make html
           python -m pytest --check-links
