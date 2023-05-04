@@ -49,7 +49,9 @@ test = [
 ]
 
 docs = [
-    "sphinx>=1.5"]
+    "sphinx>=1.5",
+    "pytest-check-links"
+]
     
 [project.urls]
 Homepage = "https://github.com/paddymul/buckaroo"
