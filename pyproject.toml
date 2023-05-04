@@ -48,6 +48,9 @@ test = [
     "pytest>=6",
 ]
 
+docs = [
+    "sphinx>=1.5"]
+    
 [project.urls]
 Homepage = "https://github.com/paddymul/buckaroo"
 
