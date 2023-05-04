@@ -58,7 +58,7 @@ module.exports = [
     entry: './js/extension.ts',
     output: {
       filename: 'index.js',
-      path: path.resolve(__dirname, 'dcef', 'nbextension'),
+      path: path.resolve(__dirname, 'buckaroo', 'nbextension'),
       libraryTarget: 'amd',
     },
     module: {
@@ -70,7 +70,7 @@ module.exports = [
   },
 
   /**
-   * Embeddable dcef bundle
+   * Embeddable buckaroo bundle
    *
    * This bundle is almost identical to the notebook extension bundle. The only
    * difference is in the configuration of the webpack public path for the
@@ -85,8 +85,8 @@ module.exports = [
       filename: 'index.js',
       path: path.resolve(__dirname, 'dist'),
       libraryTarget: 'amd',
-      library: 'dcef',
-      publicPath: 'https://unpkg.com/dcef@' + version + '/dist/',
+      library: 'buckaroo',
+      publicPath: 'https://unpkg.com/buckaroo@' + version + '/dist/',
     },
     devtool: 'source-map',
     module: {
@@ -106,7 +106,7 @@ module.exports = [
     output: {
       filename: 'embed-bundle.js',
       path: path.resolve(__dirname, 'docs', 'source', '_static'),
-      library: 'dcef',
+      library: 'buckaroo',
       libraryTarget: 'amd',
     },
     module: {

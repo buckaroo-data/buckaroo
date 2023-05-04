@@ -1,5 +1,5 @@
 {
   "load_extensions": {
-    "dcef/extension": true
+    "buckaroo/extension": true
   }
 }

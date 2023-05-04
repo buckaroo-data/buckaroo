@@ -34,7 +34,7 @@ classifiers = [
 dependencies = [
     "ipywidgets>=7.6.0,<9"
 ]
-version = "0.2.6"
+version = "0.2.7"
 
 [project.license]
 file = "LICENSE.txt"
@@ -48,18 +48,18 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/bloomberg/dcef"
+Homepage = "https://github.com/paddymul/buckaroo"
 
 [tool.hatch.build]
 artifacts = [
-    "dcef/nbextension/index.*",
-    "dcef/labextension",
+    "buckaroo/nbextension/index.*",
+    "buckaroo/labextension",
 ]
 
 [tool.hatch.build.targets.wheel.shared-data]
-"dcef/nbextension" = "share/jupyter/nbextensions/dcef"
-"dcef/labextension" = "share/jupyter/labextensions/dcef"
-"dcef.json" = "etc/jupyter/nbconfig/notebook.d/dcef.json"
+"buckaroo/nbextension" = "share/jupyter/nbextensions/buckaroo"
+"buckaroo/labextension" = "share/jupyter/labextensions/buckaroo"
+"buckaroo.json" = "etc/jupyter/nbconfig/notebook.d/buckaroo.json"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
@@ -81,8 +81,8 @@ exclude = [
 
 [tool.hatch.build.hooks.jupyter-builder]
 ensured-targets = [
-    "dcef/nbextension/index.js",
-    "dcef/labextension/package.json",
+    "buckaroo/nbextension/index.js",
+    "buckaroo/labextension/package.json",
 ]
 dependencies = [
     "hatch-jupyter-builder>=0.8.1",
@@ -99,7 +99,7 @@ npm = [
 [tool.isort]
 profile = "black"
 known_first_party = [
-    "dcef",
+    "buckaroo",
     "tests",
 ]
 line_length = 80
@@ -133,7 +133,7 @@ src = "pyproject.toml"
 version_template = "version = \"{major}.{minor}.{patch}{channel}{release}\""
 
 [[tool.tbump.file]]
-src = "dcef/_version.py"
+src = "buckaroo/_version.py"
 
 [[tool.tbump.file]]
 src = "package.json"

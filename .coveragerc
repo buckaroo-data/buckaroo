@@ -1,2 +1,2 @@
 [run]
-omit = dcef/tests/*
+omit = buckaroo/tests/*
