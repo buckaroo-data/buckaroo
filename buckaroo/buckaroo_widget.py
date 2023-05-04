@@ -95,27 +95,26 @@ class BuckarooWidget(DOMWidget):
     @observe('operations')
     def interpret_operations(self, change):
         print("interpret_operations")
+        results = {}
         try:
             operations = [{'symbol': 'begin'}]
             operations.extend(change['new'])
-            print("interpret_operations", operations)
-            results = {}
+            #print("interpret_operations", operations)
+
             if len(operations) == 1:
                 results['transformed_df'] = self.origDf
                 results['generated_py_code'] = 'no operations'
-                print('exiting early')
+                #print('exiting early')
                 return
-            
+            #generating python code seems slightly less error prone than the transform
+            results['generated_py_code'] = self.buckaroo_to_py_core(operations[1:])            
             transformed_df = self.buckaroo_transform(operations, self.df)
             results['transformed_df'] = json.loads(transformed_df.to_json(orient='table', indent=2))
+            results['transform_error'] = False
 
-            results['generated_py_code'] = self.buckaroo_to_py_core(operations[1:])
-            self.operation_results = results
-            print("operations_results", results.keys())
         except Exception as e:
-            print("error_setting", e)
-            self.transform_error = str(e)
-            raise
+            results['transform_error'] = str(e)
+        self.operation_results = results
 
     def setup_from_command_kls_list(self):
         command_defaults, command_patterns, self.buckaroo_transform, self.buckaroo_to_py_core = configure_buckaroo(
