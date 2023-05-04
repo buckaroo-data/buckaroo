@@ -19,6 +19,11 @@ module.exports = {
     '@typescript-eslint/no-namespace': 'off',
     '@typescript-eslint/no-use-before-define': 'off',
     "@typescript-eslint/no-unused-vars": "off",
+
+    //necessary for js/version.ts... otherwise the python build fails
+    "@typescript-eslint/no-var-requires": "off",
+
+
     "@typescript-eslint/explicit-function-return-type": "off",
     '@typescript-eslint/quotes': [
       'error',
