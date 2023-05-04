@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "buckaroo"
-description = "Herder - GUI Data wrangling for pandas"
+description = "Buckaroo - GUI Data wrangling for pandas"
 readme = "README.md"
 requires-python = ">=3.7"
 authors = [
@@ -17,6 +17,7 @@ keywords = [
     "IPython",
     "Jupyter",
     "Widgets",
+    "pandas",
 ]
 classifiers = [
     "Framework :: Jupyter",
@@ -34,7 +35,7 @@ classifiers = [
 dependencies = [
     "ipywidgets>=7.6.0,<9"
 ]
-version = "0.2.7"
+version = "0.2.8"
 
 [project.license]
 file = "LICENSE.txt"

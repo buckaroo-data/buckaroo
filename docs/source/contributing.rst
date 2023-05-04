@@ -1,16 +1,16 @@
 .. _Contributing:
 
 ====================
-Contributing to DCEF
+Contributing to Buckaroo
 ====================
 
-DCEF is actively looking for contributors.  All forms of participation are welcome, from bug reports, to suggestions, to code contributions.
+Buckaroo is actively looking for contributors.  All forms of participation are welcome, from bug reports, to suggestions, to code contributions.
 
 
 Developing in the Jupyter Lab environment
 =========================================
 
-The easiest way to develop and contribute to DCEF is to add ``Commands``.  When I use DCEF to clean and explore a new dataset, I firt try to use the built in DCEF commands in the UI.  When I want to perform a manipulation that doesn't yet exist in DCEF, I first drop down to raw pandas/python like I would before DCEF... Then I figure out how to expose that functionality as a ``Command``.  While working with manatee data, I recognized that a column was probably date times, but a ``to_datetime``  ``Command`` didn't exist.  So I wrote one.
+The easiest way to develop and contribute to Buckaroo is to add ``Commands``.  When I use Buckaroo to clean and explore a new dataset, I firt try to use the built in Buckaroo commands in the UI.  When I want to perform a manipulation that doesn't yet exist in Buckaroo, I first drop down to raw pandas/python like I would before Buckaroo... Then I figure out how to expose that functionality as a ``Command``.  While working with manatee data, I recognized that a column was probably date times, but a ``to_datetime``  ``Command`` didn't exist.  So I wrote one.
 
 .. code-block:: python
 
@@ -39,7 +39,7 @@ The easiest way to develop and contribute to DCEF is to add ``Commands``.  When 
 
 When you use the ``add_command`` decorator, the command is instantly added to the UI of the corresponding widget.  Subsequent re-evalutations of the same cell, will replace a ``Command`` in the widget with the same name.  This allows you to iteratively develop commands.
 
-Once you have developed a ``Command`` you can either continue to use it internally as with the ``add_command`` decorator or you can open a PR and add it to the builtin commands for DCEF `all_transforms.py <https://github.com/paddymul/dcef/blob/main/dcef/all_transforms.py>`_.
+Once you have developed a ``Command`` you can either continue to use it internally as with the ``add_command`` decorator or you can open a PR and add it to the builtin commands for Buckaroo `all_transforms.py <https://github.com/paddymul/buckaroo/blob/main/buckaroo/all_transforms.py>`_.
 
 The upside of just using the @add_command decorator is that you don't have to setup a development environment.
 
@@ -51,29 +51,29 @@ First, you need to fork the project. Then setup your environment:
 .. code-block:: bash
 
    # create a new conda environment
-   conda create -n dcef-dev jupyterlab pandas nodejs yarn pip
-   conda activate dcef-dev
+   conda create -n buckaroo-dev jupyterlab pandas nodejs yarn pip
+   conda activate buckaroo-dev
    pip install build twine
 
-   # download dcef from your GitHub fork
-   git clone https://github.com/<your-github-username>/dcef.git
+   # download buckaroo from your GitHub fork
+   git clone https://github.com/<your-github-username>/buckaroo.git
    # or start by cloning the main repo
-   git clone https://github.com/paddymul/dcef.git
+   git clone https://github.com/paddymul/buckaroo.git
 
    # install JS dependencies and build js assets
-   cd dcef
+   cd buckaroo
    yarn install
 
-   # install DCEF in editable mode
+   # install Buckaroo in editable mode
    python -m pip install -ve .
 
    #in another shell, setup the typescript watcher
-   conda activate dcef-dev
+   conda activate buckaroo-dev
    yarn build && yarn watch
    #this will build the jupyter lab extension, and recompile on any code changes
 
    #start your jupyter lab server in another shell
-   conda activate dcef-dev
+   conda activate buckaroo-dev
    jupyter lab
 
    #work on your jupyter notebook from that lab server

@@ -1,14 +1,14 @@
 .. _using:
 
 ===========
-Using DCEF
+Using Buckaroo
 ===========
 
-DCEF is meant to be used in a jupyterlab notebook to clean and explore pandas dataframes.
+Buckaroo is meant to be used in a jupyterlab notebook to clean and explore pandas dataframes.
 
 Before you begin, make sure that you follow the steps in :ref:`install`.
 
-The following sections cover how to use DCEF.
+The following sections cover how to use Buckaroo.
 
 
 In a Jupyter Lab notebook cell
@@ -16,16 +16,16 @@ In a Jupyter Lab notebook cell
 
 .. code-block:: python
 
-    from dcef.dcef_widget import DCEFWidget
-    DCEFWidget(df=df)  #df being the dataframe you want to explore
+    from buckaroo.buckaroo_widget import BuckarooWidget
+    BuckarooWidget(df=df)  #df being the dataframe you want to explore
 
 
-And you will see the UI for DCEF.
+And you will see the UI for Buckaroo.
 
 Using Commands
 ==============
 
-At the core DCEF commands operate on columns.  You must first click on a cell (not a header) in the top pane to select a column.
+At the core Buckaroo commands operate on columns.  You must first click on a cell (not a header) in the top pane to select a column.
 
 Next you must click on a command like ``dropcol``, ``fillna``, or ``groupby`` to create a new command
 
@@ -37,7 +37,7 @@ Writing your own commands
 =========================
 
 
-Builtin commands are found in `all_transforms.py <https://github.com/paddymul/dcef/blob/main/dcef/all_transforms.py>`_
+Builtin commands are found in `all_transforms.py <https://github.com/paddymul/buckaroo/blob/main/buckaroo/all_transforms.py>`_
 
 
 .. code-block:: python

@@ -1,13 +1,13 @@
 .. _install:
 
 ================
-Installing DCEF
+Installing Buckaroo
 ================
 
-DCEF can be installed from ``PyPI``:
+Buckaroo can be installed from ``PyPI``:
 
 .. code-block:: bash
 
-   pip install dcef
+   pip install buckaroo
 
-Once dcef is installed, it can be used as a a Jupyter Lab  extension. See :ref:`using` for information on how to use dcef
+Once Buckaroo is installed, it can be used as a a Jupyter Lab  extension. See :ref:`using` for information on how to use Buckaroo.

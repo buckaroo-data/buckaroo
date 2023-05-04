@@ -1,42 +1,42 @@
-# DCEF - Data Cleaning Exploration Framework
-We all know how awkward it is to clean data in jupyter notebooks.  Multiple cells of exploratory work, trying different transforms, looking up different transforms, adhoc functions that work in one notebook and have to be either copied/pasta-ed to the next notebook, or rewritten from scratch.  Data Cleaning Explorationg Framework  (DCEF) makes all of that better by providing a visual UI for common cleaning operations AND emitting python code that performs the transformation. Specifically, the DCEF is a tool built to interactively explore, clean, and transform pandas dataframes.
+# Buckaroo - The Data Wrangling Assistant
+We all know how awkward it is to clean data in jupyter notebooks.  Multiple cells of exploratory work, trying different transforms, looking up different transforms, adhoc functions that work in one notebook and have to be either copied/pasta-ed to the next notebook, or rewritten from scratch.  Buckaro makes all of that better by providing a visual UI for common cleaning operations AND emitting python code that performs the transformation. Specifically, the Buckaroo is a tool built to interactively explore, clean, and transform pandas dataframes.
 
-![Data Cleaning Exploration Framework Screenshot](static/images/dcf-jupyter.png)
+![Buckaroo Screenshot](static/images/dcf-jupyter.png)
 
 
 ## Installation
 
-If using JupyterLab, `dcef` requires JupyterLab version 3 or higher.
+If using JupyterLab, `buckaroo` requires JupyterLab version 3 or higher.
 
-You can install `dcef` using `pip`
+You can install `buckaroo` using `pip`
 
 Using `pip`:
 
 ```bash
-pip install dcef
+pip install buckaroo
 ```
 
 ## Documentation
 
-To get started with using DCEF, check out the full documentation:
+To get started with using Buckaroo, check out the full documentation:
 
-https://dcef.readthedocs.io/
+https://buckaroo.readthedocs.io/
 
 
-# Using DCEF
+# Using Buckaroo
 
 in a jupyter lab notebook just add the following to a cell
 
 ```python
-from dcef.dcef_widget import DCEFWidget
-DCEFWidget(df=df)  #df being the dataframe you want to explore
+from buckaroo.buckaroo_widget import BuckarooWidget
+BuckarooWidget(df=df)  #df being the dataframe you want to explore
 ``` 
-and you will see the UI for DCEF
+and you will see the UI for Buckaroo
 
 
 ## Using commands
 
-At the core DCEF commands operate on columns.  You must first click on a cell (not a header) in the top pane to select a column.
+At the core Buckaroo commands operate on columns.  You must first click on a cell (not a header) in the top pane to select a column.
 
 Next you must click on a command like `dropcol`, `fillna`, or `groupby` to create a new command
 
@@ -46,7 +46,7 @@ At this point you can either delete the command by clicking the `X` button or ch
 
 ## Writing your own commands
 
-Builtin commands are found in [all_transforms.py](dcef/all_transforms.py)
+Builtin commands are found in [all_transforms.py](buckaroo/all_transforms.py)
 
 ### Simple example
 Here is a simple example command
@@ -142,7 +142,7 @@ These transforms emit multiple DataFrames
   * concat (concatenate multiple dataframes, with UI affordances to assure a similar shape)
   * join (join two dataframes on a key, with UI affordances)
 
-DCEF can only work on a single input dataframe shape at a time.  Any newly created columns are visible on output, but not available for manipulation in the same DCEF Cell.
+Buckaroo can only work on a single input dataframe shape at a time.  Any newly created columns are visible on output, but not available for manipulation in the same Buckaroo Cell.
 
 
 # Components
@@ -159,15 +159,15 @@ DCEF can only work on a single input dataframe shape at a time.  Any newly creat
 	* Simple UI for column level functions
 	* Shows generated python code
 	* Shows transformed data frame
-  * DCEF server
+  * Buckaroo server
     * Serves up dataframes for use by frontend
-	* responds to dcef commands
+	* responds to buckaroo commands
 	* shows generated python code
   * Developer User experience
-	* define DCEF commands in python onloy
-  * DCEF Intepreter
+	* define Buckaroo commands in python onloy
+  * Buckaroo Intepreter
     * Based on Peter Norvig's lispy.py, a simple syntax that is easy for the frontend to generate (no parens, just JSON arrays)
-  * DCEF core (actual transforms supported)
+  * Buckaroo core (actual transforms supported)
     * dropcol
 	* fillna
 	* one hot
@@ -187,7 +187,7 @@ DCEF can only work on a single input dataframe shape at a time.  Any newly creat
 	* Summary statistics tab for incoming dataframe
 	* Multi index columns
 	* DateTimeIndex support
-  * DCEF core
+  * Buckaroo core
 	* MakeCategorical
 	* Quantize
 	* Resample
@@ -208,8 +208,8 @@ DCEF can only work on a single input dataframe shape at a time.  Any newly creat
 For a development installation:
 
 ```bash
-git clone https://github.com/paddymul/dcef.git
-cd dcef
+git clone https://github.com/paddymul/buckaroo.git
+cd buckaroo
 conda install ipywidgets=8 jupyterlab
 pip install -ve .
 ```
