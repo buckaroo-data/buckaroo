@@ -46,6 +46,7 @@
     "clean:labextension": "rimraf buckaroo/labextension",
     "clean:nbextension": "rimraf buckaroo/nbextension/index.*",
     "lint": "eslint 'js/**/*.{ts,tsx}'",
+    "lint:check": "eslint 'js/**/*.{ts,tsx}'",
     "lint:fix": "eslint 'js/**/*.{ts,tsx}' --fix",
     "prepack": "yarn run build:labextension && yarn run build:nbextension",
     "test": "jest --verbose --passWithNoTests",
