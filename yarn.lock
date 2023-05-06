@@ -5115,10 +5115,10 @@ p-try@^2.0.0:
   resolved "https://registry.yarnpkg.com/p-try/-/p-try-2.2.0.tgz#cb2868540e313d61de58fafbe35ce9004d5540e6"
   integrity sha512-R4nPAVTAU0B9D35/Gk3uJf/7XYbQcyohSKdvAxIRSNghFl4e71hVoGnBNQz9cWaXxO2I10KTC+3jMdvvoKw6dQ==
 
-paddy-react-edit-list@>=1.1.35:
-  version "1.1.35"
-  resolved "https://registry.yarnpkg.com/paddy-react-edit-list/-/paddy-react-edit-list-1.1.35.tgz#b594ca1dda8cce051019a32e685051f1abe0a2a3"
-  integrity sha512-2VI2w4NBypUo/MhahtjyD0vDcyeg3JNP6nDO59viUEiOyM4TyzAyxMVjmmHuT+KIIe51JOmL3czl6Kmw5FmSVw==
+paddy-react-edit-list@>=1.1.36:
+  version "1.1.36"
+  resolved "https://registry.yarnpkg.com/paddy-react-edit-list/-/paddy-react-edit-list-1.1.36.tgz#a3e5a30e38c73867530da6750574d62999ca0407"
+  integrity sha512-iFzup927dtKPMfJHHNxftjPa6Pu+GWLZpo7xqSTI8uRz1fbkQKiYVhCjaHNzzBpJkkblWjhCqOMqpK7NhpssOQ==
   dependencies:
     "@ag-grid-community/client-side-row-model" "^29.2.0"
     "@types/lodash" "^4.14.191"

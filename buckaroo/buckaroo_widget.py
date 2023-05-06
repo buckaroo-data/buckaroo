@@ -10,6 +10,7 @@ TODO: Add module docstring
 
 from ipywidgets import DOMWidget
 from traitlets import Unicode, List, Dict, observe
+import pandas as pd
 from ._frontend import module_name, module_version
 from .all_transforms import configure_buckaroo, DefaultCommandKlsList
 from .summary_stats import summarize_df
@@ -96,6 +97,7 @@ class BuckarooWidget(DOMWidget):
     def interpret_operations(self, change):
         print("interpret_operations")
         results = {}
+        results['generated_py_code'] = 'before interpreter'
         try:
             operations = [{'symbol': 'begin'}]
             operations.extend(change['new'])
@@ -113,6 +115,9 @@ class BuckarooWidget(DOMWidget):
             results['transform_error'] = False
 
         except Exception as e:
+            empty_df = pd.DataFrame({})
+            results['transformed_df'] = json.loads(empty_df.to_json(orient='table', indent=2))
+            print(e)
             results['transform_error'] = str(e)
         self.operation_results = results
 
