@@ -49,8 +49,7 @@ test = [
 ]
 
 docs = [
-    "sphinx>=1.5",
-    "pytest-check-links"
+    "sphinx>=1.5"
 ]
     
 [project.urls]
