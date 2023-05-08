@@ -40,6 +40,6 @@ jobs:
         working-directory: docs
         run: |
           sudo apt install -y pandoc
-	  pip install pytest-check-links
+          pip install pytest-check-links
           make html
           python -m pytest --check-links
