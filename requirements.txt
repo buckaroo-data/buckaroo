@@ -1,3 +1,0 @@
-ipywidgets
-pandas
-buckaroo
