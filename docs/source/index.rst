@@ -3,8 +3,8 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Buckaroo - Data Cleaning Exploration Framework
-==========================================
+Buckaroo - The Data Cleaning assistant for pandas
+=================================================
 Buckaroo is a tool to quickly clean and explore DataFrames with a visual UI for common cleaning operations AND emitting python code that performs the transformation. 
 
 
