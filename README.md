@@ -1,7 +1,7 @@
 # Buckaroo - The Data Wrangling Assistant
 We all know how awkward it is to clean data in jupyter notebooks.  Multiple cells of exploratory work, trying different transforms, looking up different transforms, adhoc functions that work in one notebook and have to be either copied/pasta-ed to the next notebook, or rewritten from scratch.  Buckaro makes all of that better by providing a visual UI for common cleaning operations AND emitting python code that performs the transformation. Specifically, the Buckaroo is a tool built to interactively explore, clean, and transform pandas dataframes.
 
-![Buckaroo Screenshot](static/images/dcf-jupyter.png)
+![Buckaroo Screenshot](static/images/Buckaroo-screenshot.png)
 
 
 ## Installation
