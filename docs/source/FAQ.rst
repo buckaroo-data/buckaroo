@@ -8,7 +8,6 @@ Buckaroo - FAQ
 *  **Are there any similar projects to Buckaroo?**
 
 There are a couple of projects like Buckaroo that aim to provide a better table widget and pandas editing experience.
-`Buckaroo on github <https://github.com/paddymul/buckaroo>`_
 
 #. `Mito <https://github.com/mito-ds/monorepo>`_.  Open source table/code editing widget for Jupyter.  More aimed at easing transition to pandas from excel users.
 #. `Bamboolib <https://github.com/tkrabel/bamboolib>`_  An originally open source tool aimed at building a similar experience, more aimed as a low-code tool for beginners.  The parent company 8080labs was acquired by Databricks.
@@ -34,13 +33,13 @@ To be clear, I had the idea for building Buckaroo like this before I saw any of 
 
   This is a problem domain that required a DSL and intermediate language.  I could have written my own or chosen an existing language.  I chose LISP because it is simple to interpret and generate, additionally it is well understood.  Yes LISP is obscure, but it is less obscure than a custom language I would write myself.  I didn't want to expose an entire progrmaming language with all the attendant security risks, I wanted a small safe strict subset of programming features that I explicitly exposed.  LISP is easier to manipulate as an AST than any language in PL history.  I am not yet using any symbolic manipulation facilities of LISP, and will probably only use them in limited ways. 
 
-* **Do I need to know LISP to use DCF?**
+* **Do I need to know LISP to use Buckaroo?**
 
-  No.  Users of DCF will never need to know that LISP is at the core of the system.
+  No.  Users of Bucakroo will never need to know that LISP is at the core of the system.
 
-* **Do I need to know LISP to contribute to DCF?**
+* **Do I need to know LISP to contribute to Buckaroo?**
 
-  Not really.  Commands are added to the dcf interpreter via the Command class.  Commands are very simple and straight forward.  Here are the two functions that make `fillna` work.
+  Not really.  Commands are added to the buckaroo interpreter via the Command class.  Commands are very simple and straight forward.  Here are the two functions that make `fillna` work.
 
 .. code-block:: python
 		

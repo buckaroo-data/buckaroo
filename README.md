@@ -150,6 +150,17 @@ Buckaroo can only work on a single input dataframe shape at a time.  Any newly c
 * A UI for selecting and trying transforms interactively
 * An output table widget showing the transformed dataframe
 
+# Related projects
+Builtin commands are found in [all_transforms.py](buckaroo/all_transforms.py)
+
+There are a couple of projects like Buckaroo that aim to provide a better table widget and pandas editing experience.
+
+1. [Mito](https://github.com/mito-ds/monorepo)  Open source table/code editing widget for Jupyter.  More aimed at easing transition to pandas from excel users.
+1. [Bamboolib](https://github.com/tkrabel/bamboolib)  An originally open source tool aimed at building a similar experience, more aimed as a low-code tool for beginners.  The parent company 8080labs was acquired by Databricks.
+1. [Microsoft DataWrangler](https://github.com/microsoft/vscode-data-wrangler)  Open source, provides a very similar experience inside of VSCode's notebook experience.  Only works inside of VSCode.
+1. [QGrid](https://github.com/quantopian/qgrid)  Open source, unmaintained.  A slick table widget built by Quantopian, no code gen or data manipulation features
+1. [IpyDatagrid](https://github.com/bloomberg/ipydatagrid)  Open source.  Bloomberg's Jupyter table widget. I used the ipydatagrid repo structure as the basis for buckaroo (js build setup only)
+1. [IPyAgGrid](https://github.com/widgetti/ipyaggrid)  Open source.  Wraps [AG Grid](https://www.ag-grid.com/)  in a jupyter widget.  Buckaroo also uses AG Grid.
 
 # What works now, what's coming
 
