@@ -1,8 +1,8 @@
 .. _Contributing:
 
-====================
+========================
 Contributing to Buckaroo
-====================
+========================
 
 Buckaroo is actively looking for contributors.  All forms of participation are welcome, from bug reports, to suggestions, to code contributions.
 

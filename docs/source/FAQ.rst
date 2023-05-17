@@ -5,9 +5,23 @@
 
 Buckaroo - FAQ
 ==========================================
-*  **Is DCF meant to repalce knowledge of python/pandas**
+*  **Are there any similar projects to Buckaroo?**
 
-   No, DCF helps experienced pandas devs quickly build and try the transformations they already know.  Transformation names stay very close to the underlying pandas names.  DCF makes different transforms more discoverable than reading obscure blogposts and half working stackoverflow submissions.  Different transformations can be quickly tried without a lot of reading and tinkering to see if it is the transform you want.  Finally, all transformations are emitted as python code.  That python code can be a starting point.
+There are a couple of projects like Buckaroo that aim to provide a better table widget and pandas editing experience.
+
+#. `Mito <https://github.com/mito-ds/monorepo>`_.  Open source table/code editing widget for Jupyter.  More aimed at easing transition to pandas from excel users.
+#. `Bamboolib <https://github.com/tkrabel/bamboolib>`_  An originally open source tool aimed at building a similar experience, more aimed as a low-code tool for beginners.  The parent company 8080labs was acquired by Databricks.
+#. `Microsoft DataWrangler <https://github.com/microsoft/vscode-data-wrangler>`_ .  Open source, provides a very similar experience inside of VSCode's notebook experience.  Only works inside of VSCode.
+#. `QGrid <https://github.com/quantopian/qgrid>`_.  Open source, unmaintained.  A slick table widget built by Quantopian, no code gen or data manipulation features
+#. `IpyDatagrid <https://github.com/bloomberg/ipydatagrid>`_.  Open source.  Bloomberg's Jupyter table widget. I used the ipydatagrid repo structure as the basis for buckaroo (js build setup only)
+#. `IPyAgGrid <https://github.com/widgetti/ipyaggrid>`_ .  Open source.  Wraps `AG Grid <https://www.ag-grid.com/>`_  in a jupyter widget.  Buckaroo also uses AG Grid.
+
+
+To be clear, I had the idea for building Buckaroo like this before I saw any of the other projects... But they are all open source and we can learn from each other.  If Buckaroo doesn't quite do what you want, check out one of the others
+
+*  **Is Buckaroo meant to repalce knowledge of python/pandas**
+
+   No, Buckaroo helps experienced pandas devs quickly build and try the transformations they already know.  Transformation names stay very close to the underlying pandas names.  Buckaroo makes different transforms more discoverable than reading obscure blogposts and half working stackoverflow submissions.  Different transformations can be quickly tried without a lot of reading and tinkering to see if it is the transform you want.  Finally, all transformations are emitted as python code.  That python code can be a starting point.
 
 
 * **How well does Buckaroo perform on large dataframes**
@@ -19,13 +33,13 @@ Buckaroo - FAQ
 
   This is a problem domain that required a DSL and intermediate language.  I could have written my own or chosen an existing language.  I chose LISP because it is simple to interpret and generate, additionally it is well understood.  Yes LISP is obscure, but it is less obscure than a custom language I would write myself.  I didn't want to expose an entire progrmaming language with all the attendant security risks, I wanted a small safe strict subset of programming features that I explicitly exposed.  LISP is easier to manipulate as an AST than any language in PL history.  I am not yet using any symbolic manipulation facilities of LISP, and will probably only use them in limited ways. 
 
-* **Do I need to know LISP to use DCF?**
+* **Do I need to know LISP to use Buckaroo?**
 
-  No.  Users of DCF will never need to know that LISP is at the core of the system.
+  No.  Users of Bucakroo will never need to know that LISP is at the core of the system.
 
-* **Do I need to know LISP to contribute to DCF?**
+* **Do I need to know LISP to contribute to Buckaroo?**
 
-  Not really.  Commands are added to the dcf interpreter via the Command class.  Commands are very simple and straight forward.  Here are the two functions that make `fillna` work.
+  Not really.  Commands are added to the buckaroo interpreter via the Command class.  Commands are very simple and straight forward.  Here are the two functions that make `fillna` work.
 
 .. code-block:: python
 		

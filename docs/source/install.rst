@@ -1,8 +1,8 @@
 .. _install:
 
-================
+===================
 Installing Buckaroo
-================
+===================
 
 Buckaroo can be installed from ``PyPI``:
 
