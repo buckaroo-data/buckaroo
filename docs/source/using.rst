@@ -1,8 +1,8 @@
 .. _using:
 
-===========
+==============
 Using Buckaroo
-===========
+==============
 
 Buckaroo is meant to be used in a jupyterlab notebook to clean and explore pandas dataframes.
 
