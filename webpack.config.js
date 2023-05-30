@@ -1,6 +1,7 @@
 const path = require('path');
 const version = require('./package.json').version;
-
+//import {TsconfigPathsPlugin} from 'tsconfig-paths-webpack-plugin';
+const  TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
 const luminoThemeImages = /^.*@lumino\/default-theme.*.png$/;
 
 const crypto = require('crypto');
@@ -13,9 +14,25 @@ crypto.createHash = (algorithm) =>
 
 // Custom webpack rules
 const rules = [
-  { test: /\.ts$/, loader: 'ts-loader' },
+  { test: /\.tsx?$/, loader: 'ts-loader' },
   { test: /\.js$/, loader: 'source-map-loader' },
   { test: /\.css$/, use: ['style-loader', 'css-loader'] },
+
+
+// {
+//    test: /\.tsx?$/,
+//    exclude: /node_modules/,
+//    loader: 'ts-loader'
+// },
+
+  // {
+  //     test: /\.tsx?$/,
+  //     loader: 'ts-loader',
+  //     options: {
+  //         transpileOnly: true,
+  //         configFile: 'examples/tsconfig.json'
+  //     }
+  // },
   {
     test: luminoThemeImages,
     issuer: /\.css$/,
@@ -43,7 +60,8 @@ const externals = ['@jupyter-widgets/base'];
 
 const resolve = {
   // Add '.ts' and '.tsx' as resolvable extensions.
-  extensions: ['.webpack.js', '.web.js', '.ts', '.js'],
+  extensions: ['.webpack.js', '.web.js', '.ts', '.js', '.tsx'],
+    plugins: [new TsconfigPathsPlugin()],
   fallback: { crypto: false },
 };
 
