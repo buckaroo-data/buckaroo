@@ -2,6 +2,9 @@ const path = require('path');
 const version = require('./package.json').version;
 //import {TsconfigPathsPlugin} from 'tsconfig-paths-webpack-plugin';
 const  TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
+
+//import HtmlWebpackPlugin from 'html-webpack-plugin';
+const HtmlWebpackPlugin = require('html-webpack-plugin');
 const luminoThemeImages = /^.*@lumino\/default-theme.*.png$/;
 
 const crypto = require('crypto');
@@ -45,6 +48,10 @@ const rules = [
     exclude: luminoThemeImages,
     use: ['file-loader'],
   },
+    {
+        test: /\.md$/,
+        use: ['html-loader', 'markdown-loader']
+    },
   {
     test: /\.svg(\?v=\d+\.\d+\.\d+)?$/,
     issuer: /\.css$/,
@@ -66,6 +73,26 @@ const resolve = {
 };
 
 module.exports = [
+  // {
+  //   entry: './js/extension.ts',
+  //   output: {
+  //     filename: 'index.js',
+  //     path: path.resolve(__dirname, 'buckaroo', 'nbextension'),
+  //     libraryTarget: 'amd',
+  //   },
+  //   module: {
+  //     rules: rules,
+  //   },
+  //   devtool: 'source-map',
+  //   externals,
+  //   resolve,
+  //     plugins: [new HtmlWebpackPlugin({
+  //               template: './examples/index.html'
+  //           })]
+
+  // },
+
+
   /**
    * Notebook extension
    *
@@ -85,6 +112,10 @@ module.exports = [
     devtool: 'source-map',
     externals,
     resolve,
+      plugins: [new HtmlWebpackPlugin({
+                template: './examples/index.html'
+            })]
+
   },
 
   /**
@@ -112,6 +143,9 @@ module.exports = [
     },
     externals,
     resolve,
+        devServer: {
+            port: 8030
+        }
   },
 
   /**
