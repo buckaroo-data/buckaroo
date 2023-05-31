@@ -5,7 +5,7 @@ import { Operation } from './OperationUtils';
 import { CommandConfigT } from './CommandUtils';
 //import {bakedCommandConfig} from './bakedOperationDefaults';
 import { DependentTabs, OperationResult } from './DependentTabs';
-import { staticData } from 'paddy-react-edit-list';
+import { tableDf, bakedCommandConfig } from './staticData'
 
 export type OperationSetter = (ops: Operation[]) => void;
 
@@ -55,9 +55,9 @@ export function ColumnsEditorEx() {
   };
   return (
     <ColumnsEditor
-      df={staticData.tableDf}
+      df={tableDf}
       activeColumn={'foo'}
-      commandConfig={staticData.bakedCommandConfig}
+      commandConfig={bakedCommandConfig}
       operations={operations}
       setOperations={setOperations}
       operationResult={baseOperationResults}

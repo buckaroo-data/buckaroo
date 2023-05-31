@@ -2,18 +2,6 @@
 # yarn lockfile v1
 
 
-"@ag-grid-community/client-side-row-model@^29.2.0":
-  version "29.3.3"
-  resolved "https://registry.npmjs.org/@ag-grid-community/client-side-row-model/-/client-side-row-model-29.3.3.tgz"
-  integrity sha512-7BjLseiB625CiDECsSJBDn6xt59VMl0Fs1PwaCWtrTX0AKYBoU5W/SaOezRKW6saH6FnXxEW+47Vyrz+s+rRJQ==
-  dependencies:
-    "@ag-grid-community/core" "~29.3.3"
-
-"@ag-grid-community/core@~29.3.3":
-  version "29.3.3"
-  resolved "https://registry.npmjs.org/@ag-grid-community/core/-/core-29.3.3.tgz"
-  integrity sha512-cr15doApCrzf7QJYAi0X4zZMv7sFi4nBmEFN4asxSTxrbFGzqzVjO2ymQi5U60NikRTQOuYx3Kzx4PzOTuH4dA==
-
 "@ampproject/remapping@^2.2.0":
   version "2.2.1"
   resolved "https://registry.npmjs.org/@ampproject/remapping/-/remapping-2.2.1.tgz"
@@ -2026,7 +2014,7 @@
   resolved "https://registry.npmjs.org/@types/json5/-/json5-0.0.29.tgz"
   integrity sha512-dRLjCWHYg4oaA77cxO64oO+7JwCwnIzkZPdrrC71jQmQtlhM556pwKo5bUzqvZndkVbeFLIIi+9TC40JNF5hNQ==
 
-"@types/lodash@^4.14.134", "@types/lodash@^4.14.191":
+"@types/lodash@^4.14.134":
   version "4.14.194"
   resolved "https://registry.npmjs.org/@types/lodash/-/lodash-4.14.194.tgz"
   integrity sha512-r22s9tAS7imvBt2lyHC9B8AGwWnXaYb1tY09oyLkXDs4vArpYJzw09nj8MLx5VfciBPGIb+ZwG0ssYnEPJxn/g==
@@ -2499,15 +2487,15 @@ acorn@^8.8.0:
   resolved "https://registry.npmjs.org/acorn/-/acorn-8.8.2.tgz"
   integrity sha512-xjIYgE8HBrkpd/sJqOGNspf8uHG+NOHGOw6a/Urj8taM2EXfdNAH2oFcPeIFfsv3+kz/mJrS5VuMqbNLjCa2vw==
 
-ag-grid-community@^29.2.0, ag-grid-community@~29.3.3:
-  version "29.3.3"
-  resolved "https://registry.npmjs.org/ag-grid-community/-/ag-grid-community-29.3.3.tgz"
-  integrity sha512-5XHG2NtXfUFroST/IvWyIYzM7GnbAM1mX7YsKvUHRWk0iMY1kAMJMk6AOoNKe1BBj7jg+Wgbig123T4X7bNZPw==
+ag-grid-community@^29.2.0, ag-grid-community@~29.3.5:
+  version "29.3.5"
+  resolved "https://registry.npmjs.org/ag-grid-community/-/ag-grid-community-29.3.5.tgz"
+  integrity sha512-LxUo21f2/CH31ACEs1C7Q/ggGGI1fQPSTB4aY5OThmM+lBkygZ7QszBE8jpfgWOIjvjdtcdIeQbmbjkHeMsA7A==
 
 ag-grid-react@^29.2.0:
-  version "29.3.3"
-  resolved "https://registry.npmjs.org/ag-grid-react/-/ag-grid-react-29.3.3.tgz"
-  integrity sha512-xciimp9q8FXv2bgLOIyPT11dKEW0KNDTF8hyDuAKuK3541YBTZpiycwtmYxVimUM4c007TRTEYgw6Kql/gqWiA==
+  version "29.3.5"
+  resolved "https://registry.npmjs.org/ag-grid-react/-/ag-grid-react-29.3.5.tgz"
+  integrity sha512-Eg0GJ8hEBuxdVaN5g+qITOzhw0MGL9avL0Oaajr+p7QRtq2pIFHLZSknWsCBzUTjidiu75WZMKwlZjtGEuafdQ==
   dependencies:
     prop-types "^15.8.1"
 
@@ -6389,19 +6377,6 @@ p-try@^2.0.0:
   version "2.2.0"
   resolved "https://registry.npmjs.org/p-try/-/p-try-2.2.0.tgz"
   integrity sha512-R4nPAVTAU0B9D35/Gk3uJf/7XYbQcyohSKdvAxIRSNghFl4e71hVoGnBNQz9cWaXxO2I10KTC+3jMdvvoKw6dQ==
-
-paddy-react-edit-list@>=1.1.37:
-  version "1.1.37"
-  resolved "https://registry.npmjs.org/paddy-react-edit-list/-/paddy-react-edit-list-1.1.37.tgz"
-  integrity sha512-NdR9oKZ8y1GrLvHOCKWkLTIQODCtqD/CI1Yz1cS2znKhDvwDibx1bnS66mxrN1U80PxbKNgv/4i8/j71WgwuTw==
-  dependencies:
-    "@ag-grid-community/client-side-row-model" "^29.2.0"
-    "@types/lodash" "^4.14.191"
-    ag-grid-community "^29.2.0"
-    ag-grid-react "^29.2.0"
-    lodash "^4.17.21"
-    react "^18.0.0"
-    react-dom "^18.0.0"
 
 param-case@^3.0.3, param-case@^3.0.4:
   version "3.0.4"
