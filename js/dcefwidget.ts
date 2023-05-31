@@ -7,11 +7,8 @@ import {
   ISerializers,
 } from '@jupyter-widgets/base';
 
-import {
-  WidgetDCFCell,
-  CommandConfigT,
-  Operation,
-} from 'paddy-react-edit-list';
+import { WidgetDCFCell } from './components/DCFCell';
+
 import * as Backbone from 'backbone';
 
 import React, { useEffect, useState } from 'react';
@@ -24,6 +21,8 @@ import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-alpine.css';
 import 'paddy-react-edit-list/css/dcf-npm.css';
 import '../style/widget.css';
+import { Operation } from './components/OperationUtils';
+import { CommandConfigT } from './components/CommandUtils';
 
 export class DCEFWidgetModel extends DOMWidgetModel {
   defaults(): Backbone.ObjectHash {

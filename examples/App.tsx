@@ -46,9 +46,9 @@ for (const ex of Object.keys(examples)) {
 
 const LeftMenuItem = (props): JSX.Element => (
     <Link to={props.id}>
-        <span className='w-100' variant='light'>
+        <h3 className='w-100' variant='light'>
             {props.title}
-        </span>
+        </h3>
     </Link>
 );
 
