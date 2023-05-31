@@ -12,7 +12,6 @@ import '../js/npm-styles.scss';
 
 
 const examples = {
-    DCFCellEx: {title: 'DCFCell', file: 'DCFCellEx'},
     WidgetDCFCellEx: {title: 'WigetDCFCell', file: 'WidgetDCFCellEx'},
     ColumnsEditorEx: {title: 'ColumnsEditor', file: 'ColumnsEditorEx'},
     CommandViewerEx: {title: 'CommandViewer', file: 'CommandViewerEx'},
