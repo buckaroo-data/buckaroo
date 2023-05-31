@@ -1,0 +1,67 @@
+.left-menu button {
+    text-align: left;
+    font-weight: bold;
+    color: #333333;
+}
+
+.left-menu a:hover {
+    text-decoration: none;
+}
+
+.left-menu {
+    width: 10em;
+    min-width: 10em;
+    max-width: 10em;
+}
+
+.codeblock {
+    max-height: 90vh;
+    overflow-y: scroll;
+}
+
+.codeblock > pre {
+    margin-top: 0 !important;
+}
+
+.codeblock > pre > code {
+    font-size: 0.9rem !important;
+    line-height: 1.1 !important;
+}
+
+
+
+:root
+{
+    --color-example: #fff;
+}
+
+
+html,body
+{
+    font-family: "Roboto", sans-serif;
+    display: flex;
+    flex-grow: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 100vh;
+    font-size: 16px;
+    text-align: center;
+    color: var(--color-example);
+    margin: 0;
+}
+
+#app
+{
+    background-color: #4158D0;
+    background-image: linear-gradient(43deg, #4158D0 0%, #C850C0 46%, #FFCC70 100%);
+    color: var(--color-example);
+
+    justify-content: center;
+    display: flex;
+    flex-grow: 1;
+    flex-direction:column;
+    align-items: center;
+    font-size: 2rem;
+    outline:4px solid pink;
+}
+

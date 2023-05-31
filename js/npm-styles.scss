@@ -1,0 +1,153 @@
+
+.column-list {
+    width:100%; font-size:1rem;
+    dl {
+	display:flex; margin:0; padding:0;
+	div.list-item {
+	    padding:3px;
+	    dt {
+		float:left; max-width:90px; overflow:hidden; max-height:1rem;
+	    }
+	    dd {
+		float:right;
+	    }
+	    .column-editor {
+		width:100%;  clear:both; height:30px;
+		label {
+		    span { float:left; }
+		    input[type=checkbox] {
+			float:left;
+		    }
+		    input[type=text] {}
+		}
+	    }
+	}
+    }
+}
+
+.dependent-tabs {
+    font-size:1rem;
+    ul.tabs {
+	li {float:left;
+	    background:var(--ag-background-color);
+	    color:  var(--ag-foreground-color);
+
+	    border:1px solid purple;
+	    border-bottom:none;
+	    list-style:none; margin-right:5px;
+	    padding:2px
+	   }
+	li.active {
+	    background: var(--ag-range-selection-background-color-3);
+            color:var(--ag-alpine-active-color);
+	}
+
+    }
+    .output-area {
+	clear:both; float:none;
+    }
+}
+
+
+.python-displayer, .command-displayer {
+    width:100%;
+    height:100%;
+    background: hsl(0deg 0% 13%);
+    overflow:hidden;
+    padding:16px;
+    /*border:1px solid red; */
+    pre {
+
+
+	color: #41FF00 
+		    
+    }
+
+}
+.command-displayer {
+    pre {
+	overflow:hidden;
+    }
+}
+
+.features 
+{
+    font-size: 1.7rem;
+
+    & div 
+    {
+        padding: 0.5rem;
+    }
+}
+
+
+.modal {
+  position: absolute;
+  background-color: #ffffff;
+  border: 1px solid black;
+  padding: 16px;
+  list-style: none;
+
+  > li {
+    padding: 8px;
+  }
+}
+
+
+.command-viewer {
+    border:1px solid ;
+    color:black;
+    font-size:1rem;
+    .operation-adder {
+	// border:2px solid brown;
+	span.column-name {
+	    float:left;
+	    display:block;
+	    color:black;
+	}
+	fieldset {
+	    float:left;
+	}
+	clear:both;
+    }
+
+    .operations-box {
+	clear:left;
+	display:flex;
+	// height:80px;
+	overflow:auto;
+	h4 {
+	    font-size:1em;
+	    border:1px orange;
+	    color:black;
+		  
+	}
+	div {
+
+	    overflow-x:scroll
+	}
+    }
+
+}
+
+.operation-detail {
+    overflow:auto;
+    button { float:left;}
+    .arg-getters {
+	button {
+	    float:left;
+	}
+	fieldset {
+	    float:left
+	}
+	div.col-enum {
+	    float:left;
+	    width:800px;
+	    overflow-x:scroll;
+	    table {
+		td, th {border:1px solid black;}
+	    }
+	}
+	
+    }
+}

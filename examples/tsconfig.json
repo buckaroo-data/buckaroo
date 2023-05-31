@@ -1,0 +1,31 @@
+{
+    "compilerOptions": {
+        "sourceMap": true,
+        "noImplicitAny": false,
+        "module": "esnext",
+        "target": "es2018",
+        "lib": [
+            "esnext",
+            "dom",
+            "dom.iterable"
+        ],
+        "declaration": true,
+        "declarationMap": true,
+        "removeComments": false,
+        "allowSyntheticDefaultImports": true,
+        "jsx": "react",
+        "allowJs": true,
+        "baseUrl": "./",
+        "esModuleInterop": true,
+        "resolveJsonModule": true,
+        "moduleResolution": "node",
+        "downlevelIteration": true,
+        "paths": {
+            "paddy-react-edit-list": ["../js"]
+        }
+    },
+    "include": [
+        ".",
+        "../js"
+    ]
+}
