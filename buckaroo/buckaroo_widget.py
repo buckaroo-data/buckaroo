@@ -15,6 +15,9 @@ from ._frontend import module_name, module_version
 from .all_transforms import configure_buckaroo, DefaultCommandKlsList
 from .summary_stats import summarize_df
 import json
+from IPython.core.getipython import get_ipython
+from IPython.display import display
+
 
 
 def sample(df, sample_size=500, include_outliers=True):
@@ -100,7 +103,9 @@ class BuckarooWidget(DOMWidget):
         old = change['old']
         new = change['new']
         tdf = self.df_from_dfConfig()
+
         self.origDf = json.loads(tdf.to_json(orient='table', indent=2, default_handler=str))
+
 
     def df_from_dfConfig(self):
         if self.dfConfig['summaryStats']:
@@ -151,8 +156,23 @@ class BuckarooWidget(DOMWidget):
         self.command_classes = without_incoming
         self.setup_from_command_kls_list()
 
-        
-        
+def _display_as_buckaroo(df):
+    return display(BuckarooWidget(df))
 
-        
-        
+def enable():
+    """
+    Automatically use buckaroo to display all DataFrames
+    instances in the notebook.
+
+    """
+    try:
+        from IPython.core.getipython import get_ipython
+    except ImportError:
+        raise ImportError('This feature requires IPython 1.0+')
+
+    ip = get_ipython()
+    ip_formatter = ip.display_formatter.ipython_display_formatter
+
+    ip_formatter.for_type(pd.DataFrame, _display_as_buckaroo)
+    
+enable()
