@@ -43,6 +43,10 @@ export function DFViewer(
   const gridOptions: GridOptions = {
     rowSelection: 'single',
     onRowClicked: (event) => console.log('A row was clicked'),
+    defaultColDef: {
+      sortable:true
+    },
+
     onCellClicked: (event) => {
       const colName = event.column.getColId();
       if (setActiveCol === undefined || colName === undefined) {
