@@ -16,6 +16,7 @@ export interface DfConfig {
   columns: number;
   rowsShown: number;
   sampleSize: number;
+  sampled: boolean;
   summaryStats: boolean;
   reorderdColumns: boolean;
 }
@@ -25,6 +26,7 @@ const columnDefs: ColDef[] = [
   { field: 'columns' },
   { field: 'rowsShown' },
   { field: 'sampleSize' },
+  { field: 'sampled' },
   { field: 'summaryStats' },
   { field: 'reorderdColumns' },
 ];
@@ -54,6 +56,9 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
     const colName = event.column.getColId();
     if (colName === 'summaryStats') {
       setConfig({ ...config, summaryStats: !config.summaryStats });
+    }
+    else if (colName === 'sampled') {
+      setConfig({ ...config, summaryStats: !config.sampled });
     } else if (colName === 'reorderdColumns') {
       setConfig({ ...config, reorderdColumns: !config.reorderdColumns });
     }

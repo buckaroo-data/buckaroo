@@ -7,7 +7,7 @@
 """
 TODO: Add module docstring
 """
-
+import numpy as np
 from ipywidgets import DOMWidget
 from traitlets import Unicode, List, Dict, observe
 import pandas as pd
@@ -16,6 +16,24 @@ from .all_transforms import configure_buckaroo, DefaultCommandKlsList
 from .summary_stats import summarize_df
 import json
 
+
+def sample(df, sample_size=500, include_outliers=True):
+    
+    sdf = df.sample(np.min([sample_size, len(df)]))
+    
+    
+    if include_outliers:
+        outlier_idxs = []
+        for col in df.columns:
+            idxs = df[col].sort_values().index
+            outlier_idxs.extend(idxs[:5])
+            outlier_idxs.extend(idxs[-5:])
+        outlier_idxs.extend(sdf.index)
+        uniq_idx = np.unique(outlier_idxs)
+        print("len uniq_idx", len(uniq_idx))
+        return df.iloc[uniq_idx]
+    return sdf
+            
 
 class BuckarooWidget(DOMWidget):
     """TODO: Add docstring here
@@ -45,6 +63,7 @@ class BuckarooWidget(DOMWidget):
         'columns': 30,
         'rowsShown': 500,
         'sampleSize': 10_000,
+        'sampled':True,
         'summaryStats': False,
         'reorderdColumns': False
     }).tag(sync=True)
@@ -63,7 +82,7 @@ class BuckarooWidget(DOMWidget):
         super().__init__()
         self.df = df
         self.setup_dfconfig(df)
-        self.origDf = json.loads(df.to_json(orient='table', indent=2))
+        #self.origDf = json.loads(df.to_json(orient='table', indent=2))
         self.operation_results = {
             'transformed_df':self.origDf,
             'generated_py_code':'#from py widget init'}
@@ -75,6 +94,7 @@ class BuckarooWidget(DOMWidget):
             totalRows=len(df),
             columns=len(df.columns),
             sampleSize=self.dfConfig['sampleSize'],
+            sampled=True,
             summaryStats=self.dfConfig['summaryStats'],
             reorderdColumns=self.dfConfig['reorderdColumns']
             )
@@ -83,15 +103,19 @@ class BuckarooWidget(DOMWidget):
     def update_based_on_df_config(self, change):
         old = change['old']
         new = change['new']
-        if not old['summaryStats'] == new['summaryStats']:
-            self.reset_summary_stats()
+        tdf = self.df_from_dfConfig()
+        print("len tdf", len(tdf))
+        self.origDf = json.loads(tdf.to_json(orient='table', indent=2, default_handler=str))
 
-    def reset_summary_stats(self):
+
+    def df_from_dfConfig(self):
+        print(self.dfConfig)
         if self.dfConfig['summaryStats']:
-            temp_df = summarize_df(self.df)
+            return summarize_df(self.df)
+        elif self.dfConfig['sampled']:
+            return sample(self.df)
         else:
-            temp_df = self.df
-        self.origDf = json.loads(temp_df.to_json(orient='table', indent=2, default_handler=str))
+            return self.df
 
     @observe('operations')
     def interpret_operations(self, change):
