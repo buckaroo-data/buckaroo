@@ -18,10 +18,7 @@ import json
 
 
 def sample(df, sample_size=500, include_outliers=True):
-    
     sdf = df.sample(np.min([sample_size, len(df)]))
-    
-    
     if include_outliers:
         outlier_idxs = []
         for col in df.columns:
@@ -30,7 +27,6 @@ def sample(df, sample_size=500, include_outliers=True):
             outlier_idxs.extend(idxs[-5:])
         outlier_idxs.extend(sdf.index)
         uniq_idx = np.unique(outlier_idxs)
-        print("len uniq_idx", len(uniq_idx))
         return df.iloc[uniq_idx]
     return sdf
             
@@ -104,12 +100,9 @@ class BuckarooWidget(DOMWidget):
         old = change['old']
         new = change['new']
         tdf = self.df_from_dfConfig()
-        print("len tdf", len(tdf))
         self.origDf = json.loads(tdf.to_json(orient='table', indent=2, default_handler=str))
 
-
     def df_from_dfConfig(self):
-        print(self.dfConfig)
         if self.dfConfig['summaryStats']:
             return summarize_df(self.df)
         elif self.dfConfig['sampled']:

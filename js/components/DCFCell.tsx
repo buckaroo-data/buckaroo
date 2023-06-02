@@ -69,6 +69,7 @@ export function WidgetDCFCellExample() {
     columns: 30,
     rowsShown: 500,
     sampleSize: 10_000,
+    sampled: true,
     summaryStats: false,
     reorderdColumns: false,
   });

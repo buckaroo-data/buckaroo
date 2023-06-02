@@ -37,6 +37,7 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
     columns,
     rowsShown,
     sampleSize,
+    sampled,
     summaryStats,
     reorderdColumns,
   } = config;
@@ -47,6 +48,7 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
       columns,
       rowsShown,
       sampleSize,
+      sampled: sampled.toString(),
       summaryStats: summaryStats.toString(),
       reorderdColumns: reorderdColumns.toString(),
     },
@@ -58,7 +60,7 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
       setConfig({ ...config, summaryStats: !config.summaryStats });
     }
     else if (colName === 'sampled') {
-      setConfig({ ...config, summaryStats: !config.sampled });
+      setConfig({ ...config, sampled: !config.sampled });
     } else if (colName === 'reorderdColumns') {
       setConfig({ ...config, reorderdColumns: !config.reorderdColumns });
     }
@@ -94,6 +96,7 @@ export function StatusBarEx() {
     columns: 30,
     rowsShown: 500,
     sampleSize: 10_000,
+    sampled: true,
     summaryStats: false,
     reorderdColumns: false,
   });
