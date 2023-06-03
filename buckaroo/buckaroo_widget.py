@@ -13,7 +13,7 @@ from traitlets import Unicode, List, Dict, observe
 import pandas as pd
 from ._frontend import module_name, module_version
 from .all_transforms import configure_buckaroo, DefaultCommandKlsList
-from .summary_stats import summarize_df
+from .summary_stats import summarize_df, reorder_columns
 import json
 from IPython.core.getipython import get_ipython
 from IPython.display import display
@@ -21,6 +21,8 @@ from IPython.display import display
 
 
 def sample(df, sample_size=500, include_outliers=True):
+    if len(df) <= sample_size:
+        return df
     sdf = df.sample(np.min([sample_size, len(df)]))
     if include_outliers:
         outlier_idxs = []
@@ -64,7 +66,7 @@ class BuckarooWidget(DOMWidget):
         'sampleSize': 10_000,
         'sampled':True,
         'summaryStats': False,
-        'reorderdColumns': False
+        'reorderdColumns': True
     }).tag(sync=True)
         
 
@@ -103,8 +105,8 @@ class BuckarooWidget(DOMWidget):
         old = change['old']
         new = change['new']
         tdf = self.df_from_dfConfig()
-
-        self.origDf = json.loads(tdf.to_json(orient='table', indent=2, default_handler=str))
+        otdf = reorder_columns(tdf)
+        self.origDf = json.loads(otdf.to_json(orient='table', indent=2, default_handler=str))
 
 
     def df_from_dfConfig(self):
@@ -176,3 +178,18 @@ def enable():
     ip_formatter.for_type(pd.DataFrame, _display_as_buckaroo)
     
 enable()
+
+def disable():
+    """
+    Automatically use buckaroo to display all DataFrames
+    instances in the notebook.
+
+    """
+    try:
+        from IPython.core.getipython import get_ipython
+    except ImportError:
+        raise ImportError('This feature requires IPython 1.0+')
+
+    ip = get_ipython()
+    ip_formatter = ip.display_formatter.ipython_display_formatter
+    ip_formatter.type_printers.pop(pd.DataFrame, None)    
