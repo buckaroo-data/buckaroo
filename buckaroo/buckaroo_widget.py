@@ -69,6 +69,10 @@ class BuckarooWidget(DOMWidget):
         'reorderdColumns': True
     }).tag(sync=True)
         
+    widgetConfig = Dict(
+        {'showCommands':True, 'showTransformed':True}
+    ).tag(sync=True)
+        
 
     # #config for the python pre-processing, waiting for inspiration for a better name
     # python_massaging = Dict({

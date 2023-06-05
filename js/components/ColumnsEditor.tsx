@@ -8,6 +8,11 @@ import { DependentTabs, OperationResult } from './DependentTabs';
 import { tableDf, bakedCommandConfig } from './staticData'
 
 export type OperationSetter = (ops: Operation[]) => void;
+export interface WidgetConfig {
+  showCommands:boolean;
+  showTransformed:boolean;
+}
+
 
 export function ColumnsEditor({
   df,
@@ -15,8 +20,8 @@ export function ColumnsEditor({
   operations,
   setOperations,
   operationResult,
-
   commandConfig,
+  widgetConfig
 }: {
   df: DFWhole;
   activeColumn: string;
@@ -24,22 +29,26 @@ export function ColumnsEditor({
   setOperations: OperationSetter;
   operationResult: OperationResult;
   commandConfig: CommandConfigT;
+  widgetConfig:WidgetConfig
 }) {
   const allColumns = df.schema.fields.map((field) => field.name);
   //console.log('Columns Editor, commandConfig', commandConfig);
   return (
     <div className="columns-editor" style={{ width: '100%' }}>
+      {(widgetConfig.showCommands) ? (
       <OperationViewer
         operations={operations}
         setOperations={setOperations}
         activeColumn={activeColumn}
         allColumns={allColumns}
         commandConfig={commandConfig}
-      />
+	  />) : <span></span>}
+    {(widgetConfig.showTransformed) ?(
       <DependentTabs
         filledOperations={operations}
         operationResult={operationResult}
-      />
+	/>
+    ) : <span></span>}
     </div>
   );
 }
@@ -60,7 +69,8 @@ export function ColumnsEditorEx() {
       commandConfig={bakedCommandConfig}
       operations={operations}
       setOperations={setOperations}
-      operationResult={baseOperationResults}
+    operationResult={baseOperationResults}
+    widgetConfig={{showCommands:true, showTransformed:true}}
     />
   );
 }

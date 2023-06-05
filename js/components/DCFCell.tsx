@@ -1,7 +1,7 @@
 import React, { useState, Dispatch, SetStateAction } from 'react';
 import _ from 'lodash';
 import { OperationResult, baseOperationResults } from './DependentTabs';
-import { ColumnsEditor } from './ColumnsEditor';
+import { ColumnsEditor, WidgetConfig } from './ColumnsEditor';
 import { tableDf, DFWhole } from './staticData';
 import { DFViewer } from './DFViewer';
 import { StatusBar, DfConfig } from './StatusBar';
@@ -12,6 +12,7 @@ import { Operation, bakedOperations } from './OperationUtils';
 export type CommandConfigSetterT = (
   setter: Dispatch<SetStateAction<CommandConfigT>>
 ) => void;
+
 
 /*
   Widget DCFCell is meant to be used with callback functions and passed values, not explicit http calls
@@ -24,6 +25,7 @@ export function WidgetDCFCell({
   commandConfig,
   dfConfig,
   on_dfConfig,
+  widgetConfig
 }: {
   origDf: DFWhole;
   operations: Operation[];
@@ -32,6 +34,7 @@ export function WidgetDCFCell({
   commandConfig: CommandConfigT;
   dfConfig: DfConfig;
   on_dfConfig: unknown;
+  widgetConfig:WidgetConfig;
 }) {
   const [activeCol, setActiveCol] = useState('stoptime');
 
@@ -51,6 +54,7 @@ export function WidgetDCFCell({
           setActiveCol={setActiveCol}
         />
       </div>
+    {(widgetConfig.showCommands || widgetConfig.showTransformed) ? (
       <ColumnsEditor
         df={origDf}
         activeColumn={activeCol}
@@ -58,7 +62,8 @@ export function WidgetDCFCell({
         setOperations={on_operations}
         operationResult={operation_results}
         commandConfig={commandConfig}
-      />
+        widgetConfig={widgetConfig}
+	/>) : <span></span>}
     </div>
   );
 }
@@ -83,6 +88,7 @@ export function WidgetDCFCellExample() {
       commandConfig={bakedCommandConfig}
       dfConfig={sampleConfig}
       on_dfConfig={setConfig}
+    widgetConfig={{showCommands:true, showTransformed:true}}
     />
   );
 }
