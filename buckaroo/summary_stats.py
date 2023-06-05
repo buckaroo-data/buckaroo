@@ -14,8 +14,13 @@ def probable_datetime(ser):
         
     except Exception as e:
         return False
-#probable_datetime(df['start station name'])
 
+def get_mode(ser):
+    mode_raw = ser.mode()
+    if len(mode_raw) == 0:
+        return np.nan
+    else:
+        return mode_raw.values[0]
 
 def summarize_string(ser):
     l = len(ser)
@@ -24,9 +29,6 @@ def summarize_string(ser):
     nan_count = l - len(ser.dropna())
     unique_count = len(val_counts[val_counts==1])
     empty_count = val_counts.get('', 0)
-
-    #[pd.api.types.is_integer_dtype(df2[col]) for col in df2.columns]
-    #[pd.api.types.is_numeric_dtype(df2[col]) for col in df2.columns]
 
     return dict(
         dtype=ser.dtype,
@@ -40,7 +42,7 @@ def summarize_string(ser):
         is_numeric=pd.api.types.is_numeric_dtype(ser),
         is_integer=pd.api.types.is_integer_dtype(ser),
         is_datetime=probable_datetime(ser),
-        mode=ser.mode().values[0])
+        mode=get_mode(ser))
 
 def summarize_numeric(ser):
 
@@ -61,11 +63,12 @@ def summarize_df(df):
     summary_df = pd.DataFrame({col:summarize_column(df[col]) for col in df})
     return summary_df
 
+
 def make_num_categorical(ser):
-    ser_uniq = ser.unique()
+    ser_uniq = ser.dropna().unique()
     name_to_idx = {name:idx for idx, name in enumerate(ser_uniq)}
     #needs to be vectorized
-    num_categorical = ser.apply(lambda x:name_to_idx[x])
+    num_categorical = ser.dropna().apply(lambda x:name_to_idx[x])
     return num_categorical
 
 def get_cor_pair_dict(df, summary_stats):
@@ -89,14 +92,11 @@ def get_cor_pair_dict(df, summary_stats):
             cor_dict[col] = cor_cols.tolist()
     return cor_dict
 
-
-
 def set_when(df, cond_row_name, target_row_name, true_val, false_val):
     true_row = df.loc[cond_row_name]
     df.loc[target_row_name] = false_val
     df.loc[target_row_name, true_row[true_row==True].index.values] = true_val
     return df
-
 
 def without(arr, search_keys):
     new_arr = []
@@ -152,8 +152,13 @@ def order_columns(summary_stats_df, corr_pair_dict):
 def reorder_columns(df):
     tdf_stats = summarize_df(df)
     cpd = get_cor_pair_dict(df, tdf_stats)
-    col_order = order_columns(tdf_stats, cpd)
-    return df[col_order]
+    try:
+        col_order = order_columns(tdf_stats, cpd)
+        return df[col_order]
+    except Exception as e:
+        print("error reordering columns", e)
+        return df
+
 
 def make_df_metadata(df):
     summary_stats_df = summarize_df(df)
@@ -162,4 +167,3 @@ def make_df_metadata(df):
     ordered_df = df[col_order]
     ordered_sdf = summary_stats_df[col_order]
     return [ordered_df, ordered_sdf]
-

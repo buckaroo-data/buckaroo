@@ -18,6 +18,8 @@ import json
 from IPython.core.getipython import get_ipython
 from IPython.display import display
 
+#from pandas.io.json._json import JSONTableWriter
+#jst = JSONTableWriter(df3, orient='table', date_format="iso", double_precision=10,  ensure_ascii=True, date_unit="ms", index=None, default_handler=str)
 
 def get_outlier_idxs(ser):
     outlier_idxs = []
@@ -44,7 +46,10 @@ def sample(df, sample_size=500, include_outliers=True):
     return sdf
 
             
+def df_to_obj(df):
+    return json.loads(df.to_json(orient='table', indent=2, default_handler=str))
 
+FAST_SUMMARY_WHEN_GREATER = 1_000_000
 class BuckarooWidget(DOMWidget):
     """TODO: Add docstring here
     """
@@ -55,9 +60,7 @@ class BuckarooWidget(DOMWidget):
     _view_module = Unicode(module_name).tag(sync=True)
     _view_module_version = Unicode(module_version).tag(sync=True)
 
-    value = Unicode('Hello World').tag(sync=True)
     commandConfig = Dict({}).tag(sync=True)
-
     operations = List().tag(sync=True)
 
     command_classes = DefaultCommandKlsList
@@ -80,22 +83,29 @@ class BuckarooWidget(DOMWidget):
         'showCommands': True,
     }).tag(sync=True)
         
-        
 
-    # #config for the python pre-processing, waiting for inspiration for a better name
-    # python_massaging = Dict({
-    #     sample_threshold=20000,
-    #     reorder_columns=True,
-    #     max_rows=500,
-    #     default_display='rows', #rows, summary, header+rows
-    #     }).tag(sync=True)
-
-
-    def __init__(self, df):
+    def __init__(self, df,
+                 sampled=True,
+                 summaryStats=False,
+                 reorderdColumns=True,
+                 showTransformed=True,
+                 showCommands=True,
+                 really_reorder_columns=False):
         super().__init__()
+        rows = len(df)
+        cols = len(df.columns)
+        item_count = rows * cols
+        if item_count > FAST_SUMMARY_WHEN_GREATER or reorderdColumns==False:
+            self.dfConfig['reorderdColumns'] = False
+        if really_reorder_columns: #an override
+            self.dfConfig['reorderdColumns'] = True
+
+        self.dfConfig['showTransformed'] = showTransformed
+        self.dfConfig['showCommands'] = showCommands
+
         self.df = df
+        
         self.setup_dfconfig(df)
-        #self.origDf = json.loads(df.to_json(orient='table', indent=2))
         self.operation_results = {
             'transformed_df':self.origDf,
             'generated_py_code':'#from py widget init'}
@@ -113,8 +123,11 @@ class BuckarooWidget(DOMWidget):
         old = change['old']
         new = change['new']
         tdf = self.df_from_dfConfig()
-        otdf = reorder_columns(tdf)
-        self.origDf = json.loads(otdf.to_json(orient='table', indent=2, default_handler=str))
+        if self.dfConfig['reorderdColumns']:
+            otdf = reorder_columns(tdf)
+            self.origDf = df_to_obj(otdf)
+        else:
+            self.origDf = df_to_obj(tdf)
 
 
     def df_from_dfConfig(self):
@@ -167,7 +180,7 @@ class BuckarooWidget(DOMWidget):
         self.setup_from_command_kls_list()
 
 def _display_as_buckaroo(df):
-    return display(BuckarooWidget(df))
+    return display(BuckarooWidget(df, showCommands=False, showTransformed=False))
 
 def enable():
     """
