@@ -19,6 +19,16 @@ from IPython.core.getipython import get_ipython
 from IPython.display import display
 
 
+def get_outlier_idxs(ser):
+    outlier_idxs = []
+    try:
+        idxs = ser.sort_values().index
+    except Exception as e:
+        print(e)
+        idxs = ser.index
+    outlier_idxs.extend(idxs[:5])
+    outlier_idxs.extend(idxs[-5:])
+    return outlier_idxs
 
 def sample(df, sample_size=500, include_outliers=True):
     if len(df) <= sample_size:
@@ -27,13 +37,12 @@ def sample(df, sample_size=500, include_outliers=True):
     if include_outliers:
         outlier_idxs = []
         for col in df.columns:
-            idxs = df[col].sort_values().index
-            outlier_idxs.extend(idxs[:5])
-            outlier_idxs.extend(idxs[-5:])
+            outlier_idxs.extend(get_outlier_idxs(df[col]) )
         outlier_idxs.extend(sdf.index)
         uniq_idx = np.unique(outlier_idxs)
         return df.iloc[uniq_idx]
     return sdf
+
             
 
 class BuckarooWidget(DOMWidget):
