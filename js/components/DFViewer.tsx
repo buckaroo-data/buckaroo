@@ -135,7 +135,7 @@ export function DFViewer(
   return (
     <div className="df-viewer">
       <div
-        style={{ height: 500 }}
+        style={{ height: 400 }}
         className="theme-hanger ag-theme-alpine-dark"
       >
         <AgGridReact
