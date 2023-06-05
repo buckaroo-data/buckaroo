@@ -1,6 +1,6 @@
 // Copyright (c) Paddy Mullen
 // Distributed under the terms of the Modified BSD License.
-
+import _ from 'lodash';
 import {
   DOMWidgetModel,
   DOMWidgetView,
@@ -78,15 +78,19 @@ export class DCEFWidgetView extends DOMWidgetView {
       }
       return React.createElement(WidgetDCFCell, props);
     };
-    //console.log("widget el", this.el)
-    const notebookEl = document.getElementsByClassName(
-      'jp-NotebookPanel-notebook'
-    )[0];
-    const elTop = this.el.getBoundingClientRect()['y'];
-    const notebookTop = notebookEl.getBoundingClientRect()['y'];
-    const scrollOffset = notebookTop - elTop + 50;
-    //console.log("scrollOffset", scrollOffset);
-    notebookEl.scroll(0, scrollOffset);
+    console.log("widget el", this.el)
+    const el = this.el;
+    _.delay(() => {
+    //only get the active notebook
+      const notebookEl = document.querySelector(':not(.lm-mod-hidden) > .jp-NotebookPanel-notebook') as any
+      const elTop = el.getBoundingClientRect()['y'];
+      const notebookTop = notebookEl.getBoundingClientRect()['y'];
+      const scrollOffset = notebookTop - elTop + 50;
+
+      console.log("elTop", elTop, "notebookTop", notebookTop, "scrollOffset", scrollOffset);
+      //console.log("scrollOffset", scrollOffset);
+      notebookEl.scroll(0, -1*scrollOffset);
+    }, 300)
     const root = ReactDOMClient.createRoot(this.el);
     const componentEl = React.createElement(Component, {});
     root.render(componentEl);
