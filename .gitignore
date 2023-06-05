@@ -156,5 +156,8 @@ myproject/labextension
 
 ipydatagrid/labextension/*
 ipydatagrid/nbextension/*
-dcf/nbextension/*
-dcf/labextension/*
+buckaroo/nbextension/*
+buckaroo/labextension/*
+docs/*.js
+docs/*.js.map
+docs/*js*

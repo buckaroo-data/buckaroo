@@ -3,6 +3,20 @@ import pandas as pd
 import numpy as np
 
 
+def probable_datetime(ser):
+    s_ser = ser.sample(np.min([len(ser), 500]))
+    try:
+        dt_ser = pd.to_datetime(s_ser)
+        #pd.to_datetime(1_00_000_000_000_000_000) == pd.to_datetime('1973-01-01') 
+        if dt_ser.max() < pd.to_datetime('1973-01-01'):
+            return False
+        return True
+        
+    except Exception as e:
+        return False
+#probable_datetime(df['start station name'])
+
+
 def summarize_string(ser):
     l = len(ser)
     val_counts = ser.value_counts()
@@ -25,6 +39,7 @@ def summarize_string(ser):
         nan_per = nan_count/l,
         is_numeric=pd.api.types.is_numeric_dtype(ser),
         is_integer=pd.api.types.is_integer_dtype(ser),
+        is_datetime=probable_datetime(ser),
         mode=ser.mode().values[0])
 
 def summarize_numeric(ser):
@@ -118,6 +133,7 @@ def order_columns(summary_stats_df, corr_pair_dict):
     
     sdf.loc['first_col'] = 0
     sdf.loc['is_duplicate'] = 0
+    set_when(sdf, 'is_datetime', 'datetime_score', 11, 0)
     
     set_when(sdf, 'is_integer', 'grouping_score_integer', -3, 0)
     set_when(sdf, 'is_numeric', 'grouping_score_numeric', -3, 5)
@@ -130,7 +146,7 @@ def order_columns(summary_stats_df, corr_pair_dict):
     sdf.loc['first_col':, first_cols] = 5
     sdf.loc['is_duplicate':, duplicate_cols] = -5
     
-    col_scores = sdf.loc[['one_distinct', 'first_col', 'is_duplicate']].sum()
+    col_scores = sdf.loc[['one_distinct', 'first_col', 'datetime_score', 'is_duplicate']].sum()
     return col_scores.sort_values().index.values[::-1]
 
 def reorder_columns(df):
