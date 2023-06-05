@@ -66,12 +66,11 @@ class BuckarooWidget(DOMWidget):
         'sampleSize': 10_000,
         'sampled':True,
         'summaryStats': False,
-        'reorderdColumns': True
+        'reorderdColumns': True,
+        'showTransformed': True,
+        'showCommands': True,
     }).tag(sync=True)
         
-    widgetConfig = Dict(
-        {'showCommands':True, 'showTransformed':True}
-    ).tag(sync=True)
         
 
     # #config for the python pre-processing, waiting for inspiration for a better name
@@ -95,14 +94,10 @@ class BuckarooWidget(DOMWidget):
 
     #Maybe tie this to a watcher on DF?
     def setup_dfconfig(self, df):
-        self.dfConfig = dict(
-            totalRows=len(df),
-            columns=len(df.columns),
-            sampleSize=self.dfConfig['sampleSize'],
-            sampled=True,
-            summaryStats=self.dfConfig['summaryStats'],
-            reorderdColumns=self.dfConfig['reorderdColumns']
-            )
+        dfc = self.dfConfig.copy()
+        dfc.update(dict(totalRows=len(df),
+                        columns=len(df.columns)))
+        self.dfConfig = dfc
 
     @observe('dfConfig')
     def update_based_on_df_config(self, change):

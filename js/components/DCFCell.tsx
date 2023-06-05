@@ -25,7 +25,6 @@ export function WidgetDCFCell({
   commandConfig,
   dfConfig,
   on_dfConfig,
-  widgetConfig
 }: {
   origDf: DFWhole;
   operations: Operation[];
@@ -34,10 +33,9 @@ export function WidgetDCFCell({
   commandConfig: CommandConfigT;
   dfConfig: DfConfig;
   on_dfConfig: unknown;
-  widgetConfig:WidgetConfig;
 }) {
   const [activeCol, setActiveCol] = useState('stoptime');
-
+  const widgetConfig: WidgetConfig = {showCommands:dfConfig.showCommands, showTransformed:dfConfig.showTransformed}
   return (
     <div
       className="dcf-root flex flex-col"
@@ -77,6 +75,8 @@ export function WidgetDCFCellExample() {
     sampled: true,
     summaryStats: false,
     reorderdColumns: false,
+    showTransformed: true,
+    showCommands: true
   });
   const [operations, setOperations] = useState<Operation[]>(bakedOperations);
   return (
@@ -88,7 +88,6 @@ export function WidgetDCFCellExample() {
       commandConfig={bakedCommandConfig}
       dfConfig={sampleConfig}
       on_dfConfig={setConfig}
-    widgetConfig={{showCommands:true, showTransformed:true}}
     />
   );
 }

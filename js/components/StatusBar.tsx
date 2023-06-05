@@ -19,6 +19,8 @@ export interface DfConfig {
   sampled: boolean;
   summaryStats: boolean;
   reorderdColumns: boolean;
+  showCommands:boolean;
+  showTransformed:boolean;
 }
 
 const columnDefs: ColDef[] = [
@@ -29,6 +31,8 @@ const columnDefs: ColDef[] = [
   { field: 'sampled' },
   { field: 'summaryStats' },
   { field: 'reorderdColumns' },
+  { field: 'showTransformed'},
+  { field: 'showCommands'}
 ];
 
 export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) {
@@ -40,6 +44,8 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
     sampled,
     summaryStats,
     reorderdColumns,
+    showTransformed,
+    showCommands
   } = config;
 
   const rowData = [
@@ -51,6 +57,8 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
       sampled: sampled.toString(),
       summaryStats: summaryStats.toString(),
       reorderdColumns: reorderdColumns.toString(),
+      showTransformed: showTransformed.toString(),
+      showCommands: showCommands.toString(),
     },
   ];
 
@@ -63,6 +71,10 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
       setConfig({ ...config, sampled: !config.sampled });
     } else if (colName === 'reorderdColumns') {
       setConfig({ ...config, reorderdColumns: !config.reorderdColumns });
+    } else if (colName === 'showTransformed') {
+      setConfig({ ...config, showTransformed: !config.showTransformed });
+    } else if (colName === 'showCommands') {
+      setConfig({ ...config, showCommands: !config.showCommands });
     }
   };
   const gridOptions: GridOptions = {
@@ -99,6 +111,8 @@ export function StatusBarEx() {
     sampled: true,
     summaryStats: false,
     reorderdColumns: false,
+    showTransformed: true,
+    showCommands: true,
   });
 
   return <StatusBar config={sampleConfig} setConfig={setConfig} />;
