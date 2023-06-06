@@ -66,6 +66,7 @@ class BuckarooWidget(DOMWidget):
     command_classes = DefaultCommandKlsList
 
     origDf = Dict({}).tag(sync=True)
+    summaryDf = Dict({}).tag(sync=True)
 
     operation_results = Dict({}).tag(sync=True)
 
@@ -95,16 +96,27 @@ class BuckarooWidget(DOMWidget):
         rows = len(df)
         cols = len(df.columns)
         item_count = rows * cols
-        if item_count > FAST_SUMMARY_WHEN_GREATER or reorderdColumns==False:
+
+
+        if reorderdColumns == False:
             self.dfConfig['reorderdColumns'] = False
-        if really_reorder_columns: #an override
+            self.summary_df = df[:5]
+        elif item_count > FAST_SUMMARY_WHEN_GREATER:
+            self.dfConfig['reorderdColumns'] = False
+            self.summary_df = df[:5]
+        elif really_reorder_columns: #an override
             self.dfConfig['reorderdColumns'] = True
+            self.summary_df = summarize_df(df)
+        else:
+            self.dfConfig['reorderdColumns'] = True
+            self.summary_df = summarize_df(df)
+        self.summaryDf = df_to_obj(self.summary_df)
 
         self.dfConfig['showTransformed'] = showTransformed
         self.dfConfig['showCommands'] = showCommands
 
         self.df = df
-        
+
         self.setup_dfconfig(df)
         self.operation_results = {
             'transformed_df':self.origDf,
@@ -131,9 +143,9 @@ class BuckarooWidget(DOMWidget):
 
 
     def df_from_dfConfig(self):
-        if self.dfConfig['summaryStats']:
-            return summarize_df(self.df)
-        elif self.dfConfig['sampled']:
+        # if self.dfConfig['summaryStats']:
+        #     return summarize_df(self.df)
+        if self.dfConfig['sampled']:
             return sample(self.df)
         else:
             return self.df
