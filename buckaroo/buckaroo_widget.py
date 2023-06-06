@@ -11,9 +11,10 @@ import numpy as np
 from ipywidgets import DOMWidget
 from traitlets import Unicode, List, Dict, observe
 import pandas as pd
+from pandas.io.json import dumps as pdumps
 from ._frontend import module_name, module_version
 from .all_transforms import configure_buckaroo, DefaultCommandKlsList
-from .summary_stats import summarize_df, reorder_columns
+from .summary_stats import summarize_df, reorder_columns, table_sumarize
 import json
 from IPython.core.getipython import get_ipython
 from IPython.display import display
@@ -47,7 +48,9 @@ def sample(df, sample_size=500, include_outliers=True):
 
             
 def df_to_obj(df):
-    return json.loads(df.to_json(orient='table', indent=2, default_handler=str))
+    obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
+    obj['table_hints'] = json.loads(pdumps(table_sumarize(df)))
+    return obj
 
 FAST_SUMMARY_WHEN_GREATER = 1_000_000
 class BuckarooWidget(DOMWidget):

@@ -22,6 +22,43 @@ def get_mode(ser):
     else:
         return mode_raw.values[0]
 
+def int_digits(n):
+    if n == 0:
+        return 1
+    if np.sign(n) == -1:
+        return int(np.floor(np.log10(np.abs(n)))) + 2
+    return int(np.floor(np.log10(n)+1))
+
+
+def histogram(ser):
+    raw_counts, bins = np.histogram(ser, 10)
+    scaled_counts = np.round(raw_counts/raw_counts.sum(),2)
+    return [scaled_counts, bins]
+
+def table_sumarize_num_ser(ser):
+    if len(ser) == 0:
+        return dict(is_numeric=False)
+    return dict(
+        is_numeric=True,
+        is_integer=pd.api.types.is_integer_dtype(ser),
+        min_digits=int_digits(ser.min()),
+        max_digits=int_digits(ser.max()),
+        histogram=histogram(ser))
+
+def table_sumarize_obj_ser(ser):
+    return dict(
+        is_numeric=False)
+
+def table_sumarize_ser(ser):
+    if pd.api.types.is_numeric_dtype(ser.dtype):
+        return table_sumarize_num_ser(ser.dropna())
+    else:
+        return table_sumarize_obj_ser(ser)
+    
+def table_sumarize(df):
+    return {col:table_sumarize_ser(df[col]) for col in df}
+
+
 def summarize_string(ser):
     l = len(ser)
     val_counts = ser.value_counts()
