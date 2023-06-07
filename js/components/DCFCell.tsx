@@ -25,6 +25,7 @@ export function WidgetDCFCell({
   commandConfig,
   dfConfig,
   on_dfConfig,
+  summaryDf
 }: {
   origDf: DFWhole;
   operations: Operation[];
@@ -33,6 +34,7 @@ export function WidgetDCFCell({
   commandConfig: CommandConfigT;
   dfConfig: DfConfig;
   on_dfConfig: unknown;
+  summaryDf: DFWhole
 }) {
   const [activeCol, setActiveCol] = useState('stoptime');
   const widgetConfig: WidgetConfig = {showCommands:dfConfig.showCommands, showTransformed:dfConfig.showTransformed}
@@ -47,7 +49,7 @@ export function WidgetDCFCell({
       >
         <StatusBar config={dfConfig} setConfig={on_dfConfig} />
         <DFViewer
-          df={origDf}
+          df={(dfConfig.summaryStats ? summaryDf : origDf) }
           activeCol={activeCol}
           setActiveCol={setActiveCol}
         />
@@ -88,6 +90,7 @@ export function WidgetDCFCellExample() {
       commandConfig={bakedCommandConfig}
       dfConfig={sampleConfig}
       on_dfConfig={setConfig}
+    summaryDf={tableDf}
     />
   );
 }

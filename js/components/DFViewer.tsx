@@ -44,7 +44,7 @@ export function DFViewer(
     rowSelection: 'single',
     onRowClicked: (event) => console.log('A row was clicked'),
     defaultColDef: {
-      sortable:true
+      sortable:true, type: 'rightAligned'
     },
 
     onCellClicked: (event) => {
