@@ -11,3 +11,8 @@ div.dependent-tabs ul.tabs li.active {
     background:rgba(33, 150, 243, 0.49);
 /*    border:1px solid red; */
 }
+
+.ag-row .ag-cell {
+    font-family: monospace;
+}
+

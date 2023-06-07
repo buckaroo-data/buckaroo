@@ -44,11 +44,13 @@ for (const ex of Object.keys(examples)) {
 }
 
 const LeftMenuItem = (props): JSX.Element => (
+  <div><h4 className="paddy">paddy</h4>
     <Link to={props.id}>
         <h3 className='w-100' variant='light'>
             {props.title}
         </h3>
     </Link>
+    </div>
 );
 
 
