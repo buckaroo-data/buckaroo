@@ -8,7 +8,7 @@ import './app.css';
 
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-alpine.css';
-import '../js/npm-styles.scss';
+import '../style/dcf-npm.css';
 
 
 const examples = {
