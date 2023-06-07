@@ -19,7 +19,7 @@ import { MODULE_NAME, MODULE_VERSION } from './version';
 
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-alpine.css';
-import '../style/dcf-npm.css';
+import '../js/style/dcf-npm.css';
 import { Operation } from './components/OperationUtils';
 import { CommandConfigT } from './components/CommandUtils';
 
