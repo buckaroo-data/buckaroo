@@ -17,9 +17,10 @@
     // This allows us to initialize members in the "initialize" method
     "strictPropertyInitialization": false,
       "target": "es2015",
-      "jsx": "react"
+      "jsx": "react",
+      "baseUrl": "."
   },
-    "include": ["js/*.ts", "js/*.tsx", "js/core/*.ts", "js/core/*.tsx"],
+    "include": ["js/*.ts", "js/*.tsx", "js/core/*.ts", "js/core/*.tsx", "js/core/*"],
     "ts-node": {
         "transpileOnly": true
     }
