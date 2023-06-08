@@ -78,7 +78,11 @@ export function dfToAgrid(tdf: DFWhole): [ColDef[], unknown[]] {
   //console.log("hints", tdf.table_hints);
   const retColumns:ColDef[] = fields.map((f: DFColumn) => {
     //console.log(f.name, tdf.table_hints[f.name])
-    return { field: f.name, valueFormatter:getFormatter(tdf.table_hints[f.name]) };
+    const colDef:ColDef = {field: f.name, valueFormatter:getFormatter(tdf.table_hints[f.name]) }
+    if (f.name === 'index') {
+      colDef.pinned = 'left';
+    }
+		return colDef;
   });
   return [retColumns, tdf.data];
 }

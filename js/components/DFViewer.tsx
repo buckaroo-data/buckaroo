@@ -131,7 +131,7 @@ export function DFViewer(
     return () => clearTimeout(timer);
   };
 
-  makeCondtionalAutosize(50, 10);
+  makeCondtionalAutosize(50, 350);
   return (
     <div className="df-viewer">
       <div
