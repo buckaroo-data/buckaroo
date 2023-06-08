@@ -78,6 +78,8 @@ export class DCEFWidgetView extends DOMWidgetView {
       return React.createElement(WidgetDCFCell, props);
     };
     console.log("widget el", this.el)
+
+    /*
     const el = this.el;
     _.delay(() => {
     //only get the active notebook
@@ -90,6 +92,7 @@ export class DCEFWidgetView extends DOMWidgetView {
       //console.log("scrollOffset", scrollOffset);
       notebookEl.scroll(0, -1*scrollOffset);
     }, 300)
+    */
     const root = ReactDOMClient.createRoot(this.el);
     const componentEl = React.createElement(Component, {});
     root.render(componentEl);
