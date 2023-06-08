@@ -27,8 +27,10 @@ def df_to_obj(df, order = None):
         order = df.columns
     obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
     obj['table_hints'] = json.loads(pdumps(table_sumarize(df)))
-    obj['schema'] = dict(
-            fields=[{'name':c} for c in order])
+    fields=[{'name':'index'}]
+    for c in order:
+        fields.append({'name':c})
+    obj['schema'] = dict(fields=fields)
     return obj
 
 
@@ -98,6 +100,12 @@ class BuckarooWidget(DOMWidget):
     }).tag(sync=True)
         
 
+    summary_df_cols = [
+        'dtype', 'length', 'nan_count', 'distinct_count', 'empty_count',
+        'empty_per', 'unique_per', 'nan_per', 'is_numeric', 'is_integer',
+        'is_datetime', 'mode', 'min', 'max','mean',
+        ]
+    
     def __init__(self, df,
                  sampled=True,
                  summaryStats=False,
@@ -107,8 +115,27 @@ class BuckarooWidget(DOMWidget):
                  really_reorder_columns=False):
         super().__init__()
 
+        rows = len(df)
+        cols = len(df.columns)
+        item_count = rows * cols
+
+
+        if reorderdColumns == False:
+            self.dfConfig['reorderdColumns'] = False
+            self.summary_df = df[:5]
+        elif item_count > FAST_SUMMARY_WHEN_GREATER:
+            self.dfConfig['reorderdColumns'] = False
+            self.summary_df = df[:5]
+        elif really_reorder_columns: #an override
+            self.dfConfig['reorderdColumns'] = True
+        else:
+            self.dfConfig['reorderdColumns'] = True
+
+
+
+
         self.stats = DfStats(df)
-        self.summaryDf = df_to_obj(self.stats.sdf, self.stats.col_order)
+        self.summaryDf = df_to_obj(self.stats.sdf.loc[self.summary_df_cols], self.stats.col_order)
 
         self.dfConfig.update(dict(
             totalRows=len(df),

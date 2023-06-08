@@ -159,30 +159,20 @@ def order_groupings(grps, ranked_cols):
                 first_cols.append(col)
                 rest_cols.extend(list(without(grp, [col])))
                 grps = without(grps, [grp])
-    return first_cols, rest_cols
+    return list(set(first_cols)), list(set(rest_cols))
 
-def order_columns(summary_stats_df, corr_pair_dict):
-    sdf = summary_stats_df.copy()
-    sdf.loc['one_distinct'] = 0
-
-    only_ones = (sdf.loc['distinct_count'] <= 1)
-    sdf.loc['one_distinct', only_ones[only_ones==True].index.values] = -20
-    
-    sdf.loc['first_col'] = 0
-    sdf.loc['is_duplicate'] = 0
-    set_when(sdf, 'is_datetime', 'datetime_score', 11, 0)
-    
-    set_when(sdf, 'is_integer', 'grouping_score_integer', -3, 0)
-    set_when(sdf, 'is_numeric', 'grouping_score_numeric', -3, 5)
+def order_columns(sdf, corr_pair_dict):
     grouping_col_scores = sdf.loc[['grouping_score_integer', 'grouping_score_numeric']].sum()
     duplicate_col_rankings = grouping_col_scores.sort_values().index[::-1].values
 
     groupings = find_groupings(corr_pair_dict)
+    #print("groupings", groupings)
     first_cols, duplicate_cols = order_groupings(groupings, duplicate_col_rankings)
     
+    #print("duplicate_cols", duplicate_cols)
     sdf.loc['first_col':, first_cols] = 5
     sdf.loc['is_duplicate':, duplicate_cols] = -5
-    
+    #print(sdf.index)
     col_scores = sdf.loc[['one_distinct', 'first_col', 'datetime_score', 'is_duplicate']].sum()
     return col_scores.sort_values().index.values[::-1]
 
@@ -218,9 +208,24 @@ def sample(df, sample_size=500, include_outliers=True):
         return df.iloc[uniq_idx]
     return sdf
 
+def add_col_rankings(df, sdf):
+    sdf.loc['one_distinct'] = 0
+
+    only_ones = (sdf.loc['distinct_count'] <= 1)
+    sdf.loc['one_distinct', only_ones[only_ones==True].index.values] = -20
+    
+    sdf.loc['first_col'] = 0
+    sdf.loc['is_duplicate'] = 0
+    set_when(sdf, 'is_datetime', 'datetime_score', 11, 0)
+    
+    set_when(sdf, 'is_integer', 'grouping_score_integer', -3, 0)
+    set_when(sdf, 'is_numeric', 'grouping_score_numeric', -3, 5)
+
+
 class DfStats(object):
     def __init__(self,
             df,
+            annotate_funcs=[add_col_rankings],
             # summary_func=summary_stats.summarize_df,
             # order_col_func=summary_stats.order_columns):
             summary_func=summarize_df,
@@ -228,6 +233,8 @@ class DfStats(object):
 
         self.df = df
         self.sdf = summary_func(df)
+        for func in annotate_funcs:
+            func(df, self.sdf)
         self.cpd = get_cor_pair_dict(self.df, self.sdf)
         self.col_order = order_col_func(self.sdf, self.cpd)
-
+        
