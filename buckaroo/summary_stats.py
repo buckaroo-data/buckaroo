@@ -75,6 +75,7 @@ def summarize_string(ser):
         length=l,
         nan_count = nan_count,
         distinct_count= distinct_count,
+        distinct_per = distinct_count/l,
         empty_count = empty_count,
         empty_per = empty_count/l,
         unique_per = unique_count/l,
@@ -103,24 +104,23 @@ def summarize_df(df):
     summary_df = pd.DataFrame({col:summarize_column(df[col]) for col in df})
     return summary_df
 
-
 def make_num_categorical(ser):
-    ser_uniq = ser.dropna().unique()
-    name_to_idx = {name:idx for idx, name in enumerate(ser_uniq)}
-    #needs to be vectorized
-    num_categorical = ser.dropna().apply(lambda x:name_to_idx[x])
-    return num_categorical
+    return ser.dropna().astype('category').cat.codes
 
-def get_cor_pair_dict(df, summary_stats):
-    #we need to remove columns with only nans or a single value, they mess up corr()
+def get_cor_pair_dict(df, sdf):
 
-    #this needs to be vectorized
-    corrable_cols = [col for col in df if summary_stats[col]['distinct_count'] > 1]
-    
+    corrable_cols = sdf.columns[
+        (sdf.loc['distinct_count'] > 1) &
+        ((sdf.loc['distinct_per'] < .3) |
+         (sdf.loc['distinct_count'] < 50))]
+
     num_df =  pd.DataFrame({col:make_num_categorical(df[col]) for col in corrable_cols})
 
     corr_df = num_df.corr()
-    high_corr_df = corr_df[corr_df > 0.99]
+    high_corr_df = corr_df[corr_df > 0.6]
+    
+    #print(high_corr_df)
+
     cor_dict = {}
     for col in high_corr_df.columns:
         #columns with high correlation that aren't the column itself
