@@ -119,18 +119,15 @@ class BuckarooWidget(DOMWidget):
         cols = len(df.columns)
         item_count = rows * cols
 
-
-        if reorderdColumns == False:
-            self.dfConfig['reorderdColumns'] = False
-            self.summary_df = df[:5]
-        elif item_count > FAST_SUMMARY_WHEN_GREATER:
-            self.dfConfig['reorderdColumns'] = False
-            self.summary_df = df[:5]
+        fast_mode = sampled or reorderdColumns
+        if item_count > FAST_SUMMARY_WHEN_GREATER:
+            fast_mode = True
         elif really_reorder_columns: #an override
-            self.dfConfig['reorderdColumns'] = True
-        else:
-            self.dfConfig['reorderdColumns'] = True
+            fast_mode = True
 
+        if fast_mode:
+            self.dfConfig['reorderdColumns'] = False
+            self.dfConfig['sampled'] = True
 
 
 

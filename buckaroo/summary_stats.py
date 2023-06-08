@@ -217,7 +217,7 @@ def add_col_rankings(df, sdf):
     set_when(sdf, 'is_integer', 'grouping_score_integer', -3, 0)
     set_when(sdf, 'is_numeric', 'grouping_score_numeric', -3, 5)
 
-
+FAST_SUMMARY_WHEN_GREATER = 1_000_000
 class DfStats(object):
     def __init__(self,
             df,
@@ -227,6 +227,13 @@ class DfStats(object):
             summary_func=summarize_df,
             order_col_func=order_columns):
 
+        rows = len(df)
+        cols = len(df.columns)
+        item_count = rows * cols
+
+
+        if item_count > FAST_SUMMARY_WHEN_GREATER:
+            df = df.sample(np.min([50_000, len(df)]))
         self.df = df
         self.sdf = summary_func(df)
         for func in annotate_funcs:
