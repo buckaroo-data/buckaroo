@@ -33,37 +33,6 @@ def df_to_obj(df, order = None):
     obj['schema'] = dict(fields=fields)
     return obj
 
-
-'''    def __init__(self, df,
-                 sampled=True,
-                 summaryStats=False,
-                 reorderdColumns=True,
-                 showTransformed=True,
-                 showCommands=True,
-                 really_reorder_columns=False):
-        super().__init__()
-        rows = len(df)
-        cols = len(df.columns)
-        item_count = rows * cols
-
-
-        if reorderdColumns == False:
-            self.dfConfig['reorderdColumns'] = False
-            self.summary_df = df[:5]
-        elif item_count > FAST_SUMMARY_WHEN_GREATER:
-            self.dfConfig['reorderdColumns'] = False
-            self.summary_df = df[:5]
-        elif really_reorder_columns: #an override
-            self.dfConfig['reorderdColumns'] = True
-            self.summary_df = summarize_df(df)
-        else:
-            self.dfConfig['reorderdColumns'] = True
-            self.summary_df = summarize_df(df)
-
-
-
-'''
-
 FAST_SUMMARY_WHEN_GREATER = 1_000_000
 class BuckarooWidget(DOMWidget):
     """TODO: Add docstring here
@@ -88,7 +57,7 @@ class BuckarooWidget(DOMWidget):
 
     dfConfig = Dict(
         {
-        'totalRows': 5309,
+        'totalRows': 1234569,
         'columns': 30,
         'rowsShown': 500,
         'sampleSize': 10_000,
@@ -124,9 +93,7 @@ class BuckarooWidget(DOMWidget):
             fast_mode = True
         elif really_reorder_columns: #an override
             fast_mode = True
-
         if fast_mode:
-            self.dfConfig['reorderdColumns'] = False
             self.dfConfig['sampled'] = True
 
 
@@ -134,14 +101,15 @@ class BuckarooWidget(DOMWidget):
         self.stats = DfStats(df)
         self.summaryDf = df_to_obj(self.stats.sdf.loc[self.summary_df_cols], self.stats.col_order)
 
-        self.dfConfig.update(dict(
+        tempDfc = self.dfConfig.copy()
+        tempDfc.update(dict(
             totalRows=len(df),
             columns=len(df.columns),
             showTransformed=showTransformed,
             showCommands=showCommands))
         self.df = df
-        self.dfConfig = self.dfConfig.copy()
-        self.update_based_on_df_config('foo')
+        self.dfConfig = tempDfc
+        self.update_based_on_df_config(3)
         self.operation_results = {
             'transformed_df':self.origDf,
             'generated_py_code':'#from py widget init'}
@@ -157,7 +125,7 @@ class BuckarooWidget(DOMWidget):
 
     def df_from_dfConfig(self):
         if self.dfConfig['sampled']:
-            return sample(self.df)
+            return sample(self.df, self.dfConfig['sampleSize'])
         else:
             return self.df
 
