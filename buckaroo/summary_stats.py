@@ -183,16 +183,12 @@ def reorder_columns(df):
     col_order = order_columns(tdf_stats, cpd)
     return df[col_order]
 
-
 def get_outlier_idxs(ser):
+    if not pd.api.types.is_numeric_dtype(ser.dtype):
+        return []
     outlier_idxs = []
-    try:
-        idxs = ser.sort_values().index
-    except Exception as e:
-        print(e)
-        idxs = ser.index
-    outlier_idxs.extend(idxs[:5])
-    outlier_idxs.extend(idxs[-5:])
+    outlier_idxs.extend(ser.nlargest(5).index)
+    outlier_idxs.extend(ser.nsmallest(5).index)
     return outlier_idxs
 
 def sample(df, sample_size=500, include_outliers=True):
