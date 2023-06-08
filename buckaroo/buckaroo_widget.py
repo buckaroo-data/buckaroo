@@ -11,46 +11,56 @@ import numpy as np
 from ipywidgets import DOMWidget
 from traitlets import Unicode, List, Dict, observe
 import pandas as pd
-from pandas.io.json import dumps as pdumps
 from ._frontend import module_name, module_version
 from .all_transforms import configure_buckaroo, DefaultCommandKlsList
-from .summary_stats import summarize_df, reorder_columns, table_sumarize
+from .summary_stats import summarize_df, table_sumarize, sample, DfStats
 import json
 from IPython.core.getipython import get_ipython
 from IPython.display import display
-
+from pandas.io.json import dumps as pdumps
 #from pandas.io.json._json import JSONTableWriter
 #jst = JSONTableWriter(df3, orient='table', date_format="iso", double_precision=10,  ensure_ascii=True, date_unit="ms", index=None, default_handler=str)
 
-def get_outlier_idxs(ser):
-    outlier_idxs = []
-    try:
-        idxs = ser.sort_values().index
-    except Exception as e:
-        print(e)
-        idxs = ser.index
-    outlier_idxs.extend(idxs[:5])
-    outlier_idxs.extend(idxs[-5:])
-    return outlier_idxs
 
-def sample(df, sample_size=500, include_outliers=True):
-    if len(df) <= sample_size:
-        return df
-    sdf = df.sample(np.min([sample_size, len(df)]))
-    if include_outliers:
-        outlier_idxs = []
-        for col in df.columns:
-            outlier_idxs.extend(get_outlier_idxs(df[col]) )
-        outlier_idxs.extend(sdf.index)
-        uniq_idx = np.unique(outlier_idxs)
-        return df.iloc[uniq_idx]
-    return sdf
-
-            
-def df_to_obj(df):
+def df_to_obj(df, order = None):
+    if order is None:
+        order = df.columns
     obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
     obj['table_hints'] = json.loads(pdumps(table_sumarize(df)))
+    obj['schema'] = dict(
+            fields=[{'name':c} for c in order])
     return obj
+
+
+'''    def __init__(self, df,
+                 sampled=True,
+                 summaryStats=False,
+                 reorderdColumns=True,
+                 showTransformed=True,
+                 showCommands=True,
+                 really_reorder_columns=False):
+        super().__init__()
+        rows = len(df)
+        cols = len(df.columns)
+        item_count = rows * cols
+
+
+        if reorderdColumns == False:
+            self.dfConfig['reorderdColumns'] = False
+            self.summary_df = df[:5]
+        elif item_count > FAST_SUMMARY_WHEN_GREATER:
+            self.dfConfig['reorderdColumns'] = False
+            self.summary_df = df[:5]
+        elif really_reorder_columns: #an override
+            self.dfConfig['reorderdColumns'] = True
+            self.summary_df = summarize_df(df)
+        else:
+            self.dfConfig['reorderdColumns'] = True
+            self.summary_df = summarize_df(df)
+
+
+
+'''
 
 FAST_SUMMARY_WHEN_GREATER = 1_000_000
 class BuckarooWidget(DOMWidget):
@@ -80,7 +90,7 @@ class BuckarooWidget(DOMWidget):
         'columns': 30,
         'rowsShown': 500,
         'sampleSize': 10_000,
-        'sampled':True,
+        'sampled':False,
         'summaryStats': False,
         'reorderdColumns': True,
         'showTransformed': True,
@@ -96,58 +106,32 @@ class BuckarooWidget(DOMWidget):
                  showCommands=True,
                  really_reorder_columns=False):
         super().__init__()
-        rows = len(df)
-        cols = len(df.columns)
-        item_count = rows * cols
 
+        self.stats = DfStats(df)
+        self.summaryDf = df_to_obj(self.stats.sdf, self.stats.col_order)
 
-        if reorderdColumns == False:
-            self.dfConfig['reorderdColumns'] = False
-            self.summary_df = df[:5]
-        elif item_count > FAST_SUMMARY_WHEN_GREATER:
-            self.dfConfig['reorderdColumns'] = False
-            self.summary_df = df[:5]
-        elif really_reorder_columns: #an override
-            self.dfConfig['reorderdColumns'] = True
-            self.summary_df = summarize_df(df)
-        else:
-            self.dfConfig['reorderdColumns'] = True
-            self.summary_df = summarize_df(df)
-        self.summaryDf = df_to_obj(self.summary_df)
-
-        self.dfConfig['showTransformed'] = showTransformed
-        self.dfConfig['showCommands'] = showCommands
-
+        self.dfConfig.update(dict(
+            totalRows=len(df),
+            columns=len(df.columns),
+            showTransformed=showTransformed,
+            showCommands=showCommands))
         self.df = df
-
-        self.setup_dfconfig(df)
+        self.dfConfig = self.dfConfig.copy()
+        self.update_based_on_df_config('foo')
         self.operation_results = {
             'transformed_df':self.origDf,
             'generated_py_code':'#from py widget init'}
         self.setup_from_command_kls_list()
 
-    #Maybe tie this to a watcher on DF?
-    def setup_dfconfig(self, df):
-        dfc = self.dfConfig.copy()
-        dfc.update(dict(totalRows=len(df),
-                        columns=len(df.columns)))
-        self.dfConfig = dfc
-
     @observe('dfConfig')
     def update_based_on_df_config(self, change):
-        old = change['old']
-        new = change['new']
         tdf = self.df_from_dfConfig()
-        if self.dfConfig['reorderdColumns']:
-            otdf = reorder_columns(tdf)
-            self.origDf = df_to_obj(otdf)
+        if self.dfConfig['reorderdColumns']: 
+            self.origDf = df_to_obj(tdf, self.stats.col_order)
         else:
             self.origDf = df_to_obj(tdf)
 
-
     def df_from_dfConfig(self):
-        # if self.dfConfig['summaryStats']:
-        #     return summarize_df(self.df)
         if self.dfConfig['sampled']:
             return sample(self.df)
         else:

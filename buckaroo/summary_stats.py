@@ -1,6 +1,9 @@
 from functools import reduce
 import pandas as pd
+from pandas.io.json import dumps as pdumps
 import numpy as np
+
+
 
 
 def probable_datetime(ser):
@@ -113,9 +116,7 @@ def get_cor_pair_dict(df, summary_stats):
 
     #this needs to be vectorized
     corrable_cols = [col for col in df if summary_stats[col]['distinct_count'] > 1]
-    #print("corrable_cols", corrable_cols)
-    #num_df =  pd.DataFrame({col:numerize_column(df[col]) for col in corrable_cols})
-
+    
     num_df =  pd.DataFrame({col:make_num_categorical(df[col]) for col in corrable_cols})
 
     corr_df = num_df.corr()
@@ -141,7 +142,6 @@ def without(arr, search_keys):
         if v not in search_keys:
             new_arr.append(v)
     return new_arr
-
 
 def find_groupings(corr_pairs):
     all_groupings = []
@@ -189,18 +189,45 @@ def order_columns(summary_stats_df, corr_pair_dict):
 def reorder_columns(df):
     tdf_stats = summarize_df(df)
     cpd = get_cor_pair_dict(df, tdf_stats)
+    # try:
+    col_order = order_columns(tdf_stats, cpd)
+    return df[col_order]
+
+
+def get_outlier_idxs(ser):
+    outlier_idxs = []
     try:
-        col_order = order_columns(tdf_stats, cpd)
-        return df[col_order]
+        idxs = ser.sort_values().index
     except Exception as e:
-        print("error reordering columns", e)
+        print(e)
+        idxs = ser.index
+    outlier_idxs.extend(idxs[:5])
+    outlier_idxs.extend(idxs[-5:])
+    return outlier_idxs
+
+def sample(df, sample_size=500, include_outliers=True):
+    if len(df) <= sample_size:
         return df
+    sdf = df.sample(np.min([sample_size, len(df)]))
+    if include_outliers:
+        outlier_idxs = []
+        for col in df.columns:
+            outlier_idxs.extend(get_outlier_idxs(df[col]) )
+        outlier_idxs.extend(sdf.index)
+        uniq_idx = np.unique(outlier_idxs)
+        return df.iloc[uniq_idx]
+    return sdf
 
+class DfStats(object):
+    def __init__(self,
+            df,
+            # summary_func=summary_stats.summarize_df,
+            # order_col_func=summary_stats.order_columns):
+            summary_func=summarize_df,
+            order_col_func=order_columns):
 
-def make_df_metadata(df):
-    summary_stats_df = summarize_df(df)
-    corr_dict = get_cor_pair_dict(df, summary_stats_df)
-    col_order = order_columns(summary_stats_df, corr_dict)
-    ordered_df = df[col_order]
-    ordered_sdf = summary_stats_df[col_order]
-    return [ordered_df, ordered_sdf]
+        self.df = df
+        self.sdf = summary_func(df)
+        self.cpd = get_cor_pair_dict(self.df, self.sdf)
+        self.col_order = order_col_func(self.sdf, self.cpd)
+
