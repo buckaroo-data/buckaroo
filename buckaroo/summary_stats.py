@@ -73,6 +73,9 @@ def summarize_string(ser):
     return dict(
         dtype=ser.dtype,
         length=l,
+        min='',
+        max='',
+        mean='',
         nan_count = nan_count,
         distinct_count= distinct_count,
         distinct_per = distinct_count/l,
@@ -87,11 +90,12 @@ def summarize_string(ser):
 
 def summarize_numeric(ser):
 
-    num_stats = dict(
+    num_stats = summarize_string(ser)
+    num_stats.update(dict(
         min=ser.min(),
         max=ser.max(),
-        mean=ser.mean())
-    num_stats.update(summarize_string(ser))
+        mean=ser.mean()))
+
     return num_stats
 
 def summarize_column(ser):
@@ -105,7 +109,7 @@ def summarize_df(df):
     return summary_df
 
 def make_num_categorical(ser):
-    return ser.dropna().astype('category').cat.codes
+    return ser.dropna().astype('category', errors='ignore').cat.codes
 
 def get_cor_pair_dict(df, sdf):
 
@@ -238,6 +242,11 @@ class DfStats(object):
         self.sdf = summary_func(df)
         for func in annotate_funcs:
             func(df, self.sdf)
-        self.cpd = get_cor_pair_dict(self.df, self.sdf)
-        self.col_order = order_col_func(self.sdf, self.cpd)
+        try:
+            self.cpd = get_cor_pair_dict(self.df, self.sdf)
+            self.col_order = order_col_func(self.sdf, self.cpd)
+        except Exception as e:
+            print(e)
+            self.col_order = self.df.columns
+
         
