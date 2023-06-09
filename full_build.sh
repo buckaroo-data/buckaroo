@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
-rm -rf node_modules 
-rm -rf dist
+#rm -rf node_modules 
+#rm -rf dist
 python -m build .
 rm dist/index.js dist/index.js.LICENSE.txt
 twine check dist/*

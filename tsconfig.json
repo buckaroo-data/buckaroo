@@ -20,7 +20,7 @@
       "jsx": "react",
       "baseUrl": "."
   },
-    "include": ["js/*.ts", "js/*.tsx", "js/core/*.ts", "js/core/*.tsx", "js/core/*"],
+    "include": ["js/*.ts", "js/*.tsx", "js/core/*.ts", "js/core/*.tsx", ],
     "ts-node": {
         "transpileOnly": true
     }

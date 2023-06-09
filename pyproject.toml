@@ -85,20 +85,21 @@ exclude = [
 ]
 
 [tool.hatch.build.hooks.jupyter-builder]
+
 ensured-targets = [
     "buckaroo/nbextension/index.js",
     "buckaroo/labextension/package.json",
 ]
-dependencies = [
-    "hatch-jupyter-builder>=0.8.1",
-]
+#"hatch-jupyter-builder>=0.8.1",
+dependencies = ["hatch-jupyter-builder@file:///Users/paddy/code/hatch-jupyter-builder"]
+
 build-function = "hatch_jupyter_builder.npm_builder"
 
 [tool.hatch.build.hooks.jupyter-builder.build-kwargs]
 path = "."
 build_cmd = "build"
 npm = [
-    "yarn",
+    "npm",
 ]
 
 [tool.isort]

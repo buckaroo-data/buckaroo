@@ -14,6 +14,9 @@ const cryptoOrigCreateHash = crypto.createHash;
 crypto.createHash = (algorithm) =>
   cryptoOrigCreateHash(algorithm == 'md4' ? 'sha256' : algorithm);
 
+const  performance = {
+    maxAssetSize: 100_000_000,
+};
 
 // Custom webpack rules
 const baseRules = [
@@ -105,8 +108,8 @@ module.exports = [
       plugins: [new HtmlWebpackPlugin({
                 //template: './examples/index.html'
                 template: './examples/index.html'
-            })]
-
+      })],
+      performance
   },
 
 
@@ -132,6 +135,8 @@ module.exports = [
       // plugins: [new HtmlWebpackPlugin({
       //           template: './examples/index.html'
       //       })]
+      performance
+
 
   },
 
@@ -162,7 +167,9 @@ module.exports = [
     resolve,
         devServer: {
             port: 8030
-        }
+        },
+      performance
+      
   },
 
   /**
@@ -184,5 +191,7 @@ module.exports = [
     devtool: 'source-map',
     externals,
     resolve,
+      performance
+
   },
 ];
