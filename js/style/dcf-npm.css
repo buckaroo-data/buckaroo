@@ -159,4 +159,10 @@ div.dependent-tabs ul.tabs li.active {
     color:black;
 }
 
+.dev-examples .statusBar {
+    width:800px; border:3px dashed purple;
+    
+
+}
+
 /*# sourceMappingURL=dcf-npm.css.map */

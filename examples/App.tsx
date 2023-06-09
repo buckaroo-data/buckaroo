@@ -61,6 +61,7 @@ const App = (): JSX.Element => {
 
     return (
         <Router>
+	<div className="dev-examples">
             <h1 className='m-2'>
                 <strong>buckaroo stuff examples </strong>
             </h1>
@@ -98,6 +99,7 @@ const App = (): JSX.Element => {
                     </div>
                 </div>
             </div>
+	</div>
         </Router>
     );
 };
