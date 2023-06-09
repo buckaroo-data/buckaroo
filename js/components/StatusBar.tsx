@@ -24,15 +24,36 @@ export interface DfConfig {
 }
 
 const columnDefs: ColDef[] = [
-  { field: 'totalRows' },
-  { field: 'columns' },
-  { field: 'rowsShown' },
-  { field: 'sampleSize' },
-  { field: 'sampled' },
-  { field: 'summaryStats' },
-  { field: 'reorderdColumns' },
-  { field: 'showTransformed'},
-  { field: 'showCommands'}
+  { field: 'summaryStats',
+    headerName:'Σ',
+    headerTooltip:'Summary Stats',
+    width:30
+  },
+  { field: 'reorderdColumns',
+  headerName: "Θ",
+  headerTooltip:"Reorder Columns",
+  width:30
+},
+  { field: 'showTransformed',
+  headerName:"Δ",
+  headerTooltip:"Show Transformation",
+  width:30
+},
+  { field: 'showCommands',
+  headerName: "λ",
+  headerTooltip:"Show Commands",
+  width:30
+},
+
+  { field: 'sampled',
+  headerName: "Ξ",
+  headerTooltip:"Sampled",
+  width:30
+},
+  { field: 'totalRows', width:100},
+  { field: 'columns', width:100 },
+  { field: 'rowsShown', width:120},
+  { field: 'sampleSize', width:120 }
 ];
 
 export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) {
@@ -54,11 +75,11 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
       columns,
       rowsShown,
       sampleSize,
-      sampled: sampled.toString(),
-      summaryStats: summaryStats.toString(),
-      reorderdColumns: reorderdColumns.toString(),
-      showTransformed: showTransformed.toString(),
-      showCommands: showCommands.toString(),
+      sampled: sampled  ? "Ϋ" : "ό",
+      summaryStats: summaryStats ? "Ϋ" : "ό",
+      reorderdColumns: reorderdColumns ? "Ϋ" : "ό",
+      showTransformed: showTransformed ? "Ϋ" : "ό",
+      showCommands: showCommands ? "Ϋ" : "ό",
     },
   ];
 
@@ -110,7 +131,7 @@ export function StatusBarEx() {
     sampleSize: 10_000,
     sampled: true,
     summaryStats: false,
-    reorderdColumns: false,
+    reorderdColumns: true,
     showTransformed: true,
     showCommands: true,
   });
