@@ -96,7 +96,7 @@ module.exports = [
   {
       entry: './examples/index-react18.tsx',
         output: {
-            path: path.join(__dirname, '/docs'),
+            path: path.join(__dirname, '/examples/dist'),
             filename: 'bundle.js'
         },
     module: {
