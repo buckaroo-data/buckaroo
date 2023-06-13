@@ -1,6 +1,6 @@
 import { ColDef, ValueFormatterFunc, ValueFormatterParams } from 'ag-grid-community';
 import { DFWhole, DFColumn, ColumnHint } from './staticData';
-
+import _ from 'lodash';
 export const updateAtMatch = (
   cols: ColDef[],
   key: string,
@@ -78,7 +78,7 @@ export function dfToAgrid(tdf: DFWhole): [ColDef[], unknown[]] {
   //console.log("hints", tdf.table_hints);
   const retColumns:ColDef[] = fields.map((f: DFColumn) => {
     //console.log(f.name, tdf.table_hints[f.name])
-    const colDef:ColDef = {field: f.name, valueFormatter:getFormatter(tdf.table_hints[f.name]) }
+    const colDef:ColDef = {field: f.name, valueFormatter:getFormatter(_.get(tdf.table_hints,f.name, { is_numeric:false})) }
     if (f.name === 'index') {
       colDef.pinned = 'left';
     }
