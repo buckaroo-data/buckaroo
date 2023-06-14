@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+from .buckaroo_widget import BuckarooWidget, enable, disable
 
 dest = 'buckaroo-labextension'
 def _jupyter_labextension_paths():
@@ -42,3 +42,6 @@ def _jupyter_nbextension_paths():
         'dest': dest,
         'require': '%s/extension' % dest
     }]
+
+
+enable()

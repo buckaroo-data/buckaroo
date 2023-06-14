@@ -189,12 +189,10 @@ def enable():
 
     ip_formatter.for_type(pd.DataFrame, _display_as_buckaroo)
     
-enable()
 
 def disable():
     """
-    Automatically use buckaroo to display all DataFrames
-    instances in the notebook.
+    disable bucakroo as the default display method for DataFrames
 
     """
     try:
