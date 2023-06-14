@@ -59,11 +59,11 @@ class BuckarooWidget(DOMWidget):
         {
         'totalRows': 1234569,
         'columns': 30,
-        'rowsShown': 500,
+        'rowsShown': 0,
         'sampleSize': 10_000,
         'sampled':False,
         'summaryStats': False,
-        'reorderdColumns': True,
+        'reorderdColumns': False,
         'showTransformed': True,
         'showCommands': True,
     }).tag(sync=True)
@@ -78,7 +78,7 @@ class BuckarooWidget(DOMWidget):
     def __init__(self, df,
                  sampled=True,
                  summaryStats=False,
-                 reorderdColumns=True,
+                 reorderdColumns=False,
                  showTransformed=True,
                  showCommands=True,
                  really_reorder_columns=False):
