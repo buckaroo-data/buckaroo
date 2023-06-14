@@ -205,7 +205,7 @@ def sample(df, sample_size=500, include_outliers=True):
             outlier_idxs.extend(get_outlier_idxs(df[col]) )
         outlier_idxs.extend(sdf.index)
         uniq_idx = np.unique(outlier_idxs)
-        return df.iloc[uniq_idx]
+        return df.loc[uniq_idx]
     return sdf
 
 def add_col_rankings(df, sdf):
