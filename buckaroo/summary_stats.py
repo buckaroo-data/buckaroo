@@ -59,7 +59,9 @@ def table_sumarize_ser(ser):
         return table_sumarize_obj_ser(ser)
     
 def table_sumarize(df):
-    return {col:table_sumarize_ser(df[col]) for col in df}
+    table_hints = {col:table_sumarize_ser(df[col]) for col in df}
+    table_hints['index'] = table_sumarize_ser(df.index)
+    return table_hints
 
 
 def summarize_string(ser):

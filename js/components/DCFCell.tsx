@@ -38,6 +38,7 @@ export function WidgetDCFCell({
 }) {
   const [activeCol, setActiveCol] = useState('stoptime');
   const widgetConfig: WidgetConfig = {showCommands:dfConfig.showCommands, showTransformed:dfConfig.showTransformed}
+  const localDfConfig = {...dfConfig, 'rowsShown': origDf.data.length || 0}
   return (
     <div
       className="dcf-root flex flex-col"
@@ -47,7 +48,7 @@ export function WidgetDCFCell({
         className="orig-df flex flex-row"
         style={{ height: '450px', overflow: 'hidden' }}
       >
-        <StatusBar config={dfConfig} setConfig={on_dfConfig} />
+        <StatusBar config={localDfConfig} setConfig={on_dfConfig} />
         <DFViewer
           df={(dfConfig.summaryStats ? summaryDf : origDf) }
           activeCol={activeCol}

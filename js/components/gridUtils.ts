@@ -17,6 +17,33 @@ export const updateAtMatch = (
   return retColumns;
 };
 
+export const intFormatter = new Intl.NumberFormat(
+  'en-US', { minimumFractionDigits:0, maximumFractionDigits: 3 });
+
+const floatFormatter = new Intl.NumberFormat('en-US', { minimumFractionDigits:3, maximumFractionDigits: 3 });
+
+export const anyFormatter = (params: ValueFormatterParams):string => {
+  const val = params.value;
+  try {
+    const num = Number(val)
+    if (val === null) {
+      return "";
+    } else if (val === undefined) {
+      return "";
+    }
+    else if (Number.isFinite(num)) {
+      if (Number.isInteger(num)) {
+	const formatted = intFormatter.format(num)
+	return `${formatted}    `
+      } else {
+	return floatFormatter.format(num)
+      }
+    }
+  } catch (e:any) {
+    //console.log("formatting error", val, e);
+  }
+  return val
+}
 /*
   console.log((new Intl.NumberFormat('en-US')).format(amount))
   console.log((new Intl.NumberFormat('en-US', {  maximumFractionDigits: 1})).format(number))
@@ -32,7 +59,7 @@ export const updateAtMatch = (
 */
 function getFormatter(hint: ColumnHint):  ValueFormatterFunc<unknown> {
   if (hint === undefined || hint.is_numeric === false) {
-    return (params: ValueFormatterParams):string => params.value;
+    return anyFormatter;
   } else {
     const commas = Math.floor(hint.max_digits / 3);
 
@@ -42,7 +69,6 @@ function getFormatter(hint: ColumnHint):  ValueFormatterFunc<unknown> {
         console.log("params", params)
 
         const formatter = new Intl.NumberFormat('en-US');
-        //console.log(`|${last4Digits.padStart(7, ' ')}|`)
         return formatter.format(params.value).padStart(totalWidth, ' ');
       };
     } else {
@@ -64,8 +90,8 @@ function getFormatter(hint: ColumnHint):  ValueFormatterFunc<unknown> {
       };*/
       return (params: ValueFormatterParams):string => {
         //console.log("params", params)
-        const formatter = new Intl.NumberFormat('en-US', { minimumFractionDigits:3, maximumFractionDigits: 3 });
-        return formatter.format(params.value);
+
+        return floatFormatter.format(params.value);
       };
 
     }

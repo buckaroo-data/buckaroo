@@ -8,7 +8,7 @@ import {
   ColDef,
   GridOptions,
 } from 'ag-grid-community';
-
+import { intFormatter } from './gridUtils';
 export type setColumFunc = (newCol: string) => void;
 
 export interface DfConfig {
@@ -71,10 +71,10 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
 
   const rowData = [
     {
-      totalRows,
+      totalRows: intFormatter.format(totalRows),
       columns,
-      rowsShown,
-      sampleSize,
+      rowsShown : intFormatter.format(rowsShown),
+      sampleSize : intFormatter.format(sampleSize),
       sampled: sampled  ? "Ϋ" : "ό",
       summaryStats: summaryStats ? "Ϋ" : "ό",
       reorderdColumns: reorderdColumns ? "Ϋ" : "ό",
