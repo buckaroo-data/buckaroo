@@ -5,6 +5,11 @@
 
 Buckaroo - FAQ
 ==========================================
+
+* **Does Buckaroo work in Visual Studio Code**
+
+  As of 0.3.6 Buckaroo works properly in Visual Studio Code.  You must install the `Visual Studio Code Jupyter Extension <https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter>`_ and the `Jupyter Renderer extension <https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter-renderers>`_.  Then install buckaroo from pip and everything should work.
+
 *  **Are there any similar projects to Buckaroo?**
 
 There are a couple of projects like Buckaroo that aim to provide a better table widget and pandas editing experience.
