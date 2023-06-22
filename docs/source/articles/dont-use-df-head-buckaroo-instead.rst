@@ -8,7 +8,7 @@ Don't use df.head(), try buckaroo instead
 
 * **Why using df.head() is an anti-pattern**
 
-In tutorials and common use, whenever we inspect a new dataset with pandas and jupyter, the first command is inevitably :python:`df.head()`.  The next commands and cells dig into the contents of the dataframe.  In a *more perfect world* we would just be typing `df` and seeing a rendered dataframe.  Pandas has sensible defaults fo it's builtin table html rendering system that limits the number of rows and columns displayed in the interest of performance and visual compactness. Soon you find yourself playing with `pd.options.display.(width|max_rows)` and looking up sorting and filtering commands.  Some might remember these commands off the top of their head, but even so, typing them repeatedly is slow and litters the notebook with temp work.  Next you'll look up `df.info()` and `df.describe()`
+In tutorials and common use, whenever we inspect a new dataset with pandas and jupyter, the first command is inevitably ``df.head()``.  The next commands and cells dig into the contents of the dataframe.  In a *more perfect world* we would just be typing ``df`` and seeing a rendered dataframe.  Pandas has sensible defaults fo it's builtin table html rendering system that limits the number of rows and columns displayed in the interest of performance and visual compactness. Soon you find yourself playing with ``pd.options.display.(width|max_rows)`` and looking up sorting and filtering commands.  Some might remember these commands off the top of their head, but even so, typing them repeatedly is slow and litters the notebook with temp work.  Next you'll look up ``df.info()`` and ``df.describe()``
 
 * **Buckaroo fixes this in a natural way**
 
@@ -19,7 +19,7 @@ Buckaroo is already the fastest table widget for the jupyter notebook from my te
 
 * **It gets even better though**
 
-There is also column reordering. Column reordering tries to put the most interesting columns to the far left where they are easily visible without scrolling. What's an interesting column, well that's complicated, but an uninteresting column is simple to describe. A column of data that offers no insight into the dataset, a column that you will not run a computation against, a column that duplicates information from other columns. So a column that only has a single value for all rows offers no additional actionable information. Those columns are ranked lowest. Next are duplicate columns, in my favorite dataset there are two sets of four duplicate columns. Each citibike trip has a start station and an end station, there are 4 columns for both - 'station id', 'station name', 'longitude', 'latitude'. For every row with 'station id' `359`, 'station name' will always be 'E 47 St & Park Ave', 'latitude' will be `40.755` and 'longitude' will be `-73.975`. We only need one of those columns, and station name is the most descriptive. So 'Station name' is put to the left, and the other 3 columns are put to the right.
+There is also column reordering. Column reordering tries to put the most interesting columns to the far left where they are easily visible without scrolling. What's an interesting column, well that's complicated, but an uninteresting column is simple to describe. A column of data that offers no insight into the dataset, a column that you will not run a computation against, a column that duplicates information from other columns. So a column that only has a single value for all rows offers no additional actionable information. Those columns are ranked lowest. Next are duplicate columns, in my favorite dataset there are two sets of four duplicate columns. Each citibike trip has a start station and an end station, there are 4 columns for both - 'station id', 'station name', 'longitude', 'latitude'. For every row with 'station id' ``359``, 'station name' will always be 'E 47 St & Park Ave', 'latitude' will be ``40.755`` and 'longitude' will be ``-73.975``. We only need one of those columns, and station name is the most descriptive. So 'Station name' is put to the left, and the other 3 columns are put to the right.
 
 * **Common manipulations are also quickly available**
 
@@ -37,4 +37,4 @@ The biggest feature in this area is making the summary stats and column reorderi
 
 * **Try Buckaroo**
 
-Install buckaroo with `pip install buckaroo` then import it into your notebook with `import buckaroo`.  Buckaroo becomes the default dataframe viewer.  Give it a try and reach out about what you think.
+Install buckaroo with ``pip install buckaroo`` then import it into your notebook with ``import buckaroo``.  Buckaroo becomes the default dataframe viewer.  Give it a try and reach out about what you think.
