@@ -16,11 +16,6 @@ With the new release of buckaroo, we can stop using ``df.head()``. I have worked
 
 Buckaroo is already the fastest table widget for the jupyter notebook from my testing. Being fast isn't just a bragging rights matter. To be usable as the default dataframe display method, some performance guarantees are necessary. Having your kernel lock up for 30 seconds or longer is unacceptable. So the system has to make some decisions for you. this is why sampling is automatically performed for larger datasets.
 
-
-* **It gets even better though**
-
-There is also column reordering. Column reordering tries to put the most interesting columns to the far left where they are easily visible without scrolling. What's an interesting column, well that's complicated, but an uninteresting column is simple to describe. A column of data that offers no insight into the dataset, a column that you will not run a computation against, a column that duplicates information from other columns. So a column that only has a single value for all rows offers no additional actionable information. Those columns are ranked lowest. Next are duplicate columns, in my favorite dataset there are two sets of four duplicate columns. Each citibike trip has a start station and an end station, there are 4 columns for both - 'station id', 'station name', 'longitude', 'latitude'. For every row with 'station id' ``359``, 'station name' will always be ``E 47 St & Park Ave``, 'latitude' will be ``40.755`` and 'longitude' will be ``-73.975``. We only need one of those columns, and station name is the most descriptive. So 'Station name' is put to the left, and the other 3 columns are put to the right.
-
 * **Common manipulations are also quickly available**
 
 Finally the Buckaroo command UI is available with a single click. The command interface allows you to iterate through normal data cleaning operations with a GUI… while generating python code to perform the operations in a function. Want to drop a column, click the column then the "dropcol" button. 
@@ -33,7 +28,7 @@ When working with data we are constantly doing exploratory data analysis, our to
 
 * **Planned developments for the default table experience**
 
-The biggest feature in this area is making the summary stats and column reordering algorithms pluggable.  This will speed up my own development of features. I also want to to experiment with running the initial analysis in a separate thread, dynamically sizing the sample size, this way I can ensure that the table always loads in a reasonable and tunable timeframe.  I will also be adding unit tests and integrating it with the pluggable stats algorithms (run a series of tests over user supplied summary stats to check for exceptions).  There are also performance improvements, histograms, and group colors coming.
+The biggest feature in this area is making the summary stats and column reordering algorithms pluggable.  This will speed up my own development of features. I also want to to experiment with running the initial analysis in a separate thread, dynamically sizing the sample size, this way I can ensure that the table always loads in a reasonable and tunable timeframe.  I will also be adding unit tests and integrating it with the pluggable stats algorithms (run a series of tests over user supplied summary stats to check for exceptions).  There are also performance improvements, histograms, automatic column grouping, column reordering, and group colors coming.
 
 * **Try Buckaroo**
 
