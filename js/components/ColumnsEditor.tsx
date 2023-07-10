@@ -10,7 +10,7 @@ import { tableDf, bakedCommandConfig } from './staticData'
 export type OperationSetter = (ops: Operation[]) => void;
 export interface WidgetConfig {
   showCommands:boolean;
-  showTransformed:boolean;
+//  showTransformed:boolean;
 }
 
 
@@ -36,18 +36,18 @@ export function ColumnsEditor({
   return (
     <div className="columns-editor" style={{ width: '100%' }}>
       {(widgetConfig.showCommands) ? (
+	<div>
       <OperationViewer
         operations={operations}
         setOperations={setOperations}
         activeColumn={activeColumn}
         allColumns={allColumns}
-        commandConfig={commandConfig}
-	  />) : <span></span>}
-    {(widgetConfig.showTransformed) ?(
+        commandConfig={commandConfig}/>
       <DependentTabs
         filledOperations={operations}
         operationResult={operationResult}
 	/>
+    </div>
     ) : <span></span>}
     </div>
   );
@@ -70,7 +70,7 @@ export function ColumnsEditorEx() {
       operations={operations}
       setOperations={setOperations}
     operationResult={baseOperationResults}
-    widgetConfig={{showCommands:true, showTransformed:true}}
+    widgetConfig={{showCommands:true}}
     />
   );
 }
