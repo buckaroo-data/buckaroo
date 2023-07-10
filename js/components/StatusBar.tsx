@@ -48,10 +48,9 @@ const columnDefs: ColDef[] = [
   { field: 'help',
   headerName: "?",
   headerTooltip:"Help",
-    width:70,
+    width:30,
     cellRenderer: function(params:any) {
-      return <a href="https://buckaroo-data.readthedocs.io/en/latest/howto.html" target="_blank" rel="noopener">?</a>}
-
+      return <a href="https://buckaroo-data.readthedocs.io/en/latest/feature_reference.html" target="_blank" rel="noopener">?</a>}
 },
 
   { field: 'totalRows', width:100},

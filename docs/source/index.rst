@@ -25,6 +25,7 @@ We all know how awkward it is to clean data in jupyter notebooks.  Multiple cell
    :caption: Contents:
 
    using
+   feature_reference
    install
    contributing
    FAQ
