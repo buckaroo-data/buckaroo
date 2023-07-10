@@ -46,11 +46,11 @@ const columnDefs: ColDef[] = [
   width:30
 },
   { field: 'help',
-  headerName: "Help",
+  headerName: "?",
   headerTooltip:"Help",
     width:70,
     cellRenderer: function(params:any) {
-      return <a href="https://buckaroo-data.readthedocs.io/en/latest/howto.html" target="_blank" rel="noopener">Help</a>}
+      return <a href="https://buckaroo-data.readthedocs.io/en/latest/howto.html" target="_blank" rel="noopener">?</a>}
 
 },
 
