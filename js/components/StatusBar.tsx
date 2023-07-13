@@ -18,10 +18,10 @@ export interface DfConfig {
   sampleSize: number;
   sampled: boolean;
   summaryStats: boolean;
-  reorderdColumns: boolean;
   showCommands:boolean;
-  showTransformed:boolean;
+  //reorderdColumns: boolean;
 }
+
 
 const columnDefs: ColDef[] = [
   { field: 'summaryStats',
@@ -29,16 +29,11 @@ const columnDefs: ColDef[] = [
     headerTooltip:'Summary Stats',
     width:30
   },
-  { field: 'reorderdColumns',
-  headerName: "Θ",
-  headerTooltip:"Reorder Columns",
-  width:30
-},
-  { field: 'showTransformed',
-  headerName:"Δ",
-  headerTooltip:"Show Transformation",
-  width:30
-},
+//   { field: 'reorderdColumns',
+//   headerName: "Θ",
+//   headerTooltip:"Reorder Columns",
+//   width:30
+// },
   { field: 'showCommands',
   headerName: "λ",
   headerTooltip:"Show Commands",
@@ -50,6 +45,14 @@ const columnDefs: ColDef[] = [
   headerTooltip:"Sampled",
   width:30
 },
+  { field: 'help',
+  headerName: "?",
+  headerTooltip:"Help",
+    width:30,
+    cellRenderer: function(params:any) {
+      return <a href="https://buckaroo-data.readthedocs.io/en/latest/feature_reference.html" target="_blank" rel="noopener">?</a>}
+},
+
   { field: 'totalRows', width:100},
   { field: 'columns', width:100 },
   { field: 'rowsShown', width:120},
@@ -64,9 +67,8 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
     sampleSize,
     sampled,
     summaryStats,
-    reorderdColumns,
-    showTransformed,
-    showCommands
+    showCommands,
+    //reorderdColumns
   } = config;
 
   const rowData = [
@@ -75,11 +77,10 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
       columns,
       rowsShown : intFormatter.format(rowsShown),
       sampleSize : intFormatter.format(sampleSize),
-      sampled: sampled  ? "Ϋ" : "ό",
-      summaryStats: summaryStats ? "Ϋ" : "ό",
-      reorderdColumns: reorderdColumns ? "Ϋ" : "ό",
-      showTransformed: showTransformed ? "Ϋ" : "ό",
-      showCommands: showCommands ? "Ϋ" : "ό",
+      sampled: sampled  ? "1" : "0",
+      summaryStats: summaryStats ? "1" : "0",
+      // reorderdColumns: reorderdColumns ? "Ϋ" : "ό",
+      showCommands: showCommands ? "1" : "0"
     },
   ];
 
@@ -90,13 +91,12 @@ export function StatusBar({ config, setConfig }: { config:any, setConfig:any }) 
     }
     else if (colName === 'sampled') {
       setConfig({ ...config, sampled: !config.sampled });
-    } else if (colName === 'reorderdColumns') {
-      setConfig({ ...config, reorderdColumns: !config.reorderdColumns });
-    } else if (colName === 'showTransformed') {
-      setConfig({ ...config, showTransformed: !config.showTransformed });
     } else if (colName === 'showCommands') {
       setConfig({ ...config, showCommands: !config.showCommands });
     }
+    // } else if (colName === 'reorderdColumns') {
+    //   setConfig({ ...config, reorderdColumns: !config.reorderdColumns });
+
   };
   const gridOptions: GridOptions = {
     rowSelection: 'single',
@@ -131,9 +131,8 @@ export function StatusBarEx() {
     sampleSize: 10_000,
     sampled: true,
     summaryStats: false,
-    reorderdColumns: true,
-    showTransformed: true,
     showCommands: true,
+    //reorderdColumns: true,
   });
 
   return <StatusBar config={sampleConfig} setConfig={setConfig} />;

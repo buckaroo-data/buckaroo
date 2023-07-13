@@ -37,7 +37,7 @@ export function WidgetDCFCell({
   summaryDf: DFWhole
 }) {
   const [activeCol, setActiveCol] = useState('stoptime');
-  const widgetConfig: WidgetConfig = {showCommands:dfConfig.showCommands, showTransformed:dfConfig.showTransformed}
+  const widgetConfig: WidgetConfig = {showCommands:dfConfig.showCommands}
   const localDfConfig = {...dfConfig, 'rowsShown': origDf.data.length || 0}
   return (
     <div
@@ -55,7 +55,7 @@ export function WidgetDCFCell({
           setActiveCol={setActiveCol}
         />
       </div>
-    {(widgetConfig.showCommands || widgetConfig.showTransformed) ? (
+    {(widgetConfig.showCommands) ? (
       <ColumnsEditor
         df={origDf}
         activeColumn={activeCol}
@@ -77,9 +77,8 @@ export function WidgetDCFCellExample() {
     sampleSize: 10_000,
     sampled: true,
     summaryStats: false,
-    reorderdColumns: false,
-    showTransformed: true,
-    showCommands: true
+    showCommands: true,
+    //reorderdColumns: false,
   });
   const [operations, setOperations] = useState<Operation[]>(bakedOperations);
   return (
