@@ -18,14 +18,12 @@ In tutorials and common use, whenever we inspect a new dataset with pandas and j
 
 
 
-* **Buckaroo fixes this in a natural way**
-   :scale: 50 %
-   :width: 200px
-   :height: 100px
+* **Buckaroo fixes this intuitively**
 
-With the new release of buckaroo, we can stop using ``df.head()``. I have worked to make Buckaroo usable as the default table visualization for pandas dataframes. It does this through sensible defaults and down sampling. All columns are shown, if there are less than 5000 rows, all rows are shown. If there are more than 5000 rows, sampling is turned on. But not just any sampling, sampling that also includes the 5 largest and smallest values of each column. At this point you will have around 10k rows in the interactive widget, which can be sorted by any column. Summary stats are a toggle away.
 
-Buckaroo is already the fastest table widget for the jupyter notebook from my testing. Being fast isn't just a bragging rights matter. To be usable as the default dataframe display method, some performance guarantees are necessary. Having your kernel lock up for 30 seconds or longer is unacceptable. So the system has to make some decisions for you. this is why sampling is automatically performed for larger datasets.
+With the new release of buckaroo, we can stop using ``df.head()``. I have worked to make Buckaroo usable as the default table visualization for pandas dataframes. It does this through sensible defaults and down sampling. All columns are shown, if there are less than 10,000 rows, all rows are shown. If there are more than 5000 rows, sampling is turned on. But not just any sampling, sampling that also includes the 5 largest and smallest values of each column. At this point you will have around 10k rows in the interactive widget, which can be sorted by any column. Summary stats are a toggle away.
+
+Buckaroo is already the fastest table widget (comparison coming) for the jupyter notebook from my testing. Being fast isn't just a bragging rights matter. To be usable as the default dataframe display method, some performance guarantees are necessary. Having your kernel lock up for 30 seconds or longer is unacceptable. So the system has to make some decisions for you. this is why sampling is automatically performed for larger datasets.
 
 * **Common manipulations are also quickly available**
 
