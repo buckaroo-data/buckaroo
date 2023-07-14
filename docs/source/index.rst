@@ -17,13 +17,14 @@ We all know how awkward it is to clean data in jupyter notebooks.  Multiple cell
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Sitemap:
 
    using
    feature_reference
    install
    contributing
    FAQ
+   articles/index
 
 Indices and tables
 ==================
@@ -31,4 +32,5 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
+
 * `Buckaroo on github <https://github.com/paddymul/buckaroo>`_
