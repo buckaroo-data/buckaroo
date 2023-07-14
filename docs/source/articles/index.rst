@@ -15,7 +15,6 @@ Articles about Buckaroo can be found here.  It was more expedient to use Read Th
 
 
 
-* **Footer nav**
 
 * :ref:`genindex`
 * :ref:`modindex`

@@ -10,7 +10,18 @@ Don't use df.head(), try buckaroo instead
 
 In tutorials and common use, whenever we inspect a new dataset with pandas and jupyter, the first command is inevitably ``df.head()``.  The next commands and cells dig into the contents of the dataframe.  In a *more perfect world* we would just be typing ``df`` and seeing a rendered dataframe.  Pandas has sensible defaults fo its builtin table html rendering system that limits the number of rows and columns displayed in the interest of performance and visual compactness. Soon you find yourself playing with ``pd.options.display.(width|max_rows)`` and looking up sorting and filtering commands.  Some might remember these commands off the top of their head, but even so, typing them repeatedly is slow and litters the notebook with temp work.  Next you'll look up ``df.info()`` and ``df.describe()``
 
+
+
+.. image:: https://raw.githubusercontent.com/paddymul/buckaroo-assets/main/quick-buckaroo.gif
+   :alt: df.head() vs buckaroo annotated walkthrough
+   :align: right
+
+
+
 * **Buckaroo fixes this in a natural way**
+   :scale: 50 %
+   :width: 200px
+   :height: 100px
 
 With the new release of buckaroo, we can stop using ``df.head()``. I have worked to make Buckaroo usable as the default table visualization for pandas dataframes. It does this through sensible defaults and down sampling. All columns are shown, if there are less than 5000 rows, all rows are shown. If there are more than 5000 rows, sampling is turned on. But not just any sampling, sampling that also includes the 5 largest and smallest values of each column. At this point you will have around 10k rows in the interactive widget, which can be sorted by any column. Summary stats are a toggle away.
 
