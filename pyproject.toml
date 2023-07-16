@@ -33,9 +33,10 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
 ]
 dependencies = [
-    "ipywidgets>=7.6.0,<9"
+    "ipywidgets>=7.6.0,<9",
+    "jupyterlab>=3.6.0"
 ]
-version = "0.3.8"
+version = "0.3.10"
 
 [project.license]
 file = "LICENSE.txt"

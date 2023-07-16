@@ -93,6 +93,8 @@ const resolve = {
 };
 
 module.exports = [
+// the following section must be commented out for the nbextension to work
+// I think it must be enabled for the dev mode of the react app to work
   {
       entry: './examples/index-react18.tsx',
         output: {
