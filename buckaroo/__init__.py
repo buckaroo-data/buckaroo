@@ -39,9 +39,12 @@ def _jupyter_nbextension_paths():
     return [{
         'section': 'notebook',
         'src': 'nbextension',
-        'dest': dest,
-        'require': '%s/extension' % dest
+        'dest': "buckaroo",
+        'require': 'buckaroo/extension'
     }]
 
 
-enable()
+try:
+    enable()
+except:
+    print("error enabling buckaroo as default display formatter for dataframes (ignore message during testing/builds")

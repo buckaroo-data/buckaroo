@@ -6,7 +6,7 @@ define(function() {
     window['requirejs'].config({
         map: {
             '*': {
-                'dcf': 'nbextensions/dcf/index',
+                'buckaroo': 'nbextensions/buckaroo/index',
             },
         }
     });
