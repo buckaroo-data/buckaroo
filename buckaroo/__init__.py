@@ -44,7 +44,7 @@ def _jupyter_nbextension_paths():
         'require': 'buckaroo/extension'
     }]
 
-def debug_jupyter_packages():
+def debug_packages():
     print("Selected Jupyter core packages...")
     packages = [
             "buckaroo",
