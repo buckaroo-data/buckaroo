@@ -84,3 +84,5 @@ try:
     enable()
 except:
     print("error enabling buckaroo as default display formatter for dataframes (ignore message during testing/builds")
+
+
