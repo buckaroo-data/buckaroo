@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from ._version import __version__
 from .buckaroo_widget import BuckarooWidget, enable, disable
 
 dest = 'buckaroo-labextension'
@@ -43,6 +44,41 @@ def _jupyter_nbextension_paths():
         'require': 'buckaroo/extension'
     }]
 
+def debug_jupyter_packages():
+    print("Selected Jupyter core packages...")
+    packages = [
+            "buckaroo",
+            "jupyterlab",
+            "notebook",
+            "ipywidgets",
+            "traitlets",
+            "jupyter_core",
+            "pandas",
+            "numpy",
+            "IPython",
+            "ipykernel",
+            "jupyter_client",
+            "jupyter_server",
+            "nbclient",
+            "nbconvert",
+            "nbformat",
+            "qtconsole",
+    ]
+    
+    for package in packages:
+        try:
+            mod = __import__(package)
+            version = mod.__version__
+        except ImportError:
+            version = "not installed"
+        print(f"{package:<17}:", version)
+    for package in packages:
+        try:
+            mod = __import__(package)
+            path = mod.__file__
+        except ImportError:
+            path = "not installed"
+        print(f"{package:<17}:", path)
 
 try:
     enable()

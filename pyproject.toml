@@ -36,7 +36,7 @@ dependencies = [
     "ipywidgets>=7.6.0,<9",
     "jupyterlab>=3.6.0"
 ]
-version = "0.3.11"
+version = "0.3.12"
 
 [project.license]
 file = "LICENSE.txt"
