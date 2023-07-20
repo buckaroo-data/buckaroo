@@ -95,24 +95,24 @@ const resolve = {
 module.exports = [
 // the following section must be commented out for the nbextension to work
 // I think it must be enabled for the dev mode of the react app to work
-  {
-      entry: './examples/index-react18.tsx',
-        output: {
-            path: path.join(__dirname, '/examples/dist'),
-            filename: 'bundle.js'
-        },
-    module: {
-	rules: demoRules,
-    },
-    devtool: 'source-map',
-    externals,
-    resolve,
-      plugins: [new HtmlWebpackPlugin({
-                //template: './examples/index.html'
-                template: './examples/index.html'
-      })],
-      performance
-  },
+  // {
+  //     entry: './examples/index-react18.tsx',
+  //       output: {
+  //           path: path.join(__dirname, '/examples/dist'),
+  //           filename: 'bundle.js'
+  //       },
+  //   module: {
+  // 	rules: demoRules,
+  //   },
+  //   devtool: 'source-map',
+  //   externals,
+  //   resolve,
+  //     plugins: [new HtmlWebpackPlugin({
+  //               //template: './examples/index.html'
+  //               template: './examples/index.html'
+  //     })],
+  //     performance
+  // },
 
 
   /**
