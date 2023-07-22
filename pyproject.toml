@@ -34,9 +34,8 @@ classifiers = [
 ]
 dependencies = [
     "ipywidgets>=7.6.0,<9",
-    "jupyterlab>=3.6.0"
 ]
-version = "0.3.12"
+version = "0.3.17"
 
 [project.license]
 file = "LICENSE.txt"
@@ -49,8 +48,17 @@ test = [
     "pytest>=6",
 ]
 
+jupyterlab = ["jupyterlab>=3.6.0"]
+notebook = ["notebook>=7.0.0"]
+
+
 docs = [
     "sphinx>=1.5"
+]
+
+build = [
+"twine",
+"build"
 ]
     
 [project.urls]

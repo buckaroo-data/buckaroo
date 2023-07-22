@@ -1,6 +1,6 @@
 {
     "name": "buckaroo",
-    "version": "0.3.11",
+    "version": "0.2.25",
     "description": "Fast Datagrid widget for the Jupyter Notebook and JupyterLab",
     "keywords": [
         "jupyter",
@@ -30,7 +30,7 @@
     "types": "./lib/index.d.ts",
     "repository": {
         "type": "git",
-        "url": "https://github.com/paddymulp/buckaroo"
+        "url": "https://github.com/paddymul/buckaroo"
     },
     "scripts": {
         "build": "npm run build:lib && npm run build:nbextension && npm run build:labextension",
