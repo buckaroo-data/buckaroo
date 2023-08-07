@@ -34,6 +34,7 @@ classifiers = [
 ]
 dependencies = [
     "ipywidgets>=7.6.0,<9",
+    "graphlib_backport>=1.0.0"
 ]
 version = "0.3.17"
 
@@ -99,8 +100,8 @@ ensured-targets = [
     "buckaroo/nbextension/index.js",
     "buckaroo/labextension/package.json",
 ]
-#"hatch-jupyter-builder>=0.8.1",
-dependencies = ["hatch-jupyter-builder@file:///Users/paddy/code/hatch-jupyter-builder"]
+dependencies = ["hatch-jupyter-builder>=0.8.1"]
+#dependencies = ["hatch-jupyter-builder@file:///Users/paddy/code/hatch-jupyter-builder"]
 
 build-function = "hatch_jupyter_builder.npm_builder"
 
