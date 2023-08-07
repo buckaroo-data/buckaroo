@@ -14,7 +14,7 @@ from traitlets import Unicode, List, Dict, observe
 
 from ._frontend import module_name, module_version
 from .all_transforms import configure_buckaroo, DefaultCommandKlsList
-from .summary_stats import sample
+from .down_sample import sample
 
 from .analysis import (TypingStats, DefaultSummaryStats, ColDisplayHints)
 from .analysis_management import DfStats
