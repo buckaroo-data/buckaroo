@@ -3,7 +3,7 @@ import pandas as pd
 
 def _display_as_buckaroo(df):
     from IPython.display import display
-    return display(BuckarooWidget(df, showCommands=False, showTransformed=False))
+    return display(BuckarooWidget(df, showCommands=False))
 
 def enable():
     """

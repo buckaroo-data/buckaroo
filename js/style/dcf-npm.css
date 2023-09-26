@@ -163,6 +163,53 @@ div.dependent-tabs ul.tabs li.active {
     width:800px; border:3px dashed purple;
     
 
+
+
+
 }
 
+.custom-tooltip {
+    color:black;
+    background:green;
+}
+
+
+.histogram-component {
+    margin:0;
+    border-left:1px solid #68686e;
+    border-right:1px solid #68686e;
+		
+	   
+}
+
+.floating-tooltip {
+    color:black;;
+    background:white;
+}
+
+
+.floating-tooltip dl {
+    border:1px solid black;
+    padding:1px 4px;
+    margin:0;
+    display:flow-root;
+}
+.floating-tooltip dl dt {
+    font-weight:bold;
+    float:left;
+    margin:0;
+    padding:0;
+
+}
+.floating-tooltip dl dd {
+
+    float:left;
+    margin:0 0 0 10px;
+    clear:right;
+}
+
+
+
 /*# sourceMappingURL=dcf-npm.css.map */
+
+

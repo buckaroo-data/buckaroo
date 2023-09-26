@@ -14,12 +14,17 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "strict": true,
+      "experimentalDecorators": true,
     // This allows us to initialize members in the "initialize" method
     "strictPropertyInitialization": false,
       "target": "es2015",
       "jsx": "react",
       "baseUrl": "."
   },
+    "typeRoots": [
+	"./js/typings",
+	"./node_modules/@types/"
+    ],
     "include": ["js/*.ts", "js/*.tsx", "js/core/*.ts", "js/core/*.tsx", ],
     "ts-node": {
         "transpileOnly": true

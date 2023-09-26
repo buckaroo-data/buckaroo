@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-
+import traceback
 from buckaroo.pluggable_analysis_framework import (
     ColAnalysis, order_analysis, check_solvable, NotProvidedException)
 
@@ -28,11 +28,13 @@ def produce_summary_df(df, ordered_objs, df_name='test_df'):
                 summary_res = a_kls.summary(ser, summary_ser, ser)
                 for k,v in summary_res.items():
                     summary_ser.loc[k] = v
-                for k,v in a_kls.table_hints(sampled_ser, summary_ser, table_hint_dict):
+                th_dict = a_kls.table_hints(sampled_ser, summary_ser, table_hint_dict)
+                for k,v in th_dict.items():
                     table_hint_dict[k] = v
             except Exception as e:
                 print("summary_ser", summary_ser)
                 errs[ser_name] = e, a_kls
+                traceback.print_exc()
                 continue
         summary_col_dict[ser_name] = summary_ser
         table_hint_col_dict[ser_name] = table_hint_dict

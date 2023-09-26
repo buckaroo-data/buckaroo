@@ -1,7 +1,9 @@
-from .lispy import s
-from .configure_utils import configure_buckaroo
 import pandas as pd
 import numpy as np
+
+from .lispy import s
+from .configure_utils import configure_buckaroo
+from .cleaning_commands import (to_bool, to_datetime, to_int, to_float, to_string)
 
 class Command(object):
     pass
@@ -122,7 +124,7 @@ class GroupBy(Command):
     
 
 
-class to_datetime(Command):
+class ato_datetime(Command):
     #argument_names = ["df", "col"]
     command_default = [s('to_datetime'), s('df'), "col"]
     command_pattern = [None]
@@ -154,6 +156,7 @@ class reindex(Command):
              "    df.drop('%s', axis=1, inplace=True)" % col,
              "    df.index = old_col.values"])
 
-DefaultCommandKlsList = [DropCol, to_datetime, SafeInt, FillNA, reindex, OneHot, GroupBy]
+DefaultCommandKlsList = [DropCol, SafeInt, FillNA, reindex, OneHot, GroupBy,
+                         to_bool, to_datetime, to_int, to_float, to_string]
 command_defaults, command_patterns, buckaroo_transform, buckaroo_to_py_core = configure_buckaroo(DefaultCommandKlsList)
 

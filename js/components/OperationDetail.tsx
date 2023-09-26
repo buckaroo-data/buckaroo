@@ -9,7 +9,6 @@ import { ActualArg, CommandArgSpec } from './CommandUtils';
 import { objWithoutNull, replaceAtIdx, replaceAtKey } from './utils';
 import React from 'react';
 
-
 export const OperationDetail = ({
   command,
   setCommand,
@@ -71,7 +70,7 @@ export const ArgGetters = ({
   const makeArgGetter = (pattern: ActualArg) => {
     const idx = pattern[0];
     const val = command[idx] as SettableArg;
-    const valSetter = (newVal:unknown) => {
+    const valSetter = (newVal: unknown) => {
       const newCommand = replaceAtIdx(command, idx, newVal);
       //console.log('newCommand', newCommand);
       setCommand(newCommand as Operation);
@@ -108,8 +107,9 @@ const ArgGetter = ({
 }) => {
   const [_argPos, label, argType, lastArg] = argProps;
 
-  const defaultShim = (event: { target: { value: SettableArg; }; }) => setter(event.target.value);
-  if (argType === 'enum'  && _.isArray(lastArg)) {
+  const defaultShim = (event: { target: { value: SettableArg } }) =>
+    setter(event.target.value);
+  if (argType === 'enum' && _.isArray(lastArg)) {
     return (
       <fieldset>
         <label> {label} </label>
@@ -124,7 +124,8 @@ const ArgGetter = ({
     );
   } else if (argType === 'type') {
     if (lastArg === 'integer') {
-      const valSetterShim = (event: { target: { value: string; }; }) => setter(parseInt(event.target.value));
+      const valSetterShim = (event: { target: { value: string } }) =>
+        setter(parseInt(event.target.value));
       return (
         <fieldset>
           <label> {label} </label>
@@ -146,7 +147,7 @@ const ArgGetter = ({
     }
   } else if (argType === 'colEnum') {
     const widgetRow = columns.map((colName: string) => {
-      const colSetter = (event: { target: { value: any; }; }) => {
+      const colSetter = (event: { target: { value: any } }) => {
         const newColVal = event.target.value;
         if (_.isString(newColVal)) {
           const updatedColDict = replaceAtKey(
@@ -158,9 +159,8 @@ const ArgGetter = ({
         }
       };
       const colVal = _.get(val, colName, 'null');
-      if(!_.isArray(lastArg)) {
-
-        return <h3> arg error</h3>
+      if (!_.isArray(lastArg)) {
+        return <h3> arg error</h3>;
       }
       return (
         <td>

@@ -77,7 +77,7 @@ export class DCEFWidgetView extends DOMWidgetView {
       }
       return React.createElement(WidgetDCFCell, props);
     };
-    console.log("widget el", this.el)
+    console.log('widget el', this.el);
 
     /*
     const el = this.el;

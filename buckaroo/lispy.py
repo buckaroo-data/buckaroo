@@ -186,7 +186,6 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
                     eval(exp, env)
                 x = x[-1]
             else:                    # (proc exp*)
-                print("exp", x)
                 exps = [eval(exp, env) for exp in x]
                 proc = exps.pop(0)
                 if isa(proc, Procedure):
@@ -196,6 +195,22 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
 
                     return proc(*exps)
 
+
+    def is_unparsed_atom_a_symbol(obj):
+        if isinstance(obj, dict):
+            if obj.get('symbol', False):
+                if len(obj) == 1:
+                    return True
+                elif len(obj) == 2 and obj.get('meta', False) is not False:
+                    #our symbols can have a meta key too
+                    return True
+        return False
+
+    def is_unparsed_atom_a_quote(obj):
+        if isinstance(obj, dict) and len(obj) == 1:
+            if obj.get('quote', False) is not False:
+                return True
+        return False
 
     def list_parse(lst):
         ret_list = []
@@ -207,15 +222,12 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
             while True:
                 if isinstance(x, list):
                     ret_list.append(list_parse(x))
-                elif isinstance(x, dict) and len(x) == 1: #hack to make the aprser easier
-                    if x.get('symbol', False):
-                        ret_list.append(Sym(x['symbol']))
-                    elif x.get('quote', False):
-                        quote_char = x.get('quote')
-                        quote_func = quotes[quote_char]
-                        ret_list.append([quote_func, list_parse(next(lst))])
-                    else:
-                        ret_list.append(x)
+                elif is_unparsed_atom_a_symbol(x):
+                    ret_list.append(Sym(x['symbol']))
+                elif is_unparsed_atom_a_quote(x):
+                    quote_char = x.get('quote')
+                    quote_func = quotes[quote_char]
+                    ret_list.append([quote_func, list_parse(next(lst))])
                 elif isinstance(x, dict):
                     print("x was a dict", x)
                     ret_list.append(x)

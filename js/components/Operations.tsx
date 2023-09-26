@@ -1,7 +1,4 @@
-import React, {
-  useState,
-  useEffect,
-} from 'react';
+import React, { useState, useEffect } from 'react';
 import _ from 'lodash';
 import {
   Operation,
@@ -82,7 +79,15 @@ export const OperationsList = ({
   );
 };
 
-export const OperationAdder = ({ column, addOperationCb, defaultArgs }:{ column:string, addOperationCb:any, defaultArgs:any } ): JSX.Element => {
+export const OperationAdder = ({
+  column,
+  addOperationCb,
+  defaultArgs,
+}: {
+  column: string;
+  addOperationCb: any;
+  defaultArgs: any;
+}): JSX.Element => {
   const addOperationByName = (localOperationName: string) => {
     return () => {
       const defaultOperation = defaultArgs[localOperationName];

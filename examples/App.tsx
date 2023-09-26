@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
-//import 'bootstrap/dist/css/bootstrap.min.css';
+import 'bootstrap/dist/css/bootstrap.min.css';
 import React from 'react';
 import {HashRouter as Router, Route, Link} from 'react-router-dom';
 //import {Button} from 'react-bootstrap';
@@ -16,7 +16,8 @@ const examples = {
     ColumnsEditorEx: {title: 'ColumnsEditor', file: 'ColumnsEditorEx'},
     CommandViewerEx: {title: 'CommandViewer', file: 'CommandViewerEx'},
     DFViewerEx: {title: 'DFViewer', file: 'DFViewerEx'},
-    StatusBarEx: {title: 'StatusBar', file: 'StatusBarEx'}
+    StatusBarEx: {title: 'StatusBar', file: 'StatusBarEx'},
+    HistogramEx: {title: 'Histogram', file: 'HistogramEx'}
 };
 
 // The examples use a code-loading technique that I have described in

@@ -5,14 +5,13 @@ import { Operation } from './OperationUtils';
 import { CommandConfigT } from './CommandUtils';
 //import {bakedCommandConfig} from './bakedOperationDefaults';
 import { DependentTabs, OperationResult } from './DependentTabs';
-import { tableDf, bakedCommandConfig } from './staticData'
+import { tableDf, bakedCommandConfig } from './staticData';
 
 export type OperationSetter = (ops: Operation[]) => void;
 export interface WidgetConfig {
-  showCommands:boolean;
-//  showTransformed:boolean;
+  showCommands: boolean;
+  //  showTransformed:boolean;
 }
-
 
 export function ColumnsEditor({
   df,
@@ -21,7 +20,7 @@ export function ColumnsEditor({
   setOperations,
   operationResult,
   commandConfig,
-  widgetConfig
+  widgetConfig,
 }: {
   df: DFWhole;
   activeColumn: string;
@@ -29,26 +28,29 @@ export function ColumnsEditor({
   setOperations: OperationSetter;
   operationResult: OperationResult;
   commandConfig: CommandConfigT;
-  widgetConfig:WidgetConfig
+  widgetConfig: WidgetConfig;
 }) {
   const allColumns = df.schema.fields.map((field) => field.name);
   //console.log('Columns Editor, commandConfig', commandConfig);
   return (
     <div className="columns-editor" style={{ width: '100%' }}>
-      {(widgetConfig.showCommands) ? (
-	<div>
-      <OperationViewer
-        operations={operations}
-        setOperations={setOperations}
-        activeColumn={activeColumn}
-        allColumns={allColumns}
-        commandConfig={commandConfig}/>
-      <DependentTabs
-        filledOperations={operations}
-        operationResult={operationResult}
-	/>
-    </div>
-    ) : <span></span>}
+      {widgetConfig.showCommands ? (
+        <div>
+          <OperationViewer
+            operations={operations}
+            setOperations={setOperations}
+            activeColumn={activeColumn}
+            allColumns={allColumns}
+            commandConfig={commandConfig}
+          />
+          <DependentTabs
+            filledOperations={operations}
+            operationResult={operationResult}
+          />
+        </div>
+      ) : (
+        <span></span>
+      )}
     </div>
   );
 }
@@ -69,8 +71,8 @@ export function ColumnsEditorEx() {
       commandConfig={bakedCommandConfig}
       operations={operations}
       setOperations={setOperations}
-    operationResult={baseOperationResults}
-    widgetConfig={{showCommands:true}}
+      operationResult={baseOperationResults}
+      widgetConfig={{ showCommands: true }}
     />
   );
 }

@@ -5,7 +5,6 @@ export const sym = (symbolName: string) => {
   return { symbol: symbolName };
 };
 
-
 export type Atom = number | string | SymbolT | ColEnumArgs;
 export type SettableArg = number | string | ColEnumArgs;
 

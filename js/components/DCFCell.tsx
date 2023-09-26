@@ -13,7 +13,6 @@ export type CommandConfigSetterT = (
   setter: Dispatch<SetStateAction<CommandConfigT>>
 ) => void;
 
-
 /*
   Widget DCFCell is meant to be used with callback functions and passed values, not explicit http calls
  */
@@ -25,7 +24,7 @@ export function WidgetDCFCell({
   commandConfig,
   dfConfig,
   on_dfConfig,
-  summaryDf
+  summaryDf,
 }: {
   origDf: DFWhole;
   operations: Operation[];
@@ -34,11 +33,11 @@ export function WidgetDCFCell({
   commandConfig: CommandConfigT;
   dfConfig: DfConfig;
   on_dfConfig: unknown;
-  summaryDf: DFWhole
+  summaryDf: DFWhole;
 }) {
   const [activeCol, setActiveCol] = useState('stoptime');
-  const widgetConfig: WidgetConfig = {showCommands:dfConfig.showCommands}
-  const localDfConfig = {...dfConfig, 'rowsShown': origDf.data.length || 0}
+  const widgetConfig: WidgetConfig = { showCommands: dfConfig.showCommands };
+  const localDfConfig = { ...dfConfig, rowsShown: origDf.data.length || 0 };
   return (
     <div
       className="dcf-root flex flex-col"
@@ -50,21 +49,24 @@ export function WidgetDCFCell({
       >
         <StatusBar config={localDfConfig} setConfig={on_dfConfig} />
         <DFViewer
-          df={(dfConfig.summaryStats ? summaryDf : origDf) }
+          df={dfConfig.summaryStats ? summaryDf : origDf}
           activeCol={activeCol}
           setActiveCol={setActiveCol}
         />
       </div>
-    {(widgetConfig.showCommands) ? (
-      <ColumnsEditor
-        df={origDf}
-        activeColumn={activeCol}
-        operations={operations}
-        setOperations={on_operations}
-        operationResult={operation_results}
-        commandConfig={commandConfig}
-        widgetConfig={widgetConfig}
-	/>) : <span></span>}
+      {widgetConfig.showCommands ? (
+        <ColumnsEditor
+          df={origDf}
+          activeColumn={activeCol}
+          operations={operations}
+          setOperations={on_operations}
+          operationResult={operation_results}
+          commandConfig={commandConfig}
+          widgetConfig={widgetConfig}
+        />
+      ) : (
+        <span></span>
+      )}
     </div>
   );
 }
@@ -90,7 +92,7 @@ export function WidgetDCFCellExample() {
       commandConfig={bakedCommandConfig}
       dfConfig={sampleConfig}
       on_dfConfig={setConfig}
-    summaryDf={tableDf}
+      summaryDf={tableDf}
     />
   );
 }
