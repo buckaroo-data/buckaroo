@@ -191,7 +191,7 @@ class BuckarooWidget(DOMWidget):
             #self.operations, this makes sure that machine_gen
             #cleaning code shows up too
             results['generated_py_code'] = self.generate_code(new_ops)
-            results['transformed_df'] = json.loads(self.transformed_df.to_json(orient='table', indent=2))
+            results['transformed_df'] = df_to_obj(self.transformed_df)
             results['transform_error'] = False
             self.run_post_processing()            
         except Exception as e:
