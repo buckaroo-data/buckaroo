@@ -36,7 +36,7 @@ dependencies = [
     "ipywidgets>=7.6.0,<9",
     "graphlib_backport>=1.0.0"
 ]
-version = "0.3.21"
+version = "0.3.22"
 
 [project.license]
 file = "LICENSE.txt"
