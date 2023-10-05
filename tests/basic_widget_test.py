@@ -45,7 +45,6 @@ def atest_symbol_meta():
 
     """
 
-
     df = pd.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
     w = BuckarooWidget(df)
     assert w.operation_results['generated_py_code'] == '# instantiation, unused'
@@ -64,4 +63,25 @@ def test_interpreter_errors():
         #dropping the same column will result in an error
         [{"symbol":"dropcol"},{"symbol":"df"},"int_col"]]
     assert w.operation_results['transform_error'] == '''"['int_col'] not found in axis"'''
+
+def test_analysis_pipeline():
+    """  uses built in analysis_management unit tests on the Buckaroo Widget as configured"""
+    w = BuckarooWidget(simple_df)
+    assert w.stats.ap.unit_test() == True
+
+def test_autotype_false():
+    """  uses built in analysis_management unit tests on the Buckaroo Widget as configured"""
+    w = BuckarooWidget(simple_df, autoType=False)
+    assert w.stats.ap.unit_test() == True
+    
+def test_post_processing():
+    def my_func(df):
+        return df['int_col'].sum()
+    
+    bw = BuckarooWidget(simple_df, postProcessingF=my_func)
+    assert bw.processed_result == 6
+
+    bw2 = BuckarooWidget(simple_df, autoType=False, postProcessingF=my_func)
+    assert bw2.processed_result == 6
+    
 

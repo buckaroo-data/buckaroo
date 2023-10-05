@@ -47,10 +47,26 @@ def produce_summary_df(df, ordered_objs, df_name='test_df'):
         for ser_name, err_kls in errs.items():
             err, kls = err_kls
             print("%s.summary(test_ser.%s)" % (kls.__name__, ser_name))
-    return pd.DataFrame(summary_col_dict), table_hint_col_dict
+    return pd.DataFrame(summary_col_dict), table_hint_col_dict, errs
+
+
 
 class NonExistentSummaryRowException(Exception):
     pass
+
+
+
+PERVERSE_DF = pd.DataFrame({
+    'all_nan': [np.nan] * 10,
+    'all_false': [False] * 10,
+    'all_True': [True] * 10,
+    'mixed_bool': np.concatenate([[True]*5, [False]*5]),
+    'mixed_float': np.concatenate([[0.5, np.nan, None], [6]*7]),
+    'float': [0.5] *10,
+    'int': [8] *10,
+    'negative': [-1] *10,
+    'UInt32': pd.Series([5]*10, dtype='UInt32')
+    })
 
 class AnalsysisPipeline(object):
     """
@@ -72,7 +88,6 @@ class AnalsysisPipeline(object):
 
         self.provided_summary_facts_set = set(all_provided)
 
-
         #all is a special value that will dipslay every row
         if self.summary_stats_display and not self.summary_stats_display == "all":
             #verify that we have a way of computing all of the facts we are displaying
@@ -91,13 +106,22 @@ class AnalsysisPipeline(object):
         not implemented yet.
 
         This helps interactive development by doing a smoke test on
-        each new iteration of summary stats function
+        each new iteration of summary stats function.
 
         """
-        pass
+        try:
+            output_df, table_hint_dict, errs = produce_summary_df(PERVERSE_DF, self.ordered_a_objs)
+            if len(errs) == 0:
+                return True
+            return False
+        except Exception as e:
+            print("analysis pipeline unit_test failed")
+            print(e)
+            return False
+
 
     def process_df(self, input_df):
-        output_df, table_hint_dict = produce_summary_df(input_df, self.ordered_a_objs)
+        output_df, table_hint_dict, errs = produce_summary_df(input_df, self.ordered_a_objs)
         return output_df, table_hint_dict
 
     def add_analysis(self, new_aobj):
@@ -109,6 +133,11 @@ class AnalsysisPipeline(object):
             new_aobj_set.append(aobj)
         new_aobj_set.append(new_aobj)
         self.verify_analysis_objects(new_aobj_set)
+        if not self.unit_test():
+            print("new analysis fails unit tests")
+            return False
+        return True
+            
 
 class DfStats(object):
     '''

@@ -202,6 +202,7 @@ class ColDisplayHints(ColAnalysis):
     @staticmethod
     def table_hints(sampled_ser, summary_ser, table_hint_col_dict):
         is_numeric = pd.api.types.is_numeric_dtype(sampled_ser.dtype)
+        is_bool = pd.api.types.is_bool_dtype(sampled_ser)
         # if not is_numeric:
         #     return dict(is_numeric=False)
         # if len(sampled_ser) == 0:
@@ -209,7 +210,7 @@ class ColDisplayHints(ColAnalysis):
         return dict(
             is_numeric=is_numeric,
             is_integer=pd.api.types.is_integer_dtype(sampled_ser),
-            min_digits=(is_numeric and int_digits(summary_ser.loc['min'])) or 0,
-            max_digits=(is_numeric and int_digits(summary_ser.loc['max'])) or 0,
+            min_digits=(is_numeric and not is_bool and int_digits(summary_ser.loc['min'])) or 0,
+            max_digits=(is_numeric and not is_bool and int_digits(summary_ser.loc['max'])) or 0,
             histogram=histogram(sampled_ser, summary_ser['nan_per']))
 

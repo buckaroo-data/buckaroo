@@ -12,6 +12,8 @@ DATETIME_META = {'datetime': 0.75, 'datetime_error': 0.25, 'int': 0.25, 'int_err
 
 INT_META = {'datetime': 0.0, 'datetime_error': 1.0, 'int': 0.75, 'int_error': 0.25, 'float': 0.75, 'float_error': 0.25, 'bool': 0.0, 'bool_error': 1.0}
 
+FULL_INT_META = {'datetime': 0.0, 'datetime_error': 0, 'int': 1, 'int_error': 0, 'float': 0, 'float_error': 0, 'bool': 0.0, 'bool_error': 0, 'exact_type': 'UInt32', 'general_type':'int'}
+
 FLOAT_META = {'datetime': 0.0, 'datetime_error': 1.0, 'int': 0.25, 'int_error': 0.75, 'float': 0.75, 'float_error': 0.25, 'bool': 0.0, 'bool_error': 1.0}
 
 STRING_META =  {'datetime': 0.0, 'datetime_error': 1.0, 'int': 0.0, 'int_error': 1.0, 'float': 0.25, 'float_error': 0.75, 'bool': 0.0, 'bool_error': 1.0}
@@ -61,6 +63,12 @@ def test_get_typing_metadata():
     
     #there are still problems here, the code isn't properly distinguishing bools from ints and bools
     assert BOOL_META == ac.get_typing_metadata(pd.Series(['a', 'b', False, True, False]))
+    assert FULL_INT_META == ac.get_typing_metadata(pd.Series([5]*10, dtype='UInt32'))
+
+    # what does the typing code do on "dtype" objects
+    ac.get_typing_metadata(pd.Series([pd.Series([5], dtype='UInt32').dtype]*3))
+
+
 
     #only nans
     assert ac.get_typing_metadata(pd.Series([None])) == ONLY_NANS_META

@@ -9,6 +9,7 @@ TODO: Add module docstring
 """
 import json
 import warnings
+import traceback
 
 from ipywidgets import DOMWidget
 from traitlets import Unicode, List, Dict, observe
@@ -17,21 +18,14 @@ from ._frontend import module_name, module_version
 from .all_transforms import configure_buckaroo, DefaultCommandKlsList
 from .lisp_utils import (lists_match, split_operations)
 
-from .auto_clean import get_auto_type_operations
+from .auto_clean import get_auto_type_operations, get_typing_metadata, recommend_type
 from .down_sample import sample
 
 from .analysis import (TypingStats, DefaultSummaryStats, ColDisplayHints)
-
-
 from .analysis_management import DfStats
-
-
-
 from pandas.io.json import dumps as pdumps
 
 
-#empty_df = pd.DataFrame({})
-#json.loads(empty_df.to_json(orient='table', indent=2))
 EMPTY_DF_OBJ = {'schema': {'fields': [{'name': 'index', 'type': 'string'}],
   'primaryKey': ['index'],
   'pandas_version': '1.4.0'},
@@ -76,6 +70,9 @@ class BuckarooWidget(DOMWidget):
     machine_gen_operations = List().tag(sync=True)
     command_classes = DefaultCommandKlsList
 
+    typing_metadata_f = staticmethod(get_typing_metadata)
+    typing_recommend_f = staticmethod(recommend_type)
+
     origDf = Dict({}).tag(sync=True)
     summaryDf = Dict({}).tag(sync=True)
 
@@ -92,8 +89,8 @@ class BuckarooWidget(DOMWidget):
         'sampled':False,
         'summaryStats': False,
         'reorderdColumns': False,
-        'showTransformed': True,
         'showCommands': True,
+        'autoType': True,
     }).tag(sync=True)
 
 
@@ -113,7 +110,6 @@ class BuckarooWidget(DOMWidget):
         tempDfc.update(dict(
             totalRows=len(df),
             columns=len(df.columns),
-            #removing showCommands for now, mirroring showTransformed
             showCommands=showCommands))
         tempDfc['sampled'] = self.should_sample(df, sampled, reorderdColumns)
         return tempDfc
@@ -122,27 +118,57 @@ class BuckarooWidget(DOMWidget):
                  sampled=True,
                  summaryStats=False,
                  reorderdColumns=False,
-                 showCommands=True):
+                 showCommands=True,
+                 autoType=True,
+                 postProcessingF=None,
+                 ):
+
         super().__init__()
         warnings.filterwarnings('ignore')
         #moving setup_from_command_kls_list early in the init because
         #it's relatively benign and not tied to other linked updates
+        self.postProcessingF = postProcessingF
+        self.processed_result = None
+        self.transformed_df = None
 
         self.setup_from_command_kls_list()
         self.dfConfig = self.get_df_config(df, sampled, reorderdColumns, showCommands)
-        #we need dfConfig setup first before we get the proper
-        #working_df  and generate the typed_df
+        #we need dfConfig setup first before we get the proper working_df for auto_cleaning
         self.raw_df = df
-
-        # this will trigger the setting of self.typed_df
-        self.operations = get_auto_type_operations(df)
+        self.run_autoclean(autoType)
+            
         warnings.filterwarnings('default')
+
+    def run_autoclean(self, autoType):
+        if autoType:
+            # this will trigger the setting of self.typed_df
+            self.operations = get_auto_type_operations(
+                self.raw_df, metadata_f=self.typing_metadata_f,
+                recommend_f=self.typing_recommend_f)
+        else:
+            self.set_typed_df(self.get_working_df())
+            #need to run this for the no autoclean case
+            self.run_post_processing()
+        
+    def set_metadata_f(self, new_f):
+        self.typing_metadata_f = staticmethod(new_f)
+        self.run_autoclean()
+
+    def set_recommend_f(self, new_f):
+        self.typing_recommend_f = staticmethod(new_f)
+        self.run_autoclean()
 
     @observe('dfConfig')
     def update_based_on_df_config(self, change):
-        if hasattr(self, 'typed_df'):
-            self.origDf = df_to_obj(self.typed_df, self.typed_df.columns, table_hints=self.stats.table_hints)
         #otherwise this is a call before typed_df has been completely setup
+        if hasattr(self, 'typed_df'):
+            if self.dfConfig['reorderdColumns']:
+                #ideally this won't require a reserialization.  All
+                #possible col_orders shoudl be serialized once, and the
+                #frontend should just toggle from them
+              self.origDf = df_to_obj(self.typed_df, self.stats.col_order, table_hints=self.stats.table_hints)
+            else:
+                self.origDf = df_to_obj(self.typed_df, self.typed_df.columns, table_hints=self.stats.table_hints)
 
     @observe('operations')
     def handle_operations(self, change):
@@ -160,36 +186,52 @@ class BuckarooWidget(DOMWidget):
 
         results = {}
         try:
-            transformed_df = self.interpret_ops(user_gen_ops, self.typed_df)
+            self.transformed_df = self.interpret_ops(user_gen_ops, self.typed_df)
             #note we call gneerate_py_code based on the full
             #self.operations, this makes sure that machine_gen
             #cleaning code shows up too
             results['generated_py_code'] = self.generate_code(new_ops)
-            results['transformed_df'] = json.loads(transformed_df.to_json(orient='table', indent=2))
+            results['transformed_df'] = json.loads(self.transformed_df.to_json(orient='table', indent=2))
             results['transform_error'] = False
+            self.run_post_processing()            
         except Exception as e:
             results['transformed_df'] = EMPTY_DF_OBJ
             print(e)
             results['transform_error'] = str(e)
         self.operation_results = results
 
+    def run_post_processing(self):
+        if self.postProcessingF:
+            try:
+                if self.transformed_df is None:
+                    working_df = self.get_working_df()
+                else:
+                    working_df = self.transformed_df
+                self.processed_result = self.postProcessingF(working_df)
+            except Exception as e:
+                traceback.print_exc()
+
     @observe('machine_gen_operations')
     def interpret_machine_gen_ops(self, change, force=False):
         if (not force) and lists_match(change['old'], change['new']):
             return # nothing changed, do no computations
         new_ops = change['new']
-        
+        self.set_typed_df(self.interpret_ops(new_ops, self.get_working_df()))
+
+    def get_working_df(self):
         #this won't listen to sampled changes proeprly
         if self.dfConfig['sampled']:
-            working_df = sample(self.raw_df, self.dfConfig['sampleSize'])
+            return sample(self.raw_df, self.dfConfig['sampleSize'])
         else:
-            working_df = self.raw_df
-        self.typed_df = self.interpret_ops(new_ops, working_df)
-
+            return self.raw_df        
+        
+    def set_typed_df(self, new_df):
+        self.typed_df = new_df
         # stats need to be rerun each time 
         self.stats = DfStats(self.typed_df, [TypingStats, DefaultSummaryStats, ColDisplayHints])
         self.summaryDf = df_to_obj(self.stats.presentation_sdf, self.stats.col_order)
         self.update_based_on_df_config(3)
+
 
     def generate_code(self, operations):
         if len(operations) == 0:
@@ -222,16 +264,3 @@ class BuckarooWidget(DOMWidget):
         self.summaryDf = df_to_obj(self.stats.presentation_sdf, self.stats.col_order)
         #just trigger redisplay
         self.update_based_on_df_config(3)
-
-        
-class Unused():
-    def update_based_on_df_config(self, change):
-
-        if self.dfConfig['reorderdColumns']:
-            #ideally this won't require a reserialization.  All
-            #possible col_orders shoudl be serialized once, and the
-            #frontend should just toggle from them
-            #self.origDf = df_to_obj(tdf, self.stats.col_order, table_hints=self.stats.table_hints)
-            self.origDf = df_to_obj(self.typed_df, self.stats.col_order, table_hints=self.stats.table_hints)
-        else:
-            self.origDf = df_to_obj(tdf, tdf.columns, table_hints=self.stats.table_hints)

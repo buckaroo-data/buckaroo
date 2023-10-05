@@ -56,21 +56,29 @@ def get_object_typing_metadata(ser):
                 counts['datetime_error'] += 1
         except (pd.core.tools.datetimes.DateParseError, ValueError, TypeError):
             counts['datetime_error'] += 1
-        try:
-            int(v)
-            counts['int'] += 1
-        except ValueError:
-            counts['int_error'] += 1
-        try:
-            float(v)
-            counts['float'] += 1
-        except ValueError:
-            counts['float_error'] += 1
-        
+
         if isinstance(v, bool):
             counts['bool'] += 1
         else:
             counts['bool_error'] += 1
+        if isinstance(v, str):
+            try:
+                int(v)
+                counts['int'] += 1
+            except ValueError:
+                counts['int_error'] += 1
+            try:
+                float(v)
+                counts['float'] += 1
+            except ValueError:
+                counts['float_error'] += 1
+        elif isinstance(v, float) or isinstance(v, int):
+            int(v)
+            counts['int'] += 1
+            float(v)
+            counts['float'] += 1
+            
+        
 
     if len(ser) == 0:
         return counts
@@ -194,15 +202,13 @@ def auto_type_df(df):
         new_data[c] = coerce_series(df[c], recommended_types[c])
     return pd.DataFrame(new_data)
 
-def get_auto_type_operations(df):
+def get_auto_type_operations(df, metadata_f, recommend_f):
     #this is much faster because we only run the slow function on a maximum of 200 rows.  
     #That's a good size for an estimate
     sample_size = min(len(df), 200)
     cleaning_commands = []
     for c in df.columns:
-        new_type = recommend_type(get_typing_metadata(df[c].sample(sample_size)))
+        metadata = metadata_f(df[c].sample(sample_size))
+        new_type = recommend_f(metadata)
         cleaning_commands.append(emit_command(c, new_type))
     return cleaning_commands
-
-
-

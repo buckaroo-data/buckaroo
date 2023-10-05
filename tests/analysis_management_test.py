@@ -30,9 +30,22 @@ class TestAnalysisPipeline(unittest.TestCase):
             @staticmethod
             def summary(sampled_ser, summary_ser, ser):
                 return dict(foo=8)
-        ap.add_analysis(Foo)
+        assert ap.add_analysis(Foo) == True #verify no errors thrown
         sdf, _unused = ap.process_df(df)
         self.assertEqual(sdf.loc['foo']['tripduration'], 8)
+
+    def test_add_buggy_aobj(self):
+        ap = AnalsysisPipeline([TypingStats, DefaultSummaryStats])
+        class Foo(ColAnalysis):
+            provided_summary = [
+                'foo',]
+            requires_summary = ['length']
+
+            @staticmethod
+            def summary(sampled_ser, summary_ser, ser):
+                1/0 #throw an error
+                return dict(foo=8)
+        assert ap.add_analysis(Foo) == False
 
     def test_replace_aobj(self):
         ap = AnalsysisPipeline([TypingStats, DefaultSummaryStats])
