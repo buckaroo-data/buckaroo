@@ -52,6 +52,18 @@ export const anyFormatter = (params: ValueFormatterParams): string => {
   }
   return val;
 };
+
+const getNumericFormatter = (totalWidth:number) => {
+  const formatter = new Intl.NumberFormat('en-US');
+  const numericFormatter = (params: ValueFormatterParams): string => {
+    const val = params.value;
+    if(val === null) {
+      return ''
+    }
+    return formatter.format(params.value).padStart(totalWidth, ' ');
+  }
+  return numericFormatter
+}
 /*
   console.log((new Intl.NumberFormat('en-US')).format(amount))
   console.log((new Intl.NumberFormat('en-US', {  maximumFractionDigits: 1})).format(number))
@@ -73,12 +85,7 @@ function getFormatter(hint: ColumnHint): ValueFormatterFunc<unknown> {
 
     if (hint.is_integer) {
       const totalWidth = commas + hint.max_digits;
-      return (params: ValueFormatterParams): string => {
-        console.log('params', params);
-
-        const formatter = new Intl.NumberFormat('en-US');
-        return formatter.format(params.value).padStart(totalWidth, ' ');
-      };
+      return getNumericFormatter(totalWidth);
     } else {
       /*
 
@@ -98,7 +105,9 @@ function getFormatter(hint: ColumnHint): ValueFormatterFunc<unknown> {
       };*/
       return (params: ValueFormatterParams): string => {
         //console.log("params", params)
-
+	if(params.value === null) {
+	  return '';
+	}
         return floatFormatter.format(params.value);
       };
     }

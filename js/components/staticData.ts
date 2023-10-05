@@ -33,7 +33,7 @@ export interface DFColumn {
   name: string;
   type: string;
 }
-export type DFDataRow = Record<string, string | number | boolean>;
+export type DFDataRow = Record<string, string | number | boolean | null>;
 
 export type DFData = DFDataRow[];
 
@@ -272,6 +272,9 @@ export const tableDf: DFWhole = {
   schema: {
     fields: [
       { name: 'index', type: 'integer' },
+      { name: 'nanNumeric', type: 'int' },
+      { name: 'nanObject', type: 'int' },
+      { name: 'nanFloat', type: 'float' },
       { name: 'end station name', type: 'string' },
       { name: 'tripduration', type: 'integer' },
       { name: 'start station name', type: 'string' },
@@ -287,6 +290,9 @@ export const tableDf: DFWhole = {
       tripduration: 471,
       'start station name': 'Catherine St & Monroe St',
       floatCol: '1.111',
+      nanNumeric: null,
+      nanObject: null,
+      nanFloat: null,
     },
     {
       index: 1,
@@ -294,6 +300,9 @@ export const tableDf: DFWhole = {
       tripduration: 1494,
       'start station name': '1 Ave & E 30 St',
       floatCol: '8.888',
+      nanNumeric: null,
+      nanObject: null,
+      nanFloat: null,
     },
     {
       index: 2,
@@ -301,6 +310,9 @@ export const tableDf: DFWhole = {
       tripduration: 464,
       'start station name': 'E 48 St & 3 Ave',
       floatCol: '9.999',
+      nanNumeric: null,
+      nanObject: null,
+      nanFloat: null,
     },
     {
       index: 3,
@@ -308,6 +320,10 @@ export const tableDf: DFWhole = {
       tripduration: 373,
       'start station name': 'Pershing Square N',
       floatCol: '-10.1',
+      nanCol: null,
+      nanNumeric: null,
+      nanObject: null,
+      nanFloat: null,
     },
     {
       index: 4,
@@ -315,6 +331,9 @@ export const tableDf: DFWhole = {
       tripduration: 660,
       'start station name': 'Atlantic Ave & Fort Greene Pl',
       floatCol: '10.99',
+      nanNumeric: null,
+      nanObject: null,
+      nanFloat: null,
     },
   ],
   table_hints: {
@@ -345,5 +364,23 @@ export const tableDf: DFWhole = {
         { name: 'NA', cat_pop: 0.0 },
       ],
     },
+    nanNumeric: {
+      is_numeric: true,
+      is_integer: true,
+      min_digits: 1,
+      max_digits: 3,
+      histogram:histograms.num_histo
+    },
+    nanFloat: {
+      is_numeric: true,
+      is_integer: false,
+      min_digits: 1,
+      max_digits: 3,
+      histogram:histograms.num_histo
+    },
+    nanObject: {
+      is_numeric: false,
+    }
+
   },
 };

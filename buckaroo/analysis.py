@@ -71,6 +71,7 @@ class DefaultSummaryStats(ColAnalysis):
 
         is_numeric = pd.api.types.is_numeric_dtype(ser)
         is_object = pd.api.types.is_object_dtype
+        is_bool = pd.api.types.is_bool_dtype(ser)
 
         base_d = dict(
             length=l,
@@ -82,15 +83,18 @@ class DefaultSummaryStats(ColAnalysis):
             unique_per=unique_count/l,
             nan_per=nan_count/l,
             mode=get_mode(ser),
-            min=(is_numeric and ser.dropna().min() or np.nan),
-            max=(is_numeric and ser.dropna().max() or np.nan),
-            mean=(is_numeric and ser.dropna().mean() or np.nan))
-        if is_numeric:
-            base_d['mean'] = ser.mean()
+            min=np.nan,
+            max=np.nan)
+        if is_numeric and not is_bool:
+            base_d.update({
+                'mean': ser.mean(),
+                'min': ser.dropna().min(),
+                'max': ser.dropna().max()})
         return base_d
 
-
 def int_digits(n):
+    if pd.isna(n):
+        return 1
     if np.isnan(n):
         return 1
     if n == 0:
@@ -207,10 +211,15 @@ class ColDisplayHints(ColAnalysis):
         #     return dict(is_numeric=False)
         # if len(sampled_ser) == 0:
         #     return dict(is_numeric=False)
-        return dict(
+        base_dict = dict(
             is_numeric=is_numeric,
             is_integer=pd.api.types.is_integer_dtype(sampled_ser),
-            min_digits=(is_numeric and not is_bool and int_digits(summary_ser.loc['min'])) or 0,
-            max_digits=(is_numeric and not is_bool and int_digits(summary_ser.loc['max'])) or 0,
             histogram=histogram(sampled_ser, summary_ser['nan_per']))
+
+        if is_numeric and not is_bool:
+            base_dict.update({
+                'min_digits':int_digits(summary_ser.loc['min']),
+                'max_digits':int_digits(summary_ser.loc['max']),
+                })
+        return base_dict
 

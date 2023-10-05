@@ -4,9 +4,20 @@ import traceback
 from buckaroo.pluggable_analysis_framework import (
     ColAnalysis, order_analysis, check_solvable, NotProvidedException)
 
-
 FAST_SUMMARY_WHEN_GREATER = 1_000_000
 
+PERVERSE_DF = pd.DataFrame({
+    'all_nan': [np.nan] * 10,
+    'all_false': [False] * 10,
+    'all_True': [True] * 10,
+    'mixed_bool': np.concatenate([[True]*5, [False]*5]),
+    'mixed_float': np.concatenate([[0.5, np.nan, None], [6]*7]),
+    'float': [0.5] *10,
+    'int': [8] *10,
+    'negative': [-1] *10,
+    'UInt32': pd.Series([5]*10, dtype='UInt32'),
+    'UInt8None':pd.Series([None] * 10, dtype='UInt8')
+    })
 
 def produce_summary_df(df, ordered_objs, df_name='test_df'):
     """
@@ -49,24 +60,9 @@ def produce_summary_df(df, ordered_objs, df_name='test_df'):
             print("%s.summary(test_ser.%s)" % (kls.__name__, ser_name))
     return pd.DataFrame(summary_col_dict), table_hint_col_dict, errs
 
-
-
 class NonExistentSummaryRowException(Exception):
     pass
 
-
-
-PERVERSE_DF = pd.DataFrame({
-    'all_nan': [np.nan] * 10,
-    'all_false': [False] * 10,
-    'all_True': [True] * 10,
-    'mixed_bool': np.concatenate([[True]*5, [False]*5]),
-    'mixed_float': np.concatenate([[0.5, np.nan, None], [6]*7]),
-    'float': [0.5] *10,
-    'int': [8] *10,
-    'negative': [-1] *10,
-    'UInt32': pd.Series([5]*10, dtype='UInt32')
-    })
 
 class AnalsysisPipeline(object):
     """

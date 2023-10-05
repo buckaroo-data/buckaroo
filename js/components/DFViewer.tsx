@@ -31,7 +31,11 @@ export function DFViewer(
     setActiveCol: () => null,
   }
 ) {
+
   const [agColsPure, agData] = dfToAgrid(df);
+  console.log("dfviewer df", df);
+  console.log("dfviewer agData", agData);
+  
   const styledColumns = updateAtMatch(
     _.clone(agColsPure),
     activeCol || '___never',

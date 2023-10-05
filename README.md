@@ -221,7 +221,9 @@ For a development installation:
 ```bash
 git clone https://github.com/paddymul/buckaroo.git
 cd buckaroo
-conda install ipywidgets=8 jupyterlab
+#we need to build against 3.6.5, jupyterlab 4.0 has different JS typing that conflicts
+# the installable still works in JL4
+pip install build twine pytest jupyterlab==3.6.5
 pip install -ve .
 ```
 

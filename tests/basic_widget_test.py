@@ -1,14 +1,18 @@
 import pandas as pd
 from IPython.display import display
 from buckaroo.buckaroo_widget import BuckarooWidget
+from buckaroo.analysis_management import PERVERSE_DF
 
 
 simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
 
 def test_basic_instantiation():
-    df = simple_df
-    w = BuckarooWidget(df)
+    w = BuckarooWidget(simple_df)
     assert w.dfConfig['totalRows'] == 3
+
+def test_perverse_instantiation():
+    w = BuckarooWidget(PERVERSE_DF)
+    assert w.dfConfig['totalRows'] == 10
 
 def test_basic_display():
     df = simple_df
