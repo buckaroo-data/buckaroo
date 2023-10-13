@@ -3,6 +3,7 @@ import pandas as pd
 import traceback
 from buckaroo.pluggable_analysis_framework import (
     ColAnalysis, order_analysis, check_solvable, NotProvidedException)
+from buckaroo.serialization_utils import pd_py_serialize, pick, d_update
 
 FAST_SUMMARY_WHEN_GREATER = 1_000_000
 
@@ -12,12 +13,29 @@ PERVERSE_DF = pd.DataFrame({
     'all_True': [True] * 10,
     'mixed_bool': np.concatenate([[True]*5, [False]*5]),
     'mixed_float': np.concatenate([[0.5, np.nan, None], [6]*7]),
-    'float': [0.5] *10,
+    'float': [0.5]*10,
     'int': [8] *10,
-    'negative': [-1] *10,
+    'negative': [-1]*10,
     'UInt32': pd.Series([5]*10, dtype='UInt32'),
     'UInt8None':pd.Series([None] * 10, dtype='UInt8')
     })
+
+
+BASE_COL_HINT = {
+    'is_numeric': False,
+    'is_integer': None,
+    'min_digits':None,
+    'max_digits':None,
+    'histogram': []}
+
+def reproduce_summary(ser_name, kls, summary_df):
+    summary_ser = summary_df[ser_name]
+    minimal_summary_dict = pick(summary_ser, kls.requires_summary)
+    sum_ser_repr = "pd.Series(%s)" % pd_py_serialize(minimal_summary_dict)
+
+    print("%s.summary(PERVERSE_DF['%s'], %s, PERVERSE_DF['%s'])" % (
+        kls.cname(), ser_name, sum_ser_repr, ser_name))
+
 
 def produce_summary_df(df, ordered_objs, df_name='test_df'):
     """
@@ -27,42 +45,55 @@ def produce_summary_df(df, ordered_objs, df_name='test_df'):
     errs = {}
     summary_col_dict = {}
     table_hint_col_dict = {}
+
     #figure out how to add in "index"... but just for table_hints
     for ser_name in df.columns:
         ser = df[ser_name]
-        #fixme
+        #FIXME: actually sample the series.  waiting until I have time
+        #to proeprly benchmark
+
         sampled_ser = ser
         summary_ser = pd.Series({}, dtype='object')
         table_hint_dict = {}
         for a_kls in ordered_objs:
             try:
-                summary_res = a_kls.summary(ser, summary_ser, ser)
+                if a_kls.quiet or a_kls.quiet_warnings:
+                    warnings.filterwarnings('ignore')
+                    summary_res = a_kls.summary(ser, summary_ser, ser)
+                    warnings.filterwarnings('default')
+                else:
+                    summary_res = a_kls.summary(ser, summary_ser, ser)
                 for k,v in summary_res.items():
                     summary_ser.loc[k] = v
-                th_dict = a_kls.table_hints(sampled_ser, summary_ser, table_hint_dict)
-                for k,v in th_dict.items():
-                    table_hint_dict[k] = v
             except Exception as e:
-                print("summary_ser", summary_ser)
-                errs[ser_name] = e, a_kls
-                traceback.print_exc()
+                if not a_kls.quiet:
+                    errs[ser_name] = e, a_kls
+                    #traceback.print_exc()
                 continue
         summary_col_dict[ser_name] = summary_ser
-        table_hint_col_dict[ser_name] = table_hint_dict
+
+        table_hint_col_dict[ser_name] = pick(
+            d_update(BASE_COL_HINT, summary_ser.to_dict()),
+            BASE_COL_HINT.keys())
+    summary_df = pd.DataFrame(summary_col_dict)
+    table_hints = table_hint_col_dict
     if errs:
         for ser_name, err_kls in errs.items():
-            err, kls = err_kls
-            print("%r failed on %s with %r" % (kls, ser_name, err))
-        print("Reproduce")
-        print("from pluggable_analysis import test_ser")
+          err, kls = err_kls
+          print("%r failed on %s with %r" % (kls, ser_name, err))
+
+        print("Reproduction code")
+        print("-" * 80)
+        print("from buckaroo.analysis_management import PERVERSE_DF")
         for ser_name, err_kls in errs.items():
-            err, kls = err_kls
-            print("%s.summary(test_ser.%s)" % (kls.__name__, ser_name))
-    return pd.DataFrame(summary_col_dict), table_hint_col_dict, errs
+          err, kls = err_kls
+          reproduce_summary(ser_name, kls, summary_df)
+        print("-" * 80)
+
+    return summary_df, table_hints, errs
 
 class NonExistentSummaryRowException(Exception):
     pass
-
 
 class AnalsysisPipeline(object):
     """
@@ -78,7 +109,7 @@ class AnalsysisPipeline(object):
     def process_summary_facts_set(self):
         all_provided = []
         for a_obj in self.ordered_a_objs:
-            all_provided.extend(a_obj.provided_summary)
+            all_provided.extend(a_obj.provides_summary)
             if a_obj.summary_stats_display:
                 self.summary_stats_display = a_obj.summary_stats_display
 
@@ -88,7 +119,8 @@ class AnalsysisPipeline(object):
         if self.summary_stats_display and not self.summary_stats_display == "all":
             #verify that we have a way of computing all of the facts we are displaying
             if not self.provided_summary_facts_set.issuperset(set(self.summary_stats_display)):
-                raise NonExistentSummaryRowException()
+                missing = set(self.summary_stats_display) - set(self.provided_summary_facts_set)
+                raise NonExistentSummaryRowException(missing)
 
     def verify_analysis_objects(self, analysis_objects):
         self.ordered_a_objs = order_analysis(analysis_objects)

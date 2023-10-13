@@ -14,29 +14,29 @@ from buckaroo.analysis import (TypingStats, DefaultSummaryStats)
 from .fixtures import (test_df, df, DistinctCount, Len, DistinctPer, DCLen, DependsNoProvides)
 
 class NoRoute(ColAnalysis):    
-    provided_summary = ['not_used']
+    provides_summary = ['not_used']
     requires_summary = ["does_not_exist"]
     
 class CycleA(ColAnalysis):
-    provided_summary = ['cycle_a']
+    provides_summary = ['cycle_a']
     requires_summary = ["cycle_b"]
 
 class CycleB(ColAnalysis):
-    provided_summary = ['cycle_b']
+    provides_summary = ['cycle_b']
     requires_summary = ["cycle_a"]
 
 class CA_AB(ColAnalysis):
-    provided_summary = ["a", "b"]
+    provides_summary = ["a", "b"]
 
 class CA_CD(ColAnalysis):
-    provided_summary = ["c", "d"]
+    provides_summary = ["c", "d"]
 
 class CA_EF(ColAnalysis):
-    provided_summary = ["e", "f"]
+    provides_summary = ["e", "f"]
     requires_summary = ["a", "b", "c", "d"]
 
 class CA_G(ColAnalysis):
-    provided_summary = ["g"]
+    provides_summary = ["g"]
     requires_summary = ["e"]
 
 
@@ -64,11 +64,12 @@ class TestOrderAnalysis(unittest.TestCase):
             # as long as they occur before other classes
 
     def test_no_provides(self):
-        # order_analysis should work properly with ColAnalysis objects taht don't provide any summary_stats
+        # order_analysis should work properly with ColAnalysis objects that don't provide any summary_stats
+
         self.assertEqual(
             order_analysis([DCLen, DistinctPer, DependsNoProvides]),
             [DCLen, DependsNoProvides, DistinctPer])
-        
+
     def test_cycle(self):
         with self.assertRaises(graphlib.CycleError):
             order_analysis([CycleA, CycleB])
@@ -77,16 +78,3 @@ class TestOrderAnalysis(unittest.TestCase):
         check_solvable([Len])
         with self.assertRaises(NotProvidedException):
             check_solvable([NoRoute])
-
-
-
-"""
-to run the tests as regular python functions use the following code.
-This will be useful for live testing adding analysis funcs
-
-loader = unittest.TestLoader()
-suite  = unittest.TestSuite()
-tests = loader.loadTestsFromTestCase(TestOrderAnalysis)
-suite.addTests(tests)
-ab = unittest.TextTestRunner(verbosity=3).run(suite)
-"""

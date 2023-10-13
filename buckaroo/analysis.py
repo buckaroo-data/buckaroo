@@ -35,7 +35,7 @@ Overtime codebases will probably trend towards many classes with single facts, b
 """
 
 class TypingStats(ColAnalysis):
-    provided_summary = [
+    provides_summary = [
         'dtype', 'is_numeric', 'is_integer', 'is_datetime',]
 
     @staticmethod
@@ -49,7 +49,7 @@ class TypingStats(ColAnalysis):
             )
 
 class DefaultSummaryStats(ColAnalysis):
-    provided_summary = [
+    provides_summary = [
         'length', 'min', 'max', 'mean', 'nan_count', 'distinct_count',
         'distinct_per', 'empty_count', 'empty_per', 'unique_per', 'nan_per',
         'mode']
@@ -198,19 +198,13 @@ def histogram(ser, nan_per):
 
 class ColDisplayHints(ColAnalysis):
     requires_summary = ['min', 'max'] # What summary stats does this analysis provide
-    provided_summary = []
-    
-    provides_hints = [
+    provides_summary = [
         'is_numeric', 'is_integer', 'min_digits', 'max_digits', 'histogram']
 
     @staticmethod
-    def table_hints(sampled_ser, summary_ser, table_hint_col_dict):
+    def summary(sampled_ser, summary_ser, ser):
         is_numeric = pd.api.types.is_numeric_dtype(sampled_ser.dtype)
         is_bool = pd.api.types.is_bool_dtype(sampled_ser)
-        # if not is_numeric:
-        #     return dict(is_numeric=False)
-        # if len(sampled_ser) == 0:
-        #     return dict(is_numeric=False)
         base_dict = dict(
             is_numeric=is_numeric,
             is_integer=pd.api.types.is_integer_dtype(sampled_ser),

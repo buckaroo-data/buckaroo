@@ -13,7 +13,7 @@ df = pd.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
 
 class DistinctCount(ColAnalysis):
     requires_raw = True
-    provided_summary = ["distinct_count"]
+    provides_summary = ["distinct_count"]
     @staticmethod
     def summary(sampled_ser, summary_ser, raw_ser):
         val_counts = raw_ser.value_counts()
@@ -21,7 +21,7 @@ class DistinctCount(ColAnalysis):
         return {'distinct_count': distinct_count}
 
 class Len(ColAnalysis):
-    provided_summary = ["len"]
+    provides_summary = ["len"]
     requires_raw = True
     @staticmethod
     def summary(sampled_ser, summary_ser, raw_ser):
@@ -29,7 +29,7 @@ class Len(ColAnalysis):
 
 
 class DistinctPer(ColAnalysis):
-    provided_summary = ["distinct_per"]
+    provides_summary = ["distinct_per"]
     requires_summary = ["len", "distinct_count"]
     
     @staticmethod
@@ -38,7 +38,7 @@ class DistinctPer(ColAnalysis):
 
 class DistinctCount(ColAnalysis):
     requires_raw = True
-    provided_summary = ["distinct_count"]
+    provides_summary = ["distinct_count"]
     @staticmethod
     def summary(sampled_ser, summary_ser, raw_ser):
         val_counts = raw_ser.value_counts()
@@ -46,14 +46,14 @@ class DistinctCount(ColAnalysis):
         return {'distinct_count': distinct_count}
 
 class Len(ColAnalysis):
-    provided_summary = ["len"]
+    provides_summary = ["len"]
     requires_raw = True
     @staticmethod
     def summary(sampled_ser, summary_ser, raw_ser):
         return {'len': len(raw_ser)}
 
 class DCLen(ColAnalysis):
-    provided_summary = ["len", "distinct_count"]
+    provides_summary = ["len", "distinct_count"]
     requires_raw = True
     @staticmethod
     def summary(sampled_ser, summary_ser, raw_ser):
@@ -62,7 +62,7 @@ class DCLen(ColAnalysis):
         return {'len':len(raw_ser), 'distinct_count':distinct_count}
 
 class DistinctPer(ColAnalysis):
-    provided_summary = ["distinct_per"]
+    provides_summary = ["distinct_per"]
     requires_summary = ["len", "distinct_count"]
     
     @staticmethod

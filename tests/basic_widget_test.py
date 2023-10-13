@@ -6,6 +6,10 @@ from buckaroo.analysis_management import PERVERSE_DF
 
 simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
 
+#test against this too
+word_only_df = pd.DataFrame({'letters': 'h o r s e'.split(' ')})
+
+
 def test_basic_instantiation():
     w = BuckarooWidget(simple_df)
     assert w.dfConfig['totalRows'] == 3

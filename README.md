@@ -223,7 +223,7 @@ git clone https://github.com/paddymul/buckaroo.git
 cd buckaroo
 #we need to build against 3.6.5, jupyterlab 4.0 has different JS typing that conflicts
 # the installable still works in JL4
-pip install build twine pytest jupyterlab==3.6.5
+pip install build twine pytest sphinx-build jupyterlab==3.6.5
 pip install -ve .
 ```
 
@@ -238,6 +238,18 @@ jupyter labextension develop . --overwrite
 
 Note for developers: the `--symlink` argument on Linux or OS X allows one to modify the JavaScript code in-place. This feature is not available with Windows.
 `
+### Developing the JS side
+
+There are a series of examples of the components in [examples/ex](./examples/ex).
+
+
+
+Instructions
+```bash
+npm install
+npm run dev
+```
+
 
 ## Contributions
 

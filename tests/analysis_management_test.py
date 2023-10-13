@@ -10,10 +10,37 @@ from buckaroo.analysis_management import (
 from buckaroo.analysis import (TypingStats, DefaultSummaryStats)
 from .fixtures import (test_df, df, DistinctCount, Len, DistinctPer, DCLen)
 
+class DumbTableHints(ColAnalysis):
+    provides_summary = [
+        'is_numeric', 'is_integer', 'min_digits', 'max_digits', 'histogram']
+
+    @staticmethod
+    def summary(sampled_ser, summary_ser, ser):
+        return {'is_numeric':True,
+                'is_integer':False,
+                'min_digits':3,
+                'max_digits':10,
+                'histogram': []}
+
+
 class TestAnalysisPipeline(unittest.TestCase):
     def test_produce_summary_df(self):
         produce_summary_df(test_df, [DistinctCount, Len, DistinctPer], 'test_df')
 
+    def test_produce_summary_df_hints(self):
+        #this test should be ported over to the full basic_widget test with actaul verificaiton of values
+        
+        summary_df, hints, errs = produce_summary_df(
+            test_df, [DumbTableHints], 'test_df')
+
+        for col, hint_obj in hints.items():
+            #hacky replication of typescript types, just basically testing that hints are constructed properly
+            if hint_obj['is_numeric'] == False:
+                assert 'histogram' in hint_obj.keys()
+            else:
+                expected_set = set(
+                    ['is_numeric', 'is_integer', 'min_digits', 'max_digits', 'histogram'])
+                assert expected_set == set(hint_obj.keys())
 
     def test_pipeline_base(self):
         ap = AnalsysisPipeline([TypingStats, DefaultSummaryStats])
@@ -23,8 +50,7 @@ class TestAnalysisPipeline(unittest.TestCase):
     def test_add_aobj(self):
         ap = AnalsysisPipeline([TypingStats, DefaultSummaryStats])
         class Foo(ColAnalysis):
-            provided_summary = [
-                'foo',]
+            provides_summary = ['foo']
             requires_summary = ['length']
 
             @staticmethod
@@ -37,8 +63,7 @@ class TestAnalysisPipeline(unittest.TestCase):
     def test_add_buggy_aobj(self):
         ap = AnalsysisPipeline([TypingStats, DefaultSummaryStats])
         class Foo(ColAnalysis):
-            provided_summary = [
-                'foo',]
+            provides_summary = ['foo']
             requires_summary = ['length']
 
             @staticmethod
@@ -50,8 +75,7 @@ class TestAnalysisPipeline(unittest.TestCase):
     def test_replace_aobj(self):
         ap = AnalsysisPipeline([TypingStats, DefaultSummaryStats])
         class Foo(ColAnalysis):
-            provided_summary = [
-                'foo',]
+            provides_summary = ['foo']
             requires_summary = ['length']
 
             @staticmethod
@@ -64,8 +88,7 @@ class TestAnalysisPipeline(unittest.TestCase):
         self.assertEqual(len(sdf['tripduration']), 18)
         #Create an updated Foo that returns 9
         class Foo(ColAnalysis):
-            provided_summary = [
-                'foo',]
+            provides_summary = ['foo']
             requires_summary = ['length']
 
             @staticmethod
@@ -88,7 +111,7 @@ class TestAnalysisPipeline(unittest.TestCase):
     def test_add_summary_stats_display(self):
         ap = AnalsysisPipeline([TypingStats, DefaultSummaryStats])
         class Foo(ColAnalysis):
-            provided_summary = ['foo']
+            provides_summary = ['foo']
             requires_summary = ['length']
             summary_stats_display = ['foo']
 
@@ -98,7 +121,19 @@ class TestAnalysisPipeline(unittest.TestCase):
     def test_invalid_summary_stats_display_throws(self):
         ap = AnalsysisPipeline([TypingStats, DefaultSummaryStats])
         class Foo(ColAnalysis):
-            provided_summary = ['foo']
+            provides_summary = ['foo']
+            requires_summary = ['length']
+            summary_stats_display = ['not_provided']
+
+        def bad_add():
+            ap.add_analysis(Foo)            
+
+        self.assertRaises(NonExistentSummaryRowException, bad_add)
+
+    def test_invalid_summary_stats_display_throws(self):
+        ap = AnalsysisPipeline([TypingStats, DefaultSummaryStats])
+        class Foo(ColAnalysis):
+            provides_summary = ['foo']
             requires_summary = ['length']
             summary_stats_display = ['not_provided']
 
