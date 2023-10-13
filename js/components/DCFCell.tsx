@@ -15,6 +15,8 @@ export type CommandConfigSetterT = (
 
 /*
   Widget DCFCell is meant to be used with callback functions and passed values, not explicit http calls
+
+  TODO:add height settings to dfConfig rather than hardcoded.
  */
 export function WidgetDCFCell({
   origDf,

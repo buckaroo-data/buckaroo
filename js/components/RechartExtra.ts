@@ -1,3 +1,7 @@
+/**
+ * This module contains the standard library from rechart so that base rechart code cna be imported with the minimum amount of rewriting
+ */
+
 import _ from 'lodash';
 import { CSSProperties, ReactNode } from 'react';
 export { Global, DefaultTooltipContent } from 'recharts';

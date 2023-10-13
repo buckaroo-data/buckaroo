@@ -1,6 +1,8 @@
 //@ts-nocheck
 /**
- * @fileOverview Tooltip
+ * Reimplementation of rechart tooltips.  most of this is copied from ??? in the recharts source tree because the parts we are editting are deeply embedded into functions.
+
+ Most of the point of this is to get tooltips to be absolutely positioned off of document.body, not the nearest parent element.  AG-Grid hides those tooltips otherwise.
  */
 import React, {
   CSSProperties,

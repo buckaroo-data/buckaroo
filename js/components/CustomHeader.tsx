@@ -1,8 +1,6 @@
 import _ from 'lodash';
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { IHeaderParams } from './BaseHeader';
-
 import {
   BarChart,
   Bar,
@@ -12,12 +10,6 @@ import {
 } from 'recharts';
 import { Tooltip } from './RechartTooltip';
 import { isNumOrStr, ValueType } from './RechartExtra';
-//import { ICellRendererParams } from 'ag-grid-community';
-
-export interface ICustomHeaderParams extends IHeaderParams {
-  menuIcon: string;
-  histogram?: number[];
-}
 
 function defaultFormatter<TValue extends ValueType>(value: TValue) {
   return _.isArray(value) && isNumOrStr(value[0]) && isNumOrStr(value[1])
@@ -63,30 +55,30 @@ export const makeData = (histogram: number[]) => {
 const formatter = (value: any, name: any, props: any) => {
   if (props.payload.name === 'longtail') {
     return [value, name];
-  }
-  else {
+  } else {
     return [value, props.payload.name];
   }
 };
 
-
 export function FloatingTooltip({ items, x, y }: any) {
   const offset = 30;
-  const renderedItems = items.map((name: [string, number], value: number | string) => {
-    
-    const [realName, realValue]  = name;
-    const formattedVal = realValue == 0 ? "<1" : realValue;
-    return (
-      <React.Fragment>
-        <dt>{realName}</dt>
-        <dd>{formattedVal}%</dd>
-      </React.Fragment>
-    );
-  });
+  const renderedItems = items.map(
+    (name: [string, number], value: number | string) => {
+      const [realName, realValue] = name;
+      const formattedVal = realValue === 0 ? '<1' : realValue;
+      return (
+        <React.Fragment>
+          <dt>{realName}</dt>
+          <dd>{formattedVal}%</dd>
+        </React.Fragment>
+      );
+    }
+  );
   return createPortal(
     <div
       className="floating-tooltip"
-      style={{'position':'absolute', 'top':y+offset, 'left':x+offset}}>
+      style={{ position: 'absolute', top: y + offset, left: x + offset }}
+    >
       <dl>{renderedItems}</dl>
     </div>,
     document.body
@@ -94,13 +86,7 @@ export function FloatingTooltip({ items, x, y }: any) {
 }
 
 export const ToolTipAdapter = (args: any) => {
-  const { active, formatter, payload, label } = args;
-  console.log('label', label);
-  //console.log("args", args, formatter);
-  //console.log("coordinate, box", args.coordinate, args.box);
-  //console.log("payload", payload)
-  //const anchor = useRef(null);
-
+  const { active, formatter, payload } = args;
   if (active && payload && payload.length) {
     const renderContent2 = () => {
       //const items = (itemSorter ? _.sortBy(payload, itemSorter) : payload).map((entry, i) => {
@@ -113,7 +99,7 @@ export const ToolTipAdapter = (args: any) => {
         const { value, name } = entry;
         let finalValue: React.ReactNode = value;
         let finalName: React.ReactNode = name;
-        if (finalFormatter && finalValue != null && finalName != null) {
+        if (finalFormatter && finalValue !== null && finalName !== null) {
           const formatted = finalFormatter(value, name, entry, i, payload);
           if (Array.isArray(formatted)) {
             [finalValue, finalName] = formatted;
@@ -126,13 +112,6 @@ export const ToolTipAdapter = (args: any) => {
       });
       return items;
     };
-    /*
-        <p className="label">{`${label} : ${payload[0].value}`}</p>
-        <p className="intro">{label}</p>
-        <p className="desc">Anything you want can be displayed here.</p>
-
-
-      */
     return (
       <div className="custom-tooltip">
         <FloatingTooltip
@@ -149,7 +128,7 @@ export const ToolTipAdapter = (args: any) => {
 
 //export const HistogramCell   = ({histogram}: {histogram:any}) => {
 export const HistogramCell = (props: any) => {
-  if (props == undefined || props.value == undefined) {
+  if (props === undefined || props.value === undefined) {
     return <span></span>;
   }
   const histogram = props.value.histogram;
@@ -163,8 +142,10 @@ export const HistogramCell = (props: any) => {
             height="10"
             patternUnits="userSpaceOnUse"
           >
-      <polygon               stroke="pink"
-    points="0,0 2,5 0,10 5,8 10,10 8,5 10,0 5,2" />
+            <polygon
+              stroke="pink"
+              points="0,0 2,5 0,10 5,8 10,10 8,5 10,0 5,2"
+            />
           </pattern>
           <pattern
             id="stripe"
@@ -246,7 +227,7 @@ export const HistogramCell = (props: any) => {
           formatter={formatter}
           labelStyle={{ display: 'None' }}
           wrapperStyle={{ zIndex: 999991 }}
-          contentStyle={{'color':'black'}}
+          contentStyle={{ color: 'black' }}
           content={<ToolTipAdapter />}
           offset={20}
           allowEscapeViewBox={{ x: true }}

@@ -14,13 +14,14 @@ export interface DfConfig {
   sampled: boolean;
   summaryStats: boolean;
   showCommands: boolean;
+  //reorderedColumns is currently disabled as a function, but it will be added back soon
   //reorderdColumns: boolean;
 }
 
 const columnDefs: ColDef[] = [
   {
     field: 'summaryStats',
-    headerName: 'Σ',
+    headerName: 'Σ', //note the greek symbols instead of icons which require buildchain work
     headerTooltip: 'Summary Stats',
     width: 30,
   },
@@ -87,7 +88,7 @@ export function StatusBar({
       sampleSize: intFormatter.format(sampleSize),
       sampled: sampled ? '1' : '0',
       summaryStats: summaryStats ? '1' : '0',
-      // reorderdColumns: reorderdColumns ? "Ϋ" : "ό",
+      // reorderdColumns: reorderdColumns ? "1" : "ό",
       showCommands: showCommands ? '1' : '0',
     },
   ];

@@ -21,6 +21,12 @@ export const updateAtMatch = (
   return retColumns;
 };
 
+/*
+  this code should all be unit tested and in examples. Examples will
+  show potential developers how this behaves. Examples should be made
+  inside of AG-Grid, and independently.
+  */
+
 export const intFormatter = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 0,
   maximumFractionDigits: 3,
@@ -53,30 +59,18 @@ export const anyFormatter = (params: ValueFormatterParams): string => {
   return val;
 };
 
-const getNumericFormatter = (totalWidth:number) => {
+const getNumericFormatter = (totalWidth: number) => {
   const formatter = new Intl.NumberFormat('en-US');
   const numericFormatter = (params: ValueFormatterParams): string => {
     const val = params.value;
-    if(val === null) {
-      return ''
+    if (val === null) {
+      return '';
     }
     return formatter.format(params.value).padStart(totalWidth, ' ');
-  }
-  return numericFormatter
-}
-/*
-  console.log((new Intl.NumberFormat('en-US')).format(amount))
-  console.log((new Intl.NumberFormat('en-US', {  maximumFractionDigits: 1})).format(number))
+  };
+  return numericFormatter;
+};
 
-  console.log(`|${last4Digits.padStart(7, ' ')}|`)
-  
- valueFormatter: currencyFormatter}
-    ];
-    
-    function currencyFormatter(params) {
-        return '£' + formatNumber(params.value);
-    }
-*/
 function getFormatter(hint: ColumnHint): ValueFormatterFunc<unknown> {
   if (hint === undefined || hint.is_numeric === false) {
     return anyFormatter;
@@ -87,27 +81,10 @@ function getFormatter(hint: ColumnHint): ValueFormatterFunc<unknown> {
       const totalWidth = commas + hint.max_digits;
       return getNumericFormatter(totalWidth);
     } else {
-      /*
-
-      const intWidth = commas + hint.max_digits;
-      const fracWidth = 4;
-      return (params: ValueFormatterParams):string => {
-        console.log("params", params)
-        const formatter = new Intl.NumberFormat('en-US', {  maximumFractionDigits: 3 });
-        //console.log(`|${last4Digits.padStart(7, ' ')}|`)
-        const numFormatted = formatter.format(params.value);
-        if(numFormatted.includes(".")){
-          const [intPart, fracPart] = numFormatted.split(".")
-          return [intPart.padStart(intWidth, " "), fracPart.padEnd(3, " ")].join(".") }
-        else {
-          return numFormatted.padStart(intWidth, " ").padEnd(intWidth + fracWidth, " ")
-        }
-      };*/
       return (params: ValueFormatterParams): string => {
-        //console.log("params", params)
-	if(params.value === null) {
-	  return '';
-	}
+        if (params.value === null) {
+          return '';
+        }
         return floatFormatter.format(params.value);
       };
     }

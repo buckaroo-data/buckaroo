@@ -1,8 +1,4 @@
-import React, {
-  useRef,
-  CSSProperties,
-  //  useMemo,
-} from 'react';
+import React, { useRef, CSSProperties } from 'react';
 import _ from 'lodash';
 import { DFWhole, EmptyDf } from './staticData';
 
@@ -31,11 +27,9 @@ export function DFViewer(
     setActiveCol: () => null,
   }
 ) {
-
   const [agColsPure, agData] = dfToAgrid(df);
-  console.log("dfviewer df", df);
-  console.log("dfviewer agData", agData);
-  
+  // console.log('dfviewer agData', agData);
+
   const styledColumns = updateAtMatch(
     _.clone(agColsPure),
     activeCol || '___never',
@@ -45,7 +39,6 @@ export function DFViewer(
     { cellStyle: {} }
   );
 
-  //console.log("styledColumns after updateAtMatch", activeCol, styledColumns)
   const gridOptions: GridOptions = {
     rowSelection: 'single',
     onRowClicked: (event) => console.log('A row was clicked'),
@@ -79,6 +72,12 @@ export function DFViewer(
   const gridRef = useRef<AgGridReact<unknown>>(null);
 
   const makeCondtionalAutosize = (count: number, delay: number) => {
+    /*
+      this code is buggy and I'm not confident in it. I'm very
+      surprised that automatically autosizing AG-grid requires custom
+      functions to be written vs just a flag.
+      */
+
     let counter = count;
     let timer: NodeJS.Timeout;
     let colWidthHasBeenSet = false;
@@ -99,16 +98,10 @@ export function DFViewer(
       }
     }
 
-    // console.log('first pass currentColWidth');
-
     const conditionallyAutosize = () => {
-      // console.log("conditionallyAutosize", count, delay)
       if (gridRef !== undefined) {
-        // console.log("gridref defined")
         if (gridRef.current !== undefined && gridRef.current !== null) {
-          // console.log("gridref.current defined")
           if (gridRef.current.columnApi !== undefined) {
-            // console.log("calling autosizeAllColumns", count, delay);
             gridRef.current.columnApi.autoSizeAllColumns();
             const dc = gridRef.current.columnApi.getAllDisplayedColumns();
             // console.log("bodyWidth", cm.bodyWidth)
@@ -152,18 +145,7 @@ export function DFViewer(
   };
 
   makeCondtionalAutosize(50, 350);
-  //const histograms = _.fromPairs(  _.map({'a':10, 'b':20}, function(val,key) {return [y, x] }))
-  // const histograms = _.fromPairs(  _.map(df.table_hints,
-  // 					 function(val,key) {
-  // 					   return [key, val.histogram || []] }))
   const pinnedTopRowData = [df.table_hints];
-  //const pinnedTopRowData = [histograms];
-  // const pinnedTopRowData =  [{'index': 'foo',
-  // 			  'end station name': 'bar',
-  // 	    'tripduration': 471,
-  // 	    'start station name': 'Catherine St & Monroe St',
-  // 	    'floatCol': '1.111',
-  // 			 }];
 
   return (
     <div className="df-viewer">

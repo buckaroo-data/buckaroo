@@ -18,17 +18,7 @@ export const bakedOperations: Operation[] = [
   [sym('fillna'), symDf, 'col2', 5],
   [sym('resample'), symDf, 'month', 'monthly', {}],
 ];
-/*
-const origColumns = [
-  { key: 'id', name: 'ID' },
-  { key: 'title', name: 'Title' },
-];
 
-const origRows = [
-  { id: 0, title: 'Example' },
-  { id: 1, title: 'Demo' },
-];
-*/
 export interface DFColumn {
   name: string;
   type: string;
@@ -70,107 +60,108 @@ export const EmptyDf: DFWhole = {
 //print(sdf.to_json(orient='table', indent=2))
 
 export const histograms = {
-  num_histo : [
-    {'name': '-406 - -332', 'population':  1},
-    {'name': '-332 - -258', 'population':  0},
-    {'name': '-258 - -184', 'population':  2},
-    {'name': '-184 - -111', 'population': 10},
-    {'name': '-111 - -37',  'population': 22},
-    {'name': '-37 - 36',    'population': 30},
-    {'name': '36 - 109',    'population': 22},
-    {'name': '109 - 183',   'population': 10},
-    {'name': '183 - 257',   'population':  3},
-    {'name': '257 - 331',   'population':  0}],
-
-  bool_histo : [
-    {'name': 'False', 'false': 50},
-    {'name': 'True', 'true': 30},
-    {'name': 'NA', 'NA': 20}],
-
-  NA_Only : [
-    {'name': 'NA', 'NA': 100}],
-
-  simple_catgeorical : [
-    {'name': 2, 'cat_pop': 87.0},
-    {'name': 1, 'cat_pop': 13.0}],
-    
-  categorical_histo : [
-    {'name': 'KTM', 'cat_pop': 30},
-    {'name': 'Gas Gas', 'cat_pop': 15},
-    {'name': 'Yamaha', 'cat_pop': 10},
-    {'name': 'unique', 'unique': 25},
-    {'name': 'NA', 'NA': 20}
+  num_histo: [
+    { name: '-406 - -332', population: 1 },
+    { name: '-332 - -258', population: 0 },
+    { name: '-258 - -184', population: 2 },
+    { name: '-184 - -111', population: 10 },
+    { name: '-111 - -37', population: 22 },
+    { name: '-37 - 36', population: 30 },
+    { name: '36 - 109', population: 22 },
+    { name: '109 - 183', population: 10 },
+    { name: '183 - 257', population: 3 },
+    { name: '257 - 331', population: 0 },
   ],
 
-  categorical_histo_lt : [
-    {'name': 'KTM', 'cat_pop': 25},
-    {'name': 'Gas Gas', 'cat_pop': 12},
-    {'name': 'Yamaha', 'cat_pop': 8},
-    {'name': 'NA', 'NA': 20},
-    {'name': 'longtail', 'unique': 15, 'longtail':20},
+  bool_histo: [
+    { name: 'False', false: 50 },
+    { name: 'True', true: 30 },
+    { name: 'NA', NA: 20 },
   ],
 
-  all_unique : [
-    {'name': 'unique', 'unique': 100},
+  NA_Only: [{ name: 'NA', NA: 100 }],
+
+  simple_catgeorical: [
+    { name: 2, cat_pop: 87.0 },
+    { name: 1, cat_pop: 13.0 },
   ],
 
-  unique_na : [
-    {'name': 'unique', 'unique': 80},
-    {'name': 'NA', 'NA': 20}
+  categorical_histo: [
+    { name: 'KTM', cat_pop: 30 },
+    { name: 'Gas Gas', cat_pop: 15 },
+    { name: 'Yamaha', cat_pop: 10 },
+    { name: 'unique', unique: 25 },
+    { name: 'NA', NA: 20 },
   ],
 
-  unique_continuous : [
-    {'name': '-406   -332', 'population': 1},
-    {'name': '-332   -258', 'population': 0},
-    {'name': '-258   -184', 'population': 0},
-    {'name': '-184   -111', 'population': 10},
-    {'name': '-111   -37', 'population':  21},
-    {'name': '-37   36', 'population':    29},
-    {'name': '36   109', 'population':    22},
-    {'name': '109   183', 'population':   9},
-    {'name': '183   257', 'population':   3},
-    {'name': '257   331', 'population':   0},
-    {'name': 'unique', 'unique': 100},
+  categorical_histo_lt: [
+    { name: 'KTM', cat_pop: 25 },
+    { name: 'Gas Gas', cat_pop: 12 },
+    { name: 'Yamaha', cat_pop: 8 },
+    { name: 'NA', NA: 20 },
+    { name: 'longtail', unique: 15, longtail: 20 },
   ],
 
-  unique_continuous_scaled : [
-    {'name': '-406   -332', 'population': 0},
-    {'name': '-332   -258', 'population': 0},
-    {'name': '-258   -184', 'population': 0},
-    {'name': '-184   -111', 'population': 10},
-    {'name': '-111   -37', 'population':  21},
-    {'name': '-37   36', 'population':    29},
-    {'name': '36   109', 'population':    22},
-    {'name': '109   183', 'population':   9},
-    {'name': '183   257', 'population':   3},
-    {'name': '257   331', 'population':   0},
-    {'name': 'unique', 'unique': 29},
+  all_unique: [{ name: 'unique', unique: 100 }],
+
+  unique_na: [
+    { name: 'unique', unique: 80 },
+    { name: 'NA', NA: 20 },
   ],
 
-  unique_continuous_scaled_50 : [
-    {'name': '-406   -332', 'population': 0},
-    {'name': '-332   -258', 'population': 0},
-    {'name': '-258   -184', 'population': 0},
-    {'name': '-184   -111', 'population': 10},
-    {'name': '-111   -37', 'population':  21},
-    {'name': '-37   36', 'population':    29},
-    {'name': '36   109', 'population':    22},
-    {'name': '109   183', 'population':   9},
-    {'name': '183   257', 'population':   3},
-    {'name': '257   331', 'population':   0},
-    {'name': 'longtail', 'unique': 15},
+  unique_continuous: [
+    { name: '-406   -332', population: 1 },
+    { name: '-332   -258', population: 0 },
+    { name: '-258   -184', population: 0 },
+    { name: '-184   -111', population: 10 },
+    { name: '-111   -37', population: 21 },
+    { name: '-37   36', population: 29 },
+    { name: '36   109', population: 22 },
+    { name: '109   183', population: 9 },
+    { name: '183   257', population: 3 },
+    { name: '257   331', population: 0 },
+    { name: 'unique', unique: 100 },
   ],
-  start_station_categorical : [{'name': 'Pershing Square N', 'cat_pop': 1},
-				    {'name': '8 Ave & W 31 St', 'cat_pop': 1},
-				    {'name': 'Lafayette St & E 8 St', 'cat_pop': 1},
-				    {'name': 'W 21 St & 6 Ave', 'cat_pop': 1},
-				    {'name': 'E 17 St & Broadway', 'cat_pop': 1},
-				    {'name': '8 Ave & W 33 St', 'cat_pop': 1},
-				    {'name': 'E 43 St & Vanderbilt Ave', 'cat_pop': 1},
-				    {'name': 'unique', 'cat_pop': 0},
-				    {'name': 'long_tail', 'cat_pop': 92},
-				    {'name': 'NA', 'cat_pop': 0}]
 
+  unique_continuous_scaled: [
+    { name: '-406   -332', population: 0 },
+    { name: '-332   -258', population: 0 },
+    { name: '-258   -184', population: 0 },
+    { name: '-184   -111', population: 10 },
+    { name: '-111   -37', population: 21 },
+    { name: '-37   36', population: 29 },
+    { name: '36   109', population: 22 },
+    { name: '109   183', population: 9 },
+    { name: '183   257', population: 3 },
+    { name: '257   331', population: 0 },
+    { name: 'unique', unique: 29 },
+  ],
+
+  unique_continuous_scaled_50: [
+    { name: '-406   -332', population: 0 },
+    { name: '-332   -258', population: 0 },
+    { name: '-258   -184', population: 0 },
+    { name: '-184   -111', population: 10 },
+    { name: '-111   -37', population: 21 },
+    { name: '-37   36', population: 29 },
+    { name: '36   109', population: 22 },
+    { name: '109   183', population: 9 },
+    { name: '183   257', population: 3 },
+    { name: '257   331', population: 0 },
+    { name: 'longtail', unique: 15 },
+  ],
+  start_station_categorical: [
+    { name: 'Pershing Square N', cat_pop: 1 },
+    { name: '8 Ave & W 31 St', cat_pop: 1 },
+    { name: 'Lafayette St & E 8 St', cat_pop: 1 },
+    { name: 'W 21 St & 6 Ave', cat_pop: 1 },
+    { name: 'E 17 St & Broadway', cat_pop: 1 },
+    { name: '8 Ave & W 33 St', cat_pop: 1 },
+    { name: 'E 43 St & Vanderbilt Ave', cat_pop: 1 },
+    { name: 'unique', cat_pop: 0 },
+    { name: 'long_tail', cat_pop: 92 },
+    { name: 'NA', cat_pop: 0 },
+  ],
 };
 
 //export const tableDf2:DFWhole = {
@@ -194,7 +185,7 @@ export const foo: DFWhole = {
   },
   table_hints: {
     index: { is_numeric: false },
-    tripduration: { is_numeric: false, histogram:histograms.num_histo},
+    tripduration: { is_numeric: false, histogram: histograms.num_histo },
     starttime: { is_numeric: false },
     stoptime: { is_numeric: false },
     'start station id': { is_numeric: false },
@@ -337,15 +328,21 @@ export const tableDf: DFWhole = {
     },
   ],
   table_hints: {
-    'end station name': { is_numeric: false, histogram: histograms.categorical_histo_lt },
+    'end station name': {
+      is_numeric: false,
+      histogram: histograms.categorical_histo_lt,
+    },
     tripduration: {
       is_numeric: true,
       is_integer: true,
       min_digits: 3,
       max_digits: 4,
-      histogram:histograms.num_histo
+      histogram: histograms.num_histo,
     },
-    'start station name': { is_numeric: false, histogram: histograms.bool_histo },
+    'start station name': {
+      is_numeric: false,
+      histogram: histograms.bool_histo,
+    },
     floatCol: {
       is_numeric: true,
       is_integer: false,
@@ -369,18 +366,17 @@ export const tableDf: DFWhole = {
       is_integer: true,
       min_digits: 1,
       max_digits: 3,
-      histogram:histograms.num_histo
+      histogram: histograms.num_histo,
     },
     nanFloat: {
       is_numeric: true,
       is_integer: false,
       min_digits: 1,
       max_digits: 3,
-      histogram:histograms.num_histo
+      histogram: histograms.num_histo,
     },
     nanObject: {
       is_numeric: false,
-    }
-
+    },
   },
 };

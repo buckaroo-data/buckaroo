@@ -10,7 +10,6 @@ import { tableDf, bakedCommandConfig } from './staticData';
 export type OperationSetter = (ops: Operation[]) => void;
 export interface WidgetConfig {
   showCommands: boolean;
-  //  showTransformed:boolean;
 }
 
 export function ColumnsEditor({
@@ -31,7 +30,6 @@ export function ColumnsEditor({
   widgetConfig: WidgetConfig;
 }) {
   const allColumns = df.schema.fields.map((field) => field.name);
-  //console.log('Columns Editor, commandConfig', commandConfig);
   return (
     <div className="columns-editor" style={{ width: '100%' }}>
       {widgetConfig.showCommands ? (
@@ -62,7 +60,6 @@ export function ColumnsEditorEx() {
     transformed_df: EmptyDf,
     generated_py_code: 'default py code',
     transform_error: undefined,
-    //      transform_error:"asdfasf"
   };
   return (
     <ColumnsEditor

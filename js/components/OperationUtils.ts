@@ -1,3 +1,6 @@
+/*
+  used for manipulating the JSON Flavored lisp of operations and commands
+  */
 import _ from 'lodash';
 import { SymbolT, ColEnumArgs, SymbolDf, symDf } from './CommandUtils';
 
