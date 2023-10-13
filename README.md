@@ -78,7 +78,7 @@ This `transform` is the function that manipulates the dataframe.  For `dropcol` 
     def transform_to_py(df, col):
         return "    df.drop('%s', axis=1, inplace=True)" % col
 ```
-`transform_to_py` emits equivalent python code for this transform.  Code is indented 4 space for use in a function.
+`transform_to_py` emits equivalent python code for this transform.  Code is indented 4 spaces for use in a function.
 
 ### Complex example
 ```python
@@ -175,7 +175,7 @@ There are a couple of projects like Buckaroo that aim to provide a better table 
 	* responds to buckaroo commands
 	* shows generated python code
   * Developer User experience
-	* define Buckaroo commands in python onloy
+	* define Buckaroo commands in python only
   * Buckaroo Intepreter
     * Based on Peter Norvig's lispy.py, a simple syntax that is easy for the frontend to generate (no parens, just JSON arrays)
   * Buckaroo core (actual transforms supported)
