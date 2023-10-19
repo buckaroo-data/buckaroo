@@ -16,14 +16,10 @@ const examples = {
     ColumnsEditorEx: {title: 'ColumnsEditor', file: 'ColumnsEditorEx'},
     CommandViewerEx: {title: 'CommandViewer', file: 'CommandViewerEx'},
     DFViewerEx: {title: 'DFViewer', file: 'DFViewerEx'},
+    DFViewerEx_string_index: {title: 'DFViewer string index', file: 'DFViewerEx_string_index'},
     StatusBarEx: {title: 'StatusBar', file: 'StatusBarEx'},
     HistogramEx: {title: 'Histogram', file: 'HistogramEx'}
 };
-
-// The examples use a code-loading technique that I have described in
-// https://mmomtchev.medium.com/making-examples-displaying-code-along-its-output-with-webpack-a28dcf5439c6
-
-const CodeBlock = React.lazy(() => import(/* webpackPrefetch: true */ './CodeBlock'));
 
 for (const ex of Object.keys(examples)) {
     examples[ex].comp = React.lazy(
@@ -31,17 +27,6 @@ for (const ex of Object.keys(examples)) {
     );
   examples[ex].code = 'asfd'
   examples[ex].text = 'text'
-  
-    // examples[ex].code = import(
-    //     /* webpackPrefetch: true */ `!!html-loader?{"minimize":false}!./jsx-loader.ts!./ex/${examples[ex].file}.tsx`
-    // )
-
-
-// .then((code) => code.default);
-//     examples[ex].text = import(
-//         /* webpackPrefetch: true */ `!!raw-loader!./ex/${examples[ex].file}.tsx`
-//     ).then((text) => text.default);
-
 }
 
 const LeftMenuItem = (props): JSX.Element => (
@@ -54,8 +39,6 @@ const LeftMenuItem = (props): JSX.Element => (
     </div>
 );
 
-
-// eslint-disable-next-line no-var
 
 const App = (): JSX.Element => {
     const [jsText, setJSText] = React.useState<string>('');

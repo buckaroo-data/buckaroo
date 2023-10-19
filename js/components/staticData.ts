@@ -380,3 +380,30 @@ export const tableDf: DFWhole = {
     },
   },
 };
+
+export const stringIndexDf: DFWhole ={
+  schema: {
+    fields: [
+      {name: 'index', type:'integer'},
+      {name: 'a', type:'integer'},
+      {name: 'b', type:'boolean'}],
+    primaryKey: ['index'],
+    pandas_version: '1.4.0',
+  },
+  data: [{index: 0, a: 1, b: true},
+	 {index: 1, a: 2, b: false}],
+  table_hints: {
+    a: {is_numeric: true,
+	is_integer: true,
+	min_digits: 1,
+	max_digits: 1,
+	histogram: [{name: 1, cat_pop: 50.0},
+		      {name: 2, cat_pop: 50.0},
+		      {name: 'longtail', unique: 100.0}]},
+    b: {is_numeric: true,
+	is_integer: false,
+	min_digits: 1,
+	max_digits: 1,
+	histogram: [{name: true, cat_pop: 50.0},
+		      {name: false, cat_pop: 50.0},
+		      {name: 'longtail', unique: 100.0}]}}}

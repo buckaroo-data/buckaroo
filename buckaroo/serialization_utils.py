@@ -1,5 +1,7 @@
+import json
 import numpy as np
 import pandas as pd
+from pandas.io.json import dumps as pdumps
 
 def d_update(d1, d2):
     ret_dict = d1.copy()
@@ -46,3 +48,38 @@ def pd_py_serialize(dct):
                         np.nan: UnquotedString("np.nan")})
     return dict_repr(cleaned_dct)
 
+
+EMPTY_DF_OBJ = {'schema': {'fields': [{'name': 'index', 'type': 'string'}],
+  'primaryKey': ['index'],
+  'pandas_version': '1.4.0'},
+ 'data': []}
+
+
+def dumb_table_sumarize(df):
+    """used when table_hints aren't provided.  Trests every column as a string"""
+    table_hints = {col:{'is_numeric':False}  for col in df}
+    table_hints['index'] = {'is_numeric': False} 
+    return table_hints
+
+
+def df_to_obj(df, order = None, table_hints=None):
+    if order is None:
+        order = df.columns
+
+    temp_index_name = False
+    if not df.index.name is None:
+        temp_index_name = df.index.name
+        df.index.name = None
+    obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
+    if temp_index_name:
+        df.index.name = temp_index_name
+    
+    if table_hints is None:
+        obj['table_hints'] = json.loads(pdumps(dumb_table_sumarize(df)))
+    else:
+        obj['table_hints'] = json.loads(pdumps(table_hints))
+    fields=[{'name':'index'}]
+    for c in order:
+        fields.append({'name':c})
+    obj['schema'] = dict(fields=fields)
+    return obj

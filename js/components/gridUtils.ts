@@ -99,6 +99,7 @@ export function dfToAgrid(tdf: DFWhole): [ColDef[], unknown[]] {
     //console.log(f.name, tdf.table_hints[f.name])
     const colDef: ColDef = {
       field: f.name,
+      headerName: f.name,
       valueFormatter: getFormatter(
         _.get(tdf.table_hints, f.name, { is_numeric: false })
       ),
