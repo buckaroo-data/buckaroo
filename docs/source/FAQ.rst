@@ -20,17 +20,8 @@ Right now, buckaroo only works with the latest release - NB7.  The recommended w
 
 *  **Are there any similar projects to Buckaroo?**
 
-There are a couple of projects like Buckaroo that aim to provide a better table widget and pandas editing experience.
+There are a couple of projects like Buckaroo that aim to provide a better table widget and pandas editing experience.  `Complete article <articles/related_projects.html>`_ about the many related projects.
 
-#. `Mito <https://github.com/mito-ds/monorepo>`_.  Source Available table/code editing widget for Jupyter.  More aimed at easing transition to pandas from excel users.  GNU Affero licensed
-#. `Microsoft DataWrangler <https://github.com/microsoft/vscode-data-wrangler>`_ .  Closed source, provides a very similar experience inside of VSCode's notebook experience.  Only works inside of VSCode by the `VS Marketplace Terms of Use <https://cdn.vsassets.io/v/M190_20210811.1/_content/Microsoft-Visual-Studio-Marketplace-Terms-of-Use.pdf>`_
-#. `IpyDatagrid <https://github.com/bloomberg/ipydatagrid>`_.  Open source.  Bloomberg's Jupyter table widget. I used the ipydatagrid repo structure as the basis for buckaroo (js build setup only)
-#. `IPyAgGrid <https://github.com/widgetti/ipyaggrid>`_ .  Open source.  Wraps `AG Grid <https://www.ag-grid.com/>`_  in a jupyter widget.  Buckaroo also uses AG Grid.
-#. `Bamboolib <https://github.com/tkrabel/bamboolib>`_  An originally open source tool aimed at building a similar experience, more aimed as a low-code tool for beginners.  The parent company 8080labs was acquired by Databricks.  Code no longer available.
-#. `QGrid <https://github.com/quantopian/qgrid>`_.  Open source, unmaintained.  A slick table widget built by Quantopian, no code gen or data manipulation features
-
-
-To be clear, I had the idea for building Buckaroo like this before I saw any of the other projects... But they are all open source and we can learn from each other.  If Buckaroo doesn't quite do what you want, check out one of the others
 
 *  **Is Buckaroo meant to repalce knowledge of python/pandas**
 
