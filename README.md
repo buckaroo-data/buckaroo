@@ -1,7 +1,4 @@
 # Buckaroo - The Data Table for Jupyter
-## I will be giving a webinar about Buckaroo this Thursday, October 19 1:00 – 2:00pm EST.
-Learn about Buckaroo and how it can be customized to automate your own data analysis workflow.
-[Register Here](https://us06web.zoom.us/webinar/register/4216971226817/WN_P7u0oNqrRcCeYx8yOm_DWg#/registration)
 
 We all know how awkward it is to clean data in jupyter notebooks.  Multiple cells of exploratory work, trying different transforms, looking up different transforms, adhoc functions that work in one notebook and have to be either copied/pasta-ed to the next notebook, or rewritten from scratch.  Buckaro makes all of that better by providing a visual UI for common cleaning operations AND emitting python code that performs the transformation. Specifically, the Buckaroo is a tool built to interactively explore, clean, and transform pandas dataframes.
 
