@@ -96,47 +96,8 @@ column_ordering
         	    col_facts['total_score'] = col_facts['existing_order_score'] + col_facts['numeric_boost']
                     return [cd['name'] for cd in sorted(col_dicts, key=lambda x: x['total_score'])]
 
-default_cleaning_instructions
-
-    If a column has 5000 rows, and 3000 of them are parseable as an integer, and the other 2000 rows are "n/a", it was probably the intention of the original data for this to be an integer column with nulls.  DefaultCleaningInstructions.  The transform to integer can be coded as a custom command for the low-code-ui, then you can write a ColAnalysis that suggests this transform be automatically executed on load of a dataframe.
-
-    It would look like this
-
-    .. code-block:: python
-		    
-        def safe_int(x):
-            try:
-                return int(x)
-            except:
-                return np.nan
-        
-        class IntClean(ColAnalysis):
-            provided_summary = [
-                'cleanable_int']
-        
-            @staticmethod
-            def summary(sampled_ser, summary_ser, ser):
-                counts = sampled_ser.value_counts()
-        	parseable = 0
-        	for val in counts.index:
-                if safe_int(val) not np.nan:
-        	        parseable += 1
-        
-        	mostly_parseable = parseable / len(counts) > 0.95
-        	return {'cleanable_int': mostly_parseable}
-        
-            @staticmethod
-            def cleaning_instruction(summary_ser, col_name):
-                if summary_ser.loc['cleanable_int'] == False:
-        	    return None
-        	return ['safe_int', col_name]
-
-
-    Then this clean_int will be automatically loaded into the instruction viewer in the low code ui, and it will already have been executed for the loaded dataframe
     
-    I'm still figuring out how to toggle through different cleanings. I'm worried about modifying the default columns.  I guess I can make the returned cleaning instructions do a column rename by convention. so for the above cleaning instruction first copy the original column name to "_orig"
-    
-summary_stats_set
+summary_stats_display
     a list of which rows from summary stats to display.  Currently only the last added summary_stats_set is used
 
 
@@ -150,11 +111,12 @@ The pluggable analysis framework runs different functions on analysis functions 
 
 1. Compute the order of analysis objects.  This builds a DAG and makes sure all of the facts can be computed.
 2. Run all of the ``summary`` methods and build the ``summary_df``
-3. Run all of the ``cleaning_instructions`` methods and get the list of interpreter instructions
-4. Run the interpreter and produce a new "cleaned" dataframe
-5. Run all of the ``summary`` methods and build the ``summary_df`` for the cleaned dataframe.
-6. Run all of the ``table_hints`` methods and build the table_hints dictionary
-7. Run all of the ``col_ordering`` methods and produce the different col_orderings.
+3. extract table_hints from the ``summary_df``
+
+Table Hints
+===========
+
+Table hints are a subset of the complete summary dataframe.  They are used to choose formatters, provide data for the histograms, and modify other display characteristics for the frontend table.  Look at the `JS type hints <https://github.com/paddymul/buckaroo/blob/main/js/components/staticData.ts#L43-L52>`_ .  Also note that table_hints are subject to change soon per this `bug report <https://github.com/paddymul/buckaroo/issues/54>`_.
 
 Porting to polars
 =================
