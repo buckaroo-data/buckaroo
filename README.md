@@ -2,6 +2,12 @@
 
 We all know how awkward it is to clean data in jupyter notebooks.  Multiple cells of exploratory work, trying different transforms, looking up different transforms, adhoc functions that work in one notebook and have to be either copied/pasta-ed to the next notebook, or rewritten from scratch.  Buckaro makes all of that better by providing a visual UI for common cleaning operations AND emitting python code that performs the transformation. Specifically, the Buckaroo is a tool built to interactively explore, clean, and transform pandas dataframes.
 
+## Try it today
+
+* [Buckaroo full tour](https://ydata-profiling.ydata.ai/examples/master/meteorites/meteorites_report.html) (comprehensive set of meteorite landing - object properties and locations) [![Open In Colab](https://camo.githubusercontent.com/52feade06f2fecbf006889a904d221e6a730c194/68747470733a2f2f636f6c61622e72657365617263682e676f6f676c652e636f6d2f6173736574732f636f6c61622d62616467652e737667)](https://colab.research.google.com/github/paddymul/buckaroo/blob/chore/colab-play/example-notebooks/Full-tour.ipynb)
+
+
+
 ![Buckaroo Screenshot](https://raw.githubusercontent.com/paddymul/buckaroo-assets/main/quick-buckaroo.gif)
 
 
