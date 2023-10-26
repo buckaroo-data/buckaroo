@@ -24,6 +24,7 @@ PERVERSE_DF = pd.DataFrame({
 
 
 BASE_COL_HINT = {
+    'type':'string',
     'is_numeric': False,
     'is_integer': None,
     'min_digits':None,

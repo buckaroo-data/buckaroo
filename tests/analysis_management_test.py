@@ -40,7 +40,7 @@ class TestAnalysisPipeline(unittest.TestCase):
                 assert 'histogram' in hint_obj.keys()
             else:
                 expected_set = set(
-                    ['is_numeric', 'is_integer', 'min_digits', 'max_digits', 'histogram'])
+                    ['is_numeric', 'is_integer', 'min_digits', 'max_digits', 'type', 'histogram'])
                 assert expected_set == set(hint_obj.keys())
 
     def test_pipeline_base(self):

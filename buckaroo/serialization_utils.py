@@ -57,7 +57,7 @@ EMPTY_DF_OBJ = {'schema': {'fields': [{'name': 'index', 'type': 'string'}],
 
 def dumb_table_sumarize(df):
     """used when table_hints aren't provided.  Trests every column as a string"""
-    table_hints = {col:{'is_numeric':False}  for col in df}
+    table_hints = {col:{'is_numeric':False, type:'obj'}  for col in df}
     table_hints['index'] = {'is_numeric': False} 
     return table_hints
 
