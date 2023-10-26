@@ -5,10 +5,11 @@ from buckaroo.pluggable_analysis_framework import (
     ColAnalysis)
 
 from buckaroo.analysis_management import (
-    AnalsysisPipeline, produce_summary_df, NonExistentSummaryRowException)
+    AnalsysisPipeline, produce_summary_df, NonExistentSummaryRowException,
+    DfStats)
 
-from buckaroo.analysis import (TypingStats, DefaultSummaryStats)
-from .fixtures import (test_df, df, DistinctCount, Len, DistinctPer, DCLen)
+from buckaroo.analysis import (TypingStats, DefaultSummaryStats, ColDisplayHints)
+from .fixtures import (test_df, df, DistinctCount, Len, DistinctPer, DCLen, word_only_df)
 
 class DumbTableHints(ColAnalysis):
     provides_summary = [
@@ -56,8 +57,8 @@ class TestAnalysisPipeline(unittest.TestCase):
             @staticmethod
             def summary(sampled_ser, summary_ser, ser):
                 return dict(foo=8)
-        assert ap.add_analysis(Foo) == True #verify no errors thrown
-        sdf, _unused = ap.process_df(df)
+        assert ap.add_analysis(Foo) == (True, []) #verify no errors thrown
+        sdf, _unused, _unused_errs = ap.process_df(df)
         self.assertEqual(sdf.loc['foo']['tripduration'], 8)
 
     def test_add_buggy_aobj(self):
@@ -70,7 +71,9 @@ class TestAnalysisPipeline(unittest.TestCase):
             def summary(sampled_ser, summary_ser, ser):
                 1/0 #throw an error
                 return dict(foo=8)
-        assert ap.add_analysis(Foo) == False
+        unit_test_results, errs = ap.add_analysis(Foo)
+        
+        assert unit_test_results == False
 
     def test_replace_aobj(self):
         ap = AnalsysisPipeline([TypingStats, DefaultSummaryStats])
@@ -82,7 +85,7 @@ class TestAnalysisPipeline(unittest.TestCase):
             def summary(sampled_ser, summary_ser, ser):
                 return dict(foo=8)
         ap.add_analysis(Foo)
-        sdf, _unused = ap.process_df(df)
+        sdf, _unused, _unused_errs = ap.process_df(df)
         self.assertEqual(sdf.loc['foo']['tripduration'], 8)
         #18 facts returned about tripduration
         self.assertEqual(len(sdf['tripduration']), 18)
@@ -95,7 +98,7 @@ class TestAnalysisPipeline(unittest.TestCase):
             def summary(sampled_ser, summary_ser, ser):
                 return dict(foo=9)
         ap.add_analysis(Foo)
-        sdf2, _unused = ap.process_df(df)
+        sdf2, _unused, _unused_errs = ap.process_df(df)
         self.assertEqual(sdf2.loc['foo']['tripduration'], 9)
         #still 18 facts returned about tripduration
         self.assertEqual(len(sdf2['tripduration']), 18)
@@ -141,4 +144,37 @@ class TestAnalysisPipeline(unittest.TestCase):
             ap.add_analysis(Foo)            
 
         self.assertRaises(NonExistentSummaryRowException, bad_add)
+
+
+
+class SometimesProvides(ColAnalysis):
+    provides_summary = ['conditional_on_dtype']
+
+    summary_stats_display = ['conditional_on_dtype']
+    
+    @staticmethod
+    def summary(sampled_ser, summary_ser, ser):
+        import pandas as pd
+        is_numeric = pd.api.types.is_numeric_dtype(ser)
+        if is_numeric:
+            return dict(conditional_on_dtype=True)
+        return {}
+
+class TestDfStats(unittest.TestCase):
+    def test_dfstats_sometimes_present(self):
+        """many ColAnalysis objects are written such that they only
+        provide stats for certain dtypes. This used to cause
+        instantiation failures. This test verifies that there are no
+        stack traces. The alternative would be to have ColAnalyis
+        objects always return every key, even if NA. That's a less
+        natural style to write analyis code.
+
+        Possible future improvement is to run through PERVERSE_DF and
+        verify that each ColAnalyis provides its specified value as
+        non NA at least once
+
+        """
+        dfs = DfStats(word_only_df, [SometimesProvides])
+        ab = dfs.presentation_sdf
+
 

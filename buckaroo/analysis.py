@@ -3,17 +3,25 @@ import pandas as pd
 from pandas.io.json import dumps as pdumps
 import numpy as np
 from buckaroo.pluggable_analysis_framework import ColAnalysis
+import warnings
 
 def probable_datetime(ser):
+    #turning off warnings in this single function is a bit of a hack.
+    #Understandable since this is explicitly abusing pd.to_datetime
+    #which throws warnings.
+
+    warnings.filterwarnings('ignore')
     s_ser = ser.sample(np.min([len(ser), 500]))
     try:
         dt_ser = pd.to_datetime(s_ser)
         #pd.to_datetime(1_00_000_000_000_000_000) == pd.to_datetime('1973-01-01') 
+        warnings.filterwarnings('default')
         if dt_ser.max() < pd.to_datetime('1973-01-01'):
             return False
         return True
         
     except Exception as e:
+        warnings.filterwarnings('default')
         return False
 
 def get_mode(ser):

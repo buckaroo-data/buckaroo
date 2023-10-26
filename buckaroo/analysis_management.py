@@ -1,6 +1,8 @@
+import sys
+import traceback
+
 import numpy as np
 import pandas as pd
-import traceback
 from buckaroo.pluggable_analysis_framework import (
     ColAnalysis, order_analysis, check_solvable, NotProvidedException)
 from buckaroo.serialization_utils import pd_py_serialize, pick, d_update
@@ -28,13 +30,63 @@ BASE_COL_HINT = {
     'max_digits':None,
     'histogram': []}
 
-def reproduce_summary(ser_name, kls, summary_df):
-    summary_ser = summary_df[ser_name]
+
+
+def get_df_name(df, level=0):
+    """ looks up the call stack until it finds the variable with this name"""
+    if level == 0:
+        _globals = globals()
+    elif level < 60:
+        try:
+            call_frame = sys._getframe(level)
+            _globals = call_frame.f_globals
+        except ValueError:
+            return None #we went to far up the stacktrace to a non-existent frame
+    else:
+        return None
+
+    name_possibs = [x for x in _globals.keys() if _globals[x] is df]
+    if name_possibs:
+        return name_possibs[0]
+    else:
+        #+2 because the function is recursive, and we need to skip over this frame
+        return get_df_name(df, level + 2)
+
+def safe_summary_df(base_summary_df, index_list):
+    #there are instances where not all indexes of the summary_df will
+    #be available, because there was no valid data to produce those
+    #indexes. This fixes them and explicitly. Empty rows will have NaN
+    return pd.DataFrame(base_summary_df, index_list)
+
+def reproduce_summary(ser_name, kls, summary_df, err, operating_df_name):
+    ssdf = safe_summary_df(summary_df, kls.requires_summary)
+    summary_ser = ssdf[ser_name]
     minimal_summary_dict = pick(summary_ser, kls.requires_summary)
     sum_ser_repr = "pd.Series(%s)" % pd_py_serialize(minimal_summary_dict)
 
-    print("%s.summary(PERVERSE_DF['%s'], %s, PERVERSE_DF['%s'])" % (
-        kls.cname(), ser_name, sum_ser_repr, ser_name))
+    f = "{kls}.summary({df_name}['{ser_name}'], {summary_ser_repr}, {df_name}['{ser_name}']) # {err_msg}"
+    print(f.format(
+        kls=kls.cname(), df_name=operating_df_name, ser_name=ser_name,
+        summary_ser_repr=sum_ser_repr, err_msg=err))
+
+def output_reproduce_preamble():
+    print("#Reproduction code")
+    print("#" + "-" * 80)
+    print("from buckaroo.analysis_management import PERVERSE_DF")
+
+def output_full_reproduce(errs, summary_df, df_name):
+    if len(errs) == 0:
+        raise Exception("output_full_reproduce called with 0 len errs")
+
+    try:
+        for ser_name, err_kls in errs.items():
+            err, kls = err_kls
+            reproduce_summary(ser_name, kls, summary_df, err, df_name)
+    except Exception as e:
+        #this is tricky stuff that shouldn't error, I want these stack traces to escape being caught
+        traceback.print_exc()
+
+
 
 
 def produce_summary_df(df, ordered_objs, df_name='test_df'):
@@ -68,7 +120,6 @@ def produce_summary_df(df, ordered_objs, df_name='test_df'):
             except Exception as e:
                 if not a_kls.quiet:
                     errs[ser_name] = e, a_kls
-                    #traceback.print_exc()
                 continue
         summary_col_dict[ser_name] = summary_ser
 
@@ -77,19 +128,6 @@ def produce_summary_df(df, ordered_objs, df_name='test_df'):
             BASE_COL_HINT.keys())
     summary_df = pd.DataFrame(summary_col_dict)
     table_hints = table_hint_col_dict
-    if errs:
-        for ser_name, err_kls in errs.items():
-          err, kls = err_kls
-          print("%r failed on %s with %r" % (kls, ser_name, err))
-
-        print("Reproduction code")
-        print("-" * 80)
-        print("from buckaroo.analysis_management import PERVERSE_DF")
-        for ser_name, err_kls in errs.items():
-          err, kls = err_kls
-          reproduce_summary(ser_name, kls, summary_df)
-        print("-" * 80)
-
     return summary_df, table_hints, errs
 
 class NonExistentSummaryRowException(Exception):
@@ -126,8 +164,6 @@ class AnalsysisPipeline(object):
         self.ordered_a_objs = order_analysis(analysis_objects)
         check_solvable(self.ordered_a_objs)
         self.process_summary_facts_set()
-        if self.unit_test_objs:
-            self.unit_test()
 
     def unit_test(self):
         """test a single, or each col_analysis object with a set of commonly difficult series.
@@ -140,17 +176,16 @@ class AnalsysisPipeline(object):
         try:
             output_df, table_hint_dict, errs = produce_summary_df(PERVERSE_DF, self.ordered_a_objs)
             if len(errs) == 0:
-                return True
-            return False
-        except Exception as e:
-            print("analysis pipeline unit_test failed")
-            print(e)
-            return False
+                return True, []
+            else:
+                return False, errs
+        except KeyError:
+            pass
 
 
     def process_df(self, input_df):
         output_df, table_hint_dict, errs = produce_summary_df(input_df, self.ordered_a_objs)
-        return output_df, table_hint_dict
+        return output_df, table_hint_dict, errs
 
     def add_analysis(self, new_aobj):
         new_cname = new_aobj.cname()
@@ -161,10 +196,10 @@ class AnalsysisPipeline(object):
             new_aobj_set.append(aobj)
         new_aobj_set.append(new_aobj)
         self.verify_analysis_objects(new_aobj_set)
-        if not self.unit_test():
-            print("new analysis fails unit tests")
-            return False
-        return True
+        passed_unit_test, errs = self.unit_test()
+        if passed_unit_test is False:
+            return False, errs
+        return True, []
             
 
 class DfStats(object):
@@ -172,13 +207,16 @@ class DfStats(object):
     DfStats exists to handle inteligent downampling and applying the ColAnalysis functions
     '''
 
-    def __init__(self, df, col_analysis_objs):
-        self.df = self.get_operating_df(df, force_full_eval=False)
+    def __init__(self, df_stats_df, col_analysis_objs, operating_df_name=None):
+        self.df = self.get_operating_df(df_stats_df, force_full_eval=False)
         self.col_order = self.df.columns
         self.ap = AnalsysisPipeline(col_analysis_objs)
-        self.sdf, self.table_hints = self.ap.process_df(self.df)
-        
+        self.operating_df_name = operating_df_name
 
+        self.sdf, self.table_hints, errs = self.ap.process_df(self.df)
+        if errs:
+            output_full_reproduce(errs, self.sdf, operating_df_name)
+        
     def get_operating_df(self, df, force_full_eval):
         rows = len(df)
         cols = len(df.columns)
@@ -193,9 +231,21 @@ class DfStats(object):
     def presentation_sdf(self):
         if self.ap.summary_stats_display == "all":
             return self.sdf
-        return self.sdf.loc[self.ap.summary_stats_display]
+        return safe_summary_df(self.sdf, self.ap.summary_stats_display)
 
     def add_analysis(self, a_obj):
-        self.ap.add_analysis(a_obj)
-        self.sdf, self.table_hints = self.ap.process_df(self.df)
+        passed_unit_tests, ut_errs = self.ap.add_analysis(a_obj)
+        self.sdf, self.table_hints, errs = self.ap.process_df(self.df)
+        if passed_unit_tests == False:
+            print("Unit tests failed")
+        if errs:
+            print("Errors on original dataframe")
 
+        if ut_errs or errs:
+            output_reproduce_preamble()
+        if ut_errs:
+            ut_summary_df, _unused_table_hint_dict, ut_errs2 = produce_summary_df(
+                PERVERSE_DF, self.ap.ordered_a_objs)
+            output_full_reproduce(ut_errs, ut_summary_df, "PERVERSE_DF")
+        if errs:
+            output_full_reproduce(errs, self.sdf, self.operating_df_name)

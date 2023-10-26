@@ -8,6 +8,8 @@ test_df = pd.DataFrame({
         'float_nan_ser' : pd.Series([3.5, np.nan, 4.8])
     })
 
+word_only_df = pd.DataFrame({'letters': 'h o r s e'.split(' ')})
+
 df = pd.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
 
 

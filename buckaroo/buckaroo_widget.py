@@ -21,7 +21,7 @@ from .auto_clean import get_auto_type_operations, get_typing_metadata, recommend
 from .down_sample import sample
 
 from .analysis import (TypingStats, DefaultSummaryStats, ColDisplayHints)
-from .analysis_management import DfStats
+from .analysis_management import DfStats, get_df_name
 
 from .serialization_utils import df_to_obj, EMPTY_DF_OBJ
 
@@ -104,6 +104,7 @@ class BuckarooWidget(DOMWidget):
         self.postProcessingF = postProcessingF
         self.processed_result = None
         self.transformed_df = None
+        self.df_name = get_df_name(df)
 
         self.setup_from_command_kls_list()
         self.dfConfig = self.get_df_config(df, sampled, reorderdColumns, showCommands)
@@ -112,6 +113,7 @@ class BuckarooWidget(DOMWidget):
         self.run_autoclean(autoType)
             
         warnings.filterwarnings('default')
+
 
     def run_autoclean(self, autoType):
         if autoType:
@@ -202,7 +204,7 @@ class BuckarooWidget(DOMWidget):
     def set_typed_df(self, new_df):
         self.typed_df = new_df
         # stats need to be rerun each time 
-        self.stats = DfStats(self.typed_df, [TypingStats, DefaultSummaryStats, ColDisplayHints])
+        self.stats = DfStats(self.typed_df, [TypingStats, DefaultSummaryStats, ColDisplayHints], self.df_name)
         self.summaryDf = df_to_obj(self.stats.presentation_sdf, self.stats.col_order)
         self.update_based_on_df_config(3)
 

@@ -10,7 +10,13 @@ We all know how awkward it is to clean data in jupyter notebooks.  Multiple cell
 
 ![Buckaroo Screenshot](https://raw.githubusercontent.com/paddymul/buckaroo-assets/main/quick-buckaroo.gif)
 
+## Try it today
 
+* [Buckaroo full tour](https://ydata-profiling.ydata.ai/examples/master/meteorites/meteorites_report.html) (comprehensive set of meteorite landing - object properties and locations) [![Open In Colab](https://camo.githubusercontent.com/52feade06f2fecbf006889a904d221e6a730c194/68747470733a2f2f636f6c61622e72657365617263682e676f6f676c652e636f6d2f6173736574732f636f6c61622d62616467652e737667)](https://colab.research.google.com/github/paddymul/buckaroo/blob/chore/colab-play/example-notebooks/Full-tour.ipynb)
+
+
+
+https://
 ## Installation
 
 If using JupyterLab, `buckaroo` requires JupyterLab version 3 or higher.
