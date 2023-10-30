@@ -205,7 +205,7 @@ def histogram(ser, nan_per):
     return categorical_histogram(ser, val_counts, nan_per)
 
 class ColDisplayHints(ColAnalysis):
-    requires_summary = ['min', 'max'] # What summary stats does this analysis provide
+    requires_summary = ['min', 'max', 'nan_per']
     provides_summary = [
         'is_numeric', 'is_integer', 'min_digits', 'max_digits', 'histogram', 'type']
 
