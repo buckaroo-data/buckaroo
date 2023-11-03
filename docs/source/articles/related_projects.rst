@@ -32,7 +32,7 @@ Other data tables
 -----------------
 
 #. `ITables <https://github.com/mwouts/itables>`_  focusses on well styled static tables for Pandas/Jupyter
-#. `Tables.jl <https://github.com/JuliaData/Tables.jl>`_ A terminal/text only table for julia.  Wildly ambitious for pushing the limits on terminal UI.
+#. `PrettyTables.jl  <https://github.com/ronisbr/PrettyTables.jl>`_ A terminal/text only table for julia.  Wildly ambitious for pushing the limits on terminal UI.
 
 Other js data tables
 --------------------
