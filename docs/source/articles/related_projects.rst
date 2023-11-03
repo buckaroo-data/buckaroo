@@ -16,10 +16,10 @@ There are a couple of projects like Buckaroo that aim to provide a better table 
 #. `QGrid <https://github.com/quantopian/qgrid>`_.  Open source, unmaintained.  A slick table widget built by Quantopian, no code gen or data manipulation features
 
 
-To be clear, I had the idea for building Buckaroo like this before I saw any of the other projects... But they are all open source and we can learn from each other.  If Buckaroo doesn't quite do what you want, check out one of the others
+To be clear, I had the idea for building Buckaroo like this before I saw any of the other projects... But they are all open source and we can learn from each other.  If Buckaroo doesn't quite do what you want, check out one of the others.
 
 
-Other exploratory datta analysis tools
+Other exploratory data analysis tools
 --------------------------------------
 
 These tools are aimed at doing more comprehensive stastical analysis of data
@@ -27,9 +27,15 @@ These tools are aimed at doing more comprehensive stastical analysis of data
 #. `Dtale <https://github.com/man-group/dtale>`_
 #. `YData profiling <https://github.com/ydataai/ydata-profiling>`_
 
-   
+
 Other data tables
 -----------------
+
+#. `ITables <https://github.com/mwouts/itables>`_  focusses on well styled static tables for Pandas/Jupyter
+#. `Tables.jl <https://github.com/JuliaData/Tables.jl>`_ A terminal/text only table for julia.  Wildly ambitious for pushing the limits on terminal UI.
+
+Other js data tables
+--------------------
 
 JS Table widgets.  These are the core interactive tables that modern table expereinces are built around.  A lot of engineering goes into making a web browser handle large scrolling tables performantly
 
