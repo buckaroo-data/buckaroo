@@ -13,4 +13,4 @@ def test_df_to_obj():
              values=[1, 2, 3])).set_index('names')
 
     serialized_df = df_to_obj(named_index_df)
-    assert serialized_df['data'][0]['index'] == 'one'
+    assert serialized_df['data'][0]['names'] == 'one'

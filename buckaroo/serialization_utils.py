@@ -42,7 +42,6 @@ def pd_py_serialize(dct):
     """
     This is used to output an exact string that is valid python code.
     """
-
     cleaned_dct = val_replace(dct,
                        {pd.NA: UnquotedString("pd.NA"),
                         np.nan: UnquotedString("np.nan")})
@@ -52,7 +51,7 @@ def pd_py_serialize(dct):
 EMPTY_DF_OBJ = {'schema': {'fields': [{'name': 'index', 'type': 'string'}],
   'primaryKey': ['index'],
   'pandas_version': '1.4.0'},
- 'data': []}
+  'data': []}
 
 
 def dumb_table_sumarize(df):
@@ -65,21 +64,23 @@ def dumb_table_sumarize(df):
 def df_to_obj(df, order = None, table_hints=None):
     if order is None:
         order = df.columns
-
-    temp_index_name = False
-    if not df.index.name is None:
-        temp_index_name = df.index.name
-        df.index.name = None
     obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
-    if temp_index_name:
-        df.index.name = temp_index_name
-    
+
+    if isinstance(df.index,  pd.MultiIndex):
+        old_index = df.index
+        temp_index = pd.Index(df.index.to_list(), tupleize_cols=False)
+        df.index = temp_index
+        obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
+        df.index = old_index
+    else:
+        obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
+
     if table_hints is None:
         obj['table_hints'] = json.loads(pdumps(dumb_table_sumarize(df)))
     else:
         obj['table_hints'] = json.loads(pdumps(table_hints))
-    fields=[{'name':'index'}]
+    fields=[{'name': df.index.name or "index" }]
     for c in order:
-        fields.append({'name':c})
+        fields.append({'name':str(c)})
     obj['schema'] = dict(fields=fields)
     return obj
