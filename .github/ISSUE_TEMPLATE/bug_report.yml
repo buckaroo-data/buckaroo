@@ -1,6 +1,6 @@
 name: '🐞 Bug report - Python'
 description: Report an issue with Buckaroo.
-labels: [bug, python]
+labels: [bug]
 
 body:
   - type: checkboxes
@@ -26,7 +26,7 @@ body:
         - Jupyter Lab
         - Google Colab
         - Jupyter Notebook
-        - Other
+        - Other (please describe in Issue Description)
     validations:
       required: true
 
@@ -36,7 +36,7 @@ body:
       label: Reproducible example
       description: >
         Please follow [this guide](https://matthewrocklin.com/blog/work/2018/02/28/minimal-bug-reports) on how to
-        provide a minimal, copy-pastable example. Include the (wrong) output if applicable.  If this is a visual bug, provide a screenshot of the input dataframe and the top couple of lines of buckaroo output.
+        provide a minimal, copy-pastable example. [Infinity displays as blank](https://github.com/paddymul/buckaroo/issues/122) is an excellent buckaroo example. Include the (wrong) output if applicable.
       value: |
         ```python
 
@@ -45,20 +45,11 @@ body:
       required: true
 
   - type: textarea
-    id: logs
-    attributes:
-      label: Jupyter Log output
-      description: >
-        If the buckaroo widget completely didn't display, check the Jupyter Log Console.  Also check the javascript console of the browser to see if any obvious JS errors occurred.  This is optional
-        Paste the output of the logs  here.
-      render: shell
-
-  - type: textarea
     id: problem
     attributes:
       label: Issue description
       description: >
-        Provide any additional information you think might be relevant.
+        Provide any additional information you think might be relevant. If this is a visual bug, provide a screenshot of the input dataframe and the top couple of lines of buckaroo output.
     validations:
       required: true
 
@@ -87,4 +78,13 @@ body:
         </details>
     validations:
       required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Jupyter Log output
+      description: >
+        If the buckaroo widget completely didn't display, check the Jupyter Log Console.  Also check the javascript console of the browser to see if any obvious JS errors occurred.  This is optional
+        Paste the output of the logs  here.
+      render: shell
 
