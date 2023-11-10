@@ -70,11 +70,9 @@ body:
         Paste the output of ``buckaroo.debug_packages()``
       value: |
         <details>
-
         ```
-        Replace this line with the output of pl.show_versions(). Leave the backticks in place.
+        Replace this line with the output of buckaroo.debug_packages(). Leave the backticks in place.
         ```
-
         </details>
     validations:
       required: true
