@@ -13,7 +13,7 @@ body:
           required: true
         - label: >
             I have confirmed this bug exists on the
-            [latest version](https://github.com/paddymul/buckaroo) of Polars.
+            [latest version](https://github.com/paddymul/buckaroo) of Buckaroo.
           required: true
 
   - type: dropdown
