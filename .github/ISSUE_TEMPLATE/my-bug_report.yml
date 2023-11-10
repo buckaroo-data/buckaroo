@@ -26,7 +26,7 @@ body:
         - Jupyter Lab
         - Google Colab
         - Jupyter Notebook
-	- Other
+        - Other
     validations:
       required: true
 
