@@ -5,7 +5,7 @@ def enable(sampled=True,
            summaryStats=False,
            reorderdColumns=False,
            showCommands=False,
-           auto_clean=True,
+           auto_clean=False,
            postProcessingF=None):
     """
     Automatically use buckaroo to display all DataFrames

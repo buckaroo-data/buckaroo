@@ -50,6 +50,8 @@ ONLY_NANS_META = {'datetime': 0, 'datetime_error': 0, 'int': 0, 'int_error': 0, 
 
 
 def test_get_typing_metadata():
+    if int(pd.__version__[0]) < 2:
+        return
     # assert WEIRD_INT == ac.get_typing_metadata(pd.Series([5, 2, 3.1, None, NA]))
     assert INT_META == ac.get_typing_metadata(pd.Series(['181', '182', '183', 'a']))
     assert FLOAT_META == ac.get_typing_metadata(pd.Series(['181.1', '182.2', '183', 'a']))

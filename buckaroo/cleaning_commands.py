@@ -80,6 +80,9 @@ class to_string(Command):
     @staticmethod 
     def transform(df, col):
         ser = df[col]
+        if int(pd.__version__[0]) < 2:
+            df[col] = ser.fillna(value="").astype('string').reindex(ser.index)
+            return df
         df[col] = ser.fillna(value="").astype('string').replace("", None).reindex(ser.index)
         return df
 

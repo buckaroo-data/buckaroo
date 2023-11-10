@@ -182,6 +182,8 @@ def coerce_series(ser, new_type):
     elif new_type == 'float':
         return pd.to_numeric(ser, errors='coerce').dropna().astype('float').reindex(ser.index)
     elif new_type == 'string':
+        if int(pd.__version__[0]) < 2:
+            return ser.fillna(value="").astype('string').reindex(ser.index)
         return ser.fillna(value="").astype('string').replace("", None).reindex(ser.index)
     else:
         raise Exception("Unkown type of %s" % new_type)
