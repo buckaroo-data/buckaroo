@@ -79,14 +79,15 @@ export function DFViewer(
       */
 
     let counter = count;
-    let timer: NodeJS.Timeout;
+    //let timer: NodeJS.Timeout;
+    let timer: number;
     let colWidthHasBeenSet = false;
     let currentColWidth = -10;
     if (gridRef === undefined || gridRef.current === null) {
       currentColWidth = 200;
     } else {
       try {
-        const dc = gridRef!.current!.columnApi.getAllDisplayedColumns();
+        const dc = gridRef?.current?.columnApi.getAllDisplayedColumns();
 
         if (dc.length !== 0) {
           currentColWidth = dc[0].getActualWidth();
@@ -125,8 +126,7 @@ export function DFViewer(
       if (counter > 0 && colWidthHasBeenSet === false) {
         counter -= 1;
         // console.log("no gridRef or gridRef.current, setting delay", counter)
-        //@ts-ignore
-        timer = setTimeout(conditionallyAutosize, delay);
+        timer = window.setTimeout(conditionallyAutosize, delay);
         return;
       } else if (counter > 0 && currentColWidth === 200) {
         counter -= 1;
@@ -134,14 +134,12 @@ export function DFViewer(
         // console.log(
         //     "new colwidth not recognized yet",
         //     counter, originalColWidth, gridRef.current!.columnApi!.columnModel!.displayedColumns[0].actualWidth)
-        //@ts-ignore
-        timer = setTimeout(conditionallyAutosize, delay);
+        timer = window.setTimeout(conditionallyAutosize, delay);
         return;
       }
     };
-    //@ts-ignore
-    timer = setTimeout(conditionallyAutosize, delay);
-    return () => clearTimeout(timer);
+    timer = window.setTimeout(conditionallyAutosize, delay);
+    return () => window.clearTimeout(timer);
   };
 
   makeCondtionalAutosize(50, 350);

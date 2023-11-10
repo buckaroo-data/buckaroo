@@ -3,7 +3,13 @@ import {
   ValueFormatterFunc,
   ValueFormatterParams,
 } from 'ag-grid-community';
-import { DFWhole, DFColumn, ColumnHint, ColumnIntegertHint, ColumnFloatHint } from './staticData';
+import {
+  DFWhole,
+  DFColumn,
+  ColumnHint,
+  ColumnIntegertHint,
+  ColumnFloatHint,
+} from './staticData';
 import _ from 'lodash';
 export const updateAtMatch = (
   cols: ColDef[],
@@ -27,8 +33,7 @@ export const updateAtMatch = (
   inside of AG-Grid, and independently.
   */
 
-
-export const basicIntFormatter  = new Intl.NumberFormat('en-US', {
+export const basicIntFormatter = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 0,
   maximumFractionDigits: 3,
 });
@@ -38,21 +43,17 @@ export const stringFormatter = (params: ValueFormatterParams): string => {
   return val;
 };
 
-
 export const booleanFormatter = (params: ValueFormatterParams): string => {
   const val = params.value;
   if (val === true) {
-    return "True"
+    return 'True';
   } else if (val === false) {
-    return "False"
+    return 'False';
   }
-  return ""
+  return '';
 };
 
-
-
 const getIntegerFormatter = (hint: ColumnIntegertHint) => {
-
   const commas = Math.floor(hint.max_digits / 3);
   const totalWidth = commas + hint.max_digits;
 
@@ -68,7 +69,6 @@ const getIntegerFormatter = (hint: ColumnIntegertHint) => {
 };
 
 const getFloatFormatter = (hint: ColumnFloatHint) => {
-
   const floatFormatter = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
@@ -79,23 +79,21 @@ const getFloatFormatter = (hint: ColumnFloatHint) => {
     }
     return floatFormatter.format(params.value);
   };
-}
+};
 
 function getFormatter(hint: ColumnHint): ValueFormatterFunc<unknown> {
   if (hint === undefined) {
     return stringFormatter;
   }
-  if (hint.type === "integer") {
+  if (hint.type === 'integer') {
     return getIntegerFormatter(hint);
-  }
-  else if (hint.type === "string") {
-      return stringFormatter;
-    
-  } else if (hint.type === "float") {
+  } else if (hint.type === 'string') {
+    return stringFormatter;
+  } else if (hint.type === 'float') {
     return getFloatFormatter(hint);
-  } else if (hint.type === "boolean") {
+  } else if (hint.type === 'boolean') {
     return booleanFormatter;
-  } else if (hint.type === "obj") {
+  } else if (hint.type === 'obj') {
     return stringFormatter;
   }
   return stringFormatter;
@@ -111,7 +109,7 @@ export function dfToAgrid(tdf: DFWhole): [ColDef[], unknown[]] {
       field: f.name,
       headerName: f.name,
       valueFormatter: getFormatter(
-        _.get(tdf.table_hints, f.name, { is_numeric: false, type:"obj" })
+        _.get(tdf.table_hints, f.name, { is_numeric: false, type: 'obj' })
       ),
     };
     if (f.name === 'index') {
