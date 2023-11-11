@@ -46,8 +46,52 @@ def _jupyter_labextension_paths():
     }]
 
 
+
+def determine_jupter_env():
+    import psutil
+    parent_process = psutil.Process().parent().cmdline()[-1]
+
+    if 'jupyter-lab' in parent_process:
+        return "jupyter-lab"
+    elif 'jupyter-notebook' in parent_process:
+        return "jupyter-notebook"
+    elif '__vsc_ipynb_file__' in globals():
+        return "vscode"
+    else:
+        try:
+            from IPython.core import getipython
+            if 'google.colab' in str(getipython.get_ipython()):
+                return "google-colab"
+        except:
+            pass
+    return "unknown"
+
+def is_notebook_compatible():
+    jupyter_env = determine_jupter_env()
+    if jupyter_env == "jupyter-notebook":
+        try:
+            import notebook
+            return notebook.version_info[0] >= 7
+        except:
+            pass
+        return False
+    else:
+        return True
+
+def warn_on_incompatible():
+    if not is_notebook_compatible():
+        import notebook
+        print("Buckaroo is compatible with jupyter notebook > 7, or jupyterlab >3.6.0")
+        print("You seem to be executing this in jupyter notebook version %r" % str(notebook.__version__))
+        print("You can upgrade to notebook 7 by running 'pip install --upgrade notebook'")
+        print("Or you can try running jupyter lab with 'jupyter lab'")
+        
+              
+
 def debug_packages():
     print("Selected Jupyter core packages...")
+    jupyter_env = determine_jupter_env()
+    print("executing in %s " % determine_jupter_env())
     packages = [
             "buckaroo",
             "jupyterlab",
@@ -84,6 +128,7 @@ def debug_packages():
 
 try:
     enable()
+    warn_on_incompatible()
 except:
     print("error enabling buckaroo as default display formatter for dataframes (ignore message during testing/builds")
 
