@@ -14,7 +14,7 @@ jobs:
       matrix:
         #os: [ubuntu-latest, windows-latest, macos-latest]
         os: [ubuntu-latest]
-        python-version: ["3.8", "3.11"]
+        python-version: ["3.8"]
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -31,13 +31,26 @@ jobs:
       - name: Test the extension
         run: |
           python -m pip install --upgrade -v -e ".[test, examples, docs]"
-          python -m pytest
+          python -m pytest tests/unit
           yarn run test
 
       - name: Linting
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
           yarn run lint:check
+
+      - name: Package
+        run: |
+          python -m pip install build
+          python -m build .
+
+      - name: Upload builds
+        uses: actions/upload-artifact@v3
+        with:
+          name: buckaroo-dist-${{ github.run_number }}
+          path: |
+            ./dist
+            ./js/*.tgz
 
       - name: Check docs can be build + links
         if: ${{ matrix.os == 'ubuntu-latest' }}
@@ -47,3 +60,33 @@ jobs:
           pip install pytest-check-links
           make html
           python -m pytest --check-links
+
+  ui-test:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/download-artifact@v3
+        with:
+          name: buckaroo-dist-${{ github.run_number }}
+
+      - name: Install Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Setup buckaroo ui test
+        run: pip install `echo dist/*.whl`[ui-test] -r requirements-ui-test.txt
+
+      - name: Install playwright browsers
+        run: playwright install chromium
+
+      - name: Run ui-tests
+        run: SOLARA_TEST_RUNNERS=jupyter_lab pytest tests/ui/ --video=retain-on-failure
+
+      - name: Upload Test artifacts
+        if: always()
+        uses: actions/upload-artifact@v2
+        with:
+          name: buckaroo-test-results-${{ github.run_number }}
+          path: test-results
