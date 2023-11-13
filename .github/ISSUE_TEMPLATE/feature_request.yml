@@ -1,6 +1,6 @@
 name: 'Enhancement Request'
-description: Report an issue with Buckaroo.
-labels: [bug]
+description: Request an enhancement to Buckaroo.
+labels: [enhancement]
 
 body:
   - type: checkboxes
@@ -9,7 +9,7 @@ body:
       label: Checks
       options:
         - label: >
-            I have checked that this issue has not already been reported.
+            I have checked that this enhancement has not already been requested
           required: true
 
   - type: dropdown
