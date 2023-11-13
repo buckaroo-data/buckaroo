@@ -49,7 +49,7 @@ body:
       required: false
 
   - type: textarea
-    id: prior art
+    id: prior-art
     attributes:
       label: Prior Art
       description: >
