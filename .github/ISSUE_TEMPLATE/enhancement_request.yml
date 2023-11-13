@@ -1,0 +1,58 @@
+name: 'Enhancement Request'
+description: Report an issue with Buckaroo.
+labels: [bug]
+
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: >
+            I have checked that this issue has not already been reported.
+          required: true
+
+  - type: dropdown
+    id: Subsystem
+    attributes:
+      label: How would you categorize this request.  You can select multiple if not sure
+      multiple: true
+      options:
+        - Display (is this related to visual display of a value)
+        - Documentation
+        - Summary stats
+        - Developer ergonomics (defaults, error messages)
+        - Auto Cleaning
+        - Performance
+        - Developer Experience/CI (feature to make it easier to devlop on Buckaroo)
+        - Low Code UI
+        - Other (please describe in Issue Description)
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Enhancement Description
+      description: >
+        How would you like Buckaroo to function?  Write a description of what you want buckaroo to do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: pseudo-code-implementation
+    attributes:
+      label: Pseudo Code Implementation
+      description: >
+        If applicable, write simple python code that shows an input dataframe, the code to transform it to the output dataframe you are looking for, and the output dataframe.
+    validations:
+      required: false
+
+  - type: textarea
+    id: prior art
+    attributes:
+      label: Prior Art
+      description: >
+        Link to other tools that function in the way you want.  Describe how that tool solves this problem. Videos are welcome too
+    validations:
+      required: true
