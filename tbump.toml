@@ -29,8 +29,7 @@ src = "package.json"
 [[file]]
 src = "buckaroo/_version.py"
 [[file]]
-src = "docs/soruce/conf.py"
-
+src = "docs/source/conf.py"
 
 
 # You can specify a list of commands to

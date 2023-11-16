@@ -9,7 +9,7 @@
 project = 'Buckaroo'
 copyright = '2023, Paddy Mullen'
 author = 'Paddy Mullen'
-release = '0.3.23'
+release = '0.4.5'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
