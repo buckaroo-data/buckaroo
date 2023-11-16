@@ -36,7 +36,7 @@ dependencies = [
     "ipywidgets>=7.6.0,<9",
     "graphlib_backport>=1.0.0"
 ]
-version = "0.4.5"
+version = "0.4.6"
 
 [project.license]
 file = "LICENSE.txt"
@@ -138,7 +138,7 @@ field = [
 ]
 
 [tool.tbump.version]
-current = "0.4.5"
+current = "0.4.6"
 regex = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)((?P<channel>a|b|rc|.dev)(?P<release>\\d+))?"
 
 [tool.tbump.git]
