@@ -9,6 +9,7 @@ import {
   ColumnHint,
   ColumnIntegertHint,
   ColumnFloatHint,
+  ColumnDatetimeHint,
 } from './staticData';
 import _ from 'lodash';
 export const updateAtMatch = (
@@ -43,14 +44,91 @@ export const stringFormatter = (params: ValueFormatterParams): string => {
   return val;
 };
 
-export const booleanFormatter = (params: ValueFormatterParams): string => {
+const dictDisplayer = (val: Record<string, any>): string => {
+  const objBody = _.map(
+    val,
+    (value, key) => `'${key}': ${objDisplayer(value)}`
+  ).join(',');
+  return `{ ${objBody} }`;
+};
+
+export const isValidDate = (possibleDate: any): boolean => {
+  if (_.isDate(possibleDate) && isFinite(possibleDate.getTime())) {
+    return true;
+  }
+  return false;
+};
+
+const DEFAULT_DATE_FORMAT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric',
+  hour12: false,
+};
+
+export const dateDisplayerDefault = (d: Date): string => {
+  const fullStr = d.toLocaleDateString('en-CA', DEFAULT_DATE_FORMAT);
+  const [dateStr, timeStr] = fullStr.split(',');
+  //const retVal = `${dateStr} ${timeStr.padStart(12)}`;
+  const retVal = `${dateStr} ${timeStr}`;
+  return retVal;
+};
+
+export const getDatetimeFormatter = (colHint: ColumnDatetimeHint) => {
+  return (params: ValueFormatterParams): string => {
+    // console.log("params", params)
+    const val = params.value;
+    if (val === null || val === undefined) {
+      return '';
+    }
+    const d = new Date(val);
+    if (!isValidDate(d)) {
+      return '';
+    }
+    if (colHint.formatter === 'default') {
+      return dateDisplayerDefault(d);
+    } else if (colHint.formatter === 'toLocaleString') {
+      return d.toLocaleDateString(colHint.locale, colHint.args);
+    }
+    throw new Error('unreachable code in getDatetimeFormatter');
+  };
+};
+
+const objDisplayer = (val: any | any[]): string => {
+  if (val === undefined || val === null) {
+    return 'None';
+  } else if (_.isArray(val)) {
+    return `[ ${val.map(objDisplayer).join(', ')}]`;
+  } else if (_.isBoolean(val)) {
+    return boolDisplayer(val);
+  } else if (_.isObject(val)) {
+    return dictDisplayer(val);
+  } else {
+    return val.toString();
+  }
+  return val;
+};
+
+const objFormatter = (params: ValueFormatterParams): string => {
   const val = params.value;
+  return objDisplayer(val);
+};
+
+export const boolDisplayer = (val: boolean) => {
   if (val === true) {
     return 'True';
   } else if (val === false) {
     return 'False';
   }
   return '';
+};
+
+export const booleanFormatter = (params: ValueFormatterParams): string => {
+  const val = params.value;
+  return boolDisplayer(val);
 };
 
 const getIntegerFormatter = (hint: ColumnIntegertHint) => {
@@ -89,12 +167,14 @@ function getFormatter(hint: ColumnHint): ValueFormatterFunc<unknown> {
     return getIntegerFormatter(hint);
   } else if (hint.type === 'string') {
     return stringFormatter;
+  } else if (hint.type === 'datetime') {
+    return getDatetimeFormatter(hint);
   } else if (hint.type === 'float') {
     return getFloatFormatter(hint);
   } else if (hint.type === 'boolean') {
     return booleanFormatter;
   } else if (hint.type === 'obj') {
-    return stringFormatter;
+    return objFormatter;
   }
   return stringFormatter;
 }

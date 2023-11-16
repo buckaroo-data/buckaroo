@@ -1,3 +1,4 @@
+import traceback
 from .buckaroo_widget import BuckarooWidget
 import pandas as pd
 
@@ -6,7 +7,9 @@ def enable(sampled=True,
            reorderdColumns=False,
            showCommands=False,
            auto_clean=False,
-           postProcessingF=None):
+           postProcessingF=None,
+           debug=False
+           ):
     """
     Automatically use buckaroo to display all DataFrames
     instances in the notebook.
@@ -24,27 +27,41 @@ def enable(sampled=True,
         print("must be running inside ipython to enable default display via enable()")
         return
 
-
     def _display_as_buckaroo(df):
         from IPython.display import display
-        return display(BuckarooWidget(df,
-                                      sampled=sampled,
-                                      summaryStats=summaryStats,
-                                      reorderdColumns=reorderdColumns,
-                                      showCommands=showCommands,
-                                      auto_clean=auto_clean,
-                                      postProcessingF=postProcessingF))
+        try:
+            bw = BuckarooWidget(df,
+                                sampled=sampled,
+                                summaryStats=summaryStats,
+                                reorderdColumns=reorderdColumns,
+                                showCommands=showCommands,
+                                auto_clean=auto_clean,
+                                postProcessingF=postProcessingF)
+            return display(bw)
+        except:
+            if debug:
+                traceback.print_exc()
+                return
+            # returning NotImplementedError causes IPython to find the
+            # next registered formatter for the type
+            raise NotImplementedError
 
     def _display_polars_as_buckaroo(polars_df):
         from IPython.display import display
-        pandas_df = polars_df.to_pandas()
-        return display(BuckarooWidget(pandas_df, 
-                                      sampled=sampled,
-                                      summaryStats=summaryStats,
-                                      reorderdColumns=reorderdColumns,
-                                      showCommands=showCommands,
-                                      auto_clean=auto_clean,
-                                      postProcessingF=postProcessingF))
+        try:
+            pandas_df = polars_df.to_pandas()
+            return display(BuckarooWidget(pandas_df, 
+                                          sampled=sampled,
+                                          summaryStats=summaryStats,
+                                          reorderdColumns=reorderdColumns,
+                                          showCommands=showCommands,
+                                          auto_clean=auto_clean,
+                                          postProcessingF=postProcessingF))
+        except:
+            if debug:
+                traceback.print_exc()
+                return
+            raise NotImplementedError
 
 
     ip_formatter = ip.display_formatter.ipython_display_formatter

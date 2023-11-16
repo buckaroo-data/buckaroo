@@ -95,15 +95,18 @@ class BuckarooWidget(DOMWidget):
                  showCommands=False,
                  auto_clean=True,
                  postProcessingF=None,
+                 debug=False
                  ):
 
         super().__init__()
-        warnings.filterwarnings('ignore')
+        if not debug:
+            warnings.filterwarnings('ignore')
         #moving setup_from_command_kls_list early in the init because
         #it's relatively benign and not tied to other linked updates
         self.postProcessingF = postProcessingF
         self.processed_result = None
         self.transformed_df = None
+        self.debug = debug
         self.df_name = get_df_name(df)
 
         self.setup_from_command_kls_list()
@@ -111,7 +114,6 @@ class BuckarooWidget(DOMWidget):
         #we need dfConfig setup first before we get the proper working_df for auto_cleaning
         self.raw_df = df
         self.run_autoclean(auto_clean)
-            
         warnings.filterwarnings('default')
 
 
@@ -172,7 +174,7 @@ class BuckarooWidget(DOMWidget):
             self.run_post_processing()            
         except Exception as e:
             results['transformed_df'] = EMPTY_DF_OBJ
-            print(e)
+            traceback.print_exc()
             results['transform_error'] = str(e)
         self.operation_results = results
 
@@ -204,10 +206,12 @@ class BuckarooWidget(DOMWidget):
     def set_typed_df(self, new_df):
         self.typed_df = new_df
         # stats need to be rerun each time 
-        self.stats = DfStats(self.typed_df, [TypingStats, DefaultSummaryStats, ColDisplayHints], self.df_name)
+        self.stats = DfStats(
+            self.typed_df,
+            [TypingStats, DefaultSummaryStats, ColDisplayHints],
+            self.df_name, debug=self.debug)
         self.summaryDf = df_to_obj(self.stats.presentation_sdf, self.stats.col_order)
         self.update_based_on_df_config(3)
-
 
     def generate_code(self, operations):
         if len(operations) == 0:
