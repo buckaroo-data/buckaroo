@@ -19,27 +19,30 @@ export type CommandConfigSetterT = (
   TODO:add height settings to dfConfig rather than hardcoded.
  */
 export function WidgetDCFCell({
-  origDf,
+  df_json: json_serialized_df,
   operations,
   on_operations,
   operation_results,
   commandConfig,
   dfConfig,
   on_dfConfig,
-  summaryDf,
+  summary_df_json: summaryDf,
 }: {
-  origDf: DFWhole;
+  df_json: DFWhole;
   operations: Operation[];
   on_operations: (ops: Operation[]) => void;
   operation_results: OperationResult;
   commandConfig: CommandConfigT;
   dfConfig: DfConfig;
   on_dfConfig: unknown;
-  summaryDf: DFWhole;
+  summary_df_json: DFWhole;
 }) {
   const [activeCol, setActiveCol] = useState('stoptime');
   const widgetConfig: WidgetConfig = { showCommands: dfConfig.showCommands };
-  const localDfConfig = { ...dfConfig, rowsShown: origDf.data.length || 0 };
+  const localDfConfig = {
+    ...dfConfig,
+    rowsShown: json_serialized_df.data.length || 0,
+  };
   return (
     <div
       className="dcf-root flex flex-col"
@@ -51,14 +54,14 @@ export function WidgetDCFCell({
       >
         <StatusBar config={localDfConfig} setConfig={on_dfConfig} />
         <DFViewer
-          df={dfConfig.summaryStats ? summaryDf : origDf}
+          df={dfConfig.summaryStats ? summaryDf : json_serialized_df}
           activeCol={activeCol}
           setActiveCol={setActiveCol}
         />
       </div>
       {widgetConfig.showCommands ? (
         <ColumnsEditor
-          df={origDf}
+          df={json_serialized_df}
           activeColumn={activeCol}
           operations={operations}
           setOperations={on_operations}
@@ -87,14 +90,14 @@ export function WidgetDCFCellExample() {
   const [operations, setOperations] = useState<Operation[]>(bakedOperations);
   return (
     <WidgetDCFCell
-      origDf={tableDf}
+      df_json={tableDf}
       operations={operations}
       on_operations={setOperations}
       operation_results={baseOperationResults}
       commandConfig={bakedCommandConfig}
       dfConfig={sampleConfig}
       on_dfConfig={setConfig}
-      summaryDf={tableDf}
+      summary_df_json={tableDf}
     />
   );
 }

@@ -1,5 +1,5 @@
-from .lispy import s
-from .configure_utils import configure_buckaroo
+from ..jlisp.lispy import s
+from ..jlisp.configure_utils import configure_buckaroo
 from .auto_clean import smart_to_int, get_auto_type_operations
 import pandas as pd
 import numpy as np

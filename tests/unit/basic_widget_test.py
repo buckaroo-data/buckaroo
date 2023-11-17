@@ -1,7 +1,7 @@
 import pandas as pd
 from IPython.display import display
 from buckaroo.buckaroo_widget import BuckarooWidget
-from buckaroo.analysis_management import PERVERSE_DF
+from buckaroo.pluggable_analysis_framework.analysis_management import PERVERSE_DF
 from .fixtures import (word_only_df)
 
 simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})

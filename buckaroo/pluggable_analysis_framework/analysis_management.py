@@ -1,9 +1,10 @@
 import sys
 import traceback
+import warnings
 
 import numpy as np
 import pandas as pd
-from buckaroo.pluggable_analysis_framework import (
+from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
     ColAnalysis, order_analysis, check_solvable, NotProvidedException)
 from buckaroo.serialization_utils import pd_py_serialize, pick, d_update
 
@@ -74,7 +75,7 @@ def reproduce_summary(ser_name, kls, summary_df, err, operating_df_name):
 def output_reproduce_preamble():
     print("#Reproduction code")
     print("#" + "-" * 80)
-    print("from buckaroo.analysis_management import PERVERSE_DF")
+    print("from buckaroo.pluggable_analysis_framework.analysis_management import PERVERSE_DF")
 
 def output_full_reproduce(errs, summary_df, df_name):
     if len(errs) == 0:
@@ -87,8 +88,6 @@ def output_full_reproduce(errs, summary_df, df_name):
     except Exception as e:
         #this is tricky stuff that shouldn't error, I want these stack traces to escape being caught
         traceback.print_exc()
-
-
 
 
 def produce_summary_df(df, ordered_objs, df_name='test_df', debug=False):

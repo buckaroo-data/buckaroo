@@ -8,7 +8,7 @@ from ..extensions import db
 import json
 #from .dcf_transform import dcf_transform, s, dcf_to_py as dcf_to_py_core
 from .lispy import s
-from .all_transforms import dcf_transform, dcf_to_py_core, command_patterns, command_defaults
+from ..customizations.all_transforms import dcf_transform, dcf_to_py_core, command_patterns, command_defaults
 #from lispy import s
 dcf_views = Blueprint('dcf', __name__, url_prefix='/dcf')
 

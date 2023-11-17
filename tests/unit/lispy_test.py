@@ -1,6 +1,6 @@
 import unittest
 import pytest
-from buckaroo.lisp_utils import split_operations, lists_match
+from buckaroo.jlisp.lisp_utils import split_operations, lists_match
 
 def test_split_operations():
 

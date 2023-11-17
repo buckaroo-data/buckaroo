@@ -2,7 +2,7 @@ import unittest
 import pytest
 
 import pandas as pd
-from buckaroo import auto_clean as ac
+from buckaroo.auto_clean import auto_clean as ac
 from pandas import NA as NA
 from numpy import nan
 from pandas.testing import assert_series_equal, assert_frame_equal

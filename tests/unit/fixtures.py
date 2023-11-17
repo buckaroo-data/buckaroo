@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from buckaroo.pluggable_analysis_framework import (ColAnalysis)
+from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
 
 test_df = pd.DataFrame({
         'normal_int_series' : pd.Series([1,2,3,4]),

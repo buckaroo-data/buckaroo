@@ -1,7 +1,7 @@
 from datetime import datetime as dtdt
 import numpy as np
 import pandas as pd
-from buckaroo.analysis import TypingStats, DefaultSummaryStats, ColDisplayHints
+from buckaroo.customizations.analysis import TypingStats, DefaultSummaryStats, ColDisplayHints
 
 
 text_ser = pd.Series(["foo", "bar", "baz"])

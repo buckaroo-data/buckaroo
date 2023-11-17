@@ -14,14 +14,14 @@ from ipywidgets import DOMWidget
 from traitlets import Unicode, List, Dict, observe
 
 from ._frontend import module_name, module_version
-from .all_transforms import configure_buckaroo, DefaultCommandKlsList
-from .lisp_utils import (lists_match, split_operations)
+from .customizations.all_transforms import configure_buckaroo, DefaultCommandKlsList
+from .jlisp.lisp_utils import (lists_match, split_operations)
 
-from .auto_clean import get_auto_type_operations, get_typing_metadata, recommend_type
-from .down_sample import sample
+from .auto_clean.auto_clean import get_auto_type_operations, get_typing_metadata, recommend_type
+from .customizations.down_sample import sample
 
-from .analysis import (TypingStats, DefaultSummaryStats, ColDisplayHints)
-from .analysis_management import DfStats, get_df_name
+from .customizations.analysis import (TypingStats, DefaultSummaryStats, ColDisplayHints)
+from .pluggable_analysis_framework.analysis_management import DfStats, get_df_name
 
 from .serialization_utils import df_to_obj, EMPTY_DF_OBJ
 
@@ -43,12 +43,13 @@ class BuckarooWidget(DOMWidget):
     operations = List().tag(sync=True)
     machine_gen_operations = List().tag(sync=True)
     command_classes = DefaultCommandKlsList
+    analysis_classes = [TypingStats, DefaultSummaryStats, ColDisplayHints]
 
     typing_metadata_f = staticmethod(get_typing_metadata)
     typing_recommend_f = staticmethod(recommend_type)
 
-    origDf = Dict({}).tag(sync=True)
-    summaryDf = Dict({}).tag(sync=True)
+    df_json = Dict({}).tag(sync=True)
+    summary_df_json = Dict({}).tag(sync=True)
 
     operation_results = Dict(
         {'transformed_df': EMPTY_DF_OBJ, 'generated_py_code':'# instantiation, unused'}
@@ -144,9 +145,9 @@ class BuckarooWidget(DOMWidget):
                 #ideally this won't require a reserialization.  All
                 #possible col_orders shoudl be serialized once, and the
                 #frontend should just toggle from them
-              self.origDf = df_to_obj(self.typed_df, self.stats.col_order, table_hints=self.stats.table_hints)
+              self.df_json = df_to_obj(self.typed_df, self.stats.col_order, table_hints=self.stats.table_hints)
             else:
-                self.origDf = df_to_obj(self.typed_df, self.typed_df.columns, table_hints=self.stats.table_hints)
+                self.df_json = df_to_obj(self.typed_df, self.typed_df.columns, table_hints=self.stats.table_hints)
 
     @observe('operations')
     def handle_operations(self, change):
@@ -210,7 +211,7 @@ class BuckarooWidget(DOMWidget):
             self.typed_df,
             [TypingStats, DefaultSummaryStats, ColDisplayHints],
             self.df_name, debug=self.debug)
-        self.summaryDf = df_to_obj(self.stats.presentation_sdf, self.stats.col_order)
+        self.summary_df_json = df_to_obj(self.stats.presentation_sdf, self.stats.col_order)
         self.update_based_on_df_config(3)
 
     def generate_code(self, operations):
@@ -241,6 +242,6 @@ class BuckarooWidget(DOMWidget):
 
     def add_analysis(self, analysis_obj):
         self.stats.add_analysis(analysis_obj)
-        self.summaryDf = df_to_obj(self.stats.presentation_sdf, self.stats.col_order)
+        self.summary_df_json = df_to_obj(self.stats.presentation_sdf, self.stats.col_order)
         #just trigger redisplay
         self.update_based_on_df_config(3)
