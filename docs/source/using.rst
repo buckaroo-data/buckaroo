@@ -37,7 +37,7 @@ Writing your own commands
 =========================
 
 
-Builtin commands are found in `all_transforms.py <https://github.com/paddymul/buckaroo/blob/main/buckaroo/all_transforms.py>`_
+Builtin commands are found in `all_transforms.py <https://github.com/paddymul/buckaroo/blob/main/buckaroo/customizations/all_transforms.py>`_
 
 
 .. code-block:: python
