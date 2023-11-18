@@ -9,6 +9,7 @@ from buckaroo.customizations.all_transforms import (
 
 def result_from_exec(code_str, df_input):
     CODE_PREAMBLE = "import pandas as pd\nimport numpy as np\n"
+    CODE_PREAMBLE += "from buckaroo.auto_clean.auto_clean import smart_to_int\n"
     RETRIEVE_RESULT_STR = '\n__ret_closure[0] = clean(__test_df)'
     outer_scope_result = [0]
     full_code_str = CODE_PREAMBLE + code_str + RETRIEVE_RESULT_STR

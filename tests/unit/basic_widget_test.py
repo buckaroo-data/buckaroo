@@ -29,7 +29,7 @@ def test_interpreter():
 
     w = BuckarooWidget(simple_df)
     assert w.operation_results['generated_py_code'] == '''def clean(df):
-    df['int_col'] = smart_int(df['int_col'])
+    df['int_col'] = smart_to_int(df['int_col'])
     df['str_col'] = df['str_col'].fillna(value='').astype('string').replace('', None)
     return df'''
 
@@ -42,7 +42,7 @@ def test_interpreter():
     field_names = [ f['name'] for f in tdf['schema']['fields'] ]
     assert 'str_col' not in field_names
     assert w.operation_results['generated_py_code'] == """def clean(df):
-    df['int_col'] = smart_int(df['int_col'])
+    df['int_col'] = smart_to_int(df['int_col'])
     df['str_col'] = df['str_col'].fillna(value='').astype('string').replace('', None)
     df.drop('str_col', axis=1, inplace=True)
     return df"""

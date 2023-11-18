@@ -54,7 +54,7 @@ class to_int(Command):
 
     @staticmethod 
     def transform_to_py(df, col):
-        return "    df['%s'] = smart_int(df['%s'])" % (col, col)
+        return "    df['%s'] = smart_to_int(df['%s'])" % (col, col)
 
 class to_float(Command):
     #argument_names = ["df", "col"]
