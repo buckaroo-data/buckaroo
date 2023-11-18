@@ -50,7 +50,7 @@ class OneHot(Command):
     def transform_to_py(df, col):
         commands = [
             "    one_hot = pd.get_dummies(df['%s'])" % (col),
-            "    df.drop('%s', inplace=True)" % (col),
+            "    df.drop('%s', axis=1, inplace=True)" % (col),
             "    df = df.join(one_hot)"]
         return "\n".join(commands)
 
