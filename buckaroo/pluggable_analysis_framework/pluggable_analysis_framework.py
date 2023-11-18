@@ -1,7 +1,4 @@
 import graphlib
-import unittest
-import pandas as pd
-import numpy as np
 from collections import OrderedDict
 
 class ColAnalysis(object):
@@ -54,7 +51,7 @@ def remove_duplicates(lst):
     return list(OrderedDict.fromkeys(lst))
 
 def clean_list(full_class_list):
-    only_kls_lst = [kls for kls in full_class_list if not kls == None]
+    only_kls_lst = [kls for kls in full_class_list if kls is not None]
     #note I also want someway to detect that classes don't alternate
     # ['a', 'a', 'b', 'c', 'c'] # fine
     # ['a', 'a', 'b', 'a', 'c'] # something went wrong with the graph algo

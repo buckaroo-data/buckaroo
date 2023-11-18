@@ -17,7 +17,7 @@ def test_perverse_instantiation():
     assert w.dfConfig['totalRows'] == 10
 
 def test_word_only_instantiation():
-    w = BuckarooWidget(word_only_df)
+    BuckarooWidget(word_only_df)
 
 def test_basic_display():
     df = simple_df
@@ -38,7 +38,7 @@ def test_interpreter():
     w.operations = temp_ops
 
     tdf = w.operation_results['transformed_df']
-    assert w.operation_results['transform_error'] == False
+    assert w.operation_results['transform_error'] is False
     field_names = [ f['name'] for f in tdf['schema']['fields'] ]
     assert 'str_col' not in field_names
     assert w.operation_results['generated_py_code'] == """def clean(df):
@@ -60,7 +60,7 @@ def atest_symbol_meta():
     w.operations = [[{"symbol":"dropcol", "meta":{}},{"symbol":"df"},"starttime"]]
 
     tdf = w.operation_results['transformed_df']
-    assert w.operation_results['transform_error'] == False
+    assert w.operation_results['transform_error'] is False
     field_names = [ f['name'] for f in tdf['schema']['fields'] ]
     assert 'starttime' not in field_names
 

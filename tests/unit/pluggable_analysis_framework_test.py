@@ -1,17 +1,11 @@
 import unittest
-import pytest
-import pandas as pd
-import numpy as np
 import graphlib
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
     ColAnalysis, order_analysis, check_solvable, NotProvidedException)
 
-from buckaroo.pluggable_analysis_framework.analysis_management import (
-    AnalsysisPipeline, produce_summary_df)
 
-from buckaroo.customizations.analysis import (TypingStats, DefaultSummaryStats)
 
-from .fixtures import (test_df, df, DistinctCount, Len, DistinctPer, DCLen, DependsNoProvides)
+from .fixtures import (DistinctCount, Len, DistinctPer, DCLen, DependsNoProvides)
 
 class NoRoute(ColAnalysis):    
     provides_summary = ['not_used']

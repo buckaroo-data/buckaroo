@@ -1,6 +1,4 @@
-from functools import reduce
 import pandas as pd
-from pandas.io.json import dumps as pdumps
 import numpy as np
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 import warnings
@@ -20,7 +18,7 @@ def probable_datetime(ser):
             return False
         return True
         
-    except Exception as e:
+    except Exception:
         warnings.filterwarnings('default')
         return False
 
@@ -81,7 +79,6 @@ class DefaultSummaryStats(ColAnalysis):
             empty_count = 0
 
         is_numeric = pd.api.types.is_numeric_dtype(ser)
-        is_object = pd.api.types.is_object_dtype
         is_bool = pd.api.types.is_bool_dtype(ser)
 
         base_d = dict(
@@ -150,11 +147,6 @@ def numeric_histogram(arr, nan_per):
     if nan_per > 0.0:
         ret_histo.append(nan_observation)
     return ret_histo
-
-
-def histo_format(v, l):
-    scaled = v/l
-    
 
 def categorical_dict(ser, val_counts, top_n_positions=7):
     l = len(ser)

@@ -1,5 +1,3 @@
-import unittest
-import pytest
 from buckaroo.jlisp.lisp_utils import split_operations, lists_match
 
 def test_split_operations():

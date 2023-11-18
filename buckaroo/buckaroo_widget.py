@@ -187,7 +187,7 @@ class BuckarooWidget(DOMWidget):
                 else:
                     working_df = self.transformed_df
                 self.processed_result = self.postProcessingF(working_df)
-            except Exception as e:
+            except Exception:
                 traceback.print_exc()
 
     @observe('machine_gen_operations')

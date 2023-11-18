@@ -5,7 +5,7 @@ import warnings
 import numpy as np
 import pandas as pd
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
-    ColAnalysis, order_analysis, check_solvable, NotProvidedException)
+    order_analysis, check_solvable)
 from buckaroo.serialization_utils import pd_py_serialize, pick, d_update
 
 FAST_SUMMARY_WHEN_GREATER = 1_000_000
@@ -85,7 +85,7 @@ def output_full_reproduce(errs, summary_df, df_name):
         for ser_name, err_kls in errs.items():
             err, kls = err_kls
             reproduce_summary(ser_name, kls, summary_df, err, df_name)
-    except Exception as e:
+    except Exception:
         #this is tricky stuff that shouldn't error, I want these stack traces to escape being caught
         traceback.print_exc()
 
@@ -104,19 +104,17 @@ def produce_summary_df(df, ordered_objs, df_name='test_df', debug=False):
         ser = df[ser_name]
         #FIXME: actually sample the series.  waiting until I have time
         #to proeprly benchmark
-
         sampled_ser = ser
         summary_ser = pd.Series({}, dtype='object')
-        table_hint_dict = {}
         for a_kls in ordered_objs:
             try:
                 if a_kls.quiet or a_kls.quiet_warnings:
-                    if debug == False:
+                    if debug is False:
                         warnings.filterwarnings('ignore')
-                    summary_res = a_kls.summary(ser, summary_ser, ser)
+                    summary_res = a_kls.summary(sampled_ser, summary_ser, ser)
                     warnings.filterwarnings('default')
                 else:
-                    summary_res = a_kls.summary(ser, summary_ser, ser)
+                    summary_res = a_kls.summary(sampled_ser, summary_ser, ser)
                 for k,v in summary_res.items():
                     summary_ser.loc[k] = v
             except Exception as e:
@@ -242,7 +240,7 @@ class DfStats(object):
         passed_unit_tests, ut_errs = self.ap.add_analysis(a_obj)
         #if you're adding analysis interactively, of course you want debug info... I think
         self.sdf, self.table_hints, errs = self.ap.process_df(self.df, debug=True)
-        if passed_unit_tests == False:
+        if passed_unit_tests is False:
             print("Unit tests failed")
         if errs:
             print("Errors on original dataframe")

@@ -1,8 +1,6 @@
-import sys
 import math
 import warnings
 
-from datetime import timedelta
 from collections import defaultdict
 
 import pandas as pd
@@ -96,7 +94,7 @@ def get_object_typing_metadata(ser):
     return ret_dict
 
 def get_typing_metadata(ser):
-    td = type_dict = default_type_dict.copy()
+    td = default_type_dict.copy() #type_dict
     dt = ser.dtype
     if not pd.api.types.is_object_dtype(dt):
         td['exact_type'] = str(dt)

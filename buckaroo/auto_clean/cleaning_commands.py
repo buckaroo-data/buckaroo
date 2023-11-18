@@ -2,7 +2,6 @@ from ..jlisp.lispy import s
 from ..jlisp.configure_utils import configure_buckaroo
 from .auto_clean import smart_to_int, get_auto_type_operations
 import pandas as pd
-import numpy as np
 
 class Command(object):
     pass
@@ -47,7 +46,7 @@ class to_int(Command):
         ser = df[col]
         try:
             df[col] = smart_to_int(ser)
-        except Exception as e:
+        except Exception:
             #just let pandas figure it out, we recommended the wrong type
             df[col] = pd.to_numeric(ser, errors='coerce')
 

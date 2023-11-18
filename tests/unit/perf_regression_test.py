@@ -10,7 +10,8 @@ def float_df(N,K):
 # %timeit float_df(100_000,20) 9ms on my laptop
 
 def bw_do_stuff(df, **kwargs):
-    bw = buckaroo.BuckarooWidget(df, **kwargs)
+    buckaroo.buckaroo_widget.BuckarooWidget(df, **kwargs)
+
 #%timeit bw_do_stuff(float_df(100_000, 20)) 500 ms on my laptop
 
 

@@ -1,11 +1,9 @@
-import unittest
-import pytest
 
 import pandas as pd
 from buckaroo.auto_clean import auto_clean as ac
 from pandas import NA as NA
 from numpy import nan
-from pandas.testing import assert_series_equal, assert_frame_equal
+from pandas.testing import assert_series_equal
 
 
 DATETIME_META = {'datetime': 0.75, 'datetime_error': 0.25, 'int': 0.25, 'int_error': 0.75, 'float': 0.25, 'float_error': 0.75, 'bool': 0, 'bool_error':1}

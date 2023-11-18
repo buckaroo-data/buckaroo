@@ -120,12 +120,89 @@ known_first_party = [
 ]
 line_length = 80
 
-[tool.pylint.messages_control]
-disable = "C0330, C0326"
 
-[tool.pylint.format]
-max-line-length = "80"
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
 
-[tool.black]
-line-length = 80
-exclude = "/(\n    \\.eggs\n  | \\.git\n  | \\.hg\n  | \\.mypy_cache\n  | \\.tox\n  | \\.venv\n  | _build\n  | buck-out\n  | build\n  | dist\n)/\n"
+# Same as Black.
+line-length = 88
+indent-width = 4
+
+# Assume Python 3.8
+target-version = "py38"
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+select = ["E4", "E7", "E9", "F"]
+ignore = []
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["F401"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.per-file-ignores]
+# lispy.py is a vendored and slightly modified bit of code from Peter Norvig
+# Anyone trying to understand it is recommended to read Peter Norvig's writings
+# don't want to add extaneous diffs
+"buckaroo/jlisp/lispy.py" = [
+			  "E401", "F601",
+			  "E701", "E702", "E703", "E712"]
+
+#__init__.py and widget utils does some bare excepts because it absolutely cannot error
+#and give a non displayable dataframe
+"buckaroo/__init__.py" = ["E722",
+		          "F401",  #it's an __init__.py,  it needs to import unused imports
+]
+
+"buckaroo/widget_utils.py" = ["E722"]
+"buckaroo/customizations/order_columns.py" = ["ALL"]
+
+#used for safe_int
+"buckaroo/customizations/all_transforms.py" = ["E722"] #bare except
+
+"buckaroo/customizations/analysis.py" = [
+				      "E741", #ambiguous variable name
+				      "E722"] #bare except
+
+
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"

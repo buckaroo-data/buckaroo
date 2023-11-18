@@ -91,7 +91,7 @@ def warn_on_incompatible():
 def debug_packages():
     print("Selected Jupyter core packages...")
     jupyter_env = determine_jupter_env()
-    print("executing in %s " % determine_jupter_env())
+    print("executing in %s " % jupyter_env)
     packages = [
             "buckaroo",
             "jupyterlab",

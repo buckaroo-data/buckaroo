@@ -12,32 +12,6 @@ word_only_df = pd.DataFrame({'letters': 'h o r s e'.split(' ')})
 
 df = pd.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
 
-
-class DistinctCount(ColAnalysis):
-    requires_raw = True
-    provides_summary = ["distinct_count"]
-    @staticmethod
-    def summary(sampled_ser, summary_ser, raw_ser):
-        val_counts = raw_ser.value_counts()
-        distinct_count= len(val_counts)
-        return {'distinct_count': distinct_count}
-
-class Len(ColAnalysis):
-    provides_summary = ["len"]
-    requires_raw = True
-    @staticmethod
-    def summary(sampled_ser, summary_ser, raw_ser):
-        return {'len': len(raw_ser)}
-
-
-class DistinctPer(ColAnalysis):
-    provides_summary = ["distinct_per"]
-    requires_summary = ["len", "distinct_count"]
-    
-    @staticmethod
-    def summary(sampled_ser, summary_ser, raw_ser):
-        return {'distinct_per': summary_ser.loc['distinct_count'] / summary_ser.loc['len']}
-
 class DistinctCount(ColAnalysis):
     requires_raw = True
     provides_summary = ["distinct_count"]
