@@ -1,3 +1,4 @@
+import pandas as pd
 from .lispy import make_interpreter
 def configure_buckaroo(transforms):
     command_defaults = {}
@@ -14,8 +15,12 @@ def configure_buckaroo(transforms):
         to_py_lisp_primitives[transform_name] = T.transform_to_py
     
     buckaroo_eval, raw_parse = make_interpreter(transform_lisp_primitives)
+
     def buckaroo_transform(instructions, df):
-        df_copy = df.copy()
+        if isinstance(df, pd.DataFrame):
+            df_copy = df.copy()
+        else: # hack we know it's polars here... just getting something working for now
+            df_copy = df.clone()
         ret_val =  buckaroo_eval(instructions, {'df':df_copy})
         return ret_val
 

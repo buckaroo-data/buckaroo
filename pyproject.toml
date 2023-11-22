@@ -194,6 +194,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 #bare except used in a convience method for developer ergonomics
 "tests/unit/commands/command_tests.py" = ["E722"] #bare except
+"tests/unit/commands/polars_command_tests.py" = ["E722"] #bare except
 
 
 [tool.ruff.format]
