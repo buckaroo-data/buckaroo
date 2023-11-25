@@ -23,26 +23,26 @@ const baseRules = [
 
   { test: /\.js$/, loader: 'source-map-loader' },
   { test: /\.css$/, use: ['style-loader', 'css-loader'] },
-                {
-                    test: /\.scss$/,
-                    use: [
-                        // We're in dev and want HMR, SCSS is handled in JS
-                        // In production, we want our css as files
-                        "style-loader",
-                        "css-loader",
-                        {
-                            loader: "postcss-loader",
-                            options: {
-                                postcssOptions: {
-                                    plugins: [
-                                        ["postcss-preset-env"],
-                                    ],
-                                },
-                            },
-                        },
-                        "sass-loader"
-                    ],
-                },
+  {
+      test: /\.scss$/,
+      use: [
+          // We're in dev and want HMR, SCSS is handled in JS
+          // In production, we want our css as files
+          "style-loader",
+          "css-loader",
+          {
+              loader: "postcss-loader",
+              options: {
+                  postcssOptions: {
+                      plugins: [
+                          ["postcss-preset-env"],
+                      ],
+                  },
+              },
+          },
+          "sass-loader"
+      ],
+  },
   {
     test: luminoThemeImages,
     issuer: /\.css$/,
@@ -51,7 +51,7 @@ const baseRules = [
     },
   },
   {
-    test: /\.(jpg|png|gif)$/,
+    test: /\.(jpg|png|gif|woff|woff2)$/,
     exclude: luminoThemeImages,
     use: ['file-loader'],
   },

@@ -161,3 +161,4 @@ buckaroo/labextension/*
 docs/*.js
 docs/*.js.map
 docs/*js*
+docs/source/_static/*woff*

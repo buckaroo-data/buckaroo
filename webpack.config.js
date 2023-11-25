@@ -51,7 +51,7 @@ const baseRules = [
     },
   },
   {
-    test: /\.(jpg|png|gif)$/,
+    test: /\.(jpg|png|gif|woff|woff2)$/,
     exclude: luminoThemeImages,
     use: ['file-loader'],
   },
