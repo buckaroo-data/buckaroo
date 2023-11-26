@@ -47,6 +47,7 @@ test = [
     "pandas<=1.3.5",
     "pytest-cov>=3",
     "pytest>=6",
+    "hypothesis>=6.88.1"
 ]
 
 jupyterlab = ["jupyterlab>=3.6.0"]
