@@ -12,7 +12,7 @@ We all know how awkward it is to clean data in jupyter notebooks.  Multiple cell
 
 .. raw:: html
 
-	 <iframe width="560" height="315" src="https://www.youtube.com/embed/3XdU5hpOUYY" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+	 <iframe width="560" height="315" src="https://www.youtube.com/watch?v=l01aXk8AgiA" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
 
 
 .. toctree::
