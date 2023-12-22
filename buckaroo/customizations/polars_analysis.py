@@ -57,13 +57,13 @@ class ComputedDefaultSummaryStats(PolarsAnalysis):
 class VCAnalysis(PolarsAnalysis):
     provides_summary = ['value_counts']
     select_clauses = [
-        pl.all().exclude("counts").value_counts(sort=True)
+        pl.all().exclude("count").value_counts(sort=True)
         .implode().name.map(json_postfix('value_counts')),
-        pl.selectors.matches("^counts$")
+        pl.selectors.matches("^count$")
         .alias("not_counts")
         .value_counts(sort=True)
         .implode()
-        .alias("counts").name.map(json_postfix('value_counts'))]
+        .alias("count").name.map(json_postfix('value_counts'))]
     
 
 class BasicAnalysis(PolarsAnalysis):
@@ -84,7 +84,7 @@ class BasicAnalysis(PolarsAnalysis):
     @staticmethod
     def computed_summary(summary_dict):
         temp_df = pl.DataFrame({'vc': summary_dict['value_counts'].explode()}).unnest('vc')
-        regular_col_vc_df = temp_df.select(pl.all().exclude('counts').alias('key'), pl.col('counts'))
+        regular_col_vc_df = temp_df.select(pl.all().exclude('count').alias('key'), pl.col('count'))
         return dict(mode=regular_col_vc_df[0]['key'][0])
 
 
