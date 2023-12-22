@@ -1,7 +1,7 @@
 import json
-import numpy as np
 import pandas as pd
 from pandas.io.json import dumps as pdumps
+from typing import Union
 
 def d_update(d1, d2):
     ret_dict = d1.copy()
@@ -18,7 +18,9 @@ def pick(dct, keys):
 def val_replace(dct, replacements):
     ret_dict = {}
     for k, v in dct.items():
-        if v in replacements:
+        if isinstance(v, pd.Series):
+            ret_dict[k] = UnquotedString('pd.Series()')
+        elif v in replacements:
             ret_dict[k] = replacements[v]
         else:
             ret_dict[k] = v
@@ -38,14 +40,6 @@ def dict_repr(dct):
     ret_str += "}"    
     return ret_str
 
-def pd_py_serialize(dct):
-    """
-    This is used to output an exact string that is valid python code.
-    """
-    cleaned_dct = val_replace(dct,
-                       {pd.NA: UnquotedString("pd.NA"),
-                        np.nan: UnquotedString("np.nan")})
-    return dict_repr(cleaned_dct)
 
 
 EMPTY_DF_OBJ = {'schema': {'fields': [{'name': 'index', 'type': 'string'}],
@@ -56,12 +50,32 @@ EMPTY_DF_OBJ = {'schema': {'fields': [{'name': 'index', 'type': 'string'}],
 
 def dumb_table_sumarize(df):
     """used when table_hints aren't provided.  Trests every column as a string"""
-    table_hints = {col:{'is_numeric':False, type:'obj'}  for col in df}
-    table_hints['index'] = {'is_numeric': False} 
+    table_hints = {col:{'is_numeric':False, 'type':'obj', 'histogram':[]}  for col in df}
+    table_hints['index'] = {'is_numeric': False, 'type':'obj', 'histogram':[] } 
     return table_hints
 
 
-def df_to_obj(df, order = None, table_hints=None):
+#def force_to_pandas(df_pd_or_pl:Union[pd.DataFrame, pl.DataFrame]) -> pd.DataFrame:
+def force_to_pandas(df_pd_or_pl) -> pd.DataFrame:
+    if isinstance(df_pd_or_pl, pd.DataFrame):
+        return df_pd_or_pl
+
+    
+    import polars as pl
+    #hack for now so everything else flows through
+
+    if isinstance(df_pd_or_pl, pl.DataFrame):
+        return df_pd_or_pl.to_pandas()
+    else:
+        raise Exception("unexpected type for dataframe, got %r" % (type(df_pd_or_pl)))
+
+
+#def df_to_obj(unknown_df:Union[pd.DataFrame, pl.DataFrame], order = None, table_hints=None):
+def df_to_obj(unknown_df:Union[pd.DataFrame], order = None, table_hints=None):
+    df = force_to_pandas(unknown_df)
+    return pd_to_obj(df, order=order, table_hints=table_hints)
+
+def pd_to_obj(df:pd.DataFrame , order = None, table_hints=None):
     if order is None:
         order = df.columns
     obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
@@ -79,8 +93,13 @@ def df_to_obj(df, order = None, table_hints=None):
         obj['table_hints'] = json.loads(pdumps(dumb_table_sumarize(df)))
     else:
         obj['table_hints'] = json.loads(pdumps(table_hints))
-    fields=[{'name': df.index.name or "index" }]
+
+    index_name = df.index.name or "index"
+    fields=[{'name': index_name, 'type':'unused' }]
     for c in order:
-        fields.append({'name':str(c)})
-    obj['schema'] = dict(fields=fields)
+        fields.append({'name':str(c), 'type':'unused'})
+    obj['schema'] = dict(fields=fields, primaryKey=[index_name], pandas_version='1.4.0')
     return obj
+
+
+

@@ -11,11 +11,23 @@ def get_outlier_idxs(ser):
     return outlier_idxs
 
 
-def sample(df, sample_size=500, include_outliers=True):
+def polars_sample(df, sample_size=500, include_outliers=False):
+    return df.sample(min(len(df), sample_size))
+
+def sample(df, sample_size=500, include_outliers=False):
+    include_outliers = False
     if len(df) <= sample_size:
         return df
-    sdf = df.sample(np.min([sample_size, len(df)]))
 
+    try:
+        import polars
+        if isinstance(df, polars.DataFrame):
+            return polars_sample(df, sample_size, include_outliers)
+    except ImportError:
+        pass
+    sdf = df.sample(np.min([sample_size, len(df)]))
+    if True:
+        return sdf
     #non_unique indexes are very slow
     if include_outliers and sdf.index.is_unique:
         outlier_idxs = []

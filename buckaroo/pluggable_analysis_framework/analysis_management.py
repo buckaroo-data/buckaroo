@@ -1,146 +1,108 @@
-import sys
+from collections import defaultdict 
 import traceback
 import warnings
 
 import numpy as np
-import pandas as pd
+from buckaroo.pluggable_analysis_framework.safe_summary_df import output_full_reproduce, output_reproduce_preamble, safe_summary_df
+
+from buckaroo.pluggable_analysis_framework.utils import BASE_COL_HINT, FAST_SUMMARY_WHEN_GREATER, PERVERSE_DF, NonExistentSummaryRowException
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
     order_analysis, check_solvable)
-from buckaroo.serialization_utils import pd_py_serialize, pick, d_update
+from buckaroo.serialization_utils import pick, d_update
 
-FAST_SUMMARY_WHEN_GREATER = 1_000_000
+def produce_series_df(df, ordered_objs, df_name='test_df', debug=False):
+    """ just executes the series methods
 
-PERVERSE_DF = pd.DataFrame({
-    'all_nan': [np.nan] * 10,
-    'all_false': [False] * 10,
-    'all_True': [True] * 10,
-    'mixed_bool': np.concatenate([[True]*5, [False]*5]),
-    'mixed_float': np.concatenate([[0.5, np.nan, None], [6]*7]),
-    'float': [0.5]*10,
-    'int': [8] *10,
-    'negative': [-1]*10,
-    'UInt32': pd.Series([5]*10, dtype='UInt32'),
-    'UInt8None':pd.Series([None] * 10, dtype='UInt8')
-    })
+    """
+    errs = {}
+    series_stats = defaultdict(lambda: {})
+    for ser_name in df.columns:
+        ser = df[ser_name]
+        #FIXME: actually sample the series.  waiting until I have time
+        #to proeprly benchmark
+        sampled_ser = ser
+        for a_kls in ordered_objs:
+            try:
+                if a_kls.quiet or a_kls.quiet_warnings:
+                    if debug is False:
+                        warnings.filterwarnings('ignore')
+                        
+                    col_stat_dict = a_kls.series_summary(sampled_ser, ser)
+                    warnings.filterwarnings('default')
+                else:
+                    col_stat_dict = a_kls.series_summary(sampled_ser, ser)
 
+                series_stats[ser_name].update(col_stat_dict)
+            except Exception as e:
+                if not a_kls.quiet:
+                    errs[(ser_name, "series_summary")] = e, a_kls
+                if debug:
+                    traceback.print_exc()
+                continue
+    return series_stats, errs
 
-BASE_COL_HINT = {
-    'type':'string',
-    'is_numeric': False,
-    'is_integer': None,
-    'min_digits':None,
-    'max_digits':None,
-    'formatter':None,
-    'histogram': []}
-
-
-
-def get_df_name(df, level=0):
-    """ looks up the call stack until it finds the variable with this name"""
-    if level == 0:
-        _globals = globals()
-    elif level < 60:
-        try:
-            call_frame = sys._getframe(level)
-            _globals = call_frame.f_globals
-        except ValueError:
-            return None #we went to far up the stacktrace to a non-existent frame
-    else:
-        return None
-
-    name_possibs = [x for x in _globals.keys() if _globals[x] is df]
-    if name_possibs:
-        return name_possibs[0]
-    else:
-        #+2 because the function is recursive, and we need to skip over this frame
-        return get_df_name(df, level + 2)
-
-def safe_summary_df(base_summary_df, index_list):
-    #there are instances where not all indexes of the summary_df will
-    #be available, because there was no valid data to produce those
-    #indexes. This fixes them and explicitly. Empty rows will have NaN
-    return pd.DataFrame(base_summary_df, index_list)
-
-def reproduce_summary(ser_name, kls, summary_df, err, operating_df_name):
-    ssdf = safe_summary_df(summary_df, kls.requires_summary)
-    summary_ser = ssdf[ser_name]
-    minimal_summary_dict = pick(summary_ser, kls.requires_summary)
-    sum_ser_repr = "pd.Series(%s)" % pd_py_serialize(minimal_summary_dict)
-
-    f = "{kls}.summary({df_name}['{ser_name}'], {summary_ser_repr}, {df_name}['{ser_name}']) # {err_msg}"
-    print(f.format(
-        kls=kls.cname(), df_name=operating_df_name, ser_name=ser_name,
-        summary_ser_repr=sum_ser_repr, err_msg=err))
-
-def output_reproduce_preamble():
-    print("#Reproduction code")
-    print("#" + "-" * 80)
-    print("from buckaroo.pluggable_analysis_framework.analysis_management import PERVERSE_DF")
-
-def output_full_reproduce(errs, summary_df, df_name):
-    if len(errs) == 0:
-        raise Exception("output_full_reproduce called with 0 len errs")
-
-    try:
-        for ser_name, err_kls in errs.items():
-            err, kls = err_kls
-            reproduce_summary(ser_name, kls, summary_df, err, df_name)
-    except Exception:
-        #this is tricky stuff that shouldn't error, I want these stack traces to escape being caught
-        traceback.print_exc()
-
-
-def produce_summary_df(df, ordered_objs, df_name='test_df', debug=False):
+def produce_summary_df(df, series_stats, ordered_objs, df_name='test_df', debug=False):
     """
     takes a dataframe and a list of analyses that have been ordered by a graph sort,
     then it produces a summary dataframe
     """
     errs = {}
     summary_col_dict = {}
-    table_hint_col_dict = {}
-
     #figure out how to add in "index"... but just for table_hints
     for ser_name in df.columns:
-        ser = df[ser_name]
-        #FIXME: actually sample the series.  waiting until I have time
-        #to proeprly benchmark
-        sampled_ser = ser
-        summary_ser = pd.Series({}, dtype='object')
+        base_summary_dict = series_stats[ser_name]
         for a_kls in ordered_objs:
             try:
                 if a_kls.quiet or a_kls.quiet_warnings:
                     if debug is False:
                         warnings.filterwarnings('ignore')
-                    summary_res = a_kls.summary(sampled_ser, summary_ser, ser)
+                    summary_res = a_kls.computed_summary(base_summary_dict)
                     warnings.filterwarnings('default')
                 else:
-                    summary_res = a_kls.summary(sampled_ser, summary_ser, ser)
+                    summary_res = a_kls.computed_summary(base_summary_dict)
                 for k,v in summary_res.items():
-                    summary_ser.loc[k] = v
+                    base_summary_dict.update(summary_res)
             except Exception as e:
                 if not a_kls.quiet:
-                    errs[ser_name] = e, a_kls
+                    errs[(ser_name, "computed_summary")] = e, a_kls
                 if debug:
                     traceback.print_exc()
                 continue
-        summary_col_dict[ser_name] = summary_ser
+        summary_col_dict[ser_name] = base_summary_dict
+    return summary_col_dict, errs
 
+def full_produce_summary_df(df, ordered_objs, df_name='test_df', debug=False):
+    if len(df) == 0:
+        return {}, {}, {}
+
+    series_stat_dict, series_errs = produce_series_df(df, ordered_objs, df_name, debug)
+    summary_df, summary_errs = produce_summary_df(
+        df, series_stat_dict, ordered_objs, df_name, debug)
+    series_errs.update(summary_errs)
+    table_hint_col_dict = {}
+    for ser_name in df.columns:
         table_hint_col_dict[ser_name] = pick(
-            d_update(BASE_COL_HINT, summary_ser.to_dict()),
+            d_update(BASE_COL_HINT, summary_df[ser_name]),
             BASE_COL_HINT.keys())
-    summary_df = pd.DataFrame(summary_col_dict)
-    table_hints = table_hint_col_dict
-    return summary_df, table_hints, errs
 
-class NonExistentSummaryRowException(Exception):
-    pass
+    return summary_df, table_hint_col_dict, series_errs
 
-class AnalsysisPipeline(object):
+#TODO Figure out how to do proper typing with AnalysisPipeline and the polars subclasses
+# We want a TypeVar for DFType and AT.  But the main function, process_df whild still return 3 dicts
+#DFT = TypeVar("DFT") #DF Type
+#AT =  TypeVar("AT") #Analysis Type
+class AnalysisPipeline(object):
     """
     manage the ordering of a set of col_analysis objects
     allow for computing summary_stats (and other oberservation sets) based on col_analysis objects
     allow col_anlysis objects to be added
     """
+
+    #this is only a list to prevent it from being interpretted as an instance method
+    #full_produce_func: List[Callable[[DFT, List[AT], str, bool], Any]] =
+
+    full_produce_func = [full_produce_summary_df]
+    
     def __init__(self, analysis_objects, unit_test_objs=True):
         self.summary_stats_display = "all"
         self.unit_test_objs = unit_test_objs
@@ -176,7 +138,7 @@ class AnalsysisPipeline(object):
 
         """
         try:
-            output_df, table_hint_dict, errs = produce_summary_df(PERVERSE_DF, self.ordered_a_objs)
+            output_df, table_hint_dict, errs = self.full_produce_func[0](PERVERSE_DF, self.ordered_a_objs)
             if len(errs) == 0:
                 return True, []
             else:
@@ -186,7 +148,7 @@ class AnalsysisPipeline(object):
 
 
     def process_df(self, input_df, debug=False):
-        output_df, table_hint_dict, errs = produce_summary_df(input_df, self.ordered_a_objs, debug=debug)
+        output_df, table_hint_dict, errs = self.full_produce_func[0](input_df, self.ordered_a_objs, debug=debug)
         return output_df, table_hint_dict, errs
 
     def add_analysis(self, new_aobj):
@@ -209,10 +171,12 @@ class DfStats(object):
     DfStats exists to handle inteligent downampling and applying the ColAnalysis functions
     '''
 
+    ap_class = AnalysisPipeline
+
     def __init__(self, df_stats_df, col_analysis_objs, operating_df_name=None, debug=False):
         self.df = self.get_operating_df(df_stats_df, force_full_eval=False)
         self.col_order = self.df.columns
-        self.ap = AnalsysisPipeline(col_analysis_objs)
+        self.ap = self.ap_class(col_analysis_objs)
         self.operating_df_name = operating_df_name
         self.debug = debug
 

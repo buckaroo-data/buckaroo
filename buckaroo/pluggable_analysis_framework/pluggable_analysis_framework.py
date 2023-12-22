@@ -1,28 +1,41 @@
 import graphlib
 from collections import OrderedDict
+from typing import List, Union
 
 class ColAnalysis(object):
     """
     Col Analysis runs on a single column
+
+    this is the pandas based implementation
     """
     requires_raw = False
-    requires_summary = [] # What summary stats does this analysis provide
-    provides_summary = [] # mean/max/histogram
-    summary_stats_display = None
+    requires_summary:List[str] = [] # What summary stats does this analysis provide
+    provides_summary:List[str] = [] # mean/max/histogram
+
+    provides_series_stats:List[str] = [] # what does this provide at a series level
+
+
+    @classmethod
+    def full_provides(cls):
+        a = cls.provides_series_stats.copy()
+        a.extend(cls.provides_summary)
+        return a
+
+    summary_stats_display:Union[List[str], None] = None
     quiet = False
     quiet_warnings = False
     
     @staticmethod
-    def summary(sampled_ser, summary_ser, ser):
+    def series_summary(sampled_ser, ser):
+        return {}
+
+    @staticmethod
+    def computed_summary(summary_dict):
         return {}
 
     @staticmethod
     def column_order(sampled_ser, summary_ser):
         pass
-
-    @staticmethod
-    def table_hints(sampled_ser, summary_ser, existing_table_hints):
-        return {}
 
     @classmethod
     def cname(kls):
@@ -39,7 +52,9 @@ def check_solvable(a_objs):
     provides = []
     required = []
     for ao in a_objs:
-        provides.extend(ao.provides_summary)
+        rest = ao.full_provides()
+        provides.extend(rest)
+
         required.extend(ao.requires_summary)
     all_provides = set(provides)
     all_required = set(required)
@@ -66,12 +81,13 @@ def order_analysis(a_objs):
     graph = {}
     key_class_objs = {}
     for ao in a_objs:
-        if len(ao.provides_summary) == 0:
+        fp = ao.full_provides()
+        if len(fp) == 0:
             temp_provided = "__no_provided_keys__"
         else:
-            temp_provided = ao.provides_summary[0]
+            temp_provided = fp[0]
         first_mid_key = mid_key = ao.__name__ + "###" + temp_provided
-        for k in ao.provides_summary[1:]:
+        for k in ao.full_provides()[1:]:
             #print("k", k)
             next_mid_key = ao.__name__ + "###" + k
             graph[mid_key] = set([next_mid_key])
@@ -79,7 +95,7 @@ def order_analysis(a_objs):
             mid_key = next_mid_key
         graph[mid_key] = set(ao.requires_summary)
         key_class_objs[mid_key] = ao
-        for j in ao.provides_summary:
+        for j in ao.full_provides():
             #print("j", j)
             graph[j] = set([first_mid_key])
     ts = graphlib.TopologicalSorter(graph)

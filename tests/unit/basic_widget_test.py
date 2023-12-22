@@ -24,10 +24,15 @@ def test_basic_display():
     w = BuckarooWidget(df)
     display(w)
 
+def test_debug_true():
+    df = simple_df
+    w = BuckarooWidget(df, debug=True)
+    display(w)
+
 def test_interpreter():    
     #df = pd.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
 
-    w = BuckarooWidget(simple_df)
+    w = BuckarooWidget(simple_df, auto_clean=True)
     assert w.operation_results['generated_py_code'] == '''def clean(df):
     df['int_col'] = smart_to_int(df['int_col'])
     df['str_col'] = df['str_col'].fillna(value='').astype('string').replace('', None)

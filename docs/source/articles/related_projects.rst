@@ -41,6 +41,7 @@ JS Table widgets.  These are the core interactive tables that modern table exper
 
 #. `AG-Grid <https://www.ag-grid.com/>`_ The most popular high performance JS data table in use.  Buckaroo is built on top of the open source version of AG-Grid.  The closed source version offers additional features.
 #. `Finos Perspective table <https://perspective.finos.org/block/?example=streaming>`_ The highest performance JS Table that I have seen.  Works via a complete rendering engine that writes pixels to a canvas. Open source.
+#. `Glide Data grid <https://github.com/glideapps/glide-data-grid>`_  Relatively new.  Claims to be doing canvas rendering.  Looks impressive and fast, less features than AG-Grid.  Developed as a side project from a VC funded pre-revenue company, longterm future isn't certain.
 
 
 Why list potential competitors

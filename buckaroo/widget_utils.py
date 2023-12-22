@@ -48,9 +48,10 @@ def enable(sampled=True,
 
     def _display_polars_as_buckaroo(polars_df):
         from IPython.display import display
+        from buckaroo.polars_buckaroo import PolarsBuckarooWidget
+
         try:
-            pandas_df = polars_df.to_pandas()
-            return display(BuckarooWidget(pandas_df, 
+            return display(PolarsBuckarooWidget(polars_df,
                                           sampled=sampled,
                                           summaryStats=summaryStats,
                                           reorderdColumns=reorderdColumns,
