@@ -2,10 +2,6 @@ import pandas as pd
 import numpy as np
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 
-import numpy.typing as npt
-from typing_extensions import TypedDict
-from typing import List, Tuple, Any
-
 
 def numeric_histogram_labels(endpoints):
     left = endpoints[0]
@@ -53,17 +49,18 @@ def categorical_histogram(length:int, val_counts, nan_per:float, top_n_positions
         histogram.append(nan_observation)
     return histogram
 
-histogram_args = TypedDict('histogram_args', {
-    'meat_histogram': Tuple[npt.NDArray[np.intp], npt.NDArray[Any]],
-    'low_tail': float, 'high_tail':float})
+# histogram_args = TypedDict('histogram_args', {
+#     'meat_histogram': Tuple[npt.NDArray[np.intp], npt.NDArray[Any]],
+#     'low_tail': float, 'high_tail':float})
 
-class Histogram_Args(TypedDict):
-    meat_histogram: Tuple[List[int], List[float]]
-    normalized_populations:List[float]
-    low_tail: float
-    high_tail: float
+# class Histogram_Args(TypedDict):
+#     meat_histogram: Tuple[List[int], List[float]]
+#     normalized_populations:List[float]
+#     low_tail: float
+#     high_tail: float
 
-def numeric_histogram(histogram_args: Histogram_Args , min_, max_, nan_per):
+#def numeric_histogram(histogram_args: Histogram_Args , min_, max_, nan_per):
+def numeric_histogram(histogram_args, min_, max_, nan_per):
 
     low_tail, high_tail = histogram_args['low_tail'], histogram_args['high_tail']
     ret_histo = []

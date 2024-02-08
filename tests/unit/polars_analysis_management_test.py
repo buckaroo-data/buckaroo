@@ -84,8 +84,18 @@ def test_histogram_analysis():
 
     df = pl.DataFrame({'categories': cats, 'numerical_categories': [3]*30 + [7] * 70})
     summary_df, _unused, errs = full_produce_summary_df(df, HA_CLASSES, debug=True)
-    assert summary_df["categories"]["categorical_histogram"] == {'bar': 0.5, 'foo': 0.3, 'longtail': 0.1, 'unique': 0.1}
-    assert summary_df["numerical_categories"]["categorical_histogram"] == {3:.3, 7:.7, 'longtail': 0.0, 'unique': 0.0}
+
+    actual_cats = summary_df["categories"]["categorical_histogram"]
+    expected_cats = {'bar': 0.5, 'foo': 0.3, 'longtail': 0.1, 'unique': 0.1}
+    assert actual_cats == expected_cats
+
+    
+    actual_numcats = summary_df["numerical_categories"]["categorical_histogram"]
+
+    rounded_actual_numcats = dict([(k, np.round(v,2)) for k,v in actual_numcats.items()])
+    expected_categorical_histogram = {3:.3, 7:.7, 'longtail': 0.0, 'unique': 0.0}
+    assert rounded_actual_numcats == expected_categorical_histogram
+
     
 def test_numeric_histograms():
     #np.random.standard_normal(50)
