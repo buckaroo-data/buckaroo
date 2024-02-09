@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   OperationViewer,
 } from '../../js/components/Operations';
-import {bakedOperations, bakedCommandConfig } from '../../js/components/staticData';
+import {bakedOperations, bakedCommandConfig } from '../../js/baked_data/staticData';
 
 
 export default function Simple() {

@@ -1,8 +1,8 @@
 import graphlib
 from collections import OrderedDict
-from typing import List, Union
+from typing import List, Union, Any, Mapping, Tuple, Callable
 
-class ColAnalysis(object):
+class ColAnalysis:
     """
     Col Analysis runs on a single column
 
@@ -10,15 +10,24 @@ class ColAnalysis(object):
     """
     requires_raw = False
     requires_summary:List[str] = [] # What summary stats does this analysis provide
-    provides_summary:List[str] = [] # mean/max/histogram
 
     provides_series_stats:List[str] = [] # what does this provide at a series level
+    provides_defaults:Mapping[str, any] = {}
 
 
     @classmethod
-    def full_provides(cls):
-        a = cls.provides_series_stats.copy()
-        a.extend(cls.provides_summary)
+    @property
+    def provides_summary(kls):
+        return list(kls.provides_defaults.keys())
+
+
+    @classmethod
+    def full_provides(kls):
+        if not isinstance(kls.provides_defaults, dict):
+            raise Exception("no provides Defaults for %r" %kls)
+        a = kls.provides_series_stats.copy()
+        #I can't figure out why the property won't work here
+        a.extend(list(kls.provides_defaults.keys()))
         return a
 
     summary_stats_display:Union[List[str], None] = None
@@ -37,10 +46,17 @@ class ColAnalysis(object):
     def column_order(sampled_ser, summary_ser):
         pass
 
+    @staticmethod
+    def column_config(summary_dict): # -> ColumnConfig partial without col_name
+        pass
+
     @classmethod
     def cname(kls):
-        #print(dir(kls))
         return kls.__qualname__
+
+    select_clauses:List[Any] = []
+    column_ops: Mapping[str, Tuple[List[Any], Callable[[Any], Any]]] = {}
+
     
 class NotProvidedException(Exception):
     pass
@@ -88,7 +104,6 @@ def order_analysis(a_objs):
             temp_provided = fp[0]
         first_mid_key = mid_key = ao.__name__ + "###" + temp_provided
         for k in ao.full_provides()[1:]:
-            #print("k", k)
             next_mid_key = ao.__name__ + "###" + k
             graph[mid_key] = set([next_mid_key])
             key_class_objs[mid_key] = ao
@@ -96,10 +111,8 @@ def order_analysis(a_objs):
         graph[mid_key] = set(ao.requires_summary)
         key_class_objs[mid_key] = ao
         for j in ao.full_provides():
-            #print("j", j)
             graph[j] = set([first_mid_key])
     ts = graphlib.TopologicalSorter(graph)
     seq =  tuple(ts.static_order())
-    #print("seq", seq)
     full_class_list = [key_class_objs.get(k, None) for k in seq]
     return clean_list(full_class_list)

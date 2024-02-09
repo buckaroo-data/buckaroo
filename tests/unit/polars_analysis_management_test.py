@@ -1,8 +1,7 @@
-from unittest import TestCase
-
 import polars as pl
 import numpy as np
 from polars import functions as F
+import polars.selectors as cs
 from buckaroo.customizations.polars_analysis import (
     VCAnalysis, PlTyping, BasicAnalysis, HistogramAnalysis,
     ComputedDefaultSummaryStats)
@@ -10,14 +9,12 @@ from buckaroo.customizations.polars_analysis import (
 from buckaroo.pluggable_analysis_framework.utils import (json_postfix, replace_in_dict)
 
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import (
-    full_produce_summary_df,
-    produce_series_df, PolarsAnalysis, extract_table_hint)
+    PolarsAnalysisPipeline, polars_produce_series_df, PolarsAnalysis, PlDfStats)
 
 test_df = pl.DataFrame({
         'normal_int_series' : pl.Series([1,2,3,4]),
         #'empty_na_ser' : pl.Series([pl.Null] * 4, dtype="Int64"),
-        'float_nan_ser' : pl.Series([3.5, np.nan, 4.8, 2.2])
-    })
+        'float_nan_ser' : pl.Series([3.5, np.nan, 4.8, 2.2])})
 
 word_only_df = pl.DataFrame({'letters': 'h o r s e'.split(' ')})
 
@@ -29,17 +26,33 @@ empty_df = pl.DataFrame({})
 
 
 class SelectOnlyAnalysis(PolarsAnalysis):
-
+    provides_defaults = {}
     select_clauses = [
         F.all().null_count().name.map(json_postfix('null_count')),
         F.all().mean().name.map(json_postfix('mean')),
         F.all().quantile(.99).name.map(json_postfix('quin99'))]
 
 
+def test_non_full_analysis():
+    class MixedAnalysis(PolarsAnalysis):
+        provides_defaults = dict(
+            empty_count=0, sum=0)
+
+        select_clauses = [
+            F.col(pl.Utf8).str.count_matches("^$").sum().name.map(json_postfix('empty_count')),
+            cs.numeric().sum().name.map(json_postfix('sum'))]
+
+    df = pl.DataFrame({'a': [10, 20], 'b': ['', 'bar']})
+        
+    pdf = PlDfStats(df, [MixedAnalysis])
+    assert pdf.sdf == {'a': dict(empty_count=0, sum=30),
+                       'b': dict(empty_count=1, sum=0)}
+    
+
 def test_produce_series_df():
     """just make sure this doesn't fail"""
     
-    sdf, errs = produce_series_df(
+    sdf, errs = polars_produce_series_df(
         test_df, [SelectOnlyAnalysis], 'test_df', debug=True)
     expected = {
         'float_nan_ser':      {'mean': None, 'null_count':  0, 'quin99': None},
@@ -48,12 +61,13 @@ def test_produce_series_df():
     assert dsdf == expected
 
 class MaxAnalysis(PolarsAnalysis):
+    provides_defaults = {}
     select_clauses = [F.all().max().name.map(json_postfix('max'))]
 
 def test_produce_series_combine_df():
     """just make sure this doesn't fail"""
     
-    sdf, errs = produce_series_df(
+    sdf, errs = polars_produce_series_df(
         test_df, [SelectOnlyAnalysis, MaxAnalysis], 'test_df', debug=True)
     expected = {
         'float_nan_ser':      {'mean': None, 'null_count':  0, 'quin99': None, 'max': 4.8},
@@ -62,41 +76,43 @@ def test_produce_series_combine_df():
     dsdf = replace_in_dict(sdf, [(np.nan, None)])
     assert dsdf == expected
 
+
+
 def test_produce_series_column_ops():
     mixed_df = pl.DataFrame(
         {'string_col': ["foo", "bar", "baz"] + [""]*2,
          'int_col':[1,2,3,30, 100],
          'float_col':[1.1, 1.1, 3, 3, 5]})
 
-    summary_df, _unused = produce_series_df(mixed_df, [HistogramAnalysis])
-    assert summary_df["string_col"] == {}
+    summary_df, _unused = polars_produce_series_df(mixed_df, [HistogramAnalysis])
+    assert summary_df["string_col"] == {'categorical_histogram': [], 'histogram': [], 'histogram_bins': []}
 
     assert summary_df["int_col"]["histogram_args"]["meat_histogram"] == (
         [2,  0,  0,  0,  0,  0,  0,  0,  0,  1],
         [1.0,  4.0,  7.0,  10.0,  13.0,  16.0,  19.0,  22.0,  25.0,  28.0,  100.0],)
+
     
 
-HA_CLASSES = [VCAnalysis, PlTyping, BasicAnalysis,  ComputedDefaultSummaryStats,  HistogramAnalysis]
+HA_CLASSES = [VCAnalysis, PlTyping, BasicAnalysis, ComputedDefaultSummaryStats, HistogramAnalysis]
 def test_histogram_analysis():
     cats = [chr(x) for x in range(97, 102)] * 2 
     cats += [chr(x) for x in range(103,113)]
     cats += ['foo']*30 + ['bar'] * 50
 
     df = pl.DataFrame({'categories': cats, 'numerical_categories': [3]*30 + [7] * 70})
-    summary_df, _unused, errs = full_produce_summary_df(df, HA_CLASSES, debug=True)
+
+    summary_df, errs = PolarsAnalysisPipeline.full_produce_summary_df(df, HA_CLASSES, debug=True)
 
     actual_cats = summary_df["categories"]["categorical_histogram"]
     expected_cats = {'bar': 0.5, 'foo': 0.3, 'longtail': 0.1, 'unique': 0.1}
     assert actual_cats == expected_cats
 
-    
     actual_numcats = summary_df["numerical_categories"]["categorical_histogram"]
-
     rounded_actual_numcats = dict([(k, np.round(v,2)) for k,v in actual_numcats.items()])
     expected_categorical_histogram = {3:.3, 7:.7, 'longtail': 0.0, 'unique': 0.0}
     assert rounded_actual_numcats == expected_categorical_histogram
 
-    
+
 def test_numeric_histograms():
     #np.random.standard_normal(50)
     #note the negative numbers
@@ -128,8 +144,8 @@ def test_numeric_histograms():
         'int_col': int_arr,
         'int_col2': int_arr2
     })
-                      
-    summary_df, _unused, errs = full_produce_summary_df(df, HA_CLASSES, debug=True)
+
+    summary_df, errs = PolarsAnalysisPipeline.full_produce_summary_df(df, HA_CLASSES, debug=True)
     print(summary_df['int_col']['histogram'])
 
     expected_float_histogram = [
@@ -141,6 +157,10 @@ def test_numeric_histograms():
         {'name': '2-2',   'population': 0.0},  {'name': '2-2',   'population': 0.0},
         {'name': '1.87998263 - 1.87998263', 'tail': 1}]
     assert summary_df['float_col']['histogram'] == expected_float_histogram
+
+    assert summary_df["int_col"]["histogram_bins"] == [
+        -272.0, -199.0, -158.0, -117.0, -76.0,
+        -35.0, 6.0, 47.0, 88.0, 129.0, 174.0]
 
     expected_int_histogram = [
         {'name': '-272 - -272.0', 'tail': 1},
@@ -154,25 +174,14 @@ def test_numeric_histograms():
 
 
 
-def test_extract_table_hint():
+def test_pl_typing():
+    
+    class AdaptingStylingAnalysis(PolarsAnalysis):
+        provides_defaults = {}
+        requires_summary = ["histogram", "is_numeric", "dtype", "is_integer"]
 
-    summary_dict = {'a': {'null_count': 0,
-                          'mean': 35.0,
-                          'max': 100,
-                          'min': 2,
-                          'is_numeric': True,
-                          '_type': 'integer',
-                          'type': 'integer'}
-                    }
-
-
-    expected =  {
-        'a': {
-            'type':'integer',
-            'is_numeric': True,
-            'is_integer': None,
-            'min_digits':None,
-            'max_digits':None,
-            'formatter':None,
-            'histogram': []}}
-    TestCase().assertDictEqual(expected, extract_table_hint(summary_dict, ['a']))
+    PlDfStats(df,
+              [AdaptingStylingAnalysis, PlTyping, HistogramAnalysis,
+               BasicAnalysis, VCAnalysis,
+               ComputedDefaultSummaryStats])
+    

@@ -46,7 +46,6 @@ export class DCEFWidgetModel extends DOMWidgetModel {
   static view_module = MODULE_NAME; // Set to null if no view
   static view_module_version = MODULE_VERSION;
 }
-
 export class DCEFWidgetView extends DOMWidgetView {
   render(): void {
     this.el.classList.add('custom-widget');
@@ -70,7 +69,6 @@ export class DCEFWidgetView extends DOMWidgetView {
       }
       return React.createElement(WidgetDCFCell, props);
     };
-    console.log('widget el', this.el);
 
     const root = ReactDOMClient.createRoot(this.el);
     const componentEl = React.createElement(Component, {});

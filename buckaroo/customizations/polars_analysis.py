@@ -1,8 +1,8 @@
 import polars as pl
 import numpy as np
+import polars.selectors as cs
 from polars import functions as F
 from polars import datatypes as pdt
-from buckaroo.customizations.analysis_utils import int_digits
 
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
 from buckaroo.pluggable_analysis_framework.polars_utils import NUMERIC_POLARS_DTYPES
@@ -32,21 +32,15 @@ Overtime codebases will probably trend towards many classes with single facts, b
 
 
 class ComputedDefaultSummaryStats(PolarsAnalysis):
-    summary_stats_display = [
-        'dtype',
-        'length', 'nan_count', 'distinct_count', 'empty_count',
-        'empty_per', 'unique_per', 'is_numeric', 
-        'mode', 'min', 'max','mean']
-
     requires_summary = ['length', 'nan_count',
                         'unique_count', 'empty_count', 'distinct_count']
-    provides_summary = ['distinct_per', 'empty_per', 'unique_per', 'nan_per']
+    provides_defaults = dict(
+        distinct_per=0, empty_per=0, unique_per=0, nan_per=0)
                         
 
     @staticmethod
     def computed_summary(summary_dict):
         len_ = summary_dict['length']
-        
         return dict(
             distinct_per=summary_dict['distinct_count']/len_,
             empty_per=summary_dict.get('empty_count',0)/len_,
@@ -54,50 +48,70 @@ class ComputedDefaultSummaryStats(PolarsAnalysis):
             nan_per=summary_dict['nan_count']/len_)
 
 
+
+PROBABLY_STRUCTS = (~cs.numeric() & ~cs.string() & ~cs.temporal() &
+                    ~cs.boolean())
+NOT_STRUCTS = (~PROBABLY_STRUCTS)
+
 class VCAnalysis(PolarsAnalysis):
-    provides_summary = ['value_counts']
+
+
+    provides_defaults = dict(
+        value_counts=pl.Series(
+            "",
+            [{'a': 'error', 'count': 1}], dtype=pl.Struct({'a': pl.String, 'count': pl.UInt32})))
+
     select_clauses = [
-        pl.all().exclude("count").value_counts(sort=True)
+        NOT_STRUCTS.exclude("count").value_counts(sort=True)
         .implode().name.map(json_postfix('value_counts')),
-        pl.selectors.matches("^count$")
+        (NOT_STRUCTS & pl.selectors.matches("^count$"))
         .alias("not_counts")
         .value_counts(sort=True)
         .implode()
         .alias("count").name.map(json_postfix('value_counts'))]
     
 
+DUMMY_VALUE_COUNTS = pl.Series(
+    [{'a': 3, 'count': 1}, {'a': 4, 'count': 1}, {'a': 5, 'count': 1}])
 class BasicAnalysis(PolarsAnalysis):
-    provides_summary = ['length', 'nan_count', 'min', 'max', 'min',
-                        'mode', 'mean','unique_count', 'empty_count',
-                        'distinct_count']
+
+
+    provides_defaults = dict(length=0, nan_count=0, min=0, max=0, mode=0,
+                             mean=0, unique_count=0, empty_count=0, distinct_count=0)
+
+    requires_summary = ['value_counts']
     select_clauses = [
         F.all().len().name.map(json_postfix('length')),
         F.all().null_count().name.map(json_postfix('nan_count')),
-        F.all().min().name.map(json_postfix('min')),
-        F.all().max().name.map(json_postfix('max')),
-        F.all().mean().name.map(json_postfix('mean')),
+        NOT_STRUCTS.min().name.map(json_postfix('min')),
+        NOT_STRUCTS.max().name.map(json_postfix('max')),
+        NOT_STRUCTS.mean().name.map(json_postfix('mean')),
         F.col(pl.Utf8).str.count_matches("^$").sum().name.map(json_postfix('empty_count')),
-        F.all().approx_n_unique().name.map(json_postfix('distinct_count')),
-        (F.all().len() - F.all().is_duplicated().sum()).name.map(json_postfix('unique_count')),
-    ]
+        (NOT_STRUCTS.len() - NOT_STRUCTS.is_duplicated().sum()).name.map(json_postfix('unique_count'))
+        ]
 
     @staticmethod
     def computed_summary(summary_dict):
-        temp_df = pl.DataFrame({'vc': summary_dict['value_counts'].explode()}).unnest('vc')
-        regular_col_vc_df = temp_df.select(pl.all().exclude('count').alias('key'), pl.col('count'))
-        return dict(mode=regular_col_vc_df[0]['key'][0])
+        
+        if 'value_counts' in summary_dict:
+            temp_df = pl.DataFrame({'vc': summary_dict['value_counts'].explode()}).unnest('vc')
+            regular_col_vc_df = temp_df.select(pl.all().exclude('count').alias('key'), pl.col('count'))
+            return dict(mode=regular_col_vc_df[0]['key'][0], distinct_count=len(temp_df))
+        else:
+
+            return dict(mode=None, value_counts=DUMMY_VALUE_COUNTS, distinct_count=0,
+                        mean=0, unique_count=0)
 
 
 class PlTyping(PolarsAnalysis):
     column_ops = {'dtype':  ("all", lambda col_series: col_series.dtype)}
-    provides_summary = ['dtype', '_type', 'is_numeric']
-
+    provides_defaults = dict(dtype='unknown', _type='unknown', is_numeric=False, is_integer=False)
 
     @staticmethod
     def computed_summary(summary_dict):
         dt = summary_dict['dtype']
 
-        res = {'is_numeric':  False}
+        res = {'is_numeric':  False, 'is_integer': False}
 
         if dt in pdt.INTEGER_DTYPES:
             t = 'integer'
@@ -105,6 +119,9 @@ class PlTyping(PolarsAnalysis):
             t = 'datetime'
         elif dt in pdt.FLOAT_DTYPES:
             t = 'float'
+        elif dt in pl.datatypes.TEMPORAL_DTYPES:
+            #feels like a hack
+            t = 'temporal'
         elif dt == pdt.Utf8:
             t = 'string'
         elif dt == pdt.Boolean:
@@ -113,6 +130,8 @@ class PlTyping(PolarsAnalysis):
             t = 'unknown'
         if t in ('integer', 'float'):
             res['is_numeric'] = True
+        if t == 'integer':
+            res['is_integer'] = True
         res['_type'] = t
         return res
 
@@ -191,42 +210,31 @@ class HistogramAnalysis(PolarsAnalysis):
         'histogram_args': (NUMERIC_POLARS_DTYPES, normalize_polars_histogram_ser)}
 
     requires_summary = ['min', 'max', 'value_counts', 'length', 'unique_count', 'is_numeric', 'nan_per']
-    provides_summary = ['categorical_histogram', 'histogram']
+    provides_summary = ['categorical_histogram', 'histogram', 'histogram_bins']
+    provides_defaults = dict(categorical_histogram=[], histogram=[], histogram_bins=[])
 
     @staticmethod
     def computed_summary(summary_dict):
+        if len(summary_dict.keys()) == 0:
+            return {}
+        
         vc = summary_dict['value_counts']
         cd = categorical_dict_from_vc(vc)
-        is_numeric = summary_dict['is_numeric']
+        is_numeric = summary_dict.get('is_numeric', False)
         nan_per = summary_dict['nan_per']
         if is_numeric and len(vc.explode()) > 5:
-            #histogram_args = summary_dict['histogram_args']
             histogram_args = summary_dict['histogram_args']
             min_, max_, nan_per = summary_dict['min'], summary_dict['max'], summary_dict['nan_per']
             temp_histo =  numeric_histogram(histogram_args, min_, max_, nan_per)
             if len(temp_histo) > 5:
                 #if we had basically a categorical variable encoded into an integer.. don't return it
-                return {'histogram': temp_histo}
-        return {'categorical_histogram': cd, 'histogram' : categorical_histogram_from_cd(cd, nan_per)}
+                return {'histogram': temp_histo,
+                        'histogram_bins': summary_dict['histogram_args']['meat_histogram'][1]
+                        }
+        return {'categorical_histogram': cd, 'histogram' : categorical_histogram_from_cd(cd, nan_per),
+                'histogram_bins': ['faked']
+                }
 
-class PlColDisplayHints(PolarsAnalysis):
-    requires_summary = ['min', 'max', '_type', 'is_numeric']
-    provides_summary = [
-        'min_digits', 'max_digits', 'type', 'formatter']
-
-    @staticmethod
-    def computed_summary(summary_dict):
-        base_dict = {'type':summary_dict['_type']}
-        if summary_dict['_type'] == 'datetime':
-            base_dict['formatter'] = 'default'
-        if summary_dict['is_numeric']:
-            base_dict.update({
-                'min_digits':int_digits(summary_dict['min']),
-                'max_digits':int_digits(summary_dict['max']),
-                })
-        return base_dict
-
-PL_Analysis_Klasses = [VCAnalysis, BasicAnalysis, PlTyping, PlColDisplayHints,
-                       HistogramAnalysis,
-                       ComputedDefaultSummaryStats]
+PL_Analysis_Klasses = [VCAnalysis, BasicAnalysis, PlTyping,
+                       HistogramAnalysis, ComputedDefaultSummaryStats]
 

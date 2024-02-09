@@ -1,0 +1,145 @@
+digraph g {
+    compound=true;
+    newrank=true;
+	node [style=filled;    ];
+
+//define nodes or cluster then links to the next level
+//level raw_df
+raw_df [color="green"; shape="house" height=1.2]
+sample_method [color="orange"];
+
+{
+    rank = same;
+    // Here you enforce the desired order with "invisible" edges and arrowheads
+    edge[ style=invis];
+    raw_df -> sample_method;
+    rankdir = LR;
+}
+
+    raw_df -> sampled_df [weight=20];
+    sample_method -> sampled_df;
+
+//sampled_df level
+sampled_df [color="lightblue"; shape="house" height=1.2];
+cleaning_method [color="orange"];
+lowcode_ops [color="orange" ];
+
+{
+    rank = same;
+    edge[ style=invis];
+    sampled_df -> cleaning_method -> lowcode_ops;
+    rankdir = LR;
+}
+	cleaning_method -> cleaned_df [lhead=cluster_cleaned]
+	lowcode_ops -> cleaned_sd [lhead=cluster_cleaned]
+
+//cluster cleaned level
+
+subgraph cluster_cleaned {
+    label="cleaned";
+    fillcolor="red";
+    style=filled;
+
+    cleaned_df [shape="house" height=1.2;     ];
+    cleaned_sd [shape="invtrapezium" height=1 width=.5 group="sd"];
+    {
+        rank = same;
+        edge[ style=invis];
+        cleaned_df ->  cleaned_sd -> generated_code ;
+        rankdir = LR;
+    }
+}
+
+//forces post_processing_method onto a separate line
+cleaned_df -> post_processing_method[style=invis]; 
+post_processing_method [color="orange"];
+
+
+{
+    rank = same;
+    edge[ style=invis];
+    //foo  ->  post_processing_method;
+    //foo[style=invis]
+    rankdir = LR;
+}
+
+	sampled_df -> cleaned_df [lhead=cluster_cleaned; color="blueviolet"; 
+	                          penwidth = 5; weight=60]
+
+    post_processing_method -> processed_sd[headport="e" tailport="w" 
+                                          lhead=cluster_processed];
+
+//cluster_processed level
+subgraph cluster_processed {
+	label="processed";
+	fillcolor="red";
+	style=filled;
+	processed_df [shape="house" height=1.2  group="summary"];
+	processed_sd  [shape="invtrapezium" height=1 width=.5 group="sd"];
+    {
+        rank = same;
+        edge[ style=invis];
+        processed_df -> processed_sd;
+        rankdir = LR;
+    }
+}
+
+	cleaned_df -> processed_df[
+	    lhead=cluster_processed; color="blueviolet"; weight=100; penwidth = 5;  ];
+
+
+    processed_df -> summary_sd [ color="blueviolet"; penwidth = 5; weight=6;
+                                tailport="sw" weight=50] ;
+    
+    {
+        rank=same;
+        analysis_klasses [color="orange"  group="summary"];
+        summary_sd;
+        summary_sd -> analysis_klasses [style=invis;]
+    }
+	analysis_klasses -> summary_sd  ;
+
+
+summary_sd [color="lightblue" shape="invtrapezium" height=1 width=.5 group="summary"];
+//analysis_klasses [color="green"];
+
+	summary_sd -> merged_sd  [color="blueviolet"; penwidth = 5; headport="nw" weight=60];
+	processed_sd -> merged_sd [style="dashed" headport="ne" weight=40 penwidth=2.5];
+
+	cleaned_sd -> merged_sd [style="dashed" tailport="s" headport="e" weight=10  penwidth=2.5];
+
+merged_sd [color="lightblue"; shape="invtrapezium" height=1 width=.5 group="sd"]
+style_method [color="orange"];
+    {rank=same;
+    node [style="invis"]
+    edge [style="invis" headport="s" tailport="s"]
+    merged_sd -> style_method;
+    
+    }
+	style_method -> widget ;
+
+    processed_df -> widget [style="dashed" weight=2.8 tailport="w" penwidth=2.5];
+    merged_sd -> widget [color="blueviolet"; penwidth = 5; ];
+    
+    //merged_sd -> style_method[style=invis]; //forces style_method onto a separate rank
+	generated_code -> widget [style="dashed"  penwidth=2.5; tailport="s" headport="e" samehead="right"];
+    generated_code [shape="component"; ];
+
+
+widget [color="lightblue"];
+
+
+
+// sampled_df   -> widget   [ style="dotted" penwidth=3 color="red" constraint=false ]
+// cleaned_df   -> widget   [ style="dotted" penwidth=3 color="red" constraint=false ltail=cluster_cleaned ]
+// processed_df -> widget   [ style="dotted" penwidth=3 color="red" constraint=false ltail=cluster_processed ]
+// summary_sd   -> widget   [ style="dotted" penwidth=3 color="red" constraint=false ]
+// merged_sd    -> widget   [ style="dotted" penwidth=3 color="red" constraint=false ]
+
+
+
+
+}
+
+
+

@@ -36,7 +36,7 @@ dependencies = [
     "ipywidgets>=7.6.0,<9",
     "graphlib_backport>=1.0.0"
 ]
-version = "0.5.2"
+version = "0.6.1"
 
 [project.license]
 file = "LICENSE.txt"
@@ -59,7 +59,8 @@ notebook = ["notebook>=7.0.0"]
 
 
 docs = [
-    "sphinx>=1.5"
+    "sphinx>=1.5",
+    "graphviz>=0.20.1"
 ]
 
 build = [

@@ -8,29 +8,29 @@ from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
 from .fixtures import (DistinctCount, Len, DistinctPer, DCLen, DependsNoProvides)
 
 class NoRoute(ColAnalysis):    
-    provides_summary = ['not_used']
+    provides_defaults = {'not_used': False}
     requires_summary = ["does_not_exist"]
     
 class CycleA(ColAnalysis):
-    provides_summary = ['cycle_a']
+    provides_defaults = {'cycle_a': 'asdf'}
     requires_summary = ["cycle_b"]
 
 class CycleB(ColAnalysis):
-    provides_summary = ['cycle_b']
+    provides_defaults = {'cycle_b': 'foo'}
     requires_summary = ["cycle_a"]
 
 class CA_AB(ColAnalysis):
-    provides_summary = ["a", "b"]
+    provides_summary = {"a":0, "b":99}
 
 class CA_CD(ColAnalysis):
-    provides_summary = ["c", "d"]
+    provides_summary = {"c":3, "d":1}
 
 class CA_EF(ColAnalysis):
-    provides_summary = ["e", "f"]
+    provides_defaults = {"e":9, "f":2}
     requires_summary = ["a", "b", "c", "d"]
 
 class CA_G(ColAnalysis):
-    provides_summary = ["g"]
+    provides_defaults = {"g":3}
     requires_summary = ["e"]
 
 
@@ -53,7 +53,7 @@ class TestOrderAnalysis(unittest.TestCase):
             [DCLen, DistinctPer])
         self.assertEqual(
             order_analysis([CA_G, CA_CD, CA_AB, CA_EF]),
-            [CA_CD, CA_AB, CA_EF, CA_G])
+            [CA_CD, CA_AB, CA_EF, CA_G ])
             #note the order between CA_CD and CA_AB doesn't matter - 
             # as long as they occur before other classes
 

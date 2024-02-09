@@ -4,8 +4,7 @@ import React, {
   Dispatch,
   SetStateAction,
 } from 'react';
-import { DFWhole, EmptyDf } from './staticData';
-import { DFViewer } from './DFViewer';
+import { DFWhole, EmptyDf } from './DFViewerParts/DFWhole';
 import _ from 'lodash';
 import { Operation } from './OperationUtils';
 
@@ -48,11 +47,7 @@ export function TransformViewer({
   style: CSSProperties;
   transformedDf: DFWhole;
 }) {
-  return (
-    <div className="transform-viewer">
-      <DFViewer style={style} df={transformedDf} />
-    </div>
-  );
+  return <div className="transform-viewer">"transformed view"</div>;
 }
 export type OperationResult = {
   transformed_df: DFWhole;
@@ -100,7 +95,6 @@ export function DependentTabs({
 }) {
   const [tab, _setTab] = useState('DataFrame');
   const style: CSSProperties = { height: '45vh' };
-  console.log('dependenttabs operationResult', operationResult);
   return (
     <div className="dependent-tabs" style={{ width: '100%' }}>
       <ul className="tabs">

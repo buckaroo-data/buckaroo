@@ -1,7 +1,13 @@
 import json
 import pandas as pd
-from pandas.io.json import dumps as pdumps
-from typing import Union
+from typing import Union, Any
+
+
+EMPTY_DF_WHOLE = {
+    'pinned_rows':[],
+    'column_config': [],
+    'data': []
+}
 
 def d_update(d1, d2):
     ret_dict = d1.copy()
@@ -41,25 +47,10 @@ def dict_repr(dct):
     return ret_str
 
 
-
-EMPTY_DF_OBJ = {'schema': {'fields': [{'name': 'index', 'type': 'string'}],
-  'primaryKey': ['index'],
-  'pandas_version': '1.4.0'},
-  'data': []}
-
-
-def dumb_table_sumarize(df):
-    """used when table_hints aren't provided.  Trests every column as a string"""
-    table_hints = {col:{'is_numeric':False, 'type':'obj', 'histogram':[]}  for col in df}
-    table_hints['index'] = {'is_numeric': False, 'type':'obj', 'histogram':[] } 
-    return table_hints
-
-
 #def force_to_pandas(df_pd_or_pl:Union[pd.DataFrame, pl.DataFrame]) -> pd.DataFrame:
 def force_to_pandas(df_pd_or_pl) -> pd.DataFrame:
     if isinstance(df_pd_or_pl, pd.DataFrame):
         return df_pd_or_pl
-
     
     import polars as pl
     #hack for now so everything else flows through
@@ -69,18 +60,32 @@ def force_to_pandas(df_pd_or_pl) -> pd.DataFrame:
     else:
         raise Exception("unexpected type for dataframe, got %r" % (type(df_pd_or_pl)))
 
+#def generate_column_config(df:pd.DataFrame, summary_dict) -> List[ColumnConfig]:
+def generate_column_config(df:pd.DataFrame, summary_dict):
+    ret_conf = []
+    index_name = df.index.name or "index"
+    ret_conf.append({'col_name':index_name, 'displayer_args' : { 'displayer':'obj'}})
+    for col in df.columns:
+        ret_conf.append({'col_name': col, 'displayer_args' : { 'displayer':'obj'} })
+    return ret_conf
+        
 
-#def df_to_obj(unknown_df:Union[pd.DataFrame, pl.DataFrame], order = None, table_hints=None):
-def df_to_obj(unknown_df:Union[pd.DataFrame], order = None, table_hints=None):
+#def df_to_obj(unknown_df:Union[pd.DataFrame, Any], summary_dict:Any) -> DFWhole:
+def df_to_obj(unknown_df:Union[pd.DataFrame, Any], summary_dict:Any):
     df = force_to_pandas(unknown_df)
-    return pd_to_obj(df, order=order, table_hints=table_hints)
+    data = pd_to_obj(df)
+    #dfviewer_config:DFViewerConfig = {
+    dfviewer_config = {
+        'pinned_rows'   : [],
+        'column_config' : generate_column_config(df, summary_dict)
+    }
+    return {'data':data, 'dfviewer_config': dfviewer_config}
 
-def pd_to_obj(df:pd.DataFrame , order = None, table_hints=None):
-    if order is None:
-        order = df.columns
+
+def pd_to_obj(df:pd.DataFrame):
     obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
 
-    if isinstance(df.index,  pd.MultiIndex):
+    if isinstance(df.index, pd.MultiIndex):
         old_index = df.index
         temp_index = pd.Index(df.index.to_list(), tupleize_cols=False)
         df.index = temp_index
@@ -88,18 +93,7 @@ def pd_to_obj(df:pd.DataFrame , order = None, table_hints=None):
         df.index = old_index
     else:
         obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
-
-    if table_hints is None:
-        obj['table_hints'] = json.loads(pdumps(dumb_table_sumarize(df)))
-    else:
-        obj['table_hints'] = json.loads(pdumps(table_hints))
-
-    index_name = df.index.name or "index"
-    fields=[{'name': index_name, 'type':'unused' }]
-    for c in order:
-        fields.append({'name':str(c), 'type':'unused'})
-    obj['schema'] = dict(fields=fields, primaryKey=[index_name], pandas_version='1.4.0')
-    return obj
+    return obj['data']
 
 
 

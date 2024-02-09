@@ -18,6 +18,7 @@ empty_df_with_columns = pd.DataFrame({}, columns=[0])
 
 
 class DistinctCount(ColAnalysis):
+    provides_defaults = {'distinct_count':0}
     requires_raw = True
     provides_series_stats = ["distinct_count"]
 
@@ -28,6 +29,7 @@ class DistinctCount(ColAnalysis):
         return {'distinct_count': distinct_count}
 
 class Len(ColAnalysis):
+    provides_defaults = {'len':0}
     provides_series_stats = ["len"]
     requires_raw = True
 
@@ -36,6 +38,7 @@ class Len(ColAnalysis):
         return {'len': len(ser)}
 
 class DCLen(ColAnalysis):
+    provides_defaults = {'len':0, 'distinct_count':0}
     provides_series_stats = ["len", "distinct_count"]
     requires_raw = True
 
@@ -47,7 +50,7 @@ class DCLen(ColAnalysis):
 
 
 class DistinctPer(ColAnalysis):
-    provides_summary = ["distinct_per"]
+    provides_defaults = {'distinct_per':0}
     requires_summary = ["len", "distinct_count"]
     
     @staticmethod
@@ -56,4 +59,5 @@ class DistinctPer(ColAnalysis):
         return {'distinct_per': summary_dict['distinct_count'] / summary_dict['len']}
 
 class DependsNoProvides(ColAnalysis):
+    provides_defaults = {}
     requires_summary = ["len"]

@@ -3,4 +3,5 @@ dist
 coverage
 **/*.d.ts
 tests
-js/components/RechartTooltip.tsx
+js/vendor/RechartTooltip.tsx
+js/baked_data/colorMap.ts

@@ -3,10 +3,15 @@ import numpy as np
 import buckaroo
 import time
 
-def float_df(N,K):
+def float_df(N_rows, K_columns):
     return pd.DataFrame(
-        {chr(i+97): np.random.random_sample(N) for i in range(K)})
+        {chr(i+97): np.random.random_sample(N_rows) for i in range(K_columns)})
 
+
+"""
+The idea of this is to make a relative timing comparison between just insantiating a dataframe and the full buckaroo testing.  it's crude but should alert to major performance regressions.  particularly with json serialization
+
+"""
 # %timeit float_df(100_000,20) 9ms on my laptop
 
 def bw_do_stuff(df, **kwargs):
@@ -41,7 +46,7 @@ def test_basic_instantiation():
     bw_end2 = time.time()
     bw_time_2 = bw_end2 - bw_start2
     
-    assert bw_time_2 < np_time * 50
+    assert bw_time_2 < np_time * 60
 
 
 

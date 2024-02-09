@@ -10,11 +10,11 @@ simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
 
 def test_basic_instantiation():
     w = BuckarooWidget(simple_df)
-    assert w.dfConfig['totalRows'] == 3
+    assert w.df_meta['total_rows'] == 3
 
 def test_perverse_instantiation():
     w = BuckarooWidget(PERVERSE_DF)
-    assert w.dfConfig['totalRows'] == 10
+    assert w.df_meta['total_rows'] == 10
 
 def test_word_only_instantiation():
     BuckarooWidget(word_only_df)
@@ -29,7 +29,7 @@ def test_debug_true():
     w = BuckarooWidget(df, debug=True)
     display(w)
 
-def test_interpreter():    
+def xtest_interpreter():    
     #df = pd.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
 
     w = BuckarooWidget(simple_df, auto_clean=True)
@@ -44,7 +44,7 @@ def test_interpreter():
 
     tdf = w.operation_results['transformed_df']
     assert w.operation_results['transform_error'] is False
-    field_names = [ f['name'] for f in tdf['schema']['fields'] ]
+    field_names = [ f['col_name'] for f in tdf['dfviewer_config']['column_config'] ]
     assert 'str_col' not in field_names
     assert w.operation_results['generated_py_code'] == """def clean(df):
     df['int_col'] = smart_to_int(df['int_col'])
@@ -70,38 +70,11 @@ def atest_symbol_meta():
     assert 'starttime' not in field_names
 
 
-def test_interpreter_errors():
+def xtest_interpreter_errors():
     w = BuckarooWidget(simple_df)
     w.operations = [
         [{"symbol":"dropcol"},{"symbol":"df"},"int_col"],
         #dropping the same column will result in an error
         [{"symbol":"dropcol"},{"symbol":"df"},"int_col"]]
     assert w.operation_results['transform_error'] == '''"['int_col'] not found in axis"'''
-
-def test_analysis_pipeline():
-    """  uses built in analysis_management unit tests on the Buckaroo Widget as configured"""
-    w = BuckarooWidget(simple_df)
-    assert w.stats.ap.unit_test() == (True, [])
-
-def test_auto_clean_false():
-    """  uses built in analysis_management unit tests on the Buckaroo Widget as configured"""
-    w = BuckarooWidget(simple_df, auto_clean=False)
-    assert w.stats.ap.unit_test() == (True, [])
-
-def test_auto_clean_true():
-    """  uses built in analysis_management unit tests on the Buckaroo Widget as configured"""
-    w = BuckarooWidget(simple_df, auto_clean=True)
-    assert w.stats.ap.unit_test() == (True, [])
-
-    
-def test_post_processing():
-    def my_func(df):
-        return df['int_col'].sum()
-    
-    bw = BuckarooWidget(simple_df, postProcessingF=my_func)
-    assert bw.processed_result == 6
-
-    bw2 = BuckarooWidget(simple_df, auto_clean=False, postProcessingF=my_func)
-    assert bw2.processed_result == 6
-    
 

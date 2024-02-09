@@ -9,7 +9,7 @@
 project = 'Buckaroo'
 copyright = '2023, Paddy Mullen'
 author = 'Paddy Mullen'
-release = '0.5.2'
+release = '0.6.1'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -26,3 +26,10 @@ exclude_patterns = []
 
 html_theme = 'alabaster'
 html_static_path = ['_static']
+
+
+extensions = [
+    # …
+    'sphinx.ext.graphviz',
+]
+graphviz_output_format = 'svg'

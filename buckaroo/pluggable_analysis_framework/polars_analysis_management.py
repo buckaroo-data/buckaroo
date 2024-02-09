@@ -7,8 +7,6 @@ from buckaroo.pluggable_analysis_framework.polars_utils import split_to_dicts
 
 from .pluggable_analysis_framework import ColAnalysis
 from .analysis_management import (produce_summary_df, AnalysisPipeline, DfStats)
-from .utils import (BASE_COL_HINT)
-from buckaroo.serialization_utils import pick, d_update
 from buckaroo.pluggable_analysis_framework.safe_summary_df import safe_summary_df
 from typing import Mapping, Any, Callable, Tuple, List, MutableMapping
 
@@ -18,17 +16,9 @@ class PolarsAnalysis(ColAnalysis):
     select_clauses:List[pl.Expr] = []
     column_ops: Mapping[str, Tuple[List[pl.PolarsDataType], Callable[[pl.Series], Any]]] = {}
 
-def normalize_polars_histogram(ph:pl.DataFrame, ser:pl.Series):
-    edges = ph['break_point'].to_list()
-    edges[0], edges[-1] = ser.min(), ser.max()
-    #col_series.hist(bin_count=10)
-    col_only_df = ph.select(pl.col("^.*_count$"))
-    counts = col_only_df[col_only_df.columns[0]].to_list()
-    #counts = ph['_count'].to_list()
-    return counts[1:], edges
 
 
-def produce_series_df(df:pl.DataFrame,
+def polars_produce_series_df(df:pl.DataFrame,
                       unordered_objs:List[PolarsAnalysis],
                       df_name:str='test_df', debug:bool=False):
     """ just executes the series methods
@@ -45,7 +35,16 @@ def produce_series_df(df:pl.DataFrame,
             df.write_parquet('error.parq')
         traceback.print_exc()
         return dict([[k, {}] for k in df.columns]), {}
-    summary_dict = split_to_dicts(result_df)
+
+    summary_dict = {}
+    for col in df.columns:
+        summary_dict[col] = {}
+        for a_klass in unordered_objs:
+            summary_dict[col].update(a_klass.provides_defaults)
+    first_run_dict = split_to_dicts(result_df)
+
+    for col, measures in first_run_dict.items():
+        summary_dict[col].update(measures)
 
     for pa in unordered_objs:
         for measure_name, action_tuple in pa.column_ops.items():
@@ -59,25 +58,6 @@ def produce_series_df(df:pl.DataFrame,
                 pass
     return summary_dict, errs
 
-def extract_table_hint(summary_dict, columns):
-    table_hint_col_dict = {}
-    for ser_name in columns:
-        table_hint_col_dict[ser_name] = pick(
-            d_update(BASE_COL_HINT, summary_dict[ser_name]),
-            BASE_COL_HINT.keys())
-    return table_hint_col_dict
-    
-def full_produce_summary_df(
-        df:pl.DataFrame, ordered_objs:List[PolarsAnalysis],
-        df_name:str='test_df', debug:bool=False):
-    series_stat_dict, series_errs = produce_series_df(df, ordered_objs, df_name, debug)
-    summary_dict, summary_errs = produce_summary_df(
-        df, series_stat_dict, ordered_objs, df_name, debug)
-    series_errs.update(summary_errs)
-    table_hint_col_dict = extract_table_hint(summary_dict, df.columns)
-    return summary_dict, table_hint_col_dict, series_errs
-
-
 
 class PolarsAnalysisPipeline(AnalysisPipeline):
     """
@@ -85,7 +65,18 @@ class PolarsAnalysisPipeline(AnalysisPipeline):
     allow for computing summary_stats (and other oberservation sets) based on col_analysis objects
     allow col_anlysis objects to be added
     """
-    full_produce_func = [full_produce_summary_df]
+ 
+    @staticmethod
+    def full_produce_summary_df(
+            df:pl.DataFrame, ordered_objs:List[PolarsAnalysis],
+            df_name:str='test_df', debug:bool=False):
+        series_stat_dict, series_errs = polars_produce_series_df(df, ordered_objs, df_name, debug)
+        summary_dict, summary_errs = produce_summary_df(
+            df, series_stat_dict, ordered_objs, df_name, debug)
+        series_errs.update(summary_errs)
+        return summary_dict, series_errs
+
+
 
     def add_analysis(self, new_aobj):
         new_cname = new_aobj.cname()

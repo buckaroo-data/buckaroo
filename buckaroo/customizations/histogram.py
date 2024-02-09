@@ -86,7 +86,9 @@ def numeric_histogram(histogram_args, min_, max_, nan_per):
 
 
 class Histogram(ColAnalysis):
-
+    provides_defaults = dict(
+        histogram= [[],[]], histogram_args=[], histogram_bins=[])
+                    
     @staticmethod
     def series_summary(sampled_ser, ser):
         if not pd.api.types.is_numeric_dtype(ser):
@@ -108,6 +110,7 @@ class Histogram(ColAnalysis):
         meat_histogram=np.histogram(meat, 10)
         populations, _ = meat_histogram
         return dict(
+            histogram_bins = meat_histogram[1],
             histogram_args=dict(
                 meat_histogram=meat_histogram,
                 normalized_populations=(populations/populations.sum()).tolist(),
@@ -116,7 +119,7 @@ class Histogram(ColAnalysis):
 
     requires_summary = ['value_counts', 'nan_per', 'is_numeric', 'length',
                         'min', 'max',]
-    provides_summary = ['histogram', 'histogram_args']
+
 
     @staticmethod
     def computed_summary(summary_dict):

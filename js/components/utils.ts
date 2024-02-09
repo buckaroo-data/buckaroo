@@ -1,5 +1,6 @@
 import _ from 'lodash';
-import { DFWhole } from './staticData';
+import { DFWhole } from './DFViewerParts/DFWhole';
+import { ColDef } from 'ag-grid-community';
 
 export type setDFFunc = (newDf: DFWhole) => void;
 
@@ -39,3 +40,33 @@ export const objWithoutNull = (
   obj: Record<string, string>,
   extraStrips: string[] = []
 ) => _.pickBy(obj, (x) => ![null, undefined, ...extraStrips].includes(x));
+export const updateAtMatch = (
+  cols: ColDef[],
+  key: string,
+  subst: Partial<ColDef>,
+  negative: Partial<ColDef>
+) => {
+  const retColumns = cols.map((x) => {
+    if (x.field === key) {
+      return { ...x, ...subst };
+    } else {
+      return { ...x, ...negative };
+    }
+  });
+  return retColumns;
+};
+
+export const replaceAtMatch = (
+  cols: ColDef[],
+  key: string,
+  subst: Partial<ColDef>
+) => {
+  const retColumns = cols.map((x) => {
+    if (x.field === key) {
+      return { ...x, ...subst };
+    } else {
+      return { ...x };
+    }
+  });
+  return retColumns;
+};

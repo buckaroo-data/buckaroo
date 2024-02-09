@@ -1,7 +1,5 @@
 import time
 import json
-import pytest
-from pydantic import ValidationError
 import pandas as pd
 import numpy as np
 from buckaroo.serialization_utils import df_to_obj
@@ -16,16 +14,6 @@ from typing import Optional, List, Literal, Union, Dict
 
 
 
-# class BaseFormField(pydantic.BaseModel, ABC, defer_build=True):
-#     name: str
-#     title: str | list[str]
-#     required: bool = False
-#     error: str | None = None
-#     locked: bool = False
-#     description: str | None = None
-#     class_name: _class_name.ClassName = None
-
-
 class HistogramModel(pydantic.BaseModel):
     name: str
     population: float
@@ -33,68 +21,197 @@ class HistogramModel(pydantic.BaseModel):
 HT = Optional[List[HistogramModel]]
 
 
-# export interface ColumnStringHint {
-#   type: 'string';
-#   histogram?: any[];
-# }
+class ObjDisplayerA(pydantic.BaseModel):
+    displayer: Literal["obj"]
 
-class ColumnStringHint(pydantic.BaseModel):
-    type: Literal["string"]
-    histogram: HT
+class BooleanDisplayerA(pydantic.BaseModel):
+    displayer: Literal["boolean"]
 
-class ColumnObjHint(pydantic.BaseModel):
-    type: Literal["obj"]
-    histogram: HT
+class StringDisplayerA(pydantic.BaseModel):
+    displayer: Literal["string"]
+    #max_length: int
 
-# export interface ColumnBooleanHint {
-#   type: 'boolean';
-#   histogram?: any[];
-# }
+class FloatDisplayerA(pydantic.BaseModel):
+    displayer: Literal["float"]
 
-class ColumnBooleanHint(pydantic.BaseModel):
-    type: Literal["boolean"]
-    histogram: HT
+class DatetimeDefaultDisplayerA(pydantic.BaseModel):
+    displayer: Literal["datetimeDefault"]
 
-# export interface ColumnIntegertHint {
-#   type: 'integer';
-#   min_digits: number;
-#   max_digits: number;
-#   histogram: any[];
-# }
+class IntegerDisplayerA(pydantic.BaseModel):
+    displayer: Literal["integer"]
+    min_digits: int
+    max_digits: int
 
-class ColumnIntegerHint(pydantic.BaseModel):
-    type: Literal["integer"]
-    min_digits:int
-    max_digits:int
-    histogram: HT
+class DatetimeLocaleDisplayerA(pydantic.BaseModel):
+    displayer: Literal["datetimeLocaleString"]
+    locale: Union[
+        *map(lambda x: Literal[x],
+             ['en-US', 'en-GB', 'en-CA', 'fr-FR', 'es-ES', 'de-DE', 'ja-JP'])]
+    args: str # start with a dictionary, not sure of full typing
+    #args: Intl.DateTimeFormatOptions;
 
-class DFColumn(pydantic.BaseModel):
-    name: str
-    type: str #should be a union
+#End FormatterArgs
 
-ColumnHint = Union[ColumnStringHint, ColumnObjHint, ColumnBooleanHint, ColumnIntegerHint]
+# Begin CellRenderArgs
+class HistogramDisplayerA(pydantic.BaseModel):
+    displayer: Literal["histogram"]
 
-class DFSchema(pydantic.BaseModel):
-    fields: List[DFColumn]
-    primaryKey: list[str]  #; //['index']
-    pandas_version: str #; //'1.4.0',
+class LinkifyDisplayerA(pydantic.BaseModel):
+    displayer: Literal["linkify"]
 
 
-# export type DFDataRow = Record<
-#   string,
-#   string | number | boolean | any[] | Record<string, any> | null
-# >;
+# Internally DfViewer distinguishes between FormatterArgs and
+# CellRendererArgs because they are sent to different functions, but to
+# the python side, that is just an implmentation detail
 
-# export type DFData = DFDataRow[];
+DisplayerArgs = Union[
+    #formatters
+    ObjDisplayerA, BooleanDisplayerA, StringDisplayerA, FloatDisplayerA, DatetimeDefaultDisplayerA,
+    IntegerDisplayerA, DatetimeLocaleDisplayerA,
+    #Cell Renderers
+    HistogramDisplayerA, LinkifyDisplayerA]
+
+class ColorMapRules(pydantic.BaseModel):
+    color_rule: Literal['color_map']
+    map_name: Union[Literal['BLUE_TO_YELLOW'], Literal['DIVERGING_RED_WHITE_BLUE']]
+    val_column: Optional[str]
+
+class ColorWhenNotNullRules(pydantic.BaseModel):
+    color_rule: Literal['color_not_null']
+    conditional_color: Union[str, Literal['red']]
+    exist_column: str
+
+class ColorFromColumn(pydantic.BaseModel):
+    color_rule: Literal['color_from_column']
+    col_name: str
+
+ColorMappingConfig = Union[ColorMapRules, ColorWhenNotNullRules, ColorFromColumn]
+
+class SimpleToolTip(pydantic.BaseModel):
+    tooltip_type: Literal['simple']
+    val_column: str
+
+class SummarySeriesTooltip(pydantic.BaseModel):
+    tooltip_type: Literal['summary_series']
+
+TooltipConfig = Union[SimpleToolTip, SummarySeriesTooltip]
+
+
+class ColumnConfig(pydantic.BaseModel):
+    col_name: str
+    displayer_args: DisplayerArgs
+    color_map_config: Optional[ColorMappingConfig]
+    tooltip_config: Optional[TooltipConfig]
+
+class ColorMapRules(pydantic.BaseModel):
+    color_rule: Literal['color_map']
+    map_name: Union[Literal['BLUE_TO_YELLOW'], Literal['DIVERGING_RED_WHITE_BLUE']]
+    val_column: Optional[str]
+
+class LinkifyDisplayerA(pydantic.BaseModel):
+    displayer: Literal["linkify"]
+
+
+class PinnedRowConfig(pydantic.BaseModel):
+    primary_key_val: str
+    displayer_args: DisplayerArgs
+
+
+class DFViewerConfig(pydantic.BaseModel):
+    pinned_rows: List[PinnedRowConfig]
+    column_config: List[ColumnConfig]
 
 DFData = List[Dict[str, Union[str, int, float, None]]]
 
-
-
 class DFWhole(pydantic.BaseModel):
-    schema__ :DFSchema = pydantic.Field(alias='schema')
-    table_hints: Dict[str, ColumnHint]
+    dfviewer_config: DFViewerConfig
     data: DFData
+
+
+class DFMeta(pydantic.BaseModel):
+    """
+    stats as calculated about the underlying dataframe.
+    Static, these don't change regardless of modification to the dataframe via styling or cleaning
+    """
+    total_rows: int
+    columns: int
+    rows_shown: int
+
+class BuckarooOptions(pydantic.BaseModel):
+    """
+    Buckaroo is opinionated.  Each of these represent an opinion about an aspect of buckaroo.
+    The idea being that different opinions can be swapped through by the frontend
+    """
+    df_list: List[str]  #defaults to "base_df"
+    sampled: List[str]  # sampling strategies
+    #maybe add "base_df" as an always present option... but also maybe
+    #not. PL_Compare won't really use it
+    summary_stats: List[str] 
+    auto_clean: List[str]    # which cleaning strategy
+    #reorderd_columns: List[str]  #strategy for reordering cloumns
+    #styling: List[str]    # which column ordering strategy
+
+class BuckarooState(pydantic.BaseModel):
+    """
+    Given BuckarooOptions, the current state of the frontend. each str
+    will be one of the list from BuckarooOptions
+    """
+    displayed_df: Union[str, Literal['base_df']]
+    sampled: Union[str, False]
+    summary_stats: Union[str, False]
+    show_commands: bool
+    auto_clean: Union[str, False]
+    #reorderd_columns: Union[str, False]
+    #styling: Union[str, False]
+
+class WidgetOptions(pydantic.BaseModel):
+
+
+    #How is summary_dict['all']  pulled out from df_dict.  DFViewer gets a dfwhole and a summary_df
+    df_dict: Dict[str, DFWhole]
+    df_meta: DFMeta
+    operations: List[any]    # don't think I have typing yet
+    operation_results: any   # don't have typing yet
+    commandConfig: any       # casing, fix.  not typing
+    buckaroo_state: BuckarooState
+    buckaroo_options: BuckarooOptions
+
+
+"""
+auto_clean, reorderd_columns and styling all poke at the same things, and I'm not sure the best way to pull it apart.
+
+The trickiest example is lat/long.
+
+imagine a dataframe with a lat column and a long column.
+
+This should be a 'location' tuple that combines the two columns and is displayed as a map or link to a map...
+But editting/combining columns is a whole dataframe operation.  Which currently slots it into auto_clean.
+
+For display only, this makes sense as a post processing step.
+
+For autocleaning, it makes sense as a 'foreign key recognition step'.  for citibike data, start_station name, start_station_id, start_station_latitude, start_station_longitude should be replaced with a categorical linking to a 'station enum'.  They should be displayed as either "start station name", a map, or a link to the map geo coordinates.
+
+For now, I will leave it ambiguous.  I will also consider a post_processing_step that has the same interface as auto_clean (df in, df out).
+
+This same attribute could be manipulated via styling like so.
+separate lat/long columns -> display separately
+tuple column tagged lat/long in summary stats -> display as link to map
+tuple column tagged lat/long in summary stats -> display as inline map
+categorical to 3 valued tuple (name, lat/long, id) -> display name
+categorical to 3 valued tuple (name, lat/long, id) -> display tuple inline nested
+categorical to 3 valued tuple (name, lat/long, id) -> display as link to map
+categorical to 3 valued tuple (name, lat/long, id) -> display as map
+
+
+Given the above data processing should go
+raw -> auto_clean (pre-processing) -> summary_stats -> post_processing -> styling -> overrides
+
+I would also like to be able to write partial processing classes that can be combined.  So you could just write the lat/long combination into tuple, without having to rewrite a whole auto cleaning command.  These could be composed by programmers (not end users initially).
+
+
+"""
+    
+    
 
 # class DfViewer(pydantic.BaseModel):
 #     type: 'DFViewer'
@@ -104,41 +221,43 @@ class DFWhole(pydantic.BaseModel):
 #     #because I don't have any snake cased fields
 
 
-def test_column_hints():
-    ColumnStringHint(type="string", histogram=[])
-    ColumnStringHint(type="string", histogram=[{'name':'foo', 'population':3500}])
-    with pytest.raises(ValidationError) as exc_info:
-        errant_histogram_entry = {'name':'foo', 'no_population':3500}
-        ColumnStringHint(type="string", histogram=[errant_histogram_entry])
-    assert exc_info.value.errors(include_url=False) == [
-        {'type': 'missing', 'loc': ('histogram', 0, 'population'),
-         'msg': 'Field required','input': errant_histogram_entry}]
+
+
+# def test_column_hints():
+#     ColumnStringHint(type="string", histogram=[])
+#     ColumnStringHint(type="string", histogram=[{'name':'foo', 'population':3500}])
+#     with pytest.raises(ValidationError) as exc_info:
+#         errant_histogram_entry = {'name':'foo', 'no_population':3500}
+#         ColumnStringHint(type="string", histogram=[errant_histogram_entry])
+#     assert exc_info.value.errors(include_url=False) == [
+#         {'type': 'missing', 'loc': ('histogram', 0, 'population'),
+#          'msg': 'Field required','input': errant_histogram_entry}]
     
-    ColumnBooleanHint(type="boolean", histogram=[])
+#     ColumnBooleanHint(type="boolean", histogram=[])
 
-def test_column_hint_extra():
-    """verify that we can pass in extra unexpected keys"""
-    ColumnStringHint(type="string", histogram=[], foo=8)
+# def test_column_hint_extra():
+#     """verify that we can pass in extra unexpected keys"""
+#     ColumnStringHint(type="string", histogram=[], foo=8)
 
-def test_dfwhole():
-    temp = {'schema': {'fields':[{'name':'foo', 'type':'integer'}],
-                       'primaryKey':['foo'], 'pandas_version':'1.4.0'},
-            'table_hints': {'foo':{'type':'string', 'histogram':[]},
-                            'bar':{'type':'integer', 'min_digits':2, 'max_digits':4, 'histogram':[]},
-                            'baz':{'type':'obj', 'histogram':[]},
-                            },
-            'data': [{'foo': 'hello', 'bar':8},
-                     {'foo': 'world', 'bar':10}]}
-    DFWhole(**temp)
+# def test_dfwhole():
+#     temp = {'schema': {'fields':[{'name':'foo', 'type':'integer'}],
+#                        'primaryKey':['foo'], 'pandas_version':'1.4.0'},
+#             'table_hints': {'foo':{'type':'string', 'histogram':[]},
+#                             'bar':{'type':'integer', 'min_digits':2, 'max_digits':4, 'histogram':[]},
+#                             'baz':{'type':'obj', 'histogram':[]},
+#                             },
+#             'data': [{'foo': 'hello', 'bar':8},
+#                      {'foo': 'world', 'bar':10}]}
+#     DFWhole(**temp)
 
-def test_df_to_obj_pydantic():
-    named_index_df = pd.DataFrame(
-        dict(foo=['one', 'two', 'three'],
-             bar=[1, 2, 3]))
+# def test_df_to_obj_pydantic():
+#     named_index_df = pd.DataFrame(
+#         dict(foo=['one', 'two', 'three'],
+#              bar=[1, 2, 3]))
 
-    serialized_df = df_to_obj(named_index_df)
-    print(json.dumps(serialized_df, indent=4))
-    DFWhole(**serialized_df)
+#     serialized_df = df_to_obj(named_index_df)
+#     print(json.dumps(serialized_df, indent=4))
+#     DFWhole(**serialized_df)
 
 def bimodal(mean_1, mean_2, N, sigma=5):
     X1 = np.random.normal(mean_1, sigma, int(N/2))

@@ -2,9 +2,19 @@ import React, { useState, Dispatch, SetStateAction } from 'react';
 import _ from 'lodash';
 import { OperationResult, baseOperationResults } from './DependentTabs';
 import { ColumnsEditor, WidgetConfig } from './ColumnsEditor';
-import { tableDf, DFWhole } from './staticData';
-import { DFViewer } from './DFViewer';
-import { StatusBar, DfConfig } from './StatusBar';
+import {
+  dfviewer_config_no_pinned,
+  realSummaryConfig,
+  realSummaryTableData,
+  summaryDfForTableDf,
+  tableDf,
+} from '../baked_data/staticData';
+import { DFData, DFViewerConfig } from './DFViewerParts/DFWhole';
+import { DFViewer } from './DFViewerParts/DFViewer';
+import { StatusBar } from './StatusBar';
+import { BuckarooState } from './WidgetTypes';
+import { BuckarooOptions } from './WidgetTypes';
+import { DFMeta } from './WidgetTypes';
 import { CommandConfigT } from './CommandUtils';
 import { bakedCommandConfig } from './bakedOperationDefaults';
 import { Operation, bakedOperations } from './OperationUtils';
@@ -18,31 +28,50 @@ export type CommandConfigSetterT = (
 
   TODO:add height settings to dfConfig rather than hardcoded.
  */
+export interface IDisplayArgs {
+  data_key: string;
+  df_viewer_config: DFViewerConfig;
+  summary_stats_key: string;
+}
 export function WidgetDCFCell({
-  df_json: json_serialized_df,
+  df_data_dict,
+  df_display_args,
+  df_meta,
   operations,
   on_operations,
   operation_results,
   commandConfig,
-  dfConfig,
-  on_dfConfig,
-  summary_df_json: summaryDf,
+  buckaroo_state,
+  on_buckaroo_state,
+  buckaroo_options,
 }: {
-  df_json: DFWhole;
+  //  df_dict: Record<string, DFWhole>;
+  df_meta: DFMeta;
+  df_data_dict: Record<string, DFData>;
+  df_display_args: Record<string, IDisplayArgs>;
   operations: Operation[];
   on_operations: (ops: Operation[]) => void;
   operation_results: OperationResult;
   commandConfig: CommandConfigT;
-  dfConfig: DfConfig;
-  on_dfConfig: unknown;
-  summary_df_json: DFWhole;
+  buckaroo_state: BuckarooState;
+  on_buckaroo_state: React.Dispatch<React.SetStateAction<BuckarooState>>;
+  buckaroo_options: BuckarooOptions;
 }) {
   const [activeCol, setActiveCol] = useState('stoptime');
-  const widgetConfig: WidgetConfig = { showCommands: dfConfig.showCommands };
-  const localDfConfig = {
-    ...dfConfig,
-    rowsShown: json_serialized_df.data.length || 0,
+  const widgetConfig: WidgetConfig = {
+    showCommands: buckaroo_state.show_commands ? true : false,
   };
+
+  const cDisp = df_display_args[buckaroo_state.df_display];
+  if (cDisp === undefined) {
+    //  console.log("cDisp undefined", buckaroo_state.df_display, buckaroo_options.df_display)
+  } else {
+    //  console.log("cDisp", cDisp);
+  }
+  const dfData = df_data_dict[cDisp.data_key];
+  //console.log("dfData", dfData);
+  const summaryStatsData = df_data_dict[cDisp.summary_stats_key];
+
   return (
     <div
       className="dcf-root flex flex-col"
@@ -52,16 +81,23 @@ export function WidgetDCFCell({
         className="orig-df flex flex-row"
         style={{ height: '450px', overflow: 'hidden' }}
       >
-        <StatusBar config={localDfConfig} setConfig={on_dfConfig} />
+        <StatusBar
+          dfMeta={df_meta}
+          buckarooState={buckaroo_state}
+          setBuckarooState={on_buckaroo_state}
+          buckarooOptions={buckaroo_options}
+        />
         <DFViewer
-          df={dfConfig.summaryStats ? summaryDf : json_serialized_df}
+          df={dfData}
+          df_viewer_config={cDisp.df_viewer_config}
+          summary_stats_data={summaryStatsData}
           activeCol={activeCol}
           setActiveCol={setActiveCol}
         />
       </div>
       {widgetConfig.showCommands ? (
         <ColumnsEditor
-          df={json_serialized_df}
+          df_viewer_config={cDisp.df_viewer_config}
           activeColumn={activeCol}
           operations={operations}
           setOperations={on_operations}
@@ -77,27 +113,69 @@ export function WidgetDCFCell({
 }
 
 export function WidgetDCFCellExample() {
-  const [sampleConfig, setConfig] = useState<DfConfig>({
-    totalRows: 1309,
-    columns: 30,
-    rowsShown: 500,
-    sampleSize: 10_000,
-    sampled: true,
-    summaryStats: false,
-    showCommands: true,
-    //reorderdColumns: false,
+  const dfm: DFMeta = {
+    columns: 5,
+    rows_shown: 20,
+    total_rows: 877,
+  };
+
+  const [bState, setBState] = useState<BuckarooState>({
+    auto_clean: '',
+    sampled: false,
+    show_commands: false,
+    df_display: 'main',
+    post_processing: '',
+    search_string: '',
   });
+
+  const bOptions: BuckarooOptions = {
+    auto_clean: ['', 'aggressive', 'conservative'],
+    df_display: ['main', 'realSummary', 'no_pinned'],
+    sampled: ['random'],
+    post_processing: ['', 'foo', 'bar'],
+    show_commands: ['on'],
+    //    'summary_stats' : ['full', 'all', 'typing_stats']
+  };
+
   const [operations, setOperations] = useState<Operation[]>(bakedOperations);
+
+  const bakedDfDisplay: Record<string, IDisplayArgs> = {
+    main: {
+      data_key: 'main',
+      df_viewer_config: tableDf.dfviewer_config,
+      summary_stats_key: 'all',
+    },
+    realSummary: {
+      data_key: 'empty',
+      df_viewer_config: realSummaryConfig,
+      summary_stats_key: 'real_summary',
+    },
+
+    no_pinned: {
+      data_key: 'main',
+      df_viewer_config: dfviewer_config_no_pinned,
+      summary_stats_key: 'all',
+    },
+  };
+
+  const df_data_dict = {
+    main: tableDf.data,
+    all: summaryDfForTableDf,
+    real_summary: realSummaryTableData,
+    empty: [{ index: 'distinct_count' }],
+  };
   return (
     <WidgetDCFCell
-      df_json={tableDf}
+      df_meta={dfm}
+      df_display_args={bakedDfDisplay}
+      df_data_dict={df_data_dict}
+      buckaroo_options={bOptions}
+      buckaroo_state={bState}
+      on_buckaroo_state={setBState}
+      commandConfig={bakedCommandConfig}
       operations={operations}
       on_operations={setOperations}
       operation_results={baseOperationResults}
-      commandConfig={bakedCommandConfig}
-      dfConfig={sampleConfig}
-      on_dfConfig={setConfig}
-      summary_df_json={tableDf}
     />
   );
 }

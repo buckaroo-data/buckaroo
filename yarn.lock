@@ -2599,16 +2599,17 @@ acorn@^8.8.2:
   resolved "https://registry.npmjs.org/acorn/-/acorn-8.8.2.tgz"
   integrity sha512-xjIYgE8HBrkpd/sJqOGNspf8uHG+NOHGOw6a/Urj8taM2EXfdNAH2oFcPeIFfsv3+kz/mJrS5VuMqbNLjCa2vw==
 
-ag-grid-community@^29.2.0, ag-grid-community@~29.3.5:
-  version "29.3.5"
-  resolved "https://registry.npmjs.org/ag-grid-community/-/ag-grid-community-29.3.5.tgz"
-  integrity sha512-LxUo21f2/CH31ACEs1C7Q/ggGGI1fQPSTB4aY5OThmM+lBkygZ7QszBE8jpfgWOIjvjdtcdIeQbmbjkHeMsA7A==
+ag-grid-community@^31.0.3, ag-grid-community@~31.0.3:
+  version "31.0.3"
+  resolved "https://registry.npmjs.org/ag-grid-community/-/ag-grid-community-31.0.3.tgz"
+  integrity sha512-k81YmLaOQOab9BavYD+Pw2smZSl6TXOJqj9hRuf70XQl3EknOHCGcra7joJxZRJLMKE/HdR+u33TNyX4TCuWfg==
 
-ag-grid-react@^29.2.0:
-  version "29.3.5"
-  resolved "https://registry.npmjs.org/ag-grid-react/-/ag-grid-react-29.3.5.tgz"
-  integrity sha512-Eg0GJ8hEBuxdVaN5g+qITOzhw0MGL9avL0Oaajr+p7QRtq2pIFHLZSknWsCBzUTjidiu75WZMKwlZjtGEuafdQ==
+ag-grid-react@^31.0.3:
+  version "31.0.3"
+  resolved "https://registry.npmjs.org/ag-grid-react/-/ag-grid-react-31.0.3.tgz"
+  integrity sha512-CE4Z5Rdb0H3MFBhmge9854AyDvI4DoG7ZoUJRFB1p2pu5ANVe6tv7cwEI/ugHemEXRRP6s5uvW+ndv0Q6x1/+Q==
   dependencies:
+    ag-grid-community "~31.0.3"
     prop-types "^15.8.1"
 
 aggregate-error@^3.0.0:

@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-from buckaroo.customizations.analysis_utils import int_digits
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 import warnings
 
@@ -24,11 +23,15 @@ def probable_datetime(ser):
         return False
 
 def get_mode(ser):
-    mode_raw = ser.mode()
-    if len(mode_raw) == 0:
+    try:
+        mode_raw = ser.mode()
+        if len(mode_raw) == 0:
+            return np.nan
+        else:
+            return mode_raw.values[0]
+    except Exception:
         return np.nan
-    else:
-        return mode_raw.values[0]
+
 
 """
 to best take advantage of the DAG and pluggable_analysis_framework, structure your code as follows
@@ -42,13 +45,15 @@ Overtime codebases will probably trend towards many classes with single facts, b
 """
 
 class TypingStats(ColAnalysis):
-    provides_summary = [
-        'dtype', 'is_numeric', 'is_integer', 'is_datetime', 'is_bool', 'is_float', '_type']
+
+    provides_defaults = {
+        'dtype':'asdf', 'is_numeric':False, 'is_integer':False,
+        'is_datetime':False, 'is_bool':False, 'is_float':False, '_type':'asdf'}
 
     @staticmethod
     def series_summary(sampled_ser, ser):
         return dict(
-            dtype=ser.dtype,
+            dtype=str(ser.dtype),
             is_numeric=pd.api.types.is_numeric_dtype(ser),
             is_integer=pd.api.types.is_integer_dtype(ser),
             is_datetime=probable_datetime(ser),
@@ -75,11 +80,9 @@ class TypingStats(ColAnalysis):
         return dict(_type=_type)
 
 class DefaultSummaryStats(ColAnalysis):
-    provides_summary = [
-        'length', 'min', 'max', 'mean', 'nan_count',
-        'value_counts', 'mode']
-
-    
+    provides_defaults = {
+        'length':0, 'min':0, 'max':0, 'mean':0, 'nan_count':0,
+        'value_counts':0, 'mode':0}
     @staticmethod
     def series_summary(sampled_ser, ser):
         l = len(ser)
@@ -104,16 +107,14 @@ class DefaultSummaryStats(ColAnalysis):
 
 class ComputedDefaultSummaryStats(ColAnalysis):
 
-    summary_stats_display = [
-        'dtype',
-        'length', 'nan_count', 'distinct_count', 'empty_count',
-        'empty_per', 'unique_per', 'is_numeric', 'is_integer',
-        'is_datetime', 'mode', 'min', 'max','mean']
 
     requires_summary = ['length', 'nan_count',
                         'value_counts']
-    provides_summary = ['distinct_per', 'empty_per', 'unique_per', 'nan_per',
-                        'unique_count', 'empty_count', 'distinct_count']
+
+    provides_defaults = {
+        'distinct_per':0, 'empty_per':0, 'unique_per':0, 'nan_per':0,
+        'unique_count':0, 'empty_count':0, 'distinct_count':0}
+
 
     @staticmethod
     def computed_summary(summary_dict):
@@ -134,22 +135,4 @@ class ComputedDefaultSummaryStats(ColAnalysis):
             empty_per=empty_count/l,
             unique_per=unique_count/l,
             nan_per=summary_dict['nan_count']/l)
-
-
-class ColDisplayHints(ColAnalysis):
-    requires_summary = ['min', 'max', '_type']
-    provides_summary = [
-        'is_numeric', 'is_integer', 'min_digits', 'max_digits', 'type', 'formatter']
-
-    @staticmethod
-    def computed_summary(summary_dict):
-        base_dict = {'type':summary_dict['_type']}
-        if summary_dict['is_datetime']:
-            base_dict['formatter'] = 'default'
-        if summary_dict['is_numeric'] and not summary_dict['is_bool']:
-            base_dict.update({
-                'min_digits':int_digits(summary_dict['min']),
-                'max_digits':int_digits(summary_dict['max']),
-                })
-        return base_dict
 

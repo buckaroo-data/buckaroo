@@ -1,0 +1,57 @@
+digraph g {
+    compound=true;
+	ratio = fill;
+	k=.8
+	node [style=filled];
+	
+subgraph cluster_variables {
+    label="Variable types";
+    instance_var [color="green";]
+    dataflow_variable [color="lightblue"]
+    ui_variable [color="orange"];
+    }
+    instance_var -> dataframe [fconstraint=false style="invis" weight=10]
+
+
+subgraph cluster_types {
+    label="Types";
+    dataframe [shape="house" height=1 width=.5];
+    summary_dict [shape="invtrapezium" height=1 width=.5];
+}
+
+summary_dict -> foo [fconstraint=false  style="invis"]
+
+subgraph cluster_blah {
+    label="Named Tuple";
+    fillcolor="red";
+    style=filled;
+    foo 
+    bar
+    baz 
+    }
+
+	foo -> c [ style="invis"]
+
+
+subgraph cluster_edges {
+    landscape=true
+    packmode=10
+    label="Edges";
+    c -> d  [penwidth = 5;     color="blueviolet";
+        label="  data-flow changes trigger recomputation" ];
+
+    e -> f [ constraint=false 
+        label="  changes to ui-variables trigger recomputation too" ]
+
+    a -> b  [ style="dashed" penwidth=2.5 weight=10
+        label="  read-only,\n   does not trigger recompute"];
+
+    function -> widget [
+                         style="dotted" penwidth=3 color="red" 
+			 label="error-flow \n data-flow steps skipped" ]
+    e [color="orange"];
+    c [color="lightblue"]
+    }
+
+}
+
