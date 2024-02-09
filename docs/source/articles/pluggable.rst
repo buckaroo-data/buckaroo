@@ -113,17 +113,3 @@ The pluggable analysis framework runs different functions on analysis functions 
 2. Run all of the ``summary`` methods and build the ``summary_df``
 3. extract table_hints from the ``summary_df``
 
-Table Hints
-===========
-
-Table hints are a subset of the complete summary dataframe.  They are used to choose formatters, provide data for the histograms, and modify other display characteristics for the frontend table.  Look at the `JS type hints <https://github.com/paddymul/buckaroo/blob/main/js/components/staticData.ts#L43-L52>`_ .  Also note that table_hints are subject to change soon per this `bug report <https://github.com/paddymul/buckaroo/issues/54>`_.
-
-Porting to polars
-=================
-
-I would really like to be able to run these computations in lazy polars, there should be very significant speed increases.  I think this stackoverflow answer might be the key... but I'm not sure  https://stackoverflow.com/a/76560342
-
-
-For now I'm just focussing on writing the framework and making sure it works... I can make it fast later... I think.
-
-After further thought, I think I can make all of the base series calcs lazy with pl.struct.  Then do all the other calcs in pure python (they should be fast).
