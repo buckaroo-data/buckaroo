@@ -1,4 +1,4 @@
-from buckaroo.dataflow import StylingAnalysis
+from buckaroo.dataflow.dataflow import StylingAnalysis
 from typing import Any
 
 def obj_(pkey):

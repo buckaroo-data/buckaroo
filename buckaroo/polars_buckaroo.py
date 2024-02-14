@@ -8,7 +8,7 @@ from buckaroo.customizations.polars_commands import (
     DropCol, FillNA, GroupBy #, OneHot, GroupBy, reindex
 )
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
-from .dataflow import Sampling
+from .dataflow.dataflow import Sampling
 
 
 class PLSampling(Sampling):

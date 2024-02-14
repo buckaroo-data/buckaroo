@@ -1,7 +1,8 @@
 import sys
 import pandas as pd
-from buckaroo.dataflow import DataFlow
-from buckaroo import dataflow as dft
+from buckaroo.dataflow.dataflow import DataFlow
+from buckaroo.dataflow import dataflow as dft
+from buckaroo.dataflow.dataflow import SENTINEL_DF_1, SENTINEL_DF_2
 
 simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
 
@@ -20,9 +21,9 @@ def test_dataflow_cleaned():
     d_flow = DataFlow(simple_df)
     assert d_flow.cleaned_df is simple_df
     d_flow.existing_operations = ["one"]
-    assert d_flow.cleaned_df is dft.SENTINEL_DF_1
+    assert d_flow.cleaned_df is SENTINEL_DF_1
     d_flow.cleaning_method = "one op"
-    assert d_flow.cleaned_df is dft.SENTINEL_DF_2
+    assert d_flow.cleaned_df is SENTINEL_DF_2
 
 def test_dataflow_processed():
 

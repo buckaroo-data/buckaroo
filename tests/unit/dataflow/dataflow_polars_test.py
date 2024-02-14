@@ -1,4 +1,4 @@
-from buckaroo.dataflow import StylingAnalysis
+from buckaroo.dataflow.dataflow import StylingAnalysis
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget
 import polars as pl 

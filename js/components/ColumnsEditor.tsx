@@ -20,7 +20,6 @@ export function ColumnsEditor({
   setOperations,
   operationResult,
   commandConfig,
-  widgetConfig,
 }: {
   df_viewer_config: DFViewerConfig;
   activeColumn: string;
@@ -28,30 +27,25 @@ export function ColumnsEditor({
   setOperations: OperationSetter;
   operationResult: OperationResult;
   commandConfig: CommandConfigT;
-  widgetConfig: WidgetConfig;
 }) {
   const allColumns = df_viewer_config.column_config.map(
     (field) => field.col_name
   );
   return (
     <div className="columns-editor" style={{ width: '100%' }}>
-      {widgetConfig.showCommands ? (
-        <div>
-          <OperationViewer
-            operations={operations}
-            setOperations={setOperations}
-            activeColumn={activeColumn}
-            allColumns={allColumns}
-            commandConfig={commandConfig}
-          />
-          <DependentTabs
-            filledOperations={operations}
-            operationResult={operationResult}
-          />
-        </div>
-      ) : (
-        <span></span>
-      )}
+      <div>
+        <OperationViewer
+          operations={operations}
+          setOperations={setOperations}
+          activeColumn={activeColumn}
+          allColumns={allColumns}
+          commandConfig={commandConfig}
+        />
+        <DependentTabs
+          filledOperations={operations}
+          operationResult={operationResult}
+        />
+      </div>
     </div>
   );
 }
@@ -72,7 +66,6 @@ export function ColumnsEditorEx() {
       operations={operations}
       setOperations={setOperations}
       operationResult={baseOperationResults}
-      widgetConfig={{ showCommands: true }}
     />
   );
 }

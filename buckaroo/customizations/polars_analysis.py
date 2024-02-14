@@ -54,8 +54,6 @@ PROBABLY_STRUCTS = (~cs.numeric() & ~cs.string() & ~cs.temporal() &
 NOT_STRUCTS = (~PROBABLY_STRUCTS)
 
 class VCAnalysis(PolarsAnalysis):
-
-
     provides_defaults = dict(
         value_counts=pl.Series(
             "",
@@ -210,7 +208,6 @@ class HistogramAnalysis(PolarsAnalysis):
         'histogram_args': (NUMERIC_POLARS_DTYPES, normalize_polars_histogram_ser)}
 
     requires_summary = ['min', 'max', 'value_counts', 'length', 'unique_count', 'is_numeric', 'nan_per']
-    provides_summary = ['categorical_histogram', 'histogram', 'histogram_bins']
     provides_defaults = dict(categorical_histogram=[], histogram=[], histogram_bins=[])
 
     @staticmethod
@@ -235,6 +232,23 @@ class HistogramAnalysis(PolarsAnalysis):
                 'histogram_bins': ['faked']
                 }
 
+class PLCleaningStats(PolarsAnalysis):
+    requires_summary = ['value_counts', 'length']
+    provides_defaults = {'int_parse_fail': 0.0, 'int_parse':0.0}
+    
+    @staticmethod
+    def computed_summary(column_metadata):
+        vc_ser, len_ = column_metadata['value_counts'], column_metadata['length']
+        vc_df = pl.DataFrame({'vc': vc_ser.explode()}).unnest('vc')
+        regular_col_vc_df = vc_df.select(pl.all().exclude('count').alias('key'), pl.col('count'))
+        int_parse = pl.col('key').cast(pl.Int64, strict=False).is_null()
+        per_df = regular_col_vc_df.select(
+            int_parse.replace({True:1, False:0}).mul(pl.col('count')).sum().alias('int_parse_fail'),
+            int_parse.replace({True:0, False:1}).mul(pl.col('count')).sum().alias('int_parse')) / len_
+        return per_df.to_dicts()[0]
+
+
 PL_Analysis_Klasses = [VCAnalysis, BasicAnalysis, PlTyping,
                        HistogramAnalysis, ComputedDefaultSummaryStats]
+
 

@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 from ..fixtures import (DistinctCount)
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
-from buckaroo.dataflow import CustomizableDataflow, StylingAnalysis
+from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
 from buckaroo.buckaroo_widget import BuckarooWidget
          
 

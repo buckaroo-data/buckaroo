@@ -7,7 +7,7 @@ from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
     ColAnalysis)
 from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget
-from buckaroo.dataflow import StylingAnalysis
+from buckaroo.dataflow.dataflow import StylingAnalysis
 
 def test_basic_instantiation():
     PolarsBuckarooWidget(

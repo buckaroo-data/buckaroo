@@ -3,6 +3,7 @@ import sys
 import pandas as pd
 import numpy as np
 
+
 BASE_COL_HINT = {
     'type':'string',
     'is_numeric': False,
@@ -81,3 +82,10 @@ def json_postfix(postfix):
     return lambda nm: json.dumps([nm, postfix])
     
 
+def filter_analysis(klasses, attr):
+    ret_klses = {}
+    for k in klasses:
+        attr_val = getattr(k, attr, None)
+        if attr_val is not None:
+            ret_klses[attr_val] = k
+    return ret_klses

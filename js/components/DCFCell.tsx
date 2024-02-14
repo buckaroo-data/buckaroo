@@ -1,7 +1,7 @@
 import React, { useState, Dispatch, SetStateAction } from 'react';
 import _ from 'lodash';
 import { OperationResult, baseOperationResults } from './DependentTabs';
-import { ColumnsEditor, WidgetConfig } from './ColumnsEditor';
+import { ColumnsEditor } from './ColumnsEditor';
 import {
   dfviewer_config_no_pinned,
   realSummaryConfig,
@@ -45,7 +45,6 @@ export function WidgetDCFCell({
   on_buckaroo_state,
   buckaroo_options,
 }: {
-  //  df_dict: Record<string, DFWhole>;
   df_meta: DFMeta;
   df_data_dict: Record<string, DFData>;
   df_display_args: Record<string, IDisplayArgs>;
@@ -58,13 +57,14 @@ export function WidgetDCFCell({
   buckaroo_options: BuckarooOptions;
 }) {
   const [activeCol, setActiveCol] = useState('stoptime');
-  const widgetConfig: WidgetConfig = {
-    showCommands: buckaroo_state.show_commands ? true : false,
-  };
 
   const cDisp = df_display_args[buckaroo_state.df_display];
   if (cDisp === undefined) {
-    //  console.log("cDisp undefined", buckaroo_state.df_display, buckaroo_options.df_display)
+    console.log(
+      'cDisp undefined',
+      buckaroo_state.df_display,
+      buckaroo_options.df_display
+    );
   } else {
     //  console.log("cDisp", cDisp);
   }
@@ -95,7 +95,7 @@ export function WidgetDCFCell({
           setActiveCol={setActiveCol}
         />
       </div>
-      {widgetConfig.showCommands ? (
+      {buckaroo_state.show_commands ? (
         <ColumnsEditor
           df_viewer_config={cDisp.df_viewer_config}
           activeColumn={activeCol}
@@ -103,7 +103,6 @@ export function WidgetDCFCell({
           setOperations={on_operations}
           operationResult={operation_results}
           commandConfig={commandConfig}
-          widgetConfig={widgetConfig}
         />
       ) : (
         <span></span>
