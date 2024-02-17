@@ -67,7 +67,7 @@ Other research
 
 https://edwinth.github.io/blog/outlier-bin/
 
-https://stackoverflow.com/questions/11882393/matplotlib-disregard-outliers-when-plotting
+
 references
 
         Boris Iglewicz and David Hoaglin (1993), "Volume 16: How to Detect and

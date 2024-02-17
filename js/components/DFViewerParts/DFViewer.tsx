@@ -47,7 +47,6 @@ export function DFViewer(
     df_viewer_config,
     summary_stats_data || []
   );
-  //agColsPure[0].minWidth=150;
 
   const styledColumns = replaceAtMatch(
     _.clone(agColsPure),
@@ -79,6 +78,9 @@ export function DFViewer(
         setActiveCol(colName);
       }
     },
+    ...(df_viewer_config.extra_grid_config
+      ? df_viewer_config.extra_grid_config
+      : {}),
   };
   const gridRef = useRef<AgGridReact<unknown>>(null);
   const pinned_rows = df_viewer_config.pinned_rows;

@@ -1,6 +1,6 @@
 // I'm not sure about adding underlying types too
 
-import { ColDef } from 'ag-grid-community';
+import { ColDef, GridOptions } from 'ag-grid-community';
 import _ from 'lodash';
 
 type AGGrid_ColDef = ColDef;
@@ -58,13 +58,23 @@ export interface BooleanCheckboxDisplayerA {
   displayer: 'boolean_checkbox';
 }
 
+export interface Base64PNGImageDisplayerA {
+  displayer: 'Base64PNGImageDisplayer';
+}
+
 export type CellRendererArgs =
   | HistogramDisplayerA
   | LinkifyDisplayerA
-  | BooleanCheckboxDisplayerA;
+  | BooleanCheckboxDisplayerA
+  | Base64PNGImageDisplayerA;
+
 export type DisplayerArgs = FormatterArgs | CellRendererArgs;
 
-export const cellRendererDisplayers = ['histogram', 'linkify'];
+export const cellRendererDisplayers = [
+  'histogram',
+  'linkify',
+  'Base64PNGImageDisplayer',
+];
 
 //ColorMapRules
 export interface ColorMapRules {
@@ -122,6 +132,7 @@ export type PinnedRowConfig = {
 export interface DFViewerConfig {
   pinned_rows: PinnedRowConfig[];
   column_config: ColumnConfig[];
+  extra_grid_config?: GridOptions;
 }
 
 export type DFDataRow = Record<

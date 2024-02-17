@@ -8,7 +8,11 @@ import {
   StringDisplayerA,
 } from './DFWhole';
 import _ from 'lodash';
-import { HistogramCell, LinkCellRenderer } from './HistogramCell';
+import {
+  Base64PNGDisplayer,
+  HistogramCell,
+  LinkCellRenderer,
+} from './HistogramCell';
 import { CellRendererArgs, FormatterArgs } from './DFWhole';
 
 /*
@@ -194,6 +198,8 @@ export function getCellRenderer(crArgs: CellRendererArgs) {
       return HistogramCell;
     case 'linkify':
       return LinkCellRenderer;
+    case 'Base64PNGImageDisplayer':
+      return Base64PNGDisplayer;
     case 'boolean_checkbox':
       return 'agCheckboxCellRenderer';
   }

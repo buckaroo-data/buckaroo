@@ -140,6 +140,11 @@ export const LinkCellRenderer = (props: any) => {
   return <a href={props.value}>{props.value}</a>;
 };
 
+export const Base64PNGDisplayer = (props: any) => {
+  const imgString = 'data:image/png;base64,' + props.value;
+  return <img src={imgString}></img>;
+};
+
 export const HistogramCell = (props: any) => {
   //debugger;
   if (props === undefined || props.value === undefined) {
