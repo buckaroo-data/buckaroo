@@ -998,7 +998,7 @@ const summary_stats_data =[
     
         const working = {'df':data, 'df_viewer_config': dfvConfig, 'summary_stats_data':summary_stats_data};
 
-    return <DFViewer df={current.df}
+    return <DFViewer df_data={current.df}
     df_viewer_config={current.df_viewer_config}
     summary_stats_data={current.summary_stats_data}
     activeCol={activeCol} setActiveCol={setActiveCol} />;

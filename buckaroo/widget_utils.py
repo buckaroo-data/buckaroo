@@ -2,6 +2,20 @@ import traceback
 from .buckaroo_widget import BuckarooWidget
 import pandas as pd
 
+def is_in_ipython():
+
+    try:
+        from IPython.core.getipython import get_ipython
+    except ImportError:
+        raise ImportError('This feature requires IPython 1.0+')
+    
+    ip = get_ipython()
+    if ip is None:
+        #print("must be running inside ipython to enable default display via enable()")
+        return False
+    return ip
+    
+
 def enable(sampled=True,
            summaryStats=False,
            reorderdColumns=False,
@@ -16,17 +30,8 @@ def enable(sampled=True,
 
     """
 
-
-    try:
-        from IPython.core.getipython import get_ipython
-    except ImportError:
-        raise ImportError('This feature requires IPython 1.0+')
-
-    ip = get_ipython()
-    if ip is None:
-        print("must be running inside ipython to enable default display via enable()")
-        return
-
+    ip = is_in_ipython()
+    
     def _display_as_buckaroo(df):
         from IPython.display import display
         try:
@@ -61,24 +66,22 @@ def enable(sampled=True,
         ip_formatter.for_type(pl.DataFrame, _display_polars_as_buckaroo)
     except ImportError:
         pass
+    return True
 
 def disable():
     """
     disable bucakroo as the default display method for DataFrames
 
     """
-    try:
-        from IPython.core.getipython import get_ipython
-    except ImportError:
-        raise ImportError('This feature requires IPython 1.0+')
 
-    ip = get_ipython()
+    ip = is_in_ipython()
     
     ip_formatter = ip.display_formatter.ipython_display_formatter
-    ip_formatter.type_printers.pop(pd.DataFrame, None)    
+    ip_formatter.type_printers.pop(pd.DataFrame, None)
+    
     try:
         import polars as pl
         ip_formatter.type_printers.pop(pl.DataFrame, None)    
     except ImportError:
         pass
-
+    print("The default DataFrame displayers have been restored. To re-enable Buckaroo use `from buckaroo import enable; enable()`")

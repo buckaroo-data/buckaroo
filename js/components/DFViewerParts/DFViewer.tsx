@@ -1,6 +1,6 @@
 import React, { useRef, CSSProperties, useState } from 'react';
 import _ from 'lodash';
-import { DFData, DFViewerConfig, EmptyDf } from './DFWhole';
+import { DFData, DFViewerConfig } from './DFWhole';
 
 import { dfToAgrid, extractPinnedRows } from './gridUtils';
 import { replaceAtMatch } from '../utils';
@@ -16,29 +16,28 @@ import { getCellRendererSelector } from './gridUtils';
 
 export type setColumFunc = (newCol: string) => void;
 
-export function DFViewer(
-  {
-    df,
-    df_viewer_config,
-    summary_stats_data,
-    style,
-    activeCol,
-    setActiveCol,
-  }: {
-    df: DFData;
-    df_viewer_config: DFViewerConfig;
-    summary_stats_data?: DFData;
-    style?: CSSProperties;
-    activeCol?: string;
-    setActiveCol?: setColumFunc;
-  } = {
+export function DFViewer({
+  df_data: df,
+  df_viewer_config,
+  summary_stats_data,
+  style,
+  activeCol,
+  setActiveCol,
+}: {
+  df_data: DFData;
+  df_viewer_config: DFViewerConfig;
+  summary_stats_data?: DFData;
+  style?: CSSProperties;
+  activeCol?: string;
+  setActiveCol?: setColumFunc;
+}) {
+  /* = {
     df: EmptyDf.data,
     df_viewer_config: EmptyDf.dfviewer_config,
     summary_stats_data: [],
     style: { height: '300px' },
     setActiveCol: () => null,
-  }
-) {
+  }*/
   //console.log("dfviewer df_viewer_config", df_viewer_config);
   //  console.log("summary_stats_data", summary_stats_data);
   //  console.log("full_object", {'df':df, 'df_viewer_config':df_viewer_config, 'summary_stats_data': summary_stats_data})
@@ -128,7 +127,7 @@ export function DFViewerEx() {
   const [activeCol, setActiveCol] = useState('tripduration');
   return (
     <DFViewer
-      df={tableDf.data}
+      df_data={tableDf.data}
       df_viewer_config={tableDf.dfviewer_config}
       summary_stats_data={summaryDfForTableDf}
       activeCol={activeCol}

@@ -25,7 +25,20 @@ from .serialization_utils import EMPTY_DF_WHOLE
 from .dataflow.dataflow import CustomizableDataflow, StylingAnalysis, exception_protect
 
 
-class BuckarooWidget(CustomizableDataflow, DOMWidget):
+class BuckarooProjectWidget(DOMWidget):
+    """
+    Repetitious code needed to make Jupyter communicate properly with any BuckarooWidget in this package
+    
+    """
+    _model_module = Unicode(module_name).tag(sync=True)
+    _view_module  = Unicode(module_name).tag(sync=True)
+
+    _model_module_version = Unicode(module_version).tag(sync=True)
+    _view_module_version  = Unicode(module_version).tag(sync=True)
+
+
+
+class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
     """Extends CustomizableDataFlow and DOMWIdget
 
     Replaces generic options in CustomizableDataFlow with Pandas implementations
@@ -35,11 +48,7 @@ class BuckarooWidget(CustomizableDataflow, DOMWidget):
 
     #### DOMWidget Boilerplate
     _model_name = Unicode('DCEFWidgetModel').tag(sync=True)
-    _model_module = Unicode(module_name).tag(sync=True)
-    _model_module_version = Unicode(module_version).tag(sync=True)
     _view_name = Unicode('DCEFWidgetView').tag(sync=True)
-    _view_module = Unicode(module_name).tag(sync=True)
-    _view_module_version = Unicode(module_version).tag(sync=True)
     #END DOMWidget Boilerplate
 
     operations = List().tag(sync=True)
@@ -115,3 +124,42 @@ class BuckarooWidget(CustomizableDataflow, DOMWidget):
         temp_buckaroo_state = self.buckaroo_state.copy()
         temp_buckaroo_state['post_processing'] = proc_func_name
         self.buckaroo_state = temp_buckaroo_state
+
+
+class RawDFViewerWidget(BuckarooProjectWidget):
+    """
+
+    A very raw way of instaniating just the DFViewer, not meant for use by enduers
+
+    instead use DFViewer, or PolarsDFViewer which have better convience methods
+    """
+
+    #### DOMWidget Boilerplate
+    _model_name = Unicode('DFViewerModel').tag(sync=True)
+    _view_name = Unicode('DFViewerView').tag(sync=True)
+    #END DOMWidget Boilerplate
+
+
+
+    df_data = List([
+        {'a':  5  , 'b':20, 'c': 'Paddy'},
+        {'a': 58.2, 'b': 9, 'c': 'Margaret'}]).tag(sync=True)
+
+    df_viewer_config = Dict({
+        'column_config': [
+            { 'col_name': 'a',
+              'displayer_args': { 'displayer': 'float',   'min_fraction_digits': 2, 'max_fraction_digits': 8 }},
+            { 'col_name': 'b',
+              'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 }},
+            { 'col_name': 'c',
+              'displayer_args': { 'displayer': 'string',  'min_digits': 3, 'max_digits': 5 }}],
+        'pinned_rows': [
+            { 'primary_key_val': 'dtype', 'displayer_args': { 'displayer': 'obj' }},
+            { 'primary_key_val': 'mean', 'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 }}]}
+                            ).tag(sync=True)
+
+    summary_stats_data = List([
+        { 'index': 'mean',  'a':      28,   'b':      14, 'c': 'Padarget' },
+        { 'index': 'dtype', 'a': 'float64', 'b': 'int64', 'c': 'object' }]).tag(sync=True)
+
+

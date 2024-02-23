@@ -9,7 +9,7 @@ export function getBakedDFViewer(seriesDf: DFWhole) {
       <div>
         <h1> series_summary </h1>
         <DFViewer
-          df={seriesDf.data}
+          df_data={seriesDf.data}
           df_viewer_config={seriesDf.dfviewer_config}
           summary_stats_data={[]}
         ></DFViewer>

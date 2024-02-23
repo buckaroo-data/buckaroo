@@ -88,7 +88,7 @@ export function WidgetDCFCell({
           buckarooOptions={buckaroo_options}
         />
         <DFViewer
-          df={dfData}
+          df_data={dfData}
           df_viewer_config={cDisp.df_viewer_config}
           summary_stats_data={summaryStatsData}
           activeCol={activeCol}

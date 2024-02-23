@@ -258,7 +258,7 @@ const dictOfListsToListOfDicts = (a: Record<string, any[]>) : Record<string, any
 
 
 
-    return <DFViewer df={current.df}
+    return <DFViewer df_data={current.df}
     df_viewer_config={current.df_viewer_config}
     summary_stats_data={current.summary_stats_data}
     activeCol={activeCol} setActiveCol={setActiveCol} />;
