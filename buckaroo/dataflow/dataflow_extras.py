@@ -116,14 +116,20 @@ class Sampling:
             print("Removing excess columns, found %d columns" %  len(df.columns))
             df = df[df.columns[:kls.max_columns]]
         if kls.pre_limit and len(df) > kls.pre_limit:
-            return df.sample(kls.pre_limit)
+            sampled = df.sample(kls.pre_limit)
+            if isinstance(sampled, pd.DataFrame):
+                return sampled.sort_index()
+            return sampled
         return df
 
 
     @classmethod
     def serialize_sample(kls, df):
         if kls.serialize_limit and len(df) > kls.serialize_limit:
-            return df.sample(kls.serialize_limit)
+            sampled = df.sample(kls.serialize_limit)
+            if isinstance(sampled, pd.DataFrame):
+                return sampled.sort_index()
+            return sampled
         return df
 
 

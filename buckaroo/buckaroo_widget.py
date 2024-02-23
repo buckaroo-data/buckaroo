@@ -23,7 +23,7 @@ from .pluggable_analysis_framework.pluggable_analysis_framework import ColAnalys
 
 from .serialization_utils import EMPTY_DF_WHOLE
 from .dataflow.dataflow import CustomizableDataflow, StylingAnalysis, exception_protect
-
+from .dataflow.dataflow_extras import (Sampling)
 
 class BuckarooProjectWidget(DOMWidget):
     """
@@ -38,6 +38,10 @@ class BuckarooProjectWidget(DOMWidget):
 
 
 
+class PdSampling(Sampling):
+        #pre_limit = 500_000
+        pre_limit = False
+
 class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
     """Extends CustomizableDataFlow and DOMWIdget
 
@@ -50,6 +54,8 @@ class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
     _model_name = Unicode('DCEFWidgetModel').tag(sync=True)
     _view_name = Unicode('DCEFWidgetView').tag(sync=True)
     #END DOMWidget Boilerplate
+
+    sampling_klass = PdSampling
 
     operations = List().tag(sync=True)
     operation_results = Dict(
