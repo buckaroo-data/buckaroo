@@ -38,6 +38,13 @@ Buckaroo works with the following DataFrame libraries
 - `polars` optional 
 
 
+# Learn More
+
+Buckaroo has extensive docs and tests, the best way to learn about the system is from feature example videos on youtube
+
+## [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE)
+## [Styling Buckaroo](https://www.youtube.com/watch?v=cbwJyo_PzKY)
+
 # Features
 
 ## High performance table
