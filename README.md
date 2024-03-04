@@ -42,8 +42,21 @@ Buckaroo works with the following DataFrame libraries
 
 Buckaroo has extensive docs and tests, the best way to learn about the system is from feature example videos on youtube
 
-## [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE)
-## [Styling Buckaroo](https://www.youtube.com/watch?v=cbwJyo_PzKY)
+
+## Videos 
+- [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE)
+- [Styling Buckaroo](https://www.youtube.com/watch?v=cbwJyo_PzKY)
+
+## Example Notebooks
+
+The following notebooks must executed in an environemnt with Buckaroo installed.
+- [Full Tour](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Full-tour.ipynb) Start here. This gives a broad overview of Buckaroo's features.
+- [Histogram Demo](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Histograms-demo.ipynb) Explantion of the embedded histograms of Buckaroo.
+- [Styling Gallery](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/styling-gallery.ipynb) Examples of all of the different formatters and styling available for the table
+- [Extending Buckaroo](http://localhost:8888/lab/workspaces/auto-p/tree/Extending.ipynb) Broad overview of how to add post processing methods and custom styling methods to Buckaroo
+- [Styling Howto](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/styling-howto.ipynb) In depth explanation of how to write custom styling methods
+- [Pluggable Analysis Framework](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Pluggable-Analysis-Framework.ipynb) How to add new summary stats to Buckaroo
+- [Solara Buckaroo](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Solara-Buckaroo.ipynb) Using Buckaroo with Solara
 
 # Features
 
