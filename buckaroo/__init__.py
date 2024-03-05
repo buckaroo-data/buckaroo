@@ -2,7 +2,7 @@
 from ._version import __version__
 from .buckaroo_widget import BuckarooWidget
 from .dataflow.widget_extension_utils import DFViewer
-from .widget_utils import is_in_ipython, enable, disable
+from .widget_utils import is_in_ipython, enable, disable, determine_jupter_env
 
 
 def _jupyter_nbextension_paths():
@@ -48,24 +48,6 @@ def _jupyter_labextension_paths():
 
 
 
-def determine_jupter_env():
-    import psutil
-    parent_process = psutil.Process().parent().cmdline()[-1]
-
-    if 'jupyter-lab' in parent_process:
-        return "jupyter-lab"
-    elif 'jupyter-notebook' in parent_process:
-        return "jupyter-notebook"
-    elif '__vsc_ipynb_file__' in globals():
-        return "vscode"
-    else:
-        try:
-            from IPython.core import getipython
-            if 'google.colab' in str(getipython.get_ipython()):
-                return "google-colab"
-        except:
-            pass
-    return "unknown"
 
 def is_notebook_compatible():
     jupyter_env = determine_jupter_env()
