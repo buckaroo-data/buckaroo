@@ -5,13 +5,11 @@ from traitlets import Unicode, Any, observe, HasTraits, Dict
 from ..serialization_utils import pd_to_obj    
 from buckaroo.pluggable_analysis_framework.utils import (filter_analysis)
 from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
+from .autocleaning import SentinelAutocleaning
 from .dataflow_extras import (
-    EMPTY_DF_DISPLAY_ARG, SENTINEL_DF_1, SENTINEL_DF_2,
-    merge_ops, merge_sds, merge_column_config,
+    EMPTY_DF_DISPLAY_ARG, merge_sds, merge_column_config,
     style_columns, exception_protect, StylingAnalysis,
     Sampling)
-
-
 
 
 class DataFlow(HasTraits):
@@ -36,12 +34,13 @@ class DataFlow(HasTraits):
         super().__init__()
         self.summary_sd = {}
         self.existing_operations = []
+        self.ac_obj = self.autocleaning_klass()
         try:
             self.raw_df = raw_df
         except Exception:
             six.reraise(self.exception[0], self.exception[1], self.exception[2])
 
-    #autocleaning_klass = SentinelAutocleaning
+    autocleaning_klass = SentinelAutocleaning
 
     raw_df = Any('')
     sample_method = Unicode('default')
@@ -87,46 +86,15 @@ class DataFlow(HasTraits):
     def _sampled_df(self, change):
         self.sampled_df = self._compute_sampled_df(self.raw_df, self.sample_method)
 
-    '''FIXME: remove _run_df_interpreter, _run_code_generator, and
-    _run_cleaning when autocleaning properly integrated as a separate
-    testable class
-
-    '''
-    def _run_df_interpreter(self, df, ops):
-        if len(ops) == 1:
-            return SENTINEL_DF_1
-        if len(ops) == 2:
-            return SENTINEL_DF_2
-        return df
-
-    def _run_code_generator(self, ops):
-        if len(ops) == 1:
-            return "codegen 1"
-        if len(ops) == 2:
-            return "codegen 2"
-        return ""
-
-    def _run_cleaning(self, df, cleaning_method):
-        cleaning_ops = []
-        if cleaning_method == "one op":
-            cleaning_ops =  [""]
-        if cleaning_method == "two op":
-            cleaning_ops = ["", ""]
-        cleaning_sd = {}
-        return cleaning_ops, cleaning_sd
-
     @observe('sampled_df', 'cleaning_method', 'existing_operations')
     @exception_protect('operation_result-protector')
     def _operation_result(self, change):
-        if self.sampled_df is None:
+        result = self.ac_obj.handle_ops_and_clean(
+            self.sampled_df, self.cleaning_method, self.existing_operations)
+        if result is None:
             return
-        cleaning_operations, cleaning_sd = self._run_cleaning(self.sampled_df, self.cleaning_method)
-        merged_operations = merge_ops(self.existing_operations, cleaning_operations)
-        cleaned_df = self._run_df_interpreter(self.sampled_df, merged_operations)
-        generated_code = self._run_code_generator(merged_operations)
-        self.cleaned = [cleaned_df, cleaning_sd, generated_code, merged_operations]
-
-
+        else:
+            self.cleaned = result
     @property
     def cleaned_df(self):
         if self.cleaned is not None:
@@ -289,6 +257,17 @@ class CustomizableDataflow(DataFlow):
     #empty needs to always be present, it enables startup
     df_data_dict = Any({'empty':[]}).tag(sync=True)
 
+
+    ### start code interpreter block
+    def add_command(self, incomingCommandKls):
+        return self.ac_obj.add_command(incomingCommandKls)
+
+    def _run_df_interpreter(self, df, operations):
+        self.ac_obj._run_df_interpreter(df, operations)
+
+    def run_code_generator(self, operations):
+        self.ac_obj.run_code_generator(operations)
+    ### end code interpeter block
 
     def _compute_processed_result(self, cleaned_df, post_processing_method):
         if post_processing_method == '':

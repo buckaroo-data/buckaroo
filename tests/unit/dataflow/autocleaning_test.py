@@ -1,8 +1,10 @@
 import polars as pl
 from buckaroo.customizations.polars_analysis import (
     VCAnalysis, PLCleaningStats, BasicAnalysis)
-from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlDfStats, PolarsAnalysis
-from buckaroo.dataflow.autocleaning import Autocleaning, merge_ops, format_ops, make_origs, AutocleaningConfig
+from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlDfStats
+from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
+from buckaroo.dataflow.autocleaning import merge_ops, format_ops, make_origs, AutocleaningConfig
+from buckaroo.polars_buckaroo import PolarsAutocleaning
 from buckaroo.customizations.polars_commands import (
     PlSafeInt, DropCol, FillNA, GroupBy, NoOp
 )
@@ -15,12 +17,12 @@ dirty_df = pl.DataFrame({
 
 
 def make_default_analysis(**kwargs):
-    class DefaultAnalysis(PolarsAnalysis):
+    class DefaultAnalysis(ColAnalysis):
         requires_summary = []
         provides_defaults = kwargs
     return DefaultAnalysis
 
-class CleaningGenOps(PolarsAnalysis):
+class CleaningGenOps(ColAnalysis):
     requires_summary = ['int_parse_fail', 'int_parse']
     provides_defaults = {'cleaning_ops': []}
 
@@ -66,17 +68,6 @@ def test_format_ops():
     assert format_ops(column_meta) == expected_ops
 
 
-
-
-class AlwaysSafeIntGenOps(PolarsAnalysis):
-    requires_summary = []
-    provides_defaults = {'cleaning_ops': []}
-
-    @classmethod
-    def computed_summary(kls, column_metadata):
-        return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}},
-                                 {'symbol': 'df'}]}
-
 def test_merge_ops():
     existing_ops = [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, 'a'],
@@ -103,7 +94,7 @@ class ACConf(AutocleaningConfig):
     
 def test_handle_user_ops():
 
-    ac = Autocleaning([ACConf])
+    ac = PolarsAutocleaning([ACConf])
     df = pl.DataFrame({'a': [10, 20, 30]})
     cleaning_result = ac.handle_ops_and_clean(df, cleaning_method='default', existing_operations=[])
     cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
@@ -153,7 +144,7 @@ def test_make_origs_different_dtype():
     assert make_origs(raw, cleaned).to_dicts() == expected.to_dicts()
 
 def test_handle_clean_df():
-    ac = Autocleaning([ACConf])
+    ac = PolarsAutocleaning([ACConf])
     df = pl.DataFrame({'a': ["30", "40"]})
     cleaning_result = ac.handle_ops_and_clean(df, cleaning_method='default', existing_operations=[])
     cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
@@ -167,7 +158,7 @@ EXPECTED_GEN_CODE = """def clean(df):
     return df"""
 
 def test_autoclean_codegen():
-    ac = Autocleaning([ACConf])
+    ac = PolarsAutocleaning([ACConf])
     df = pl.DataFrame({'a': ["30", "40"]})
     cleaning_result = ac.handle_ops_and_clean(df, cleaning_method='default', existing_operations=[])
     cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result

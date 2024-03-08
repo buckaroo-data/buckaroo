@@ -2,7 +2,7 @@ import sys
 import pandas as pd
 from buckaroo.dataflow.dataflow import DataFlow
 from buckaroo.dataflow import dataflow as dft
-from buckaroo.dataflow.dataflow import SENTINEL_DF_1, SENTINEL_DF_2
+from buckaroo.dataflow.autocleaning import SENTINEL_DF_1, SENTINEL_DF_2
 
 simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
 

@@ -9,6 +9,7 @@ from buckaroo.customizations.polars_commands import (
 )
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .dataflow.dataflow import Sampling
+from .dataflow.autocleaning import Autocleaning
 from .dataflow.widget_extension_utils import configure_buckaroo
 
 class PLSampling(Sampling):
@@ -18,6 +19,11 @@ local_analysis_klasses = PL_Analysis_Klasses.copy()
 local_analysis_klasses.extend(
     [DefaultSummaryStatsStyling, DefaultMainStyling])
 
+
+class PolarsAutocleaning(Autocleaning):
+    DFStatsKlass = PlDfStats
+
+    
 class PolarsBuckarooWidget(BuckarooWidget):
     """TODO: Add docstring here
     """
