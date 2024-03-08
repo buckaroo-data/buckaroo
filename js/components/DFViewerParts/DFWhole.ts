@@ -7,6 +7,7 @@ type AGGrid_ColDef = ColDef;
 
 export interface ObjDisplayerA {
   displayer: 'obj';
+  max_length?: number;
 }
 export interface BooleanDisplayerA {
   displayer: 'boolean';
@@ -62,11 +63,16 @@ export interface Base64PNGImageDisplayerA {
   displayer: 'Base64PNGImageDisplayer';
 }
 
+export interface SVGDisplayerA {
+  displayer: 'SVGDisplayer';
+}
+
 export type CellRendererArgs =
   | HistogramDisplayerA
   | LinkifyDisplayerA
   | BooleanCheckboxDisplayerA
-  | Base64PNGImageDisplayerA;
+  | Base64PNGImageDisplayerA
+  | SVGDisplayerA;
 
 export type DisplayerArgs = FormatterArgs | CellRendererArgs;
 
@@ -74,6 +80,7 @@ export const cellRendererDisplayers = [
   'histogram',
   'linkify',
   'Base64PNGImageDisplayer',
+  'SVGDisplayer',
 ];
 
 //ColorMapRules
@@ -129,10 +136,15 @@ export type PinnedRowConfig = {
   default_renderer_columns?: string[];
 };
 
+export type ComponentConfig = {
+  height_fraction?: number;
+};
+
 export interface DFViewerConfig {
   pinned_rows: PinnedRowConfig[];
   column_config: ColumnConfig[];
   extra_grid_config?: GridOptions;
+  component_config?: ComponentConfig;
 }
 
 export type DFDataRow = Record<

@@ -244,6 +244,10 @@ export const tableDf: DFWhole = {
         displayer_args: { displayer: 'integer', min_digits: 3, max_digits: 5 },
       },
       {
+        col_name: 'svg_column',
+        displayer_args: { displayer: 'SVGDisplayer' },
+      },
+      {
         col_name: 'link_column',
         displayer_args: { displayer: 'linkify' },
       },
@@ -306,9 +310,10 @@ export const tableDf: DFWhole = {
         ag_grid_specs: { width: 150 },
       },
     ],
-    extra_grid_config: { rowHeight: 35 },
+    extra_grid_config: { rowHeight: 105 },
+    component_config: { height_fraction: 1 },
     pinned_rows: [
-      { primary_key_val: 'dtype', displayer_args: { displayer: 'obj' } },
+      //      { primary_key_val: 'dtype', displayer_args: { displayer: 'obj' } },
       //      {        primary_key_val: 'histogram',        displayer_args: { displayer: 'histogram' },      },
     ],
   },
@@ -322,6 +327,7 @@ export const tableDf: DFWhole = {
       nanNumeric: null,
       nanObject: null,
       nanFloat: null,
+      //svg_column: '<h1> paddy </h1>',
       link_column: 'https://buckaroo.dev',
       img_: smileyPNGString,
     },
@@ -334,6 +340,8 @@ export const tableDf: DFWhole = {
       nanNumeric: null,
       nanObject: null,
       nanFloat: null,
+      svg_column:
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100" height="100" viewBox="43.4952 4.7852 4.449600000000004 3.3796" preserveAspectRatio="xMinYMin meet"><g transform="matrix(1,0,0,-1,0,12.95)"><path fill-rule="evenodd" fill="#66cc99" stroke="#555555" stroke-width="0.08899200000000007" opacity="0.6" d="M 47.78,8.0 L 44.96,5.0 L 43.66,4.95 L 46.94,7.99 L 47.78,8.0 z" /></g></svg>',
       link_column: 'https://pola.rs/',
     },
     {
@@ -344,6 +352,8 @@ export const tableDf: DFWhole = {
       floatCol: '9.999',
       nanNumeric: null,
       nanObject: null,
+      svg_column:
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100.0" height="100.0" viewBox="29.0828 3.4328 1.8143999999999991 1.2343999999999995" preserveAspectRatio="xMinYMin meet"><g transform="matrix(1,0,0,-1,0,8.1)"><path fill-rule="evenodd" fill="#66cc99" stroke="#555555" stroke-width="0.03628799999999998" opacity="0.6" d="M 30.83,3.5 L 29.95,4.17 L 29.71,4.6 L 29.15,4.38 L 30.83,3.5 z" /></g></svg>',
       nanFloat: 10,
     },
     {
@@ -355,6 +365,8 @@ export const tableDf: DFWhole = {
       nanCol: null,
       nanNumeric: null,
       nanObject: null,
+      svg_column:
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100.0" height="100.0" viewBox="40.693599999999996 -1.9163999999999999 1.6728000000000094 6.3828" preserveAspectRatio="xMinYMin meet"><g transform="matrix(1,0,0,-1,0,2.5500000000000003)"><path fill-rule="evenodd" fill="#66cc99" stroke="#555555" stroke-width="0.127656" opacity="0.6" d="M 41.58,-1.68 L 40.93,-0.85 L 40.95,2.78 L 41.85,3.91 L 42.13,4.23 L 41.58,-1.68 z" /></g></svg>',
       nanFloat: null,
     },
     {

@@ -222,11 +222,17 @@ class CustomizableDataflow(DataFlow):
     sampling_klass = Sampling
     df_display_klasses = {}
 
-    def __init__(self, df, debug=False, column_config_overrides=None, pinned_rows=None):
+
+    def __init__(self, df, debug=False,
+                 column_config_overrides=None,
+                 pinned_rows=None, extra_grid_config=None,
+                 component_config=None):
         if column_config_overrides is None:
             column_config_overrides = {}
         self.column_config_overrides = column_config_overrides
         self.pinned_rows = pinned_rows
+        self.extra_grid_config = extra_grid_config
+        self.component_config = component_config
         if not debug:
             warnings.filterwarnings('ignore')
 
@@ -240,8 +246,6 @@ class CustomizableDataflow(DataFlow):
         self.populate_df_meta()
         #self.raw_df = df
         warnings.filterwarnings('default')
-    
-
 
     def populate_df_meta(self):
         self.df_meta = {
@@ -366,8 +370,13 @@ class CustomizableDataflow(DataFlow):
                         'summary_stats_key': A_Klass.summary_stats_key}
             temp_display_args[display_name] = disp_arg
 
-        if self.pinned_rows:
+        if self.pinned_rows is not None:
             temp_display_args['main']['df_viewer_config']['pinned_rows'] = self.pinned_rows
+        if self.extra_grid_config:
+            temp_display_args['main']['df_viewer_config']['extra_grid_config'] = self.extra_grid_config
+        if self.component_config:
+            temp_display_args['main']['df_viewer_config']['component_config'] = self.component_config
+
         self.df_display_args = temp_display_args
    
 """

@@ -18,7 +18,10 @@ EXPECTED_DF_VIEWER_CONFIG = {
     'pinned_rows': [],
     'column_config': [
         {'col_name': 'index', 'displayer_args': {'displayer': 'obj'}},
-        {'col_name': 'normal_int_series', 'displayer_args': {'displayer': 'obj'}}]}
+        {'col_name': 'normal_int_series', 'displayer_args': {'displayer': 'obj'}}],
+    'component_config': {},
+    'extra_grid_config': {},
+}
                              
 class SelectOnlyAnalysis(PolarsAnalysis):
 

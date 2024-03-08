@@ -208,8 +208,17 @@ div.dependent-tabs ul.tabs li.active {
     clear:right;
 }
 
+.df-viewer.short-mode .ag-center-cols-viewport {
+/*  min-height: unset !important;  */
+    min-height: 50px;
+}
+/*
+.df-viewer.short-mode > div {
 
-
+  min-height: 100;
+  max-height: 800
+}
+*/
 /*# sourceMappingURL=dcf-npm.css.map */
 
 

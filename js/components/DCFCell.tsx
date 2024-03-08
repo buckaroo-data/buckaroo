@@ -79,7 +79,10 @@ export function WidgetDCFCell({
     >
       <div
         className="orig-df flex flex-row"
-        style={{ height: '450px', overflow: 'hidden' }}
+        style={{
+          // height: '450px',
+          overflow: 'hidden',
+        }}
       >
         <StatusBar
           dfMeta={df_meta}

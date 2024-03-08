@@ -54,6 +54,7 @@ def enable(sampled=True,
         #warning. I think this usecase specifically works on google
         #colab
 
+
     
     def _display_as_buckaroo(df):
         from IPython.display import display
@@ -80,6 +81,19 @@ def enable(sampled=True,
                 return
             raise NotImplementedError
 
+    def _display_geopandas_as_buckaroo(gdf):
+        from IPython.display import display
+        from buckaroo.geopandas_buckaroo import GeopandasBuckarooWidget
+
+        try:
+            return display(GeopandasBuckarooWidget(gdf))
+        except:
+            if debug:
+                traceback.print_exc()
+                return
+            raise NotImplementedError
+
+
     ip_formatter = ip.display_formatter.ipython_display_formatter
     ip_formatter.for_type(pd.DataFrame, _display_as_buckaroo)
     
@@ -88,6 +102,14 @@ def enable(sampled=True,
         ip_formatter.for_type(pl.DataFrame, _display_polars_as_buckaroo)
     except ImportError:
         pass
+
+    try:
+        import geopandas
+        ip_formatter.for_type(geopandas.geodataframe.GeoDataFrame, _display_geopandas_as_buckaroo)
+    except ImportError:
+        pass
+
+
     return True
 
 def disable():
@@ -126,3 +148,4 @@ def determine_jupter_env():
         except:
             pass
     return "unknown"
+

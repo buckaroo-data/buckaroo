@@ -137,6 +137,9 @@ class StylingAnalysis(ColAnalysis):
     provides_defaults = {}
     pinned_rows = []
 
+    extra_grid_config = {}
+    component_config = {}
+    
     #the type should be
     #def style_column(col:str, column_metadata: SingleColumnMetadata) -> ColumnConfig:
     @classmethod
@@ -166,5 +169,7 @@ class StylingAnalysis(ColAnalysis):
             
         return {
             'pinned_rows': kls.pinned_rows,
-            'column_config': ret_col_config}
-
+            'column_config': ret_col_config,
+            'extra_grid_config': kls.extra_grid_config,
+            'component_config': kls.component_config
+        }

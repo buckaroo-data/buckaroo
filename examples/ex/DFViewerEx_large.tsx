@@ -198,6 +198,8 @@ const dictOfListsToListOfDicts = (a: Record<string, any[]>) : Record<string, any
             }
           }
         ],
+        component_config: {height_fraction:1.15},
+
         "column_config": [
           {
             "col_name": "index",

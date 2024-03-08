@@ -17,7 +17,10 @@ DFVIEWER_CONFIG_DEFAULT = {
                    'column_config':  [
                        {'col_name':'index', 'displayer_args': {'displayer': 'obj'}},
                        {'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
-                       {'col_name':'b', 'displayer_args': {'displayer': 'obj'}}]}
+                       {'col_name':'b', 'displayer_args': {'displayer': 'obj'}}],
+                   'component_config' : {},
+                   'extra_grid_config': {},
+}
 
 
 class BasicStyling(StylingAnalysis):
@@ -57,7 +60,6 @@ def test_custom_dataflow():
 
     class TwoStyleDFC(PolarsBuckarooWidget):
         analysis_klasses = [StylingAnalysis, IntStyling]
-        #analysis_klasses = [IntStyling]
         
     cdfc = TwoStyleDFC(BASIC_DF)
     assert cdfc.widget_args_tuple[1] is BASIC_DF
@@ -67,7 +69,10 @@ def test_custom_dataflow():
                    'column_config':  [
                        {'col_name':'index', 'displayer_args': {'displayer': 'obj'}},
                        {'col_name':'a', 'displayer_args': {'displayer': 'int'}},
-                       {'col_name':'b', 'displayer_args': {'displayer': 'int'}}]}
+                       {'col_name':'b', 'displayer_args': {'displayer': 'int'}}],
+                   'component_config' : {},
+                   'extra_grid_config': {},
+    }
     
     assert cdfc.df_display_args['int_styles']['df_viewer_config'] == DFVIEWER_CONFIG_INT
 

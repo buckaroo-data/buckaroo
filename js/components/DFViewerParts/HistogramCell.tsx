@@ -145,6 +145,16 @@ export const Base64PNGDisplayer = (props: any) => {
   return <img src={imgString}></img>;
 };
 
+export const SVGDisplayer = (props: any) => {
+  const markup = { __html: props.value };
+
+  return (
+    <div //style={{border:'1px solid red', borderBottom:'1px solid green'}}
+      dangerouslySetInnerHTML={markup}
+    ></div>
+  );
+};
+
 export const HistogramCell = (props: any) => {
   //debugger;
   if (props === undefined || props.value === undefined) {
