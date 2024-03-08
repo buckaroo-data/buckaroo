@@ -10,6 +10,11 @@ Buckaroo is a tool to quickly clean and explore DataFrames with a visual UI for 
 
 We all know how awkward it is to clean data in jupyter notebooks.  Multiple cells of exploratory work, trying different transforms, looking up different transforms, adhoc functions that work in one notebook and have to be either copied/pasta-ed to the next notebook, or rewritten from scratch.  Buckaroo aims to massively speed up that process.
 
+**Install Buckaroo**::
+
+   pip install buckaroo
+
+
 .. raw:: html
 
 	 <iframe width="560" height="315" src="https://www.youtube.com/embed/l01aXk8AgiA?si=wpdwUyMpbNqmO6jk" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
