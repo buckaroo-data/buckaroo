@@ -35,7 +35,8 @@ Buckaroo works in the following notebook environments
 
 Buckaroo works with the following DataFrame libraries
 - `pandas` (version >=1.3.5)
-- `polars` optional 
+- `polars` optional
+- `geopandas` optional
 
 
 # Learn More
@@ -46,6 +47,7 @@ Buckaroo has extensive docs and tests, the best way to learn about the system is
 ## Videos 
 - [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE)
 - [Styling Buckaroo](https://www.youtube.com/watch?v=cbwJyo_PzKY)
+- [GeoPandas Support](https://youtu.be/8WBhoNjDJsA)
 
 ## Example Notebooks
 
@@ -57,6 +59,7 @@ The following notebooks must executed in an environemnt with Buckaroo installed.
 - [Styling Howto](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/styling-howto.ipynb) In depth explanation of how to write custom styling methods
 - [Pluggable Analysis Framework](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Pluggable-Analysis-Framework.ipynb) How to add new summary stats to Buckaroo
 - [Solara Buckaroo](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Solara-Buckaroo.ipynb) Using Buckaroo with Solara
+- [GeoPandas with Bucakroo](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/GeoPandas.ipynb)
 
 # Features
 
