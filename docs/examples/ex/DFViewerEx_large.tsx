@@ -1,9 +1,8 @@
-import {DFViewer} from '../../js/components/DFViewerParts/DFViewer';
+import React, { useState} from 'react';
 import _ from 'lodash';
 
-//import { stringIndexDf } from '../../js/baked_data/staticData';
-import React, { useState} from 'react';
-import { DFData, DFViewerConfig } from '../../js/components/DFViewerParts/DFWhole';
+import { extraComponents } from 'buckaroo';
+//import { DFData, DFViewerConfig } from 'buckaroo';
 
 const data = [
   {
@@ -181,7 +180,9 @@ const dictOfListsToListOfDicts = (a: Record<string, any[]>) : Record<string, any
         'f':genString(samples, 3,  70),
         'g':genInt(samples,  -3,   55),
       })
-      const current: {'df':DFData, 'df_viewer_config':DFViewerConfig, 'summary_stats_data':DFData} =   {
+      //const current: {'df':DFData, 'df_viewer_config':DFViewerConfig, 'summary_stats_data':DFData} =   {
+      const current: {'df':any, 'df_viewer_config': any, 'summary_stats_data': any} =   {
+
       "df": data,
       "df_viewer_config": {
         "pinned_rows": [
@@ -256,11 +257,8 @@ const dictOfListsToListOfDicts = (a: Record<string, any[]>) : Record<string, any
       "summary_stats_data": summary_stats_data
     }
     
-//        const working = {'df':data, 'df_viewer_config': dfvConfig, 'summary_stats_data':summary_stats_data};
 
-
-
-    return <DFViewer df_data={current.df}
+    return <extraComponents.DFViewer df_data={current.df}
     df_viewer_config={current.df_viewer_config}
     summary_stats_data={current.summary_stats_data}
     activeCol={activeCol} setActiveCol={setActiveCol} />;

@@ -2,13 +2,9 @@
 import 'bootstrap/dist/css/bootstrap.min.css';
 import React from 'react';
 import {HashRouter as Router, Route, Link} from 'react-router-dom';
-//import {Button} from 'react-bootstrap';
+import {Button} from 'react-bootstrap';
 
 import './app.css';
-
-import 'ag-grid-community/styles/ag-grid.css';
-import 'ag-grid-community/styles/ag-theme-alpine.css';
-import '../js/style/dcf-npm.css';
 
 
 const examples = {
@@ -25,33 +21,43 @@ const examples = {
     HistogramEx: {title: 'Histogram', file: 'HistogramEx'}
 };
 
+      
+// The examples use a code-loading technique that I have described in
+// https://mmomtchev.medium.com/making-examples-displaying-code-along-its-output-with-webpack-a28dcf5439c6
+
+const ReadmeBlock = React.lazy(() => import(/* webpackPrefetch: true */ './ReadmeBlock'));
+const CodeBlock = React.lazy(() => import(/* webpackPrefetch: true */ './CodeBlock'));
+
 for (const ex of Object.keys(examples)) {
     examples[ex].comp = React.lazy(
         () => import(/* webpackPrefetch: true */ `./ex/${examples[ex].file}.tsx`)
     );
-  examples[ex].code = 'asfd'
-  examples[ex].text = 'text'
+    examples[ex].code = import(
+        /* webpackPrefetch: true */ `!!html-loader?{"minimize":false}!./jsx-loader.ts!./ex/${examples[ex].file}.tsx`
+    ).then((code) => code.default);
+    examples[ex].text = import(
+        /* webpackPrefetch: true */ `!!raw-loader!./ex/${examples[ex].file}.tsx`
+    ).then((text) => text.default);
 }
 
 const LeftMenuItem = (props): JSX.Element => (
-  <div>
     <Link to={props.id}>
-        <h3 className='w-100' variant='light'>
+        <Button className='w-100' variant='light'>
             {props.title}
-        </h3>
+        </Button>
     </Link>
-    </div>
 );
 
+// eslint-disable-next-line no-var
+//declare var VERSION: string = "handwritten";
 
 const App = (): JSX.Element => {
     const [jsText, setJSText] = React.useState<string>('');
 
     return (
         <Router>
-	<div className="dev-examples">
             <h1 className='m-2'>
-                <strong>buckaroo stuff examples </strong>
+                <strong>Buckaroo JS Frontend Examples</strong>
             </h1>
             <div className='d-flex flex-row p-3'>
                 <div className='d-flex flex-column left-menu me-2'>
@@ -65,20 +71,28 @@ const App = (): JSX.Element => {
                         <Route exact path='/'>
                             <div className='ml-2'>
                                 <React.Suspense fallback={<div>Loading...</div>}>
+                                    <ReadmeBlock />
                                 </React.Suspense>
                             </div>
                         </Route>
                         {Object.keys(examples).map((e) => (
                             <Route key={e} path={`/${e}`}>
                                 <div className='row'>
-                                    <div className='col-12 col-xl-12 mb-12'>
+                                    <div className='col-12 col-xl-5 mb-1'>
                                         <React.Suspense fallback={<div>Loading component...</div>}>
-                                            {React.createElement(examples[e].comp)}
+                                             <div className="component-example">
+			                         <h2> Component example </h2>
+                                                 {React.createElement(examples[e].comp)}
+                                             </div>
                                         </React.Suspense>
                                     </div>
                                     <div className='col-12 col-xl-7'>
                                         <React.Suspense fallback={<div>Parsing code...</div>}>
-
+                                            <CodeBlock
+                                                title={examples[e].title}
+                                                code={examples[e].code}
+                                                text={examples[e].text}
+                                            />
                                         </React.Suspense>
                                     </div>
                                 </div>
@@ -87,7 +101,6 @@ const App = (): JSX.Element => {
                     </div>
                 </div>
             </div>
-	</div>
         </Router>
     );
 };

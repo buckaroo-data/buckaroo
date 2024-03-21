@@ -18,6 +18,7 @@
 .codeblock {
     max-height: 90vh;
     overflow-y: scroll;
+    text-align: left;
 }
 
 .codeblock > pre {
@@ -50,9 +51,15 @@ html,body
     min-height: 100vh;
     font-size: 16px;
     text-align: center;
-    color: var(--color-example);
+    /*color: var(--color-example); */
+    color:black;
     margin: 0;
 }
+#fullscreen {
+    width:100%
+
+}
+
 
 #app
 {
@@ -71,6 +78,18 @@ html,body
 
 .histogram {
     color:black;
+}
+
+.component-example {
+    border:1px solid black;
+    table {
+	th {
+	    border: 2px solid black;
+	}
+	td {
+	    border:1px solid black;
+	}
+    }
 }
 
 .customHeaderRenderer {

@@ -15,7 +15,7 @@
         "allowSyntheticDefaultImports": true,
         "jsx": "react",
         "allowJs": true,
-        "baseUrl": "./",
+	"baseUrl": "./",
         "esModuleInterop": true,
         "resolveJsonModule": true,
         "moduleResolution": "node",

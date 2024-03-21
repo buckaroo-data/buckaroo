@@ -1,7 +1,7 @@
-import {DFViewer} from '../../js/components/DFViewerParts/DFViewer';
-//import { stringIndexDf } from '../../js/baked_data/staticData';
 import React, { useState} from 'react';
-import { DFData, DFViewerConfig } from '../../js/components/DFViewerParts/DFWhole';
+import { extraComponents } from 'buckaroo';
+//import { DFData, DFViewerConfig } from 'buckaroo';
+
 
 const data = [
   {
@@ -479,7 +479,9 @@ const summary_stats_data =[
   export default function DFViewerExString() {
     const [activeCol, setActiveCol] = useState('tripduration');
 
-    const dfvConfig:DFViewerConfig = {
+  //const dfvConfig:DFViewerConfig = {
+
+  const dfvConfig:any = {
   "pinned_rows": [
     {
       "primary_key_val": "dtype",
@@ -552,7 +554,9 @@ const summary_stats_data =[
     //     }
     //   ]
     // }
-    const current: {'df':DFData, 'df_viewer_config':DFViewerConfig, 'summary_stats_data':DFData} =   {
+    //const current: {'df':DFData, 'df_viewer_config':DFViewerConfig, 'summary_stats_data':DFData} =   {
+
+    const current: {'df':any, 'df_viewer_config':any, 'summary_stats_data':any} =   {
       "df": [],
       "df_viewer_config": {
         "pinned_rows": [
@@ -996,9 +1000,11 @@ const summary_stats_data =[
       ]
     }
     
-        const working = {'df':data, 'df_viewer_config': dfvConfig, 'summary_stats_data':summary_stats_data};
+    //const working = {'df':data, 'df_viewer_config': dfvConfig, 'summary_stats_data':summary_stats_data};
+    const working = {'df':data, 'df_viewer_config': dfvConfig, 'summary_stats_data':summary_stats_data};
 
-    return <DFViewer df_data={current.df}
+
+    return <extraComponents.DFViewer df_data={current.df}
     df_viewer_config={current.df_viewer_config}
     summary_stats_data={current.summary_stats_data}
     activeCol={activeCol} setActiveCol={setActiveCol} />;

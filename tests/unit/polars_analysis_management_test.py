@@ -18,7 +18,7 @@ test_df = pl.DataFrame({
 
 word_only_df = pl.DataFrame({'letters': 'h o r s e'.split(' ')})
 
-df = pl.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
+df = pl.read_csv('./docs/examples/data/2014-01-citibike-tripdata.csv')
 
 empty_df = pl.DataFrame({})
 #empty_df_with_columns = pl.DataFrame({}, columns=[0])

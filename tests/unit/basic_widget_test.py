@@ -59,7 +59,7 @@ def atest_symbol_meta():
 
     """
 
-    df = pd.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
+    df = pd.read_csv('./docs/examples/data/2014-01-citibike-tripdata.csv')
     w = BuckarooWidget(df)
     assert w.operation_results['generated_py_code'] == '# instantiation, unused'
     w.operations = [[{"symbol":"dropcol", "meta":{}},{"symbol":"df"},"starttime"]]

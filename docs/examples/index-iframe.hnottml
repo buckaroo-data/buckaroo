@@ -6,15 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <meta name="keywords" content="react, list, listview, typescript, javascript">
-    <title>react-edit-list - Universal Editable List React Component</title>
+    <title>iframe wrapper index </title>
+    <style>
+      html {
+	  color:black;
+      }
+      </style>
 </head>
 
+
 <body>
-    <div id="fullscreen" class="fullscreen">
-        <div id="root">
-            <%= require('../README.md').default %>
-        </div>
-    </div>
+  <h1  style="color:black"> index iframe </h1>
+  <div style="border:1px solid green">
+    <iframe height="400" width="900" src="//#/DFViewerEx"></iframe>
 </body>
 
 </html>
