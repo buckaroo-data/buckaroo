@@ -111,7 +111,13 @@ module.exports = [
       plugins: [new HtmlWebpackPlugin({
                 //template: './examples/index.html'
                 template: './examples/index.html'
-      })],
+      }),
+	new HtmlWebpackPlugin({
+	    filename: path.join(__dirname, '/examples/dist', 'index-iframe.html'),
+	    template: 'examples/index-iframe.html',
+	  //  chunks: ['exampleEntry']
+	})
+	       ],
       performance
   },
 

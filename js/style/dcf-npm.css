@@ -212,6 +212,19 @@ div.dependent-tabs ul.tabs li.active {
 /*  min-height: unset !important;  */
     min-height: 50px;
 }
+
+.df-viewer.in-iframe.short-mode {
+ .ag-center-cols-viewport {
+    min-height:450px;
+  }
+}
+.df-viewer.in-iframe {
+  .ag-center-cols-viewport {
+     min-height:450px;
+   }
+ }
+
+
 /*
 .df-viewer.short-mode > div {
 

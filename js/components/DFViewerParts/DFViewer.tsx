@@ -114,6 +114,7 @@ export function DFViewer({
     minHeight: 50,
     maxHeight: dfvHeight,
   };
+  const inIframe = window.parent !== window;
 
   const belowMinRows = agData.length + df_viewer_config.pinned_rows.length < 10;
   const shortMode =
@@ -121,9 +122,13 @@ export function DFViewer({
     df_viewer_config?.extra_grid_config?.rowHeight === undefined;
   const layoutType = shortMode ? 'autoHeight' : 'normal';
   const applicableStyle = shortMode ? shortDivStyle : regularDivStyle;
-  console.log('shortMode', shortMode, dfvHeight);
+  console.log('shortMode', shortMode, dfvHeight, inIframe);
   return (
-    <div className={`df-viewer  ${shortMode ? 'short-mode' : 'regular-mode'}`}>
+    <div
+      className={`df-viewer  ${shortMode ? 'short-mode' : 'regular-mode'} ${
+        inIframe ? 'in-iframe' : ''
+      }`}
+    >
       <div
         style={applicableStyle}
         className="theme-hanger ag-theme-alpine-dark "
