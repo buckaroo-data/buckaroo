@@ -103,9 +103,10 @@ export function DFViewer({
     };
   };
 
+  const inIframe = window.parent !== window;
+  const compC = df_viewer_config?.component_config;
   const dfvHeight =
-    window.innerHeight /
-    (df_viewer_config?.component_config?.height_fraction || 2);
+    compC?.dfvHeight || window.innerHeight / (compC?.height_fraction || 2);
   const regularDivStyle = {
     height: dfvHeight,
   };
@@ -114,13 +115,13 @@ export function DFViewer({
     minHeight: 50,
     maxHeight: dfvHeight,
   };
-  const inIframe = window.parent !== window;
 
   const belowMinRows = agData.length + df_viewer_config.pinned_rows.length < 10;
   const shortMode =
-    belowMinRows &&
-    df_viewer_config?.extra_grid_config?.rowHeight === undefined;
-  const layoutType = shortMode ? 'autoHeight' : 'normal';
+    compC?.shortMode ||
+    (belowMinRows &&
+      df_viewer_config?.extra_grid_config?.rowHeight === undefined);
+  const layoutType = compC?.layoutType || (shortMode ? 'autoHeight' : 'normal');
   const applicableStyle = shortMode ? shortDivStyle : regularDivStyle;
   console.log('shortMode', shortMode, dfvHeight, inIframe);
   return (

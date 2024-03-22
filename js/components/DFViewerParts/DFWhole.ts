@@ -138,6 +138,10 @@ export type PinnedRowConfig = {
 
 export type ComponentConfig = {
   height_fraction?: number;
+  // temporary debugging props
+  dfvHeight?: number;
+  layoutType?: 'autoHeight' | 'normal';
+  shortMode?: boolean;
 };
 
 export interface DFViewerConfig {
