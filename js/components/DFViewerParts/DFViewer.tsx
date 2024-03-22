@@ -1,6 +1,6 @@
 import React, { useRef, CSSProperties, useState } from 'react';
 import _ from 'lodash';
-import { DFData, DFViewerConfig } from './DFWhole';
+import { ComponentConfig, DFData, DFViewerConfig } from './DFWhole';
 
 import { dfToAgrid, extractPinnedRows } from './gridUtils';
 import { replaceAtMatch } from '../utils';
@@ -103,40 +103,22 @@ export function DFViewer({
     };
   };
 
-  const inIframe = window.parent !== window;
-  const compC = df_viewer_config?.component_config;
-  const dfvHeight =
-    compC?.dfvHeight || window.innerHeight / (compC?.height_fraction || 2);
-  const regularDivStyle = {
-    height: dfvHeight,
-  };
+  const hs = heightStyle(
+    agData.length,
+    df_viewer_config.pinned_rows.length,
+    df_viewer_config?.extra_grid_config?.rowHeight,
+    df_viewer_config?.component_config
+  );
 
-  const shortDivStyle = {
-    minHeight: 50,
-    maxHeight: dfvHeight,
-  };
-
-  const belowMinRows = agData.length + df_viewer_config.pinned_rows.length < 10;
-  const shortMode =
-    compC?.shortMode ||
-    (belowMinRows &&
-      df_viewer_config?.extra_grid_config?.rowHeight === undefined);
-  const layoutType = compC?.layoutType || (shortMode ? 'autoHeight' : 'normal');
-  const applicableStyle = shortMode ? shortDivStyle : regularDivStyle;
-  console.log('shortMode', shortMode, dfvHeight, inIframe);
   return (
-    <div
-      className={`df-viewer  ${shortMode ? 'short-mode' : 'regular-mode'} ${
-        inIframe ? 'in-iframe' : ''
-      }`}
-    >
+    <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
       <div
-        style={applicableStyle}
+        style={hs.applicableStyle}
         className="theme-hanger ag-theme-alpine-dark "
       >
         <AgGridReact
           ref={gridRef}
-          domLayout={layoutType}
+          domLayout={hs.domLayout}
           defaultColDef={defaultColDef}
           gridOptions={gridOptions}
           rowData={agData}
@@ -148,6 +130,42 @@ export function DFViewer({
     </div>
   );
 }
+
+export const heightStyle = (
+  numRows: number,
+  pinnedRowLen: number,
+  rowHeight?: number,
+  compC?: ComponentConfig
+) => {
+  const inIframe = window.parent !== window;
+  const dfvHeight =
+    compC?.dfvHeight || window.innerHeight / (compC?.height_fraction || 2);
+  const regularDivStyle = { height: dfvHeight };
+
+  const shortDivStyle = { minHeight: 50, maxHeight: dfvHeight };
+
+  //   const belowMinRows = agData.length + df_viewer_config.pinned_rows.length < 10;
+  const belowMinRows = numRows + pinnedRowLen < 10;
+
+  const shortMode =
+    compC?.shortMode || (belowMinRows && rowHeight === undefined);
+  const domLayout = compC?.layoutType || (shortMode ? 'autoHeight' : 'normal');
+  const applicableStyle = shortMode ? shortDivStyle : regularDivStyle;
+  console.log('shortMode', shortMode, dfvHeight, inIframe);
+  return {
+    classMode: shortMode ? 'short-mode' : 'regular-mode',
+    inIframe: inIframe ? 'in-iframe' : '',
+    domLayout,
+    applicableStyle,
+  };
+
+  /*
+  ab = window.location.host;
+ "cskfus796ts-496ff2e9c6d22116-0-colab.googleusercontent.com"
+ bc = window.location.pathname
+ "/outputframe.html" 
+*/
+};
 
 export function DFViewerEx() {
   const [activeCol, setActiveCol] = useState('tripduration');
