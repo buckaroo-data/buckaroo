@@ -6,6 +6,7 @@ import { dfToAgrid, extractPinnedRows } from './gridUtils';
 import { replaceAtMatch } from '../utils';
 import { AgGridReact } from 'ag-grid-react'; // the AG Grid React Component
 import {
+  DomLayoutType,
   GridOptions,
   SizeColumnsToContentStrategy,
   SizeColumnsToFitProvidedWidthStrategy,
@@ -90,8 +91,6 @@ export function DFViewer({
   const getAutoSize = ():
     | SizeColumnsToFitProvidedWidthStrategy
     | SizeColumnsToContentStrategy => {
-    console.log('getAutoSize');
-
     if (styledColumns.length < 1) {
       return {
         type: 'fitProvidedWidth',
@@ -103,12 +102,13 @@ export function DFViewer({
     };
   };
 
-  const hs = heightStyle(
-    agData.length,
-    df_viewer_config.pinned_rows.length,
-    df_viewer_config?.extra_grid_config?.rowHeight,
-    df_viewer_config?.component_config
-  );
+  const hs = heightStyle({
+    numRows: agData.length,
+    pinnedRowLen: df_viewer_config.pinned_rows.length,
+    location: window.location,
+    compC: df_viewer_config?.component_config,
+    rowHeight: df_viewer_config?.extra_grid_config?.rowHeight,
+  });
 
   return (
     <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
@@ -131,32 +131,63 @@ export function DFViewer({
   );
 }
 
-export const heightStyle = (
-  numRows: number,
-  pinnedRowLen: number,
-  rowHeight?: number,
-  compC?: ComponentConfig
-) => {
-  const inIframe = window.parent !== window;
-  const dfvHeight =
-    compC?.dfvHeight || window.innerHeight / (compC?.height_fraction || 2);
-  const regularDivStyle = { height: dfvHeight };
+interface HeightStyleArgs {
+  numRows: number;
+  pinnedRowLen: number;
+  readonly location: Location;
+  rowHeight?: number;
+  compC?: ComponentConfig;
+}
+interface HeightStyleI {
+  domLayout: DomLayoutType;
+  inIframe: string;
+  classMode: 'short-mode' | 'regular-mode';
+  applicableStyle: CSSProperties;
+}
 
+export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
+  const { numRows, pinnedRowLen, location, rowHeight, compC } = hArgs;
+  const isGoogleColab =
+    location.host.indexOf('colab.googleusercontent.com') !== -1;
+
+  const inIframe = window.parent !== window;
+  const regularCompHeight = window.innerHeight / (compC?.height_fraction || 2);
+  const dfvHeight = compC?.dfvHeight || regularCompHeight;
+  const regularDivStyle = { height: dfvHeight };
   const shortDivStyle = { minHeight: 50, maxHeight: dfvHeight };
 
-  //   const belowMinRows = agData.length + df_viewer_config.pinned_rows.length < 10;
   const belowMinRows = numRows + pinnedRowLen < 10;
 
   const shortMode =
     compC?.shortMode || (belowMinRows && rowHeight === undefined);
-  const domLayout = compC?.layoutType || (shortMode ? 'autoHeight' : 'normal');
+  console.log(
+    'shortMode',
+    shortMode,
+    'dfvHeight',
+    dfvHeight,
+    'isGoogleColab',
+    isGoogleColab,
+    'inIframe',
+    inIframe
+  );
+  const inIframeClass = inIframe ? 'inIframe' : '';
+  if (isGoogleColab || inIframe) {
+    return {
+      classMode: 'regular-mode',
+      domLayout: 'normal',
+      applicableStyle: { height: 500 },
+      inIframe: inIframeClass,
+    };
+  }
+  const domLayout: DomLayoutType =
+    compC?.layoutType || (shortMode ? 'autoHeight' : 'normal');
   const applicableStyle = shortMode ? shortDivStyle : regularDivStyle;
-  console.log('shortMode', shortMode, dfvHeight, inIframe);
+  const classMode = shortMode ? 'short-mode' : 'regular-mode';
   return {
-    classMode: shortMode ? 'short-mode' : 'regular-mode',
-    inIframe: inIframe ? 'in-iframe' : '',
+    classMode,
     domLayout,
     applicableStyle,
+    inIframe: inIframeClass,
   };
 
   /*
