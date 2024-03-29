@@ -36,7 +36,7 @@ dependencies = [
     "ipywidgets>=7.6.0,<9",
     "graphlib_backport>=1.0.0"
 ]
-version = "0.6.9"
+version = "0.6.10"
 
 [project.license]
 file = "LICENSE.txt"
@@ -49,11 +49,15 @@ test = [
     "pytest-cov>=3",
     "pytest>=6",
     "hypothesis>=6.88.1",
-    "polars>=0.19.4",
+    "polars>=0.20.7",
+    "polars[timezone]",
     "pydantic>=2.5.2",
-    "pyarrow"
+    "pyarrow",
+    "geopandas"
 ]
-polars = ["polars>=0.20.7"]
+polars = ["polars>=0.20.7",
+       "polars[timezone]"
+]
 jupyterlab = ["jupyterlab>=3.6.0"]
 notebook = ["notebook>=7.0.0"]
 

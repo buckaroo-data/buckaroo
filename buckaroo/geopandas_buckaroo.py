@@ -53,7 +53,29 @@ class GeoPdSampling(Sampling):
         pre_limit = 2_000
     
 
-class GeopandasSVGBuckarooWidget(buckaroo.BuckarooWidget):
+
+class GeopandasBase(buckaroo.BuckarooWidget):
+
+    def _df_to_obj(self, df):
+        pd_df = pd.DataFrame(dict(zip(df.columns, df.to_numpy().T)))
+        return pd_to_obj(self.sampling_klass.serialize_sample(pd_df))
+
+    def _sd_to_jsondf(self, sd):
+        """exists so this can be overriden for polars  """
+        temp_sd = sd.copy()
+        #FIXME add actual test around weird index behavior
+        if 'index' in temp_sd:
+            del temp_sd['index']
+        # we need this to go through the regular pandas path, not our
+        # special serialization the special serialization gives
+        # numeric indexes, when summary stats needs string indexes of
+        # the stats name
+        return pd_to_obj(pd.DataFrame(temp_sd))
+
+class GeopandasBuckarooWidget(GeopandasBase):
+    pass
+    
+class GeopandasSVGBuckarooWidget(GeopandasBase):
     analysis_klasses = [
         TypingStats,
         GeoStyling,
@@ -66,13 +88,3 @@ class GeopandasSVGBuckarooWidget(buckaroo.BuckarooWidget):
         t_state = self.buckaroo_state.copy()
         t_state['post_processing'] = 'svg_geo'
         self.buckaroo_state = t_state
-        
-    def _df_to_obj(self, df):
-        pd_df = pd.DataFrame(dict(zip(df.columns, df.to_numpy().T)))
-        return pd_to_obj(self.sampling_klass.serialize_sample(pd_df))
-
-class GeopandasBuckarooWidget(buckaroo.BuckarooWidget):
-
-    def _df_to_obj(self, df):
-        pd_df = pd.DataFrame(dict(zip(df.columns, df.to_numpy().T)))
-        return pd_to_obj(self.sampling_klass.serialize_sample(pd_df))
