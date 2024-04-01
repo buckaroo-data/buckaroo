@@ -61,7 +61,6 @@ def categorical_histogram(length:int, val_counts, nan_per:float, top_n_positions
 
 #def numeric_histogram(histogram_args: Histogram_Args , min_, max_, nan_per):
 def numeric_histogram(histogram_args, min_, max_, nan_per):
-
     low_tail, high_tail = histogram_args['low_tail'], histogram_args['high_tail']
     ret_histo = []
     nan_observation = {'name':'NA', 'NA':np.round(nan_per*100, 0)}
@@ -106,7 +105,6 @@ class Histogram(ColAnalysis):
         low_pass  = ser > low_tail 
         high_pass = ser < high_tail
         meat = vals[low_pass & high_pass]
-
         if len(meat) == 0:
             return dict(histogram_args={})
    
@@ -129,7 +127,7 @@ class Histogram(ColAnalysis):
         is_numeric = summary_dict['is_numeric']
         value_counts = summary_dict['value_counts']
         nan_per = summary_dict['nan_per']
-        if is_numeric and len(value_counts) > 5:
+        if is_numeric and len(value_counts) > 5 and summary_dict['histogram_args']:
             histogram_args = summary_dict['histogram_args']
             min_, max_ = summary_dict['min'], summary_dict['max']
             temp_histo =  numeric_histogram(histogram_args, min_, max_, nan_per)

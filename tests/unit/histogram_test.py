@@ -42,6 +42,17 @@ def test_produce_series_df():
     ha = sdf['a']['histogram_args']
     _assert_ha(ha)
 
+def test_no_meat():
+    """just make sure this doesn't fail based on
+    Nearly-constant column with outliers fails to display #264
+    https://github.com/paddymul/buckaroo/issues/264
+    """
+    df = pd.DataFrame({'no_meat': [1] * 400 + [10, 20, 30, 40, 50]})
+    sdf, errs = AnalysisPipeline.full_produce_summary_df(df,
+        [TypingStats, ComputedDefaultSummaryStats, Histogram, DefaultSummaryStats],
+        debug=True)
+    assert errs == {}
+
 def test_full_produce_summary_df():
     sdf, errs = AnalysisPipeline.full_produce_summary_df(test_df, [Histogram], debug=True)
     ha = sdf['a']['histogram_args']
