@@ -1,7 +1,7 @@
 [build-system]
 requires = [
     "hatchling",
-    "jupyterlab~=3.0",
+    "jupyterlab~=4.0",
 ]
 build-backend = "hatchling.build"
 
@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 name = "buckaroo"
 description = "Buckaroo - GUI Data wrangling for pandas"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 authors = [
     { name = "Paddy Mullen" },
 ]
@@ -27,8 +27,6 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
 ]
@@ -119,7 +117,7 @@ build-function = "hatch_jupyter_builder.npm_builder"
 path = "."
 build_cmd = "build"
 npm = [
-    "npm",
+    "yarn",
 ]
 
 [tool.isort]

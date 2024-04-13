@@ -14,15 +14,15 @@ jobs:
       matrix:
         #os: [ubuntu-latest, windows-latest, macos-latest]
         os: [ubuntu-latest]
-        python-version: ["3.8"]
+        python-version: ["3.9"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
-
+        uses: actions/checkout@v4
       - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         with:
-          node-version: "18.x"
+          node-version: "20.x"
+          cache: yarn
 
       - name: Install dependencies
         run: |
@@ -57,7 +57,7 @@ jobs:
           python -m build .
 
       - name: Upload builds
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: buckaroo-dist-${{ github.run_number }}
           path: |
@@ -69,15 +69,15 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/download-artifact@v3
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
           name: buckaroo-dist-${{ github.run_number }}
 
       - name: Install Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: 3.9
 
       - name: Setup buckaroo ui test
         run: pip install `echo dist/*.whl`[ui-test] -r requirements-ui-test.txt
@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload Test artifacts
         if: always()
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: buckaroo-test-results-${{ github.run_number }}
           path: test-results

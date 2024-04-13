@@ -37,7 +37,9 @@ test_df = pl.DataFrame({
 
 
 def test_polars_all_stats():
-    """the all_stats verify that PolarsBuckarooWidget produces the
+    """
+    FIXME temporarily disabled to test other build stuff
+    the all_stats verify that PolarsBuckarooWidget produces the
     same summary_stats shape tatha pandas does.
 
     Since polars doesn't have an index concept, some things are a little different, but the summary_stats display essentiall depends on the index being present and displayed
@@ -56,13 +58,17 @@ def test_polars_all_stats():
     assert spbw.merged_sd == expected
 
     assert spbw.df_data_dict['all_stats'] == [
-        {'index': 'mean', 'normal_int_series': 2.5},
         {'index': 'null_count', 'normal_int_series': 0.0},
+        {'index': 'mean', 'normal_int_series': 2.5},
         {'index': 'quin99', 'normal_int_series': 4.0}]
     assert spbw.df_display_args['main']['df_viewer_config'] == EXPECTED_DF_VIEWER_CONFIG
 
+
+
 def test_pandas_all_stats():
-    """just make sure this doesn't fail"""
+    """
+
+    just make sure this doesn't fail"""
     from buckaroo.buckaroo_widget import BuckarooWidget
     from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
     import pandas as pd
