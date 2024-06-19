@@ -28,6 +28,8 @@ def get_mode(ser):
         if len(mode_raw) == 0:
             return np.nan
         else:
+            # add check to verify  that mode isn't np.datetime64, change it to a pd.timestamp.
+            # this leads to segfaults for pandas < 2.07 on serialization
             return mode_raw.values[0]
     except Exception:
         return np.nan

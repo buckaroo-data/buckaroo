@@ -121,26 +121,13 @@ class AnalysisPipeline(object):
             df, series_stat_dict, ordered_objs, df_name, debug)
         series_errs.update(summary_errs)
         for col, summary_dict in summary_df.items():
-            # for summary_key, summary_val in summary_dict.items():
-            #     if summary_key == 'value_counts':
-            #         del summary_dict['value_counts']
-            # keys = list(summary_dict.keys())
-            # key_len = len(keys)
-            # print(key_len, keys)
-            # del_keys = keys[key_len//2:]
-            # print("del_keys", del_keys)
-            # for k in del_keys:
-            #     del summary_dict[k]
-            #for k, v in summary_dict.items():
-            for k in ['mode', 'mean', 'max', 'value_counts']:
-                v = summary_dict[k]
-                print(k, type(v))
-            if 'value_counts' in summary_dict:
-                # del summary_dict['value_counts']
-                # del summary_dict['histogram_args']
-                # del summary_dict['histogram_bins']
-                # del summary_dict['histogram']
-                del summary_dict['mode']
+            del_keys = []
+            for k,v in summary_dict.items():
+                # add a check for the pandas version here
+                if isinstance(v, np.datetime64):
+                    del_keys.append(k)
+            for k in del_keys:
+                del summary_dict[k]
         return summary_df, series_errs
     
 
