@@ -32,7 +32,8 @@ classifiers = [
 ]
 dependencies = [
     "ipywidgets>=7.6.0,<9",
-    "graphlib_backport>=1.0.0"
+    "graphlib_backport>=1.0.0",
+    "packaging>=18"
 ]
 version = "0.6.11"
 

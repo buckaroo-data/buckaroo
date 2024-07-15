@@ -2,7 +2,10 @@ from collections import defaultdict
 import traceback
 import warnings
 
+import pandas as pd
 import numpy as np
+from packaging.version import Version
+
 from buckaroo.pluggable_analysis_framework.safe_summary_df import output_full_reproduce, output_reproduce_preamble
 
 from buckaroo.pluggable_analysis_framework.utils import FAST_SUMMARY_WHEN_GREATER, PERVERSE_DF
@@ -53,7 +56,6 @@ def produce_series_df(df, ordered_objs, df_name='test_df', debug=False):
     return series_stats, errs
 
 
-
 def produce_summary_df(df, series_stats, ordered_objs, df_name='test_df', debug=False):
     """
     takes a dataframe and a list of analyses that have been ordered by a graph sort,
@@ -85,7 +87,6 @@ def produce_summary_df(df, series_stats, ordered_objs, df_name='test_df', debug=
                 else:
                     summary_res = a_kls.computed_summary(base_summary_dict)
                 for k,v in summary_res.items():
-                    
                     base_summary_dict.update(summary_res)
             except Exception as e:
                 if not a_kls.quiet:
@@ -120,14 +121,14 @@ class AnalysisPipeline(object):
         summary_df, summary_errs = produce_summary_df(
             df, series_stat_dict, ordered_objs, df_name, debug)
         series_errs.update(summary_errs)
-        for col, summary_dict in summary_df.items():
-            del_keys = []
-            for k,v in summary_dict.items():
-                # add a check for the pandas version here
-                if isinstance(v, np.datetime64):
-                    del_keys.append(k)
-            for k in del_keys:
-                del summary_dict[k]
+        if Version(pd.__version__) < Version("2.0.7"):
+            for col, summary_dict in summary_df.items():
+                del_keys = []
+                for k,v in summary_dict.items():
+                    if isinstance(v, np.datetime64):
+                        del_keys.append(k)
+                for k in del_keys:
+                    del summary_dict[k]
         return summary_df, series_errs
     
 
