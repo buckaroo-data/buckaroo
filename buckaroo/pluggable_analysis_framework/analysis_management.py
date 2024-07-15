@@ -56,6 +56,7 @@ def produce_series_df(df, ordered_objs, df_name='test_df', debug=False):
     return series_stats, errs
 
 
+
 def produce_summary_df(df, series_stats, ordered_objs, df_name='test_df', debug=False):
     """
     takes a dataframe and a list of analyses that have been ordered by a graph sort,
@@ -130,7 +131,6 @@ class AnalysisPipeline(object):
                 for k in del_keys:
                     del summary_dict[k]
         return summary_df, series_errs
-    
 
     style_method = None
     

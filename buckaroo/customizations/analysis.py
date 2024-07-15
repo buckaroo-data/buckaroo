@@ -1,7 +1,11 @@
+import warnings
+
 import pandas as pd
 import numpy as np
+from packaging.version import Version
+
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
-import warnings
+
 
 def probable_datetime(ser):
     #turning off warnings in this single function is a bit of a hack.
@@ -28,9 +32,15 @@ def get_mode(ser):
         if len(mode_raw) == 0:
             return np.nan
         else:
-            # add check to verify  that mode isn't np.datetime64, change it to a pd.timestamp.
-            # this leads to segfaults for pandas < 2.07 on serialization
-            return mode_raw.values[0]
+            if Version(pd.__version__) < Version("2.0.7"):
+                # add check to verify  that mode isn't np.datetime64, change it to a pd.timestamp.
+                # this leads to segfaults for pandas < 2.07 on serialization
+                retval = mode_raw.values[0]
+                if isinstance(retval, np.datetime64):
+                    return pd.Timestamp(retval)
+                return retval
+            else:
+                return mode_raw.values[0]
     except Exception:
         return np.nan
 
