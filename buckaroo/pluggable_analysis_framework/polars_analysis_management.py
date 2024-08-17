@@ -14,7 +14,7 @@ from typing import Mapping, Any, Callable, Tuple, List, MutableMapping
 
 class PolarsAnalysis(ColAnalysis):
     select_clauses:List[pl.Expr] = []
-    column_ops: Mapping[str, Tuple[List[pl.PolarsDataType], Callable[[pl.Series], Any]]] = {}
+    column_ops: Mapping[str, Tuple[List[pl.DataType], Callable[[pl.Series], Any]]] = {}
 
 
 

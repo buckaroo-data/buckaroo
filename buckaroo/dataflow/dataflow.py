@@ -50,7 +50,6 @@ class DataFlow(HasTraits):
     cleaning_operations = Any()
 
     existing_operations = Any([])
-    merged_operations = Any()
 
     cleaned = Any().tag(default=None)
     

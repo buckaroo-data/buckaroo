@@ -27,7 +27,7 @@ def dict_repr(dct):
     ret_str = "{"
     for k, v in dct.items():
         ret_str += "'%s': " % k
-        if type(v) == UnquotedString:
+        if isinstance(v, UnquotedString):
             ret_str += "%s, " % v
         else:
             ret_str += "%r, " % v

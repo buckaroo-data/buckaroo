@@ -108,21 +108,25 @@ class PlTyping(PolarsAnalysis):
     @staticmethod
     def computed_summary(summary_dict):
         dt = summary_dict['dtype']
-
+        '''
+        ['Array', 'Binary', 'Boolean', 'Categorical', 'DTYPE_TEMPORAL_UNITS', 'DataType', 'DataTypeClass', 'Date', 'Datetime', 'Decimal', 'Duration', 'Enum', 'Field', 'Float32', 'Float64', 'Int16', 'Int32', 'Int64', 'Int8', 'IntegerType', 'List', 'N_INFER_DEFAULT', 'Null', 'Object', 'String', 'Struct', 'TemporalType', 'Time', 'UInt16', 'UInt32', 'UInt64', 'UInt8', 'Unknown', 'Utf8', '__all__', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__', '__name__', '__package__', '__path__', '__spec__', '_parse', '_utils', 'classes', 'constants', 'constructor', 'convert', 'dtype_to_ffiname', 'dtype_to_py_type', 'group', 'is_polars_dtype', 'maybe_cast', 'numpy_char_code_to_dtype', 'numpy_type_to_constructor', 'numpy_values_and_dtype', 'parse_into_dtype', 'polars_type_to_constructor', 'py_type_to_arrow_type', 'py_type_to_constructor', 'supported_numpy_char_code', 'try_parse_into_dtype', 'unpack_dtypes']
+        '''
+        print("type", dt, type(dt))
         res = {'is_numeric':  False, 'is_integer': False}
 
-        if dt in pdt.INTEGER_DTYPES:
+
+        if isinstance(dt, pdt.IntegerType):
             t = 'integer'
-        elif dt in pdt.DATETIME_DTYPES:
+        elif isinstance(dt, pdt.Datetime) or isinstance(dt, pdt.Date):
             t = 'datetime'
-        elif dt in pdt.FLOAT_DTYPES:
+        elif isinstance(dt, pdt.Float32) or isinstance(dt, pdt.Float64):
             t = 'float'
-        elif dt in pl.datatypes.TEMPORAL_DTYPES:
+        elif  isinstance(dt, pdt.TemporalType): 
             #feels like a hack
             t = 'temporal'
-        elif dt == pdt.Utf8:
+        elif isinstance(dt, pdt.Utf8):
             t = 'string'
-        elif dt == pdt.Boolean:
+        elif isinstance(dt, pdt.Boolean):
             t = 'boolean'
         else:
             t = 'unknown'
@@ -147,8 +151,10 @@ def normalize_polars_histogram_ser(ser):
         return { 'low_tail': smallest, 'high_tail':largest,
                  'meat_histogram': [[],[]], 'normalized_populations': []}
     raw_hist = meat_df.hist(bin_count=10, include_breakpoint=True)
-    hist_df = raw_hist.select(pl.col("break_point"), pl.selectors.ends_with("count").alias("count"))
-    edges = hist_df['break_point'].to_list()
+    print("cols")
+    print(raw_hist.columns)
+    hist_df = raw_hist.select(pl.col("breakpoint"), pl.selectors.ends_with("count").alias("count"))
+    edges = hist_df['breakpoint'].to_list()
     edges[0], edges[-1] = smallest, largest
     counts = hist_df['count'][1:]
     norm_counts = counts/counts.sum()
@@ -248,7 +254,8 @@ class PLCleaningStats(PolarsAnalysis):
         return per_df.to_dicts()[0]
 
 
-PL_Analysis_Klasses = [VCAnalysis, BasicAnalysis, PlTyping,
-                       HistogramAnalysis, ComputedDefaultSummaryStats]
+PL_Analysis_Klasses = [VCAnalysis, BasicAnalysis, PlTyping, ComputedDefaultSummaryStats,
+                       HistogramAnalysis
+                       ]
 
 

@@ -17,7 +17,10 @@ class PLSampling(Sampling):
 
 local_analysis_klasses = PL_Analysis_Klasses.copy()
 local_analysis_klasses.extend(
-    [DefaultSummaryStatsStyling, DefaultMainStyling])
+    [DefaultSummaryStatsStyling,
+     DefaultMainStyling
+
+     ])
 
 
 class PolarsAutocleaning(Autocleaning):

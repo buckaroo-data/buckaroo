@@ -3,11 +3,18 @@ import numpy as np
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 
 
+def force_float(n):
+    if isinstance(n, np.floating):
+        return n.item()
+    else:
+        return n
+    
 def numeric_histogram_labels(endpoints):
     left = endpoints[0]
     labels = []
     for edge in endpoints[1:]:
-        labels.append("{:.0f}-{:.0f}".format(left, edge))
+        
+        labels.append("{:.0f}-{:.0f}".format(force_float(left), force_float(edge)))
         left = edge
     return labels
 
@@ -72,12 +79,12 @@ def numeric_histogram(histogram_args, min_, max_, nan_per):
     labels = numeric_histogram_labels(endpoints)
     #normalized_pop = populations / populations.sum()
     normalized_pop = histogram_args['normalized_populations']
-    low_label = "%r - %r" % (min_, low_tail)
+    low_label = "%r - %r" % (force_float(min_), force_float(low_tail))
 
     ret_histo.append({'name': low_label, 'tail':1})
     for label, pop in zip(labels, normalized_pop):
         ret_histo.append({'name': label, 'population':np.round(pop * 100, 0)})
-    high_label = "%r - %r" % (high_tail, max_)
+    high_label = "%r - %r" % (force_float(high_tail), force_float(max_))
     ret_histo.append({'name': high_label, 'tail':1})
     if nan_per > 0.0:
         ret_histo.append(nan_observation)

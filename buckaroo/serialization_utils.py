@@ -39,7 +39,7 @@ def dict_repr(dct):
     ret_str = "{"
     for k, v in dct.items():
         ret_str += "'%s': " % k
-        if type(v) == UnquotedString:
+        if isinstance(v, UnquotedString):
             ret_str += "%s, " % v
         else:
             ret_str += "%r, " % v
@@ -82,6 +82,7 @@ def df_to_obj(unknown_df:Union[pd.DataFrame, Any], summary_dict:Any):
     return {'data':data, 'dfviewer_config': dfviewer_config}
 
 
+
 def pd_to_obj(df:pd.DataFrame):
     obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
 
@@ -94,6 +95,3 @@ def pd_to_obj(df:pd.DataFrame):
     else:
         obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
     return obj['data']
-
-
-

@@ -41,6 +41,6 @@ def lists_match(l1, l2):
     #https://note.nkmk.me/en/python-list-compare/#checking-the-exact-match-of-lists
     if len(l1) != len(l2):
         return False
-    return all(x == y and type(x) == type(y) for x, y in zip(l1, l2))
+    return all(x == y and type(x) is type(y) for x, y in zip(l1, l2))
 
             

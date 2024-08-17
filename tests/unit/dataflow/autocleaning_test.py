@@ -10,10 +10,12 @@ from buckaroo.customizations.polars_commands import (
 )
 
 
-
-dirty_df = pl.DataFrame({
-    'a':[10,  20,  30,   40,  10, 20.3,   5, None, None, None],
-    'b':["3", "4", "a", "5", "5",  "b", "b", None, None, None]})
+# this dataframe instantiation doesn't work with Polars 1.0, but
+# autocleaning doesn't currently work either, so diabling
+dirty_df = pl.DataFrame(
+    {'a':[10,  20,  30,   40,  10, 20.3,   5, None, None, None],
+     'b':["3", "4", "a", "5", "5",  "b", "b", None, None, None]},
+    strict=False)
 
 
 def make_default_analysis(**kwargs):
@@ -131,16 +133,19 @@ def desired_test_make_origs():
         [pl.Series("a",      [  10,   20,    0,   40], dtype=pl.Int64),
          pl.Series("a_orig", [None, None,   30, None], dtype=pl.Int64),
          pl.Series("b",      [   1,    2,    3,    4], dtype=pl.Int64),
-         pl.Series("b_orig", [None, None, None, None], dtype=pl.Int64)])
+         pl.Series("b_orig", [None, None, None, None], dtype=pl.Int64)],
+    )
 
     assert make_origs(df_a, df_b).to_dicts() == expected.to_dicts()
 
 def test_make_origs_different_dtype():
-    raw = pl.DataFrame({'a': [30, "40"]})
+    raw = pl.DataFrame({'a': [30, "40"]}, strict=False)
     cleaned = pl.DataFrame({'a': [30,  40]})
-    expected = pl.DataFrame({
-        'a': [30, 40],
-        'a_orig': [30,  "40"]})
+    expected = pl.DataFrame(
+        {
+            'a': [30, 40],
+            'a_orig': [30,  "40"]},
+        strict=False)
     assert make_origs(raw, cleaned).to_dicts() == expected.to_dicts()
 
 def test_handle_clean_df():

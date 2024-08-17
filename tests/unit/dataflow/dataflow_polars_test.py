@@ -133,7 +133,7 @@ def test_transpose_error():
         analysis_klasses = base_a_klasses
 
     vcb = VCBuckarooWidget(typed_df, debug=False)
-    assert type(vcb.processed_df) == pl.DataFrame
+    assert isinstance(vcb.processed_df, pl.DataFrame)
     assert vcb.processed_df.to_numpy().tolist() ==[
         [1, 0.5, 'foobar'],
         [1, 0.5, 'foobar'],
@@ -144,7 +144,7 @@ def test_transpose_error():
     temp_buckaroo_state = vcb.buckaroo_state.copy()
     temp_buckaroo_state['post_processing'] = 'transpose'
     vcb.buckaroo_state = temp_buckaroo_state
-    assert type(vcb.processed_df) == pl.DataFrame
+    assert isinstance(vcb.processed_df, pl.DataFrame)
     #note that Polars doesn'transpose to objects, but to strings instead
     assert vcb.processed_df.to_numpy().tolist() == [
         ['1', '1', '1', '1', '1'],
