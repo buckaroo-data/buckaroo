@@ -35,7 +35,7 @@ dependencies = [
     "graphlib_backport>=1.0.0",
     "packaging>=18"
 ]
-version = "0.7.0"
+version = "0.7.1"
 
 [project.license]
 file = "LICENSE.txt"
@@ -48,13 +48,13 @@ test = [
     "pytest-cov>=3",
     "pytest>=6",
     "hypothesis>=6.88.1",
-    "polars>=1.0",
+    "polars>=1.0,<1.6",
     "polars[timezone]",
     "pydantic>=2.5.2",
     "pyarrow",
     "geopandas<1.0"
 ]
-polars = ["polars>=0.20.7",
+polars = ["polars>=1.0,<1.6",
        "polars[timezone]"
 ]
 jupyterlab = ["jupyterlab>=3.6.0"]

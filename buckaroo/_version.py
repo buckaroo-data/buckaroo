@@ -1,11 +1,11 @@
 # Copyright (c) Paddy Mullen.
 # Distributed under the terms of the Modified BSD License.
 
-import pkg_resources
+from importlib import metadata
 import json
 import pathlib
 full_path = pathlib.Path(__file__).parent.resolve()
 try:
-    __version__ = pkg_resources.get_distribution('buckaroo').version
+    __version__ = metadata.version('buckaroo')
 except Exception:
     __version__ = json.loads(open(full_path / "../package.json").read())['version']
