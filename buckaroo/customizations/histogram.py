@@ -104,6 +104,8 @@ class Histogram(ColAnalysis):
             return dict(histogram_args={})
         if pd.api.types.is_bool_dtype(ser):
             return dict(histogram_args={})
+        if not ser.index.is_unique:
+            ser.index = pd.RangeIndex(len(ser))
         vals = ser.dropna()
         if len(vals) == 0:
             return dict(histogram_args={})

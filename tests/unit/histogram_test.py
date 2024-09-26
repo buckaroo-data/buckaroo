@@ -53,6 +53,17 @@ def test_no_meat():
         debug=True)
     assert errs == {}
 
+def test_non_nunique_index():
+    """ histograms can fail with non-unique indexes.  non-unique indexes frequently occur as the result of concatting dataframes.  This should not fail
+    """
+    df = pd.DataFrame({'bad': pd.Series([1,2, pd.NA,  1],
+             index= [11000, 11001, 11002,  11000]).astype('Int64')})
+    
+    sdf, errs = AnalysisPipeline.full_produce_summary_df(df,
+        [TypingStats, ComputedDefaultSummaryStats, Histogram, DefaultSummaryStats],
+        debug=True)
+    assert errs == {}
+
 def test_full_produce_summary_df():
     sdf, errs = AnalysisPipeline.full_produce_summary_df(test_df, [Histogram], debug=True)
     ha = sdf['a']['histogram_args']
