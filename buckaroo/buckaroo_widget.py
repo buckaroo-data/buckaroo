@@ -24,6 +24,7 @@ from .pluggable_analysis_framework.pluggable_analysis_framework import ColAnalys
 from .serialization_utils import EMPTY_DF_WHOLE
 from .dataflow.dataflow import CustomizableDataflow, StylingAnalysis, exception_protect
 from .dataflow.dataflow_extras import (Sampling)
+from .dataflow.autocleaning import PandasAutocleaning
 
 class BuckarooProjectWidget(DOMWidget):
     """
@@ -56,6 +57,7 @@ class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
     #END DOMWidget Boilerplate
 
     sampling_klass = PdSampling
+    autocleaning_klass = PandasAutocleaning
 
     operations = List().tag(sync=True)
     operation_results = Dict(
@@ -85,7 +87,7 @@ class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
         # dfviewer_config = self._get_dfviewer_config(self.merged_sd, self.style_method)
         # self.widget_args_tuple = [self.processed_df, self.merged_sd, dfviewer_config]
         old, new = change['old'], change['new']
-        if not old['post_processing'] == new['post_processing']:
+        if not old['post_processing'] == new['post_processing']: 
             self.post_processing_method = new['post_processing']
 
 

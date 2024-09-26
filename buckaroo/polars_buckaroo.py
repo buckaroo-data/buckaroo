@@ -9,7 +9,7 @@ from buckaroo.customizations.polars_commands import (
 )
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .dataflow.dataflow import Sampling
-from .dataflow.autocleaning import Autocleaning
+from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.widget_extension_utils import configure_buckaroo
 
 class PLSampling(Sampling):
@@ -23,8 +23,17 @@ local_analysis_klasses.extend(
      ])
 
 
-class PolarsAutocleaning(Autocleaning):
+class PolarsAutocleaning(PandasAutocleaning):
     DFStatsKlass = PlDfStats
+    
+    @staticmethod
+    def make_origs(raw_df, cleaned_df):
+        clauses = []
+        for col in raw_df.columns:
+            clauses.append(cleaned_df[col])
+            clauses.append(raw_df[col].alias(col+"_orig"))
+            ret_df = cleaned_df.select(clauses)
+        return ret_df
 
     
 class PolarsBuckarooWidget(BuckarooWidget):

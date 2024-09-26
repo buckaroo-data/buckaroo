@@ -148,3 +148,36 @@ class ComputedDefaultSummaryStats(ColAnalysis):
             unique_per=unique_count/l,
             nan_per=summary_dict['nan_count']/l)
 
+
+class PdCleaningStats(ColAnalysis):
+    provides_defaults = {'int_parse_fail': 0.0, 'int_parse':0.0}
+    requires_summary = ['value_counts', 'length']
+
+
+    @staticmethod
+    def computed_summary(summary_dict):
+        vc = summary_dict['value_counts']
+        coerced_ser = pd.to_numeric(vc.index.values, errors='coerce', downcast='integer', dtype_backend='pyarrow')
+        #return 0 for all floats
+        nan_sum = (pd.Series(coerced_ser).isna() * 1 * vc.values).sum()
+        l = summary_dict['length']
+        return dict(
+            int_parse_fail = nan_sum / l,
+            int_parse = ((l - nan_sum )/l))
+
+
+# class PLCleaningStats(PolarsAnalysis):
+#     requires_summary = ['value_counts', 'length']
+#     provides_defaults = {'int_parse_fail': 0.0, 'int_parse':0.0}
+    
+#     @staticmethod
+#     def computed_summary(column_metadata):
+#         vc_ser, len_ = column_metadata['value_counts'], column_metadata['length']
+#         vc_df = pl.DataFrame({'vc': vc_ser.explode()}).unnest('vc')
+#         regular_col_vc_df = vc_df.select(pl.all().exclude('count').alias('key'), pl.col('count'))
+#         pd.to_numeric(vc_b.index, errors='coerce')
+#         int_parse = pl.col('key').cast(pl.Int64, strict=False).is_null()
+#         per_df = regular_col_vc_df.select(
+#             int_parse.replace({True:1, False:0}).mul(pl.col('count')).sum().alias('int_parse_fail'),
+#             int_parse.replace({True:0, False:1}).mul(pl.col('count')).sum().alias('int_parse')) / len_
+#         return per_df.to_dicts()[0]

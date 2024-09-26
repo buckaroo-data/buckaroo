@@ -64,23 +64,14 @@ def merge_ops(existing_ops, cleaning_ops):
 def format_ops(column_meta):
     ret_ops = []
     for k,v in column_meta.items():
+        if k == 'index':
+            continue
         ops = v['cleaning_ops']
         if len(ops) > 0:
             temp_ops = ops.copy()
             temp_ops.insert(2, k)
             ret_ops.append(temp_ops)
     return ret_ops
-
-def make_origs(raw_df, cleaned_df):
-    clauses = []
-    for col in raw_df.columns:
-        clauses.append(cleaned_df[col])
-        clauses.append(raw_df[col].alias(col+"_orig"))
-        # clauses.append(
-        #     pl.when((raw_df[col] - cleaned_df[col]).eq(0)).then(None).otherwise(raw_df[col]).alias(col+"_orig"))
-    ret_df = cleaned_df.select(clauses)
-    return ret_df
-
 
 class AutocleaningConfig:
     command_klasses = [DefaultCommandKlsList]
@@ -89,7 +80,7 @@ class AutocleaningConfig:
     name = 'default'
     
 
-class Autocleaning:
+class PandasAutocleaning:
     # def add_command(self, incomingCommandKls):
     #     without_incoming = [x for x in self.command_classes if not x.__name__ == incomingCommandKls.__name__]
     #     without_incoming.append(incomingCommandKls)
@@ -97,7 +88,7 @@ class Autocleaning:
     #     self.setup_from_command_kls_list()
 
     DFStatsKlass = DfStats
-    def __init__(self, ac_configs):
+    def __init__(self, ac_configs=tuple([AutocleaningConfig()])):
 
         self.config_dict = {}
         for conf in ac_configs:
@@ -141,13 +132,28 @@ class Autocleaning:
         cleaning_sd = {}
         return gen_ops, cleaning_sd
 
+    @staticmethod
+    def make_origs(raw_df, cleaned_df):
+        cols = {}
+        
+        for col in raw_df.columns:
+            cols[col] = cleaned_df[col]
+            cols[col + "_orig"] = raw_df[col]
+        return pd.DataFrame(cols)
+
     def handle_ops_and_clean(self, df, cleaning_method, existing_operations):
         if df is None:
             return None
+        if cleaning_method == "":
+            #no cleaning method was specified, just return the bare minimum
+            return [df, {},  "#empty generated code", merge_ops(existing_operations, [])]
         self._setup_from_command_kls_list(cleaning_method)
         cleaning_operations, cleaning_sd = self._run_cleaning(df, cleaning_method)
         merged_operations = merge_ops(existing_operations, cleaning_operations)
         cleaned_df = self._run_df_interpreter(df, merged_operations)
-        merged_cleaned_df = make_origs(df, cleaned_df)
+        merged_cleaned_df = self.make_origs(df, cleaned_df)
         generated_code = self._run_code_generator(merged_operations)
+        print(f"{merged_cleaned_df=}, {type(merged_cleaned_df)=}")
+        #        1/0
+
         return [merged_cleaned_df, cleaning_sd, generated_code, merged_operations]
