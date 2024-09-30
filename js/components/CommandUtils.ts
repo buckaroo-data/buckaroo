@@ -26,6 +26,8 @@ export type CommandArgSpec = Record<string, ArgSpec[]>;
 export const bakedArgSpecs: CommandArgSpec = {
   dropcol: [null],
   fillna: [[3, 'fillVal', 'type', 'integer']],
+  remove_outliers: [[3, 'tail', 'type', 'float']],
+  search: [[3, 'needle', 'type', 'string']],
   resample: [
     [3, 'frequency', 'enum', ['daily', 'weekly', 'monthly']],
     [4, 'colMap', 'colEnum', ['null', 'sum', 'mean', 'count']],

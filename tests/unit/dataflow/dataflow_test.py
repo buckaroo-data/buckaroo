@@ -20,7 +20,7 @@ def test_dataflow_operating_df():
 def test_dataflow_cleaned():
     d_flow = DataFlow(simple_df)
     assert d_flow.cleaned_df is simple_df
-    d_flow.existing_operations = ["one"]
+    d_flow.operations = ["one"]
     assert d_flow.cleaned_df is SENTINEL_DF_1
     d_flow.cleaning_method = "one op"
     assert d_flow.cleaned_df is SENTINEL_DF_2

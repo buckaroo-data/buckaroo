@@ -14,6 +14,8 @@ import {
 export const bakedOperationDefaults: OperationDefaultArgs = {
   dropcol: [sym('dropcol'), symDf, 'col'],
   fillna: [sym('fillna'), symDf, 'col', 8],
+  remove_outliers: [sym('remove_outliers'), symDf, 'col', 0.02],
+  search: [sym('search'), symDf, 'col', 'term'],
   resample: [sym('resample'), symDf, 'col', 'monthly', {}],
 };
 

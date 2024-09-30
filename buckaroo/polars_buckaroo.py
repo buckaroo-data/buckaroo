@@ -4,9 +4,6 @@ from .customizations.polars_analysis import PL_Analysis_Klasses
 from .pluggable_analysis_framework.polars_analysis_management import (
     PlDfStats)
 from .serialization_utils import pd_to_obj
-from buckaroo.customizations.polars_commands import (
-    DropCol, FillNA, GroupBy #, OneHot, GroupBy, reindex
-)
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .dataflow.dataflow import Sampling
 from .dataflow.autocleaning import PandasAutocleaning
@@ -27,19 +24,25 @@ class PolarsAutocleaning(PandasAutocleaning):
     DFStatsKlass = PlDfStats
     
     @staticmethod
-    def make_origs(raw_df, cleaned_df):
+    def make_origs(raw_df, cleaned_df, cleaning_sd):
         clauses = []
-        for col in raw_df.columns:
-            clauses.append(cleaned_df[col])
-            clauses.append(raw_df[col].alias(col+"_orig"))
-            ret_df = cleaned_df.select(clauses)
-        return ret_df
+        changed = 0
+        for col, sd in cleaning_sd.items():
+            if "add_orig" in sd:
+                clauses.append(cleaned_df[col])
+                clauses.append(raw_df[col].alias(col+"_orig"))
+                changed += 1
+            else:
+                clauses.append(cleaned_df[col])
+        if changed > 0:
+            return cleaned_df.select(clauses)
+        else:
+            return cleaned_df
 
     
 class PolarsBuckarooWidget(BuckarooWidget):
     """TODO: Add docstring here
     """
-    command_classes = [DropCol, FillNA, GroupBy]
     analysis_klasses = local_analysis_klasses
     DFStatsClass = PlDfStats
     sampling_klass = PLSampling

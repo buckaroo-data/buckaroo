@@ -12,6 +12,8 @@ from .dataflow_extras import (
     Sampling)
 
 
+
+
 class DataFlow(HasTraits):
     """This class is meant to only represent the dataflow through
     buckaroo with no accomodation for widget particulars
@@ -34,27 +36,29 @@ class DataFlow(HasTraits):
         super().__init__()
         self.summary_sd = {}
         self.existing_operations = []
-        self.ac_obj = self.autocleaning_klass()
+        self.ac_obj = self.autocleaning_klass(self.autoclean_conf)
+        #self.ac_obj._setup_from_command_kls_list("default")
+        self.commandConfig = self.ac_obj.commandConfig
         try:
             self.raw_df = raw_df
         except Exception:
             six.reraise(self.exception[0], self.exception[1], self.exception[2])
 
     autocleaning_klass = SentinelAutocleaning
+    autoclean_conf = tuple()
+
+    commandConfig = Dict({}).tag(sync=True)
+
 
     raw_df = Any('')
     sample_method = Unicode('default')
     sampled_df = Any('')
 
-    cleaning_method = Unicode('')
-    cleaning_operations = Any()
-
-    existing_operations = Any([])
+    cleaning_method = Unicode('NoCleaning')
+    operations = Any([]).tag(sync=True)
 
     cleaned = Any().tag(default=None)
     
-    lowcode_operations = Any()
-
     post_processing_method = Unicode('').tag(default='')
     processed_result = Any().tag(default=None)
 
@@ -85,15 +89,20 @@ class DataFlow(HasTraits):
     def _sampled_df(self, change):
         self.sampled_df = self._compute_sampled_df(self.raw_df, self.sample_method)
 
-    @observe('sampled_df', 'cleaning_method', 'existing_operations')
+    @observe('sampled_df', 'cleaning_method', 'operations')
     @exception_protect('operation_result-protector')
     def _operation_result(self, change):
         result = self.ac_obj.handle_ops_and_clean(
-            self.sampled_df, self.cleaning_method, self.existing_operations)
+            self.sampled_df, self.cleaning_method, self.operations)
         if result is None:
             return
         else:
             self.cleaned = result
+        self.operation_results = {'transformed_df':None,
+                                  'generated_py_code': self.generated_code,
+                                  #'transform_error': None
+                                  }
+
     @property
     def cleaned_df(self):
         if self.cleaned is not None:
@@ -118,11 +127,15 @@ class DataFlow(HasTraits):
     def _compute_processed_result(self, cleaned_df, post_processing_method):
         return [cleaned_df, {}]
 
+    def populate_df_meta(self):
+        pass
+
     @observe('cleaned', 'post_processing_method')
     @exception_protect('processed_result-protector')
     def _processed_result(self, change):
         #for now this is a no-op because I don't have a post_processing_function or mechanism
         self.processed_result = self._compute_processed_result(self.cleaned_df, self.post_processing_method)
+        self.populate_df_meta()
 
     @property
     def processed_df(self):
@@ -190,7 +203,7 @@ class CustomizableDataflow(DataFlow):
     df_display_klasses = {}
 
 
-    def __init__(self, df, debug=False,
+    def __init__(self, orig_df, debug=False,
                  column_config_overrides=None,
                  pinned_rows=None, extra_grid_config=None,
                  component_config=None):
@@ -208,18 +221,20 @@ class CustomizableDataflow(DataFlow):
         self.df_name = "placeholder"
         self.df_display_args = {}
         self.setup_options_from_analysis()
-        super().__init__(self.sampling_klass.pre_stats_sample(df))
-
+        self.orig_df = orig_df
+        # I don't like this seapration of 
+        super().__init__(self.sampling_klass.pre_stats_sample(orig_df))
         self.populate_df_meta()
         #self.raw_df = df
         warnings.filterwarnings('default')
 
     def populate_df_meta(self):
         self.df_meta = {
-            'columns': len(self.raw_df.columns),
+            'columns': len(self.processed_df.columns),
             # I need to recompute this when sampling changes
-            'rows_shown': len(self.sampled_df),  
-            'total_rows': len(self.raw_df)}
+            'filtered_rows': len(self.processed_df),
+            'rows_shown': min(len(self.processed_df), self.sampling_klass.serialize_limit),  
+            'total_rows': len(self.orig_df)}
 
     buckaroo_options = Dict({
         'sampled': ['random'],

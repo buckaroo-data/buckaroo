@@ -165,12 +165,21 @@ def test_pinned_rows_override_widget():
     pinned_rows = bw2.df_display_args['main']['df_viewer_config']['pinned_rows']
     assert pinned_rows[0] == HIST_ROW
 
+def test_stock_flow():
+    ROWS = 5
+    typed_df = pd.DataFrame({'int_col': [1] * ROWS})
+    bw = BuckarooWidget(typed_df)
+    #cleaning should be off by default. no columns should be changed
+    #and the values shouldn't be changed
+    assert bw.processed_df.columns.tolist() == typed_df.columns.tolist()
+    assert bw.processed_df.values.tolist() == typed_df.values.tolist()
     
 
 class TransposeProcessing(ColAnalysis):
     provides_defaults = {}
     @classmethod
     def post_process_df(kls, df):
+        print("post_process_df TransposeProcessing")
         return [df.T, {}]
     post_processing_method = "transpose"
 
@@ -196,9 +205,11 @@ def test_transpose_error():
         [1, 1, 1, 1, 1],
         [0.5, 0.5, 0.5, 0.5, 0.5],
         ['foobar', 'foobar', 'foobar', 'foobar', 'foobar']]
+
+    
 def test_sample():
     big_df = pd.DataFrame({'a': np.arange(105_000)})
     bw = CustomizableDataflow(big_df)
     assert len(bw.processed_df) == 100_000
     print(list(bw.df_data_dict.keys()))
-    assert len(bw.df_data_dict['main']) == 10_000
+    assert len(bw.df_data_dict['main']) == 5_000

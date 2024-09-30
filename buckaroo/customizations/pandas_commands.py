@@ -2,8 +2,6 @@ import pandas as pd
 import numpy as np
 
 from ..jlisp.lispy import s
-#from ..jlisp.configure_utils import configure_buckaroo
-#from ..auto_clean.cleaning_commands import (to_bool, to_datetime, to_int, to_float, to_string)
 
 class Command(object):
     @staticmethod 
@@ -137,6 +135,55 @@ class SafeInt(Command):
     def transform_to_py(df, col):
         return "    df['%s'] = smart_to_int(df['%s'])" % (col, col)
 
+class RemoveOutliers(Command):
+    command_default = [s('remove_outliers'), s('df'), "col", 1]
+    #command_pattern = [[3, 'remove_outliers_99', 'type', 'float']]
+    command_pattern = [[3, 'remove_outliers', 'type', 'integer']]
+
+
+    @staticmethod 
+    def transform(df, col, int_tail):
+        if col == 'index':
+            return df
+        ser = df[col]
+        tail = int_tail / 100
+        new_df = df[(ser > np.quantile(ser, tail)) & (ser < np.quantile(ser, 1-tail ))]
+        print("pre_filter", len(df), "post_filter", len(new_df))
+        return new_df
+
+    @staticmethod 
+    def transform_to_py(df, col, int_tail):
+        C = f"df['{col}']"
+        tail = int_tail / 100
+        low_tail = tail
+        high_tail = 1-tail
+        return f"    df[({C} > np.quantile({C}, {low_tail})) & ({C} < np.quantile({C}, {high_tail}))]" 
+
+
+class OnlyOutliers(Command):
+    command_default = [s('only_outliers'), s('df'), "col", 1]
+    #command_pattern = [[3, 'remove_outliers_99', 'type', 'float']]
+    command_pattern = [[3, 'only_outliers', 'type', 'integer']]
+
+
+    @staticmethod 
+    def transform(df, col, int_tail):
+        if col == 'index':
+            return df
+        ser = df[col]
+        tail = int_tail / 100
+        new_df = df[(ser < np.quantile(ser, tail)) | (ser > np.quantile(ser, 1-tail ))]
+        print("pre_filter", len(df), "post_filter", len(new_df))
+        return new_df
+
+    @staticmethod 
+    def transform_to_py(df, col, int_tail):
+        C = f"df['{col}']"
+        tail = int_tail / 100
+        low_tail = tail
+        high_tail = 1-tail
+        return f"    df[({C} < np.quantile({C}, {low_tail})) | ({C} > np.quantile({C}, {high_tail}))]" 
+
 
 
 class GroupBy(Command):
@@ -192,6 +239,7 @@ class DropCol(Command):
     @staticmethod 
     def transform(df, col):
         df.drop(col, axis=1, inplace=True)
+        print("dropcol.transform")
         return df
 
     @staticmethod 
@@ -232,7 +280,32 @@ class reindex(Command):
              "    df.drop('%s', axis=1, inplace=True)" % col,
              "    df.index = old_col.values"])
 
+def search_df_str(df, needle:str):
+    existing_bool = pd.Series(False, index=np.arange(len(df)), dtype='boolean')
+    str_cols = list(df.select_dtypes("string").columns)
+    str_cols.extend(list(df.select_dtypes("object").columns))
+    for col in str_cols:
+        bool_result = ~(df[col].str.find(needle).fillna(-1) == -1).fillna(False)
+        existing_bool = existing_bool | bool_result
+    return df[existing_bool]    
 
-# DefaultCommandKlsList = [DropCol, SafeInt, FillNA, reindex, OneHot, GroupBy,
-#                          to_bool, to_datetime, to_int, to_float, to_string]
-# command_defaults, command_patterns, buckaroo_transform, buckaroo_to_py_core = configure_buckaroo(DefaultCommandKlsList)
+
+
+class Search(Command):
+    #argument_names = ["df", "col", "fill_val"]
+    command_default = [s('Search'), s('df'), "col", ""]
+    command_pattern = [[3, 'term', 'type', 'string']]
+
+    @staticmethod 
+    def transform(df, col, val):
+        
+        print("search_df", val)
+        if val is None or val == "":
+            print("no search term set")
+            return df
+        return search_df_str(df, val)
+
+
+    @staticmethod 
+    def transform_to_py(df, col, val):
+        return "    df.fillna({'%s':%r}, inplace=True)" % (col, val)

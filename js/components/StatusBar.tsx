@@ -153,6 +153,7 @@ export function StatusBar({
       cellRenderer: helpCell,
     },
     { field: 'total_rows', width: 100 },
+    { field: 'processed_rows', headerName: 'filtered', width: 85 },
     { field: 'rows_shown', headerName: 'displayed', width: 85 },
     { field: 'columns', width: 75 },
   ];
@@ -165,6 +166,7 @@ export function StatusBar({
       sampled: buckarooState.sampled || '0',
       auto_clean: buckarooState.auto_clean || '0',
       df_display: buckarooState.df_display,
+      processed_rows: dfMeta.processed_rows,
       post_processing: buckarooState.post_processing,
       show_commands: buckarooState.show_commands || '0',
     },
@@ -198,6 +200,7 @@ export function StatusBarEx() {
   const dfm: DFMeta = {
     columns: 5,
     rows_shown: 20,
+    processed_rows: 300_000,
     total_rows: 8_777_444,
   };
 

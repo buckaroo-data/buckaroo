@@ -1,4 +1,5 @@
 import pandas as pd
+from buckaroo import BuckarooWidget
 from buckaroo.customizations.analysis import (
     DefaultSummaryStats, PdCleaningStats)
 from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
@@ -30,7 +31,8 @@ class CleaningGenOps(ColAnalysis):
     @classmethod
     def computed_summary(kls, column_metadata):
         if column_metadata['int_parse'] > kls.int_parse_threshhold:
-            return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}]}
+            return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}],
+                    'add_orig': True}
         else:
             return {'cleaning_ops': []}
 
@@ -117,7 +119,9 @@ def test_make_origs_different_dtype():
         {
             'a': [30, 40],
             'a_orig': [30,  "40"]})
-    assert PandasAutocleaning.make_origs(raw, cleaned).to_dict() == expected.to_dict()
+    combined = PandasAutocleaning.make_origs(
+        raw, cleaned, {'a':{'add_orig': True}})
+    assert combined.to_dict() == expected.to_dict()
 
 def test_handle_clean_df():
     ac = PandasAutocleaning([ACConf])
@@ -140,3 +144,25 @@ def test_autoclean_codegen():
     cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
 
     assert generated_code == EXPECTED_GEN_CODE
+
+def test_drop_col():
+    """make sure we can that make_origs doesn't throw an error when
+    drop_col is called. It might depend on columns existing
+
+    """
+    df = pd.DataFrame({
+        'a':[10,20,20, 10, 10, None],
+        'b':['20',10,None,'5',10, 'asdf']})
+    bw = BuckarooWidget(df)
+    bw.operations = [[{'symbol': 'dropcol'}, {'symbol': 'df'}, 'a']]
+
+
+def test_stacked_filters():
+    """make sure that filters apply combinatorially not just last one first
+
+    fixing this requires replacing the progn with some type of
+    threading macro. or making every operation in place. and adding a
+    copy() at the beginning
+
+    """
+    

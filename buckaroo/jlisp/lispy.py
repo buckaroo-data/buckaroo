@@ -5,7 +5,7 @@
 ################ Symbol, Procedure, classes
 
 from __future__ import division
-import re, sys, io
+import re, io
 
 class Symbol(str): pass
 
@@ -41,7 +41,8 @@ def to_string(x):
     if x is True: return "#t"
     elif x is False: return "#f"
     elif isa(x, Symbol): return x
-    elif isa(x, str): return '"%s"' % x.encode('string_escape').replace('"',r'\"')
+    #elif isa(x, str): return '"%s"' % x.encode('unicode_escape').replace('"',r'\"')
+    elif isa(x, str): return '"%s"' % x.replace('"',r'\"')
     elif isa(x, list):
         #return '('+' '.join(map(to_string, x))+')'
         fragments = [y for y in map(to_string, x)]
@@ -51,7 +52,7 @@ def to_string(x):
     else: return str(x)
 
 
-
+'''
 def load(filename):
     "Eval every expression from a file."
     repl(None, InPort(open(filename)), None)
@@ -69,7 +70,7 @@ def repl(prompt='lispy> ', inport=InPort(sys.stdin), out=sys.stdout):
                 print(to_string(val))
         except Exception as e:
             print('%s: %s' % (type(e).__name__, e))
-
+'''
 ################ Environment class
 
 class Env(dict):
@@ -117,6 +118,9 @@ def add_globals(env):
      'list':lambda *x:list(x), 'list?': lambda x:isa(x,list),
      'null?':lambda x:x==[], 'symbol?':lambda x: isa(x, Symbol),
      'boolean?':lambda x: isa(x, bool), 'pair?':is_pair, 
+      '+':op.add, '-':op.sub, '*':op.mul, '/':op.truediv, 'not':op.not_, 
+      '>':op.gt, '<':op.lt, '>=':op.ge, '<=':op.le, '=':op.eq, 
+
      #'display':lambda x,port=sys.stdout:port.write(x if isa(x,str) else to_string(x))})
      #'display':display
     })
@@ -128,8 +132,6 @@ def add_globals(env):
 #     self.update(vars(math))
 #     self.update(vars(cmath))
 #     self.update({
-#      '+':op.add, '-':op.sub, '*':op.mul, '/':op.truediv, 'not':op.not_, 
-#      '>':op.gt, '<':op.lt, '>=':op.ge, '<=':op.le, '=':op.eq, 
 #      'equal?':op.eq, 'eq?':op.is_, 'length':len, 'cons':cons,
 #      'car':lambda x:x[0], 'cdr':lambda x:x[1:], 'append':op.add,  
 #      'list':lambda *x:list(x), 'list?': lambda x:isa(x,list),
@@ -213,6 +215,7 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
         return False
 
     def list_parse(lst):
+        """converts list objects to lisp code.  if lst is a string, treat it as a regular strign """
         ret_list = []
         if isinstance(lst, list) == False:
             return lst
@@ -388,9 +391,6 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
         return [[_lambda, list(vars)]+expanded_body] + expanded_vals
     
     macro_table = {_let:let} ## More macros can go here
-    def lisp_eval(expr):
-        eval(parse(expr))
-
     def local_eval(x, extra_env=global_env):
         if extra_env is not global_env:
             new_env = Env()
@@ -400,19 +400,12 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
         #return generic_eval(expand(list_parse(x), macro_table, symbol_table, toplevel=True), local_env)
         return eval(expand(list_parse(x), toplevel=True), global_env)
 
+    def lisp_eval(expr):
+        return eval(parse(expr))
+
+
     return local_eval, lisp_eval
 
-base_eval, parse = make_interpreter()
-base_eval(parse("""(begin
-    
-    (define-macro and (lambda args 
-       (if (null? args) #t
-           (if (= (length args) 1) (car args)
-               `(if ,(car args) (and ,@(cdr args)) #f)))))
-    
-    ;; More macros can also go here
-    
-    )"""))
     
 # if __name__ == '__main__':
 #     repl()
@@ -421,41 +414,7 @@ def s(symbol_name):
     return {'symbol':symbol_name}
     
     
-def test_extra_env():
-    #verify that we can define a variable
-    assert base_eval([s('begin'), [s('define'), 'foo', 5], [s('+'), s('foo'), 1]]  ) == 6
-
-    #verify that referencing a variable with an env passed in resolves properly
-    assert base_eval([s('+'), s('foo'), 1], {'foo':20}) == 21
-
-    #verify that the original env is untouched
-    assert base_eval([s('+'), s('foo'), 1]) == 6
     
-
-    
-
-def test_make_interpreter():
-    def always5():
-        return 5
-
-    def add5(num):
-        return num+5
-
-    _eval = make_interpreter({'always5':always5, 'add5':add5})
-    #_eval = make_interpreter({always5, add5})
-    assert _eval([s('always5')]) == 5
-
-
-
-def always5():
-    return 5
-
-def add5(num):
-    return num+5
-
-_eval, _parse = make_interpreter({'always5':always5, 'add5':add5})
-#_eval = make_interpreter({always5, add5})
-#assert _eval([s('always5')]) == 5
 
 
     

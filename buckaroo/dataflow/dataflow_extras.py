@@ -108,7 +108,7 @@ class Sampling:
 
     max_columns      =     250
     pre_limit        = 100_000
-    serialize_limit  =  10_000
+    serialize_limit  =   5_000
 
     @classmethod
     def pre_stats_sample(kls, df):

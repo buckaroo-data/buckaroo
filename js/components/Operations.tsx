@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import _ from 'lodash';
 import {
   Operation,
@@ -8,39 +8,65 @@ import {
 } from './OperationUtils';
 import { CommandConfigT } from './CommandUtils';
 import { replaceInArr } from './utils';
-import { bakedCommandConfig } from './bakedOperationDefaults';
+
 import { OperationDetail } from './OperationDetail';
 import { AgGridReact } from 'ag-grid-react'; // the AG Grid React Component
 import { ColDef, GridOptions } from 'ag-grid-community';
+//import { CustomCellRendererProps } from '@ag-grid-community/react';
+
 import { updateAtMatch } from './utils';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-alpine.css';
-import { bakedOperations } from '../baked_data/staticData';
-
-const getColumns = (passedOperations: Operation[]): ColDef[] =>
-  _.map(Array.from(passedOperations.entries()), ([index, element]) => {
-    const name = element[0]['symbol'];
-    const key = name + index.toString();
-    const column = { field: key, headerName: name }; // width: 20, maxWidth: 60};
-    return column;
-  });
 
 export const OperationsList = ({
   operations,
   activeKey,
   setActiveKey,
+  delKey,
 }: {
   operations: Operation[];
   activeKey?: string;
   setActiveKey: React.Dispatch<React.SetStateAction<string>>;
+  delKey: any;
 }) => {
-  const rowElements = _.map(
+  const renderOperation = (params: any) => (
+    <span className="missionSpan">
+      <span
+        style={{
+          height: 30,
+          width: 30,
+          margin: 3,
+          paddingBottom: 8,
+          float: 'left',
+          background: 'grey',
+        }}
+        onClick={delKey(params.value[0])}
+      >
+        X
+      </span>
+      <span>{params.value[1]}</span>
+    </span>
+  );
+
+  const getColumns = (passedOperations: Operation[]): ColDef[] =>
+    _.map(Array.from(passedOperations.entries()), ([index, element]) => {
+      const name = element[0]['symbol'];
+      const key = name + index.toString();
+      const column = {
+        field: key,
+        headerName: name,
+        cellRenderer: renderOperation,
+      }; // width: 20, maxWidth: 60};
+      return column;
+    });
+
+  const rowElements: Record<string, [string, string]>[] = _.map(
     Array.from(operations.entries()),
     ([index, element]) => {
       const name = element[0]['symbol'];
       const key = name + index.toString();
-      const rowEl: Record<string, string> = {};
-      rowEl[key] = element[2];
+      const rowEl: Record<string, [string, string]> = {};
+      rowEl[key] = [key, element[2]]; //key, colName
       return rowEl;
     }
   );
@@ -119,13 +145,16 @@ export const OperationViewer = ({
   allColumns: string[];
   commandConfig: CommandConfigT;
 }) => {
+  const opToKey = (idx: number, op: Operation): string => {
+    const name = op[0]['symbol'];
+    return name + idx.toString();
+  };
+
   const operationObjs = _.map(
     Array.from(operations.entries()),
     ([index, element]) => {
-      const name = element[0]['symbol'];
-      const key = name + index.toString();
       const rowEl: Record<string, Operation> = {};
-      rowEl[key] = element;
+      rowEl[opToKey(index, element)] = element;
       return rowEl;
     }
   );
@@ -136,10 +165,8 @@ export const OperationViewer = ({
   const idxObjs = _.map(
     Array.from(operations.entries()),
     ([index, element]) => {
-      const name = element[0]['symbol'];
-      const key = name + index.toString();
       const rowEl: Record<string, number> = {};
-      rowEl[key] = index;
+      rowEl[opToKey(index, element)] = index;
       return rowEl;
     }
   );
@@ -158,6 +185,7 @@ export const OperationViewer = ({
           return c;
         }
       });
+      console.log('about to call setOperations', key, newOperation);
       setOperations(nextOperations);
     };
   }
@@ -172,11 +200,22 @@ export const OperationViewer = ({
           return c;
         }
       });
-      setActiveKey('');
-      setOperations(_.filter(nextOperations) as Operation[]);
+      //const newIdx = Math.max(0, index - 1);
+      const newOps = _.filter(nextOperations) as Operation[];
+      console.log('getDeleteOperations', operations.length, newOps.length);
+      setOperations(newOps);
+      //setActiveKey(opToKey(newIdx, newOps[newIdx]));
+      //setActiveKey('');
     };
   }
 
+  const getColumns = (passedOperations: Operation[]): ColDef[] =>
+    _.map(Array.from(passedOperations.entries()), ([index, element]) => {
+      const name = element[0]['symbol'];
+      const key = name + index.toString();
+      const column = { field: key, headerName: name }; // width: 20, maxWidth: 60};
+      return column;
+    });
   const addOperation: OperationEventFunc = (newOperation: Operation) => {
     const newOperationArr = [...operations, newOperation];
     setOperations(newOperationArr);
@@ -200,44 +239,17 @@ export const OperationViewer = ({
           operations={operations}
           activeKey={activeKey}
           setActiveKey={setActiveKey}
+          delKey={getDeleteOperation}
         />
       </div>
       {activeKey && (
         <OperationDetail
           command={operationDict[activeKey]}
           setCommand={getSetOperation(activeKey)}
-          deleteCB={getDeleteOperation(activeKey)}
           columns={allColumns}
           commandPatterns={argspecs}
         />
       )}
-    </div>
-  );
-};
-
-export const Commands = () => {
-  const [c, setC] = useState(bakedOperations);
-  const [commandConfig, setCommandConfig] = useState(bakedCommandConfig);
-
-  useEffect(() => {
-    fetch('http://localhost:5000/dcf/command-config').then(async (response) => {
-      setCommandConfig(await response.json());
-    });
-  }, []);
-
-  return (
-    <div style={{ width: '100%', height: '100%' }}>
-      <OperationViewer
-        operations={c}
-        setOperations={setC}
-        activeColumn={'new-column2'}
-        allColumns={['foo-col', 'bar-col', 'baz-col']}
-        commandConfig={commandConfig}
-      />
-      <code style={{ fontSize: '1em', textAlign: 'left' }}>
-        {' '}
-        {JSON.stringify(c, null, '\t\n\r')}{' '}
-      </code>
     </div>
   );
 };

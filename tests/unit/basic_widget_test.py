@@ -29,21 +29,23 @@ def test_debug_true():
     w = BuckarooWidget(df, debug=True)
     display(w)
 
-def xtest_interpreter():    
+def test_interpreter():    
     #df = pd.read_csv('./examples/data/2014-01-citibike-tripdata.csv')
 
-    w = BuckarooWidget(simple_df, auto_clean=True)
-    assert w.operation_results['generated_py_code'] == '''def clean(df):
-    df['int_col'] = smart_to_int(df['int_col'])
-    df['str_col'] = df['str_col'].fillna(value='').astype('string').replace('', None)
-    return df'''
-
+    w = BuckarooWidget(simple_df)
+    # assert w.operation_results['generated_py_code'] == '''def clean(df):
+    # df['int_col'] = smart_to_int(df['int_col'])
+    # df['str_col'] = df['str_col'].fillna(value='').astype('string').replace('', None)
+    # return df'''
+    assert 'str_col' in w.cleaned_df.columns
     temp_ops = w.operations.copy()
     temp_ops.append([{"symbol":"dropcol"},{"symbol":"df"},"str_col"])
     w.operations = temp_ops
 
-    tdf = w.operation_results['transformed_df']
-    assert w.operation_results['transform_error'] is False
+    tdf = w.cleaned_df
+    assert 'str_col' not in tdf.columns
+    '''
+    #assert w.operation_results['transform_error'] is False
     field_names = [ f['col_name'] for f in tdf['dfviewer_config']['column_config'] ]
     assert 'str_col' not in field_names
     assert w.operation_results['generated_py_code'] == """def clean(df):
@@ -51,6 +53,7 @@ def xtest_interpreter():
     df['str_col'] = df['str_col'].fillna(value='').astype('string').replace('', None)
     df.drop('str_col', axis=1, inplace=True)
     return df"""
+    '''
 
 def atest_symbol_meta():    
     """verifies that a symbol with a meta key can be added and
@@ -78,3 +81,7 @@ def xtest_interpreter_errors():
         [{"symbol":"dropcol"},{"symbol":"df"},"int_col"]]
     assert w.operation_results['transform_error'] == '''"['int_col'] not found in axis"'''
 
+
+def xtest_displayed_after_interpreter_filter():
+    """verify that the displayed number updates when an operation changes the size of cleaned_df  """
+    pass

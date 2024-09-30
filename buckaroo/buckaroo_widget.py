@@ -12,11 +12,11 @@ from ipywidgets import DOMWidget
 from traitlets import Unicode, List, Dict, observe
 
 from ._frontend import module_name, module_version
-from .customizations.all_transforms import DefaultCommandKlsList
 
 
 from .customizations.analysis import (TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
 from .customizations.histogram import (Histogram)
+from .customizations.pd_autoclean_conf import (CleaningConf, NoCleaningConf)
 from .customizations.styling import (DefaultSummaryStatsStyling, DefaultMainStyling)
 from .pluggable_analysis_framework.analysis_management import DfStats
 from .pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
@@ -40,9 +40,13 @@ class BuckarooProjectWidget(DOMWidget):
 
 
 class PdSampling(Sampling):
-        #pre_limit = 500_000
-        pre_limit = False
+    pre_limit = 1_000_000
 
+
+def sym(name):
+    return {'symbol':name}
+
+symDf = SymbolDf = {'symbol': 'df'}
 class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
     """Extends CustomizableDataFlow and DOMWIdget
 
@@ -57,15 +61,16 @@ class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
     #END DOMWidget Boilerplate
 
     sampling_klass = PdSampling
-    autocleaning_klass = PandasAutocleaning
+    autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
+    DFStatsClass = DfStats # Pandas Specific
+    autoclean_conf = tuple([CleaningConf, NoCleaningConf]) #override the base CustomizableDataFlow conf
 
-    operations = List().tag(sync=True)
     operation_results = Dict(
         {'transformed_df': EMPTY_DF_WHOLE, 'generated_py_code':'# instantiation, unused'}
     ).tag(sync=True)
 
     df_meta = Dict({
-        'columns': 5,
+        'columns': 5, # dummy data
         'rows_shown': 20,
         'total_rows': 877}).tag(sync=True)
 
@@ -93,7 +98,7 @@ class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
 
         
     #widget config.  Change these via inheritance to alter core behaviors of buckaroo
-    command_klasses = DefaultCommandKlsList
+    #command_klasses = DefaultCommandKlsList
     analysis_klasses = [TypingStats, DefaultSummaryStats,
                         Histogram,
                         ComputedDefaultSummaryStats,
@@ -101,8 +106,6 @@ class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
                         DefaultSummaryStats,
                         DefaultSummaryStatsStyling, DefaultMainStyling]
 
-
-    DFStatsClass = DfStats
 
 
     def add_analysis(self, analysis_klass):

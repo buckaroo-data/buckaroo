@@ -30,7 +30,8 @@ class CleaningGenOps(ColAnalysis):
     @classmethod
     def computed_summary(kls, column_metadata):
         if column_metadata['int_parse'] > kls.int_parse_threshhold:
-            return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}]}
+            return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}],
+                    'add_orig': True}
         else:
             return {'cleaning_ops': []}
 
@@ -88,7 +89,7 @@ def test_merge_ops():
 class ACConf(AutocleaningConfig):
     autocleaning_analysis_klasses = [VCAnalysis, PLCleaningStats, BasicAnalysis, CleaningGenOps]
     command_klasses = [PlSafeInt, DropCol, FillNA, GroupBy, NoOp]
-    name="default"
+    name = "default"
 
 
     
@@ -134,7 +135,9 @@ def desired_test_make_origs():
          pl.Series("b_orig", [None, None, None, None], dtype=pl.Int64)],
     )
 
-    assert PolarsAutocleaning.make_origs(df_a, df_b).to_dicts() == expected.to_dicts()
+    combined = PolarsAutocleaning.make_origs(
+        df_a, df_b, {'a':{'add_orig': True}, 'b': {'add_orig': True}})
+    assert combined.to_dicts() == expected.to_dicts()
 
 def test_make_origs_different_dtype():
     raw = pl.DataFrame({'a': [30, "40"]}, strict=False)
@@ -144,7 +147,9 @@ def test_make_origs_different_dtype():
             'a': [30, 40],
             'a_orig': [30,  "40"]},
         strict=False)
-    assert PolarsAutocleaning.make_origs(raw, cleaned).to_dicts() == expected.to_dicts()
+    combined = PolarsAutocleaning.make_origs(
+        raw, cleaned, {'a':{'add_orig': True}})
+    assert combined.to_dicts() == expected.to_dicts()
 
 def test_handle_clean_df():
     ac = PolarsAutocleaning([ACConf])
@@ -154,6 +159,7 @@ def test_handle_clean_df():
     expected = pl.DataFrame({
         'a': [30, 40],
         'a_orig': ["30",  "40"]})
+    print(f"{cleaning_sd=}")
     assert cleaned_df.to_dicts() == expected.to_dicts()
 
 EXPECTED_GEN_CODE = """def clean(df):

@@ -2,6 +2,7 @@ export interface DFMeta {
   // static,
   total_rows: number;
   columns: number;
+  processed_rows: number;
   rows_shown: number;
 }
 export interface BuckarooOptions {
