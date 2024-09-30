@@ -118,7 +118,7 @@ export function WidgetDCFCellExample() {
   const dfm: DFMeta = {
     columns: 5,
     rows_shown: 20,
-    processed_rows: 89,
+    filtered_rows: 89,
     total_rows: 877,
   };
 
