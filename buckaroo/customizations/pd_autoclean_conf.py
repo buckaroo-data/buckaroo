@@ -1,15 +1,31 @@
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.customizations.pandas_commands import (
-    SafeInt, DropCol, FillNA, GroupBy, RemoveOutliers, OnlyOutliers, Search, SearchCol,
+    SafeInt, DropCol, MakeCategory, FillNA, Rank,
+    DropDuplicates, GroupBy, GroupByTransform, RemoveOutliers, OnlyOutliers, Search, SearchCol,
     LinearRegression)
 
 from buckaroo.customizations.analysis import (
     DefaultSummaryStats, PdCleaningStats)
 
-BASE_COMMANDS = [DropCol, FillNA, GroupBy, SafeInt, RemoveOutliers, OnlyOutliers, Search, SearchCol,
-                 LinearRegression
-                 ]
+BASE_COMMANDS = [
+    #Basic Column operations
+    DropCol, FillNA, MakeCategory,
+
+    #Cleaning Operations
+    DropDuplicates, SafeInt, 
+
+    #Column modifications
+    Rank,
+
+    #Filtering ops
+    RemoveOutliers, OnlyOutliers,
+    Search, SearchCol, 
+
+    #complex transforms
+    GroupBy, GroupByTransform,
+    LinearRegression
+]
 
 
 class CleaningGenOps(ColAnalysis):

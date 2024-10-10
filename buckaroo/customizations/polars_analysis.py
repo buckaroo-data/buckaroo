@@ -111,7 +111,6 @@ class PlTyping(PolarsAnalysis):
         '''
         ['Array', 'Binary', 'Boolean', 'Categorical', 'DTYPE_TEMPORAL_UNITS', 'DataType', 'DataTypeClass', 'Date', 'Datetime', 'Decimal', 'Duration', 'Enum', 'Field', 'Float32', 'Float64', 'Int16', 'Int32', 'Int64', 'Int8', 'IntegerType', 'List', 'N_INFER_DEFAULT', 'Null', 'Object', 'String', 'Struct', 'TemporalType', 'Time', 'UInt16', 'UInt32', 'UInt64', 'UInt8', 'Unknown', 'Utf8', '__all__', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__', '__name__', '__package__', '__path__', '__spec__', '_parse', '_utils', 'classes', 'constants', 'constructor', 'convert', 'dtype_to_ffiname', 'dtype_to_py_type', 'group', 'is_polars_dtype', 'maybe_cast', 'numpy_char_code_to_dtype', 'numpy_type_to_constructor', 'numpy_values_and_dtype', 'parse_into_dtype', 'polars_type_to_constructor', 'py_type_to_arrow_type', 'py_type_to_constructor', 'supported_numpy_char_code', 'try_parse_into_dtype', 'unpack_dtypes']
         '''
-        print("type", dt, type(dt))
         res = {'is_numeric':  False, 'is_integer': False}
 
 
@@ -151,8 +150,6 @@ def normalize_polars_histogram_ser(ser):
         return { 'low_tail': smallest, 'high_tail':largest,
                  'meat_histogram': [[],[]], 'normalized_populations': []}
     raw_hist = meat_df.hist(bin_count=10, include_breakpoint=True)
-    print("cols")
-    print(raw_hist.columns)
     hist_df = raw_hist.select(pl.col("breakpoint"), pl.selectors.ends_with("count").alias("count"))
     edges = hist_df['breakpoint'].to_list()
     edges[0], edges[-1] = smallest, largest

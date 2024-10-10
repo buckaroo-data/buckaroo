@@ -136,10 +136,28 @@ class SafeInt(Command):
     def transform_to_py(df, col):
         return "    df['%s'] = smart_to_int(df['%s'])" % (col, col)
 
+class MakeCategory(Command):
+    command_default = [s('make_category'), s('df'), "col"]
+    command_pattern = [None]
+
+
+    @staticmethod 
+    def transform(df, col):
+        if col == 'index':
+            return df
+        # maybe check for str or int
+        df[col] = df[col].astype('category')
+        return df
+
+
+    @staticmethod 
+    def transform_to_py(df, col):
+        return f"    df['{col}'] = df['{col}'].astype('category')"
+
 class RemoveOutliers(Command):
-    command_default = [s('remove_outliers'), s('df'), "col", 1]
+    command_default = [s('remove_outliers'), s('df'), "col", .01]
     #command_pattern = [[3, 'remove_outliers_99', 'type', 'float']]
-    command_pattern = [[3, 'remove_outliers', 'type', 'integer']]
+    command_pattern = [[3, 'remove_outliers', 'type', 'float']]
 
 
     @staticmethod 
@@ -270,24 +288,69 @@ class LinearRegression(Command):
 
 
 
+AGG_METHODS_WITH_HELP = [  # ordered in aproximate frequency of use
+('null', "Don't aggregate this column"),
+('mean', 'Return the mean value.'),
+('median', 'Return the median value.'),
+('min', 'Return the minimum value.'),
+('max', 'Return the maximum value.'),
+('sum', 'Return the sum of the series.'),
+('count', 'Returns count of non-missing values.'),
+('count_null', 'Returns count of missing values.'),
+('std', 'Return the standard deviation of the data.'),
+
+('empty', "True if no values in series."),
+('hasnans' 'True if missing values in series.'),
+('nunique', 'Return the count of unique values.'),
+
+
+('is_monotonic', 'True if values always increase.'),
+('is_monotonic_decreasing', 'True if values always decrease.'),
+('is_monotonic_increasing', 'True if values always increase.'),
+
+
+('all', 'Returns True if every value is truthy.'),
+('any', 'Returns True if any value is truthy.'),
+
+('autocorr', 'Returns Pearson correlation of series with shifted self. Can override lag as keyword argument(default is 1).'),
+
+('kurt', 'Return ”excess” kurtosis (0 is normal distribution). Values greater than 0 have more outliers than normal.'),
+('mad', 'Return the mean absolute deviation.'),
+
+('sem', 'Return the unbiased standard error.'),
+('skew', 'Return the unbiased skew of the data. Negative indicates tail is on the left side.'),
+
+('idxmax' "Returns index value of maximum value."),
+('idxmin', 'Returns index value of minimum value.'),
+
+('dtype', 'Type of the series.'),
+('dtypes', 'Type of the series.'),
+('nbytes', 'Return the number of bytes of the data.'),
+('ndim', 'Return the number of dimensions (1) of the data.'),
+('size', 'Return the size of the data.'),
+# These aggregations exist, but need an extra argument
+#('cov', 'Return covariance of series with other series. Need to specify other.'),
+#('corr', 'Returns Pearson correlation of series with other series. Need to specify other.'),
+#('quantile', 'Return the median value. Can override q to specify other quantile.'),
+]
+
+
+AGG_METHOD_NAMES = [x[0] for x in AGG_METHODS_WITH_HELP]
+
 class GroupBy(Command):
     command_default = [s("groupby"), s('df'), 'col', {}]
-    command_pattern = [[3, 'colMap', 'colEnum', ['null', 'sum', 'mean', 'median', 'count', 'count_null']]]
+    command_pattern = [[3, 'colMap', 'colEnum', AGG_METHOD_NAMES]]
     @staticmethod 
     def transform(df, col, col_spec):
         grps = df.groupby(col)
         df_contents = {}
         for k, v in col_spec.items():
-            if v == "sum":
-                df_contents[k] = grps[k].apply(lambda x: x.sum())
-            elif v == "mean":
-                df_contents[k] = grps[k].apply(lambda x: x.mean())
-            elif v == "median":
-                df_contents[k] = grps[k].apply(lambda x: x.median())
-            elif v == "count":
-                df_contents[k] = grps[k].apply(lambda x: x.count())
-            elif v == "count_null":
-                df_contents[k] = grps[k].apply(lambda x: x.isna().count())
+            if v == "null":
+                continue
+            elif v == 'count_null':
+                df_contents[k] = grps[k].agg('size') - grps[k].agg('count')
+            else:
+                df_contents[k] = grps[k].agg(v)
         return pd.DataFrame(df_contents)
 
     #test_df = group_df
@@ -303,24 +366,52 @@ class GroupBy(Command):
             "    df_contents = {}"
         ]
         for k, v in col_spec.items():
-            if v == "sum":
-                commands.append("    df_contents['%s'] = grps['%s'].apply(lambda x: x.sum())" % (k, k))
-            elif v == "mean":
-                commands.append("    df_contents['%s'] = grps['%s'].apply(lambda x: x.mean())" % (k, k))
-            elif v == "median":
-                commands.append("    df_contents['%s'] = grps['%s'].apply(lambda x: x.median())" % (k, k))
-            elif v == "count":
-                commands.append("    df_contents['%s'] = grps['%s'].apply(lambda x: x.count())" % (k, k))
-            elif v == "count_null":
-                commands.append("    df_contents['%s'] = grps['%s'].apply(lambda x: x.isna().count())" % (k, k))
-        #print("commands", commands)
+            if v == "null":
+                continue
+            elif v == 'count_null':
+                commands.append(f"    df_contents['{k}'] = grps['{k}'].agg('size') - grps['{k}'].agg('count') #count_null")
+            else:
+                commands.append(f"    df_contents['{k}'] = grps['{k}'].agg('{v}')")
         commands.append("    df = pd.DataFrame(df_contents)")
         return "\n".join(commands)
 
+class GroupByTransform(Command):
+    command_default = [s("groupby_transform"), s('df'), 'col', {}]
+    command_pattern = [[3, 'colMap', 'colEnum', AGG_METHOD_NAMES]]
+
+
+
+    @staticmethod 
+    def transform(df, col, col_spec):
+        grps = df.groupby(col)
+        for k, v in col_spec.items():
+            new_col_name = k + "_" + v
+            if v == "null":
+                continue
+            elif v == 'count_null':
+                df[new_col_name] = grps[k].transform('size') - grps[k].transform('count')
+            else:
+                df[new_col_name] = grps[k].transform(v)
+        return df
+
+
+    @staticmethod 
+    def transform_to_py(df, col, col_spec):
+        commands = [
+            f"    grps = df.groupby('{col}')"
+        ]
+        for k, v in col_spec.items():
+            new_col_name = k + "_" + v
+            if v == "null":
+                continue
+            elif v == 'count_null':
+                commands.append(f"    df['{new_col_name}'] = grps['{k}'].agg('size') - grps['{k}'].agg('count') #count_null")
+            else:
+                commands.append(f"    df['{new_col_name}'] = grps['{k}'].agg('{v}')")
+        return "\n".join(commands)
 
 
 class DropCol(Command):
-    #argument_names = ["df", "col"]
     command_default = [s('dropcol'), s('df'), "col"]
     command_pattern = [None]
 
@@ -337,7 +428,6 @@ class DropCol(Command):
 
 
 class ato_datetime(Command):
-    #argument_names = ["df", "col"]
     command_default = [s('to_datetime'), s('df'), "col"]
     command_pattern = [None]
 
@@ -380,7 +470,6 @@ def search_df_str(df, needle:str):
 
 
 class Search(Command):
-    #argument_names = ["df", "col", "fill_val"]
     command_default = [s('search'), s('df'), "col", ""]
     command_pattern = [[3, 'term', 'type', 'string']]
 
@@ -409,7 +498,6 @@ def search_col_str(df, col, needle:str):
 
 
 class SearchCol(Command):
-    #argument_names = ["df", "col", "fill_val"]
     command_default = [s('search_col'), s('df'), "col", ""]
     command_pattern = [[3, 'term', 'type', 'string']]
 
@@ -426,4 +514,84 @@ class SearchCol(Command):
     @staticmethod 
     def transform_to_py(df, col, needle):
         return f"    df = df[~(df['{col}'].str.find('{needle}').fillna(-1) == -1).fillna(False)]"
+
+
+
+class DropDuplicates(Command):
+    command_default = [s("drop_duplicates"), s('df'), 'col', "first"]
+    command_pattern = [[3, 'keep', 'enum', ["first", "last", "False"]]]
+    
+
+    @staticmethod 
+    def transform(df, col, val):
+        if val == "False":
+            return df[col].drop_duplicates(keep=False)
+        else:
+            return df[col].drop_duplicates(keep=val)
+
+
+    @staticmethod 
+    def transform_to_py(df, col, val):
+        if val == "False":
+            keep_arg = "False"
+        else:
+            keep_arg = f"'{val}'"
+        return f"    df = df['{col}'].drop_duplicates(keep={keep_arg})"
+
+class Rank(Command):
+    command_default = [s("rank"), s('df'), 'col', "None", False]
+    command_pattern = [[3, 'method', 'enum', ["None", "min", "dense"]],
+                       [4, 'new_col', 'bool']
+                       ]
+    
+
+    @staticmethod 
+    def transform(df, col, method, new_col):
+        arg_values = {"None":None, "min":"min", "dense":"dense"}
+        method_arg = arg_values[method]
+        if new_col:
+            new_col_name = f"{col}_rank"
+            assert new_col_name not in df.columns
+            df[new_col_name] = df[col].rank(method=method_arg)
+            return df
+        else:
+            df[col] = df[col].rank(method=method_arg)
+            return df
+
+    @staticmethod 
+    def transform_to_py(df, col, val, new_col):
+        arg_values = {"None":'None', "min":"'min'", "dense":"'dense'"}
+        method_arg = arg_values[val]
+        if new_col:
+            new_col_name = f"{col}_rank"
+            return f"    df = df['{col}'].rank(method={method_arg})"
+        else:
+            return f"    df = df['{new_col_name}'].rank(method={method_arg})"
+
+
+                       
+
+class Replace(Command):
+    command_default = [s("replace"), s('df'), 'col', "", ""]
+    command_pattern = [[3, 'old', 'type', 'string'],
+                       [4, 'new_', 'type', 'string']
+                       ]
+
+    @staticmethod 
+    def transform(df, col, prev, new_):
+        df[col] = df[col].replace(prev, new_)
+        return df
+
+    @staticmethod 
+    def transform_to_py(df, col, prev, new_):
+        return f"    df['{col}'] = df['{col}'].replace('{prev}', '{new_}')"
+
+# string commands to add
+#split
+# age = pd.Series(['0-10', '11-15', '11-15', '61-65', '46-50'])
+# (age
+# .str.split('-', expand=True) .iloc[:,0]
+# .astype(int)
+# )
+
 

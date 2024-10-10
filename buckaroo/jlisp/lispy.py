@@ -232,7 +232,7 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
                     quote_func = quotes[quote_char]
                     ret_list.append([quote_func, list_parse(next(lst))])
                 elif isinstance(x, dict):
-                    print("x was a dict", x)
+                    #print("x was a dict", x)
                     ret_list.append(x)
                     #raise("we dont't currently support atoms of dictionary")
                 else:
