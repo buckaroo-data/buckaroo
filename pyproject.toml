@@ -76,12 +76,10 @@ Homepage = "https://github.com/paddymul/buckaroo"
 
 [tool.hatch.build]
 artifacts = [
-    "buckaroo/nbextension/index.*",
     "buckaroo/labextension",
 ]
 
 [tool.hatch.build.targets.wheel.shared-data]
-"buckaroo/nbextension" = "share/jupyter/nbextensions/buckaroo"
 "buckaroo/labextension" = "share/jupyter/labextensions/buckaroo"
 "buckaroo.json" = "etc/jupyter/nbconfig/notebook.d/buckaroo.json"
 
@@ -106,7 +104,6 @@ exclude = [
 [tool.hatch.build.hooks.jupyter-builder]
 
 ensured-targets = [
-    "buckaroo/nbextension/index.js",
     "buckaroo/labextension/package.json",
 ]
 dependencies = ["hatch-jupyter-builder>=0.8.1"]

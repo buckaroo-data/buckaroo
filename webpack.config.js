@@ -1,7 +1,7 @@
 const path = require('path');
 const version = require('./package.json').version;
 //import {TsconfigPathsPlugin} from 'tsconfig-paths-webpack-plugin';
-const  TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
+const TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
 
 //import HtmlWebpackPlugin from 'html-webpack-plugin';
 const HtmlWebpackPlugin = require('html-webpack-plugin');
@@ -14,35 +14,15 @@ const cryptoOrigCreateHash = crypto.createHash;
 crypto.createHash = (algorithm) =>
   cryptoOrigCreateHash(algorithm == 'md4' ? 'sha256' : algorithm);
 
-const  performance = {
-    maxAssetSize: 100_000_000,
+const performance = {
+  maxAssetSize: 100_000_000,
 };
 
 // Custom webpack rules
-const baseRules = [
-
+const rules = [
+  { test: /\.tsx?$/, loader: 'ts-loader' },
   { test: /\.js$/, loader: 'source-map-loader' },
   { test: /\.css$/, use: ['style-loader', 'css-loader'] },
-                {
-                    test: /\.scss$/,
-                    use: [
-                        // We're in dev and want HMR, SCSS is handled in JS
-                        // In production, we want our css as files
-                        "style-loader",
-                        "css-loader",
-                        {
-                            loader: "postcss-loader",
-                            options: {
-                                postcssOptions: {
-                                    plugins: [
-                                        ["postcss-preset-env"],
-                                    ],
-                                },
-                            },
-                        },
-                        "sass-loader"
-                    ],
-                },
   {
     test: luminoThemeImages,
     issuer: /\.css$/,
@@ -55,10 +35,10 @@ const baseRules = [
     exclude: luminoThemeImages,
     use: ['file-loader'],
   },
-    {
-        test: /\.md$/,
-        use: ['html-loader', 'markdown-loader']
-    },
+  {
+    test: /\.md$/,
+    use: ['html-loader', 'markdown-loader'],
+  },
   {
     test: /\.svg(\?v=\d+\.\d+\.\d+)?$/,
     issuer: /\.css$/,
@@ -70,56 +50,17 @@ const baseRules = [
 ];
 
 
-const rules = [...baseRules,   { test: /\.tsx?$/, loader: 'ts-loader' }];
-const demoRules = [...baseRules,
-                {
-                    test: /\.tsx?$/,
-                    loader: 'ts-loader',
-                    options: {
-                        transpileOnly: true,
-                        configFile: 'examples/tsconfig.json'
-                    }
-                }]
-
-		   
 // Packages that shouldn't be bundled but loaded at runtime
 const externals = ['@jupyter-widgets/base'];
 
 const resolve = {
   // Add '.ts' and '.tsx' as resolvable extensions.
   extensions: ['.webpack.js', '.web.js', '.ts', '.js', '.tsx'],
-    plugins: [new TsconfigPathsPlugin()],
+  plugins: [new TsconfigPathsPlugin()],
   fallback: { crypto: false },
 };
 
 module.exports = [
-  /**
-   * Notebook extension
-   *
-   * This bundle only contains the part of the JavaScript that is run on load of
-   * the notebook.
-   */
-  {
-    entry: './js/extension.ts',
-    output: {
-      filename: 'index.js',
-      path: path.resolve(__dirname, 'buckaroo', 'nbextension'),
-      libraryTarget: 'amd',
-    },
-    module: {
-      rules: rules,
-    },
-    devtool: 'source-map',
-    externals,
-    resolve,
-      // plugins: [new HtmlWebpackPlugin({
-      //           template: './examples/index.html'
-      //       })]
-      performance
-
-
-  },
-
   /**
    * Embeddable buckaroo bundle
    *
@@ -145,33 +86,9 @@ module.exports = [
     },
     externals,
     resolve,
-        devServer: {
-            port: 8030
-        },
-      performance
-      
-  },
-
-  /**
-   * Documentation widget bundle
-   *
-   * This bundle is used to embed widgets in the package documentation.
-   */
-  {
-    entry: './js/index.ts',
-    output: {
-      filename: 'embed-bundle.js',
-      path: path.resolve(__dirname, 'docs', 'source', '_static'),
-      library: 'buckaroo',
-      libraryTarget: 'amd',
+    devServer: {
+      port: 8030,
     },
-    module: {
-      rules: rules,
-    },
-    devtool: 'source-map',
-    externals,
-    resolve,
-      performance
-
+    performance,
   },
 ];
