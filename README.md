@@ -43,6 +43,9 @@ Buckaroo works with the following DataFrame libraries
 
 Buckaroo has extensive docs and tests, the best way to learn about the system is from feature example videos on youtube
 
+## Interactive Styling Gallery
+
+The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery) lets you see different styling configurations.  You can live edit code and play with different configs.
 
 ## Videos 
 - [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE)
