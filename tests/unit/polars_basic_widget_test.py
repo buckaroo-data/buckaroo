@@ -8,6 +8,7 @@ from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
 from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget
 from buckaroo.dataflow.dataflow import StylingAnalysis
+from buckaroo.jlisp.lisp_utils import (s, qc_sym)
 
 def test_basic_instantiation():
     PolarsBuckarooWidget(
@@ -220,6 +221,56 @@ def test_polars_to_pandas():
     temp_buckaroo_state = bw.buckaroo_state.copy()
     temp_buckaroo_state['post_processing'] = 'show_errors'
     bw.buckaroo_state = temp_buckaroo_state
+
+
+
+def test_polars_search():
+    """
+    Makes sure that search actually works
+
+    """
+    df = pl.DataFrame(
+        {'a':[10,20,30,40], 'b': ['a', 'aa', 'ab', 'bb']})
+
+    bw = PolarsBuckarooWidget(df)
+    assert bw.buckaroo_state['cleaning_method'] == 'NoCleaning'
+    assert bw.cleaning_method == 'NoCleaning'
+    # class VCBuckarooWidget(BuckarooWidget):
+    #     #analysis_klasses = base_a_klasses
+    #     autoclean_conf = tuple([NoCleaningConf]) 
+
+    # vcb = VCBuckarooWidget(typed_df, debug=False)
+    assert len(bw.processed_df) == 4
+    
+    temp_buckaroo_state = bw.buckaroo_state.copy()
+    temp_buckaroo_state['quick_command_args'] = {'search': ['a']}
+    bw.buckaroo_state = temp_buckaroo_state
+
+    #probably something in autocleaning config should be responsible for generating these commands
+    assert bw.merged_operations == [
+        [qc_sym('search'), s('df'), "col", "a"]]
+
+    assert len(bw.processed_df) == 3
+
+    temp_buckaroo_state = bw.buckaroo_state.copy()
+    temp_buckaroo_state['quick_command_args'] = {'search': ['aa']}
+    bw.buckaroo_state = temp_buckaroo_state
+
+    #probably something in autocleaning config should be responsible for generating these commands
+    assert bw.merged_operations == [
+        [qc_sym('search'), s('df'), "col", "aa"]]
+
+    assert len(bw.processed_df) == 1
+
+    """
+    add an additional test that accounts for arbitrary, configurable status bar command args
+
+    dataflow should just be responsible for parsing back the frontend datastructure.
+
+    There should be another part where the frontend presents a command structure to the status bar.
+    
+
+    """
 
     
 '''

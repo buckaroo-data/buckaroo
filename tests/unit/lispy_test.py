@@ -1,5 +1,5 @@
-from buckaroo.jlisp.lisp_utils import split_operations, lists_match
-from buckaroo.jlisp.lispy import make_interpreter, s
+from buckaroo.jlisp.lisp_utils import split_operations, lists_match, s
+from buckaroo.jlisp.lispy import make_interpreter
 
 def test_split_operations():
 

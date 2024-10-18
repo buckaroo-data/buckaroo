@@ -8,7 +8,7 @@ import { HistogramCell } from './components/DFViewerParts/HistogramCell';
 import { DependentTabs } from './components/DependentTabs';
 import { OperationViewer } from './components/Operations';
 //import { DFData, DFViewerConfig } from './components/DFViewerParts/DFWhole';
-import { StatusBarEx } from './components/StatusBar';
+import { StatusBar } from './components/StatusBar';
 
 // In case of classic Jupyter Notebook and embed, we provide the PhosphorJS CSS
 
@@ -24,7 +24,7 @@ export const extraComponents = {
   ColumnsEditorEx,
   DFViewer,
   DFViewerEx,
-  StatusBarEx,
+  StatusBar,
   HistogramCell,
 };
 

@@ -56,7 +56,9 @@ def test_column_config():
     assert merged_sd == {'index' : {}, 'a': {}, 'b': {}}
     
 def test_merge_sds():
-
+    """
+    verifies that summary_dicts are merged together properly
+    """
     sd_base = {
         'Volume' : {
             'a':10,

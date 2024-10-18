@@ -76,12 +76,13 @@ class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
 
 
     buckaroo_state = Dict({
-        'auto_clean': 'conservative',
+        'cleaning_method': 'NoCleaning',
         'post_processing': '',
         'sampled': False,
         'show_commands': False,
         'df_display': 'main',
         'search_string': '',
+        'quick_command_args': {}
     }).tag(sync=True)
 
 
@@ -94,6 +95,8 @@ class BuckarooWidget(CustomizableDataflow, BuckarooProjectWidget):
         old, new = change['old'], change['new']
         if not old['post_processing'] == new['post_processing']: 
             self.post_processing_method = new['post_processing']
+        if not old['quick_command_args'] == new['quick_command_args']: 
+            self.quick_command_args = new['quick_command_args']
 
 
         

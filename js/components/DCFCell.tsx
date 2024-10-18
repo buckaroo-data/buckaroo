@@ -128,7 +128,7 @@ export function WidgetDCFCellExample() {
     show_commands: false,
     df_display: 'main',
     post_processing: '',
-    search_string: '',
+    quick_command_args: {},
   });
 
   const bOptions: BuckarooOptions = {

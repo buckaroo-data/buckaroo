@@ -43,11 +43,13 @@ class CleaningGenOps(ColAnalysis):
 class CleaningConf(AutocleaningConfig):
     autocleaning_analysis_klasses = [DefaultSummaryStats, CleaningGenOps, PdCleaningStats]
     command_klasses = BASE_COMMANDS
+    quick_command_klasses = []
     name="default"
 
 class NoCleaningConf(AutocleaningConfig):
     #just run the interpreter
     autocleaning_analysis_klasses = []
     command_klasses = BASE_COMMANDS
+    quick_command_klasses = [Search]
     name="NoCleaning"
 

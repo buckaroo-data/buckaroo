@@ -1,6 +1,5 @@
 import pandas as pd
-from buckaroo.jlisp.lisp_utils import split_operations
-from buckaroo.jlisp.lispy import s
+from buckaroo.jlisp.lisp_utils import split_operations, s, qc_sym
 from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
 from ..customizations.all_transforms import configure_buckaroo, DefaultCommandKlsList
 
@@ -20,7 +19,7 @@ class SentinelAutocleaning:
     def __init__(self, confs):
         self.commandConfig = {}
     
-    def handle_ops_and_clean(self, df, cleaning_method, existing_operations):
+    def handle_ops_and_clean(self, df, cleaning_method, quick_command_args, existing_operations):
         cleaning_ops = []
         generated_code = ""
         if cleaning_method == "one op":
@@ -69,9 +68,37 @@ def format_ops(column_meta):
 class AutocleaningConfig:
     command_klasses = [DefaultCommandKlsList]
     autocleaning_analysis_klasses = []
-
+    quick_command_klasses = []
     name = 'default'
     
+    
+class WrongFrontendQuickArgs(Exception):
+    pass
+
+def generate_quick_ops(command_list, quick_args):
+    ret_ops = []
+    for c in command_list:
+        sym_name = c.command_default[0]['symbol']
+        if sym_name not in quick_args:
+            continue
+        val = quick_args[sym_name]
+        if len(val) == 1:
+            v1 = val[0]
+            if v1 == "" or v1 is None:
+                #this is an empty result sent from the frontend.
+                #the frontend for quick_args is pretty dumb
+                continue 
+        if not len(val) == len(c.quick_args_pattern):
+            raise WrongFrontendQuickArgs(f"Frontend passed in wrong quick_arg format for {sym_name} expected {c.quick_args_pattern} got {val}.  Full quick_args obj {quick_args}")
+        op = c.command_default.copy()
+        for form, arg  in zip(c.quick_args_pattern, val):
+            arg_pos = form[0]
+            op[arg_pos] = arg
+        op[0] = qc_sym(sym_name)
+        ret_ops.append(op)
+    return ret_ops
+
+            
 
 class PandasAutocleaning:
     # def add_command(self, incomingCommandKls):
@@ -82,7 +109,7 @@ class PandasAutocleaning:
 
     DFStatsKlass = DfStats
     #until we plumb in swapping configs, just stick with default
-    def __init__(self, ac_configs=tuple([AutocleaningConfig()]), conf_name="default"):
+    def __init__(self, ac_configs=tuple([AutocleaningConfig()]), conf_name="NoCleaning"):
 
         self.config_dict = {}
         for conf in ac_configs:
@@ -103,6 +130,7 @@ class PandasAutocleaning:
         c_defaults, c_patterns, df_interpreter, gencode_interpreter = configure_buckaroo(c_klasses)
         self.df_interpreter, self.gencode_interpreter = df_interpreter, gencode_interpreter
         self.commandConfig = dict(argspecs=c_patterns, defaultArgs=c_defaults)
+        self.quick_command_klasses = conf.quick_command_klasses
 
 
     def _run_df_interpreter(self, df, operations):
@@ -153,16 +181,23 @@ class PandasAutocleaning:
         else:
             return cleaned_df
 
-    def handle_ops_and_clean(self, df, cleaning_method, existing_operations):
+    def handle_ops_and_clean(self, df, cleaning_method, quick_command_args, existing_operations):
         if df is None:
             #on first instantiation df is likely to be None,  do nothing and return
             return None
-        if cleaning_method == "" and len(existing_operations) == 0:
-            #no cleaning method was specified, just return the bare minimum
-            return [df, {},  "#empty generated code", merge_ops(existing_operations, [])]
+
+        quick_ops = generate_quick_ops(self.quick_command_klasses, quick_command_args)
+        if cleaning_method == "":
+
+            if (len(existing_operations) + len(quick_ops)) == 0:
+                #no cleaning method was specified, just return the bare minimum
+                return [df, {},  "#empty generated code", merge_ops(existing_operations, [])]
         self._setup_from_command_kls_list(cleaning_method)
+
         cleaning_operations, cleaning_sd = self._run_cleaning(df, cleaning_method)
+        cleaning_operations.extend(quick_ops)
         merged_operations = merge_ops(existing_operations, cleaning_operations)
+        
         cleaned_df = self._run_df_interpreter(df, merged_operations)
         #print("len(cleaned_df)", len(cleaned_df))
         merged_cleaned_df = self.make_origs(df, cleaned_df, cleaning_sd)

@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 
-from ..jlisp.lispy import s
+from ..jlisp.lisp_utils import s
 
 class Command(object):
     @staticmethod 
@@ -182,6 +182,7 @@ class RemoveOutliers(Command):
 class OnlyOutliers(Command):
     command_default = [s('only_outliers'), s('df'), "col", .01]
     command_pattern = [[3, 'only_outliers', 'type', 'float']]
+    quick_args_pattern = [[2, 'term', 'type', 'col']]
 
     @staticmethod 
     def transform(df, col, tail):
@@ -472,10 +473,10 @@ def search_df_str(df, needle:str):
 class Search(Command):
     command_default = [s('search'), s('df'), "col", ""]
     command_pattern = [[3, 'term', 'type', 'string']]
+    quick_args_pattern = [[3, 'term', 'type', 'string']]
 
     @staticmethod 
     def transform(df, col, val):
-        
         #print("search_df", val)
         if val is None or val == "":
             #print("no search term set")

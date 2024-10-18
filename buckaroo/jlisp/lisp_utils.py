@@ -44,3 +44,9 @@ def lists_match(l1, l2):
     return all(x == y and type(x) is type(y) for x, y in zip(l1, l2))
 
             
+def qc_sym(symbol_name):
+    return {'symbol':symbol_name, 'meta':{'auto_clean': True, 'quick_command':True}}
+
+def s(symbol_name):
+    return {'symbol':symbol_name}
+    

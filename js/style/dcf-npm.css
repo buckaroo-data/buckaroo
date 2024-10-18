@@ -235,3 +235,10 @@ div.dependent-tabs ul.tabs li.active {
 /*# sourceMappingURL=dcf-npm.css.map */
 
 
+.ag-root-wrapper-body .ag-cell-inline-editing {
+    /* this is trying to remove the weird styling thing that sometimes happens with the editted cell where the
+edit box moves up and is only half visible */
+    
+    height: 100%;
+
+}

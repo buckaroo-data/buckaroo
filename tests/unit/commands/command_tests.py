@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
 
-from buckaroo.jlisp.lispy import s
+from buckaroo.jlisp.lisp_utils import s
 from buckaroo.jlisp.configure_utils import configure_buckaroo
 from buckaroo.customizations.all_transforms import (
-    DropCol, FillNA, OneHot, GroupBy, reindex )
+    DropCol, FillNA, OneHot, GroupBy, reindex,  )
 
 
 def result_from_exec(code_str, df_input):
@@ -69,3 +69,13 @@ def test_reindex():
     
     output_df = same(reindex, [[s('reindex'), s('df'), "a"]], base_df)
     assert output_df.index.to_list() == ['ca', 'cb', 'cd', 'ee', 'ff']
+
+def test_search():
+    base_df = pd.DataFrame({
+        'a':['ca', 'cb', 'ca', 'ee', 'ff'],
+        'b': [pd.NA, 2, 2, 2, pd.NA]})
+    
+    output_df = same(reindex, [[s('reindex'), s('df'), "a"]], base_df)
+    assert output_df.index.to_list() == ['ca', 'cb', 'cd', 'ee', 'ff']
+
+    

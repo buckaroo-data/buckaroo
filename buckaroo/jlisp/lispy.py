@@ -405,14 +405,6 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
 
 
     return local_eval, lisp_eval
-
-    
-# if __name__ == '__main__':
-#     repl()
-    
-def s(symbol_name):
-    return {'symbol':symbol_name}
-    
     
     
 

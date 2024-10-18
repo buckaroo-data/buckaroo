@@ -37,7 +37,6 @@ class DataFlow(HasTraits):
         self.summary_sd = {}
         self.existing_operations = []
         self.ac_obj = self.autocleaning_klass(self.autoclean_conf)
-        #self.ac_obj._setup_from_command_kls_list("default")
         self.commandConfig = self.ac_obj.commandConfig
         try:
             self.raw_df = raw_df
@@ -55,6 +54,8 @@ class DataFlow(HasTraits):
     sampled_df = Any('')
 
     cleaning_method = Unicode('NoCleaning')
+    quick_command_args = Dict({})
+
     operations = Any([]).tag(sync=True)
 
     cleaned = Any().tag(default=None)
@@ -89,11 +90,11 @@ class DataFlow(HasTraits):
     def _sampled_df(self, change):
         self.sampled_df = self._compute_sampled_df(self.raw_df, self.sample_method)
 
-    @observe('sampled_df', 'cleaning_method', 'operations')
+    @observe('sampled_df', 'cleaning_method', 'quick_command_args', 'operations')
     @exception_protect('operation_result-protector')
     def _operation_result(self, change):
         result = self.ac_obj.handle_ops_and_clean(
-            self.sampled_df, self.cleaning_method, self.operations)
+            self.sampled_df, self.cleaning_method, self.quick_command_args, self.operations)
         if result is None:
             return
         else:

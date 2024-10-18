@@ -1,5 +1,5 @@
 // https://plnkr.co/edit/QTNwBb2VEn81lf4t?open=index.tsx
-import React, { useState, useRef } from 'react';
+import React, { useRef, useCallback } from 'react';
 import _ from 'lodash';
 import { AgGridReact } from 'ag-grid-react'; // the AG Grid React Component
 import { ColDef, GridOptions } from 'ag-grid-community';
@@ -8,33 +8,6 @@ import { DFMeta } from './WidgetTypes';
 import { BuckarooOptions } from './WidgetTypes';
 import { BuckarooState, BKeys } from './WidgetTypes';
 export type setColumFunc = (newCol: string) => void;
-
-const getSearchForm = (initialVal: string, setSearchVal: any) => {
-  return function MyForm() {
-    function handleSubmit(e: any) {
-      // Prevent the browser from reloading the page
-      e.preventDefault();
-      // Read the form data
-      const form = e.target;
-      const formData = new FormData(form);
-
-      const entries = Array.from(formData.entries());
-
-      const formDict = _.fromPairs(entries) as Record<string, string>;
-
-      console.log('formDict', formDict);
-      setSearchVal(formDict['search']);
-    }
-
-    return (
-      <form method="post" onSubmit={handleSubmit}>
-        <label>
-          <input name="search" defaultValue={initialVal} />
-        </label>
-      </form>
-    );
-  };
-};
 
 const helpCell = function (params: any) {
   return (
@@ -59,7 +32,15 @@ export function StatusBar({
   setBuckarooState: React.Dispatch<React.SetStateAction<BuckarooState>>;
   buckarooOptions: BuckarooOptions;
 }) {
-  console.log('initial buckarooState', buckarooState);
+  /*
+      AgGridReact
+        rowData={rowData}
+        columnDefs={columns}
+        singleClickEdit={true}
+        stopEditingWhenCellsLoseFocus={true}
+*/
+
+  //console.log('initial buckarooState', buckarooState);
   //   const optionCycles = _.fromPairs(
   // //    _.map(buckarooOptions, (v: any, k) => [k, ( k==='df_display' ? v :  _.concat([false], v) ) ])
   //     _.map(buckarooOptions, (v: any, k) => [k, ( k==='post_processing' ? v :  _.concat([false], v) ) ])
@@ -91,7 +72,7 @@ export function StatusBar({
   };
   const updateDict = (event: any) => {
     const colName = event.column.getColId();
-    if (colName === 'search') {
+    if (colName === 'quick_command_args' || colName === 'search') {
       return;
     }
     if (_.includes(_.keys(buckarooState), colName)) {
@@ -99,22 +80,33 @@ export function StatusBar({
       setBuckarooState(nbstate);
     }
   };
-  const showSearch = false;
-  const localSetSearchString = (search_query: string) => {
-    setBuckarooState({ ...buckarooState, search_string: search_query });
-  };
+
+  const handleCellChange = useCallback(
+    (params: { oldValue: any; newValue: any }) => {
+      const { oldValue, newValue } = params;
+
+      if (oldValue !== newValue && newValue !== null) {
+        //console.log('Edited cell:', newValue);
+        const newState = {
+          ...buckarooState,
+          quick_command_args: { search: [newValue] },
+        };
+        //console.log('handleCellChange', buckarooState, newState);
+        setBuckarooState(newState);
+      }
+    },
+    []
+  );
 
   const columnDefs: ColDef[] = [
     {
       field: 'search',
+      headerName: 'search',
       width: 200,
-      cellRenderer: getSearchForm(
-        buckarooState.search_string,
-        localSetSearchString
-      ),
-      hide: !showSearch,
+      editable: true,
+      onCellValueChanged: handleCellChange,
+      //hide: !showSearch,
     },
-
     {
       field: 'df_display',
       headerName: 'Σ', //note the greek symbols instead of icons which require buildchain work
@@ -158,6 +150,9 @@ export function StatusBar({
     { field: 'columns', width: 75 },
   ];
 
+  const searchArg = buckarooState.quick_command_args?.search;
+  const searchStr = searchArg && searchArg.length === 1 ? searchArg[0] : '';
+
   const rowData = [
     {
       total_rows: basicIntFormatter.format(dfMeta.total_rows),
@@ -169,6 +164,7 @@ export function StatusBar({
       filtered_rows: basicIntFormatter.format(dfMeta.filtered_rows),
       post_processing: buckarooState.post_processing,
       show_commands: buckarooState.show_commands || '0',
+      search: searchStr,
     },
   ];
 
@@ -178,7 +174,6 @@ export function StatusBar({
 
   const gridRef = useRef<AgGridReact<unknown>>(null);
   const defaultColDef = {
-    //    type: 'left-aligned',
     cellStyle: { textAlign: 'left' },
   };
   return (
@@ -194,39 +189,5 @@ export function StatusBar({
         ></AgGridReact>
       </div>
     </div>
-  );
-}
-export function StatusBarEx() {
-  const dfm: DFMeta = {
-    columns: 5,
-    rows_shown: 20,
-    filtered_rows: 300_000,
-    total_rows: 8_777_444,
-  };
-
-  const [bState, setBState] = useState<BuckarooState>({
-    auto_clean: 'conservative',
-    sampled: false,
-    df_display: 'main',
-    post_processing: 'asdf',
-    show_commands: false,
-    search_string: '',
-  });
-
-  const bOptions: BuckarooOptions = {
-    auto_clean: ['aggressive', 'conservative'],
-    post_processing: ['', 'asdf'],
-    sampled: ['random'],
-    show_commands: ['on'],
-    df_display: ['main'],
-  };
-
-  return (
-    <StatusBar
-      dfMeta={dfm}
-      buckarooState={bState}
-      setBuckarooState={setBState}
-      buckarooOptions={bOptions}
-    />
   );
 }

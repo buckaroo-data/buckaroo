@@ -5,6 +5,7 @@ from .pluggable_analysis_framework.polars_analysis_management import (
     PlDfStats)
 from .serialization_utils import pd_to_obj
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
+from .customizations.pl_autocleaning_conf import NoCleaningConfPl
 from .dataflow.dataflow import Sampling
 from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.widget_extension_utils import configure_buckaroo
@@ -44,6 +45,8 @@ class PolarsBuckarooWidget(BuckarooWidget):
     """TODO: Add docstring here
     """
     analysis_klasses = local_analysis_klasses
+    autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
+    autoclean_conf = tuple([NoCleaningConfPl]) #override the base CustomizableDataFlow conf
     DFStatsClass = PlDfStats
     sampling_klass = PLSampling
 
