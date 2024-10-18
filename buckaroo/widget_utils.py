@@ -3,7 +3,7 @@ from .buckaroo_widget import BuckarooWidget
 import pandas as pd
 from datetime import datetime as dtdt
 import os
-import psutil
+
 
 
 def is_in_ipython():
@@ -35,14 +35,18 @@ def enable(sampled=True,
     """
 
     ip = is_in_ipython()
+    try:
+        import psutil
+        parent_process = psutil.Process().parent()
+        server_start_time = dtdt.fromtimestamp(parent_process.create_time())
 
-    parent_process = psutil.Process().parent()
-    server_start_time = dtdt.fromtimestamp(parent_process.create_time())
-
-    buckaroo_mtime = dtdt.fromtimestamp(os.path.getmtime(__file__))
+        buckaroo_mtime = dtdt.fromtimestamp(os.path.getmtime(__file__))
+        buckaroo_installed_after_server_start = buckaroo_mtime > server_start_time
+    except ImportError:
+        buckaroo_installed_after_server_start = False
 
     jupyter_env = determine_jupter_env()
-    if jupyter_env in ["jupyter-lab", "jupyter-notebook"] and buckaroo_mtime > server_start_time:
+    if jupyter_env in ["jupyter-lab", "jupyter-notebook"] and buckaroo_installed_after_server_start:
         print("It looks like you installed Buckaroo after you started this notebook server.")
         print("""If you see a messages like""")
         print(""""Failed to load model class 'DCEFWidgetModel' from module 'buckaroo'" """)
@@ -131,7 +135,10 @@ def disable():
     print("The default DataFrame displayers have been restored. To re-enable Buckaroo use `from buckaroo import enable; enable()`")
 
 def determine_jupter_env():
-    import psutil
+    try:
+        import psutil
+    except ImportError:
+        return "jupyterlite"
     parent_process = psutil.Process().parent().cmdline()[-1]
 
     if 'jupyter-lab' in parent_process:
