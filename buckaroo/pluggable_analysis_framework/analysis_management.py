@@ -4,7 +4,7 @@ import warnings
 
 import pandas as pd
 import numpy as np
-from packaging.version import Version
+
 
 from buckaroo.pluggable_analysis_framework.safe_summary_df import output_full_reproduce, output_reproduce_preamble
 
@@ -122,6 +122,12 @@ class AnalysisPipeline(object):
         summary_df, summary_errs = produce_summary_df(
             df, series_stat_dict, ordered_objs, df_name, debug)
         series_errs.update(summary_errs)
+        try:
+            from packaging.version import Version
+        except Exception:
+            # probably in jupyterlite
+            # we have a recent pandas version here, so it's fine to just return the obj
+            return summary_df, series_errs
         if Version(pd.__version__) < Version("2.0.7"):
             for col, summary_dict in summary_df.items():
                 del_keys = []

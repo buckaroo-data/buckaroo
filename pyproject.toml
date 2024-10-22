@@ -35,7 +35,7 @@ dependencies = [
     "graphlib_backport>=1.0.0",
     "packaging>=18"
 ]
-version = "0.7.6"
+version = "0.7.8"
 
 [project.license]
 file = "LICENSE.txt"
@@ -52,7 +52,8 @@ test = [
     "polars[timezone]",
     "pydantic>=2.5.2",
     "pyarrow",
-    "geopandas<1.0"
+    "geopandas<1.0",
+    "ruff"
 ]
 polars = ["polars>=1.0,<1.6",
        "polars[timezone]"

@@ -2,7 +2,7 @@ import warnings
 
 import pandas as pd
 import numpy as np
-from packaging.version import Version
+
 
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 
@@ -26,7 +26,20 @@ def probable_datetime(ser):
         warnings.filterwarnings('default')
         return False
 
+
 def get_mode(ser):
+    try:
+        from packaging.version import Version
+    except Exception:
+        #this package isn't available in jupyterlite
+        
+        # but in jupyterlite envs, we have a recent version of pandas
+        # without this problem
+        mode_raw = ser.mode()
+        if len(mode_raw) == 0:
+            return np.nan
+        return mode_raw.values[0]
+        
     try:
         mode_raw = ser.mode()
         if len(mode_raw) == 0:
