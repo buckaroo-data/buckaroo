@@ -5,11 +5,16 @@ Buckaroo is a modern data table for Jupyter that expedites the most common explo
 <img width="1002" alt="Polars-Buckaroo" src="https://github.com/paddymul/buckaroo/assets/40453/f48b701b-dfc4-4470-8588-05b6a9f33eec">
 
 
+## Try it with Jupyterlite
+Play with Buckaroo without any installation.
+[Full Tour](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb)
+[![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb)
 
 ## Quick start
 
-run `pip install buckaroo`
-in a notebook execute the following to see Buckaroo
+run `pip install buckaroo` then restart your jupyter server
+
+The following code shows Buckaroo on a simple dataframe
 
 ```
 import pandas as pd
@@ -28,7 +33,9 @@ Buckaroo works in the following notebook environments
 - `jupyter lab` (version >=3.6.0)
 - `jupyter notebook` (version >=7.0) 
 - `VS Code notebooks` (with extra install)
-- `Google colab`  (with special initiation code)
+- [Jupyter Lite](https://paddymul.github.io/buckaroo-examples/lab/index.html)
+- `Google colab`  (with special initiation code, currently broken)
+
 
 Buckaroo works with the following DataFrame libraries
 - `pandas` (version >=1.3.5)
@@ -51,13 +58,13 @@ The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery)
 
 ## Example Notebooks
 
-The following notebooks must executed in an environemnt with Buckaroo installed.
-- [Full Tour](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Full-tour.ipynb) Start here. This gives a broad overview of Buckaroo's features.
-- [Histogram Demo](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Histograms-demo.ipynb) Explantion of the embedded histograms of Buckaroo.
-- [Styling Gallery](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/styling-gallery.ipynb) Examples of all of the different formatters and styling available for the table
-- [Extending Buckaroo](http://localhost:8888/lab/workspaces/auto-p/tree/Extending.ipynb) Broad overview of how to add post processing methods and custom styling methods to Buckaroo
-- [Styling Howto](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/styling-howto.ipynb) In depth explanation of how to write custom styling methods
-- [Pluggable Analysis Framework](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Pluggable-Analysis-Framework.ipynb) How to add new summary stats to Buckaroo
+The following examples are loaded into a jupyter lite environment with Buckaroo installed.
+- [Full Tour](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb) Start here. This gives a broad overview of Buckaroo's features.
+- [Histogram Demo](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Histograms-demo.ipynb) Explantion of the embedded histograms of Buckaroo.
+- [Styling Gallery](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-gallery.ipynb) Examples of all of the different formatters and styling available for the table
+- [Extending Buckaroo](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Extending.ipynb) Broad overview of how to add post processing methods and custom styling methods to Buckaroo
+- [Styling Howto](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-howto.ipynb) In depth explanation of how to write custom styling methods
+- [Pluggable Analysis Framework](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Pluggable-Analysis-Framework.ipynb) How to add new summary stats to Buckaroo
 - [Solara Buckaroo](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Solara-Buckaroo.ipynb) Using Buckaroo with Solara
 - [GeoPandas with Bucakroo](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/GeoPandas.ipynb)
 
