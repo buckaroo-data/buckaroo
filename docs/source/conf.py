@@ -19,7 +19,7 @@ release = json.loads(open("../../package.json").read())['version']
 extensions = []
 
 templates_path = ['_templates']
-exclude_patterns = []
+exclude_patterns = ['*.ipynb']
 
 
 
