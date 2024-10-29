@@ -13,6 +13,7 @@ nbstripout docs/example-notebooks/DFViewer.ipynb \
  docs/example-notebooks/Pluggable-Analysis-Framework.ipynb \
  docs/example-notebooks/Solara-Buckaroo.ipynb \
  docs/example-notebooks/introduction.ipynb \
- docs/example-notebooks/styling-gallery.ipynb \
+ docs/example-notebooks/Styling-Gallery-Polars.ipynb \
+ docs/example-notebooks/Styling-Gallery-Pandas.ipynb \
  docs/example-notebooks/styling-howto.ipynb \
  docs/example-notebooks/testcases-fast.ipynb

@@ -152,15 +152,35 @@ class ComputedDefaultSummaryStats(ColAnalysis):
         distinct_count=len(value_counts)
         unique_count = len(value_counts[value_counts==1])
 
-        return dict(
-            unique_count=unique_count,
-            empty_count=empty_count,
-            distinct_count=distinct_count,
-            distinct_per=distinct_count/l,
-            empty_per=empty_count/l,
-            unique_per=unique_count/l,
-            nan_per=summary_dict['nan_count']/l)
+        try:
+            empty_count = value_counts.get('', 0)
+        except:
+            empty_count = 0
+        distinct_count=len(value_counts)
+        unique_count = len(value_counts[value_counts==1])
 
+        def vc_nth(pos):
+            if pos >= len(value_counts):
+                return None
+            else:
+                return value_counts.index[pos]
+
+        return {
+            'non_null_count':l - summary_dict['nan_count'],
+            'null_count': summary_dict['nan_count'],
+            'most_freq':vc_nth(0),
+            '2nd_freq':vc_nth(1),
+            '3rd_freq':vc_nth(2),
+            '4th_freq':vc_nth(3),
+            '5th_freq':vc_nth(4),
+            'unique_count':unique_count,
+            'empty_count':empty_count,
+            'distinct_count':distinct_count,
+            'distinct_per':distinct_count/l,
+            'empty_per':empty_count/l,
+            'unique_per':unique_count/l,
+            'nan_per':summary_dict['nan_count']/l
+        }
 
 class PdCleaningStats(ColAnalysis):
     provides_defaults = {'int_parse_fail': 0.0, 'int_parse':0.0}
