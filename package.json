@@ -1,6 +1,6 @@
 {
   "name": "buckaroo",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "description": "Fast Datagrid widget for the Jupyter Notebook and JupyterLab",
   "keywords": [
     "jupyter",
