@@ -1,14 +1,8 @@
 import React, { useState, Dispatch, SetStateAction } from 'react';
 import _ from 'lodash';
-import { OperationResult, baseOperationResults } from './DependentTabs';
+import { OperationResult } from './DependentTabs';
 import { ColumnsEditor } from './ColumnsEditor';
-import {
-  dfviewer_config_no_pinned,
-  realSummaryConfig,
-  realSummaryTableData,
-  summaryDfForTableDf,
-  tableDf,
-} from '../baked_data/staticData';
+
 import { DFData, DFViewerConfig } from './DFViewerParts/DFWhole';
 import { DFViewer } from './DFViewerParts/DFViewer';
 import { StatusBar } from './StatusBar';
@@ -16,8 +10,7 @@ import { BuckarooState } from './WidgetTypes';
 import { BuckarooOptions } from './WidgetTypes';
 import { DFMeta } from './WidgetTypes';
 import { CommandConfigT } from './CommandUtils';
-import { bakedCommandConfig } from './bakedOperationDefaults';
-import { Operation, bakedOperations } from './OperationUtils';
+import { Operation } from './OperationUtils';
 
 export type CommandConfigSetterT = (
   setter: Dispatch<SetStateAction<CommandConfigT>>
@@ -111,74 +104,5 @@ export function WidgetDCFCell({
         <span></span>
       )}
     </div>
-  );
-}
-
-export function WidgetDCFCellExample() {
-  const dfm: DFMeta = {
-    columns: 5,
-    rows_shown: 20,
-    filtered_rows: 89,
-    total_rows: 877,
-  };
-
-  const [bState, setBState] = useState<BuckarooState>({
-    auto_clean: '',
-    sampled: false,
-    show_commands: false,
-    df_display: 'main',
-    post_processing: '',
-    quick_command_args: {},
-  });
-
-  const bOptions: BuckarooOptions = {
-    auto_clean: ['', 'aggressive', 'conservative'],
-    df_display: ['main', 'realSummary', 'no_pinned'],
-    sampled: ['random'],
-    post_processing: ['', 'foo', 'bar'],
-    show_commands: ['on'],
-    //    'summary_stats' : ['full', 'all', 'typing_stats']
-  };
-
-  const [operations, setOperations] = useState<Operation[]>(bakedOperations);
-
-  const bakedDfDisplay: Record<string, IDisplayArgs> = {
-    main: {
-      data_key: 'main',
-      df_viewer_config: tableDf.dfviewer_config,
-      summary_stats_key: 'all',
-    },
-    realSummary: {
-      data_key: 'empty',
-      df_viewer_config: realSummaryConfig,
-      summary_stats_key: 'real_summary',
-    },
-
-    no_pinned: {
-      data_key: 'main',
-      df_viewer_config: dfviewer_config_no_pinned,
-      summary_stats_key: 'all',
-    },
-  };
-
-  const df_data_dict = {
-    main: tableDf.data,
-    all: summaryDfForTableDf,
-    real_summary: realSummaryTableData,
-    empty: [{ index: 'distinct_count' }],
-  };
-  return (
-    <WidgetDCFCell
-      df_meta={dfm}
-      df_display_args={bakedDfDisplay}
-      df_data_dict={df_data_dict}
-      buckaroo_options={bOptions}
-      buckaroo_state={bState}
-      on_buckaroo_state={setBState}
-      commandConfig={bakedCommandConfig}
-      operations={operations}
-      on_operations={setOperations}
-      operation_results={baseOperationResults}
-    />
   );
 }

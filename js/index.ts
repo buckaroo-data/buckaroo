@@ -1,36 +1,28 @@
-// Copyright (c) Bloomberg
+// Copyright (c) Paddy Mullen
 // Distributed under the terms of the Modified BSD License.
 
-import { ColumnsEditor, ColumnsEditorEx } from './components/ColumnsEditor';
-import { WidgetDCFCellExample } from './components/DCFCell';
-import { DFViewer, DFViewerEx } from './components/DFViewerParts/DFViewer';
+import { ColumnsEditor } from './components/ColumnsEditor';
+import { DFViewer } from './components/DFViewerParts/DFViewer';
+import { WidgetDCFCell } from './components/DCFCell';
 import { HistogramCell } from './components/DFViewerParts/HistogramCell';
 import { DependentTabs } from './components/DependentTabs';
 import { OperationViewer } from './components/Operations';
-//import { DFData, DFViewerConfig } from './components/DFViewerParts/DFWhole';
+import * as CommandUtils from './components/CommandUtils';
+import * as utils from './components/utils';
 import { StatusBar } from './components/StatusBar';
 
 // In case of classic Jupyter Notebook and embed, we provide the PhosphorJS CSS
-
 export * from './version';
 export * from './dcefwidget';
-export * as bakedData from './baked_data/staticData';
 
 export const extraComponents = {
   ColumnsEditor,
   DependentTabs,
   OperationViewer,
-  WidgetDCFCellExample,
-  ColumnsEditorEx,
+  WidgetDCFCell,
   DFViewer,
-  DFViewerEx,
   StatusBar,
   HistogramCell,
+  CommandUtils,
+  utils,
 };
-
-/*
-export const typing = { 
-    DFData, 
-    DFViewerConfig
- };
-*/

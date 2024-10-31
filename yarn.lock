@@ -3975,13 +3975,6 @@ dom-converter@^0.2.0:
   dependencies:
     utila "~0.4"
 
-dom-helpers@^3.4.0:
-  version "3.4.0"
-  resolved "https://registry.npmjs.org/dom-helpers/-/dom-helpers-3.4.0.tgz"
-  integrity sha512-LnuPJ+dwqKDIyotW1VzmOZ5TONUN7CwkCR5hrgawTUbkBGYdeoNLZo6nNfGkCrjtE1nXXaj7iMMpDa8/d9WoIA==
-  dependencies:
-    "@babel/runtime" "^7.1.2"
-
 dom-helpers@^5.0.1, dom-helpers@^5.2.0, dom-helpers@^5.2.1:
   version "5.2.1"
   resolved "https://registry.npmjs.org/dom-helpers/-/dom-helpers-5.2.1.tgz"
@@ -4532,7 +4525,7 @@ fast-diff@^1.1.2:
   resolved "https://registry.npmjs.org/fast-diff/-/fast-diff-1.3.0.tgz"
   integrity sha512-VxPP4NqbUjj6MaAOafWeUn2cXWLcCtljklUtZf0Ind4XQ+QPtmA0b18zZy0jIQx+ExRVCR/ZQpBmik5lXshNsw==
 
-fast-equals@^5.0.0, fast-equals@^5.0.1:
+fast-equals@^5.0.1:
   version "5.0.1"
   resolved "https://registry.npmjs.org/fast-equals/-/fast-equals-5.0.1.tgz"
   integrity sha512-WF1Wi8PwwSY7/6Kx0vKXtw8RwuSGoM1bvDaJbu7MxDlR1vovZjIAKrnzyrThgAjm6JDTu0fVgWXDlMGspodfoQ==
@@ -7401,7 +7394,7 @@ react-dom@^18.0.0, react-dom@^18.2.0:
     loose-envify "^1.1.0"
     scheduler "^0.23.0"
 
-react-is@^16.10.2, react-is@^16.13.1, react-is@^16.3.2, react-is@^16.6.0, react-is@^16.7.0:
+react-is@^16.13.1, react-is@^16.3.2, react-is@^16.6.0, react-is@^16.7.0:
   version "16.13.1"
   resolved "https://registry.npmjs.org/react-is/-/react-is-16.13.1.tgz"
   integrity sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==
@@ -7410,6 +7403,11 @@ react-is@^18.0.0, react-is@^18.2.0:
   version "18.2.0"
   resolved "https://registry.npmjs.org/react-is/-/react-is-18.2.0.tgz"
   integrity sha512-xWGDIW6x921xtzPkhiULtthJHoJvBbF3q26fzloPCK0hsvxtPVelvftw3zjbHWSkR2km9Z+4uxbDDK/6Zw9B8w==
+
+react-is@^18.3.1:
+  version "18.3.1"
+  resolved "https://registry.yarnpkg.com/react-is/-/react-is-18.3.1.tgz#e83557dc12eae63a99e003a46388b1dcbb44db7e"
+  integrity sha512-/LLMVyas0ljjAtoYiPqYiL8VWXzUUdThrmU5+n20DZv+a+ClRoevUzw5JxU+Ieh5/c87ytoTBV9G1FiKfNJdmg==
 
 react-lifecycles-compat@^3.0.4:
   version "3.0.4"
@@ -7451,14 +7449,6 @@ react-router@^6.3.0:
   dependencies:
     "@remix-run/router" "1.15.3"
 
-react-smooth@^2.0.3:
-  version "2.0.5"
-  resolved "https://registry.npmjs.org/react-smooth/-/react-smooth-2.0.5.tgz"
-  integrity sha512-BMP2Ad42tD60h0JW6BFaib+RJuV5dsXJK9Baxiv/HlNFjvRLqA9xrNKxVWnUIZPQfzUwGXIlU/dSYLU+54YGQA==
-  dependencies:
-    fast-equals "^5.0.0"
-    react-transition-group "2.9.0"
-
 react-smooth@^4.0.0:
   version "4.0.1"
   resolved "https://registry.npmjs.org/react-smooth/-/react-smooth-4.0.1.tgz"
@@ -7467,16 +7457,6 @@ react-smooth@^4.0.0:
     fast-equals "^5.0.1"
     prop-types "^15.8.1"
     react-transition-group "^4.4.5"
-
-react-transition-group@2.9.0:
-  version "2.9.0"
-  resolved "https://registry.npmjs.org/react-transition-group/-/react-transition-group-2.9.0.tgz"
-  integrity sha512-+HzNTCHpeQyl4MJ/bdE0u6XRMe9+XG/+aL4mCxVN4DnPBQ0/5bfHWPDuOZUzYdMj94daZaZdCCc1Dzt9R/xSSg==
-  dependencies:
-    dom-helpers "^3.4.0"
-    loose-envify "^1.4.0"
-    prop-types "^15.6.2"
-    react-lifecycles-compat "^3.0.4"
 
 react-transition-group@^4.4.5:
   version "4.4.5"
@@ -7540,15 +7520,15 @@ recharts-scale@^0.4.4:
   dependencies:
     decimal.js-light "^2.4.1"
 
-recharts@^2.7.3:
-  version "2.12.5"
-  resolved "https://registry.npmjs.org/recharts/-/recharts-2.12.5.tgz"
-  integrity sha512-Cy+BkqrFIYTHJCyKHJEPvbHE2kVQEP6PKbOHJ8ztRGTAhvHuUnCwDaKVb13OwRFZ0QNUk1QvGTDdgWSMbuMtKw==
+recharts@^2.13.1:
+  version "2.13.2"
+  resolved "https://registry.yarnpkg.com/recharts/-/recharts-2.13.2.tgz#4450e5644da54680aa6924e5bc5bd06407fae5d2"
+  integrity sha512-UDLGFmnsBluDIPpQb9uty0ejb+jiVI71vkki8vVsR6ZCJdgjBfKQoQfft4re99CKlTy9qjQApxCLG6TrxJkeAg==
   dependencies:
     clsx "^2.0.0"
     eventemitter3 "^4.0.1"
     lodash "^4.17.21"
-    react-is "^16.10.2"
+    react-is "^18.3.1"
     react-smooth "^4.0.0"
     recharts-scale "^0.4.4"
     tiny-invariant "^1.3.1"

@@ -1,12 +1,10 @@
-import React, { useState } from 'react';
-import { bakedOperations } from '../baked_data/staticData';
-import { DFViewerConfig, EmptyDf } from './DFViewerParts/DFWhole';
+import React from 'react';
+
+import { DFViewerConfig } from './DFViewerParts/DFWhole';
 import { OperationViewer } from './Operations';
 import { Operation } from './OperationUtils';
 import { CommandConfigT } from './CommandUtils';
-//import {bakedCommandConfig} from './bakedOperationDefaults';
 import { DependentTabs, OperationResult } from './DependentTabs';
-import { tableDf, bakedCommandConfig } from '../baked_data/staticData';
 
 export type OperationSetter = (ops: Operation[]) => void;
 export interface WidgetConfig {
@@ -47,25 +45,5 @@ export function ColumnsEditor({
         />
       </div>
     </div>
-  );
-}
-
-export function ColumnsEditorEx() {
-  const [operations, setOperations] = useState(bakedOperations);
-
-  const baseOperationResults: OperationResult = {
-    transformed_df: EmptyDf,
-    generated_py_code: 'default py code',
-    transform_error: undefined,
-  };
-  return (
-    <ColumnsEditor
-      df_viewer_config={tableDf.dfviewer_config}
-      activeColumn={'foo'}
-      commandConfig={bakedCommandConfig}
-      operations={operations}
-      setOperations={setOperations}
-      operationResult={baseOperationResults}
-    />
   );
 }

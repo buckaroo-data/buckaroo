@@ -2,58 +2,14 @@ import _ from 'lodash';
 import React from 'react';
 import { createPortal } from 'react-dom';
 
-import {
-  BarChart,
-  Bar,
-  //Tooltip,
-  //Legend,
-  //Cell, XAxis, YAxis, CartesianGrid, , ResponsiveContainer,
-} from 'recharts';
-import { Tooltip } from '../../vendor/RechartTooltip';
+import { Bar, BarChart, Tooltip } from 'recharts';
 
-import { isNumOrStr, ValueType } from '../../vendor/RechartExtra';
-import { ValueFormatterFunc } from 'ag-grid-community';
+import {} from 'recharts';
 
-function defaultFormatter<TValue extends ValueType>(value: TValue) {
-  return _.isArray(value) && isNumOrStr(value[0]) && isNumOrStr(value[1])
-    ? (value.join(' ~ ') as TValue)
-    : value;
+export interface HistogramNode {
+  name: string;
+  population: number;
 }
-
-export const bakedData = [
-  {
-    name: 'Page A',
-    population: 4000,
-  },
-  {
-    name: 'Page B',
-    population: 3000,
-  },
-  {
-    name: 'Page C',
-    population: 2000,
-  },
-  {
-    name: 'Page D',
-    population: 2780,
-  },
-  {
-    name: 'Page E',
-    population: 1890,
-  },
-];
-
-export const makeData = (histogram: number[]) => {
-  const accum = [];
-  for (let i = 0; i < histogram.length; i++) {
-    accum.push({
-      name: `${i + 1}/${histogram.length}`,
-      population: histogram[i],
-    });
-  }
-  //console.log('accum', accum)
-  return accum;
-};
 
 export const formatter = (value: any, name: any, props: any) => {
   if (props.payload.name === 'longtail') {
@@ -88,75 +44,32 @@ export function FloatingTooltip({ items, x, y }: any) {
   );
 }
 
-export const ToolTipAdapter = (args: any) => {
-  const { active, formatter, payload } = args;
-  if (active && payload && payload.length) {
-    const renderContent2 = () => {
-      //const items = (itemSorter ? _.sortBy(payload, itemSorter) : payload).map((entry, i) => {
-      const items = payload.map((entry: any, i: number) => {
-        if (entry.type === 'none') {
-          return null;
-        }
-
-        const finalFormatter = entry.formatter || formatter || defaultFormatter;
-        const { value, name } = entry;
-        let finalValue: React.ReactNode = value;
-        let finalName: React.ReactNode = name;
-        if (finalFormatter && finalValue !== null && finalName !== null) {
-          const formatted = finalFormatter(value, name, entry, i, payload);
-          if (Array.isArray(formatted)) {
-            [finalValue, finalName] = formatted;
-          } else {
-            finalValue = formatted;
-          }
-        }
-
-        return [finalName, finalValue];
-      });
-      return items;
-    };
-    return (
-      <div className="custom-tooltip">
-        <FloatingTooltip
-          items={renderContent2()}
-          x={args.box.x}
-          y={args.box.y}
-        />
-      </div>
+const CustomTooltip = ({ active, payload, label, screenCoords }: any) => {
+  if (active && payload && payload.length && screenCoords) {
+    // console.log("payload", payload, "label", label);
+    // console.log("payload[0].payload", payload[0].payload, payload[0].payload.name)
+    const name = payload[0].payload.name;
+    return createPortal(
+      <div
+        style={{
+          backgroundColor: '#eee',
+          padding: '5px 10px 5px 10px',
+          color: '#111',
+          position: 'absolute',
+          top: screenCoords.y + 10,
+          left: screenCoords.x + 10,
+        }}
+      >
+        <p className="label">{`${name} : ${payload[0].value}`}</p>
+      </div>,
+      document.body
     );
   }
 
   return null;
 };
 
-export const getTextCellRenderer = (formatter: ValueFormatterFunc<any>) => {
-  const TextCellRenderer = (props: any) => {
-    return <span>{formatter(props)}</span>;
-  };
-  return TextCellRenderer;
-};
-
-export const LinkCellRenderer = (props: any) => {
-  return <a href={props.value}>{props.value}</a>;
-};
-
-export const Base64PNGDisplayer = (props: any) => {
-  const imgString = 'data:image/png;base64,' + props.value;
-  return <img src={imgString}></img>;
-};
-
-export const SVGDisplayer = (props: any) => {
-  const markup = { __html: props.value };
-
-  return (
-    <div //style={{border:'1px solid red', borderBottom:'1px solid green'}}
-      dangerouslySetInnerHTML={markup}
-    ></div>
-  );
-};
-
 export const HistogramCell = (props: any) => {
-  //debugger;
   if (props === undefined || props.value === undefined) {
     return <span></span>;
   }
@@ -174,6 +87,10 @@ export const HistogramCell = (props: any) => {
     console.log('dumbClickHandler', rechartsArgs);
   };
 
+  const [screenCoords, setScreenCoords] = React.useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   return (
     <div className="histogram-component">
       <BarChart
@@ -182,6 +99,10 @@ export const HistogramCell = (props: any) => {
         barGap={1}
         data={histogram}
         onClick={dumbClickHandler}
+        onMouseMove={(_, e) => {
+          // console.log(e);
+          setScreenCoords({ x: e.clientX, y: e.clientY });
+        }}
       >
         <defs>
           <pattern
@@ -270,15 +191,13 @@ export const HistogramCell = (props: any) => {
           stackId="stack"
         />
         <Bar dataKey="NA" fill="url(#stripe)" stackId="stack" />
-
         <Tooltip
           formatter={formatter}
-          labelStyle={{ display: 'None' }}
-          wrapperStyle={{ zIndex: 999991 }}
-          contentStyle={{ color: 'black' }}
-          content={<ToolTipAdapter />}
-          offset={20}
-          allowEscapeViewBox={{ x: true }}
+          allowEscapeViewBox={{ x: true, y: true }}
+          wrapperStyle={{ zIndex: 99999999, color: '#111' }}
+          content={(props) => (
+            <CustomTooltip {...props} screenCoords={screenCoords} />
+          )}
         />
       </BarChart>
     </div>

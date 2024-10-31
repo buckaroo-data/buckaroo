@@ -14,7 +14,7 @@ const helpCell = function (params: any) {
     <a
       href="https://buckaroo-data.readthedocs.io/en/latest/feature_reference.html"
       target="_blank"
-      rel="noopener"
+      rel="noopener noreferrer"
     >
       ?
     </a>

@@ -1,6 +1,6 @@
 {
   "name": "buckaroo",
-  "version": "0.7.9",
+  "version": "0.7.10",
   "description": "Fast Datagrid widget for the Jupyter Notebook and JupyterLab",
   "keywords": [
     "jupyter",
@@ -66,8 +66,7 @@
     "lodash": "^4.17.21",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
-    "react-smooth": "^2.0.3",
-    "recharts": "^2.7.3"
+    "recharts": "^2.13.1"
   },
   "devDependencies": {
     "@babel/cli": "^7.6.3",

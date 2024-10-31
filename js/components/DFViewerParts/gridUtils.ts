@@ -21,12 +21,12 @@ import {
   DFViewerConfig,
 } from './DFWhole';
 import _, { zipObject } from 'lodash';
-import { getTextCellRenderer } from './HistogramCell';
+import { getTextCellRenderer } from './OtherRenderers';
 
 import { DFData, SDFMeasure, SDFT } from './DFWhole';
 
 import { CellRendererArgs, FormatterArgs, PinnedRowConfig } from './DFWhole';
-import { getBakedDFViewer } from './SeriesSummaryTooltip';
+import { getBakedDFViewer, simpleTooltip } from './SeriesSummaryTooltip';
 import {
   getFormatterFromArgs,
   getCellRenderer,
@@ -165,7 +165,7 @@ export function getTooltip(
 ): Partial<ColDef> {
   switch (ttc.tooltip_type) {
     case 'simple':
-      return { tooltipField: ttc.val_column };
+      return { tooltipField: ttc.val_column, tooltipComponent: simpleTooltip };
 
     case 'summary_series':
       return {
@@ -230,6 +230,7 @@ export function dfToAgrid(
       return colDef;
     }
   );
+  console.log('retColumns', retColumns);
   return [retColumns, tdf];
 }
 
@@ -253,7 +254,6 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[]) {
         return anyRenderer;
       }
       const prc: PinnedRowConfig = maybePrc;
-      console.log('params', params);
       const currentCol = params.column?.getColId();
       if (
         (prc.default_renderer_columns === undefined &&
@@ -298,25 +298,3 @@ export function extractSDFT(summaryStatsDf: DFData): SDFT {
   });
   return zipObject(allColumns, vals) as SDFT;
 }
-
-/*
-I would love for extractSDF to be more elegant like the following function.  I just can't quite get it to work
-time to move on
-
-export function extractSDFT2(summaryStatsDf:DFData) : SDFT  {
-  const rows = ['histogram_bins', 'histogram_log_bins']
-
-  const extracted = _.map(rows, (pk) => {
-    return _.find(summaryStatsDf,  {'index': pk}) || {}
-  })
-  const dupKeys: string[][] = _.map(extracted, _.keys);
-  const allColumns: string[] = _.without(_.union(...dupKeys), 'index');
-  const vals:SDFMeasure[] = _.map(allColumns, (colName) => {
-    const pairs = _.map(_.zip(rows, extracted), (rname, row) => {
-      return [rname, (_.get(row, colName, []) as number[])];
-    })
-    return _.fromPairs(pairs) as SDFMeasure;
-  });
-  return zipObject(allColumns, vals) as SDFT;
-}
-*/

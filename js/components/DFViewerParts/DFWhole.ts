@@ -142,6 +142,8 @@ export type ComponentConfig = {
   dfvHeight?: number;
   layoutType?: 'autoHeight' | 'normal';
   shortMode?: boolean;
+  selectionBackground?: string;
+  className?: string;
 };
 
 export interface DFViewerConfig {
