@@ -9,6 +9,7 @@ TODO: Add module docstring
 """
 
 from ipywidgets import DOMWidget
+import pandas as pd
 from traitlets import Unicode, List, Dict, observe
 
 from ._frontend import module_name, module_version
@@ -21,10 +22,11 @@ from .customizations.styling import (DefaultSummaryStatsStyling, DefaultMainStyl
 from .pluggable_analysis_framework.analysis_management import DfStats
 from .pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 
-from .serialization_utils import EMPTY_DF_WHOLE
+from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df
 from .dataflow.dataflow import CustomizableDataflow, StylingAnalysis, exception_protect
 from .dataflow.dataflow_extras import (Sampling)
 from .dataflow.autocleaning import PandasAutocleaning
+
 
 class BuckarooProjectWidget(DOMWidget):
     """
@@ -40,6 +42,21 @@ class BuckarooProjectWidget(DOMWidget):
 
 
 class PdSampling(Sampling):
+    @classmethod
+    def pre_stats_sample(kls, df):
+        # this is a bad place for fixing the dataframe, but for now
+        # it's expedient. There probably should be a nother processing
+        # step
+        df = check_and_fix_df(df)
+        if len(df.columns) > kls.max_columns:
+            print("Removing excess columns, found %d columns" %  len(df.columns))
+            df = df[df.columns[:kls.max_columns]]
+        if kls.pre_limit and len(df) > kls.pre_limit:
+            sampled = df.sample(kls.pre_limit)
+            if isinstance(sampled, pd.DataFrame):
+                return sampled.sort_index()
+            return sampled
+        return df
     pre_limit = 1_000_000
 
 

@@ -1,8 +1,11 @@
+import pytest
 import pandas as pd
 from IPython.display import display
 from buckaroo.buckaroo_widget import BuckarooWidget
 from buckaroo.pluggable_analysis_framework.analysis_management import PERVERSE_DF
 from .fixtures import (word_only_df)
+from buckaroo.serialization_utils import (DuplicateColumnsException)
+
 
 simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
 
@@ -55,6 +58,29 @@ def test_interpreter():
     return df"""
     '''
 
+def test_string_column_handling():
+    """
+    If the front end is passed numeric column names, nothing works, and no error is thrown
+    """
+    
+    df = pd.DataFrame([["a","b","c"]], columns=[10,20,30])
+    bw = BuckarooWidget(df)
+    # print(bw.df_data_dict['main'])
+    # print(bw.df_display_args['main']['df_viewer_config']['column_config'])
+    #we want the column to be named the string '10' not the number t10
+    assert bw.df_display_args['main']['df_viewer_config']['column_config'][1]['col_name'] == '10'
+    assert bw.df_data_dict['main'] == [{'index': 0, '10': 'a', '20': 'b', '30': 'c'}]
+    assert bw.df_display_args['main']['df_viewer_config']['column_config'][1]['tooltip_config']['val_column'] == '10'
+
+
+def test_non_unique_column_names():
+    #you end up with columns named [0,1,2, 0,1,2]
+    #refactor to instantiating the dataframe without concat
+
+    with pytest.raises(DuplicateColumnsException):
+        BuckarooWidget(pd.DataFrame([['a', 'b'], [1,2]], columns = [1,1]))
+
+    
 def atest_symbol_meta():    
     """verifies that a symbol with a meta key can be added and
     properly interpretted.  This should probably be a lower level

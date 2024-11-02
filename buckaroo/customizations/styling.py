@@ -25,7 +25,7 @@ class DefaultMainStyling(StylingAnalysis):
 
         digits = 3
         t = column_metadata['_type']
-        base_config = {'col_name':col}
+        base_config = {'col_name':str(col)}
         if t == 'integer':
             disp = {'displayer': 'float', 'min_fraction_digits':0, 'max_fraction_digits':0}
         elif t == 'float':
@@ -34,10 +34,10 @@ class DefaultMainStyling(StylingAnalysis):
             disp = {'displayer': 'datetimeLocaleString','locale': 'en-US',  'args': {}}
         elif t == 'string':
             disp = {'displayer': 'string', 'max_length': 35}
-            base_config['tooltip_config'] = {'tooltip_type':'simple', 'val_column': col}
+            base_config['tooltip_config'] = {'tooltip_type':'simple', 'val_column': str(col)}
         else:
             disp = {'displayer': 'obj'}
-            base_config['tooltip_config'] = {'tooltip_type':'simple', 'val_column': col}
+            base_config['tooltip_config'] = {'tooltip_type':'simple', 'val_column': str(col)}
         base_config['displayer_args'] = disp 
         return base_config
 

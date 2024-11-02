@@ -35,7 +35,7 @@ dependencies = [
     "graphlib_backport>=1.0.0",
     "packaging>=18"
 ]
-version = "0.7.10"
+version = "0.7.11"
 
 [project.license]
 file = "LICENSE.txt"
