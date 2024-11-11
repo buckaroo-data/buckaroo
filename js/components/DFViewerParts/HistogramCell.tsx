@@ -87,6 +87,17 @@ export const HistogramCell = (props: any) => {
     console.log('dumbClickHandler', rechartsArgs);
   };
 
+  // used to prevent duplicate IDs which lead to a nasty bug where patterns aren't applied
+  // https://github.com/paddymul/buckaroo/issues/292
+  const gensym = (base: string) => {
+    const id = `${base}-${crypto.randomUUID()}`;
+    return [id, `url(#${id})`];
+  };
+  const [starId, starUrl] = gensym('star');
+  const [stripeId, stripeUrl] = gensym('stripe');
+  const [circleId, circleUrl] = gensym('circle');
+  const [checkersId, checkersUrl] = gensym('checkers');
+  const [leafsId, leafsUrl] = gensym('leafs');
   const [screenCoords, setScreenCoords] = React.useState<{
     x: number;
     y: number;
@@ -106,7 +117,7 @@ export const HistogramCell = (props: any) => {
       >
         <defs>
           <pattern
-            id="star"
+            id={starId}
             width="10"
             height="10"
             patternUnits="userSpaceOnUse"
@@ -117,7 +128,7 @@ export const HistogramCell = (props: any) => {
             />
           </pattern>
           <pattern
-            id="stripe"
+            id={stripeId}
             width="4"
             height="4"
             patternUnits="userSpaceOnUse"
@@ -126,7 +137,7 @@ export const HistogramCell = (props: any) => {
             <rect width="2" height="4" fill="red" />
           </pattern>
           <pattern
-            id="circles"
+            id={circleId}
             width="4"
             height="4"
             patternUnits="userSpaceOnUse"
@@ -141,7 +152,7 @@ export const HistogramCell = (props: any) => {
           </pattern>
 
           <pattern
-            id="checkers"
+            id={checkersId}
             x="0"
             y="0"
             width="4"
@@ -153,7 +164,7 @@ export const HistogramCell = (props: any) => {
           </pattern>
 
           <pattern
-            id="leafs"
+            id={leafsId}
             x="0"
             y="0"
             width="6"
@@ -172,25 +183,16 @@ export const HistogramCell = (props: any) => {
         <Bar dataKey="tail" stroke="#000" fill="gray" stackId="stack" />
         <Bar dataKey="true" stroke="#00f" fill="#00f" stackId="stack" />
         <Bar dataKey="false" stroke="#000" fill="#fff" stackId="stack" />
-        <Bar
-          dataKey="cat_pop"
-          stroke="pink"
-          fill="url(#circles)"
-          stackId="stack"
-        />
+        <Bar dataKey="cat_pop" stroke="pink" fill={circleUrl} stackId="stack" />
         <Bar
           dataKey="unique"
           stroke="#0f0"
-          fill="url(#checkers)"
+          fill={checkersUrl}
           stackId="stack"
         />
-        <Bar
-          dataKey="longtail"
-          stroke="teal"
-          fill="url(#leafs)"
-          stackId="stack"
-        />
-        <Bar dataKey="NA" fill="url(#stripe)" stackId="stack" />
+        <Bar dataKey="longtail" stroke="teal" fill={leafsUrl} stackId="stack" />
+        <Bar dataKey="user1" stroke="teal" fill={starUrl} stackId="stack" />
+        <Bar dataKey="NA" fill={stripeUrl} stackId="stack" />
         <Tooltip
           formatter={formatter}
           allowEscapeViewBox={{ x: true, y: true }}
