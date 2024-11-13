@@ -1,6 +1,6 @@
 // I'm not sure about adding underlying types too
 
-import { ColDef, GridOptions } from 'ag-grid-community';
+import { ColDef, GridOptions } from '@ag-grid-community/core';
 import _ from 'lodash';
 
 type AGGrid_ColDef = ColDef;

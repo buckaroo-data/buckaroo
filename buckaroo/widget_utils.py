@@ -1,5 +1,5 @@
 import traceback
-from .buckaroo_widget import BuckarooWidget
+from .buckaroo_widget import BuckarooInfiniteWidget
 import pandas as pd
 from datetime import datetime as dtdt
 import os
@@ -20,13 +20,8 @@ def is_in_ipython():
     return ip
     
 
-def enable(sampled=True,
-           summaryStats=False,
-           reorderdColumns=False,
-           showCommands=False,
-           auto_clean=False,
-           postProcessingF=None,
-           debug=False
+def enable(buckaroo_kls=BuckarooInfiniteWidget,
+           debug=False,
            ):
     """
     Automatically use buckaroo to display all DataFrames
@@ -63,7 +58,7 @@ def enable(sampled=True,
     def _display_as_buckaroo(df):
         from IPython.display import display
         try:
-            bw = BuckarooWidget(df, debug=debug)
+            bw = buckaroo_kls(df, debug=debug)
             return display(bw)
         except:
             if debug:

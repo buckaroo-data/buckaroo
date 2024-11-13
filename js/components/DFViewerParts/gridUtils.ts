@@ -3,7 +3,9 @@ import {
   CellRendererSelectorResult,
   ColDef,
   ICellRendererParams,
-} from 'ag-grid-community';
+  IDatasource,
+  IGetRowsParams,
+} from '@ag-grid-community/core';
 import {
   BLUE_TO_YELLOW,
   DIVERGING_RED_WHITE_BLUE,
@@ -33,6 +35,8 @@ import {
   objFormatter,
   getFormatter,
 } from './Displayer';
+import { Dispatch, SetStateAction } from 'react';
+import { CommandConfigT } from '../CommandUtils';
 
 // for now colDef stuff with less than 3 implementantions should stay in this file
 // as implementations grow large or with many implmentations, they should move to separate files
@@ -196,10 +200,9 @@ export function extractSingleSeriesSummary(
 }
 
 export function dfToAgrid(
-  tdf: DFData,
   dfviewer_config: DFViewerConfig,
   full_summary_stats_df: DFData
-): [ColDef[], unknown[]] {
+): ColDef[] {
   //more convienient df format for some formatters
   const hdf = extractSDFT(full_summary_stats_df || []);
 
@@ -230,8 +233,7 @@ export function dfToAgrid(
       return colDef;
     }
   );
-  console.log('retColumns', retColumns);
-  return [retColumns, tdf];
+  return retColumns;
 }
 
 // this is very similar to the colDef parts of dfToAgrid
@@ -298,3 +300,172 @@ export function extractSDFT(summaryStatsDf: DFData): SDFT {
   });
   return zipObject(allColumns, vals) as SDFT;
 }
+export interface PayloadArgs {
+  sourceName: string;
+  start: number;
+  end: number;
+  sort?: string;
+  sort_direction?: string;
+}
+export interface PayloadResponse {
+  key: PayloadArgs;
+  data: DFData;
+  length: number;
+  error_info?: string;
+}
+export const getPayloadKey = (
+  payloadArgs: PayloadArgs,
+  outside_params: any
+): string => {
+  return `${payloadArgs.sourceName}-${payloadArgs.start}-${payloadArgs.end}-${payloadArgs.sort}-${payloadArgs.sort_direction}`; //-${JSON.stringify(outside_params)}`;
+};
+export type CommandConfigSetterT = (
+  setter: Dispatch<SetStateAction<CommandConfigT>>
+) => void;
+
+export interface IDisplayArgs {
+  data_key: string;
+  df_viewer_config: DFViewerConfig;
+  summary_stats_key: string;
+}
+
+export class LruCache<T> {
+  private values: Map<string, T> = new Map<string, T>();
+  private maxEntries = 10;
+
+  public get(key: string): T | undefined {
+    const hasKey = this.values.has(key);
+    if (hasKey) {
+      // peek the entry, re-insert for LRU strategy
+      const maybeEntry = this.values.get(key);
+      if (maybeEntry === undefined) {
+        throw new Error(`unexpected undefined for ${key}`);
+      }
+      const entry: T = maybeEntry;
+      this.values.delete(key);
+      this.values.set(key, entry);
+      return entry;
+    }
+    return undefined;
+  }
+
+  public put(key: string, value: T) {
+    if (this.values.size >= this.maxEntries) {
+      // least-recently used cache eviction strategy
+      const keyToDelete = this.values.keys().next().value;
+      console.log(`deleting ${keyToDelete}`);
+      this.values.delete(String(keyToDelete));
+    }
+
+    this.values.set(key, value);
+  }
+}
+export type RespCache = LruCache<PayloadResponse>;
+
+export interface TimedIDatasource extends IDatasource {
+  createTime: Date;
+}
+
+export const getDs = (
+  setPaState2: (pa: PayloadArgs) => void,
+  respCache: LruCache<PayloadResponse>
+): TimedIDatasource => {
+  const dsLoc: TimedIDatasource = {
+    createTime: new Date(),
+    rowCount: undefined,
+    getRows: (params: IGetRowsParams) => {
+      const sm = params.sortModel;
+      const outside_params_string = JSON.stringify(
+        params.context?.outside_df_params
+      );
+      const dsPayloadArgs = {
+        sourceName: outside_params_string,
+        start: params.startRow,
+        end: params.endRow,
+        sort: sm.length === 1 ? sm[0].colId : undefined,
+        sort_direction: sm.length === 1 ? sm[0].sort : undefined,
+      };
+
+      const dsPayloadArgsNext = {
+        sourceName: outside_params_string,
+        start: params.endRow,
+        end: params.endRow + (params.endRow - params.startRow),
+        sort: sm.length === 1 ? sm[0].colId : undefined,
+        sort_direction: sm.length === 1 ? sm[0].sort : undefined,
+      };
+      //      console.log('dsPayloadArgs', dsPayloadArgs, getPayloadKey(dsPayloadArgs));
+      console.log(
+        'gridUtils context outside_df_params',
+        params.context?.outside_df_params
+      );
+      const origKey = getPayloadKey(
+        dsPayloadArgs,
+        params.context?.outside_df_params
+      );
+      const resp = respCache.get(origKey);
+
+      if (resp === undefined) {
+        const tryFetching = (attempt: number) => {
+          //const retryWait = 30 * Math.pow(1.7, attempt);
+          //fetching is really cheap.  I'm going to go every 10ms up until 400 ms
+          const retryWait = 15;
+          setTimeout(() => {
+            const toResp = respCache.get(origKey);
+            if (toResp === undefined && attempt < 30) {
+              console.log(
+                `Attempt ${
+                  attempt + 1
+                }: Data not found in cache, retrying... in ${retryWait} tried`,
+                origKey
+              );
+              tryFetching(attempt + 1);
+            } else if (toResp !== undefined) {
+              const expectedPayload =
+                getPayloadKey(
+                  dsPayloadArgs,
+                  params.context?.outside_df_params
+                ) ===
+                getPayloadKey(toResp.key, params.context?.outside_df_params);
+              if (!expectedPayload) {
+                console.log('got back the wrong payload');
+              }
+              console.log('found data for', origKey, toResp.data);
+              params.successCallback(toResp.data, toResp.length);
+              // after the first success, prepopulate the cache for the following request
+              setPaState2(dsPayloadArgsNext);
+            } else {
+              console.log('Failed to fetch data after 5 attempts');
+            }
+          }, retryWait); // Increase timeout exponentially
+        };
+
+        console.log(
+          'after setTimeout, about to call setPayloadArgs',
+          dsPayloadArgs
+        );
+        tryFetching(0);
+        setPaState2(dsPayloadArgs);
+      } else {
+        const expectedPayload =
+          getPayloadKey(dsPayloadArgs, params.context?.outside_df_params) ===
+          getPayloadKey(resp.key, params.context?.outside_df_params);
+        console.log(
+          'data already in cache',
+          dsPayloadArgs.start,
+          dsPayloadArgs.end,
+          expectedPayload,
+          dsPayloadArgs,
+          resp.key
+        );
+        if (!expectedPayload) {
+          console.log('got back the wrong payload');
+          return;
+        }
+        params.successCallback(resp.data, resp.length);
+        // after the first success, prepopulate the cache for the following request
+        setPaState2(dsPayloadArgsNext);
+      }
+    },
+  };
+  return dsLoc;
+};

@@ -10,13 +10,14 @@ import { CommandConfigT } from './CommandUtils';
 import { replaceInArr } from './utils';
 
 import { OperationDetail } from './OperationDetail';
-import { AgGridReact } from 'ag-grid-react'; // the AG Grid React Component
-import { ColDef, GridOptions } from 'ag-grid-community';
+import { AgGridReact } from '@ag-grid-community/react'; // the AG Grid React Component
+import { ColDef, GridOptions } from '@ag-grid-community/core';
 //import { CustomCellRendererProps } from '@ag-grid-community/react';
 
 import { updateAtMatch } from './utils';
-import 'ag-grid-community/styles/ag-grid.css';
-import 'ag-grid-community/styles/ag-theme-alpine.css';
+
+import '@ag-grid-community/styles/ag-grid.css';
+import '@ag-grid-community/styles/ag-theme-alpine.css';
 
 export const OperationsList = ({
   operations,

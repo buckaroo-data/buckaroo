@@ -3,7 +3,7 @@
 import { extractSDFT,  getHistoIndex, } from '../../js/components/DFViewerParts/gridUtils';
 import { DFData } from "../../js/components/DFViewerParts/DFWhole";
 import { getFloatFormatter } from '../../js/components/DFViewerParts/Displayer';
-import { ValueFormatterParams } from 'ag-grid-community';
+import { ValueFormatterParams } from '@ag-grid-community/core';
 
 describe("testing utility functions in gridUtils ", () => {
   // mostly sanity checks to help develop gridUtils

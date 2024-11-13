@@ -1,6 +1,6 @@
 import _ from 'lodash';
 import { DFWhole } from './DFViewerParts/DFWhole';
-import { ColDef } from 'ag-grid-community';
+import { ColDef } from '@ag-grid-community/core';
 
 export type setDFFunc = (newDf: DFWhole) => void;
 

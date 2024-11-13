@@ -5,6 +5,8 @@ import {
   DOMWidgetModel,
   DOMWidgetView,
   ISerializers,
+  WidgetModel,
+  WidgetView,
 } from '@jupyter-widgets/base';
 
 import { WidgetDCFCell } from './components/DCFCell';
@@ -16,118 +18,98 @@ import * as ReactDOMClient from 'react-dom/client';
 import { MODULE_NAME, MODULE_VERSION } from './version';
 
 // Import the CSS
+import '@ag-grid-community/styles/ag-grid.css';
+import '@ag-grid-community/styles/ag-theme-alpine.css';
 
-import 'ag-grid-community/styles/ag-grid.css';
-import 'ag-grid-community/styles/ag-theme-alpine.css';
 import '../js/style/dcf-npm.css';
 import { DFViewer } from './components/DFViewerParts/DFViewer';
+import { InfiniteWrapper } from './components/DFViewerParts/TableInfinite';
+import { BuckarooInfiniteWidget } from './components/BuckarooWidgetInfinite';
 
-export class DCEFWidgetModel extends DOMWidgetModel {
-  defaults(): Backbone.ObjectHash {
-    return {
-      ...super.defaults(),
-      _model_name: DCEFWidgetModel.model_name,
-      _model_module: DCEFWidgetModel.model_module,
-      _model_module_version: DCEFWidgetModel.model_module_version,
-      _view_name: DCEFWidgetModel.view_name,
-      _view_module: DCEFWidgetModel.view_module,
-      _view_module_version: DCEFWidgetModel.view_module_version,
-    };
-  }
-
-  static serializers: ISerializers = {
-    ...DOMWidgetModel.serializers,
-    // Add any extra serializers here
-  };
-
-  static model_name = 'DCEFWidgetModel';
-  static model_module = MODULE_NAME;
-  static model_module_version = MODULE_VERSION;
-  static view_name = 'ExampleView'; // Set to null if no view
-  static view_module = MODULE_NAME; // Set to null if no view
-  static view_module_version = MODULE_VERSION;
-}
-export class DCEFWidgetView extends DOMWidgetView {
-  render(): void {
-    this.el.classList.add('custom-widget');
-
-    const Component = () => {
-      const [_, setCounter] = useState(0);
-      const forceRerender = () => {
-        setCounter((x: number) => x + 1);
+function createModelAndView(
+  model_name: string,
+  widget_name: string,
+  WrappedComponent: (arg0: any) => React.JSX.Element
+): [typeof WidgetModel, typeof WidgetView] {
+  class CustomModel extends DOMWidgetModel {
+    defaults(): Backbone.ObjectHash {
+      return {
+        ...super.defaults(),
+        _model_name: model_name,
+        _model_module: CustomModel.model_module,
+        _model_module_version: CustomModel.model_module_version,
+        _view_name: widget_name,
+        _view_module: CustomModel.view_module,
+        _view_module_version: CustomModel.view_module_version,
       };
-      useEffect(() => {
-        this.listenTo(this.model, 'change', forceRerender);
-      }, []);
+    }
 
-      const props: any = {};
-      for (const key of Object.keys(this.model.attributes)) {
-        props[key] = this.model.get(key);
-        props['on_' + key] = (value: any) => {
-          this.model.set(key, value);
-          this.touch();
+    static serializers: ISerializers = {
+      ...DOMWidgetModel.serializers,
+    };
+
+    static model_name = model_name;
+    static model_module = MODULE_NAME;
+    static model_module_version = MODULE_VERSION;
+    static view_name = widget_name;
+    static view_module = MODULE_NAME;
+    static view_module_version = MODULE_VERSION;
+  }
+
+  class CustomView extends DOMWidgetView {
+    render(): void {
+      this.el.classList.add('custom-widget');
+
+      const Component = () => {
+        // this is taken from the AnyWidget implementation
+        const [_, setCounter] = useState(0);
+        const forceRerender = () => {
+          setCounter((x: number) => x + 1);
         };
-      }
-      return React.createElement(WidgetDCFCell, props);
-    };
+        useEffect(() => {
+          this.listenTo(this.model, 'change', forceRerender);
+        }, []);
 
-    const root = ReactDOMClient.createRoot(this.el);
-    const componentEl = React.createElement(Component, {});
-    root.render(componentEl);
-  }
-}
-export class DFViewerModel extends DOMWidgetModel {
-  defaults(): Backbone.ObjectHash {
-    return {
-      ...super.defaults(),
-      _model_name: DFViewerModel.model_name,
-      _model_module: DFViewerModel.model_module,
-      _model_module_version: DFViewerModel.model_module_version,
-      _view_name: DFViewerModel.view_name,
-      _view_module: DFViewerModel.view_module,
-      _view_module_version: DFViewerModel.view_module_version,
-    };
-  }
-
-  static serializers: ISerializers = {
-    ...DOMWidgetModel.serializers,
-    // Add any extra serializers here
-  };
-
-  static model_name = 'DFViewerModel';
-  static model_module = MODULE_NAME;
-  static model_module_version = MODULE_VERSION;
-  static view_name = 'DFViewerView'; // Set to null if no view
-  static view_module = MODULE_NAME; // Set to null if no view
-  static view_module_version = MODULE_VERSION;
-}
-export class DFViewerView extends DOMWidgetView {
-  render(): void {
-    this.el.classList.add('dfviewer-widget');
-
-    const Component = () => {
-      const [_, setCounter] = useState(0);
-      const forceRerender = () => {
-        setCounter((x: number) => x + 1);
+        const props: any = {};
+        for (const key of Object.keys(this.model.attributes)) {
+          props[key] = this.model.get(key);
+          props['on_' + key] = (value: any) => {
+            this.model.set(key, value);
+            this.touch();
+          };
+        }
+        return React.createElement(WrappedComponent, props);
       };
-      useEffect(() => {
-        this.listenTo(this.model, 'change', forceRerender);
-      }, []);
 
-      const props: any = {};
-      for (const key of Object.keys(this.model.attributes)) {
-        props[key] = this.model.get(key);
-        props['on_' + key] = (value: any) => {
-          this.model.set(key, value);
-          this.touch();
-        };
-      }
-      return React.createElement(DFViewer, props);
-      //return React.createElement(WidgetDCFCell, props);
-    };
-
-    const root = ReactDOMClient.createRoot(this.el);
-    const componentEl = React.createElement(Component, {});
-    root.render(componentEl);
+      const root = ReactDOMClient.createRoot(this.el);
+      const componentEl = React.createElement(Component, {});
+      root.render(componentEl);
+    }
   }
+  return [CustomModel, CustomView];
 }
+
+export const [DCEFWidgetModel, DCEFWidgetView] = createModelAndView(
+  'DCEFWidgetModel',
+  'DCEFWidgetView',
+  WidgetDCFCell
+);
+
+export const [BuckarooInfiniteWidgetModel, BuckarooInfiniteWidgetView] =
+  createModelAndView(
+    'BuckarooInfiniteWidgetModel',
+    'BuckarooInfiniteWidgetView',
+    BuckarooInfiniteWidget
+  );
+
+export const [InfiniteViewerModel, InfiniteViewerView] = createModelAndView(
+  'InfiniteViewerModel',
+  'InfiniteViewerView',
+  InfiniteWrapper
+);
+
+export const [DFViewerModel, DFViewerView] = createModelAndView(
+  'DFViewerModel',
+  'DFViewerView',
+  DFViewer
+);

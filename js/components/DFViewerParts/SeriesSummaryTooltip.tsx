@@ -1,7 +1,7 @@
 import React from 'react';
 import { DFViewer } from './DFViewer';
 import { DFWhole } from './DFWhole';
-import { ITooltipParams } from 'ag-grid-community';
+import { ITooltipParams } from '@ag-grid-community/core';
 
 export function getBakedDFViewer(seriesDf: DFWhole) {
   const retFunc = (props: ITooltipParams) => {

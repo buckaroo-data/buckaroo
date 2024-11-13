@@ -1,4 +1,7 @@
-import { ValueFormatterFunc, ValueFormatterParams } from 'ag-grid-community';
+import {
+  ValueFormatterFunc,
+  ValueFormatterParams,
+} from '@ag-grid-community/core';
 import {
   DisplayerArgs,
   cellRendererDisplayers,
@@ -31,8 +34,13 @@ export const basicIntFormatter = new Intl.NumberFormat('en-US', {
 export const getStringFormatter = (args: StringDisplayerA) => {
   const stringFormatter = (params: ValueFormatterParams): string => {
     const val = params.value;
-    if (val && args.max_length) {
-      return val.slice(0, args.max_length);
+    if (val && args.max_length && typeof val === 'string') {
+      try {
+        return val.slice(0, args.max_length);
+      } catch (e) {
+        console.log('e', e, 'val', val);
+        return '';
+      }
     }
     return val;
   };

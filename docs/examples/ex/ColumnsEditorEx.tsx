@@ -1,7 +1,9 @@
 import React, {useState} from 'react';
 import {extraComponents} from 'buckaroo';
-import 'ag-grid-community/styles/ag-grid.css';
-import 'ag-grid-community/styles/ag-theme-alpine.css';
+
+
+import "@ag-grid-community/styles/ag-grid.css";
+import "@ag-grid-community/styles/ag-theme-alpine.css";
 
 const sym = extraComponents.utils.sym;
 const  {

@@ -5,6 +5,7 @@ export interface DFMeta {
   filtered_rows: number;
   rows_shown: number;
 }
+
 export interface BuckarooOptions {
   sampled: string[];
   auto_clean: string[];
@@ -24,7 +25,7 @@ export interface BuckarooState {
   show_commands: string | false;
 }
 
-export type BKeys = keyof BuckarooOptions;
+export type BKeys = 'sampled' | 'auto_clean' | 'post_processing' | 'df_display';
 
 // df_dict: Record<string, DFWhole>;
 // df_meta: DFMeta;

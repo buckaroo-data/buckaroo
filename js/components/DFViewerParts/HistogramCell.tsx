@@ -4,8 +4,6 @@ import { createPortal } from 'react-dom';
 
 import { Bar, BarChart, Tooltip } from 'recharts';
 
-import {} from 'recharts';
-
 export interface HistogramNode {
   name: string;
   population: number;
@@ -179,20 +177,68 @@ export const HistogramCell = (props: any) => {
             </svg>
           </pattern>
         </defs>
-        <Bar dataKey="population" stroke="#000" fill="gray" stackId="stack" />
-        <Bar dataKey="tail" stroke="#000" fill="gray" stackId="stack" />
-        <Bar dataKey="true" stroke="#00f" fill="#00f" stackId="stack" />
-        <Bar dataKey="false" stroke="#000" fill="#fff" stackId="stack" />
-        <Bar dataKey="cat_pop" stroke="pink" fill={circleUrl} stackId="stack" />
+        <Bar
+          dataKey="population"
+          stroke="#000"
+          fill="gray"
+          stackId="stack"
+          isAnimationActive={false}
+        />
+        <Bar
+          dataKey="tail"
+          stroke="#000"
+          fill="gray"
+          stackId="stack"
+          isAnimationActive={false}
+        />
+        <Bar
+          dataKey="true"
+          stroke="#00f"
+          fill="#00f"
+          stackId="stack"
+          isAnimationActive={false}
+        />
+        <Bar
+          dataKey="false"
+          stroke="#000"
+          fill="#fff"
+          stackId="stack"
+          isAnimationActive={false}
+        />
+        <Bar
+          dataKey="cat_pop"
+          stroke="pink"
+          fill={circleUrl}
+          stackId="stack"
+          isAnimationActive={false}
+        />
         <Bar
           dataKey="unique"
           stroke="#0f0"
           fill={checkersUrl}
           stackId="stack"
+          isAnimationActive={false}
         />
-        <Bar dataKey="longtail" stroke="teal" fill={leafsUrl} stackId="stack" />
-        <Bar dataKey="user1" stroke="teal" fill={starUrl} stackId="stack" />
-        <Bar dataKey="NA" fill={stripeUrl} stackId="stack" />
+        <Bar
+          dataKey="longtail"
+          stroke="teal"
+          fill={leafsUrl}
+          stackId="stack"
+          isAnimationActive={false}
+        />
+        <Bar
+          dataKey="user1"
+          stroke="teal"
+          fill={starUrl}
+          stackId="stack"
+          isAnimationActive={false}
+        />
+        <Bar
+          dataKey="NA"
+          fill={stripeUrl}
+          stackId="stack"
+          isAnimationActive={false}
+        />
         <Tooltip
           formatter={formatter}
           allowEscapeViewBox={{ x: true, y: true }}

@@ -1,6 +1,6 @@
 import _ from 'lodash';
 import React from 'react';
-import { ValueFormatterFunc } from 'ag-grid-community';
+import { ValueFormatterFunc } from '@ag-grid-community/core';
 
 export const getTextCellRenderer = (formatter: ValueFormatterFunc<any>) => {
   const TextCellRenderer = (props: any) => {

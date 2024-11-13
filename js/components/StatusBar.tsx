@@ -1,8 +1,8 @@
 // https://plnkr.co/edit/QTNwBb2VEn81lf4t?open=index.tsx
 import React, { useRef, useCallback } from 'react';
 import _ from 'lodash';
-import { AgGridReact } from 'ag-grid-react'; // the AG Grid React Component
-import { ColDef, GridOptions } from 'ag-grid-community';
+import { AgGridReact } from '@ag-grid-community/react'; // the AG Grid React Component
+import { ColDef, GridOptions } from '@ag-grid-community/core';
 import { basicIntFormatter } from './DFViewerParts/Displayer';
 import { DFMeta } from './WidgetTypes';
 import { BuckarooOptions } from './WidgetTypes';
@@ -32,21 +32,8 @@ export function StatusBar({
   setBuckarooState: React.Dispatch<React.SetStateAction<BuckarooState>>;
   buckarooOptions: BuckarooOptions;
 }) {
-  /*
-      AgGridReact
-        rowData={rowData}
-        columnDefs={columns}
-        singleClickEdit={true}
-        stopEditingWhenCellsLoseFocus={true}
-*/
-
-  //console.log('initial buckarooState', buckarooState);
-  //   const optionCycles = _.fromPairs(
-  // //    _.map(buckarooOptions, (v: any, k) => [k, ( k==='df_display' ? v :  _.concat([false], v) ) ])
-  //     _.map(buckarooOptions, (v: any, k) => [k, ( k==='post_processing' ? v :  _.concat([false], v) ) ])
-
-  //   ) as Record<BKeys, any[]>;
   const optionCycles = buckarooOptions;
+
   const idxs = _.fromPairs(
     _.map(_.keys(optionCycles), (k) => [
       k,
@@ -70,9 +57,11 @@ export function StatusBar({
     newState[k] = newVal;
     return newState;
   };
+
+  const excludeKeys = ['quick_command_args', 'search', 'show_displayed_rows'];
   const updateDict = (event: any) => {
     const colName = event.column.getColId();
-    if (colName === 'quick_command_args' || colName === 'search') {
+    if (_.includes(excludeKeys, colName)) {
       return;
     }
     if (_.includes(_.keys(buckarooState), colName)) {
@@ -146,7 +135,12 @@ export function StatusBar({
     },
     { field: 'total_rows', width: 100 },
     { field: 'filtered_rows', headerName: 'filtered', width: 85 },
-    { field: 'rows_shown', headerName: 'displayed', width: 85 },
+    {
+      field: 'rows_shown',
+      headerName: 'displayed',
+      width: 85,
+      hide: dfMeta.rows_shown === -1,
+    },
     { field: 'columns', width: 75 },
   ];
 

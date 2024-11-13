@@ -4,54 +4,33 @@ import { ComponentConfig, DFData, DFViewerConfig } from './DFWhole';
 
 import { dfToAgrid, extractPinnedRows } from './gridUtils';
 import { replaceAtMatch } from '../utils';
-import { AgGridReact } from 'ag-grid-react'; // the AG Grid React Component
+import { AgGridReact } from '@ag-grid-community/react'; // the AG Grid React Component
 import {
+  ColDef,
   DomLayoutType,
   GridOptions,
   SizeColumnsToContentStrategy,
   SizeColumnsToFitProvidedWidthStrategy,
-} from 'ag-grid-community';
+} from '@ag-grid-community/core';
 import { getCellRendererSelector } from './gridUtils';
 
-export type setColumFunc = (newCol: string) => void;
+import { ModuleRegistry } from '@ag-grid-community/core';
+import { ClientSideRowModelModule } from '@ag-grid-community/client-side-row-model';
 
-export function DFViewer({
-  df_data: df,
-  df_viewer_config,
-  summary_stats_data,
-  style,
-  activeCol,
-  setActiveCol,
-}: {
-  df_data: DFData;
-  df_viewer_config: DFViewerConfig;
-  summary_stats_data?: DFData;
-  style?: CSSProperties;
-  activeCol?: string;
-  setActiveCol?: setColumFunc;
-}) {
-  const [agColsPure, agData] = dfToAgrid(
-    df,
-    df_viewer_config,
-    summary_stats_data || []
-  );
-  const selectBackground =
-    df_viewer_config?.component_config?.selectionBackground ||
-    'var(--ag-range-selection-background-color-3)';
-  const styledColumns = replaceAtMatch(
-    _.clone(agColsPure),
-    activeCol || '___never',
-    {
-      cellStyle: { background: selectBackground },
-    }
-  );
+ModuleRegistry.registerModules([ClientSideRowModelModule]);
+export type SetColumFunc = (newCol: string) => void;
+export type PossibleAutosizeStrategy =
+  | SizeColumnsToFitProvidedWidthStrategy
+  | SizeColumnsToContentStrategy;
 
-  const defaultColDef = {
-    sortable: true,
-    type: 'rightAligned',
-    cellRendererSelector: getCellRendererSelector(df_viewer_config.pinned_rows),
-  };
-
+export const getGridOptions = (
+  setActiveCol: SetColumFunc,
+  df_viewer_config: DFViewerConfig,
+  defaultColDef: ColDef,
+  columnDefs: ColDef[],
+  domLayout: DomLayoutType,
+  autoSizeStrategy: PossibleAutosizeStrategy
+): GridOptions => {
   const gridOptions: GridOptions = {
     rowSelection: 'single',
 
@@ -81,46 +60,77 @@ export function DFViewer({
 
     onCellClicked: (event) => {
       const colName = event.column.getColId();
+      console.log('onCellClicked', event);
       if (setActiveCol === undefined || colName === undefined) {
+        console.log('returning because setActiveCol is undefined');
         return;
       } else {
+        console.log('calling setActiveCol with', colName);
         setActiveCol(colName);
       }
     },
+    defaultColDef,
+    columnDefs,
+    domLayout,
+    autoSizeStrategy,
+
     ...(df_viewer_config.extra_grid_config
       ? df_viewer_config.extra_grid_config
       : {}),
   };
+  return gridOptions;
+};
+
+export function DFViewer({
+  df_data: df,
+  df_viewer_config,
+  summary_stats_data,
+  style,
+  activeCol,
+  setActiveCol,
+}: {
+  df_data: DFData;
+  df_viewer_config: DFViewerConfig;
+  summary_stats_data?: DFData;
+  style?: CSSProperties;
+  activeCol?: string;
+  setActiveCol?: SetColumFunc;
+}) {
+  const agColsPure = dfToAgrid(df_viewer_config, summary_stats_data || []);
+  const selectBackground =
+    df_viewer_config?.component_config?.selectionBackground ||
+    'var(--ag-range-selection-background-color-3)';
+  const styledColumns = replaceAtMatch(
+    _.clone(agColsPure),
+    activeCol || '___never',
+    {
+      cellStyle: { background: selectBackground },
+    }
+  );
+
+  const defaultColDef = {
+    sortable: true,
+    type: 'rightAligned',
+    cellRendererSelector: getCellRendererSelector(df_viewer_config.pinned_rows),
+  };
+
   const gridRef = useRef<AgGridReact<unknown>>(null);
   const pinned_rows = df_viewer_config.pinned_rows;
   const topRowData = summary_stats_data
     ? extractPinnedRows(summary_stats_data, pinned_rows ? pinned_rows : [])
     : [];
 
-  const getAutoSize = ():
-    | SizeColumnsToFitProvidedWidthStrategy
-    | SizeColumnsToContentStrategy => {
-    if (styledColumns.length < 1) {
-      return {
-        type: 'fitProvidedWidth',
-        width: window.innerWidth - 100,
-      };
-    }
-    return {
-      type: 'fitCellContents',
-    };
-  };
-
-  const hs = heightStyle({
-    numRows: agData.length,
-    pinnedRowLen: df_viewer_config.pinned_rows.length,
-    location: window.location,
-    compC: df_viewer_config?.component_config,
-    rowHeight: df_viewer_config?.extra_grid_config?.rowHeight,
-  });
-
   const divClass =
     df_viewer_config?.component_config?.className || 'ag-theme-alpine-dark';
+  const hs = getHeightStyle(df_viewer_config, df.length);
+  const gridOptions = getGridOptions(
+    setActiveCol as SetColumFunc,
+    df_viewer_config,
+    defaultColDef,
+    _.cloneDeep(styledColumns),
+    hs.domLayout,
+    getAutoSize(styledColumns.length)
+  );
 
   return (
     <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
@@ -130,10 +140,10 @@ export function DFViewer({
           domLayout={hs.domLayout}
           defaultColDef={defaultColDef}
           gridOptions={gridOptions}
-          rowData={agData}
+          rowData={df}
           pinnedTopRowData={topRowData}
           columnDefs={_.cloneDeep(styledColumns)}
-          autoSizeStrategy={getAutoSize()}
+          autoSizeStrategy={getAutoSize(styledColumns.length)}
         ></AgGridReact>
       </div>
     </div>
@@ -147,13 +157,26 @@ interface HeightStyleArgs {
   rowHeight?: number;
   compC?: ComponentConfig;
 }
-interface HeightStyleI {
+export interface HeightStyleI {
   domLayout: DomLayoutType;
   inIframe: string;
   classMode: 'short-mode' | 'regular-mode';
   applicableStyle: CSSProperties;
 }
 
+export const getHeightStyle = (
+  df_viewer_config: DFViewerConfig,
+  numRows: number
+): HeightStyleI => {
+  const hs = heightStyle({
+    numRows: numRows,
+    pinnedRowLen: df_viewer_config.pinned_rows.length,
+    location: window.location,
+    compC: df_viewer_config?.component_config,
+    rowHeight: df_viewer_config?.extra_grid_config?.rowHeight,
+  });
+  return hs;
+};
 export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
   const { numRows, pinnedRowLen, location, rowHeight, compC } = hArgs;
   const isGoogleColab =
@@ -169,6 +192,7 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
 
   const shortMode =
     compC?.shortMode || (belowMinRows && rowHeight === undefined);
+  /*
   console.log(
     'shortMode',
     shortMode,
@@ -179,6 +203,7 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
     'inIframe',
     inIframe
   );
+  */
   const inIframeClass = inIframe ? 'inIframe' : '';
   if (isGoogleColab || inIframe) {
     return {
@@ -197,5 +222,18 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
     domLayout,
     applicableStyle,
     inIframe: inIframeClass,
+  };
+};
+export const getAutoSize = (
+  numColumns: number
+): SizeColumnsToFitProvidedWidthStrategy | SizeColumnsToContentStrategy => {
+  if (numColumns < 1) {
+    return {
+      type: 'fitProvidedWidth',
+      width: window.innerWidth - 100,
+    };
+  }
+  return {
+    type: 'fitCellContents',
   };
 };

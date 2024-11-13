@@ -6,6 +6,7 @@ import { Button } from 'react-bootstrap';
 
 import './app.css';
 
+
 const examples = {
   WidgetDCFCellEx: {
     title: 'WigetDCFCell',
@@ -31,8 +32,14 @@ const examples = {
   DFViewerEx_large: {
     title: 'DFViewer large',
     file: 'DFViewerEx_large',
-    layout: 'HBox',
+    layout: 'VBox',
   },
+  DFViewerInfiniteEx_large: {
+    title: 'DFViewerInfinite large',
+    file: 'DFViewerInfiniteEx_large',
+    layout: 'VBox',
+  },
+
   DFViewerEx_real_summary: {
     title: 'DFViewer summary',
     file: 'DFViewerEx_real_summary',
@@ -45,6 +52,8 @@ const examples = {
   },
 
   StatusBarEx: { title: 'StatusBar', file: 'StatusBarEx', layout: 'VBox' },
+  InfiniteEx: { title: 'Infinite Example', file: 'InfiniteEx', layout: 'VBox' },
+
   HistogramEx: { title: 'Histogram', file: 'HistogramEx', layout: 'HBox' },
 };
 

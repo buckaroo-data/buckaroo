@@ -1,9 +1,9 @@
-import React, { useState, Dispatch, SetStateAction } from 'react';
+import React, { useState } from 'react';
 import _ from 'lodash';
 import { OperationResult } from './DependentTabs';
 import { ColumnsEditor } from './ColumnsEditor';
 
-import { DFData, DFViewerConfig } from './DFViewerParts/DFWhole';
+import { DFData } from './DFViewerParts/DFWhole';
 import { DFViewer } from './DFViewerParts/DFViewer';
 import { StatusBar } from './StatusBar';
 import { BuckarooState } from './WidgetTypes';
@@ -11,21 +11,8 @@ import { BuckarooOptions } from './WidgetTypes';
 import { DFMeta } from './WidgetTypes';
 import { CommandConfigT } from './CommandUtils';
 import { Operation } from './OperationUtils';
+import { IDisplayArgs } from './DFViewerParts/gridUtils';
 
-export type CommandConfigSetterT = (
-  setter: Dispatch<SetStateAction<CommandConfigT>>
-) => void;
-
-/*
-  Widget DCFCell is meant to be used with callback functions and passed values, not explicit http calls
-
-  TODO:add height settings to dfConfig rather than hardcoded.
- */
-export interface IDisplayArgs {
-  data_key: string;
-  df_viewer_config: DFViewerConfig;
-  summary_stats_key: string;
-}
 export function WidgetDCFCell({
   df_data_dict,
   df_display_args,
