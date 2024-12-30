@@ -37,7 +37,7 @@ class DataFlow(HasTraits):
         self.summary_sd = {}
         self.existing_operations = []
         self.ac_obj = self.autocleaning_klass(self.autoclean_conf)
-        self.commandConfig = self.ac_obj.commandConfig
+        self.command_config = self.ac_obj.command_config
         try:
             self.raw_df = raw_df
         except Exception:
@@ -46,7 +46,7 @@ class DataFlow(HasTraits):
     autocleaning_klass = SentinelAutocleaning
     autoclean_conf = tuple()
 
-    commandConfig = Dict({}).tag(sync=True)
+    command_config = Dict({}).tag(sync=True)
 
 
     raw_df = Any('')
@@ -198,7 +198,7 @@ class CustomizableDataflow(DataFlow):
     This allows targetd extension and customization of DataFlow
     """
     analysis_klasses = [StylingAnalysis]
-    commandConfig = Dict({}).tag(sync=True)
+    command_config = Dict({}).tag(sync=True)
     DFStatsClass = DfStats
     sampling_klass = Sampling
     df_display_klasses = {}

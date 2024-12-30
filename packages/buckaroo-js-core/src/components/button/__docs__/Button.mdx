@@ -1,0 +1,40 @@
+import { Canvas, Meta } from "@storybook/blocks";
+import Example from "./Example.tsx";
+import * as Button from "./Button.stories.tsx";
+
+<Meta of={Button} title="Button" />
+
+# Button
+
+Button component with different props.
+
+#### Example
+
+<Canvas of={Button.Primary} />
+
+## Usage
+
+```ts
+import {Button} from "sld-ui";
+
+const Example = () => {
+  return (
+      <Button
+        size={"small"}
+        text={"Button"}
+        onClick={()=> console.log("Clicked")}
+        primary
+      />
+  );
+};
+
+export default Example;
+```
+
+#### Arguments
+
+- **text** _`() => void`_ - A string that represents the text content of the button.
+- **primary** - A boolean indicating whether the button should have a primary styling or not. Typically, a primary button stands out as the main action in a user interface.
+- **disabled** - A boolean indicating whether the button should be disabled or not. When disabled, the button cannot be clicked or interacted with.
+- **size** - A string with one of three possible values: "small," "medium," or "large." It defines the size or dimensions of the button.
+- **onClick** - A function that is called when the button is clicked. It receives a MouseEventHandler for handling the click event on the button element.

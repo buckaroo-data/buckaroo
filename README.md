@@ -141,6 +141,14 @@ npm run dev
 ```
 
 
+### UV Instuctions
+``sh
+cd buckaroo
+uv venv
+uv sync -q
+
+``
+
 ## Contributions
 
 We :heart: contributions.

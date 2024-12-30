@@ -31,16 +31,41 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
 ]
 dependencies = [
-    "ipywidgets>=7.6.0,<9",
+    "anywidget >= 0.9.0",
     "graphlib_backport>=1.0.0",
-    "packaging>=18"
+    "hatch>=1.14.0",
+    "packaging>=18",
+    "twine>=6.0.1",
 ]
-version = "0.7.12"
+version = "0.8.1"
 
 [project.license]
 file = "LICENSE.txt"
 
+
+
+[tool.uv]
+dev-dependencies = [
+    "anywidget[dev]>=0.9.0",
+    "jupyterlab>=4.2.5",
+    "ruff>=0.6.2",
+    "polars>=1.5.0",
+    "pandas>=1.3.5",
+    "geopandas<1.0",
+    "playwright",
+    "pydantic>=2.5.2",
+    "pyarrow",
+    "polars[timezone]",
+    "hypothesis>=6.88.1",
+    "nbval>=0.9",
+    "pytest-playwright",
+    "solara",
+    "solara[pytest]",
+]
+
+
 [project.optional-dependencies]
+dev = ["watchfiles", "jupyterlab",     "anywidget[dev]>=0.9.0",]
 
 test = [
     "nbval>=0.9",
@@ -54,9 +79,10 @@ test = [
     "pyarrow",
     "geopandas<1.0",
     "ruff",
+    "anywidget",
     "nbstripout"
 ]
-polars = ["polars>=1.0,<1.6",
+polars = ["polars>=1.0,<1.10",
        "polars[timezone]"
 ]
 jupyterlab = ["jupyterlab>=3.6.0"]
@@ -69,57 +95,31 @@ docs = [
     "pytest-check-links"
 ]
 
-build = [
-"twine",
-"build",
-]
     
 [project.urls]
 Homepage = "https://github.com/paddymul/buckaroo"
 
 [tool.hatch.build]
-artifacts = [
-    "buckaroo/labextension",
-]
+only-packages = true
+artifacts = ["buckaroo/static/widget.js", "buckaroo/static/widget.css", "scripts/hatch_build.py"]
 
-[tool.hatch.build.targets.wheel.shared-data]
-"buckaroo/labextension" = "share/jupyter/labextensions/buckaroo"
-"buckaroo.json" = "etc/jupyter/nbconfig/notebook.d/buckaroo.json"
+[tool.hatch.build.hooks.custom]
+path = "scripts/hatch_build.py"
 
-[tool.hatch.build.targets.sdist]
-exclude = [
-    ".github",
-    "examples",
-    "tests",
-    "ui-tests*",
-    "widget-examples",
-    "binder",
-    "*.yaml",
-    ".npmignore",
-    ".eslint*",
-    "__mocks__",
-    "*.yml",
-    "*.ini",
-    ".pre*",
-    "jest*",
-]
 
-[tool.hatch.build.hooks.jupyter-builder]
+[tool.hatch.envs.default]
+installer = "uv"
 
-ensured-targets = [
-    "buckaroo/labextension/package.json",
-]
-dependencies = ["hatch-jupyter-builder>=0.8.1"]
-#dependencies = ["hatch-jupyter-builder@file:///Users/paddy/code/hatch-jupyter-builder"]
+# temporarily commenting out to simplify build closer to quak
+# [tool.hatch.build.targets.wheel]
+# include = [
+#    "buckaroo/**/*.py",
+#    "buckaroo/static/*",
+# ]
+# [tool.hatch.build.targets.wheel.force-include]
+#    "packages/buckaroo-js-core/dist/style.css" = "packages/buckaroo-js-core/dist/style.css"
 
-build-function = "hatch_jupyter_builder.npm_builder"
 
-[tool.hatch.build.hooks.jupyter-builder.build-kwargs]
-path = "."
-build_cmd = "build"
-npm = [
-    "yarn",
-]
 
 [tool.isort]
 profile = "black"

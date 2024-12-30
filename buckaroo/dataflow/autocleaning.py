@@ -17,7 +17,7 @@ SENTINEL_DF_4 = pd.DataFrame({'vvv'  :[12, 49], 'oo':   [ 'ccc', 'www']})
 class SentinelAutocleaning:
 
     def __init__(self, confs):
-        self.commandConfig = {}
+        self.command_config = {}
     
     def handle_ops_and_clean(self, df, cleaning_method, quick_command_args, existing_operations):
         cleaning_ops = []
@@ -129,7 +129,7 @@ class PandasAutocleaning:
 
         c_defaults, c_patterns, df_interpreter, gencode_interpreter = configure_buckaroo(c_klasses)
         self.df_interpreter, self.gencode_interpreter = df_interpreter, gencode_interpreter
-        self.commandConfig = dict(argspecs=c_patterns, defaultArgs=c_defaults)
+        self.command_config = dict(argspecs=c_patterns, defaultArgs=c_defaults)
         self.quick_command_klasses = conf.quick_command_klasses
 
 
