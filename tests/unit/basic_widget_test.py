@@ -80,6 +80,15 @@ def test_non_unique_column_names():
     with pytest.raises(DuplicateColumnsException):
         BuckarooWidget(pd.DataFrame([['a', 'b'], [1,2]], columns = [1,1]))
 
+
+def test_init_sd():
+    """
+    I have run into a bug where init_sd causes an error in DefaultMainStyling, it shouldn't blow up
+    """
+    BuckarooWidget(simple_df, init_sd={'int_col': {'foo':8}})
+
+
+
     
 def atest_symbol_meta():    
     """verifies that a symbol with a meta key can be added and

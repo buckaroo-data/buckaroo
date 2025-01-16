@@ -168,7 +168,7 @@ class DataFlow(HasTraits):
         result_summary_sd = self._get_summary_sd(self.processed_df)
         self.summary_sd = result_summary_sd
 
-    @observe('summary_sd')
+    @observe('summary_sd', 'processed_result')
     @exception_protect('merged_sd-protector')
     def _merged_sd(self, change):
         #slightly inconsitent that processed_sd gets priority over
@@ -207,7 +207,12 @@ class CustomizableDataflow(DataFlow):
     def __init__(self, orig_df, debug=False,
                  column_config_overrides=None,
                  pinned_rows=None, extra_grid_config=None,
-                 component_config=None):
+                 component_config=None, init_sd=None):
+        if init_sd is None:
+            self.init_sd = {}
+        else:
+            self.init_sd = init_sd
+
         if column_config_overrides is None:
             column_config_overrides = {}
         self.column_config_overrides = column_config_overrides
@@ -271,6 +276,16 @@ class CustomizableDataflow(DataFlow):
     df_display_args = Any({'main':EMPTY_DF_DISPLAY_ARG}).tag(sync=True)
     #empty needs to always be present, it enables startup
     df_data_dict = Any({'empty':[]}).tag(sync=True)
+
+
+    @observe('summary_sd', 'processed_result')
+    @exception_protect('merged_sd-protector')
+    def _merged_sd(self, change):
+        #slightly inconsitent that processed_sd gets priority over
+        #summary_sd, given that processed_df is computed first. My
+        #thinking was that processed_sd has greater total knowledge
+        #and should supersede summary_sd.
+        self.merged_sd = merge_sds(self.init_sd, self.cleaned_sd, self.summary_sd, self.processed_sd)
 
 
     ### start code interpreter block
@@ -374,6 +389,8 @@ class CustomizableDataflow(DataFlow):
         self.df_display_args = temp_display_args
    
 """
+
+
 Instantiation
 df_data_dict starts with only 'empty'
 first populate df_display_args, make all data point to 'empty', make all df_viewer_configs EMPTY_DFVIEWER_CONFIG

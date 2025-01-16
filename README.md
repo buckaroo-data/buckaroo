@@ -148,6 +148,19 @@ uv venv
 uv sync -q
 
 ``
+### Release instructions
+[github release instructions](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
+
+```bash
+git tag $VERSION_NUMBER #no leading v
+update CHANGELOG.md
+#push code and tag to github
+```
+navigate to [create new buckaroo release](https://github.com/paddymul/buckaroo/releases/new)
+Follow instructions
+
+
+
 
 ## Contributions
 

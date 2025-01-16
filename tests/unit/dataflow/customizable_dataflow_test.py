@@ -27,6 +27,17 @@ DFVIEWER_CONFIG_DEFAULT = {
                     'component_config': {},
                     'extra_grid_config': {},
 }
+DFVIEWER_CONFIG_WITHOUT_B = {
+    'pinned_rows': [],
+    'column_config':  [
+        {'col_name':'index', 'displayer_args': {'displayer': 'obj'}},
+        ## note that col_name:'b' isn't present because of the merge rule
+        {'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
+    ],
+    'component_config': {},
+    'extra_grid_config': {},
+}
+
 
 def test_widget_instatiation():
     dfc = CustomizableDataflow(BASIC_DF)
@@ -35,7 +46,10 @@ def test_widget_instatiation():
     assert dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
 
 def test_custom_dataflow():
-
+    """
+    verifies that that both StylingAnalysis are called and that we get a
+    df_display key of 'int_styles' and 'main'
+    """
     class IntStyling(StylingAnalysis):
         provides_defaults = {}
         @staticmethod
@@ -66,6 +80,19 @@ def test_custom_dataflow():
     
     assert cdfc.df_display_args['int_styles']['df_viewer_config'] == DFVIEWER_CONFIG_INT
 
+def test_hide_column_config_overrides():
+    """
+    verifies that column_config_overrides works properly and column b doesn't end up in column_config
+    """
+    cdfc = CustomizableDataflow(BASIC_DF)
+    assert cdfc.widget_args_tuple[1] is BASIC_DF
+    assert cdfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
+
+    cdfc2 = CustomizableDataflow(BASIC_DF,
+                      column_config_overrides={'b': {'merge_rule': 'hidden'}}
+                      )
+
+    assert cdfc2.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_WITHOUT_B
 
 
 def test_custom_summary_stats():
@@ -80,6 +107,42 @@ def test_custom_summary_stats():
     assert summary_sd == {'index': {'distinct_count': 3}, 
                           'a': {'distinct_count':2}, 'b': {'distinct_count':3}}
     assert list(summary_sd.keys()) == ['index', 'a', 'b']
+
+def test_init_sd():
+    class DCDFC(CustomizableDataflow):
+        analysis_klasses = [DistinctCount, StylingAnalysis]
+
+    dc_dfc = DCDFC(BASIC_DF, init_sd={'a':{'foo':8}})
+
+    summary_sd = dc_dfc.widget_args_tuple[2]
+    print(summary_sd)
+    print("^"*80)
+    assert dc_dfc.merged_sd == {
+        'index': {'distinct_count': 3}, 
+        'a': {'distinct_count':2, 'foo':8}, 'b': {'distinct_count':3}}
+
+class AlwaysFailStyling(StylingAnalysis):
+    requires_summary = []
+
+    @classmethod
+    def style_column(kls, col, column_metadata):
+        1/0
+
+
+def test_always_fail_styling():
+    """ styling should default to obj displayer if an error is thrown
+    """
+    class DCDFC(CustomizableDataflow):
+        analysis_klasses = [AlwaysFailStyling]
+        pass
+
+    dc_dfc = DCDFC(BASIC_DF) #, init_sd={'a':{'foo':8}})
+
+    summary_sd = dc_dfc.widget_args_tuple[2]
+    print(summary_sd)
+    print("^"*80)
+
+
 
 SENTINEL_DF = pd.DataFrame({'sent_int_col':[11, 22, 33], 'sent_str_col':['ka', 'b', 'c']})
 
@@ -104,6 +167,72 @@ def test_custom_post_processing():
     p_dfc.post_processing_method = 'post1'
 
     assert p_dfc.processed_df is SENTINEL_DF
+
+
+class HidePostProcessingAnalysis(ColAnalysis):
+    provides_defaults = {}
+    post_processing_method = "hide_post"
+
+    @classmethod
+    def post_process_df(kls, cleaned_df):
+        return [SENTINEL_DF, {'sent_int_col': {'merge_rule': 'hidden'}}]
+
+SENTINEL_CONFIG_WITHOUT_INT = {
+    'pinned_rows': [],
+    'column_config':  [
+        {'col_name':'index', 'displayer_args': {'displayer': 'obj'}},
+        {'col_name':'sent_str_col', 'displayer_args': {'displayer': 'obj'}},
+    ],
+    'component_config': {},
+    'extra_grid_config': {},
+}
+
+
+def test_hide_column_config_post_processing():
+    """
+    verifies that a PostProcessing function can hide columns 
+    """
+    class PostDCFC(CustomizableDataflow):
+        analysis_klasses = [HidePostProcessingAnalysis, StylingAnalysis]
+
+    p_dfc = PostDCFC(BASIC_DF)
+    assert p_dfc.post_processing_method == ''
+    assert p_dfc.processed_df is BASIC_DF
+    assert p_dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
+    assert p_dfc.cleaned_sd == {}
+    p_dfc.post_processing_method = 'hide_post'
+    assert p_dfc.processed_df is SENTINEL_DF
+    assert p_dfc.df_display_args['main']['df_viewer_config'] == SENTINEL_CONFIG_WITHOUT_INT
+    """ Make sure we can switch post_processing back to unset and everything works """
+    p_dfc.post_processing_method = ''
+    assert p_dfc.processed_df is BASIC_DF
+    assert p_dfc.cleaned_sd == {}
+    assert p_dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
+
+
+class HidePostProcessingAnalysis2(ColAnalysis):
+    provides_defaults = {}
+    post_processing_method = "hide_post"
+
+    @classmethod
+    def post_process_df(kls, cleaned_df):
+        return [cleaned_df, {'b': {'merge_rule': 'hidden'}}]
+
+
+def test_hide_column_config_post_processing2():
+    """
+    This only works because we add an unknown column c, then remove it.
+    returning cleaned_df and dropping 'b' doesn't work
+    """
+    class PostDCFC(CustomizableDataflow):
+        analysis_klasses = [HidePostProcessingAnalysis2, StylingAnalysis]
+
+    p_dfc = PostDCFC(BASIC_DF)
+    assert p_dfc.post_processing_method == ''
+    assert p_dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
+    p_dfc.post_processing_method = 'hide_post'
+    assert p_dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_WITHOUT_B
+
 
 class AlwaysFailAnalysis(ColAnalysis):
     provides_defaults = {}
@@ -260,3 +389,5 @@ def test_sample():
     assert len(bw.processed_df) == 100_000
     print(list(bw.df_data_dict.keys()))
     assert len(bw.df_data_dict['main']) == 5_000
+
+

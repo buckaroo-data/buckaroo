@@ -1,6 +1,11 @@
 import sys
+import logging
+
+
 import pandas as pd
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
+
+logger = logging.getLogger()
 
 EMPTY_DFVIEWER_CONFIG = {
     'pinned_rows': [],
@@ -152,19 +157,31 @@ class StylingAnalysis(ColAnalysis):
     summary_stats_key= 'all_stats'
 
     @classmethod
+    def default_styling(kls, col_name):
+        return {'col_name': col_name, 'displayer_args': {'displayer': 'obj'}}
+
+    @classmethod
     def style_columns(kls, sd):
         ret_col_config = []
-
         #this is necessary for polars to add an index column, which is
         #required so that summary_stats makes sense
         if 'index' not in sd:
-            ret_col_config.append({'col_name': 'index', 'displayer_args': {'displayer': 'obj'}})
+            ret_col_config.append(kls.default_styling('index'))
             
         for col in sd.keys():
             col_meta = sd[col]
-            base_style = kls.style_column(col, col_meta)
+            if col_meta.get('merge_rule') == 'hidden':
+                continue
+            try:
+                base_style = kls.style_column(col, col_meta)
+            except Exception:
+                logger.warn(f"Warning, styling failed from {kls} on column {col} with col_meta {col_meta} using default_styling instead")
+                base_style = kls.default_styling(col)
             if 'column_config_override' in col_meta:
+                #column_config_override, sent by the instantiation, gets set later
                 base_style.update(col_meta['column_config_override'])
+            if base_style.get('merge_rule') == 'hidden':
+                continue
             ret_col_config.append(base_style)
             
         return {
@@ -173,3 +190,4 @@ class StylingAnalysis(ColAnalysis):
             'extra_grid_config': kls.extra_grid_config,
             'component_config': kls.component_config
         }
+

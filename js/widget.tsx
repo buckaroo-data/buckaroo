@@ -188,7 +188,6 @@ const renderBuckarooInfiniteWidget = createRender(() => {
 	const [buckaroo_state, on_buckaroo_state] = useModelState("buckaroo_state");
 	const [buckaroo_options, _set_boptions] = useModelState("buckaroo_options");
 	return (
-	    <div className="buckaroo_anywidget" style={{width:"800px", height:"400px", border:"4px solid orange"}}>
 			<srt.BuckarooInfiniteWidget
 				payload_args={payload_args}
 				on_payload_args={on_payload_args}
@@ -204,7 +203,6 @@ const renderBuckarooInfiniteWidget = createRender(() => {
 				on_buckaroo_state={on_buckaroo_state}
 				buckaroo_options={buckaroo_options}
 			/>
-		</div>
 	);
 });
 
