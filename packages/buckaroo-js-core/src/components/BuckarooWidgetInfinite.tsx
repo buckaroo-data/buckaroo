@@ -25,12 +25,13 @@ export const getDataWrapper = (
     data_key: string,
     df_data_dict: Record<string, DFData>,
     ds: IDatasource,
+    total_rows?: number
 ): DatasourceOrRaw => {
     if (data_key === "main") {
         return {
             data_type: "DataSource",
             datasource: ds,
-            length: 50, //hack
+            length: total_rows || 50,
         };
     } else {
         return {
@@ -96,7 +97,7 @@ export function BuckarooInfiniteWidget({
 
     const [data_wrapper, summaryStatsData] = useMemo(
         () => [
-            getDataWrapper(cDisp.data_key, df_data_dict, mainDs),
+            getDataWrapper(cDisp.data_key, df_data_dict, mainDs, df_meta.total_rows),
             df_data_dict[cDisp.summary_stats_key],
         ],
         [cDisp, operations, buckaroo_state],

@@ -142,12 +142,25 @@ npm run dev
 
 
 ### UV Instuctions
-``sh
+```sh
 cd buckaroo
 uv venv
 uv sync -q
 
-``
+```
+
+### adding a package
+```sh
+cd ~/buckaroo
+uv add $PACKAGE_NAME
+```
+
+#### adding a package to a subgroup 
+```sh
+cd ~/buckaroo
+uv add --group $GROUP_NAME --quiet $PACKAGE_NAME
+```
+
 ### Release instructions
 [github release instructions](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
 
@@ -169,4 +182,5 @@ We :heart: contributions.
 Have you had a good experience with this project? Why not share some love and contribute code, or just let us know about any issues you had with it?
 
 We welcome issue reports [here](../../issues); be sure to choose the proper issue template for your issue, so that we can be sure you're providing the necessary information.
+
 

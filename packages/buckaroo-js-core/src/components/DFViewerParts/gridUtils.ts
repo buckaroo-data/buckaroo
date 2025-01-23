@@ -1,31 +1,26 @@
 import {
-    CellClassParams,
     CellRendererSelectorResult,
     ColDef,
     ICellRendererParams,
     IDatasource,
     IGetRowsParams,
 } from "@ag-grid-community/core";
-import { BLUE_TO_YELLOW, DIVERGING_RED_WHITE_BLUE } from "../../baked_data/colorMap";
 
 import {
     DFWhole,
     DisplayerArgs,
     cellRendererDisplayers,
     ColumnConfig,
-    ColorMappingConfig,
-    ColorMapRules,
     TooltipConfig,
-    ColorWhenNotNullRules,
     DFViewerConfig,
 } from "./DFWhole";
 import _, { zipObject } from "lodash";
 import { getTextCellRenderer } from "./OtherRenderers";
-
+import { getStyler } from "./Styler";
 import { DFData, SDFMeasure, SDFT } from "./DFWhole";
 
 import { CellRendererArgs, FormatterArgs, PinnedRowConfig } from "./DFWhole";
-import { getBakedDFViewer, simpleTooltip } from "./SeriesSummaryTooltip";
+import { getBakedDFViewer, getSimpleTooltip } from "./SeriesSummaryTooltip";
 import { getFormatterFromArgs, getCellRenderer, objFormatter, getFormatter } from "./Displayer";
 import { Dispatch, SetStateAction } from "react";
 import { CommandConfigT } from "../CommandUtils";
@@ -54,94 +49,6 @@ export function addToColDef(
     return undefined;
 }
 
-export function getHistoIndex(val: number, histogram_edges: number[]): number {
-    /*
-np.histogram([1, 2, 3, 4,  10, 20, 30, 40, 300, 300, 400, 500], bins=5)
-( [  8,       0,     2,     1,     1], 
-[  1. , 100.8, 200.6, 300.4, 400.2, 500. ])
-The bottom matters for us, those are the endge
-
-this means that 8 values are between 1 and 100.8  and 2 values are between 200.6 and 300.4
-  */
-    if (histogram_edges.length === 0) {
-        return 0;
-    }
-    for (let i = 0; i < histogram_edges.length; i++) {
-        if (val <= histogram_edges[i]) {
-            return i;
-        }
-    }
-    return histogram_edges.length;
-}
-
-export function colorMap(cmr: ColorMapRules, histogram_edges: number[]) {
-    // https://colorcet.com/gallery.html#isoluminant
-    // https://github.com/holoviz/colorcet/tree/main/assets/CET
-    // https://github.com/bokeh/bokeh/blob/ed285b11ab196e72336b47bf12f44e1bef5abed3/src/bokeh/models/mappers.py#L304
-    const maps: Record<string, string[]> = {
-        BLUE_TO_YELLOW: BLUE_TO_YELLOW,
-        DIVERGING_RED_WHITE_BLUE: DIVERGING_RED_WHITE_BLUE,
-    };
-    const cmap = maps[cmr.map_name];
-
-    function numberToColor(val: number) {
-        const histoIndex = getHistoIndex(val, histogram_edges);
-        const scaledIndex = Math.round((histoIndex / histogram_edges.length) * cmap.length);
-        return cmap[scaledIndex];
-    }
-
-    function cellStyle(params: CellClassParams) {
-        const val = cmr.val_column ? params.data[cmr.val_column] : params.value;
-        const color = numberToColor(val);
-        return {
-            backgroundColor: color,
-        };
-    }
-
-    const retProps = {
-        cellStyle: cellStyle,
-    };
-    return retProps;
-}
-
-export function colorNotNull(cmr: ColorWhenNotNullRules) {
-    function cellStyle(params: CellClassParams) {
-        if (params.data === undefined) {
-            return { backgroundColor: "inherit" };
-        }
-        const val = params.data[cmr.exist_column];
-        const valPresent = val && val !== null;
-        const isPinned = params.node.rowPinned;
-        const color = valPresent && !isPinned ? cmr.conditional_color : "inherit";
-        return {
-            backgroundColor: color,
-        };
-    }
-
-    const retProps = {
-        cellStyle: cellStyle,
-    };
-    return retProps;
-}
-
-export function getStyler(cmr: ColorMappingConfig, col_name: string, histogram_stats: SDFT) {
-    switch (cmr.color_rule) {
-        case "color_map": {
-            //block necessary because you cant define varaibles in case blocks
-            const statsCol = cmr.val_column || col_name;
-            const summary_stats_cell = histogram_stats[statsCol];
-
-            if (summary_stats_cell && summary_stats_cell.histogram_bins !== undefined) {
-                return colorMap(cmr, summary_stats_cell.histogram_bins);
-            } else {
-                console.log("histogram bins not found for color_map");
-                return {};
-            }
-        }
-        case "color_not_null":
-            return colorNotNull(cmr);
-    }
-}
 
 export function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]) {
     return _.map(_.map(prc, "primary_key_val"), (x) => _.find(sdf, { index: x }));
@@ -150,7 +57,7 @@ export function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]) {
 export function getTooltip(ttc: TooltipConfig, single_series_summary_df: DFWhole): Partial<ColDef> {
     switch (ttc.tooltip_type) {
         case "simple":
-            return { tooltipField: ttc.val_column, tooltipComponent: simpleTooltip };
+            return { tooltipComponent: getSimpleTooltip(ttc.val_column)};
 
         case "summary_series":
             return {

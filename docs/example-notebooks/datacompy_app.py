@@ -10,7 +10,15 @@ from IPython.utils import io
 import logging
 
 
-def col_join_dfs(df1, df2, cmp):
+def col_join_dfs(df1, df2, cmp, join_columns, how):
+    df2_suffix = "|df2"
+    for col in df1.columns:
+        if df2_suffix in col:
+            raise Exception("|df2 is a sentinel column name used by this tool, and it can't be used in a dataframe passed in,  {col} violates that constraint")
+    for col in df2.columns:
+        if df2_suffix in col:
+            raise Exception("|df2 is a sentinel column name used by this tool, and it can't be used in a dataframe passed in,  {col} violates that constraint")
+        
     df1_name = cmp.df1_name
     df2_name = cmp.df2_name
 
@@ -30,53 +38,59 @@ def col_join_dfs(df1, df2, cmp):
     for col in col_order:
         col_stat = get_col_stat(col)
         if col_stat:
-            eqs[col] = {'unequality': col_stat['unequal_cnt']}
+            eqs[col] = {'inequality': col_stat['unequal_cnt']}
         else:
             if col in df1.columns:
-                eqs[col] = {'unequality': df1_name}
+                eqs[col] = {'inequality': df1_name}
             else:
-                eqs[col] = {'unequality': df2_name}
-    ret_df_columns = {}
+                eqs[col] = {'inequality': df2_name}
+
     column_config_overrides = {}
 
+
+
+    eq_map = ["pink", "#73ae80", "#90b2b3", "#6c83b5"];
     for col in col_order:
-        eq_col = eqs[col]['unequality']
-        if eq_col == df1_name:
-            #it's only in df1
-            ret_df_columns[col] = df1[col]
-        elif eq_col == df2_name:
-            #it's only in df2
-            ret_df_columns[col] = df2[col]
-        elif eq_col == 0:
-            #columns are exactly the same
-            ret_df_columns[col] = df1[col]
-        else:
-            ret_df_columns[col] = df1[col]
-            #|df2 is a magic value, not a super fan, but it's also unlikely
-            df2_col_name = col+"|df2"
-            
-            ret_df_columns[df2_col_name] = df2[col]
+        eq_col = eqs[col]['inequality']
 
-            
-            column_config_overrides[df2_col_name] = {'merge_rule': 'hidden'}
-            column_config_overrides[col] = {
-                'tooltip_config': { 'tooltip_type':'simple', 'val_column': df2_col_name},
-                'color_map_config': {
-                    'color_rule': 'color_not_null',
-                    'conditional_color': 'red',
-                    'exist_column': df2_col_name},
-            }
+    m_df = pd.merge(df1, df2, on=join_columns, how=how, suffixes=["", df2_suffix])
+    for b_col in m_df.columns:
+        if b_col.endswith("|df2"):
+            a_col = b_col.removesuffix(df2_suffix)
 
-    ret_df = pd.DataFrame(ret_df_columns)
-    for col, v in eqs.items():
-        if v['unequality'] in ["df1", "df2"]:
-            continue
-        if v['unequality'] > 0:
-            df2_col_name = col+"|df2"
-            ret_df.loc[~(df1[col] == df2[col]), df2_col_name] = None
+    
+    df_1_membership = m_df['a'].isin(df1[join_columns]).astype('Int8') 
+    df_2_membership = (m_df['a'].isin(df2[join_columns]).astype('Int8') *2)
+    m_df['membership'] = df_1_membership + df_2_membership
+    column_config_overrides['membership'] = {'merge_rule': 'hidden'}
+    both_columns = [c for c in m_df.columns if df2_suffix in c] #columns that occur in both
+    for b_col in both_columns:
+        a_col = b_col.removesuffix(df2_suffix)
+        col_neq = (m_df[a_col] == m_df[b_col]).astype('Int8') * 4 
 
+        eq_col = a_col + "|eq"
+        #by adding 2 and 4 to the boolean columns we get unique values
+        #for combinations of is_null and value equal
+        # this is then colored on the column
         
-    return ret_df, column_config_overrides, eqs
+        m_df[eq_col] = col_neq + m_df['membership']
+
+        column_config_overrides[b_col] = {'merge_rule': 'hidden'}
+        column_config_overrides[eq_col] = {'merge_rule': 'hidden'}
+        column_config_overrides[a_col] = {
+            'tooltip_config': { 'tooltip_type':'simple', 'val_column': b_col},
+            'color_map_config': {
+                'color_rule': 'color_categorical',
+                'map_name': eq_map,
+                'val_column': eq_col }}
+        
+    #where did the row come from 
+    column_config_overrides[join_columns] =  {'color_map_config': {
+          'color_rule': 'color_categorical',
+          'map_name': eq_map,
+          'val_column': 'membership'
+        }}
+    return m_df, column_config_overrides, eqs
 
 
 
@@ -88,7 +102,7 @@ def hide_orig_columns(orig_df, new_df):
     remove_columns = orig_df.columns.difference(new_df.columns)
     return {k: {'merge_rule': 'hidden'} for k in remove_columns}
 
-def DatacompyBuckaroo(df1, df2):
+def DatacompyBuckaroo(df1, df2, join_columns, how):
     #shoving all of this into a function is a bit of a hack to geta closure over cmp
     # ideally this would be better integrated into buckaroo via a special type of command
     # in the low code UI,  That way this could work alongside filtering and other pieces
@@ -97,9 +111,10 @@ def DatacompyBuckaroo(df1, df2):
     logger.setLevel(logging.CRITICAL)
 
 
+    
     cmp = datacompy.Compare(
             df1, df2,
-            join_columns='a',  # Column to join DataFrames on
+            join_columns,
             abs_tol=0,  # Absolute tolerancej
             rel_tol=0) # Relative tolerance
     logger.setLevel(logging.WARNING)
@@ -220,7 +235,7 @@ def DatacompyBuckaroo(df1, df2):
         analysis_klasses = base_a_klasses
 
 
-    joined_df, column_config_overrides, init_sd = col_join_dfs(df1, df2, cmp)
+    joined_df, column_config_overrides, init_sd = col_join_dfs(df1, df2, cmp, join_columns[0], how)
 
     #this is a bit of a hack and we are doing double work, for a demo it's expedient
     df1_bw = BuckarooWidget(df1)
@@ -240,7 +255,7 @@ def DatacompyBuckaroo(df1, df2):
         {'primary_key_val': 'dtype',           'displayer_args': {'displayer': 'obj'}},
         {'primary_key_val': 'df1_histogram',   'displayer_args': {'displayer': 'histogram'}},
         {'primary_key_val': 'df2_histogram',   'displayer_args': {'displayer': 'histogram'}},
-        {'primary_key_val': 'unequality',      'displayer_args': {'displayer': 'obj'}}
+        {'primary_key_val': 'inequality',      'displayer_args': {'displayer': 'obj'}}
         ],
         debug=False
     )

@@ -37,7 +37,7 @@ dependencies = [
     "packaging>=18",
     "twine>=6.0.1",
 ]
-version = "0.8.2"
+version = "0.8.3"
 
 [project.license]
 file = "LICENSE.txt"
@@ -218,3 +218,8 @@ skip-magic-trailing-comma = false
 
 # Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
+
+[dependency-groups]
+datacompy = [
+    "datacompy>=0.15.0",
+]

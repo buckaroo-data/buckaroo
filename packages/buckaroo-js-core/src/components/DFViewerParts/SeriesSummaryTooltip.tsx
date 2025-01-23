@@ -17,16 +17,20 @@ export function getBakedDFViewer(seriesDf: DFWhole) {
     };
     return retFunc;
 }
-export const simpleTooltip = (props: ITooltipParams) => {
-    // displaying the tooltip for histograms is distracting.
-    // This should be possible with the tooltipValueGetter, but that
-    // wasn't working for some reason
+export const getSimpleTooltip = (tooltipField:string) => {
 
-    // console.log("simpleTooltip props", props);
-    // console.log("props.colId", props.column.colId, "pinned",
-    // 		props.column.pinned, "node.id", props.node.id, "rowIndex", props.rowIndex)
-    if (props.data.index === "histogram") {
-        return;
-    }
-    return <div className="ag-tooltip">{props.valueFormatted}</div>;
-};
+    
+    const simpleTooltip = (props: ITooltipParams) => {
+	// displaying the tooltip for histograms is distracting.
+	// This should be possible with the tooltipValueGetter, but that
+	// wasn't working for some reason
+
+	if (props.data.index === "histogram") {
+            return;
+	}
+	const val = props.data[tooltipField];
+	return <div className="ag-tooltip">{val}</div>;
+    };
+    return simpleTooltip;
+
+}
