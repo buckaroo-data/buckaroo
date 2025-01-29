@@ -33,11 +33,8 @@ classifiers = [
 dependencies = [
     "anywidget >= 0.9.0",
     "graphlib_backport>=1.0.0",
-    "hatch>=1.14.0",
-    "packaging>=18",
-    "twine>=6.0.1",
 ]
-version = "0.8.3"
+version = "0.8.6"
 
 [project.license]
 file = "LICENSE.txt"
