@@ -2,7 +2,7 @@
 from ._version import __version__
 from .buckaroo_widget import BuckarooWidget
 from .dataflow.widget_extension_utils import DFViewer
-from .widget_utils import is_in_ipython, enable, disable, determine_jupter_env
+from .widget_utils import is_in_ipython, is_in_marimo, enable, disable, determine_jupter_env
 
 
 
@@ -67,7 +67,7 @@ def debug_packages():
         print(f"{package:<17}:", path)
 
 try:
-    if is_in_ipython():
+    if is_in_ipython() or is_in_marimo():
         enable()
         print("Buckaroo has been enabled as the default DataFrame viewer.  To return to default dataframe visualization use `from buckaroo import disable; disable()`")
     else:

@@ -18,6 +18,13 @@ def is_in_ipython():
         #print("must be running inside ipython to enable default display via enable()")
         return False
     return ip
+
+def is_in_marimo():
+    try:
+        import marimo
+    except ImportError:
+        return False
+    return marimo.running_in_notebook()
     
 
 def enable(buckaroo_kls=BuckarooInfiniteWidget,
@@ -130,10 +137,20 @@ def disable():
     print("The default DataFrame displayers have been restored. To re-enable Buckaroo use `from buckaroo import enable; enable()`")
 
 def determine_jupter_env():
+    jupyterlite = False
     try:
         import psutil
     except ImportError:
+        jupyterlite = True
+
+    if is_in_marimo():
+        if jupyterlite:
+            return "marimo-jupyterlite"
+        else:
+            return "marimo"
+    if jupyterlite:
         return "jupyterlite"
+
     parent_process = psutil.Process().parent().cmdline()[-1]
 
     if 'jupyter-lab' in parent_process:
