@@ -107,7 +107,7 @@ export function BuckarooInfiniteWidget({
     return (
         <div className="dcf-root flex flex-col" style={{ width: "100%", height: "100%" }}>
             <div
-                className="orig-df flex flex-row"
+                className="orig-df"
                 style={{
                     // height: '450px',
                     overflow: "hidden",

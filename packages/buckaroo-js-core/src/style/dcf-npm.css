@@ -161,13 +161,20 @@ div.dependent-tabs ul.tabs li.active {
 
 .dev-examples .statusBar {
     width:800px; border:3px dashed purple;
-    
-
-
-
-
 }
 
+.marimo .orig-df {
+    display:flex;
+    flex-direction:column;
+}
+.marimo .statusBar {
+    width:100%;
+    order:1
+}
+
+.marimo .orig-df .df-viewer {
+    order:1
+}
 .custom-tooltip {
     color:black;
     background:green;
