@@ -33,13 +33,14 @@ def test_widget_instatiation():
     dfc = PolarsBuckarooWidget(BASIC_DF)
     #the BasicStyling is simple and predictable, it writes to 'basic' which nothing else should
     dfc.add_analysis(BasicStyling)
-    assert_frame_equal(dfc.widget_args_tuple[1], BASIC_DF)
+    assert_frame_equal(dfc.dataflow.widget_args_tuple[1], BASIC_DF)
     assert dfc.df_data_dict['main'] == BASIC_DF_JSON_DATA
 
     actual_column_config = dfc.df_display_args['basic']['df_viewer_config']['column_config']
     expected_column_config = DFVIEWER_CONFIG_DEFAULT['column_config']
 
     #this test is brittle because styling is rapidly changing in development
+    #assert dfc.analysis_klasses == dfc.dataflow.analysis_klasses
     assert actual_column_config == expected_column_config 
 
 def test_custom_dataflow():
@@ -62,7 +63,7 @@ def test_custom_dataflow():
         analysis_klasses = [StylingAnalysis, IntStyling]
         
     cdfc = TwoStyleDFC(BASIC_DF)
-    assert_frame_equal(cdfc.widget_args_tuple[1], BASIC_DF)
+    assert_frame_equal(cdfc.dataflow.widget_args_tuple[1], BASIC_DF)
     assert cdfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
     DFVIEWER_CONFIG_INT = {
                    'pinned_rows': [],
@@ -108,7 +109,7 @@ def test_custom_post_processing():
     temp_buckaroo_state['post_processing'] = 'post1'
     p_dfc.buckaroo_state = temp_buckaroo_state
 
-    assert p_dfc.processed_df is SENTINEL_DF
+    assert p_dfc.dataflow.processed_df is SENTINEL_DF
 
 
 class TransposeProcessing(ColAnalysis):
@@ -133,8 +134,8 @@ def test_transpose_error():
         analysis_klasses = base_a_klasses
 
     vcb = VCBuckarooWidget(typed_df, debug=False)
-    assert isinstance(vcb.processed_df, pl.DataFrame)
-    assert vcb.processed_df.to_numpy().tolist() ==[
+    assert isinstance(vcb.dataflow.processed_df, pl.DataFrame)
+    assert vcb.dataflow.processed_df.to_numpy().tolist() ==[
         [1, 0.5, 'foobar'],
         [1, 0.5, 'foobar'],
         [1, 0.5, 'foobar'],
@@ -144,9 +145,9 @@ def test_transpose_error():
     temp_buckaroo_state = vcb.buckaroo_state.copy()
     temp_buckaroo_state['post_processing'] = 'transpose'
     vcb.buckaroo_state = temp_buckaroo_state
-    assert isinstance(vcb.processed_df, pl.DataFrame)
+    assert isinstance(vcb.dataflow.processed_df, pl.DataFrame)
     #note that Polars doesn'transpose to objects, but to strings instead
-    assert vcb.processed_df.to_numpy().tolist() == [
+    assert vcb.dataflow.processed_df.to_numpy().tolist() == [
         ['1', '1', '1', '1', '1'],
         ['0.5', '0.5', '0.5', '0.5', '0.5'],
         ['foobar', 'foobar', 'foobar', 'foobar', 'foobar']]
@@ -173,8 +174,8 @@ def test_always_error_post_processing():
     temp_buckaroo_state['post_processing'] = 'always_error'
     bw.buckaroo_state = temp_buckaroo_state
     
-    print(bw.processed_df.to_numpy().tolist())
-    assert bw.processed_df.to_numpy().tolist() ==  [['division by zero']]
+    #print(bw.processed_df.to_numpy().tolist())
+    assert bw.dataflow.processed_df.to_numpy().tolist() ==  [['division by zero']]
 
 ROWS = 5
 typed_df = pl.DataFrame(
@@ -198,7 +199,7 @@ def test_column_config_override():
 
     bw.add_analysis(ColumnConfigOverride)
 
-    assert 'column_config_override' not in bw.merged_sd['int_col']
+    assert 'column_config_override' not in bw.dataflow.merged_sd['int_col']
     cc_initial = bw.df_display_args['main']['df_viewer_config']['column_config']
     int_cc_initial = cc_initial[1]
     assert int_cc_initial['col_name'] == 'int_col' #make sure we found the right row
@@ -208,7 +209,7 @@ def test_column_config_override():
     temp_buckaroo_state['post_processing'] = 'override'
     bw.buckaroo_state = temp_buckaroo_state
     
-    assert bw.merged_sd['int_col']['column_config_override'] == EXPECTED_OVERRIDE
+    assert bw.dataflow.merged_sd['int_col']['column_config_override'] == EXPECTED_OVERRIDE
     cc_after = bw.df_display_args['main']['df_viewer_config']['column_config']
     int_cc_after = cc_after[1]
     assert int_cc_after['col_name'] == 'int_col' #make sure we found the right row
@@ -217,5 +218,5 @@ def test_column_config_override():
 def test_sample():
     big_df = pl.DataFrame({'a': np.arange(30_000)})
     bw = PolarsBuckarooWidget(big_df)
-    assert len(bw.processed_df) == len(big_df)
+    assert len(bw.dataflow.processed_df) == len(big_df)
     assert len(bw.df_data_dict['main']) == 5_000

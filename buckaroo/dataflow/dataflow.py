@@ -153,20 +153,21 @@ class DataFlow(HasTraits):
     def _get_summary_sd(self, df):
         analysis_klasses = self.analysis_klasses
         if analysis_klasses == "foo":
-            return {'some-col': {'foo':8}}
+            return {'some-col': {'foo':8}}, {}
         if analysis_klasses == "bar":
-            return {'other-col': {'bar':10}}
+            return {'other-col': {'bar':10}}, {}
         index_name = df.index.name or "index"
         ret_summary = {index_name: {}}
         for col in df.columns:
             ret_summary[col] = {}
-        return ret_summary
+        return ret_summary, {}
 
     @observe('processed_result', 'analysis_klasses')
     @exception_protect('summary_sd-protector')
     def _summary_sd(self, change):
-        result_summary_sd = self._get_summary_sd(self.processed_df)
+        result_summary_sd, errs  = self._get_summary_sd(self.processed_df)
         self.summary_sd = result_summary_sd
+        self.errs = errs
 
     @observe('summary_sd', 'processed_result')
     @exception_protect('merged_sd-protector')
@@ -207,12 +208,12 @@ class CustomizableDataflow(DataFlow):
     def __init__(self, orig_df, debug=False,
                  column_config_overrides=None,
                  pinned_rows=None, extra_grid_config=None,
-                 component_config=None, init_sd=None):
+                 component_config=None, init_sd=None, skip_main_serial=False):
         if init_sd is None:
             self.init_sd = {}
         else:
             self.init_sd = init_sd
-
+        self.skip_main_serial = skip_main_serial
         if column_config_overrides is None:
             column_config_overrides = {}
         self.column_config_overrides = column_config_overrides
@@ -326,9 +327,9 @@ class CustomizableDataflow(DataFlow):
             if self.debug:
                 raise Exception("Error executing analysis")
             else:
-                return {}
+                return {}, stats.errs
         else:
-            return sdf
+            return sdf, {}
 
 
     # ### end summary stats block        
@@ -344,6 +345,23 @@ class CustomizableDataflow(DataFlow):
     def _df_to_obj(self, df:pd.DataFrame):
         return pd_to_obj(self.sampling_klass.serialize_sample(df))
     
+    def add_analysis(self, analysis_klass):
+        """
+        same as get_summary_sd, call whatever to set summary_sd and trigger further comps
+        """
+
+        stats = self.DFStatsClass(
+            self.processed_df,
+            self.analysis_klasses,
+            self.df_name, debug=self.debug)
+        stats.add_analysis(analysis_klass)
+        
+        self.analysis_klasses = stats.ap.ordered_a_objs
+        self.DFStatsClass.verify_analysis_objects(self.analysis_klasses)
+        self.setup_options_from_analysis()
+        #force recomputation
+        self._handle_widget_change({})
+
 
     #final processing block
     @observe('widget_args_tuple')
@@ -362,10 +380,14 @@ class CustomizableDataflow(DataFlow):
         # to expedite processing maybe future provided dfs from
         # postprcoessing could default to empty until that is
         # selected, optionally
-        
-        self.df_data_dict = {'main': self._df_to_obj(processed_df),
-                             'all_stats': self._sd_to_jsondf(merged_sd),
-                             'empty': []}
+        if self.skip_main_serial:
+            self.df_data_dict = {'main': [],
+                                 'all_stats': self._sd_to_jsondf(merged_sd),
+                                 'empty': []}
+        else:
+            self.df_data_dict = {'main': self._df_to_obj(processed_df),
+                                 'all_stats': self._sd_to_jsondf(merged_sd),
+                                 'empty': []}
 
         temp_display_args = {}
         for display_name, A_Klass in self.df_display_klasses.items():

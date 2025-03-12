@@ -1,3 +1,4 @@
+import json
 import graphlib
 from collections import OrderedDict
 from typing import List, Union, Any, Mapping, Tuple, Callable
@@ -29,6 +30,14 @@ class ColAnalysis:
         #I can't figure out why the property won't work here
         a.extend(list(kls.provides_defaults.keys()))
         return a
+
+    @classmethod
+    def verify_no_cycle(kls):
+        requires = set(kls.requires_summary)
+        provides = set(kls.provides_defaults.keys())
+        if len(requires.intersection(provides)) == 0:
+            return True
+        return False
 
     summary_stats_display:Union[List[str], None] = None
     quiet = False
@@ -68,6 +77,8 @@ def check_solvable(a_objs):
     provides = []
     required = []
     for ao in a_objs:
+        if ao.verify_no_cycle() == False:
+            raise SelfCycle(f"{ao} depends on itself")
         rest = ao.full_provides()
         provides.extend(rest)
 
@@ -89,13 +100,24 @@ def clean_list(full_class_list):
     return remove_duplicates(only_kls_lst)
 
 
+
+class SelfCycle(Exception):
+    pass
+
 def order_analysis(a_objs):
     """order a set of col analysis objects such that the dag of their
     provides_summary and requires_summary is ordered for computation
     """
 
     graph = {}
-    key_class_objs = {}
+    key_class_objs = {} #from class+prop name to class object
+
+    # graph is an object with keys of 'prop' or class and values of the prop or class it depends on
+    # classnames are of the form "ClassName###first_provided_prop
+
+    # these fixes aren't complete.  look at https://github.com/paddymul/buckaroo/issues/352
+    # for some more explanation
+    
     for ao in a_objs:
         fp = ao.full_provides()
         if len(fp) == 0:
@@ -113,6 +135,11 @@ def order_analysis(a_objs):
         for j in ao.full_provides():
             graph[j] = set([first_mid_key])
     ts = graphlib.TopologicalSorter(graph)
-    seq =  tuple(ts.static_order())
+    try:
+        seq = tuple(ts.static_order())
+    except graphlib.CycleError as e:
+        print("e", e)
+        print("graph", graph)
+        raise
     full_class_list = [key_class_objs.get(k, None) for k in seq]
     return clean_list(full_class_list)

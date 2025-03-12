@@ -33,8 +33,10 @@ classifiers = [
 dependencies = [
     "anywidget >= 0.9.0",
     "graphlib_backport>=1.0.0",
+    "fastparquet"
 ]
-version = "0.8.9"
+
+version = "0.9.0"
 
 [project.license]
 file = "LICENSE.txt"

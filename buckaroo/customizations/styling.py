@@ -30,7 +30,7 @@ class DefaultMainStyling(StylingAnalysis):
             disp = {'displayer': 'float', 'min_fraction_digits':0, 'max_fraction_digits':0}
         elif t == 'float':
             disp = {'displayer': 'float', 'min_fraction_digits':digits, 'max_fraction_digits':digits}
-        elif t == 'temporal':
+        elif t == 'datetime':
             disp = {'displayer': 'datetimeLocaleString','locale': 'en-US',  'args': {}}
         elif t == 'string':
             disp = {'displayer': 'string', 'max_length': 35}
@@ -43,19 +43,23 @@ class DefaultMainStyling(StylingAnalysis):
 
 
 class DefaultSummaryStatsStyling(StylingAnalysis):
+    requires_summary = [
+        "dtype", "non_null_count", "null_count", "unique_count", "distinct_count",
+        "mean", "std", "min", 
+        "median",
+        "max",
+        "most_freq", "2nd_freq", "3rd_freq", "4th_freq", "5th_freq"]
     pinned_rows = [
         obj_('dtype'),
         float_('non_null_count', 0),
         float_('null_count', 0),
+        float_('unique_count', 0),
+        float_('distinct_count', 0),
         float_('mean'),
         float_('std'),
         float_('min'),
-        float_('25th'),
         float_('median'),
-        float_('75th'),
         float_('max'),
-        float_('unique_count', 0),
-        float_('distinct_count', 0),
         obj_('most_freq'),
         obj_('2nd_freq'),
         obj_('3rd_freq'),

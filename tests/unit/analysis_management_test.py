@@ -34,7 +34,37 @@ class AlwaysErr(ColAnalysis):
     def computed_summary(summary_dict):
         1/0
 
+
+class DependsA(ColAnalysis):
+
+    provides_defaults = { 'b':'asdf'}
+    requires_summary = ['a']
+    @staticmethod
+    def computed_summary(summary_dict):
+        if summary_dict.get('a',False) == 'asdf':
+            raise Exception("DependsA expected 'a' in summary_dict, it wasn't there")
+        return { 'b':'bar'}
+
+class ProvidesAComputed(ColAnalysis):
+
+    provides_defaults = { 'a':'asdf'}
+    @staticmethod
+    def computed_summary(summary_dict):
+        return { 'a':'bar'}
+
+
+
 class TestAnalysisPipeline(unittest.TestCase):
+
+    def test_provides_ordering(self):
+        """Make sure computed_summary of provides called before it is required.
+        """
+
+        sdf, errs = AnalysisPipeline.full_produce_summary_df(
+            test_df, [ProvidesAComputed, DependsA], 'test_df', debug=True)
+        assert errs == {}
+
+
 
     def test_produce_series_df(self):
         """just make sure this doesn't fail"""

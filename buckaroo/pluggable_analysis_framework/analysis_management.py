@@ -142,7 +142,6 @@ class AnalysisPipeline(object):
     
     def __init__(self, analysis_objects, unit_test_objs=True):
 
-        #self.produce_func = self.full_produce_func[0]
         self.summary_stats_display = "all"
         self.unit_test_objs = unit_test_objs
         self.verify_analysis_objects(analysis_objects)

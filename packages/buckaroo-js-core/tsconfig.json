@@ -5,7 +5,8 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"], // Specifies the libraries available for the code.
     "module": "ESNext", // Defines the module system to use for code generation.
     "skipLibCheck": true, // Skips type checking of declaration files.
-
+      "composite":true,
+    "allowSyntheticDefaultImports": true,
     /* Bundler mode */
     "moduleResolution": "bundler", // Specifies how modules are resolved when bundling.
     "allowImportingTsExtensions": true, // Allows importing TypeScript files with extensions.
@@ -21,8 +22,9 @@
     "noFallthroughCasesInSwitch": true, // Requires handling all cases in a switch statement.
     "declaration": true, // Generates declaration files for TypeScript.
   },
-  "include": ["src"], // Specifies the directory to include when searching for TypeScript files.
+    "include": ["src", "./jest.setup.ts",], // Specifies the directory to include when searching for TypeScript files.
   "exclude": [
-    "src/**/__docs__","src/**/__test__"
+      "src/**/__docs__","src/**/__test__",
+
   ]
 }

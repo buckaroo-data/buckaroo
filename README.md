@@ -145,6 +145,7 @@ npm run dev
 ```sh
 cd buckaroo
 uv venv
+source ~/buckaroo/.venv/bin/activate
 uv sync -q
 
 ```

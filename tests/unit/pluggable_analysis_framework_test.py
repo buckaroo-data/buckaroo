@@ -1,7 +1,7 @@
 import unittest
 import graphlib
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
-    ColAnalysis, order_analysis, check_solvable, NotProvidedException)
+    ColAnalysis, order_analysis, check_solvable, NotProvidedException, SelfCycle)
 
 
 
@@ -10,14 +10,24 @@ from .fixtures import (DistinctCount, Len, DistinctPer, DCLen, DependsNoProvides
 class NoRoute(ColAnalysis):    
     provides_defaults = {'not_used': False}
     requires_summary = ["does_not_exist"]
+
+class SelfCycleA(ColAnalysis):
+    provides_defaults = {'cycle_a': 'asdf'}
+
+    requires_summary = ["cycle_a"]
+
     
 class CycleA(ColAnalysis):
-    provides_defaults = {'cycle_a': 'asdf'}
+    provides_defaults = {'cycle_a': 'asdf', 'extra_from_class_a':'asdf'}
+    #provides_defaults = {'cycle_a': 'asdf'}
     requires_summary = ["cycle_b"]
 
 class CycleB(ColAnalysis):
     provides_defaults = {'cycle_b': 'foo'}
     requires_summary = ["cycle_a"]
+
+
+
 
 class CA_AB(ColAnalysis):
     provides_summary = {"a":0, "b":99}
@@ -67,6 +77,10 @@ class TestOrderAnalysis(unittest.TestCase):
     def test_cycle(self):
         with self.assertRaises(graphlib.CycleError):
             order_analysis([CycleA, CycleB])
+
+    def test_self_cycle(self):
+        with self.assertRaises(SelfCycle):
+            check_solvable([SelfCycleA])
             
     def test_no_route(self):
         check_solvable([Len])

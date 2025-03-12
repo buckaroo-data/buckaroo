@@ -1,19 +1,18 @@
 "use strict";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { winners } from "../../baked_data/olympic-winners";
 import {
-    getDs,
-    getPayloadKey,
-    LruCache,
+//    getDs,
+//    getPayloadKey,
     //@ts-ignore
     PayloadArgs,
-    PayloadResponse,
     //  sourceName,
 } from "./gridUtils";
-import { InfiniteViewer } from "./InfiniteViewerImpl";
+//import { InfiniteViewer } from "./InfiniteViewerImpl";
 import { Operation } from "../OperationUtils";
 import _ from "lodash";
+import { PayloadResponse } from "./SmartRowCache";
 
 const data: [string, Operation[]][] = [
     ["Swimming", [[{ symbol: "foo" }, { symbol: "df" }, "green"]]],
@@ -78,23 +77,30 @@ const getDataset = (sportName: string) => {
 export const InfiniteWrapper = ({
     //@ts-ignore
     payloadArgs,
+    //@ts-ignore
     on_payloadArgs,
     payloadResponse,
     operations,
+    
 }: {
     payloadArgs: PayloadArgs;
     on_payloadArgs: (pa: PayloadArgs) => void;
     payloadResponse: PayloadResponse;
     operations: Operation[];
 }) => {
-    const key = getPayloadKey(payloadResponse.key);
-    const respCache = useMemo(() => new LruCache<PayloadResponse>(), []);
+    console.log("here", payloadArgs,on_payloadArgs, payloadResponse, operations);
+    return <h1>broken</h1>
+    //    const key = getPayloadKey(payloadResponse.key);
 
+    /*
     const ds = useMemo(() => {
         console.log("recreating ds");
-        return getDs(on_payloadArgs, respCache);
+        return getDs({}); //this whole thing is broken
     }, [operations]);
-    respCache.put(key, payloadResponse);
+
+    src.addRows([payloadResponse.key.start, payloadResponse.key.end], payloadResponse.data);
+    src.sentLength = payloadResponse.length;
+
     console.log(`tableinfinite 94 found ${payloadResponse.data.length} rows for `, key);
     return (
         <div>
@@ -103,6 +109,7 @@ export const InfiniteWrapper = ({
             <InfiniteViewer dataSource={ds} operations={operations} />
         </div>
     );
+    */
 };
 
 export const InfiniteEx = () => {

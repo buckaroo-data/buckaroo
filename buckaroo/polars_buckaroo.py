@@ -1,5 +1,9 @@
+from io import BytesIO
+import traceback
+
 import polars as pl
-from buckaroo.buckaroo_widget import BuckarooWidget, RawDFViewerWidget
+
+from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, RawDFViewerWidget
 from .customizations.polars_analysis import PL_Analysis_Klasses
 from .pluggable_analysis_framework.polars_analysis_management import (
     PlDfStats)
@@ -66,7 +70,73 @@ class PolarsBuckarooWidget(BuckarooWidget):
     def _df_to_obj(self, df):
         # I want to this, but then row numbers are lost
         #return pd_to_obj(self.sampling_klass.serialize_sample(df).to_pandas())
+        import pandas as pd
+        if isinstance(df, pd.DataFrame):
+            return pd_to_obj(self.sampling_klass.serialize_sample(df))
         return pd_to_obj(self.sampling_klass.serialize_sample(df.to_pandas()))
+
+
+def to_parquet(df):
+    # I don't like this copy.  modify to keep the same data with different names
+    #df2 = df.copy()
+    
+    df.columns = [str(x) for x in df.columns]
+    #obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
+    #encodings = {k:'json' for k in obj_columns}
+
+    out = BytesIO()
+
+    df.with_row_index().write_parquet(out, compression='uncompressed') #engine='fastparquet', object_encoding=encodings)
+    out.seek(0)
+    return out.read()
+
+
+class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget):
+    def _handle_payload_args(self, new_payload_args):
+        start, end = new_payload_args['start'], new_payload_args['end']
+        print("payload_args changed", start, end)
+        _unused, processed_df, merged_sd = self.dataflow.widget_args_tuple
+        if processed_df is None:
+            return
+
+        try:
+            sort = new_payload_args.get('sort')
+            if sort:
+                sort_dir = new_payload_args.get('sort_direction')
+                ascending = sort_dir == 'asc'
+                sorted_df = processed_df.sort(sort, descending=not ascending)
+                slice_df = sorted_df[start:end]
+                #slice_df['index'] = slice_df.index
+                self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)}, [to_parquet(slice_df)])
+            else:
+                slice_df = processed_df[start:end]
+                #slice_df['index'] = slice_df.index
+                self.send({ "type": "infinite_resp", 'key':new_payload_args,
+                            'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
+    
+                second_pa = new_payload_args.get('second_request')
+                if not second_pa:
+                    return
+                
+                extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
+                extra_payload_args = dict(
+                    start=extra_start, end=extra_end,
+                    sourceName=new_payload_args.get('sourceName', 'no_source_name'))
+                #extra_df = pd_to_obj(processed_df[extra_start:extra_end])
+                # self.send(
+                #     {"type": "infinite_resp", 'key':second_pa, 'data':extra_df, 'length':len(processed_df)})
+                extra_df = processed_df[extra_start:extra_end]
+                extra_df['index'] = extra_df.index
+                self.send(
+                    {"type": "infinite_resp", 'key':second_pa, 'data':[], 'length':len(processed_df)},
+                    [to_parquet(extra_df)]
+                )
+        except Exception as e:
+            print(e)
+            stack_trace = traceback.format_exc()
+            self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'error_info':stack_trace, 'length':0})
+            raise
+
 
 def PolarsDFViewer(df,
                    column_config_overrides=None,

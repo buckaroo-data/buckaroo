@@ -6,7 +6,7 @@ from buckaroo.pluggable_analysis_framework.polars_analysis_management import (
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
     ColAnalysis)
 from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
-from buckaroo.polars_buckaroo import PolarsBuckarooWidget
+from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget
 from buckaroo.dataflow.dataflow import StylingAnalysis
 from buckaroo.jlisp.lisp_utils import (s, qc_sym)
 
@@ -36,10 +36,8 @@ test_df = pl.DataFrame({
 })
 
 
-
 def test_polars_all_stats():
     """
-    FIXME temporarily disabled to test other build stuff
     the all_stats verify that PolarsBuckarooWidget produces the
     same summary_stats shape tatha pandas does.
 
@@ -56,7 +54,7 @@ def test_polars_all_stats():
         analysis_klasses= [SelectOnlyAnalysis, StylingAnalysis]
 
     spbw = SimplePolarsBuckaroo(test_df)
-    assert spbw.merged_sd == expected
+    assert spbw.dataflow.merged_sd == expected
 
     assert spbw.df_data_dict['all_stats'] == [
         {'index': 'null_count', 'normal_int_series': 0.0},
@@ -64,6 +62,22 @@ def test_polars_all_stats():
         {'index': 'quin99', 'normal_int_series': 4.0}]
     assert spbw.df_display_args['main']['df_viewer_config'] == EXPECTED_DF_VIEWER_CONFIG
 
+def test_polars_boolean():
+    bool_df = pl.DataFrame({'bools':[True, True, False, False, True, None]})
+    sdf, errs = polars_produce_series_df(
+        bool_df, PolarsBuckarooWidget.analysis_klasses, 'test_df', debug=True)
+    assert errs == {}
+
+def test_polars_infinite():
+    bool_df = pl.DataFrame({'bools':[True, True, False, False, True, None]})
+    pbw = PolarsBuckarooInfiniteWidget(bool_df)
+    byts = pbw._handle_payload_args({'start':0, 'end':3})
+
+def Xtest_polars_index_col():
+    df = pl.DataFrame({'bools':[True, True, False, False, True, None],
+                       'index':[   0,    1,     2,     3,    4,    5]
+                       })
+    pbw2= PolarsBuckarooWidget(df)
 
 
 def test_pandas_all_stats():
@@ -97,7 +111,7 @@ def test_pandas_all_stats():
         analysis_klasses= [SimpleAnalysis, StylingAnalysis]
 
     sbw = SimpleBuckaroo(pd_test_df)
-    assert sbw.merged_sd == {
+    assert sbw.dataflow.merged_sd == {
         'index': {'mean': 2.5, 'null_count': 0, 'quin99': 4.0},
         'normal_int_series':  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0}}
     assert sbw.df_display_args['main']['df_viewer_config'] == EXPECTED_DF_VIEWER_CONFIG
@@ -234,33 +248,33 @@ def test_polars_search():
 
     bw = PolarsBuckarooWidget(df)
     assert bw.buckaroo_state['cleaning_method'] == 'NoCleaning'
-    assert bw.cleaning_method == 'NoCleaning'
+    assert bw.dataflow.cleaning_method == 'NoCleaning'
     # class VCBuckarooWidget(BuckarooWidget):
     #     #analysis_klasses = base_a_klasses
     #     autoclean_conf = tuple([NoCleaningConf]) 
 
     # vcb = VCBuckarooWidget(typed_df, debug=False)
-    assert len(bw.processed_df) == 4
+    assert len(bw.dataflow.processed_df) == 4
     
     temp_buckaroo_state = bw.buckaroo_state.copy()
     temp_buckaroo_state['quick_command_args'] = {'search': ['a']}
     bw.buckaroo_state = temp_buckaroo_state
 
     #probably something in autocleaning config should be responsible for generating these commands
-    assert bw.merged_operations == [
+    assert bw.dataflow.merged_operations == [
         [qc_sym('search'), s('df'), "col", "a"]]
 
-    assert len(bw.processed_df) == 3
+    assert len(bw.dataflow.processed_df) == 3
 
     temp_buckaroo_state = bw.buckaroo_state.copy()
     temp_buckaroo_state['quick_command_args'] = {'search': ['aa']}
     bw.buckaroo_state = temp_buckaroo_state
 
     #probably something in autocleaning config should be responsible for generating these commands
-    assert bw.merged_operations == [
+    assert bw.dataflow.merged_operations == [
         [qc_sym('search'), s('df'), "col", "aa"]]
 
-    assert len(bw.processed_df) == 1
+    assert len(bw.dataflow.processed_df) == 1
 
     """
     add an additional test that accounts for arbitrary, configurable status bar command args

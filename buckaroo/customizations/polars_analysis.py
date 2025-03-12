@@ -32,10 +32,13 @@ Overtime codebases will probably trend towards many classes with single facts, b
 
 
 class ComputedDefaultSummaryStats(PolarsAnalysis):
-    requires_summary = ['length', 'nan_count',
+    requires_summary = ['length',
                         'unique_count', 'empty_count', 'distinct_count']
     provides_defaults = dict(
         distinct_per=0, empty_per=0, unique_per=0, nan_per=0)
+
+
+
                         
 
     @staticmethod
@@ -45,7 +48,7 @@ class ComputedDefaultSummaryStats(PolarsAnalysis):
             distinct_per=summary_dict['distinct_count']/len_,
             empty_per=summary_dict.get('empty_count',0)/len_,
             unique_per=summary_dict['unique_count']/len_,
-            nan_per=summary_dict['nan_count']/len_)
+            nan_per=summary_dict['null_count']/len_)
 
 
 
@@ -71,21 +74,33 @@ class VCAnalysis(PolarsAnalysis):
 
 DUMMY_VALUE_COUNTS = pl.Series(
     [{'a': 3, 'count': 1}, {'a': 4, 'count': 1}, {'a': 5, 'count': 1}])
+
+
 class BasicAnalysis(PolarsAnalysis):
 
 
-    provides_defaults = dict(length=0, nan_count=0, min=0, max=0, mode=0,
-                             mean=0, unique_count=0, empty_count=0, distinct_count=0)
+    provides_defaults = {'length':0, 'min':0, 'max':0, 'mode':0,
+                         'mean':0, 'unique_count':0, 'empty_count':0, 'distinct_count':0,
+                         'most_freq':0, 'median':0,
+                         'std':0,
+                         'null_count':0, 'non_null_count':0,
+                         '2nd_freq':0, '3rd_freq':0, '4th_freq':0, '5th_freq':0}
+
 
     requires_summary = ['value_counts']
     select_clauses = [
         F.all().len().name.map(json_postfix('length')),
-        F.all().null_count().name.map(json_postfix('nan_count')),
+        F.all().null_count().name.map(json_postfix('null_count')),
         NOT_STRUCTS.min().name.map(json_postfix('min')),
         NOT_STRUCTS.max().name.map(json_postfix('max')),
         NOT_STRUCTS.mean().name.map(json_postfix('mean')),
+        NOT_STRUCTS.mode().name.map(json_postfix('most_freq')),
+        cs.numeric().median().name.map(json_postfix('median')),
+        cs.numeric().std().name.map(json_postfix('std')),
+        
         F.col(pl.Utf8).str.count_matches("^$").sum().name.map(json_postfix('empty_count')),
-        (NOT_STRUCTS.len() - NOT_STRUCTS.is_duplicated().sum()).name.map(json_postfix('unique_count'))
+        (NOT_STRUCTS.len() - NOT_STRUCTS.is_duplicated().sum()).name.map(json_postfix('unique_count')),
+        (NOT_STRUCTS.len() - NOT_STRUCTS.null_count()).name.map(json_postfix('non_null_count'))
         ]
 
     @staticmethod
@@ -94,7 +109,17 @@ class BasicAnalysis(PolarsAnalysis):
         if 'value_counts' in summary_dict:
             temp_df = pl.DataFrame({'vc': summary_dict['value_counts'].explode()}).unnest('vc')
             regular_col_vc_df = temp_df.select(pl.all().exclude('count').alias('key'), pl.col('count'))
-            return dict(mode=regular_col_vc_df[0]['key'][0], distinct_count=len(temp_df))
+
+            def get_freq(pos):
+                if len(regular_col_vc_df) > pos:
+                    return regular_col_vc_df[pos]['key'][0]
+                return None
+            return {'mode': get_freq(0),
+                    '2nd_freq': get_freq(1),
+                    '3rd_freq': get_freq(2),
+                    '4th_freq': get_freq(3),
+                    '5th_freq': get_freq(4),
+                    'distinct_count':len(temp_df)}
         else:
 
             return dict(mode=None, value_counts=DUMMY_VALUE_COUNTS, distinct_count=0,
@@ -210,7 +235,9 @@ class HistogramAnalysis(PolarsAnalysis):
     column_ops = {
         'histogram_args': (NUMERIC_POLARS_DTYPES, normalize_polars_histogram_ser)}
 
-    requires_summary = ['min', 'max', 'value_counts', 'length', 'unique_count', 'is_numeric', 'nan_per']
+    requires_summary = ['min', 'max', 'value_counts', 'length', 'unique_count', 'is_numeric', 'nan_per',
+                        'null_count',
+                        ]
     provides_defaults = dict(categorical_histogram=[], histogram=[], histogram_bins=[])
 
     @staticmethod
@@ -221,7 +248,7 @@ class HistogramAnalysis(PolarsAnalysis):
         vc = summary_dict['value_counts']
         cd = categorical_dict_from_vc(vc)
         is_numeric = summary_dict.get('is_numeric', False)
-        nan_per = summary_dict['nan_per']
+        nan_per = summary_dict['null_count']
         if is_numeric and len(vc.explode()) > 5:
             histogram_args = summary_dict['histogram_args']
             min_, max_, nan_per = summary_dict['min'], summary_dict['max'], summary_dict['nan_per']

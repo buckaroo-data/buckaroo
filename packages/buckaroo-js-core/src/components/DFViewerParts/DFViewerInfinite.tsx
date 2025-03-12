@@ -119,7 +119,7 @@ export function DFViewerInfinite({
         getRowId,
         rowModelType: "clientSide",
     };
-    console.log("error_info", error_info);
+    
     if (data_wrapper.data_type === "Raw") {
         const rdGridOptions: GridOptions = {
             ...gridOptions,
@@ -136,7 +136,7 @@ export function DFViewerInfinite({
             />
         );
     } else if (data_wrapper.data_type === "DataSource") {
-        const dsGridOptions = getDsGridOptions(gridOptions);
+        const dsGridOptions = getDsGridOptions(gridOptions, hs.maxRowsWithoutScrolling );
         return (
             <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
                 <pre>{error_info ? error_info : ""}</pre>
@@ -171,7 +171,6 @@ const RowDataViewer = ({
     rdGridOptions: GridOptions;
     topRowData: DFData;
 }): React.JSX.Element => {
-    console.log("gridRef");
     return (
         <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
             <div style={hs.applicableStyle} className={`theme-hanger ${divClass}`}>
@@ -185,11 +184,13 @@ const RowDataViewer = ({
     );
 };
 
-const getDsGridOptions = (origGridOptions: GridOptions): GridOptions => {
+const getDsGridOptions = (origGridOptions: GridOptions, maxRowsWithoutScrolling:number):
+ GridOptions => {
     const dsGridOptions: GridOptions = {
         ...origGridOptions,
         onSortChanged: (event: SortChangedEvent) => {
             const api: GridApi = event.api;
+	    //@ts-ignore
             console.log(
                 "sortChanged",
                 api.getFirstDisplayedRowIndex(),
@@ -200,13 +201,13 @@ const getDsGridOptions = (origGridOptions: GridOptions): GridOptions => {
             // Setting a sort and being in the middle of it makes no sense
             api.ensureIndexVisible(0);
         },
-        rowBuffer: 5,
+        rowBuffer: 20,
         rowModelType: "infinite",
-        cacheBlockSize: 49,
-        cacheOverflowSize: 2,
-        maxConcurrentDatasourceRequests: 1,
-        maxBlocksInCache: 5,
-        infiniteInitialRowCount: 49,
+        cacheBlockSize: maxRowsWithoutScrolling + 50,
+        cacheOverflowSize: 0,
+        maxConcurrentDatasourceRequests: 2,
+        maxBlocksInCache: 0,
+        infiniteInitialRowCount: maxRowsWithoutScrolling + 50
     };
     return dsGridOptions;
 };

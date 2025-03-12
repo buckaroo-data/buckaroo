@@ -98,6 +98,24 @@ def Xtest_produce_series_column_ops():
     
 
 HA_CLASSES = [VCAnalysis, PlTyping, BasicAnalysis, ComputedDefaultSummaryStats, HistogramAnalysis]
+
+
+class AlwaysError(PolarsAnalysis):
+    provides_defaults = {'foo':0}
+    @staticmethod
+    def computed_summary(summary_dict):
+        1/0
+
+def test_errors_analysis():
+    bool_df = pl.DataFrame({'bools':[True, True, False, False, True, None]})
+    summary_df, errs = PolarsAnalysisPipeline.full_produce_summary_df(bool_df, [AlwaysError])
+    print("errs", errs)
+    key = list(errs.keys())[0]
+    err = list(errs.values())[0]
+
+    assert key == ('bools', 'computed_summary')
+    assert isinstance(err[0], ZeroDivisionError)
+
 def test_histogram_analysis():
     cats = [chr(x) for x in range(97, 102)] * 2 
     cats += [chr(x) for x in range(103,113)]

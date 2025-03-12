@@ -30,11 +30,11 @@ def polars_produce_series_df(df:pl.DataFrame,
         all_clauses.extend(obj.select_clauses)
     try:
         result_df = df.lazy().select(all_clauses).collect()
-    except Exception:
+    except Exception as e:
         if debug:
             df.write_parquet('error.parq')
         traceback.print_exc()
-        return dict([[k, {}] for k in df.columns]), {}
+        return dict([[k, str(e)] for k in df.columns]), {}
 
     summary_dict = {}
     for col in df.columns:

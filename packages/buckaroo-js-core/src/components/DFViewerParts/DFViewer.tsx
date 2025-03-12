@@ -36,8 +36,6 @@ export const getGridOptions = (
 
         enableCellTextSelection: true,
         onRowClicked: (event) => {
-            // console.log('A row was clicked')
-            // console.log("event", event)
             const sel = document.getSelection();
             if (sel === null) {
                 return;
@@ -60,7 +58,6 @@ export const getGridOptions = (
 
         onCellClicked: (event) => {
             const colName = event.column.getColId();
-            console.log("onCellClicked", event);
             if (setActiveCol === undefined || colName === undefined) {
                 console.log("returning because setActiveCol is undefined");
                 return;
@@ -106,7 +103,6 @@ export function DFViewer({
         cellRendererSelector: getCellRendererSelector(df_viewer_config.pinned_rows),
     };
 
-    console.log("108 here");
     //const gridRef = useRef<AgGridReact<unknown>>(null);
     const pinned_rows = df_viewer_config.pinned_rows;
     const topRowData = summary_stats_data
@@ -155,6 +151,7 @@ export interface HeightStyleI {
     //the class for the outer wrapping div
     classMode: "short-mode" | "regular-mode"; 
     applicableStyle: CSSProperties;
+    maxRowsWithoutScrolling:number;
 }
 
 export const getHeightStyle = (df_viewer_config: DFViewerConfig, numRows: number): HeightStyleI => {
@@ -196,12 +193,12 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
     const scrollSlop = 3;
 
     // figured out default row height of 21.  Want to plumb back in to what is actually rendered.
-    const maxRowsWithoutScrolling = (dfvHeight / (rowHeight || 21)) - scrollSlop;  
+    const maxRowsWithoutScrolling = Math.floor((dfvHeight / (rowHeight || 21)) - scrollSlop);
 
 
 
     const belowMinRows = (numRows + pinnedRowLen) < maxRowsWithoutScrolling;
-    console.log("maxRowsWithoutScrolling", maxRowsWithoutScrolling, belowMinRows, numRows, dfvHeight, rowHeight);
+    //console.log("maxRowsWithoutScrolling", maxRowsWithoutScrolling, belowMinRows, numRows, dfvHeight, rowHeight);
     const shortMode = compC?.shortMode || (belowMinRows && rowHeight === undefined);
 
     const inIframeClass = inIframe ? "inIframe" : "";
@@ -211,6 +208,7 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
             domLayout: "normal",
             applicableStyle: { height: 500 },
             inIframe: inIframeClass,
+            maxRowsWithoutScrolling
         };
     }
     const domLayout: DomLayoutType = compC?.layoutType || (shortMode ? "autoHeight" : "normal");
@@ -221,6 +219,7 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
         domLayout,
         applicableStyle,
         inIframe: inIframeClass,
+        maxRowsWithoutScrolling
     };
 };
 export const getAutoSize = (

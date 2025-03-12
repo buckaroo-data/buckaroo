@@ -24,8 +24,10 @@ export function ColumnsEditor({
     operation_result: OperationResult;
     command_config: CommandConfigT;
 }) {
+    /*
     console.log("ColumnsEditor", df_viewer_config, activeColumn, operations, 
         operation_result, command_config);
+    */
     const allColumns = df_viewer_config.column_config.map((field) => field.col_name);
     return (
         <div className="columns-editor" style={{ width: "100%" }}>

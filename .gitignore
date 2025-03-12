@@ -162,3 +162,5 @@ docs/*.js
 docs/*.js.map
 docs/*js*
 docs/source/_static/*woff*
+
+packages/buckaroo-js-core/tsconfig.tsbuildinfo

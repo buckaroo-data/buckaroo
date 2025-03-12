@@ -107,7 +107,7 @@ class TypingStats(ColAnalysis):
 class DefaultSummaryStats(ColAnalysis):
     provides_defaults = {
         'length':0, 'min':0, 'max':0, 'mean':0, 'nan_count':0,
-        'value_counts':0, 'mode':0}
+        'value_counts':0, 'mode':0, "std":0, "median":0}
     @staticmethod
     def series_summary(sampled_ser, ser):
         l = len(ser)
@@ -125,7 +125,9 @@ class DefaultSummaryStats(ColAnalysis):
             max=np.nan)
         if is_numeric and not is_bool:
             base_d.update({
+                'std': ser.std(),
                 'mean': ser.mean(),
+                'median': ser.median(),
                 'min': ser.dropna().min(),
                 'max': ser.dropna().max()})
         return base_d
@@ -133,12 +135,15 @@ class DefaultSummaryStats(ColAnalysis):
 class ComputedDefaultSummaryStats(ColAnalysis):
 
 
-    requires_summary = ['length', 'nan_count',
-                        'value_counts']
+    requires_summary = ['length', 'value_counts']
 
     provides_defaults = {
+        'non_null_count':0, 'null_count':0,
+        'most_freq':0, '2nd_freq':0, '3rd_freq':0, '4th_freq':0, '5th_freq':0,
+        
         'distinct_per':0, 'empty_per':0, 'unique_per':0, 'nan_per':0,
-        'unique_count':0, 'empty_count':0, 'distinct_count':0}
+        'unique_count':0, 'empty_count':0, 'distinct_count':0,
+    }
 
 
     @staticmethod
@@ -166,8 +171,8 @@ class ComputedDefaultSummaryStats(ColAnalysis):
                 return value_counts.index[pos]
 
         return {
-            'non_null_count':l - summary_dict['nan_count'],
-            'null_count': summary_dict['nan_count'],
+            'non_null_count':l - summary_dict['null_count'],
+            'null_count': summary_dict['null_count'],
             'most_freq':vc_nth(0),
             '2nd_freq':vc_nth(1),
             '3rd_freq':vc_nth(2),
@@ -179,7 +184,7 @@ class ComputedDefaultSummaryStats(ColAnalysis):
             'distinct_per':distinct_count/l,
             'empty_per':empty_count/l,
             'unique_per':unique_count/l,
-            'nan_per':summary_dict['nan_count']/l
+            'nan_per':summary_dict['null_count']/l
         }
 
 class PdCleaningStats(ColAnalysis):
