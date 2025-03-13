@@ -7,10 +7,15 @@
 """
 TODO: Add module docstring
 """
-
+from io import BytesIO
 import traceback
 import json
 import pandas as pd
+import logging
+
+# Creating an object
+
+
 from traitlets import List, Dict, observe, Unicode, Any
 import anywidget
 
@@ -27,7 +32,7 @@ from .dataflow.dataflow_extras import (Sampling, exception_protect, merge_column
 from .dataflow.autocleaning import PandasAutocleaning
 from pathlib import Path
 
-
+logger = logging.getLogger()
 
 class PdSampling(Sampling):
     @classmethod
@@ -330,10 +335,6 @@ class BuckarooInfiniteWidget(BuckarooWidget):
             self._handle_widget_change(change_unused)
         self.dataflow.observe(widget_tuple_args_bridge, "widget_args_tuple")
         def payload_bridge(_unused_self, msg, _unused_buffers):
-            print("payload_bridge")
-            print(msg)
-            print("-"*80)
-            print(_unused_buffers)
             if msg['type'] == 'infinite_request':
                 payload_args = msg['payload_args']
                 self._handle_payload_args(payload_args)
@@ -342,7 +343,6 @@ class BuckarooInfiniteWidget(BuckarooWidget):
 
     def _handle_payload_args(self, new_payload_args):
         start, end = new_payload_args['start'], new_payload_args['end']
-        print("payload_args changed", start, end)
         _unused, processed_df, merged_sd = self.dataflow.widget_args_tuple
         if processed_df is None:
             return
@@ -354,11 +354,9 @@ class BuckarooInfiniteWidget(BuckarooWidget):
                 ascending = sort_dir == 'asc'
                 sorted_df = processed_df.sort_values(by=[sort], ascending=ascending)
                 slice_df = sorted_df[start:end]
-                slice_df['index'] = slice_df.index
                 self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)}, [to_parquet(slice_df)])
             else:
                 slice_df = processed_df[start:end]
-                slice_df['index'] = slice_df.index
                 self.send({ "type": "infinite_resp", 'key':new_payload_args,
                             'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
     
@@ -374,13 +372,12 @@ class BuckarooInfiniteWidget(BuckarooWidget):
                 # self.send(
                 #     {"type": "infinite_resp", 'key':second_pa, 'data':extra_df, 'length':len(processed_df)})
                 extra_df = processed_df[extra_start:extra_end]
-                extra_df['index'] = extra_df.index
                 self.send(
                     {"type": "infinite_resp", 'key':second_pa, 'data':[], 'length':len(processed_df)},
                     [to_parquet(extra_df)]
                 )
         except Exception as e:
-            print(e)
+            logger.error(e)
             stack_trace = traceback.format_exc()
             self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'error_info':stack_trace, 'length':0})
             raise
@@ -396,4 +393,25 @@ def to_parquet(df):
     obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
     encodings = {k:'json' for k in obj_columns}
     return df2.to_parquet(engine='fastparquet', object_encoding=encodings)
+
+
+def to_parquet(df):
+    data: BytesIO = BytesIO()
+    
+    orig_close = data.close
+    data.close = lambda: None
+    df2 = df.copy()
+    df2['index'] = df2.index
+    df2.columns = [str(x) for x in df2.columns]
+    obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
+    encodings = {k:'json' for k in obj_columns}
+
+    try:
+        df2.to_parquet(data, engine='fastparquet', object_encoding=encodings)
+    except Exception as e:
+        logger.error("error serializing to parquet", e)
+    finally:
+        data.close = orig_close
+    data.seek(0)
+    return data.read()
 
