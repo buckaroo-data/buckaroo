@@ -106,19 +106,18 @@ class TypingStats(ColAnalysis):
 
 class DefaultSummaryStats(ColAnalysis):
     provides_defaults = {
-        'length':0, 'min':0, 'max':0, 'mean':0, 'nan_count':0,
+        'length':0, 'min':0, 'max':0, 'mean':0, 'null_count':0,
         'value_counts':0, 'mode':0, "std":0, "median":0}
     @staticmethod
     def series_summary(sampled_ser, ser):
         l = len(ser)
         value_counts = ser.value_counts()
-        nan_count = l - len(ser.dropna())
         is_numeric = pd.api.types.is_numeric_dtype(ser)
         is_bool = pd.api.types.is_bool_dtype(ser)
 
         base_d = dict(
             length=l,
-            nan_count=nan_count,
+            null_count=ser.isna().sum(),
             value_counts=value_counts,
             mode=get_mode(ser),
             min=np.nan,
@@ -135,10 +134,10 @@ class DefaultSummaryStats(ColAnalysis):
 class ComputedDefaultSummaryStats(ColAnalysis):
 
 
-    requires_summary = ['length', 'value_counts']
+    requires_summary = ['length', 'value_counts', 'null_count']
 
     provides_defaults = {
-        'non_null_count':0, 'null_count':0,
+        'non_null_count':0,
         'most_freq':0, '2nd_freq':0, '3rd_freq':0, '4th_freq':0, '5th_freq':0,
         
         'distinct_per':0, 'empty_per':0, 'unique_per':0, 'nan_per':0,

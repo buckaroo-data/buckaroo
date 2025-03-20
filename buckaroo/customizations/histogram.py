@@ -32,10 +32,10 @@ def categorical_dict(len_, val_counts, top_n_positions=7):
     full_long_tail = rest_vals.sum()
     unique_count = sum(val_counts == 1)
     long_tail = full_long_tail - unique_count
-    if unique_count > 0:
-        histogram['unique'] = np.round( (unique_count/len_)* 100, 0)
     if long_tail > 0:
         histogram['longtail'] = np.round((long_tail/len_) * 100,0)
+    if unique_count > 0:
+        histogram['unique'] = np.round( (unique_count/len_)* 100, 0)
     return histogram    
 
 
@@ -44,14 +44,19 @@ def categorical_histogram(length:int, val_counts, nan_per:float, top_n_positions
     cd = categorical_dict(length, val_counts, top_n_positions)
     
     histogram = []
-    longtail_obs = {'name': 'longtail'}
     for k,v in cd.items():
         if k in ["longtail", "unique"]:
-            longtail_obs[k] = v
             continue
-        histogram.append({'name':k, 'cat_pop': np.round((v/length)*100,0) })
-    if len(longtail_obs) > 1:
-        histogram.append(longtail_obs)
+
+        percent = np.round((v/length)*100,0)
+        if percent > .3:
+            histogram.append({'name':k, 'cat_pop': percent })
+    # I want longtail and unique to come last
+    for k,v in cd.items():
+        if k in ["longtail", "unique"]:
+            obs = {'name': k}
+            obs[k] = v
+            histogram.append(obs)
     if nan_per > 0.0:
         histogram.append(nan_observation)
     return histogram
