@@ -119,12 +119,6 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
                     return
                 
                 extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
-                extra_payload_args = dict(
-                    start=extra_start, end=extra_end,
-                    sourceName=new_payload_args.get('sourceName', 'no_source_name'))
-                #extra_df = pd_to_obj(processed_df[extra_start:extra_end])
-                # self.send(
-                #     {"type": "infinite_resp", 'key':second_pa, 'data':extra_df, 'length':len(processed_df)})
                 extra_df = processed_df[extra_start:extra_end]
                 extra_df['index'] = extra_df.index
                 self.send(

@@ -45,7 +45,7 @@ def test_unhashable():
     result = DefaultSummaryStats.series_summary(unhashable_ser, unhashable_ser)
     #print(result)
     cleaned_result = {i:result[i] for i in result if i!='value_counts'}
-    assert     {'length': 2, 'nan_count': 0, 
+    assert     {'length': 2, 'null_count': 0, 
                 'mode': ['a'], 'min': np.nan, 'max': np.nan} == cleaned_result
 
 def test_unhashable3():
@@ -77,12 +77,12 @@ def test_datetime_histogram():
              ))
 
     assert     {
-                'histogram': [{'cat_pop': 33.0,
+                'histogram': [{'cat_pop': np.float64(33.0),
                                'name': pd.Timestamp('2000-01-01 00:00:00')},
-                              {'cat_pop': 33.0,
+                              {'cat_pop': np.float64(33.0),
                                'name': pd.Timestamp('2001-01-01 00:00:00')},
-                              {'name': 'longtail', 'unique': 67.0},
-                              {'NA': 33.0, 'name': 'NA'}
+                              {'name': 'unique', 'unique': np.float64(67.0)},
+                              {'NA': np.float64(33.0), 'name': 'NA'}
                               ],
                 } == summary_result
 

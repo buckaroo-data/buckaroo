@@ -5,18 +5,13 @@ from buckaroo.buckaroo_widget import BuckarooWidget
 from buckaroo.pluggable_analysis_framework.analysis_management import PERVERSE_DF
 from .fixtures import (word_only_df)
 from buckaroo.serialization_utils import (DuplicateColumnsException)
-
-
-simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
-
 from buckaroo.dataflow.dataflow_extras import StylingAnalysis
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 
 from buckaroo.customizations.analysis import (TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
 from buckaroo.customizations.histogram import (Histogram)
 from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
-from traitlets import observe
-import warnings
+
+simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
 class EverythingStyling(StylingAnalysis):
     """
     This styling shows as much detail as possible
@@ -28,13 +23,12 @@ class EverythingStyling(StylingAnalysis):
     @classmethod
     def style_column(kls, col:str, column_metadata):
         print("EverythingStyling style_column", col)
-        
         try:
             t = column_metadata['_type']
+            assert t is not None
+            disp = {'displayer': 'foo'}        
             return {'col_name':col, 'displayer_args': disp }
-        except Exception as  e:
-            #print(col, e)
-            disp = {'displayer': 'foo'}
+        except:
             raise
 
             
@@ -59,7 +53,7 @@ def test_styling_instantiation():
     ksw = KitchenSinkWidget(simple_df)
     #TODO: check that nothing was logged, later
     # I'm not quite sure how to verify the clean user experience I want here
-
+    assert ksw is not None
 
 
 def test_basic_instantiation():

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useState } from "react";
 import { createRender, useModelState, useModel } from "@anywidget/react";
 import srt from "buckaroo-js-core";
 import "./widget.css";
@@ -173,8 +174,13 @@ const renderBuckarooWidget = createRender(() => {
 		</div>
 	);
 });
-const renderBuckarooInfiniteWidget = createRender((a,b,c) => {
-    const model = useModel()
+
+
+const srcClosureRBI = (src) => {
+    const renderBuckarooInfiniteWidget = createRender((a,b,c) => {
+	console.log("178 renderBuckarooInfiniteWidget", src);
+	
+	const model = useModel()
 	const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
 	const [df_display_args, _set_dda] = useModelState("df_display_args");
 	const [df_meta, _set_df_meta] = useModelState("df_meta");
@@ -185,34 +191,49 @@ const renderBuckarooInfiniteWidget = createRender((a,b,c) => {
 	const [buckaroo_state, on_buckaroo_state] = useModelState("buckaroo_state");
 	const [buckaroo_options, _set_boptions] = useModelState("buckaroo_options");
 	return (
-			<srt.BuckarooInfiniteWidget
-				df_data_dict={df_data_dict}
-				df_display_args={df_display_args}
-				df_meta={df_meta}
-				operations={operations}
-				on_operations={on_operations}
-				operation_results={operation_results}
-				command_config={command_config}
-				buckaroo_state={buckaroo_state}
-				on_buckaroo_state={on_buckaroo_state}
+	    <srt.BuckarooInfiniteWidget
+	    df_data_dict={df_data_dict}
+	    df_display_args={df_display_args}
+	    df_meta={df_meta}
+	    operations={operations}
+	    on_operations={on_operations}
+	    operation_results={operation_results}
+	    command_config={command_config}
+	    buckaroo_state={buckaroo_state}
+	    on_buckaroo_state={on_buckaroo_state}
 	    buckaroo_options={buckaroo_options}
-	    model={model}
-			/>
+	    src={src}
+		/>
 	);
-});
+    });
+    return renderBuckarooInfiniteWidget
+}
 
-const render = ({ el, model, experimental }) => {
-	const render_func_name = model.get("render_func_name");
-	console.log("render_func_name", render_func_name);
-	if (render_func_name === "DFViewer") {
+export default async () => {
+    console.log("224, export default async");
+    let extraState = {};
+    return {
+	initialize({ model }) {
+	    console.log("initialize 262")
+	    // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
+	    // so having it live between relaods is key
+	    //const [respError, setRespError] = useState<string | undefined>(undefined);
+	    const setRespError = (a,b) => {console.log("setRespError",a,b);}
+	    extraState['keySmartCache'] = srt.getKeySmartRowCache(model, setRespError);
+	    extraState['rbiFunc'] = srcClosureRBI(extraState['keySmartCache']);
+	},
+	render({ model, el, experimental }) {
+	    const render_func_name = model.get("render_func_name");
+	    if (render_func_name === "DFViewer") {
 		renderDFV({ el, model, experimental });
-	} else if (render_func_name === "BuckarooWidget") {
+	    } else if (render_func_name === "BuckarooWidget") {
 		renderBuckarooWidget({ el, model, experimental });
-	} else if (render_func_name === "BuckarooInfiniteWidget") {
-		renderBuckarooInfiniteWidget({ el, model, experimental });
-	} else {
+	    } else if (render_func_name === "BuckarooInfiniteWidget") {
+		extraState['rbiFunc']({ el, model, experimental });
+	    } else {
 		renderBaked({ el, model, experimental });
+	    }
 	}
-};
+    }
+}
 
-export default { render };

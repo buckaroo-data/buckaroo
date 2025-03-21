@@ -49,7 +49,7 @@ const gensym = () => {
 }
 */
 //const counter = gensym()
-const getSingleSRC = _.once((model: any, setRespError) => {
+export const getKeySmartRowCache = (model: any, setRespError:any) => {
     //const symNum = counter();
     const reqFn: RequestFN = (pa: PayloadArgs) => {
         model.send({ type: 'infinite_request', payload_args: pa })
@@ -102,7 +102,7 @@ const getSingleSRC = _.once((model: any, setRespError) => {
         })
     })
     return src;
-})
+}
 
 export function BuckarooInfiniteWidget({
         df_data_dict,
@@ -115,7 +115,7 @@ export function BuckarooInfiniteWidget({
         buckaroo_state,
         on_buckaroo_state,
         buckaroo_options,
-        model
+        src
     }: {
         df_meta: DFMeta;
         df_data_dict: Record<string, DFData>;
@@ -127,22 +127,14 @@ export function BuckarooInfiniteWidget({
         buckaroo_state: BuckarooState;
         on_buckaroo_state: React.Dispatch<React.SetStateAction<BuckarooState>>;
         buckaroo_options: BuckarooOptions;
-        model: any
+        src: KeyAwareSmartRowCache
     }) {
-
+    console.log("132 BuckarooInfiniteWidget");
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
         // so having it live between relaods is key
-        const [respError, setRespError] = useState<string | undefined>(undefined);
+        //const [respError, setRespError] = useState<string | undefined>(undefined);
 
-        // const src: KeyAwareSmartRowCache= useMemo(() => {
-        //     return getSingleSRC(model, setRespError );
-        // }, []);
 
-        const src: KeyAwareSmartRowCache = useMemo(
-            () => getSingleSRC(model, setRespError), [])
-
-        //@ts-ignore
-        window.ksrc = src
         const mainDs = useMemo(() => {
             console.log("recreating data source because operations changed", new Date());
             src.debugCacheState();
@@ -189,7 +181,7 @@ export function BuckarooInfiniteWidget({
                         outside_df_params={outsideDFParams}
                         activeCol={activeCol}
                         setActiveCol={setActiveCol}
-                        error_info={respError}
+                        error_info={""}
                     />
                 </div>
                 {buckaroo_state.show_commands ? (

@@ -9,7 +9,6 @@ TODO: Add module docstring
 """
 from io import BytesIO
 import traceback
-import json
 import pandas as pd
 import logging
 
@@ -365,12 +364,6 @@ class BuckarooInfiniteWidget(BuckarooWidget):
                     return
                 
                 extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
-                extra_payload_args = dict(
-                    start=extra_start, end=extra_end,
-                    sourceName=new_payload_args.get('sourceName', 'no_source_name'))
-                #extra_df = pd_to_obj(processed_df[extra_start:extra_end])
-                # self.send(
-                #     {"type": "infinite_resp", 'key':second_pa, 'data':extra_df, 'length':len(processed_df)})
                 extra_df = processed_df[extra_start:extra_end]
                 self.send(
                     {"type": "infinite_resp", 'key':second_pa, 'data':[], 'length':len(processed_df)},
@@ -387,19 +380,11 @@ class BuckarooInfiniteWidget(BuckarooWidget):
         return pd_to_obj(df)
 
 def to_parquet(df):
-    # I don't like this copy.  modify to keep the same data with different names
-    df2 = df.copy()
-    df2.columns = [str(x) for x in df2.columns]
-    obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
-    encodings = {k:'json' for k in obj_columns}
-    return df2.to_parquet(engine='fastparquet', object_encoding=encodings)
-
-
-def to_parquet(df):
     data: BytesIO = BytesIO()
     
     orig_close = data.close
     data.close = lambda: None
+    # I don't like this copy.  modify to keep the same data with different names
     df2 = df.copy()
     df2['index'] = df2.index
     df2.columns = [str(x) for x in df2.columns]

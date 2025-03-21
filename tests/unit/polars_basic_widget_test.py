@@ -71,13 +71,14 @@ def test_polars_boolean():
 def test_polars_infinite():
     bool_df = pl.DataFrame({'bools':[True, True, False, False, True, None]})
     pbw = PolarsBuckarooInfiniteWidget(bool_df)
-    byts = pbw._handle_payload_args({'start':0, 'end':3})
+    pbw._handle_payload_args({'start':0, 'end':3})
 
 def Xtest_polars_index_col():
     df = pl.DataFrame({'bools':[True, True, False, False, True, None],
                        'index':[   0,    1,     2,     3,    4,    5]
                        })
     pbw2= PolarsBuckarooWidget(df)
+    assert pbw2 is not None
 
 
 def test_pandas_all_stats():

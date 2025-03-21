@@ -1,4 +1,3 @@
-import json
 import graphlib
 from collections import OrderedDict
 from typing import List, Union, Any, Mapping, Tuple, Callable
@@ -77,7 +76,7 @@ def check_solvable(a_objs):
     provides = []
     required = []
     for ao in a_objs:
-        if ao.verify_no_cycle() == False:
+        if ao.verify_no_cycle() is False:
             raise SelfCycle(f"{ao} depends on itself")
         rest = ao.full_provides()
         provides.extend(rest)
