@@ -7,11 +7,9 @@
 """
 TODO: Add module docstring
 """
-from io import BytesIO
 import traceback
 import pandas as pd
 import logging
-
 # Creating an object
 
 
@@ -25,7 +23,7 @@ from .customizations.styling import (DefaultSummaryStatsStyling, DefaultMainStyl
 from .pluggable_analysis_framework.analysis_management import DfStats
 from .pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 
-from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj
+from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet
 from .dataflow.dataflow import CustomizableDataflow, StylingAnalysis
 from .dataflow.dataflow_extras import (Sampling, exception_protect, merge_column_config)
 from .dataflow.autocleaning import PandasAutocleaning
@@ -379,24 +377,5 @@ class BuckarooInfiniteWidget(BuckarooWidget):
     def _df_to_obj(self, df:pd.DataFrame):
         return pd_to_obj(df)
 
-def to_parquet(df):
-    data: BytesIO = BytesIO()
-    
-    orig_close = data.close
-    data.close = lambda: None
-    # I don't like this copy.  modify to keep the same data with different names
-    df2 = df.copy()
-    df2['index'] = df2.index
-    df2.columns = [str(x) for x in df2.columns]
-    obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
-    encodings = {k:'json' for k in obj_columns}
 
-    try:
-        df2.to_parquet(data, engine='fastparquet', object_encoding=encodings)
-    except Exception as e:
-        logger.error("error serializing to parquet", e)
-    finally:
-        data.close = orig_close
-    data.seek(0)
-    return data.read()
 

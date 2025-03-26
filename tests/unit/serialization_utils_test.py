@@ -1,8 +1,9 @@
+from datetime import date
 import pytest
 import pandas as pd
 from buckaroo.serialization_utils import (
     df_to_obj, is_col_dt_safe, is_dataframe_datetime_safe, check_and_fix_df,
-    DuplicateColumnsException)
+    to_parquet, DuplicateColumnsException)
 
 def test_df_to_obj():
     named_index_df = pd.DataFrame(
@@ -88,6 +89,18 @@ def test_check_and_fix_df4():
 def test_check_and_fix_df5():
     df = pd.DataFrame({'value': [10, 20, 30], 'strs': ['a', 'b', 'c']})
     recheck(df)
+
+def test_serialize_naive_json():
+    d = date(year=1999, month=10, day=3)
+    d2 = date(year=1999, month=10, day=3)
+    df = pd.DataFrame({'a': [pd.DataFrame, Exception, lambda x: x+10],
+                       'b': [d, d2, None]})
+
+    #just make sure we don't throw an error
+    output = to_parquet(df)
+    #and make sure output isn't empty. I don't want to hardcode a
+    #response here
+    assert len(output) > 20
     
 # def test_int_overflow_validation():
 #     value=float('nan')
