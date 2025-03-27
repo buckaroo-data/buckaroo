@@ -81,7 +81,7 @@ class TypingStats(ColAnalysis):
             dtype=str(ser.dtype),
             is_numeric=pd.api.types.is_numeric_dtype(ser),
             is_integer=pd.api.types.is_integer_dtype(ser),
-            is_datetime=probable_datetime(ser),
+            is_datetime=pd.api.types.is_datetime64_any_dtype(ser),
             is_bool=pd.api.types.is_bool_dtype(ser),
             is_float=pd.api.types.is_float_dtype(ser),
             is_string=pd.api.types.is_string_dtype(ser),

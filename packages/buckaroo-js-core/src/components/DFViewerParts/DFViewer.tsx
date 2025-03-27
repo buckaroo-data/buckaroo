@@ -77,7 +77,7 @@ export const getGridOptions = (
 };
 
 export function DFViewer({
-    df_data: df,
+    df_data,
     df_viewer_config,
     summary_stats_data,
     activeCol,
@@ -110,7 +110,7 @@ export function DFViewer({
         : [];
 
     const divClass = df_viewer_config?.component_config?.className || "ag-theme-alpine-dark";
-    const hs = getHeightStyle(df_viewer_config, df.length);
+    const hs = getHeightStyle(df_viewer_config, df_data.length);
     const gridOptions = getGridOptions(
         setActiveCol as SetColumFunc,
         df_viewer_config,
@@ -128,7 +128,7 @@ export function DFViewer({
                     domLayout={hs.domLayout}
                     defaultColDef={defaultColDef}
                     gridOptions={gridOptions}
-                    rowData={df}
+                    rowData={df_data}
                     pinnedTopRowData={topRowData}
                     columnDefs={_.cloneDeep(styledColumns)}
                     autoSizeStrategy={getAutoSize(styledColumns.length)}

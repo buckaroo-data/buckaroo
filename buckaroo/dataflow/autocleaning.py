@@ -1,3 +1,4 @@
+import json
 import pandas as pd
 from buckaroo.jlisp.lisp_utils import split_operations, s, qc_sym
 from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
@@ -64,6 +65,9 @@ def format_ops(column_meta):
             temp_ops.insert(2, k)
             ret_ops.append(temp_ops)
     return ret_ops
+
+def ops_eq(ops_a, ops_b):
+    return json.dumps(ops_a) == json.dumps(ops_b)
 
 class AutocleaningConfig:
     command_klasses = [DefaultCommandKlsList]
@@ -181,27 +185,54 @@ class PandasAutocleaning:
         else:
             return cleaned_df
 
+    def produce_cleaning_ops(self, df, cleaning_method):
+        """
+        I probably want to cache this
+
+        """
+        if df is None:
+            #on first instantiation df is likely to be None,  do nothing and return
+            return [], {}
+
+        if cleaning_method == "":
+            return [], {}
+        self._setup_from_command_kls_list(cleaning_method)
+        cleaning_operations, cleaning_sd = self._run_cleaning(df, cleaning_method)
+        return cleaning_operations, cleaning_sd
+
+    def produce_final_ops(self, cleaning_ops, quick_command_args, existing_operations):
+        quick_ops = generate_quick_ops(self.quick_command_klasses, quick_command_args)
+        cleaning_ops.extend(quick_ops)
+        merged_operations = merge_ops(existing_operations, cleaning_ops)
+        return merged_operations
+    
+
     def handle_ops_and_clean(self, df, cleaning_method, quick_command_args, existing_operations):
         if df is None:
             #on first instantiation df is likely to be None,  do nothing and return
             return None
 
-        quick_ops = generate_quick_ops(self.quick_command_klasses, quick_command_args)
-        if cleaning_method == "":
+        cleaning_ops, cleaning_sd = self.produce_cleaning_ops(df, cleaning_method)
 
-            if (len(existing_operations) + len(quick_ops)) == 0:
-                #no cleaning method was specified, just return the bare minimum
-                return [df, {},  "#empty generated code", merge_ops(existing_operations, [])]
-        self._setup_from_command_kls_list(cleaning_method)
+        # [{'meta':'no-op'}] is a sentinel for the initial state
+        if ops_eq(existing_operations, [{'meta':'no-op'}]):
 
-        cleaning_operations, cleaning_sd = self._run_cleaning(df, cleaning_method)
-        cleaning_operations.extend(quick_ops)
-        merged_operations = merge_ops(existing_operations, cleaning_operations)
-        
-        cleaned_df = self._run_df_interpreter(df, merged_operations)
-        #print("len(cleaned_df)", len(cleaned_df))
+            final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, [])
+            #FIXME, a little bit of a hack to reset cleaning_sd, but it helps tests pass. I
+            # don't know how any other properties could really be set
+            # when 'no-op' the initial state is true
+            cleaning_sd = {}
+        else:
+            final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, existing_operations)
+
+        if ops_eq(final_ops,[]) and cleaning_method == "NoCleaning":
+            #nothing to be done here, no point in running the interpreter
+            #this also has the nice effect of not copying the DF, which the interpreter does
+            return [df, {}, "", []]
+            
+
+        cleaned_df = self._run_df_interpreter(df, final_ops)
         merged_cleaned_df = self.make_origs(df, cleaned_df, cleaning_sd)
-        generated_code = self._run_code_generator(merged_operations)
-        #print(f"{merged_cleaned_df=}, {type(merged_cleaned_df)=}")
+        generated_code = self._run_code_generator(final_ops)
+        return [merged_cleaned_df, cleaning_sd, generated_code, final_ops]
 
-        return [merged_cleaned_df, cleaning_sd, generated_code, merged_operations]

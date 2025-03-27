@@ -10,6 +10,11 @@ import { ColDef, GridOptions } from "@ag-grid-community/core";
 //import { CustomCellRendererProps } from '@ag-grid-community/react';
 
 import { updateAtMatch } from "./utils";
+import { ModuleRegistry } from "@ag-grid-community/core";
+import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-model";
+
+ModuleRegistry.registerModules([ClientSideRowModelModule]);
+
 
 import "@ag-grid-community/styles/ag-grid.css";
 import "@ag-grid-community/styles/ag-theme-alpine.css";

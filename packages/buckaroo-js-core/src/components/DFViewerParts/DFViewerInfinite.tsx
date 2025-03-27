@@ -188,6 +188,7 @@ const getDsGridOptions = (origGridOptions: GridOptions, maxRowsWithoutScrolling:
  GridOptions => {
     const dsGridOptions: GridOptions = {
         ...origGridOptions,
+        animateRows:false,
         onSortChanged: (event: SortChangedEvent) => {
             const api: GridApi = event.api;
 	    //@ts-ignore

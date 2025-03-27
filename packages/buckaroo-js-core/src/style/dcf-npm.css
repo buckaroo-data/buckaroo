@@ -260,3 +260,48 @@ edit box moves up and is only half visible */
     border:7px solid orange;
 }
 
+
+/* These are important to remove the blue outlines around the  */
+
+/*
+.statusBar .ag-ltr .ag-cell-inline-editing.ag-cell input{
+  border-color:none;
+  border:none;
+  outline:1px solid var(--ag-border-color);
+  padding-left:5px;
+} 
+
+.statusBar .ag-ltr .ag-cell-inline-editing.ag-cell button {
+  border-radius: 2px;
+  outline:none;
+  padding:0 2px 0 2px;
+} 
+
+.statusBar .ag-ltr .ag-cell-inline-editing.ag-cell .SearchEditor{
+  border-color:none;
+  border:none;
+  outline:1px solid var(--ag-border-color);
+}
+  */
+.statusBar .ag-ltr .ag-cell-focus:not(.ag-cell-range-selected):focus-within,
+.statusBar .ag-ltr .ag-context-menu-open .ag-cell-focus:not(.ag-cell-range-selected),
+.statusBar .ag-ltr .ag-full-width-row.ag-row-focus:focus .ag-cell-wrapper.ag-row-group,
+.statusBar .ag-ltr .ag-cell-range-single-cell,
+.statusBar .ag-ltr .ag-cell-range-single-cell.ag-cell-range-handle,
+.statusBar .ag-rtl .ag-cell-focus:not(.ag-cell-range-selected):focus-within,
+.statusBar .ag-rtl .ag-context-menu-open .ag-cell-focus:not(.ag-cell-range-selected),
+.statusBar .ag-rtl .ag-full-width-row.ag-row-focus:focus .ag-cell-wrapper.ag-row-group,
+.statusBar .ag-rtl .ag-cell-range-single-cell,
+.statusBar .ag-rtl .ag-cell-range-single-cell.ag-cell-range-handle {
+  border-style:none;
+  outline: initial;
+}
+
+
+.statusBar .ag-column-first { 
+  padding:0;
+}
+
+.statusBar .ag-column-first .FakeSearchEditor input{ 
+  outline:none;
+}

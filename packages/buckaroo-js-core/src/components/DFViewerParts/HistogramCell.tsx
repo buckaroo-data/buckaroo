@@ -3,6 +3,8 @@ import React from "react";
 import { createPortal } from "react-dom";
 
 import { Bar, BarChart, Tooltip } from "recharts";
+import { ChartColors } from "./LineChartCell";
+import { ColDef, Column, Context, GridApi } from "@ag-grid-community/core";
 
 export interface HistogramNode {
     name: string;
@@ -41,9 +43,8 @@ export function FloatingTooltip({ items, x, y }: any) {
 }
 
 const CustomTooltip = ({ active, payload, screenCoords }: any) => {
+    // Read this github issue for context https://github.com/recharts/recharts/issues/5181
     if (active && payload && payload.length && screenCoords) {
-        // console.log("payload", payload, "label", label);
-        // console.log("payload[0].payload", payload[0].payload, payload[0].payload.name)
         const name = payload[0].payload.name;
         return createPortal(
             <div
@@ -65,22 +66,46 @@ const CustomTooltip = ({ active, payload, screenCoords }: any) => {
     return null;
 };
 
-export const HistogramCell = (props: any) => {
-    if (props === undefined || props.value === undefined) {
+
+export interface HistogramBar {
+    'cat_pop'?: number;
+    'name':string;
+    'NA'?: number;
+    'longtail'?: number;
+    'unique'?:number;
+    'population'?: number;
+}
+
+
+export const HistogramCell = (props:
+    {api:GridApi, colDef:ColDef, 
+     column:Column, context:Context, value:any}
+) => {
+    // relevant args here 
+    // https://www.ag-grid.com/react-data-grid/component-cell-renderer/
+    if (props === undefined ) {
         return <span></span>;
     }
-    const histogram = props.value;
+    const potentialHistogramArr = props.value;
     //for key "index", the value is "histogram"
     // this causes ReChart to blow up, so we check to see if it's an array
-    if (histogram === undefined || !_.isArray(histogram)) {
+    if (potentialHistogramArr === undefined || !_.isArray(potentialHistogramArr)) {
         return <span></span>;
     }
+    const histogramArr = potentialHistogramArr as HistogramBar[];
+    return TypedHistogramCell({histogramArr, context:props.context});
+}
+
+export const TypedHistogramCell = ({histogramArr, context}:
+    {histogramArr:HistogramBar[], context:any}) => {
     const dumbClickHandler = (rechartsArgs: any, _unused_react: any) => {
+        //we can access the rest of the data model through context
+    
         // I can't find the type for rechartsArgs
         // these are probably the keys we care about
         // activeTooltipIndex
         // activeLabel
-        console.log("dumbClickHandler", rechartsArgs);
+        console.log("dumbClickHandler", rechartsArgs, context);
     };
 
     // used to prevent duplicate IDs which lead to a nasty bug where patterns aren't applied
@@ -104,7 +129,7 @@ export const HistogramCell = (props: any) => {
                 width={100}
                 height={24}
                 barGap={1}
-                data={histogram}
+                data={histogramArr}
                 onClick={dumbClickHandler}
                 onMouseMove={(_, e) => {
                     // console.log(e);
@@ -122,7 +147,7 @@ export const HistogramCell = (props: any) => {
                         patternUnits="userSpaceOnUse"
                         patternTransform="rotate(45)"
                     >
-                        <rect width="2" height="4" fill="red" />
+                        <rect width="2" height="4" fill={ChartColors.NA} />
                     </pattern>
                     <pattern id={circleId} width="4" height="4" patternUnits="userSpaceOnUse">
                         <circle data-color="outline" stroke="pink" cx=".5" cy=".5" r="1.5"></circle>
@@ -186,21 +211,21 @@ export const HistogramCell = (props: any) => {
                 />
                 <Bar
                     dataKey="cat_pop"
-                    stroke="pink"
+                    stroke={ChartColors.cat_pop}
                     fill={circleUrl}
                     stackId="stack"
                     isAnimationActive={false}
                 />
                 <Bar
                     dataKey="unique"
-                    stroke="#0f0"
+                    stroke={ChartColors.unique}
                     fill={checkersUrl}
                     stackId="stack"
                     isAnimationActive={false}
                 />
                 <Bar
                     dataKey="longtail"
-                    stroke="teal"
+                    stroke={ChartColors.longtail}
                     fill={leafsUrl}
                     stackId="stack"
                     isAnimationActive={false}
@@ -212,7 +237,9 @@ export const HistogramCell = (props: any) => {
                     stackId="stack"
                     isAnimationActive={false}
                 />
-                <Bar dataKey="NA" fill={stripeUrl} stackId="stack" isAnimationActive={false} />
+                <Bar dataKey="NA" fill={stripeUrl} 
+                     stackId="stack" 
+                     isAnimationActive={false} />
                 <Tooltip
                     formatter={formatter}
                     allowEscapeViewBox={{ x: true, y: true }}

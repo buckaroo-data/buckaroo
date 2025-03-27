@@ -10,6 +10,8 @@ from buckaroo.dataflow.dataflow_extras import StylingAnalysis
 from buckaroo.customizations.analysis import (TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
 from buckaroo.customizations.histogram import (Histogram)
 from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
+from buckaroo.jlisp.lisp_utils import (s, qc_sym)
+
 
 simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
 class EverythingStyling(StylingAnalysis):
@@ -88,6 +90,9 @@ def test_interpreter():
     assert 'str_col' in w.dataflow.cleaned_df.columns
     temp_ops = w.operations.copy()
     temp_ops.append([{"symbol":"dropcol"},{"symbol":"df"},"str_col"])
+
+    print("setting operations")
+    print("-"*80)
     w.operations = temp_ops
 
     tdf = w.dataflow.cleaned_df
@@ -131,6 +136,38 @@ def test_init_sd():
     I have run into a bug where init_sd causes an error in DefaultMainStyling, it shouldn't blow up
     """
     BuckarooWidget(simple_df, init_sd={'int_col': {'foo':8}})
+
+
+
+def test_quick_commands_run():
+    """
+    test that quick_commands work with autocleaning disabled
+    """
+
+    df = pd.DataFrame({'a': ["30", "40"], 'b': ['aa', 'bb']})
+    bw = BuckarooWidget(df)
+    bw.buckaroo_state = {'cleaning_method': 'NoCleaning',
+                         'post_processing': '',
+                         'sampled': False,
+                         'show_commands': False,
+                         'df_display': 'main',
+                         'search_string': '',
+                         'quick_command_args': {'search': ['aa']}}
+
+    expected = pd.DataFrame({
+        'a': ["30"],
+        'b': ['aa']})
+    assert bw.dataflow.quick_command_args == {'search': ['aa']}
+    assert bw.dataflow.merged_operations == [[qc_sym('search'), s('df'), "col", "aa"]]
+    assert bw.dataflow.processed_df.to_dict() == expected.to_dict()
+    assert bw.dataflow.processed_df.to_dict() == expected.to_dict()
+
+
+    # FIXME
+    # I need unmerging logic to make this work
+    # dataflow.merged_operations is the combination of quick_args (and possibly cleaning_ops) + operations that are executed.  Resetting bw.operations after this is merged would result in a loop
+    # the ops from cleaning and quick_args are tagged so that they can be treated differently, changing cleaning or quick_args shouldn't affect manually editted operations
+    #assert bw.operations == [[qc_sym('search'), s('df'), "col", "aa"]]
 
 
 

@@ -45,9 +45,8 @@ export function WidgetDCFCell({
         //  console.log("cDisp", cDisp);
     }
     const dfData = df_data_dict[cDisp.data_key];
-    //console.log("dfData", dfData);
     const summaryStatsData = df_data_dict[cDisp.summary_stats_key];
-    console.log("dcfcell show_commands", buckaroo_state.show_commands, buckaroo_state)
+
     return (
         <div className="dcf-root flex flex-col" style={{ width: "100%", height: "100%" }}>
             <div

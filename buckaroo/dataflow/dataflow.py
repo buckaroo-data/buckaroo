@@ -47,6 +47,8 @@ class DataFlow(HasTraits):
     autoclean_conf = tuple()
 
     command_config = Dict({}).tag(sync=True)
+    operation_results = Dict({'transformed_df':None,
+                              'generated_py_code': ""})
 
 
     raw_df = Any('')
@@ -56,6 +58,8 @@ class DataFlow(HasTraits):
     cleaning_method = Unicode('NoCleaning')
     quick_command_args = Dict({})
 
+    # we put an operation here that will be stripped out, this assures
+    # us that the interpeter is run through at least once
     operations = Any([]).tag(sync=True)
 
     cleaned = Any().tag(default=None)
@@ -65,6 +69,7 @@ class DataFlow(HasTraits):
 
     analysis_klasses = None
     summary_sd = Any()
+    df_meta = Any()
 
     merged_sd = Any()
 
@@ -99,9 +104,9 @@ class DataFlow(HasTraits):
             return
         else:
             self.cleaned = result
+            self.operations = result[3]
         self.operation_results = {'transformed_df':None,
                                   'generated_py_code': self.generated_code,
-                                  #'transform_error': None
                                   }
 
     @property
@@ -203,7 +208,7 @@ class CustomizableDataflow(DataFlow):
     DFStatsClass = DfStats
     sampling_klass = Sampling
     df_display_klasses = {}
-
+    operations = Any([{'meta':'no-op'}]).tag(sync=True)
 
     def __init__(self, orig_df, debug=False,
                  column_config_overrides=None,
@@ -236,6 +241,15 @@ class CustomizableDataflow(DataFlow):
         warnings.filterwarnings('default')
 
     def populate_df_meta(self):
+        if self.processed_df is None:
+            self.df_meta = {
+                'columns': 0,
+                # I need to recompute this when sampling changes
+                'filtered_rows': 0,
+                'rows_shown': 0,
+                'total_rows': 0}
+
+            return
         self.df_meta = {
             'columns': len(self.processed_df.columns),
             # I need to recompute this when sampling changes

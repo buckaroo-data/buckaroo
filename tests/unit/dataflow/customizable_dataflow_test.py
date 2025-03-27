@@ -4,9 +4,10 @@ import pytest
 from ..fixtures import (DistinctCount)
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
 from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
-from buckaroo.buckaroo_widget import BuckarooWidget
+from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget
 from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)         
 from buckaroo.jlisp.lisp_utils import (s, qc_sym)
+from buckaroo.dataflow.autocleaning import PandasAutocleaning
 
 EMPTY_DF_JSON = {
             'dfviewer_config': {
@@ -38,13 +39,30 @@ DFVIEWER_CONFIG_WITHOUT_B = {
     'extra_grid_config': {},
 }
 
+class ACDFC(CustomizableDataflow):
+    autocleaning_klass = PandasAutocleaning
+    autoclean_conf = tuple([NoCleaningConf])
 
 def test_widget_instatiation():
-    dfc = CustomizableDataflow(BASIC_DF)
-    assert dfc.widget_args_tuple[1] is BASIC_DF
+    dfc = ACDFC(BASIC_DF)
+
+    #make sure that all forms of the dataframe exiting form
+    #handle_ops_and_clean equal as we expect them to
+    
+    pd.testing.assert_frame_equal(dfc.widget_args_tuple[1], BASIC_DF)
+    pd.testing.assert_frame_equal(dfc.cleaned_df, BASIC_DF)
+
+    assert dfc.cleaned_sd == {}
+    pd.testing.assert_frame_equal(dfc.processed_df, BASIC_DF)
     assert dfc.df_data_dict['main'] == BASIC_DF_JSON_DATA
     assert dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
 
+def test_widget_operations_instatiation():
+    dfc = ACDFC(BASIC_DF)
+    # dfc starts with operations of [{'meta':'no-op'], but the first
+    # run that should be changed to []
+
+    assert dfc.operations == []
 def test_custom_dataflow():
     """
     verifies that that both StylingAnalysis are called and that we get a
@@ -61,12 +79,14 @@ def test_custom_dataflow():
         summary_stats_key= '555555555'
 
 
-    class TwoStyleDFC(CustomizableDataflow):
+    class TwoStyleDFC(ACDFC):
         analysis_klasses = [StylingAnalysis, IntStyling]
         #analysis_klasses = [IntStyling]
         
     cdfc = TwoStyleDFC(BASIC_DF)
-    assert cdfc.widget_args_tuple[1] is BASIC_DF
+    #assert cdfc.widget_args_tuple[1] is BASIC_DF
+    pd.testing.assert_frame_equal(cdfc.widget_args_tuple[1], BASIC_DF)
+    pd.testing.assert_frame_equal(cdfc.widget_args_tuple[1], BASIC_DF)
     assert cdfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
     DFVIEWER_CONFIG_INT = {
                    'pinned_rows': [],
@@ -84,11 +104,11 @@ def test_hide_column_config_overrides():
     """
     verifies that column_config_overrides works properly and column b doesn't end up in column_config
     """
-    cdfc = CustomizableDataflow(BASIC_DF)
-    assert cdfc.widget_args_tuple[1] is BASIC_DF
+    cdfc = ACDFC(BASIC_DF)
+    pd.testing.assert_frame_equal(cdfc.widget_args_tuple[1], BASIC_DF)
     assert cdfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
 
-    cdfc2 = CustomizableDataflow(BASIC_DF,
+    cdfc2 = ACDFC(BASIC_DF,
                       column_config_overrides={'b': {'merge_rule': 'hidden'}}
                       )
 
@@ -96,7 +116,7 @@ def test_hide_column_config_overrides():
 
 
 def test_custom_summary_stats():
-    class DCDFC(CustomizableDataflow):
+    class DCDFC(ACDFC):
         analysis_klasses = [DistinctCount, StylingAnalysis]
 
     dc_dfc = DCDFC(BASIC_DF)
@@ -109,7 +129,7 @@ def test_custom_summary_stats():
     assert list(summary_sd.keys()) == ['index', 'a', 'b']
 
 def test_init_sd():
-    class DCDFC(CustomizableDataflow):
+    class DCDFC(ACDFC):
         analysis_klasses = [DistinctCount, StylingAnalysis]
 
     dc_dfc = DCDFC(BASIC_DF, init_sd={'a':{'foo':8}})
@@ -132,7 +152,7 @@ class AlwaysFailStyling(StylingAnalysis):
 def test_always_fail_styling():
     """ styling should default to obj displayer if an error is thrown
     """
-    class DCDFC(CustomizableDataflow):
+    class DCDFC(ACDFC):
         analysis_klasses = [AlwaysFailStyling]
         pass
 
@@ -157,7 +177,7 @@ class PostProcessingAnalysis(ColAnalysis):
 
 
 def test_custom_post_processing():
-    class PostDCFC(CustomizableDataflow):
+    class PostDCFC(ACDFC):
         analysis_klasses = [PostProcessingAnalysis, StylingAnalysis]
 
     p_dfc = PostDCFC(BASIC_DF)
@@ -187,25 +207,30 @@ SENTINEL_CONFIG_WITHOUT_INT = {
     'extra_grid_config': {},
 }
 
+#FIXME, this used to be {}, but some change tot eh autcleaning ops,
+#and now I'm getting this probably equivalent structure, dig to the
+#bottom of this
+ALMOST_EMPTY_SD = {}
 
 def test_hide_column_config_post_processing():
     """
     verifies that a PostProcessing function can hide columns 
     """
-    class PostDCFC(CustomizableDataflow):
+    class PostDCFC(ACDFC):
         analysis_klasses = [HidePostProcessingAnalysis, StylingAnalysis]
 
     p_dfc = PostDCFC(BASIC_DF)
     assert p_dfc.post_processing_method == ''
-    assert p_dfc.processed_df is BASIC_DF
+    pd.testing.assert_frame_equal(p_dfc.processed_df, BASIC_DF)
     assert p_dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
-    assert p_dfc.cleaned_sd == {}
+    #assert p_dfc.cleaned_sd == {}
+    assert p_dfc.cleaned_sd == ALMOST_EMPTY_SD
     p_dfc.post_processing_method = 'hide_post'
     assert p_dfc.processed_df is SENTINEL_DF
     assert p_dfc.df_display_args['main']['df_viewer_config'] == SENTINEL_CONFIG_WITHOUT_INT
     """ Make sure we can switch post_processing back to unset and everything works """
     p_dfc.post_processing_method = ''
-    assert p_dfc.processed_df is BASIC_DF
+    pd.testing.assert_frame_equal(p_dfc.processed_df, BASIC_DF)
     assert p_dfc.cleaned_sd == {}
     assert p_dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
 
@@ -213,24 +238,24 @@ def test_add_analysis():
     """
     verifies that a PostProcessing function can hide columns 
     """
-    class PostDCFC(CustomizableDataflow):
+    class PostDCFC(ACDFC):
         analysis_klasses = []
         #pass
 
     p_dfc = PostDCFC(BASIC_DF)
     assert p_dfc.post_processing_method == ''
-    assert p_dfc.processed_df is BASIC_DF
+    pd.testing.assert_frame_equal(p_dfc.processed_df, BASIC_DF)
     assert p_dfc.df_display_args == {}
     p_dfc.add_analysis(StylingAnalysis)
     assert p_dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
-    assert p_dfc.cleaned_sd == {}
+    assert p_dfc.cleaned_sd == ALMOST_EMPTY_SD
     p_dfc.add_analysis(HidePostProcessingAnalysis)
     p_dfc.post_processing_method = 'hide_post'
     assert p_dfc.processed_df is SENTINEL_DF
     assert p_dfc.df_display_args['main']['df_viewer_config'] == SENTINEL_CONFIG_WITHOUT_INT
     """ Make sure we can switch post_processing back to unset and everything works """
     p_dfc.post_processing_method = ''
-    assert p_dfc.processed_df is BASIC_DF
+    pd.testing.assert_frame_equal(p_dfc.processed_df, BASIC_DF)
     assert p_dfc.cleaned_sd == {}
     assert p_dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
 
@@ -249,7 +274,7 @@ def test_hide_column_config_post_processing2():
     This only works because we add an unknown column c, then remove it.
     returning cleaned_df and dropping 'b' doesn't work
     """
-    class PostDCFC(CustomizableDataflow):
+    class PostDCFC(ACDFC):
         analysis_klasses = [HidePostProcessingAnalysis2, StylingAnalysis]
 
     p_dfc = PostDCFC(BASIC_DF)
@@ -266,7 +291,7 @@ class AlwaysFailAnalysis(ColAnalysis):
     def computed_summary(foo):
         1/0
 def test_error_analysis():
-    class ErrorCustomDataflow(CustomizableDataflow):
+    class ErrorCustomDataflow(ACDFC):
         analysis_klasses = [AlwaysFailAnalysis]
 
     ErrorCustomDataflow(BASIC_DF)
@@ -284,7 +309,7 @@ class AlwaysFailPostProcessingAnalysis(ColAnalysis):
 
 
 def test_error_post_processing():
-    class ErrorCFC(CustomizableDataflow):
+    class ErrorCFC(ACDFC):
         analysis_klasses = [AlwaysFailPostProcessingAnalysis, StylingAnalysis]
 
     e_dfc = ErrorCFC(BASIC_DF)
@@ -366,6 +391,40 @@ def test_transpose_error():
         ['foobar', 'foobar', 'foobar', 'foobar', 'foobar']]
 
 
+
+class SliceProcessing(ColAnalysis):
+    provides_defaults = {}
+    @classmethod
+    def post_process_df(kls, df):
+        print("post_process_df SliceProcessing")
+        return [df[:3], {}]
+    post_processing_method = "slice"
+
+def test_df_meta_update():
+    """Swaps in a different post processing method at runtime to show the
+    values are changed.
+
+    """
+    ROWS = 5
+    typed_df = pd.DataFrame(
+        {'int_col': [1] * ROWS,
+         'float_col': [.5] * ROWS,
+         "str_col": ["foobar"]* ROWS})
+
+    base_a_klasses = BuckarooWidget.analysis_klasses.copy()
+    base_a_klasses.extend([SliceProcessing])
+
+    class VCBuckarooWidget(BuckarooWidget):
+        analysis_klasses = base_a_klasses
+
+    vcb = VCBuckarooWidget(typed_df, debug=False)
+    assert vcb.df_meta['filtered_rows'] == 5
+    temp_buckaroo_state = vcb.buckaroo_state.copy()
+    temp_buckaroo_state['post_processing'] = 'slice'
+    vcb.buckaroo_state = temp_buckaroo_state
+    assert vcb.df_meta['filtered_rows'] == 3
+
+
 def test_bstate_commands():
     """
     Makes sure that when bstate is editted, the correct commands get added
@@ -375,7 +434,10 @@ def test_bstate_commands():
     typed_df = pd.DataFrame(
         {'int_col': [1] * ROWS,
          'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS})
+         "str_col": ["foobar"]* ROWS,
+         "other": ["foo", "foo", "needle", "needle", "foo"]
+
+         })
 
     base_a_klasses = BuckarooWidget.analysis_klasses.copy()
     base_a_klasses.extend([TransposeProcessing])
@@ -388,6 +450,7 @@ def test_bstate_commands():
         autoclean_conf = tuple([NoCleaningConf]) 
 
     vcb = VCBuckarooWidget(typed_df, debug=False)
+    assert len(vcb.dataflow.processed_df) == 5
     temp_buckaroo_state = vcb.buckaroo_state.copy()
     temp_buckaroo_state['quick_command_args'] = {'search': ['needle']}
     vcb.buckaroo_state = temp_buckaroo_state
@@ -395,6 +458,44 @@ def test_bstate_commands():
     #probably something in autocleaning config should be responsible for generating these commands
     assert vcb.dataflow.merged_operations == [
         [qc_sym('search'), s('df'), "col", "needle"]]
+    assert len(vcb.dataflow.processed_df) == 2
+    assert vcb.df_meta['filtered_rows'] == 2
+
+def test_bstate_commands2():
+    """
+    Makes sure that when bstate is editted, the correct commands get added
+
+    """
+    ROWS = 5
+    typed_df = pd.DataFrame(
+        {'int_col': [1] * ROWS,
+         'float_col': [.5] * ROWS,
+         "str_col": ["foobar"]* ROWS,
+         "other": ["foo", "foo", "needle", "needle", "foo"]
+
+         })
+
+    base_a_klasses = BuckarooWidget.analysis_klasses.copy()
+    base_a_klasses.extend([TransposeProcessing])
+
+    bw = BuckarooWidget(typed_df)
+    assert bw.buckaroo_state['cleaning_method'] == 'NoCleaning'
+    assert bw.dataflow.cleaning_method == 'NoCleaning'
+    class VCBuckarooWidget(BuckarooInfiniteWidget):
+        #analysis_klasses = base_a_klasses
+        autoclean_conf = tuple([NoCleaningConf]) 
+
+    vcb = VCBuckarooWidget(typed_df, debug=False)
+    assert len(vcb.dataflow.processed_df) == 5
+    temp_buckaroo_state = vcb.buckaroo_state.copy()
+    temp_buckaroo_state['quick_command_args'] = {'search': ['needle']}
+    vcb.buckaroo_state = temp_buckaroo_state
+
+    #probably something in autocleaning config should be responsible for generating these commands
+    assert vcb.dataflow.merged_operations == [
+        [qc_sym('search'), s('df'), "col", "needle"]]
+    assert len(vcb.dataflow.processed_df) == 2
+    assert vcb.df_meta['filtered_rows'] == 2
 
 
     """
@@ -406,11 +507,47 @@ def test_bstate_commands():
     
 
     """
+def test_bstate_commands3():
+    """
+    Makes sure that when bstate is editted, the correct commands get added
+
+    """
+    ROWS = 5
+    typed_df = pd.DataFrame(
+        {'int_col': [1] * ROWS,
+         'float_col': [.5] * ROWS,
+         "str_col": ["foobar"]* ROWS,
+         "other": ["foo", "foo", "needle", "needle", "foo"]
+
+         })
+
+    base_a_klasses = BuckarooInfiniteWidget.analysis_klasses.copy()
+    base_a_klasses.extend([TransposeProcessing])
+
+    bw = BuckarooWidget(typed_df)
+    assert bw.buckaroo_state['cleaning_method'] == 'NoCleaning'
+    assert bw.dataflow.cleaning_method == 'NoCleaning'
+    class VCBuckarooWidget(BuckarooWidget):
+        #analysis_klasses = base_a_klasses
+        autoclean_conf = tuple([NoCleaningConf]) 
+
+    vcb = VCBuckarooWidget(typed_df, debug=False)
+    assert len(vcb.dataflow.processed_df) == 5
+    temp_buckaroo_state = vcb.buckaroo_state.copy()
+    temp_buckaroo_state['quick_command_args'] = {'search': ['needle']}
+    vcb.buckaroo_state = temp_buckaroo_state
+
+    #probably something in autocleaning config should be responsible for generating these commands
+    assert vcb.dataflow.merged_operations == [
+        [qc_sym('search'), s('df'), "col", "needle"]]
+    assert len(vcb.dataflow.processed_df) == 2
+    assert vcb.df_meta['filtered_rows'] == 2
+
 
     
 def test_sample():
     big_df = pd.DataFrame({'a': np.arange(105_000)})
-    bw = CustomizableDataflow(big_df)
+    bw = ACDFC(big_df)
     assert len(bw.processed_df) == 100_000
     print(list(bw.df_data_dict.keys()))
     assert len(bw.df_data_dict['main']) == 5_000

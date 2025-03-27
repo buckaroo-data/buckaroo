@@ -5,7 +5,7 @@
   color: #333;
   font-size: 14px;
   line-height: 24px;
-  font-family: 'Nunito Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: "Nunito Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 .storybook-page h2 {
@@ -22,8 +22,7 @@
 }
 
 .storybook-page a {
-  color: #1ea7fd;
-  text-decoration: none;
+  color: inherit;
 }
 
 .storybook-page ul {
@@ -42,7 +41,7 @@
   border-radius: 1em;
   background: #e7fdd8;
   padding: 4px 12px;
-  color: #66bf3c;
+  color: #357a14;
   font-weight: 700;
   font-size: 11px;
   line-height: 12px;

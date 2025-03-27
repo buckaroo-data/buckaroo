@@ -10,7 +10,6 @@ TODO: Add module docstring
 import traceback
 import pandas as pd
 import logging
-# Creating an object
 
 
 from traitlets import List, Dict, observe, Unicode, Any
@@ -99,6 +98,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
 
         """
         super().__init__()
+        self.exception = None
         kls = self.__class__
         class InnerDataFlow(CustomizableDataflow):
             sampling_klass = kls.sampling_klass
@@ -212,6 +212,13 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         temp_buckaroo_state['post_processing'] = proc_func_name
         self.buckaroo_state = temp_buckaroo_state
 
+    def _sd_to_jsondf(self, sd):
+        """exists so this can be overriden for polars  """
+        temp_sd = sd.copy()
+        #FIXME add actual test around weird index behavior
+        if 'index' in temp_sd:
+            del temp_sd['index']
+        return self._df_to_obj(pd.DataFrame(temp_sd))
 
 
 
@@ -299,23 +306,23 @@ class BuckarooInfiniteWidget(BuckarooWidget):
                              'empty': []}
 
         temp_display_args = {}
-        for display_name, A_Klass in self.df_display_klasses.items():
+        for display_name, A_Klass in self.dataflow.df_display_klasses.items():
             df_viewer_config = A_Klass.style_columns(merged_sd)
             base_column_config = df_viewer_config['column_config']
             df_viewer_config['column_config'] =  merge_column_config(
-                base_column_config, self.column_config_overrides)
+                base_column_config, self.dataflow.column_config_overrides)
             disp_arg = {'data_key': A_Klass.data_key,
                         #'df_viewer_config': json.loads(json.dumps(df_viewer_config)),
                         'df_viewer_config': df_viewer_config,
                         'summary_stats_key': A_Klass.summary_stats_key}
             temp_display_args[display_name] = disp_arg
 
-        if self.pinned_rows is not None:
-            temp_display_args['main']['df_viewer_config']['pinned_rows'] = self.pinned_rows
-        if self.extra_grid_config:
-            temp_display_args['main']['df_viewer_config']['extra_grid_config'] = self.extra_grid_config
-        if self.component_config:
-            temp_display_args['main']['df_viewer_config']['component_config'] = self.component_config
+        if self.dataflow.pinned_rows is not None:
+            temp_display_args['main']['df_viewer_config']['pinned_rows'] = self.dataflow.pinned_rows
+        if self.dataflow.extra_grid_config:
+            temp_display_args['main']['df_viewer_config']['extra_grid_config'] = self.dataflow.extra_grid_config
+        if self.dataflow.component_config:
+            temp_display_args['main']['df_viewer_config']['component_config'] = self.dataflow.component_config
 
         self.df_display_args = temp_display_args
 

@@ -118,6 +118,8 @@ const getIntegerFormatter = (hint: IntegerDisplayerA) => {
         const val = params.value;
         if (val === null) {
             return "";
+        } else if(val === undefined) {
+            return ""
         }
         return formatter.format(params.value).padStart(totalWidth, " ");
     };
@@ -129,9 +131,10 @@ export const getFloatFormatter = (hint: FloatDisplayerA) => {
         maximumFractionDigits: hint.max_fraction_digits,
     });
     return (params: ValueFormatterParams): string => {
-        if (params.value === null) {
+        if (params.value === null || params.value === undefined) {
             return "";
         }
+
         const res: string = floatFormatter.format(params.value);
         if (!_.includes(res, ".")) {
             const padLength = res.length + hint.max_fraction_digits + 1;
