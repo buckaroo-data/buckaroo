@@ -98,8 +98,31 @@ class DataFlow(HasTraits):
     @observe('sampled_df', 'cleaning_method', 'quick_command_args', 'operations')
     @exception_protect('operation_result-protector')
     def _operation_result(self, change):
+        """This function is really complex
+
+        three main pieces with operations interact here.
+
+        Cleaning method generates operations, quick_command_args
+        generates operations, and then there are the existing
+        operations
+
+        Operations that are created by quick_command_args, and
+        cleaning_method ar called generated_ops and are treated differently than operations
+        created by the user. Generated_ops are tagged with meta: {'auto_clean':True}
+        and or meta: 'quick_command:True.  User created oeprations have no meta key
+
+        So if the user changes "cleaning_method", all existing
+        generated_ops are removed, new generated_ops are created and
+        merged with the existing user_operations
+
+        These merged operations are then set back onto the "self.operations" trait.
+
+        Obviously this can lead to cycles so this code must be approached carefully
+
+        """
         result = self.ac_obj.handle_ops_and_clean(
             self.sampled_df, self.cleaning_method, self.quick_command_args, self.operations)
+
         if result is None:
             return
         else:

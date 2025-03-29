@@ -215,8 +215,8 @@ class PandasAutocleaning:
         cleaning_ops, cleaning_sd = self.produce_cleaning_ops(df, cleaning_method)
 
         # [{'meta':'no-op'}] is a sentinel for the initial state
-        if ops_eq(existing_operations, [{'meta':'no-op'}]):
-
+        if ops_eq(existing_operations, [{'meta':'no-op'}]) and cleaning_method == "NoCleaning":
+            print("cleaning_method", cleaning_method)
             final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, [])
             #FIXME, a little bit of a hack to reset cleaning_sd, but it helps tests pass. I
             # don't know how any other properties could really be set
@@ -229,7 +229,7 @@ class PandasAutocleaning:
             #nothing to be done here, no point in running the interpreter
             #this also has the nice effect of not copying the DF, which the interpreter does
             return [df, {}, "", []]
-            
+
 
         cleaned_df = self._run_df_interpreter(df, final_ops)
         merged_cleaned_df = self.make_origs(df, cleaned_df, cleaning_sd)
