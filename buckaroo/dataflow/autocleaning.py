@@ -216,7 +216,6 @@ class PandasAutocleaning:
 
         # [{'meta':'no-op'}] is a sentinel for the initial state
         if ops_eq(existing_operations, [{'meta':'no-op'}]) and cleaning_method == "NoCleaning":
-            print("cleaning_method", cleaning_method)
             final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, [])
             #FIXME, a little bit of a hack to reset cleaning_sd, but it helps tests pass. I
             # don't know how any other properties could really be set

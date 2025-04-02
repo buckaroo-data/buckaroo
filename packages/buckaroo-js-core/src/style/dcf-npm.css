@@ -249,15 +249,18 @@ div.dependent-tabs ul.tabs li.active {
 .ag-root-wrapper-body .ag-cell-inline-editing {
     /* this is trying to remove the weird styling thing that sometimes happens with the editted cell where the
 edit box moves up and is only half visible */
-    
     height: 100%;
-
 }
 
-.marimo .buckaroo_anwidget {
-    width:800px;
-    height:500px;
-    border:7px solid orange;
+
+/* unspecific rule that should only apply in a shaddow dom */
+.buckaroo_anywidget {
+  min-width:900px;
+}
+/* this should override the above rule.  for some reason in jupyter, the .buckaroo_anywidget div isn't injected */
+div div div .buckaroo_anywidget {
+  min-width:inherit;
+  /* border:5px solid brown; */
 }
 
 

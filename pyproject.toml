@@ -36,7 +36,7 @@ dependencies = [
     "fastparquet"
 ]
 
-version = "0.9.11"
+version = "0.9.12"
 
 [project.license]
 file = "LICENSE.txt"
