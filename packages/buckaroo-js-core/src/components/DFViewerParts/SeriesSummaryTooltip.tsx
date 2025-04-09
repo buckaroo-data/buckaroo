@@ -1,4 +1,4 @@
-import { DFViewer } from "./DFViewer";
+import { DFViewer } from "./DFViewerInfinite";
 import { DFWhole } from "./DFWhole";
 import { ITooltipParams } from "@ag-grid-community/core";
 

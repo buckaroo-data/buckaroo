@@ -1,9 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 
 import "../style/dcf-npm.css"
-import '@ag-grid-community/styles/ag-grid.css'; 
-import '@ag-grid-community/styles/ag-theme-quartz.css';
-import "@ag-grid-community/styles/ag-theme-alpine.css";
 import _ from "lodash";
 import { StatusBar } from "../components/StatusBar";
 import { BuckarooOptions, BuckarooState, DFMeta } from "../components/WidgetTypes";

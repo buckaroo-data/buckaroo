@@ -4,7 +4,7 @@ import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
 
 import { DFData } from "./DFViewerParts/DFWhole";
-import { DFViewer } from "./DFViewerParts/DFViewer";
+import { DFViewer } from "./DFViewerParts/DFViewerInfinite";
 import { StatusBar } from "./StatusBar";
 import { BuckarooState } from "./WidgetTypes";
 import { BuckarooOptions } from "./WidgetTypes";
@@ -48,7 +48,7 @@ export function WidgetDCFCell({
     const summaryStatsData = df_data_dict[cDisp.summary_stats_key];
 
     return (
-        <div className="dcf-root flex flex-col" style={{ width: "100%", height: "100%" }}>
+        <div className="dcf-root flex flex-col buckaroo-widget" style={{ width: "100%", height: "100%" }}>
             <div
                 className="orig-df"
                 style={{

@@ -16,8 +16,6 @@ import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-mod
 ModuleRegistry.registerModules([ClientSideRowModelModule]);
 
 
-import "@ag-grid-community/styles/ag-grid.css";
-import "@ag-grid-community/styles/ag-theme-alpine.css";
 
 export const OperationsList = ({
     operations,

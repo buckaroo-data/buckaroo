@@ -1,11 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { DFData, DFViewerConfig } from "../components/DFViewerParts/DFWhole";
-import { DFViewer, SetColumFunc } from "../components/DFViewerParts/DFViewer";
-//import "../packages/buckaroo-js-core/dist/style.css";
+import { SetColumFunc } from "../components/DFViewerParts/gridUtils";
+
 import "../style/dcf-npm.css"
-import '@ag-grid-community/styles/ag-grid.css'; 
-import "@ag-grid-community/styles/ag-theme-alpine.css";
-import '@ag-grid-community/styles/ag-theme-quartz.css';
+import { DFViewer } from "../components/DFViewerParts/DFViewerInfinite";
 
 const DFViewerWrap = ({
     df_data,

@@ -1,12 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { DatasourceOrRaw, DFViewerInfinite, RawDataWrapper } from "../components/DFViewerParts/DFViewerInfinite";
 import { DFData, DFViewerConfig } from "../components/DFViewerParts/DFWhole";
-import { SetColumFunc } from "../components/DFViewerParts/DFViewer";
-//import "../packages/buckaroo-js-core/dist/style.css";
-import "../style/dcf-npm.css"
-import '@ag-grid-community/styles/ag-grid.css'; 
-import "@ag-grid-community/styles/ag-theme-alpine.css";
-import '@ag-grid-community/styles/ag-theme-quartz.css';
+import { SetColumFunc } from "../components/DFViewerParts/gridUtils";
 
 const DFViewerInfiniteWrap = ({
     data_wrapper,

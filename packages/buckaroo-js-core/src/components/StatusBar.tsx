@@ -9,6 +9,8 @@ import { BuckarooOptions } from "./WidgetTypes";
 import { BuckarooState, BKeys } from "./WidgetTypes";
 import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-model";
 import { CustomCellEditorProps } from '@ag-grid-community/react';
+import { myTheme } from "./DFViewerParts/gridUtils";
+import { Theme } from "@ag-grid-community/theming";
 
 export type setColumFunc = (newCol: string) => void;
 ModuleRegistry.registerModules([ClientSideRowModelModule]);
@@ -52,7 +54,7 @@ export const fakeSearchCell = function (_params: any) {
         >
             <input
                 type="text"
-                style={{ flex: "auto", width: 140 }}
+                style={{ flex: "auto", width: 133 }}
                 value={searchVal}
                 onChange={({ target: { value }}) => setSearchVal(value)}
                 onSubmit={setVal}
@@ -115,6 +117,7 @@ export function StatusBar({
     buckarooOptions: BuckarooOptions;
     heightOverride?: number;
 }) {
+    console.log("heightOverride", heightOverride)
     const optionCycles = buckarooOptions;
     const idxs = _.fromPairs(
         _.map(_.keys(optionCycles), (k) => [
@@ -261,17 +264,42 @@ export function StatusBar({
     const defaultColDef = {
         cellStyle: { textAlign: "left" },
     };
+
+    const statusTheme: Theme = myTheme.withParams({
+        headerFontSize: 14,
+        rowVerticalPaddingScale: 0.8,
+        
+        /*
+        spacing:5,
+        cellHorizontalPaddingScale: 0.3,
+        browserColorScheme: "dark",
+        columnBorder: true,
+        rowBorder: false,
+        wrapperBorder: false,
+        fontSize: 12,
+        dataFontSize: "12px",
+        iconSize: 10,
+        backgroundColor: "#181D1F",
+        oddRowBackgroundColor: '#222628',
+        */
+    //    cellHorizontalPadding: 3,
+    
+    })
     return (
-        <div className="statusBar">
-            <div style={{ height: heightOverride||50 }} className="theme-hanger ag-theme-alpine-dark">
+        <div className="status-bar">
+            <div 
+            className="theme-hanger ag-theme-alpine-dark">
                 <AgGridReact
                     ref={gridRef}
+                    theme={statusTheme}
+                    loadThemeGoogleFonts
                     onCellEditingStopped={onGridReady}
                     onCellClicked={updateDict}
                     onGridReady={onGridReady}
                     gridOptions={gridOptions}
                     defaultColDef={defaultColDef}
                     rowData={rowData}
+                    domLayout={"autoHeight"}
                     columnDefs={columnDefs}
                 ></AgGridReact>
             </div>

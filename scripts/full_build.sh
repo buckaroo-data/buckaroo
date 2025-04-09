@@ -5,6 +5,7 @@ rm -rf  packages/buckaroo-js-core/dist packages/buckaroo-js-core/node_modules
 cd packages/buckaroo-js-core
 npm install && npm run build
 cd ../..
+cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
 rm -rf packages/buckaroo-js-core/node_modules
 npm install && npm run build
 rm -rf dist

@@ -1,7 +1,4 @@
 import React, {
-    //  useRef,
-    CSSProperties,
-    useState,
     useCallback,
     useMemo,
 } from "react";
@@ -19,10 +16,8 @@ import {
     GridApi,
     GridOptions,
     IDatasource,
-    IGetRowsParams,
     ModuleRegistry,
     SortChangedEvent,
-    //  ViewportChangedEvent,
 } from "@ag-grid-community/core";
 import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-model";
 import {
@@ -30,12 +25,35 @@ import {
     getGridOptions,
     getHeightStyle,
     HeightStyleI,
-    SetColumFunc,
-} from "./DFViewer";
+    SetColumFunc
+} from "./gridUtils";
 import { InfiniteRowModelModule } from "@ag-grid-community/infinite-row-model";
+import { themeAlpine} from '@ag-grid-community/theming';
+import { colorSchemeDark } from '@ag-grid-community/theming';
 
 ModuleRegistry.registerModules([ClientSideRowModelModule]);
 ModuleRegistry.registerModules([InfiniteRowModelModule]);
+
+
+const myTheme = themeAlpine.withPart(colorSchemeDark).withParams({
+    spacing:5,
+    browserColorScheme: "dark",
+    cellHorizontalPaddingScale: 0.3,
+    columnBorder: true,
+    rowBorder: false,
+    rowVerticalPaddingScale: 0.5,
+    wrapperBorder: false,
+    fontSize: 12,
+    dataFontSize: "12px",
+    headerFontSize: 14,
+    iconSize: 10,
+    backgroundColor: "#181D1F",
+    oddRowBackgroundColor: '#222628',
+    headerVerticalPaddingScale: 0.6,
+//    cellHorizontalPadding: 3,
+
+})
+
 
 export interface DatasourceWrapper {
     datasource: IDatasource;
@@ -141,7 +159,9 @@ export function DFViewerInfinite({
             <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
                 <pre>{error_info ? error_info : ""}</pre>
                 <div style={hs.applicableStyle} className={`theme-hanger ${divClass}`}>
-                    <AgGridReact
+                <AgGridReact
+	                theme={myTheme}
+                        loadThemeGoogleFonts
                         gridOptions={dsGridOptions}
                         datasource={data_wrapper.datasource}
                         pinnedTopRowData={topRowData}
@@ -175,10 +195,12 @@ const RowDataViewer = ({
         <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
             <div style={hs.applicableStyle} className={`theme-hanger ${divClass}`}>
                 <AgGridReact
+         	        theme={myTheme}
+                    loadThemeGoogleFonts
                     gridOptions={rdGridOptions}
                     pinnedTopRowData={topRowData}
-                    columnDefs={_.cloneDeep(rdGridOptions.columnDefs)}
-                ></AgGridReact>
+                    columnDefs={_.cloneDeep(rdGridOptions.columnDefs)}>
+                </AgGridReact>
             </div>
         </div>
     );
@@ -211,46 +233,26 @@ const getDsGridOptions = (origGridOptions: GridOptions, maxRowsWithoutScrolling:
         infiniteInitialRowCount: maxRowsWithoutScrolling + 50
     };
     return dsGridOptions;
-};
-
-export const StaticWrapDFViewerInfinite = ({
-    df_data,
-    df_viewer_config,
-    summary_stats_data,
+};export function DFViewer({
+    df_data, df_viewer_config, summary_stats_data, activeCol, setActiveCol,
 }: {
     df_data: DFData;
     df_viewer_config: DFViewerConfig;
     summary_stats_data?: DFData;
-    style?: CSSProperties;
-}) => {
-    // used for demos to exercise DFViewerInfinite
-
-    const data_wrapper: DatasourceWrapper = {
-        length: df_data.length,
-
-        data_type: "DataSource",
-        datasource: {
-            getRows: (params: IGetRowsParams) => {
-                console.log("StaticWrapDFViewerInfinite", params);
-                params.successCallback(
-                    df_data.slice(params.startRow, params.endRow),
-                    df_data.length,
-                );
-            },
-        },
-    };
-
-    const [activeCol, setActiveCol] = useState("stoptime");
-
+    activeCol?: string;
+    setActiveCol?: SetColumFunc;
+}) {
     return (
-        <div style={{ height: 500 }}>
-            <DFViewerInfinite
-                data_wrapper={data_wrapper}
-                df_viewer_config={df_viewer_config}
-                summary_stats_data={summary_stats_data}
-                activeCol={activeCol}
-                setActiveCol={setActiveCol}
-            />
-        </div>
+        <DFViewerInfinite
+            data_wrapper={{
+                data_type: "Raw",
+                data: df_data,
+                length: df_data.length
+            }}
+            df_viewer_config={df_viewer_config}
+            summary_stats_data={summary_stats_data}
+            activeCol={activeCol}
+            setActiveCol={setActiveCol} />
     );
-};
+}
+

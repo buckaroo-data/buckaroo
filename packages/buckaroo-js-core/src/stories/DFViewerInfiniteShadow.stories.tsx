@@ -1,14 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { DatasourceWrapper, DFViewerInfinite } from "../components/DFViewerParts/DFViewerInfinite";
 import { DFData, DFViewerConfig } from "../components/DFViewerParts/DFWhole";
-import { SetColumFunc } from "../components/DFViewerParts/DFViewer";
-//import "../packages/buckaroo-js-core/dist/style.css";
-import "../style/dcf-npm.css"
-import '@ag-grid-community/styles/ag-grid.css'; 
-import '@ag-grid-community/styles/ag-theme-quartz.css';
-import "@ag-grid-community/styles/ag-theme-alpine.css";
+import { SetColumFunc } from "../components/DFViewerParts/gridUtils";
+
 import { IDatasource, IGetRowsParams } from "@ag-grid-community/core";
 import _ from "lodash";
+import { ShadowDomWrapper } from "./StoryUtils";
 
 const DFViewerInfiniteWrap = ({
     data,
@@ -45,6 +42,7 @@ const DFViewerInfiniteWrap = ({
     length:data.length
   }
   return (
+    <ShadowDomWrapper>
      <div style={{height:500, width:800}}>
       <DFViewerInfinite
       data_wrapper={data_wrapper}
@@ -54,14 +52,15 @@ const DFViewerInfiniteWrap = ({
       setActiveCol={setActiveCol}
       outside_df_params={outside_df_params}
       error_info={error_info} />
-     </div>);
+     </div>
+     </ShadowDomWrapper>);
 }
 
     
 
 // More on how to set up stories at: https://storybook.js.org/docs/writing-stories#default-export
 const meta = {
-  title: "Buckaroo/DFViewer/DFViewerInfinite",
+  title: "Buckaroo/DFViewer/DFViewerInfiniteShadow",
   component:DFViewerInfiniteWrap,
   parameters: {
     // Optional parameter to center the component in the Canvas. More

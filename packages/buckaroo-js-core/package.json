@@ -8,21 +8,22 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-      "test": "jest",
+    "test": "jest",
     "storybook": "storybook dev -p 6006"
   },
   "files": [
     "/dist"
   ],
   "dependencies": {
-    "@ag-grid-community/client-side-row-model": "^32.3.2",
-    "@ag-grid-community/core": "^32.3.2",
-    "@ag-grid-community/infinite-row-model": "^32.3.2",
-    "@ag-grid-community/react": "^32.3.2",
-    "@ag-grid-community/styles": "^32.3.2",
+    "@ag-grid-community/client-side-row-model": "^32.3.3",
+    "@ag-grid-community/core": "^32.3.3",
+    "@ag-grid-community/infinite-row-model": "^32.3.3",
+    "@ag-grid-community/react": "^32.3.3",
+    "@ag-grid-community/styles": "^32.3.3",
+    "@ag-grid-community/theming": "^32.3.3",
+    "hyparquet": "^1.8.2",
     "lodash": "^4.17.21",
-    "recharts": "^2.13.1",
-    "hyparquet": "^1.8.2"
+    "recharts": "^2.13.1"
   },
   "devDependencies": {
     "@babel/preset-typescript": "^7.26.0",

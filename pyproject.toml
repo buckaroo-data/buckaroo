@@ -36,7 +36,8 @@ dependencies = [
     "fastparquet"
 ]
 
-version = "0.9.12"
+version = "0.9.13"
+
 
 [project.license]
 file = "LICENSE.txt"
@@ -98,7 +99,7 @@ Homepage = "https://github.com/paddymul/buckaroo"
 
 [tool.hatch.build]
 only-packages = true
-artifacts = ["buckaroo/static/widget.js", "buckaroo/static/widget.css", "scripts/hatch_build.py"]
+artifacts = ["buckaroo/static/widget.js", "buckaroo/static/compiled.css", "scripts/hatch_build.py"]
 
 [tool.hatch.build.hooks.custom]
 path = "scripts/hatch_build.py"

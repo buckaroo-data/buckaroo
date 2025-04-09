@@ -131,7 +131,8 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
 
 
     _esm = Path(__file__).parent / "static" / "widget.js"
-    _css = Path(__file__).parent / "static" / "widget.css"
+    _css = Path(__file__).parent / "static" / "compiled.css"
+
     #used for selecting the right codepath in the widget.tsx since we
     #can only have a single exported function with anywidget
     render_func_name = Unicode("baked").tag(sync=True)

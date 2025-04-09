@@ -68,12 +68,6 @@
   overflow: hidden;
 }
 
-.features {
-  font-size: 1.7rem;
-}
-.features div {
-  padding: 0.5rem;
-}
 
 .modal {
   position: absolute;
@@ -159,9 +153,40 @@ div.dependent-tabs ul.tabs li.active {
     color:black;
 }
 
-.dev-examples .statusBar {
-    width:800px; border:3px dashed purple;
+
+
+.status-bar {
+    /*
+      useful debugging props.  maybe figure out a way to turn on/off in storybook
+    border:3px dashed purple;
+    padding:10px;
+    background:orange;
+
+   */
+
 }
+.status-bar .ag-center-cols-viewport {
+    min-height: unset !important;
+}
+
+.status-bar .ag-root-wrapper {
+    /* the status-bar is always displayed with the df-viewer */
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.buckaroo-widget .df-viewer  .ag-root-wrapper {
+    /* We want the status bar and the main df-viewer to look like a
+   continuous UI when used together.
+
+   when just df-viewer is shown, there will be regular top borders
+   */
+   border-top-left-radius: 0;
+   border-top-right-radius: 0;
+
+
+}
+
 
 .marimo .orig-df {
     display:flex;
@@ -243,7 +268,6 @@ div.dependent-tabs ul.tabs li.active {
   max-height: 800
 }
 */
-/*# sourceMappingURL=dcf-npm.css.map */
 
 
 .ag-root-wrapper-body .ag-cell-inline-editing {

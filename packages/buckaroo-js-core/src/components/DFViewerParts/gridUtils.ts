@@ -1,9 +1,13 @@
 import {
     CellRendererSelectorResult,
     ColDef,
+    DomLayoutType,
+    GridOptions,
     ICellRendererParams,
     IDatasource,
     IGetRowsParams,
+    SizeColumnsToContentStrategy,
+    SizeColumnsToFitProvidedWidthStrategy,
 } from "@ag-grid-community/core";
 
 import {
@@ -13,6 +17,7 @@ import {
     ColumnConfig,
     TooltipConfig,
     DFViewerConfig,
+    ComponentConfig,
 } from "./DFWhole";
 import _, { zipObject } from "lodash";
 import { getTextCellRenderer } from "./OtherRenderers";
@@ -22,9 +27,11 @@ import { DFData, SDFMeasure, SDFT } from "./DFWhole";
 import { CellRendererArgs, FormatterArgs, PinnedRowConfig } from "./DFWhole";
 import { getBakedDFViewer, getSimpleTooltip } from "./SeriesSummaryTooltip";
 import { getFormatterFromArgs, getCellRenderer, objFormatter, getFormatter } from "./Displayer";
-import { Dispatch, SetStateAction } from "react";
+import { CSSProperties, Dispatch, SetStateAction } from "react";
 import { CommandConfigT } from "../CommandUtils";
 import { KeyAwareSmartRowCache, PayloadArgs } from "./SmartRowCache";
+import { colorSchemeDark, themeAlpine, Theme } from "@ag-grid-community/theming";
+
 
 // for now colDef stuff with less than 3 implementantions should stay in this file
 // as implementations grow large or with many implmentations, they should move to separate files
@@ -230,3 +237,175 @@ export const getDs = (
     };
     return dsLoc;
 };
+export type SetColumFunc = (newCol: string) => void;
+export type PossibleAutosizeStrategy = SizeColumnsToFitProvidedWidthStrategy |
+    SizeColumnsToContentStrategy;
+
+export const getGridOptions = (
+    setActiveCol: SetColumFunc,
+    df_viewer_config: DFViewerConfig,
+    defaultColDef: ColDef,
+    columnDefs: ColDef[],
+    domLayout: DomLayoutType,
+    autoSizeStrategy: PossibleAutosizeStrategy
+): GridOptions => {
+    const gridOptions: GridOptions = {
+        rowSelection: "single",
+
+        enableCellTextSelection: true,
+        onRowClicked: (event) => {
+            const sel = document.getSelection();
+            if (sel === null) {
+                return;
+            }
+            const range = document.createRange();
+            const el = event?.event?.target;
+            if (el === null || el === undefined) {
+                return;
+            }
+            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+            //@ts-ignore
+            range.selectNodeContents(el);
+            sel.removeAllRanges();
+            sel.addRange(range);
+        },
+        tooltipShowDelay: 0,
+
+        // defaultColDef needs to be specifically passed in as a prop to the component, not defined here,
+        // otherwise updates aren't reactive
+        onCellClicked: (event) => {
+            const colName = event.column.getColId();
+            if (setActiveCol === undefined || colName === undefined) {
+                console.log("returning because setActiveCol is undefined");
+                return;
+            } else {
+                console.log("calling setActiveCol with", colName);
+                setActiveCol(colName);
+            }
+        },
+        defaultColDef,
+        columnDefs,
+        domLayout,
+        autoSizeStrategy,
+
+        ...(df_viewer_config.extra_grid_config ? df_viewer_config.extra_grid_config : {}),
+    };
+    return gridOptions;
+};
+interface HeightStyleArgs {
+    numRows: number;
+    pinnedRowLen: number;
+    readonly location: Location;
+    rowHeight?: number;
+    compC?: ComponentConfig;
+}
+export interface HeightStyleI {
+    domLayout: DomLayoutType; // an ag-grid argument https://www.ag-grid.com/javascript-data-grid/grid-size/#dom-layout
+    inIframe: string; // is this being rendered in an iFrame
+
+    //the class for the outer wrapping div
+    classMode: "short-mode" | "regular-mode";
+    applicableStyle: CSSProperties;
+    maxRowsWithoutScrolling: number;
+}
+
+export const getHeightStyle = (df_viewer_config: DFViewerConfig, numRows: number): HeightStyleI => {
+    const hs = heightStyle({
+        numRows: numRows,
+        pinnedRowLen: df_viewer_config.pinned_rows.length,
+        location: window.location,
+        compC: df_viewer_config?.component_config,
+        rowHeight: df_viewer_config?.extra_grid_config?.rowHeight,
+    });
+    return hs;
+};
+export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
+    /*
+      This function is intended to consolidate all of the calculations for the vertical styling of the viewer
+
+      
+      */
+    const { numRows, pinnedRowLen, location, rowHeight, compC } = hArgs;
+    const isGoogleColab = location.host.indexOf("colab.googleusercontent.com") !== -1;
+
+    const inIframe = window.parent !== window;
+    const regularCompHeight = window.innerHeight / (compC?.height_fraction || 2);
+    const dfvHeight = compC?.dfvHeight || regularCompHeight;
+    const regularDivStyle = { height: dfvHeight };
+    const shortDivStyle = { minHeight: 50, maxHeight: dfvHeight };
+
+    // scrollSlop controls the tolerance for maxRowsWithoutScrolling
+    // to enable scrolling anyway. scroll slop includes room for other
+    // parts of the widget, notably the status bar
+    // This still allows for scrolling of a single row. I'd rather
+    // have the min scroll amount... if rows are hidden, at least 5
+    // should be hidden... That would require sizing the whole widget
+    // smaller in that case which is also messy and inconsistent. I
+    // wish there were persistent side scrollbars a UI affordance we
+    // have lost
+    const scrollSlop = 3;
+
+    // figured out default row height of 21.  Want to plumb back in to what is actually rendered.
+    const maxRowsWithoutScrolling = Math.floor((dfvHeight / (rowHeight || 21)) - scrollSlop);
+
+
+
+    const belowMinRows = (numRows + pinnedRowLen) < maxRowsWithoutScrolling;
+    //console.log("maxRowsWithoutScrolling", maxRowsWithoutScrolling, belowMinRows, numRows, dfvHeight, rowHeight);
+    const shortMode = compC?.shortMode || (belowMinRows && rowHeight === undefined);
+
+    const inIframeClass = inIframe ? "inIframe" : "";
+    if (isGoogleColab || inIframe) {
+        return {
+            classMode: "regular-mode",
+            domLayout: "normal",
+            applicableStyle: { height: 500 },
+            inIframe: inIframeClass,
+            maxRowsWithoutScrolling
+        };
+    }
+    const domLayout: DomLayoutType = compC?.layoutType || (shortMode ? "autoHeight" : "normal");
+    const applicableStyle = shortMode ? shortDivStyle : regularDivStyle;
+    const classMode = shortMode ? "short-mode" : "regular-mode";
+    return {
+        classMode,
+        domLayout,
+        applicableStyle,
+        inIframe: inIframeClass,
+        maxRowsWithoutScrolling
+    };
+};
+export const getAutoSize = (
+    numColumns: number
+): SizeColumnsToFitProvidedWidthStrategy | SizeColumnsToContentStrategy => {
+    if (numColumns < 1) {
+        return {
+            type: "fitProvidedWidth",
+            width: window.innerWidth - 100,
+        };
+    }
+    return {
+        type: "fitCellContents",
+    };
+};
+
+
+
+export const myTheme: Theme = themeAlpine.withPart(colorSchemeDark).withParams({
+    spacing:5,
+    browserColorScheme: "dark",
+    cellHorizontalPaddingScale: 0.3,
+    columnBorder: true,
+    rowBorder: false,
+    rowVerticalPaddingScale: 0.5,
+    wrapperBorder: false,
+    fontSize: 12,
+    dataFontSize: "12px",
+    headerFontSize: 14,
+    iconSize: 10,
+    backgroundColor: "#181D1F",
+    oddRowBackgroundColor: '#222628',
+    headerVerticalPaddingScale: 0.6,
+//    cellHorizontalPadding: 3,
+
+})
