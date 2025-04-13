@@ -203,3 +203,75 @@ export function BuckarooInfiniteWidget({
             </div>
         );
     }
+export function DFViewerInfiniteDS({
+        df_meta,
+        df_data_dict,
+        df_display_args,
+        src,
+        df_id
+    }: {
+        df_meta: DFMeta;
+        df_data_dict: Record<string, DFData>;
+        df_display_args: Record<string, IDisplayArgs>;
+        src: KeyAwareSmartRowCache,
+        df_id: string // the memory id 
+    }) {
+        console.log("221 DFViewerWidget");
+        // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
+        // so having it live between relaods is key
+        //const [respError, setRespError] = useState<string | undefined>(undefined);
+
+
+        const mainDs = useMemo(() => {
+            console.log("recreating data source because operations changed", new Date());
+            src.debugCacheState();
+            return getDs(src);
+            // getting a new datasource when operations or post-processing changes - necessary for forcing ag-grid complete updated
+            // updating via post-processing changes appropriately.
+            // forces re-render and dataload when not completely necessary if other
+            // buckaroo_state props change
+            //
+            // putting buckaroo_state.post_processing doesn't work properly
+        }, []);
+        const [activeCol, setActiveCol] = useState("stoptime");
+
+        const cDisp = df_display_args["main"];
+
+        const [data_wrapper, summaryStatsData] = useMemo(
+            () => [
+                getDataWrapper(cDisp.data_key, df_data_dict, mainDs, df_meta.total_rows),
+                df_data_dict[cDisp.summary_stats_key],
+            ],
+            [cDisp]
+        );
+        
+        //used to denote "this dataframe has been transformed", This is
+        //evantually spliced back into the request args from scrolling/
+        //the data source
+        //const outsideDFParams = ["unused", "unused"];
+        const outsideDFParams: unknown = [df_id];
+        
+
+        return (
+            <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
+             style={{ width: "100%", height: "100%" }}>
+                <div
+                    className="orig-df flex flex-row"
+                    style={{
+                        // height: '450px',
+                        overflow: "hidden",
+                    }}
+                >
+                    <DFViewerInfinite
+                        data_wrapper={data_wrapper}
+                        df_viewer_config={cDisp.df_viewer_config}
+                        summary_stats_data={summaryStatsData}
+                        outside_df_params={outsideDFParams}
+                        activeCol={activeCol}
+                        setActiveCol={setActiveCol}
+                        error_info={""}
+                    />
+                </div>
+            </div>
+        );
+    }

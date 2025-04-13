@@ -5,7 +5,6 @@ from datetime import datetime as dtdt
 import os
 
 
-
 def is_in_ipython():
 
     try:

@@ -4,9 +4,7 @@ import datacompy
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 from buckaroo import BuckarooWidget
 from buckaroo.dataflow.dataflow_extras import (
-    merge_sds, exception_protect)
-from traitlets import observe
-from IPython.utils import io
+    merge_sds)
 import logging
 
 

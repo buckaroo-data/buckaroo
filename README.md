@@ -5,10 +5,10 @@ Buckaroo is a modern data table for Jupyter that expedites the most common explo
 <img width="1002" alt="Polars-Buckaroo" src="https://github.com/paddymul/buckaroo/assets/40453/f48b701b-dfc4-4470-8588-05b6a9f33eec">
 
 
-## Try it with Jupyterlite
+## Try it now with Marimo in your browser
 Play with Buckaroo without any installation.
-[Full Tour](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb)
-[![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb)
+[Full Tour](https://marimo.io/p/@paddy-mullen/buckaroo-full-tour)
+
 
 ## Quick start
 
@@ -32,9 +32,10 @@ Buckaroo works in the following notebook environments
 
 - `jupyter lab` (version >=3.6.0)
 - `jupyter notebook` (version >=7.0) 
+- [Marimo](https://marimo.io/)
 - `VS Code notebooks` (with extra install)
 - [Jupyter Lite](https://paddymul.github.io/buckaroo-examples/lab/index.html)
-- `Google colab`  (with special initiation code, currently broken)
+- `Google colab`  (with special initiation code)
 
 
 Buckaroo works with the following DataFrame libraries

@@ -385,5 +385,16 @@ class BuckarooInfiniteWidget(BuckarooWidget):
     def _df_to_obj(self, df:pd.DataFrame):
         return pd_to_obj(df)
 
+class DFViewerInfinite(BuckarooInfiniteWidget):
+    
 
+    render_func_name = Unicode("DFViewerInfinite").tag(sync=True)
+    df_id = Unicode("unknown").tag(sync=True)
 
+    def __init__(self, orig_df, debug=False,
+                 column_config_overrides=None,
+                 pinned_rows=None, extra_grid_config=None,
+                 component_config=None, init_sd=None):
+        super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
+                         extra_grid_config, component_config, init_sd)
+        self.df_id = str(id(orig_df))

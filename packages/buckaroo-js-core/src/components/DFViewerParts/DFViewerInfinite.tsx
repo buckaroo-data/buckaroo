@@ -28,7 +28,7 @@ import {
     SetColumFunc
 } from "./gridUtils";
 import { InfiniteRowModelModule } from "@ag-grid-community/infinite-row-model";
-import { themeAlpine} from '@ag-grid-community/theming';
+import { Theme, themeAlpine} from '@ag-grid-community/theming';
 import { colorSchemeDark } from '@ag-grid-community/theming';
 
 ModuleRegistry.registerModules([ClientSideRowModelModule]);
@@ -155,12 +155,13 @@ export function DFViewerInfinite({
         );
     } else if (data_wrapper.data_type === "DataSource") {
         const dsGridOptions = getDsGridOptions(gridOptions, hs.maxRowsWithoutScrolling );
+        const localTheme: Theme = myTheme.withParams({});
         return (
             <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
                 <pre>{error_info ? error_info : ""}</pre>
                 <div style={hs.applicableStyle} className={`theme-hanger ${divClass}`}>
                 <AgGridReact
-	                theme={myTheme}
+	                theme={localTheme}
                         loadThemeGoogleFonts
                         gridOptions={dsGridOptions}
                         datasource={data_wrapper.datasource}

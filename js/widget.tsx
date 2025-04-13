@@ -53,7 +53,6 @@ const renderBuckarooWidget = createRender(() => {
 	);
 });
 
-
 const srcClosureRBI = (src) => {
     const renderBuckarooInfiniteWidget = createRender((a,b,c) => {
 	const model = useModel()
@@ -85,7 +84,27 @@ const srcClosureRBI = (src) => {
 		</div>
 	);
     });
-    return renderBuckarooInfiniteWidget
+
+    const renderDFViewerInfiniteWidget = createRender((a,b,c) => {
+	const model = useModel()
+	const [df_meta, _set_df_meta] = useModelState("df_meta");
+	const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
+	const [df_display_args, _set_dda] = useModelState("df_display_args");
+        const [df_id, _set_df_id] = useModelState("df_id");
+	return (
+	    <div className="buckaroo_anywidget">
+		<srt.DFViewerInfiniteDS
+                    df_meta={df_meta}
+                    df_data_dict={df_data_dict}
+                    df_display_args={df_display_args}
+                    df_id={df_id}
+	            src={src}
+		/>
+		</div>
+	);
+    });
+
+    return [renderBuckarooInfiniteWidget, renderDFViewerInfiniteWidget];
 }
 
 export default async () => {
@@ -97,7 +116,9 @@ export default async () => {
 	    //const [respError, setRespError] = useState<string | undefined>(undefined);
 	    const setRespError = (a,b) => {console.log("setRespError",a,b);}
 	    extraState['keySmartCache'] = srt.getKeySmartRowCache(model, setRespError);
-	    extraState['rbiFunc'] = srcClosureRBI(extraState['keySmartCache']);
+	    const [renderBuckarooInfinite, renderDFViewerInfinite] = srcClosureRBI(extraState['keySmartCache']);
+	    extraState['renderBuckarooInfinite'] = renderBuckarooInfinite;
+	    extraState['renderDFViewerInfinite'] = renderDFViewerInfinite;
 	},
 	render({ model, el, experimental }) {
 	    const render_func_name = model.get("render_func_name");
@@ -106,7 +127,9 @@ export default async () => {
 	    } else if (render_func_name === "BuckarooWidget") {
 		renderBuckarooWidget({ el, model, experimental });
 	    } else if (render_func_name === "BuckarooInfiniteWidget") {
-		extraState['rbiFunc']({ el, model, experimental });
+		extraState['renderBuckarooInfinite']({ el, model, experimental });
+	    } else if (render_func_name === "DFViewerInfinite") {
+		extraState['renderDFViewerInfinite']({ el, model, experimental });
 	    }
 	}
     }

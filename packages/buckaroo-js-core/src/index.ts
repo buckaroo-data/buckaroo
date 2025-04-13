@@ -10,7 +10,7 @@ import {
 } from "./components/DFViewerParts/DFViewerInfinite";
 
 import { WidgetDCFCell } from "./components/DCFCell";
-import { BuckarooInfiniteWidget, getKeySmartRowCache } from "./components/BuckarooWidgetInfinite";
+import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from "./components/BuckarooWidgetInfinite";
 
 import { HistogramCell } from "./components/DFViewerParts/HistogramCell";
 import { InfiniteEx } from "./components/DFViewerParts/TableInfinite";
@@ -34,6 +34,7 @@ export default {
     WidgetDCFCell,
     DFViewer,
     DFViewerInfinite,
+    DFViewerInfiniteDS,
     StatusBar,
     HistogramCell,
     CommandUtils,
