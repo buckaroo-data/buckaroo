@@ -26,7 +26,7 @@ def _(mo):
 
 
 @app.cell
-def _(BuckarooInfiniteWidget, dropdown_dict, format_json, mo):
+def _(DFViewerInfinite, dropdown_dict, format_json, mo):
     mo.vstack(
         [
             dropdown_dict,
@@ -35,7 +35,7 @@ def _(BuckarooInfiniteWidget, dropdown_dict, format_json, mo):
                 mo.ui.text_area(format_json(dropdown_dict.value[1]), disabled=True, max_length=500, rows=15, full_width=True)],
                      widths="equal"
                      ),
-            BuckarooInfiniteWidget(dropdown_dict.value[0], column_config_overrides = dropdown_dict.value[1])
+            DFViewerInfinite(dropdown_dict.value[0], column_config_overrides = dropdown_dict.value[1])
         ]
     )
     return
@@ -402,31 +402,6 @@ def _(DataFrame):
     return (explicit_colormap_config,)
 
 
-@app.cell(hide_code=True)
-def _():
-    # Extra utility functions and marimo overrides
-    import numpy as np
-    from buckaroo.marimo_utils import marimo_monkeypatch, BuckarooDataFrame as DataFrame
-
-    # this overrides pd.read_csv and pd.read_parquet to return BuckarooDataFrames which overrides displays as BuckarooWidget, not the default marimo table
-    marimo_monkeypatch()
-    import json
-    import re
-    def format_json(obj):
-        """
-          Formats obj to json  string to remove unnecessary whitespace.
-          Returns:
-              The formatted JSON string.
-        """
-        json_string = json.dumps(obj, indent=4)
-        # Remove whitespace before closing curly braces
-        formatted_string =   re.sub(r'\s+}', '}', json_string)
-        #formatted_string = json_string
-        return formatted_string
-
-    return DataFrame, format_json, json, marimo_monkeypatch, np, re
-
-
 @app.cell
 def _(
     colormap_config,
@@ -458,13 +433,53 @@ def _(
     return dfs, dropdown_dict
 
 
-@app.cell(hide_code=True)
-def _():
+@app.cell
+async def _():
     import marimo as mo
     import pandas as pd
+    import numpy as np
+    import micropip
+    await micropip.install("http://localhost:8000/public/buckaroo-0.9.15-py3-none-any.whl")
     import buckaroo
     from buckaroo import BuckarooInfiniteWidget
-    return BuckarooInfiniteWidget, buckaroo, mo, pd
+    from buckaroo.buckaroo_widget import DFViewerInfinite
+    # Extra utility functions and marimo overrides
+    from buckaroo.marimo_utils import marimo_monkeypatch, BuckarooDataFrame as DataFrame
+
+    # this overrides pd.read_csv and pd.read_parquet to return BuckarooDataFrames which overrides displays as BuckarooWidget, not the default marimo table
+    marimo_monkeypatch()
+    import json
+    import re
+    def format_json(obj):
+        """
+          Formats obj to json  string to remove unnecessary whitespace.
+          Returns:
+              The formatted JSON string.
+        """
+        json_string = json.dumps(obj, indent=4)
+        # Remove whitespace before closing curly braces
+        formatted_string =   re.sub(r'\s+}', '}', json_string)
+        #formatted_string = json_string
+        return formatted_string
+    return (
+        BuckarooInfiniteWidget,
+        DFViewerInfinite,
+        DataFrame,
+        buckaroo,
+        format_json,
+        json,
+        marimo_monkeypatch,
+        micropip,
+        mo,
+        np,
+        pd,
+        re,
+    )
+
+
+@app.cell
+def _():
+    return
 
 
 if __name__ == "__main__":

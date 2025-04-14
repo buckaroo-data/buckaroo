@@ -332,3 +332,35 @@ div div div .buckaroo_anywidget {
 .statusBar .ag-column-first .FakeSearchEditor input{ 
   outline:none;
 }
+
+
+/*  lm-Widget lm-Panel jp-OutputArea-output
+classNames of the anywidget el parent while in jupyter
+
+when in vs-code
+cell-output-ipywidget-background
+
+when in marimo
+contents light
+
+When debugging CSS inside a weird environment I did the following
+	const [style_block, _set_style_block] = useModelState("style_block");
+	return (
+	    <div className="buckaroo_anywidget">
+		<style>{style_block}</style>
+	    <srt.BuckarooInfiniteWidget
+Then set the `style_block` property from ptyhon.  
+*/
+div.cell-output-ipywidget-background {
+    background:#1f1f1f !important;
+}
+.cell-output-ipywidget-background .status-bar {
+    margin-bottom:0;
+}
+
+.cell-output-ipywidget-background .df-viewer {
+    margin-top:0;
+}
+.cell-output-ipywidget-background .df-viewer  .theme-hanger{
+    margin-top:-12px;
+}

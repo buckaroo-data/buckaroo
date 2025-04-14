@@ -319,6 +319,15 @@ export const getHeightStyle = (df_viewer_config: DFViewerConfig, numRows: number
     });
     return hs;
 };
+const inVSCcode = () => {
+    // vscIPYWidgets will be present on window when rendered in VSCode
+    //@ts-ignore
+    if(window.vscIPyWidgets !== undefined) {
+        return true
+    }
+    return false
+
+}
 export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
     /*
       This function is intended to consolidate all of the calculations for the vertical styling of the viewer
@@ -327,10 +336,10 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
       */
     const { numRows, pinnedRowLen, location, rowHeight, compC } = hArgs;
     const isGoogleColab = location.host.indexOf("colab.googleusercontent.com") !== -1;
-
     const inIframe = window.parent !== window;
     const regularCompHeight = window.innerHeight / (compC?.height_fraction || 2);
     const dfvHeight = compC?.dfvHeight || regularCompHeight;
+
     const regularDivStyle = { height: dfvHeight };
     const shortDivStyle = { minHeight: 50, maxHeight: dfvHeight };
 
@@ -355,7 +364,8 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
     const shortMode = compC?.shortMode || (belowMinRows && rowHeight === undefined);
 
     const inIframeClass = inIframe ? "inIframe" : "";
-    if (isGoogleColab || inIframe) {
+    console.log("heightstyle", dfvHeight)
+    if (isGoogleColab || inVSCcode() ) {
         return {
             classMode: "regular-mode",
             domLayout: "normal",

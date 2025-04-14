@@ -305,3 +305,40 @@ export const DateNoDisplay: Story = {
   }
 }
 };
+
+const MEDIUM= 300;
+
+export const MedDFVHeight: Story = {
+  args: {
+    data:dictOfArraystoDFData({'a':NRandom(MEDIUM, 3,50), 'b':arange(MEDIUM)   }),
+    df_viewer_config: {
+      column_config: [
+      {
+        col_name: 'a',
+        displayer_args: {
+          displayer: 'float',
+          min_fraction_digits: 2,
+          max_fraction_digits: 8,
+        },
+        //tooltip_config: { tooltip_type: 'summary_series' },
+      },
+      {
+        col_name: 'a',
+        displayer_args: {
+          displayer: 'integer',
+          min_digits:2, max_digits:3
+        },
+      },
+      {
+        col_name: 'b',
+        displayer_args: {
+          displayer: 'obj',
+        },
+      },
+    ],
+    pinned_rows:[],
+    component_config: {dfvHeight:200}
+  },
+  
+    }
+}
