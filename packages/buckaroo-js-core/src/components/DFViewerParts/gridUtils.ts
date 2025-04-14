@@ -15,7 +15,7 @@ import {
     DisplayerArgs,
     cellRendererDisplayers,
     ColumnConfig,
-    TooltipConfig,
+
     DFViewerConfig,
     ComponentConfig,
 } from "./DFWhole";
@@ -25,7 +25,7 @@ import { getStyler } from "./Styler";
 import { DFData, SDFMeasure, SDFT } from "./DFWhole";
 
 import { CellRendererArgs, FormatterArgs, PinnedRowConfig } from "./DFWhole";
-import { getBakedDFViewer, getSimpleTooltip } from "./SeriesSummaryTooltip";
+import { getTooltipParams } from "./SeriesSummaryTooltip";
 import { getFormatterFromArgs, getCellRenderer, objFormatter, getFormatter } from "./Displayer";
 import { CSSProperties, Dispatch, SetStateAction } from "react";
 import { CommandConfigT } from "../CommandUtils";
@@ -60,20 +60,6 @@ export function addToColDef(
 
 export function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]) {
     return _.map(_.map(prc, "primary_key_val"), (x) => _.find(sdf, { index: x }));
-}
-
-export function getTooltip(ttc: TooltipConfig, single_series_summary_df: DFWhole): Partial<ColDef> {
-    switch (ttc.tooltip_type) {
-        case "simple":
-            return { tooltipComponent: getSimpleTooltip(ttc.val_column) };
-
-        case "summary_series":
-            return {
-                tooltipComponent: getBakedDFViewer(single_series_summary_df),
-                tooltipField: "index",
-                tooltipComponentParams: {},
-            };
-    }
 }
 
 export function extractSingleSeriesSummary(
@@ -112,9 +98,6 @@ export function dfToAgrid(
             ? getStyler(f.color_map_config, f.col_name, hdf)
             : {};
 
-        const tooltip_config = f.tooltip_config
-            ? getTooltip(f.tooltip_config, single_series_summary_df)
-            : {};
         const colDef: ColDef = {
             field: f.col_name,
             headerName: f.col_name,
@@ -122,9 +105,10 @@ export function dfToAgrid(
             cellStyle: {}, // necessary for colormapped columns to have a default
             ...addToColDef(f.displayer_args, hdf[f.col_name]),
             ...color_map_config,
-            ...tooltip_config,
+            ...getTooltipParams(single_series_summary_df, f.tooltip_config),
             ...f.ag_grid_specs,
         };
+        console.log("colDef", colDef)
         return colDef;
     });
     return retColumns;

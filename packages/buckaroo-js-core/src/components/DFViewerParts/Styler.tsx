@@ -32,13 +32,20 @@ The bottom matters for us, those are the endge
 
 this means that 8 values are between 1 and 100.8  and 2 values are between 200.6 and 300.4
   */
-    if (histogram_edges.length === 0) {
+    const L = histogram_edges.length
+    if (L === 0) {
         return 0;
     }
+    
+    // this is n^2 for number of histogram edges, but histogram edges should be about 10
+    
     for (let i = 0; i < histogram_edges.length; i++) {
         if (val <= histogram_edges[i]) {
             return i;
         }
+    }
+    if (val > histogram_edges[L-1]) {
+        return L-1
     }
     return histogram_edges.length;
 }

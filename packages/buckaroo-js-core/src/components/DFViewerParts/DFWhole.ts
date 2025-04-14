@@ -52,6 +52,15 @@ export interface HistogramDisplayerA {
     displayer: "histogram";
 }
 
+export interface ChartDisplayerA {
+    displayer: "chart";
+    colors?: {
+        custom1_color:string;
+        custom2_color:string;
+        custom3_color:string;
+    }
+}
+
 export interface LinkifyDisplayerA {
     displayer: "linkify";
 }
@@ -69,6 +78,7 @@ export interface SVGDisplayerA {
 
 export type CellRendererArgs =
     | HistogramDisplayerA
+    | ChartDisplayerA
     | LinkifyDisplayerA
     | BooleanCheckboxDisplayerA
     | Base64PNGImageDisplayerA
@@ -77,6 +87,7 @@ export type CellRendererArgs =
 export type DisplayerArgs = FormatterArgs | CellRendererArgs;
 
 export const cellRendererDisplayers = [
+    "chart",
     "histogram",
     "linkify",
     "Base64PNGImageDisplayer",

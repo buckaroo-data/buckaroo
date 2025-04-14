@@ -3,7 +3,7 @@ import React from "react";
 import { createPortal } from "react-dom";
 
 import { Bar, BarChart, Tooltip } from "recharts";
-import { ChartColors } from "./LineChartCell";
+import { ChartColors } from "./ChartCell";
 import { ColDef, Column, Context, GridApi } from "@ag-grid-community/core";
 
 export interface HistogramNode {

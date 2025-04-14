@@ -101,20 +101,67 @@ export const Primary: Story = {
   
     }
 }
-export const DateNoDisplay: Story = {
+export const Tooltip: Story = {
   args: {
-    df_data:    [{'index': 0, 'date': '06/11/2021', 'date2': '06/11/2021'},
-      {'index': 1, 'date': 'Nov, 22nd 2021', 'date2': '22/11/2021'},
-      {'index': 2, 'date': '24th of November, 2021', 'date2': '24/11/2021'}],
+    df_data:    [
+      {index: 0, date: '06/11/2021',             date2: '06/11/2021', tt:'foo'},
+      {index: 1, date: 'Nov, 22nd 2021',         date2: '22/11/2021', tt:'bar'},
+      {index: 2, date: '24th of November, 2021', date2: '24/11/2021', tt:'baz'},
+      {index: 3, date: '24th of November, 2021', date2: '24/11/2021'},
+      {index: 4, date: '24th of November, 2021', date2: '24/11/2021', tt:9999},
+      {index: 5, date: '24th of November, 2021', date2: '24/11/2021', tt:'baz'}],
+
     df_viewer_config: {
       column_config: [
       { col_name: 'index', displayer_args: {'displayer':'obj'} },
-      { col_name: 'date', displayer_args: {'displayer':'obj'} },
-      { col_name: 'date', displayer_args: {'displayer':'string'}},
-      { col_name: 'date2', displayer_args: {'displayer':'obj'} },
+      { col_name: 'date', displayer_args: {'displayer':'string'},
+        tooltip_config: { 'tooltip_type':'simple', 'val_column': 'tt'}
+    
+    },
       { col_name: 'date2', displayer_args: {'displayer':'string'}},
     ],
     pinned_rows:[],
   }
 }
 };
+
+export const ColorFromCol: Story = {
+  args: {
+    df_data:    [
+      {index: 0, date: '06/11/2021',             color:"red"},
+      {index: 1, date: 'Nov, 22nd 2021',         color:"#f8f8a1"},
+      {index: 2, date: '24th of November, 2021', color:"teal"},
+      {index: 3, date: '24th of November, 2021', color:"#aaa"},
+      {index: 4, date: '24th of November, 2021'},
+      {index: 5, date: '24th of November, 2021'}],
+    df_viewer_config: {
+      column_config: [
+        {col_name: 'index', displayer_args: {'displayer':'obj'} },
+        {col_name: 'date', displayer_args: {'displayer':'string'},
+          color_map_config: {
+            color_rule: "color_from_column",
+            val_column: "color"}}],
+
+      pinned_rows:[],
+   }
+  }
+}
+
+const lineChart = [
+  {lineRed:33.0,  name: '2000-01-01 00:00:00'},
+  {lineRed: 33.0, name: '2001-01-01 00:00:00'},
+  {lineRed: 66, name:'unique'},
+  {lineRed: 100, name:'end'},
+]
+export const Chart: Story = {
+  args: {
+    df_data:    [
+      {index: 0, chart1: lineChart}],
+    df_viewer_config: {
+      column_config: [
+        {col_name: 'index', displayer_args: {'displayer':'obj'} },
+        {col_name: 'chart1', displayer_args: {'displayer':'chart'}}],        
+      pinned_rows:[],
+   }
+  }
+}
