@@ -42,7 +42,8 @@ interface EmptyTooltipParams {}
 export type CDTooltipParams = RealTooltipParams|EmptyTooltipParams
 
 export const getTooltipParams = (
-    single_series_summary_df: DFWhole, tooltip_config?: TooltipConfig): CDTooltipParams => {
+    //single_series_summary_df: DFWhole,
+     tooltip_config?: TooltipConfig): CDTooltipParams => {
     if (tooltip_config === undefined) {
         return {}
     }
@@ -53,11 +54,13 @@ export const getTooltipParams = (
                 tooltipField: tooltip_config.val_column
             };
         case "summary_series":
-            return {
-                tooltipComponent: getBakedDFViewer(single_series_summary_df),
-                tooltipField: "index",
-                tooltipComponentParams: {},
-            };
+            return {};
+            // return {
+            //     tooltipComponent: getBakedDFViewer(single_series_summary_df),
+            //     tooltipField: "index",
+            //     tooltipComponentParams: {},
+            // };
+
     }
 }
 

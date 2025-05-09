@@ -8,7 +8,7 @@ from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
 from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget
 from buckaroo.dataflow.dataflow import StylingAnalysis
-from buckaroo.jlisp.lisp_utils import (s, qc_sym)
+from buckaroo.jlisp.lisp_utils import (s, sQ)
 
 def test_basic_instantiation():
     PolarsBuckarooWidget(
@@ -113,8 +113,8 @@ def test_pandas_all_stats():
 
     sbw = SimpleBuckaroo(pd_test_df)
     assert sbw.dataflow.merged_sd == {
-        'index': {'mean': 2.5, 'null_count': 0, 'quin99': 4.0},
-        'normal_int_series':  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0}}
+        'index': {'mean': 2.5, 'null_count': 0, 'quin99': 4.0, 'col_name':'index'},
+        'normal_int_series':  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0, 'col_name':'normal_int_series'}}
     assert sbw.df_display_args['main']['df_viewer_config'] == EXPECTED_DF_VIEWER_CONFIG
 
 
@@ -248,8 +248,8 @@ def test_polars_search():
         {'a':[10,20,30,40], 'b': ['a', 'aa', 'ab', 'bb']})
 
     bw = PolarsBuckarooWidget(df)
-    assert bw.buckaroo_state['cleaning_method'] == 'NoCleaning'
-    assert bw.dataflow.cleaning_method == 'NoCleaning'
+    assert bw.buckaroo_state['cleaning_method'] == ''
+    assert bw.dataflow.cleaning_method == ''
     # class VCBuckarooWidget(BuckarooWidget):
     #     #analysis_klasses = base_a_klasses
     #     autoclean_conf = tuple([NoCleaningConf]) 
@@ -263,7 +263,7 @@ def test_polars_search():
 
     #probably something in autocleaning config should be responsible for generating these commands
     assert bw.dataflow.merged_operations == [
-        [qc_sym('search'), s('df'), "col", "a"]]
+        [sQ('search'), s('df'), "col", "a"]]
 
     assert len(bw.dataflow.processed_df) == 3
 
@@ -273,7 +273,7 @@ def test_polars_search():
 
     #probably something in autocleaning config should be responsible for generating these commands
     assert bw.dataflow.merged_operations == [
-        [qc_sym('search'), s('df'), "col", "aa"]]
+        [sQ('search'), s('df'), "col", "aa"]]
 
     assert len(bw.dataflow.processed_df) == 1
 

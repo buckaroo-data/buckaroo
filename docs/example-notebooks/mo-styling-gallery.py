@@ -562,5 +562,17 @@ async def _():
     )
 
 
+@app.cell
+def _(BuckarooInfiniteWidget, colormap_config):
+    bw2 = BuckarooInfiniteWidget(colormap_config[0], column_config_overrides=colormap_config[1])
+    bw2.dataflow.summary_sd
+    return (bw2,)
+
+
+@app.cell
+def _():
+    return
+
+
 if __name__ == "__main__":
     app.run()

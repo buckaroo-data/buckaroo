@@ -1,8 +1,9 @@
+from functools import lru_cache
 import json
 import sys
 import pandas as pd
 import numpy as np
-
+from pandas.util import hash_pandas_object
 
 BASE_COL_HINT = {
     'type':'string',
@@ -89,3 +90,43 @@ def filter_analysis(klasses, attr):
         if attr_val is not None:
             ret_klses[attr_val] = k
     return ret_klses
+
+def hash_series(ser):
+    return int(hash_pandas_object(ser).sum())
+
+class SeriesWrapper:
+    def __init__(self, series):
+        self.series = series
+        if not getattr(series, '_hash', False):
+            #saving the _hash as an attribute of the series means we don't have to run this hash and sum frequently.  I do worry about 
+            series._hash = hash_series(series)
+        self._hash = series._hash
+
+    def __eq__(self, other):
+        return isinstance(other, SeriesWrapper) and self._hash == other._hash
+
+    def __hash__(self):
+        return self._hash
+def cache_series_func(f, max_size=256):
+    _cache = {}
+
+    def unwrapped_hashable_func(ser):
+        #we need to take the series out of the wrapper call the original function
+        ret_val = f(ser.series)
+        ser.series = None # we don't need to keep a reference to the series around
+        # this behaviour should be explicitly checked by
+        # tests/unit/pluggable_analysis_framework_test.py::TestCacheSeriesFunc::test_memoize_gc 
+
+        
+        return ret_val
+    cached_func= lru_cache(max_size)(unwrapped_hashable_func)
+
+    def ret_func(ser):
+        if isinstance(ser, SeriesWrapper):
+            return cached_func(ser)
+        elif isinstance(ser, pd.Series):
+            cser = SeriesWrapper(ser)
+            return cached_func(cser)
+        else:
+            raise Exception(f"Unknown type of {type(ser)}")
+    return ret_func

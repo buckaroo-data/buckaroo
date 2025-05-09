@@ -71,24 +71,41 @@ class TestAnalysisPipeline(unittest.TestCase):
 
         sdf, errs = produce_series_df(
             test_df, [Len], 'test_df', debug=True)
-        ld = {'len':4}
         #dict(**sdf) makes the types equal and leads to better error messages if there is a problem
-        assert dict(**sdf) == {'normal_int_series': ld, 'empty_na_ser': ld, 'float_nan_ser': ld, 'index':ld}
+        assert dict(**sdf) ==     {
+        'empty_na_ser': {
+          'col_name': 'empty_na_ser',
+            'len': 4,
+        },
+        'float_nan_ser': {
+           'col_name': 'float_nan_ser',
+            'len': 4,
+        },
+        'index': {
+           'col_name': 'index',
+            'len': 4,
+        },
+        'normal_int_series': {
+           'col_name': 'normal_int_series',
+            'len': 4,
+        },
+    }
 
         sdf2, errs = produce_series_df(
             test_df, [DistinctCount], 'test_df', debug=True)
         assert dict(**sdf2) == {
-            'normal_int_series': {'distinct_count': 4},
-            'index':  {'distinct_count': 4},
-            'empty_na_ser': {'distinct_count':0}, 'float_nan_ser': {'distinct_count':2}}
+            'normal_int_series': {'distinct_count': 4, 'col_name':'normal_int_series'},
+            'index':  {'distinct_count': 4,  'col_name':'index'},
+            'empty_na_ser': {'distinct_count':0,  'col_name':'empty_na_ser'},
+            'float_nan_ser': {'distinct_count':2,  'col_name':'float_nan_ser'}}
 
         sdf3, errs = produce_series_df(
             test_df, [DistinctCount, DistinctPer], 'test_df', debug=True)
         assert dict(**sdf3) == {
-            'normal_int_series': {'distinct_count': 4, 'distinct_per':0},
-            'index':             {'distinct_count': 4, 'distinct_per':0},
-            'empty_na_ser':      {'distinct_count': 0, 'distinct_per':0},
-            'float_nan_ser':     {'distinct_count': 2, 'distinct_per':0}}
+            'normal_int_series': {'distinct_count': 4, 'distinct_per':0, 'col_name':'normal_int_series'},
+            'index':             {'distinct_count': 4, 'distinct_per':0, 'col_name':'index'},
+            'empty_na_ser':      {'distinct_count': 0, 'distinct_per':0, 'col_name':'empty_na_ser'},
+            'float_nan_ser':     {'distinct_count': 2, 'distinct_per':0, 'col_name':'float_nan_ser'}}
 
     def test_full_produce_summary_df(self):
         """just make sure this doesn't fail"""

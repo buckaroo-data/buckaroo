@@ -94,7 +94,7 @@ class ACConf(AutocleaningConfig):
 class NoCleaning(AutocleaningConfig):
     autocleaning_analysis_klasses = []
     command_klasses = [PlSafeInt, DropCol, FillNA, GroupBy, NoOp]
-    name = "NoCleaning"
+    name = ""
 
 
     

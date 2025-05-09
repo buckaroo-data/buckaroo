@@ -17,10 +17,11 @@ import anywidget
 
 from .customizations.analysis import (TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
 from .customizations.histogram import (Histogram)
-from .customizations.pd_autoclean_conf import (CleaningConf, NoCleaningConf)
-from .customizations.styling import (DefaultSummaryStatsStyling, DefaultMainStyling)
+from .customizations.pd_autoclean_conf import (CleaningConf, NoCleaningConf, AggressiveAC, ConservativeAC)
+from .customizations.styling import (DefaultSummaryStatsStyling, DefaultMainStyling, CleaningDetailStyling)
 from .pluggable_analysis_framework.analysis_management import DfStats
 from .pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
+from buckaroo.extension_utils import copy_extend
 
 from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet
 from .dataflow.dataflow import CustomizableDataflow, StylingAnalysis
@@ -164,7 +165,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     
     #information about the current configuration of buckaroo
     buckaroo_state = Dict({
-        'cleaning_method': 'NoCleaning',
+        'cleaning_method': '',
         'post_processing': '',
         'sampled': False,
         'show_commands': False,
@@ -178,11 +179,12 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     @exception_protect('buckaroo_state-protector')
     def _buckaroo_state(self, change):
         old, new = change['old'], change['new']
-        if not old['post_processing'] == new['post_processing']: 
+        if not old['post_processing'] == new['post_processing']:
             self.dataflow.post_processing_method = new['post_processing']
-        if not old['quick_command_args'] == new['quick_command_args']: 
+        if not old['cleaning_method'] == new['cleaning_method']:
+            self.dataflow.cleaning_method = new['cleaning_method']
+        if not old['quick_command_args'] == new['quick_command_args']:
             self.dataflow.quick_command_args = new['quick_command_args']
-
 
         
     #widget config.  Change these via inheritance to alter core behaviors of buckaroo
@@ -193,7 +195,6 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
                         StylingAnalysis,
                         DefaultSummaryStats,
                         DefaultSummaryStatsStyling, DefaultMainStyling]
-
 
 
     def add_analysis(self, analysis_klass):
@@ -398,3 +399,10 @@ class DFViewerInfinite(BuckarooInfiniteWidget):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
                          extra_grid_config, component_config, init_sd)
         self.df_id = str(id(orig_df))
+
+
+class AutocleaningBuckaroo(BuckarooInfiniteWidget):
+    autoclean_conf = tuple([NoCleaningConf, AggressiveAC, ConservativeAC])
+    analysis_klasses = copy_extend(
+        BuckarooInfiniteWidget.analysis_klasses, CleaningDetailStyling
+    )

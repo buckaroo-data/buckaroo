@@ -8,7 +8,8 @@ import {
     StringDisplayerA,
     ObjDisplayerA,
 } from "./DFWhole";
-import _ from "lodash";
+import * as _ from "lodash";
+
 import { HistogramCell } from "./HistogramCell";
 import { Base64PNGDisplayer, LinkCellRenderer, SVGDisplayer } from "./OtherRenderers";
 import { CellRendererArgs, FormatterArgs } from "./DFWhole";

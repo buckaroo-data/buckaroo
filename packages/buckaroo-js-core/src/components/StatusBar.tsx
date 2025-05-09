@@ -26,10 +26,102 @@ const helpCell = function (_params: any) {
     );
 };
 
+const dfDisplayCell = function (params: any) {
+    const value = params.value;
+    const options = params.context.buckarooOptions.df_display;
+    
+    const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+        const newState = _.clone(params.context.buckarooState);
+        newState.df_display = event.target.value;
+        params.context.setBuckarooState(newState);
+    };
+
+    return (
+        <select 
+            value={value} 
+            onChange={handleChange}
+            style={{ width: '100%', background: 'transparent', border: 'none', color: 'inherit' }}
+        >
+            {options.map((option: string) => (
+                <option key={option} value={option}>
+                    {option}
+                </option>
+            ))}
+        </select>
+    );
+};
+
+const cleaningMethodCell = function (params: any) {
+    const value = params.value;
+    const options = params.context.buckarooOptions.cleaning_method;
+    
+    const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+        const newState = _.clone(params.context.buckarooState);
+        newState.cleaning_method = event.target.value;
+        params.context.setBuckarooState(newState);
+    };
+
+    return (
+        <select 
+            value={value} 
+            onChange={handleChange}
+            style={{ width: '100%', background: 'transparent', border: 'none', color: 'inherit' }}
+        >
+            {options.map((option: string) => (
+                <option key={option} value={option}>
+                    {option}
+                </option>
+            ))}
+        </select>
+    );
+};
+
+const postProcessingCell = function (params: any) {
+    const value = params.value;
+    const options = params.context.buckarooOptions.post_processing;
+    
+    const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+        const newState = _.clone(params.context.buckarooState);
+        newState.post_processing = event.target.value;
+        params.context.setBuckarooState(newState);
+    };
+
+    return (
+        <select 
+            value={value} 
+            onChange={handleChange}
+            style={{ width: '100%', background: 'transparent', border: 'none', color: 'inherit' }}
+        >
+            {options.map((option: string) => (
+                <option key={option} value={option}>
+                    {option}
+                </option>
+            ))}
+        </select>
+    );
+};
+
+const showCommandsCell = function (params: any) {
+    const value = params.value === "1";
+    
+    const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const newState = _.clone(params.context.buckarooState);
+        newState.show_commands = event.target.checked ? "1" : "0";
+        params.context.setBuckarooState(newState);
+    };
+
+    return (
+        <input
+            type="checkbox"
+            checked={value}
+            onChange={handleChange}
+            style={{ margin: '0 auto', display: 'block' }}
+        />
+    );
+};
+
 export const fakeSearchCell = function (_params: any) {
     const value = _params.value;
-    console.log("_params", _params);
-    console.log("_params.api", _params.api)
 
     const [searchVal, setSearchVal] = useState<string>(value||'');
     const setVal = () => {
@@ -117,7 +209,9 @@ export function StatusBar({
     buckarooOptions: BuckarooOptions;
     heightOverride?: number;
 }) {
-    console.log("heightOverride", heightOverride)
+    if (false) {
+	console.log("heightOverride", heightOverride);
+    }
     const optionCycles = buckarooOptions;
     const idxs = _.fromPairs(
         _.map(_.keys(optionCycles), (k) => [
@@ -145,6 +239,7 @@ export function StatusBar({
 
     const excludeKeys = ["quick_command_args", "search", "show_displayed_rows"];
     const updateDict = (event: any) => {
+        console.log("event.column", event.column, event.column.getColId());
         const colName = event.column.getColId();
         if (_.includes(excludeKeys, colName)) {
             return;
@@ -155,7 +250,7 @@ export function StatusBar({
         }
     };
 
-    const handleCellChange = useCallback((params: { oldValue: any; newValue: any }) => {
+    const handleSearchCellChange = useCallback((params: { oldValue: any; newValue: any }) => {
         const { oldValue, newValue } = params;
         if (oldValue !== newValue && newValue !== null) {
             //console.log('Edited cell:', newValue);
@@ -163,7 +258,7 @@ export function StatusBar({
                 ...buckarooState,
                 quick_command_args: { search: [newValue] },
             };
-            //console.log('handleCellChange', buckarooState, newState);
+
             setBuckarooState(newState);
         }
     }, []);
@@ -177,7 +272,7 @@ export function StatusBar({
             cellEditor: SearchEditor,
             cellRenderer: fakeSearchCell,
 
-            onCellValueChanged: handleCellChange,
+            onCellValueChanged: handleSearchCellChange,
         },
 
         {
@@ -185,6 +280,7 @@ export function StatusBar({
             headerName: "Σ", //note the greek symbols instead of icons which require buildchain work
             headerTooltip: "Summary Stats",
             width: 120,
+            cellRenderer: dfDisplayCell,
         },
         /*
     {
@@ -200,14 +296,22 @@ export function StatusBar({
             headerName: "post processing",
             headerTooltip: "post process method",
             width: 100,
+            cellRenderer: postProcessingCell,
         },
         {
             field: "show_commands",
             headerName: "λ",
             headerTooltip: "Show Commands",
             width: 30,
+            cellRenderer: showCommandsCell,
         },
-        { field: "sampled", headerName: "Ξ", headerTooltip: "Sampled", width: 30 },
+        { 
+            field: "cleaning_method", 
+            headerName: "cleaning", 
+            headerTooltip: "Auto cleaning method", 
+            width: 80,
+            cellRenderer: cleaningMethodCell,
+        },
         {
             field: "help",
             headerName: "?",
@@ -234,8 +338,8 @@ export function StatusBar({
             total_rows: basicIntFormatter.format(dfMeta.total_rows),
             columns: dfMeta.columns,
             rows_shown: basicIntFormatter.format(dfMeta.rows_shown),
-            sampled: buckarooState.sampled || "0",
-            auto_clean: buckarooState.auto_clean || "0",
+            //sampled: buckarooState.sampled || "0",
+            cleaning_method: buckarooState.cleaning_method || "0",
             df_display: buckarooState.df_display,
             filtered_rows: basicIntFormatter.format(dfMeta.filtered_rows),
             post_processing: buckarooState.post_processing,
@@ -251,39 +355,17 @@ export function StatusBar({
     const gridRef = useRef<AgGridReact<unknown>>(null);
 
     const onGridReady = useCallback((params: {api:GridApi}) => {
-        console.log("onGridReady statusbar", params)
-
-        // const eParams:StartEditingCellParams = {
-        //     rowIndex:0, colKey:"search"
-        // }
-        // params.api.startEditingCell(eParams)
-  //      params.api.clearFocusedCell();
-
+        console.log("StatusBar252 onGridReady statusbar", params)
     }, []);
 
     const defaultColDef = {
+        sortable:false,
         cellStyle: { textAlign: "left" },
     };
 
     const statusTheme: Theme = myTheme.withParams({
         headerFontSize: 14,
-        rowVerticalPaddingScale: 0.8,
-        
-        /*
-        spacing:5,
-        cellHorizontalPaddingScale: 0.3,
-        browserColorScheme: "dark",
-        columnBorder: true,
-        rowBorder: false,
-        wrapperBorder: false,
-        fontSize: 12,
-        dataFontSize: "12px",
-        iconSize: 10,
-        backgroundColor: "#181D1F",
-        oddRowBackgroundColor: '#222628',
-        */
-    //    cellHorizontalPadding: 3,
-    
+        rowVerticalPaddingScale: 0.8,    
     })
     return (
         <div className="status-bar">
@@ -294,13 +376,18 @@ export function StatusBar({
                     theme={statusTheme}
                     loadThemeGoogleFonts
                     onCellEditingStopped={onGridReady}
-                    onCellClicked={updateDict}
+                    onColumnHeaderClicked={updateDict}
                     onGridReady={onGridReady}
                     gridOptions={gridOptions}
                     defaultColDef={defaultColDef}
                     rowData={rowData}
                     domLayout={"autoHeight"}
                     columnDefs={columnDefs}
+                    context={{
+                        buckarooState,
+                        setBuckarooState,
+                        buckarooOptions
+                    }}
                 ></AgGridReact>
             </div>
         </div>

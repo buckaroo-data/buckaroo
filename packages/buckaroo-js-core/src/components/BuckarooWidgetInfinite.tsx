@@ -57,6 +57,7 @@ export const getKeySmartRowCache = (model: any, setRespError:any) => {
     const src = new KeyAwareSmartRowCache(reqFn)
 
     model.on("msg:custom", (msg: any, buffers: any[]) => {
+        console.log("got a message", msg);
         if (msg?.type !== "infinite_resp") {
             console.log("bailing not infinite_resp")
             return
@@ -68,6 +69,7 @@ export const getKeySmartRowCache = (model: any, setRespError:any) => {
         const payload_response = msg as PayloadResponse;
         if (payload_response.error_info !== undefined) {
             console.log("there was a problem with the request, not adding to the cache")
+            src.addErrorResponse(payload_response);
             console.log(payload_response.error_info)
             setRespError(payload_response.error_info)
             return
@@ -85,10 +87,10 @@ export const getKeySmartRowCache = (model: any, setRespError:any) => {
             const respTime = now - payload_response.key.request_time;
             console.log(`response before ${[payload_response.key.start, payload_response.key.origEnd, payload_response.key.end]} parse took ${respTime}`)
         }
-            
+        console.log("about to read buffers[0]", buffers[0])            
         const table_bytes = buffers[0]
         const metadata = parquetMetadata(table_bytes.buffer)
-
+        console.log("metadata", metadata)
         parquetRead({
             file: table_bytes.buffer,
             metadata:metadata,
@@ -134,9 +136,10 @@ export function BuckarooInfiniteWidget({
         // so having it live between relaods is key
         //const [respError, setRespError] = useState<string | undefined>(undefined);
 
-
-        const mainDs = useMemo(() => {
-            console.log("recreating data source because operations changed", new Date());
+    const outerTime = new Date();
+    const mainDs = useMemo(() => {
+	//@ts-ignore
+        console.log("recreating data source because operations changed", outerTime, ((new Date()) - outerTime))
             src.debugCacheState();
             return getDs(src);
             // getting a new datasource when operations or post-processing changes - necessary for forcing ag-grid complete updated
@@ -145,7 +148,8 @@ export function BuckarooInfiniteWidget({
             // buckaroo_state props change
             //
             // putting buckaroo_state.post_processing doesn't work properly
-        }, [operations, buckaroo_state]);
+        //}, [operations, buckaroo_state]);
+        }, [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method]);
         const [activeCol, setActiveCol] = useState("stoptime");
 
         const cDisp = df_display_args[buckaroo_state.df_display];

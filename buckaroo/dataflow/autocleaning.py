@@ -1,6 +1,5 @@
-import json
 import pandas as pd
-from buckaroo.jlisp.lisp_utils import split_operations, s, qc_sym
+from buckaroo.jlisp.lisp_utils import s, sQ, merge_ops, format_ops, ops_eq
 from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
 from ..customizations.all_transforms import configure_buckaroo, DefaultCommandKlsList
 
@@ -40,35 +39,6 @@ class SentinelAutocleaning:
             cleaned_df = df
         return [cleaned_df, {}, generated_code, merged_operations]
 
-def merge_ops(existing_ops, cleaning_ops):
-    """ strip cleaning_ops from existing_ops, reinsert cleaning_ops at the beginning """
-    old_cleaning_ops, user_gen_ops = split_operations(existing_ops)
-    merged = cleaning_ops.copy()
-    merged.extend(user_gen_ops)  # we want the user cleaning ops to come last
-    return merged
-
-
-
-def format_ops(column_meta):
-    """
-    translate summary_dict with cleaning_ops to real, usable instructions
-    """
-    ret_ops = []
-    for k,v in column_meta.items():
-        if k == 'index':
-            continue
-        if 'cleaning_ops' not in v:
-            continue
-        ops = v['cleaning_ops']
-        if len(ops) > 0:
-            temp_ops = ops.copy()
-            temp_ops.insert(2, k)
-            ret_ops.append(temp_ops)
-    return ret_ops
-
-def ops_eq(ops_a, ops_b):
-    return json.dumps(ops_a) == json.dumps(ops_b)
-
 class AutocleaningConfig:
     command_klasses = [DefaultCommandKlsList]
     autocleaning_analysis_klasses = []
@@ -98,7 +68,7 @@ def generate_quick_ops(command_list, quick_args):
         for form, arg  in zip(c.quick_args_pattern, val):
             arg_pos = form[0]
             op[arg_pos] = arg
-        op[0] = qc_sym(sym_name)
+        op[0] = sQ(sym_name)
         ret_ops.append(op)
     return ret_ops
 
@@ -113,7 +83,7 @@ class PandasAutocleaning:
 
     DFStatsKlass = DfStats
     #until we plumb in swapping configs, just stick with default
-    def __init__(self, ac_configs=tuple([AutocleaningConfig()]), conf_name="NoCleaning"):
+    def __init__(self, ac_configs=tuple([AutocleaningConfig()]), conf_name=""):
 
         self.config_dict = {}
         for conf in ac_configs:
@@ -160,8 +130,6 @@ class PandasAutocleaning:
     def _run_cleaning(self, df, cleaning_method):
         dfs = self.DFStatsKlass(df, self.autocleaning_analysis_klasses, debug=True)
         gen_ops = format_ops(dfs.sdf)
-
-        #cleaning_sd = {}
         return gen_ops, dfs.sdf
 
     @staticmethod
@@ -215,7 +183,7 @@ class PandasAutocleaning:
         cleaning_ops, cleaning_sd = self.produce_cleaning_ops(df, cleaning_method)
 
         # [{'meta':'no-op'}] is a sentinel for the initial state
-        if ops_eq(existing_operations, [{'meta':'no-op'}]) and cleaning_method == "NoCleaning":
+        if ops_eq(existing_operations, [{'meta':'no-op'}]) and cleaning_method == "":
             final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, [])
             #FIXME, a little bit of a hack to reset cleaning_sd, but it helps tests pass. I
             # don't know how any other properties could really be set
@@ -224,7 +192,7 @@ class PandasAutocleaning:
         else:
             final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, existing_operations)
 
-        if ops_eq(final_ops,[]) and cleaning_method == "NoCleaning":
+        if ops_eq(final_ops,[]) and cleaning_method == "":
             #nothing to be done here, no point in running the interpreter
             #this also has the nice effect of not copying the DF, which the interpreter does
             return [df, {}, "", []]

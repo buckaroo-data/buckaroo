@@ -15,6 +15,12 @@ export type OperationSingleColumn = [SymbolT, SymbolDf, string];
 export type OperationSingleArg = [SymbolT, SymbolDf, string, Atom];
 export type OperationTwoArg = [SymbolT, SymbolDf, string, Atom, Atom];
 export type Operation = OperationSingleColumn | OperationSingleArg | OperationTwoArg;
+export const getOperationKey = (ops:Operation[], idx:number):string => {
+  if(idx > ops.length) {
+    return "no-key"
+  }
+  return ops[idx][0].symbol + idx.toString();
+}
 
 export type SetOperationFunc = (newCommand: Operation) => void;
 export type SetOperationsFunc = (newCommands: Operation[]) => void;

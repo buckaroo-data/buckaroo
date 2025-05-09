@@ -84,7 +84,6 @@ export function DependentTabs({
     return (
         <div className="dependent-tabs" style={{ width: "100%" }}>
             <ul className="tabs">
-                <TabComponent currentTab={tab} _setTab={_setTab} tabName={"DataFrame"} />
                 <TabComponent currentTab={tab} _setTab={_setTab} tabName={"Python"} />
                 <TabComponent currentTab={tab} _setTab={_setTab} tabName={"Operations"} />
             </ul>

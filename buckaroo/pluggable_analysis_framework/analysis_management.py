@@ -34,7 +34,10 @@ def produce_series_df(df, ordered_objs, df_name='test_df', debug=False):
         #FIXME: actually sample the series.  waiting until I have time
         #to proeprly benchmark
         sampled_ser = ser
+        series_stats[ser_name]['col_name'] = ser_name
         for a_kls in ordered_objs:
+
+
             col_stat_dict = a_kls.provides_defaults.copy()
             try:
                 if a_kls.quiet or a_kls.quiet_warnings:

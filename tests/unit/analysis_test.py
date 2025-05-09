@@ -46,7 +46,7 @@ def test_unhashable():
     #print(result)
     cleaned_result = {i:result[i] for i in result if i!='value_counts'}
     assert     {'length': 2, 'null_count': 0, 
-                'mode': ['a'], 'min': np.nan, 'max': np.nan} == cleaned_result
+                'mode': np.nan, 'min': np.nan, 'max': np.nan} == cleaned_result
 
 def test_unhashable3():
     ser = pd.Series([{'a':1, 'b':2}, {'b':10, 'c': 5}])
@@ -78,9 +78,9 @@ def test_datetime_histogram():
 
     assert     {
                 'histogram': [{'cat_pop': np.float64(33.0),
-                               'name': pd.Timestamp('2000-01-01 00:00:00')},
+                               'name': '2000-01-01 00:00:00'},
                               {'cat_pop': np.float64(33.0),
-                               'name': pd.Timestamp('2001-01-01 00:00:00')},
+                               'name': '2001-01-01 00:00:00'},
                               {'name': 'unique', 'unique': np.float64(67.0)},
                               {'NA': np.float64(33.0), 'name': 'NA'}
                               ],

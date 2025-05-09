@@ -48,3 +48,12 @@ export default tseslint.config({
   },
 })
 ```
+
+
+playwright
+
+storybook must be running
+```sh
+export PW_TEST_HTML_REPORT_OPEN='never' 
+pnpm exec playwright test
+```

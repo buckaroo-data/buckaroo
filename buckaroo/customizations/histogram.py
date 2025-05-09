@@ -50,7 +50,16 @@ def categorical_histogram(length:int, val_counts, nan_per:float, top_n_positions
 
         percent = np.round((v/length)*100,0)
         if percent > .3:
-            histogram.append({'name':k, 'cat_pop': percent })
+            # str(k) important because the key must be a string, not a number or boolean
+            """
+            Warning: Received `true` for a non-boolean attribute `name`.
+
+            If you want to write it to the DOM, pass a string instead: name="true" or name={value.toString()}.
+            path
+            Rectangle2@http://localhost:6006/node_modules/...
+            """
+            histogram.append({'name':str(k), 'cat_pop': percent })
+
     # I want longtail and unique to come last
     for k,v in cd.items():
         if k in ["longtail", "unique"]:

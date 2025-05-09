@@ -2,7 +2,6 @@ import {
     CellRendererSelectorResult,
     ColDef,
     DomLayoutType,
-    GridOptions,
     ICellRendererParams,
     IDatasource,
     IGetRowsParams,
@@ -19,7 +18,8 @@ import {
     DFViewerConfig,
     ComponentConfig,
 } from "./DFWhole";
-import _, { zipObject } from "lodash";
+
+import * as _ from "lodash";
 import { getTextCellRenderer } from "./OtherRenderers";
 import { getStyler } from "./Styler";
 import { DFData, SDFMeasure, SDFT } from "./DFWhole";
@@ -37,11 +37,9 @@ import { colorSchemeDark, themeAlpine, Theme } from "@ag-grid-community/theming"
 // as implementations grow large or with many implmentations, they should move to separate files
 // like displayer
 
-export function addToColDef(
+export function getCellRendererorFormatter(
     dispArgs: DisplayerArgs,
-    //@ts-ignore
-    summary_stats_column: SDFMeasure,
-) {
+):ColDef {
     const formatter = getFormatterFromArgs(dispArgs);
     if (formatter !== undefined) {
         const colDefExtras: ColDef = { valueFormatter: formatter };
@@ -54,7 +52,8 @@ export function addToColDef(
             cellRenderer: getCellRenderer(crArgs),
         };
     }
-    return undefined;
+    //this is probably an error
+    return {};
 }
 
 
@@ -83,32 +82,29 @@ export function extractSingleSeriesSummary(
 
 export function dfToAgrid(
     dfviewer_config: DFViewerConfig,
-    full_summary_stats_df: DFData,
 ): ColDef[] {
     //more convienient df format for some formatters
-    const hdf = extractSDFT(full_summary_stats_df || []);
+    //const hdf = extractSDFT(full_summary_stats_df || []);
 
     const retColumns: ColDef[] = dfviewer_config.column_config.map((f: ColumnConfig) => {
-        const single_series_summary_df = extractSingleSeriesSummary(
-            full_summary_stats_df,
-            f.col_name,
-        );
+        // const single_series_summary_df = extractSingleSeriesSummary(
+        //     full_summary_stats_df,
+        //     f.col_name,
+        // );
 
         const color_map_config = f.color_map_config
-            ? getStyler(f.color_map_config, f.col_name, hdf)
-            : {};
+            ? getStyler(f.color_map_config) : {};
 
         const colDef: ColDef = {
             field: f.col_name,
             headerName: f.col_name,
             cellDataType: false,
-            cellStyle: {}, // necessary for colormapped columns to have a default
-            ...addToColDef(f.displayer_args, hdf[f.col_name]),
+            cellStyle: undefined, // necessary for colormapped columns to have a default
+            ...getCellRendererorFormatter(f.displayer_args),
             ...color_map_config,
-            ...getTooltipParams(single_series_summary_df, f.tooltip_config),
+            ...getTooltipParams(f.tooltip_config),
             ...f.ag_grid_specs,
         };
-        console.log("colDef", colDef)
         return colDef;
     });
     return retColumns;
@@ -121,6 +117,7 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[]) {
     };
     return (params: ICellRendererParams<any, any, any>): CellRendererSelectorResult | undefined => {
         if (params.node.rowPinned) {
+            
             const pk = _.get(params.node.data, "index");
             if (pk === undefined) {
                 return anyRenderer; // default renderer
@@ -157,6 +154,9 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[]) {
 }
 
 export function extractSDFT(summaryStatsDf: DFData): SDFT {
+    /*  histogram_bins are special cased because of how they are passed to rendereres in pinned_rows
+	I think
+     */
     const maybeHistogramBins = _.find(summaryStatsDf, { index: "histogram_bins" }) || {};
     const maybeHistogramLogBins = _.find(summaryStatsDf, { index: "histogram_log_bins" }) || {};
     const allColumns: string[] = _.without(
@@ -169,7 +169,7 @@ export function extractSDFT(summaryStatsDf: DFData): SDFT {
             histogram_log_bins: _.get(maybeHistogramLogBins, colName, []) as number[],
         };
     });
-    return zipObject(allColumns, vals) as SDFT;
+    return _.zipObject(allColumns, vals) as SDFT;
 }
 
 export const getPayloadKey = (payloadArgs: PayloadArgs): string => {
@@ -191,10 +191,13 @@ export interface TimedIDatasource extends IDatasource {
 export const getDs = (
     src: KeyAwareSmartRowCache,
 ): TimedIDatasource => {
+    const createTime =  new Date();
     const dsLoc: TimedIDatasource = {
-        createTime: new Date(),
+        createTime,
         rowCount: undefined,
         getRows: (params: IGetRowsParams) => {
+	    //@ts-ignore
+	    console.log("gridUtils 198 calling getRows createTime", createTime, ((new Date()) - createTime));
             const sm = params.sortModel;
             const outside_params_string = JSON.stringify(params.context?.outside_df_params);
             const dsPayloadArgs = {
@@ -206,7 +209,8 @@ export const getDs = (
                 sort_direction: sm.length === 1 ? sm[0].sort : undefined,
             };
             const successWrapper = (df:DFData, length:number) => {
-                //console.log("successWrapper called 217", 
+		//@ts-ignore
+                console.log("successWrapper called 217",  createTime, ((new Date()) - createTime));
                 //   [dsPayloadArgs.start, dsPayloadArgs.end], length)
                 params.successCallback(df, length)
             }
@@ -221,61 +225,10 @@ export const getDs = (
     };
     return dsLoc;
 };
-export type SetColumFunc = (newCol: string) => void;
+export type SetColumnFunc = (newCol: string) => void;
 export type PossibleAutosizeStrategy = SizeColumnsToFitProvidedWidthStrategy |
     SizeColumnsToContentStrategy;
 
-export const getGridOptions = (
-    setActiveCol: SetColumFunc,
-    df_viewer_config: DFViewerConfig,
-    defaultColDef: ColDef,
-    columnDefs: ColDef[],
-    domLayout: DomLayoutType,
-    autoSizeStrategy: PossibleAutosizeStrategy
-): GridOptions => {
-    const gridOptions: GridOptions = {
-        rowSelection: "single",
-
-        enableCellTextSelection: true,
-        onRowClicked: (event) => {
-            const sel = document.getSelection();
-            if (sel === null) {
-                return;
-            }
-            const range = document.createRange();
-            const el = event?.event?.target;
-            if (el === null || el === undefined) {
-                return;
-            }
-            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-            //@ts-ignore
-            range.selectNodeContents(el);
-            sel.removeAllRanges();
-            sel.addRange(range);
-        },
-        tooltipShowDelay: 0,
-
-        // defaultColDef needs to be specifically passed in as a prop to the component, not defined here,
-        // otherwise updates aren't reactive
-        onCellClicked: (event) => {
-            const colName = event.column.getColId();
-            if (setActiveCol === undefined || colName === undefined) {
-                console.log("returning because setActiveCol is undefined");
-                return;
-            } else {
-                console.log("calling setActiveCol with", colName);
-                setActiveCol(colName);
-            }
-        },
-        defaultColDef,
-        columnDefs,
-        domLayout,
-        autoSizeStrategy,
-
-        ...(df_viewer_config.extra_grid_config ? df_viewer_config.extra_grid_config : {}),
-    };
-    return gridOptions;
-};
 interface HeightStyleArgs {
     numRows: number;
     pinnedRowLen: number;
@@ -293,16 +246,28 @@ export interface HeightStyleI {
     maxRowsWithoutScrolling: number;
 }
 
-export const getHeightStyle = (df_viewer_config: DFViewerConfig, numRows: number): HeightStyleI => {
+
+export const getHeightStyle2 = (
+    maxDataPinnedRows:number, // the maximum number of pinned rows across configs with data (not summary_stats which has no data)
+    maxRows:number, // the maximum of pinned rows across configs or total_rows
+    component_config?: ComponentConfig, //Very rarely set
+    rowHeight?:number //very rarely set
+): HeightStyleI => {
+    /*
+    rewritten for better caching
+    */
     const hs = heightStyle({
-        numRows: numRows,
-        pinnedRowLen: df_viewer_config.pinned_rows.length,
+        numRows: maxRows,
+        pinnedRowLen: maxDataPinnedRows,
         location: window.location,
-        compC: df_viewer_config?.component_config,
-        rowHeight: df_viewer_config?.extra_grid_config?.rowHeight,
+        compC: component_config,
+        rowHeight: rowHeight,
     });
     return hs;
 };
+
+
+
 const inVSCcode = () => {
     // vscIPYWidgets will be present on window when rendered in VSCode
     //@ts-ignore
@@ -323,9 +288,11 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
     const inIframe = window.parent !== window;
     const regularCompHeight = window.innerHeight / (compC?.height_fraction || 2);
     const dfvHeight = compC?.dfvHeight || regularCompHeight;
-
-    const regularDivStyle = { height: dfvHeight };
-    const shortDivStyle = { minHeight: 50, maxHeight: dfvHeight };
+    console.log("314, ", regularCompHeight, window.innerHeight, (compC?.height_fraction || 2), compC?.dfvHeight, regularCompHeight, dfvHeight);
+    //314,  175.5 351 2 200 175.5 200
+    //314,  175.5 351 2 undefined 175.5 175.5
+    const regularDivStyle = { height: dfvHeight, overflow:"hidden" };
+    const shortDivStyle = { minHeight: 50, maxHeight: dfvHeight, overflow:"hidden" };
 
     // scrollSlop controls the tolerance for maxRowsWithoutScrolling
     // to enable scrolling anyway. scroll slop includes room for other
@@ -340,15 +307,17 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
 
     // figured out default row height of 21.  Want to plumb back in to what is actually rendered.
     const maxRowsWithoutScrolling = Math.floor((dfvHeight / (rowHeight || 21)) - scrollSlop);
-
+    
 
 
     const belowMinRows = (numRows + pinnedRowLen) < maxRowsWithoutScrolling;
+    console.log("belowMinRows", belowMinRows, numRows, pinnedRowLen, maxRowsWithoutScrolling)
+    //belowMinRows true 5 2 9
     //console.log("maxRowsWithoutScrolling", maxRowsWithoutScrolling, belowMinRows, numRows, dfvHeight, rowHeight);
     const shortMode = compC?.shortMode || (belowMinRows && rowHeight === undefined);
-
+    console.log("shortMode", shortMode, compC?.shortMode, belowMinRows, rowHeight);
     const inIframeClass = inIframe ? "inIframe" : "";
-    console.log("heightstyle", dfvHeight)
+    //console.log("gridUtils 350 heightstyle", dfvHeight)
     if (isGoogleColab || inVSCcode() ) {
         return {
             classMode: "regular-mode",
@@ -360,6 +329,7 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
     }
     const domLayout: DomLayoutType = compC?.layoutType || (shortMode ? "autoHeight" : "normal");
     const applicableStyle = shortMode ? shortDivStyle : regularDivStyle;
+    console.log("351 gridUtils", shortMode, shortDivStyle, regularDivStyle)
     const classMode = shortMode ? "short-mode" : "regular-mode";
     return {
         classMode,

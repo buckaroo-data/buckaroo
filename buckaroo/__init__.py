@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from ._version import __version__
-from .buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget
+from .buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, AutocleaningBuckaroo
 from .dataflow.widget_extension_utils import DFViewer
 from .widget_utils import is_in_ipython, is_in_marimo, enable, disable, determine_jupter_env
 

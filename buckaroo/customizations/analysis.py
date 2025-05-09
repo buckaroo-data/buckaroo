@@ -35,12 +35,16 @@ def get_mode(ser):
         
         # but in jupyterlite envs, we have a recent version of pandas
         # without this problem
+        if not pd.api.types.is_numeric():
+            return np.nan
         mode_raw = ser.mode()
         if len(mode_raw) == 0:
             return np.nan
         return mode_raw.values[0]
         
     try:
+        if not pd.api.types.is_numeric():
+            return np.nan
         mode_raw = ser.mode()
         if len(mode_raw) == 0:
             return np.nan

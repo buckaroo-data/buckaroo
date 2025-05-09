@@ -283,7 +283,7 @@ export const sizeSlice = (midPoint: number, offset: number, segments: Segment[])
 
 export const compactSegments = (segments: Segment[], dfs: DFData[], keep: Segment): [Segment[], DFData[]] => {
     const [retSegments, retDFs]: [Segment[], DFData[]] = [[], []];
-    console.log("284 segments", segments)
+    //console.log("284 segments", segments)
     for (var i = 0; i < segments.length; i++) {
         const [seg, df] = [segments[i], dfs[i]];
         if (segmentSubset(keep, seg)) {
@@ -316,7 +316,7 @@ export class SmartRowCache {
 
     public segments: Segment[] = []
     private dfs: DFData[] = []
-    public sentLength: number = 0;
+    public sentLength: number = -1;
     // These tuning factors are sensitive.
     // there are other serverside and ag-grid tuning factors too.
     // those are "rowRequestSize" from ag-grid verify prop name
@@ -352,7 +352,7 @@ export class SmartRowCache {
 
         if (this.lastRequest[0] === 0 && this.lastRequest[1] === 0) {
             //throw new Error("trying to trim with no requests, unexpected");
-            console.log("trying to trim with no requests, unexpected")
+            //console.log("trying to trim with no requests, unexpected")
             return
         }
         const last = this.lastRequest;
@@ -405,7 +405,7 @@ export class SmartRowCache {
         const newSegLength = newSegment[1] - newSegment[0]
         if (newDf.length !== newSegLength) {
             //throw new Error(`addRows called with a df smaller that newSegLenth ${newSegLength} ${newSegment} ${newDf.length}`)
-            console.log(`addRows called with a df smaller that newSegLenth ${newSegLength} ${newSegment} ${newDf.length}`)
+            //console.log(`addRows called with a df smaller that newSegLenth ${newSegLength} ${newSegment} ${newDf.length}`)
 	    if ((newSegment[0] + newDf.length) === this.sentLength) {
 		const endSegment:Segment = [newSegment[0], this.sentLength];
 		return this.addRows(endSegment, newDf);
@@ -416,14 +416,16 @@ export class SmartRowCache {
         this.segments = newSegs;
         this.dfs = newDfs;
         this.trimCache()
-        //console.log("size,extents after trimCache", this.usedSize(), this.getExtents())
     }
 
     public hasRows(needSeg: Segment): RequestArgs {
         if(needSeg[0] === 0 && needSeg[1] === 0) {
-            console.log("setting lastRequest to [0,0] in hasRows")
-            debugger;
+            console.log("setting lastRequest to [0,0] in hasRows, this is unexpected")
         }
+	if (this.sentLength > -1 && needSeg[1] > this.sentLength) {
+	    const newSeg:Segment = [needSeg[0], this.sentLength]
+	    return this.hasRows(newSeg)
+	}
         this.lastRequest = needSeg;
         for (const ourSeg of this.segments) {
             if (segmentsOverlap(ourSeg, needSeg)) {
@@ -436,8 +438,7 @@ export class SmartRowCache {
     public getRows(range: Segment): DFData {
         if (this.hasRows(range) === true) {
             if(range[0] === 0 && range[1] === 0) {
-                console.log("setting lastRequest to [0,0] in getRows")
-                debugger;
+                console.log("unexpected setting lastRequest to [0,0] in getRows")
             }
             this.lastRequest = range;
             return getRange(this.segments, this.dfs, range)
@@ -500,6 +501,7 @@ export class KeyAwareSmartRowCache {
         const srcKey = getSourcePayloadKey(pa)
         const seg: Segment = [pa.start, pa.origEnd];
 	if (!this.srcAccesses.has(srcKey)) {
+	    console.log("500 hasRows, returning False because couldn't find srcKey")
             return false
         }
 	const src = this.srcAccesses.get(srcKey);
@@ -511,6 +513,7 @@ export class KeyAwareSmartRowCache {
         if (reqArgs === true) {
             return true
         }
+	console.log("500 hasRows, returning False because src didn't have rows")
         return false
     }
 
@@ -532,7 +535,7 @@ export class KeyAwareSmartRowCache {
 
 	if (src.sentLength !== 0 &&  src.sentLength < pa.end) {
 	    const newSeg:Segment = [pa.start, src.sentLength];
-	    console.log("at failing point", newSeg, src.getExtents())
+	    //console.log("at failing point", newSeg, src.getExtents())
 	    return src.getRows(newSeg);
 	}
         return src.getRows(seg);
@@ -592,7 +595,7 @@ export class KeyAwareSmartRowCache {
 
     public ensureRowCacheForPa(pa:PayloadArgs): SmartRowCache {
         const srcKey = getSourcePayloadKey(pa)
-
+	console.log("592 ensureRowCacheForPa", srcKey, this.srcAccesses.has(srcKey))
 	if (!this.srcAccesses.has(srcKey)){
             this.srcAccesses.set(srcKey, new SmartRowCache());
         }
@@ -605,18 +608,17 @@ export class KeyAwareSmartRowCache {
 
     public addPayloadResponse(resp: PayloadResponse) {
         const seg: Segment = [resp.key.start, resp.key.end];
-
         if(resp.key.request_time !== undefined ) {
             //@ts-ignore
-            const now = (new Date()) - 1 as number
-            const respTime = now - resp.key.request_time;
-            console.log(`response had ${seg[1]-seg[0]} rows took ${respTime}`)
+            //const now = (new Date()) - 1 as number
+            //const _respTime = now - resp.key.request_time;
+            //console.log(`response had ${seg[1]-seg[0]} rows took ${respTime}`)
         }
 
 	this.trim()
         const src = this.ensureRowCacheForPa(resp.key)
         const cbKey = getPayloadKey(resp.key)
-        const preExtents = src.safeGetExtents()
+        //const preExtents = src.safeGetExtents()
 
 	if(resp.length < resp.key.end && resp.key.start === 0) {
 	    // add tests
@@ -625,10 +627,7 @@ export class KeyAwareSmartRowCache {
 	} else {
             src.addRows(seg, resp.data)
 	}
-	    
-
-        console.log(`response before ${[resp.key.start, resp.key.origEnd, resp.key.end]} before add, preExtents ${preExtents}, post extents ${src.safeGetExtents()}`)
-
+        //console.log(`response before ${[resp.key.start, resp.key.origEnd, resp.key.end]} before add, preExtents ${preExtents}, post extents ${src.safeGetExtents()}`)
         src.sentLength = resp.length;
         if (_.has(this.waitingCallbacks, cbKey)) {
             const [success, fail] = this.waitingCallbacks[cbKey];
@@ -641,8 +640,17 @@ export class KeyAwareSmartRowCache {
         }
     }
 
+    public addErrorResponse(resp: PayloadResponse) {
+        const cbKey = getPayloadKey(resp.key)
+
+        if (_.has(this.waitingCallbacks, cbKey)) {
+            const [_success, fail] = this.waitingCallbacks[cbKey];
+            fail()
+            delete this.waitingCallbacks[cbKey]
+        }
+    }
+
     public trim(): void {
-        console.log("trim")
 
 	if(this.usedSize() > this.maxSize) {
 	    const lastUsedKey = this.srcAccesses.keys().next().value;

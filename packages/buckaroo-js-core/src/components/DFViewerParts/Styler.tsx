@@ -1,7 +1,6 @@
 import {
     CellClassParams,
 } from "@ag-grid-community/core";
-import { SDFT } from "./DFWhole";
 
 import { BLUE_TO_YELLOW, DIVERGING_RED_WHITE_BLUE } from "../../baked_data/colorMap";
 import {
@@ -50,33 +49,47 @@ this means that 8 values are between 1 and 100.8  and 2 values are between 200.6
     return histogram_edges.length;
 }
 
-export function colorMap(cmr: ColorMapRules, histogram_edges: number[]) {
+export function colorMap(cmr: ColorMapRules) {
     // https://colorcet.com/gallery.html#isoluminant
     // https://github.com/holoviz/colorcet/tree/main/assets/CET
     // https://github.com/bokeh/bokeh/blob/ed285b11ab196e72336b47bf12f44e1bef5abed3/src/bokeh/models/mappers.py#L304
-    const cmap = getColorMap(cmr.map_name);
 
-    function numberToColor(val: number) {
-        const histoIndex = getHistoIndex(val, histogram_edges);
-        const scaledIndex = Math.round((histoIndex / histogram_edges.length) * cmap.length);
-        return cmap[scaledIndex];
-    }
 
     function cellStyle(params: CellClassParams) {
+        const cmap = getColorMap(cmr.map_name);
+        const baseReturn = {backgroundColor:"inherit"};
+
+        const summarys = params.context?.histogram_stats;
+        const statsCol = cmr.val_column; // || col_name;
+        if (statsCol ===  undefined || summarys === undefined){
+            console.log("66 couldn't find stats_col")
+            return baseReturn;
+        } 
+        const summary_stats_cell = summarys[statsCol];
+        if (summary_stats_cell === undefined || summary_stats_cell.histogram_bins === undefined ) {
+            console.log("69 couldn't find summary_stats");
+            return baseReturn
+        }
+        const histogram_edges = summary_stats_cell.histogram_bins;
+
+
+        function numberToColor(val: number) {
+            const histoIndex = getHistoIndex(val, histogram_edges);
+            const scaledIndex = Math.round((histoIndex / histogram_edges.length) * cmap.length);
+            return cmap[scaledIndex];
+        }
         const val = (cmr.val_column && params.data) ? params.data[cmr.val_column] : params.value;
         const dataColor = numberToColor(val);
-	const isPinned = params.node.rowPinned;
+	    const isPinned = params.node.rowPinned;
         const color = isPinned? "inherit": dataColor;
 
         return {
             backgroundColor: color,
         };
     }
-
-    const retProps = {
+    return {
         cellStyle: cellStyle,
     };
-    return retProps;
 }
 
 export function categoricalColor(cmr: ColorCategoricalRules) {
@@ -86,18 +99,16 @@ export function categoricalColor(cmr: ColorCategoricalRules) {
 
     function cellStyle(params: CellClassParams) {
         const val = (cmr.val_column && params.data) ? params.data[cmr.val_column] : params.value;
-	const isPinned = params.node.rowPinned;
+	    const isPinned = params.node.rowPinned;
         const color = isPinned? "inherit": cmap[val]
 
         return {
             backgroundColor: color,
         };
     }
-
-    const retProps = {
+    return {
         cellStyle: cellStyle,
     };
-    return retProps;
 }
 
 export function colorNotNull(cmr: ColorWhenNotNullRules) {
@@ -127,42 +138,22 @@ export function colorFromColumn(cmr: ColorFromColumn) {
             return { backgroundColor: "inherit" };
         }
         const dataColor = params.data[cmr.val_column];
-	const isPinned = params.node.rowPinned;
+    	const isPinned = params.node.rowPinned;
         const color = dataColor && !isPinned ? dataColor : "inherit";
         return {
             backgroundColor: color
         };
     }
-
-    const retProps = {
+    return {
         cellStyle: cellStyle,
     };
-    return retProps;
 }
 
-export function getStyler(cmr: ColorMappingConfig, col_name: string, histogram_stats: SDFT) {
+export function getStyler(cmr: ColorMappingConfig) {
     switch (cmr.color_rule) {
-        case "color_map": {
-            //block necessary because you cant define varaibles in case blocks
-            const statsCol = cmr.val_column || col_name;
-            const summary_stats_cell = histogram_stats[statsCol];
-
-            if (summary_stats_cell && summary_stats_cell.histogram_bins !== undefined) {
-                return colorMap(cmr, summary_stats_cell.histogram_bins);
-            } else {
-                console.log("histogram bins not found for color_map");
-                return {};
-            }
+        case "color_map": return colorMap(cmr);
+        case "color_categorical": return categoricalColor(cmr);
+        case "color_from_column": return colorFromColumn(cmr);
+        case "color_not_null":    return colorNotNull(cmr);
         }
-        case "color_categorical": {
-            //block necessary because you cant define varaibles in case blocks
-	    return categoricalColor(cmr);
-        }
-        case "color_from_column": {
-            //block necessary because you cant define varaibles in case blocks
-	    return colorFromColumn(cmr)
-        }
-        case "color_not_null":
-            return colorNotNull(cmr);
-    }
 }

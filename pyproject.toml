@@ -36,7 +36,7 @@ dependencies = [
     "fastparquet"
 ]
 
-version = "0.9.17"
+version = "0.10.0"
 
 
 [project.license]
@@ -185,6 +185,13 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 			  "E401", "F601",
 			  "E701", "E702", "E703", "E712"]
 
+"tests/unit/test_heuristic_lang.py" = [
+"E712"
+]
+
+"tests/unit/jlisp/lispy_test.py" = [
+"E712"
+]
 #__init__.py and widget utils does some bare excepts because it absolutely cannot error
 #and give a non displayable dataframe
 "buckaroo/__init__.py" = ["E722",

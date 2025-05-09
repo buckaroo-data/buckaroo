@@ -1,19 +1,19 @@
+import traceback
 import pandas as pd
 import numpy as np
 from buckaroo import BuckarooWidget
 from buckaroo.customizations.analysis import (
     DefaultSummaryStats, PdCleaningStats)
-from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
-from buckaroo.dataflow.autocleaning import merge_ops, format_ops, AutocleaningConfig
+from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.dataflow.autocleaning import PandasAutocleaning, generate_quick_ops
-from buckaroo.jlisp.lisp_utils import (s, qc_sym)
+from buckaroo.jlisp.lisp_utils import (s, sA, sQ)
 from buckaroo.customizations.pandas_commands import (
     Command,
     SafeInt, DropCol, FillNA, GroupBy, NoOp, Search, OnlyOutliers
 )
 from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)
-
+from buckaroo.dataflow.dataflow import CustomizableDataflow
 
 dirty_df = pd.DataFrame(
     {'a':[10,  20,  30,   40,  10, 20.3,   5, None, None, None],
@@ -41,46 +41,7 @@ class CleaningGenOps(ColAnalysis):
             return {'cleaning_ops': []}
 
 
-def xtest_cleaning_stats():
-    dfs = DfStats(dirty_df, [DefaultSummaryStats])
 
-    # "3", "4", "5", "5"   4 out of 10
-    assert dfs.sdf['b']['int_parse'] == 0.4
-    assert dfs.sdf['b']['int_parse_fail'] == 0.6
-
-
-SAFE_INT_TOKEN = [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}]
-
-
-def test_format_ops():
-    column_meta = {
-        'a': {'cleaning_ops':SAFE_INT_TOKEN },
-        'b': {'cleaning_ops': [
-            {'symbol': 'replace_dirty', 'meta':{'auto_clean': True}},
-            {'symbol': 'df'}, '\n', None]}}
-
-    expected_ops = [
-        [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a'],
-        [{'symbol': 'replace_dirty', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'b', '\n', None]]
-    assert format_ops(column_meta) == expected_ops
-
-
-def test_merge_ops():
-    existing_ops = [
-        [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, 'a'],
-        [{'symbol': 'usergen'}, 'foo_column']
-    ]
-
-    cleaning_ops = [
-        [{'symbol': 'new_cleaning', 'meta':{'auto_clean': True}}, 'a']]
-
-    expected_merged = [
-        [{'symbol': 'new_cleaning', 'meta':{'auto_clean': True}}, 'a'],
-        [{'symbol': 'usergen'}, 'foo_column']
-    ]
-    print( merge_ops(existing_ops, cleaning_ops))
-    print("@"*80)
-    assert merge_ops(existing_ops, cleaning_ops) == expected_merged
 
 class ACConf(AutocleaningConfig):
     autocleaning_analysis_klasses = [DefaultSummaryStats, CleaningGenOps, PdCleaningStats]
@@ -179,7 +140,168 @@ def test_handle_clean_df():
         'a_orig': ["30",  "40"]})
     assert cleaned_df.to_dict() == expected.to_dict()
 
+class ThrowError(Command):
+    command_default = [s('throw_error'), s('df'), "col"]
+    command_pattern = []
+
+    @staticmethod 
+    def transform(df, col):
+        1/0
+        return df
+
+    @staticmethod 
+    def transform_to_py(df, col):
+        return "    df['%s'] = df['%s'].apply(pd.to_numeric, errors='coerce')" % (col, col)
+
+
+def error_func():
+    3/0
     
+class ThrowNestedError(Command):
+    command_default = [s('throw_nested_error'), s('df'), "col"]
+    command_pattern = []
+
+    @staticmethod 
+    def transform(df, col):
+        """ This is  used for testing traceback filtering """
+        error_func()
+        return df
+
+    @staticmethod 
+    def transform_to_py(df, col):
+        return "    df['%s'] = df['%s'].apply(pd.to_numeric, errors='coerce')" % (col, col)
+
+class ACErrorConf(AutocleaningConfig):
+    autocleaning_analysis_klasses = [DefaultSummaryStats]
+    command_klasses = [DropCol, FillNA, GroupBy, NoOp, SafeInt, Search, ThrowError, ThrowNestedError]
+    quick_command_klasses = [Search]
+    name=""
+
+def test_run_df_interpreter():
+    """ this is testing a semi private method
+
+    I want to test error handling, so we can tag it on operations that cause errors
+    """
+    ac = PandasAutocleaning([ACErrorConf])
+    df = pd.DataFrame({'a': ["30", "40"]})
+
+    output_df = ac._run_df_interpreter(
+        df,
+        [
+            [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']])
+    expected = pd.DataFrame({'a': [30, 40]})
+    assert output_df.to_dict() == expected.to_dict()
+
+
+def find_error_op(df, operations, interpreter_func):
+
+    L = len(operations)
+    low, high  = 0, L-1
+    first_run = True
+
+    res = None
+    i = high
+
+    formatted_exception = None
+    while first_run or (high-low) > 1:
+        test_ops = operations[:(i+1)]
+        try:
+            res = interpreter_func(df, test_ops)
+            if first_run:
+                return [res, -1, None]
+            low = i
+        except Exception as e:
+
+            high = i
+            formatted_exception = traceback.format_exception(e)
+
+        first_run = False
+        i = low + (high - low)//2
+
+    if high == 1:
+        try:
+            res = interpreter_func(df, [operations[0]])
+            return [res, 1, None]
+        except Exception as e:
+            formatted_exception = traceback.format_exception(e)
+            return [df, 0, formatted_exception]
+    return [res, high, formatted_exception]
+
+def Xtest_find_error_ops_traceback():
+    """ I only want to show users errors from their stuff
+    """
+    ac = PandasAutocleaning([ACErrorConf])
+    df = pd.DataFrame({'a': ["30", "40"]})
+
+    def run_func(df_a, ops):
+        return ac._run_df_interpreter(df_a, ops)
+
+    #ERROR = [{'symbol': 'throw_error'}, {'symbol': 'df'}, 'a']
+    NESTED_ERROR = [{'symbol': 'throw_nested_error'}, {'symbol': 'df'}, 'a']
+    #output_df, error_op, formatted_exception = find_error_op(df, [ERROR], run_func)
+    output_df, error_op, formatted_exception = find_error_op(df, [NESTED_ERROR], run_func)
+
+    # Figure out a way to filter the traceback to just user written
+    # code, not the internals of the jlisp interpreter
+    # Currently punting
+
+    #assert formatted_exception == []
+
+#This is disabled because this code isn't used yet, and there is an incompatability between python 3.9 and 3.10 and greater with format_exception
+def Xtest_find_error_ops():
+    
+    """ this is testing a semi private method
+
+    I want to test error handling, so we can tag it on operations that cause errors
+    """
+    ac = PandasAutocleaning([ACErrorConf])
+    df = pd.DataFrame({'a': ["30", "40"]})
+
+    def run_func(df_a, ops):
+        return ac._run_df_interpreter(df_a, ops)
+
+    NOOP = [{'symbol': 'noop'}, {'symbol': 'df'}, 'a']
+    ERROR = [{'symbol': 'throw_error'}, {'symbol': 'df'}, 'a']
+
+
+    # This is probably paranoid and overkill, but off by one errors
+    # are very easy with binary search. Errors can also occur with
+    # odd/even lists
+    
+    output_df, error_op, formatted_exception = find_error_op(df, [NOOP, NOOP], run_func)
+    assert error_op == -1
+
+    output_df, error_op, formatted_exception = find_error_op(df, [ERROR], run_func)
+    assert error_op == 0
+
+    output_df, error_op, formatted_exception = find_error_op(df, [NOOP, ERROR], run_func)
+    assert error_op == 1
+
+    output_df, error_op, formatted_exception = find_error_op(df, [ERROR, NOOP], run_func)
+    assert error_op == 0
+    ######################################
+    output_df, error_op, formatted_exception = find_error_op(df, [ERROR, NOOP, NOOP], run_func)
+    assert error_op == 0
+
+    output_df, error_op, formatted_exception = find_error_op(df, [NOOP, ERROR, NOOP], run_func)
+    assert error_op == 1
+
+    output_df, error_op, formatted_exception = find_error_op(df, [NOOP, NOOP, ERROR], run_func)
+    assert error_op == 2
+    ############################
+    output_df, error_op, formatted_exception = find_error_op(df, [ERROR, NOOP, NOOP, NOOP], run_func)
+    assert error_op == 0
+
+    output_df, error_op, formatted_exception = find_error_op(df, [NOOP, ERROR, NOOP, NOOP], run_func)
+    assert error_op == 1
+
+    output_df, error_op, formatted_exception = find_error_op(df, [NOOP, NOOP, ERROR, NOOP], run_func)
+    assert error_op == 2
+
+    output_df, error_op, formatted_exception = find_error_op(df, [NOOP, NOOP, NOOP, ERROR], run_func)
+    assert error_op == 3
+
+
 def test_quick_commands_run():
     """
     test that quick_commands work with autocleaning disabled
@@ -187,14 +309,14 @@ def test_quick_commands_run():
     ac = PandasAutocleaning([ACConf, NoCleaningConf])
     df = pd.DataFrame({'a': ["30", "40"], 'b': ['aa', 'bb']})
     cleaning_result = ac.handle_ops_and_clean(
-        df, cleaning_method="NoCleaning", quick_command_args={'search':['aa']}, existing_operations=[])
+        df, cleaning_method="", quick_command_args={'search':['aa']}, existing_operations=[])
     cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
 
     expected = pd.DataFrame({
         'a': ["30"],
         'b': ['aa']})
 
-    assert merged_operations == [[qc_sym('search'), s('df'), "col", "aa"]]
+    assert merged_operations == [[sQ('search'), s('df'), "col", "aa"]]
     assert cleaned_df.to_dict() == expected.to_dict()
 
 
@@ -231,6 +353,171 @@ def test_autoclean_codegen():
     cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
 
     assert generated_code == EXPECTED_GEN_CODE
+
+class NoOp2(Command):
+    #used for testing command stuff
+    command_default = [s('noop2'), s('df'), "col"]
+    command_pattern = [None]
+
+    @staticmethod 
+    def transform(df, col):
+        return df
+
+    @staticmethod 
+    def transform_to_py(df, col):
+        return "    #noop2"
+
+class SentinelCleaningGenOps(ColAnalysis):
+    """
+    This class just calls no-op on each column
+    """
+    requires_summary = []
+    provides_defaults = {'cleaning_ops': []}
+
+
+    @classmethod
+    def computed_summary(kls, column_metadata):
+        ops = [sA('noop', clean_col=column_metadata['col_name']), s('df')]
+        return {'cleaning_ops': ops}
+
+class SentinelConfig(AutocleaningConfig):
+    """
+    add a check between rules_op_names to all of the included command classes
+    """
+    autocleaning_analysis_klasses = [SentinelCleaningGenOps]
+    command_klasses = [
+        DropCol, FillNA, GroupBy, NoOp, Search, NoOp2]
+    
+    quick_command_klasses = [Search]
+    name="sentinel1"
+
+
+
+class SentinelCleaningGenOps2(ColAnalysis):
+    """
+    This class just generated noop2 for 'b_col'
+    """
+    requires_summary = []
+    provides_defaults = {'cleaning_ops': []}
+
+
+    @classmethod
+    def computed_summary(kls, column_metadata):
+        if column_metadata['col_name'] == 'c':
+            ops = [
+                sA('noop2', clean_col='c'),
+                {'symbol': 'df'}]
+            print("ops", ops)
+            return {'cleaning_ops': ops}
+        return {}
+
+class SentinelConfig2(AutocleaningConfig):
+    """
+    add a check between rules_op_names to all of the included command classes
+    """
+    autocleaning_analysis_klasses = [SentinelCleaningGenOps2]
+    command_klasses = [
+        DropCol, FillNA, GroupBy, NoOp, Search, NoOp2]
+    
+    quick_command_klasses = [Search]
+    name="sentinel2"
+
+def test_autoclean_merge_ops():
+    """Make sure that remvoing {'auto_clean':True} from an operation
+    as preserve does, retains taht operation when switching between
+    auto_cleaning methods
+
+    """
+    class SentinelBuckaroo(BuckarooWidget):
+        autocleaning_klass = PandasAutocleaning
+        autoclean_conf = tuple([SentinelConfig, SentinelConfig2, NoCleaningConf])
+
+    dirty_df = pd.DataFrame(
+            {'a':[10,  20,  30,   40,  10, 20.3,   5, None, None, None],
+             'b':["3", "4", "a", "5", "5",  "b", "b", None, None, None],
+             'c':["3", "4", "a", "5", "5",  "b", "b", None, None, None],
+             })
+
+    bw = SentinelBuckaroo(dirty_df)
+    assert bw.operations == []
+
+    bw.buckaroo_state = {
+        "cleaning_method": "sentinel1",
+        "post_processing": "",
+        "sampled": False,
+        "show_commands": "on",
+        "df_display": "main",
+        "search_string": "",
+        "quick_command_args": {}
+    }
+
+    assert bw.dataflow.cleaning_method == 'sentinel1'
+    assert bw.operations ==  [
+        [sA('noop', clean_col='a'), s('df'), 'a'],
+        [sA('noop', clean_col='b'), s('df'), 'b'],
+        [sA('noop', clean_col='c'), s('df'), 'c']]
+        
+
+    # come up with a convience method for updating a single prop of buckaroo_state
+    bw.buckaroo_state = {
+        "cleaning_method": "sentinel2",
+        "post_processing": "",
+        "sampled": False,
+        "show_commands": "on",
+        "df_display": "main",
+        "search_string": "",
+        "quick_command_args": {}
+    }
+    assert bw.operations ==  [
+        [sA('noop2', clean_col='c') , s('df'), 'c']]
+
+    bw.operations = [
+        [s('noop2', clean_col='c') , s('df'), 'c']]
+
+    assert bw.operations == [
+        [s('noop2', clean_col='c') , s('df'), 'c']]
+
+
+def test_autoclean_dataflow():
+    """
+    verify that different autocleaning confs are actually called
+    """
+    class SentinelDataflow(CustomizableDataflow):
+        autocleaning_klass = PandasAutocleaning
+        autoclean_conf = tuple([SentinelConfig, NoCleaningConf])
+
+    sdf = SentinelDataflow(dirty_df)
+    sdf.cleaning_method = ''
+
+    assert sdf.operations == []
+    sdf.cleaning_method = "sentinel1"
+    assert len(sdf.operations) > 0
+
+def test_autoclean_full_widget():
+    """
+    verify that different autocleaning confs are actually called
+    """
+    class SentinelBuckaroo(BuckarooWidget):
+        autocleaning_klass = PandasAutocleaning
+        autoclean_conf = tuple([SentinelConfig, NoCleaningConf])
+
+    bw = SentinelBuckaroo(dirty_df)
+    assert bw.operations == []
+
+    bw.buckaroo_state = {
+        "cleaning_method": "sentinel1",
+        "post_processing": "",
+        "sampled": False,
+        "show_commands": "on",
+        "df_display": "main",
+        "search_string": "",
+        "quick_command_args": {}
+    }
+
+    assert bw.dataflow.cleaning_method == 'sentinel1'
+    # make sure the widget oprations were updated
+    assert len(bw.operations) > 0
+
 
 def test_drop_col():
     """make sure we can that make_origs doesn't throw an error when
@@ -279,17 +566,17 @@ def test_quick_commands():
 
 
     search_only_produced_commands = generate_quick_ops(quick_commands, {"search": ["asdf"]})
-    assert search_only_produced_commands == [[qc_sym('search'), s('df'), "col", "asdf"]]
+    assert search_only_produced_commands == [[sQ('search'), s('df'), "col", "asdf"]]
 
     #note only_outliers needs quick_command to substitute into the col place, not the last arg
     oo_produced_commands = generate_quick_ops(quick_commands, {"only_outliers": ["col_B"]})
-    assert oo_produced_commands == [[qc_sym('only_outliers'), s('df'), "col_B", .01]]
+    assert oo_produced_commands == [[sQ('only_outliers'), s('df'), "col_B", .01]]
 
     both_produced_commands = generate_quick_ops(
         quick_commands, {"search": ["asdf"], "only_outliers": ["col_B"]})
     assert both_produced_commands == [
-        [qc_sym('search'), s('df'), "col", "asdf"],
-        [qc_sym('only_outliers'), s('df'), "col_B", .01]
+        [sQ('search'), s('df'), "col", "asdf"],
+        [sQ('only_outliers'), s('df'), "col_B", .01]
     ]
 
 
@@ -297,8 +584,8 @@ def test_quick_commands():
     both_produced_commands_reversed = generate_quick_ops(
         quick_commands[::-1], {"search": ["asdf"], "only_outliers": ["col_B"]})
     assert both_produced_commands_reversed == [
-        [qc_sym('only_outliers'), s('df'), "col_B", .01],
-        [qc_sym('search'), s('df'), "col", "asdf"]]
+        [sQ('only_outliers'), s('df'), "col_B", .01],
+        [sQ('search'), s('df'), "col", "asdf"]]
 
 
 class TwoArgSearch(Command):
@@ -316,7 +603,7 @@ def test_two_arg_quick_command():
     
 
     two_arg_search_produced_commands = generate_quick_ops([TwoArgSearch], {"search_two": ["FFFasdf", 9]})
-    assert two_arg_search_produced_commands == [[qc_sym('search_two'), s('df'), "col", "FFFasdf", 9]]
+    assert two_arg_search_produced_commands == [[sQ('search_two'), s('df'), "col", "FFFasdf", 9]]
     
 
 

@@ -78,7 +78,7 @@ const dfm:DFMeta = {
 
 const bo:BuckarooOptions =  {
   sampled: ["sample_strat1", "sample_strat2", ""],
-  auto_clean: ["clean_strat1", "clean_strat2", ""],
+  cleaning_method: ["clean_strat1", "clean_strat2", ""],
   post_processing: ["", "post1", "post2"],
   df_display: ["main", "summary"],
   show_commands: ["on", "off"]
@@ -86,7 +86,7 @@ const bo:BuckarooOptions =  {
 
 const bs:BuckarooState = {
   sampled:false,
-  auto_clean:false,
+  cleaning_method:false,
   quick_command_args:{},
   post_processing:false,
   df_display:"main",
@@ -99,5 +99,20 @@ export const Primary: Story = {
     dfMeta:dfm,
     buckarooState:bs,
     buckarooOptions:bo,
+  }
+}
+
+
+export const NoCleaningNoPostProcessing: Story = {
+  args: {
+    dfMeta:dfm,
+    buckarooState:bs,
+    buckarooOptions:{
+      sampled: ["sample_strat1", "sample_strat2", ""],
+      cleaning_method: [],
+      post_processing: [],
+      df_display: ["main", "summary"],
+      show_commands: ["on", "off"]
+    }
   }
 }

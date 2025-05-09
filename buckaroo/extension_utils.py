@@ -32,3 +32,19 @@ def get_baked_post_processing_buckaroo(df_dict:dict[str, pd.DataFrame]):
     class BuckarooAnonymous(buckaroo.BuckarooWidget):
         analysis_klasses=post_processing_classes
     return BuckarooAnonymous
+
+def copy_update(dct, **kwargs):
+    """
+    very useful for changing one property of buckaroo_state
+    """
+    new_dct = dct.copy()
+    new_dct.update(kwargs)
+    return new_dct
+
+def copy_extend(existing_list, *new_additions):
+    """
+    used to extend class lists which comes up frequently in buckaroo
+    """
+    lst = existing_list.copy()
+    lst.extend(new_additions)
+    return lst

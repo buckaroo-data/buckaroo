@@ -55,7 +55,7 @@ class DataFlow(HasTraits):
     sample_method = Unicode('default')
     sampled_df = Any('')
 
-    cleaning_method = Unicode('NoCleaning')
+    cleaning_method = Unicode('')
     quick_command_args = Dict({})
 
     # we put an operation here that will be stripped out, this assures
@@ -259,9 +259,17 @@ class CustomizableDataflow(DataFlow):
         self.orig_df = orig_df
         # I don't like this seapration of 
         super().__init__(self.sampling_klass.pre_stats_sample(orig_df))
+        self.populate_auto_clean_options()
         self.populate_df_meta()
         #self.raw_df = df
         warnings.filterwarnings('default')
+
+    def populate_auto_clean_options(self):
+        new_buckaroo_options = self.buckaroo_options.copy()
+        #ac_ops = ['']
+        #ac_ops.extend(list(self.ac_obj.config_dict.keys()))
+        new_buckaroo_options['cleaning_method'] = list(self.ac_obj.config_dict.keys())
+        self.buckaroo_options = new_buckaroo_options
 
     def populate_df_meta(self):
         if self.processed_df is None:
@@ -307,7 +315,13 @@ class CustomizableDataflow(DataFlow):
         post_processing_methods = ['']
         post_processing_methods.extend(list(self.post_processing_klasses.keys()))
         new_buckaroo_options['post_processing'] = post_processing_methods
-        #important that we open up the possibilities first before we add them as options in the UI
+
+        #important that we open up the possibilities first before we
+        #add them as options in the UI
+
+        # I think the above comment refers to when df_display_args
+        # should refrence items in the df_display_dict that may not
+        # yet exist
         self.df_display_args = empty_df_display_args
         self.buckaroo_options = new_buckaroo_options
 

@@ -6,16 +6,11 @@
 
 from __future__ import division
 import re, io
+import sys
 
-class Symbol(str): pass
-
-
-class Procedure(object):
-    "A user-defined Scheme procedure."
-    def __init__(self, parms, exp, env):
-        self.parms, self.exp, self.env = parms, exp, env
-    def __call__(self, *args): 
-        return eval(self.exp, Env(self.parms, args, self.env))
+class Symbol(str):
+    def __repr__(self):
+        return f"Symbol({str(self)})"
 
 ################ parse, read, and user interaction
 
@@ -105,46 +100,6 @@ def callcc(proc):
         else: raise w
 isa = isinstance
 
-def add_globals(env):
-    "Add some Scheme standard procedures."
-    import math, cmath, operator as op
-    env.update(vars(math))
-    env.update(vars(cmath))
-    env.update({
-     '+':op.add, '-':op.sub, '*':op.mul, '/':op.truediv,'/':op.floordiv,
-     'not':op.not_, '>':op.gt, '<':op.lt, '>=':op.ge, '<=':op.le, '=':op.eq, 
-     'equal?':op.eq, 'eq?':op.is_, 'length':len, 'cons':cons,
-     'car':lambda x:x[0], 'cdr':lambda x:x[1:], 'append':op.add,  
-     'list':lambda *x:list(x), 'list?': lambda x:isa(x,list),
-     'null?':lambda x:x==[], 'symbol?':lambda x: isa(x, Symbol),
-     'boolean?':lambda x: isa(x, bool), 'pair?':is_pair, 
-      '+':op.add, '-':op.sub, '*':op.mul, '/':op.truediv, 'not':op.not_, 
-      '>':op.gt, '<':op.lt, '>=':op.ge, '<=':op.le, '=':op.eq, 
-
-     #'display':lambda x,port=sys.stdout:port.write(x if isa(x,str) else to_string(x))})
-     #'display':display
-    })
-    return env
-
-# def add_globals(self):
-#     "Add some Scheme standard procedures."
-#     import math, cmath, operator as op
-#     self.update(vars(math))
-#     self.update(vars(cmath))
-#     self.update({
-#      'equal?':op.eq, 'eq?':op.is_, 'length':len, 'cons':cons,
-#      'car':lambda x:x[0], 'cdr':lambda x:x[1:], 'append':op.add,  
-#      'list':lambda *x:list(x), 'list?': lambda x:isa(x,list),
-#      'null?':lambda x:x==[], 'symbol?':lambda x: isa(x, Symbol),
-#      'boolean?':lambda x: isa(x, bool), 'pair?':is_pair, 
-#      'port?': lambda x:isa(x,file), 'apply':lambda proc,l: proc(*l), 
-#      'eval':lambda x: eval(expand(x)), 'load':lambda fn: load(fn), 'call/cc':callcc,
-#      'open-input-file':open,'close-input-port':lambda p: p.file.close(), 
-#      'open-output-file':lambda f:open(f,'w'), 'close-output-port':lambda p: p.close(),
-#      'eof-object?':lambda x:x is eof_object, 'read-char':readchar,
-#      'read':read, 'write':lambda x,port=sys.stdout:port.write(to_string(x)),
-#      'display':lambda x,port=sys.stdout:port.write(x if isa(x,str) else to_string(x))})
-#     return self
 
 
 
@@ -154,10 +109,74 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
     else:
         ef = extra_funcs
 
+    def readchar(inport):
+        "Read the next character from an input port."
+        if inport.line != '':
+            ch, inport.line = inport.line[0], inport.line[1:]
+            return ch
+        else:
+            return inport.file.read(1) or eof_object
+    
+    def read(inport):
+        "Read a Scheme expression from an input port."
+        def read_ahead(token):
+            if '(' == token: 
+                L = []
+                while True:
+                    token = inport.next_token()
+                    if token == ')': return L
+                    else: L.append(read_ahead(token))
+            elif ')' == token: raise SyntaxError('unexpected )')
+            elif token in quotes: return [quotes[token], read(inport)]
+            elif token is eof_object: raise SyntaxError('unexpected EOF in list')
+            else: return atom(token)
+        # body of read:
+        token1 = inport.next_token()
+        return eof_object if token1 is eof_object else read_ahead(token1)
+    
+
+    def add_globals(self):
+        "Add some Scheme standard procedures."
+        import math, cmath, operator as op
+        self.update(vars(math))
+        self.update(vars(cmath))
+
+        _gensym_counter = [0]
+        def get_gensym():
+            symbol_name = f"GENSYM-{_gensym_counter[0]}"
+            _gensym_counter[0] += 1
+            return Sym(symbol_name)
+
+        self.update({'gensym':get_gensym,
+         '+':op.add, '-':op.sub, '*':op.mul, '/':op.truediv, 'not':op.not_, 
+         '>':op.gt, '<':op.lt, '>=':op.ge, '<=':op.le, '=':op.eq, 
+         'equal?':op.eq, 'eq?':op.is_, 'length':len, 'cons':cons,
+         'car':lambda x:x[0], 'cdr':lambda x:x[1:], 'append':op.add,  
+         'list':lambda *x:list(x), 'list?': lambda x:isa(x,list),
+         'null?':lambda x:x==[], 'symbol?':lambda x: isa(x, Symbol),
+         'none?': lambda x: x is None,
+         'boolean?':lambda x: isa(x, bool), 'pair?':is_pair, 
+         'apply':lambda proc, _els: proc(*_els), 
+         'eval':lambda x: eval(expand(x)),
+          # 'load':lambda fn: load(fn), 'port?': lambda x:isa(x,file),
+         'call/cc':callcc,
+         'open-input-file':open,'close-input-port':lambda p: p.file.close(), 
+         'open-output-file':lambda f:open(f,'w'), 'close-output-port':lambda p: p.close(),
+         'eof-object?':lambda x:x is eof_object, 'read-char':readchar,
+         'read':read, 'write':lambda x,port=sys.stdout:port.write(to_string(x)),
+         'display':lambda x,port=sys.stdout:port.write(x if isa(x,str) else to_string(x))})
+        return self
+
     global_env = add_globals(Env())
     global_env.update(ef)
 
     ################ eval (tail recursive)
+    class Procedure(object):
+        "A user-defined Scheme procedure."
+        def __init__(self, parms, exp, env):
+            self.parms, self.exp, self.env = parms, exp, env
+        def __call__(self, *args): 
+            return eval(self.exp, Env(self.parms, args, self.env))
 
     def eval(x, env=global_env):
         "Evaluate an expression in an environment."
@@ -169,6 +188,17 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
             elif x[0] is _quote:     # (quote exp)
                 (_, exp) = x
                 return exp
+            elif x[0] is _symbol_value:
+                #I'm not sure if symbol value could have been written
+                #as a macro that just calls eval, or if that would be
+                #better
+                second_arg = x[1]
+                if isa(second_arg, Symbol):
+                    return env.find(second_arg)[second_arg]
+                else:
+                    possible_sym = eval(second_arg, env)
+                    assert isa(possible_sym, Symbol)
+                    return env.find(possible_sym)[possible_sym]
             elif x[0] is _if:        # (if test conseq alt)
                 (_, test, conseq, alt) = x
                 x = (conseq if eval(test, env) else alt)
@@ -178,6 +208,13 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
                 return None
             elif x[0] is _define:    # (define var exp)
                 (_, var, exp) = x
+                
+                if isa(var, list):
+                    # most likely this is a function call to symbol-value
+                    expanded_var = eval(var, env)
+
+                    assert isa(expanded_var, Symbol)
+                    var = expanded_var
                 env[var] = eval(exp, env)
                 return None
             elif x[0] is _lambda:    # (lambda (var*) exp)
@@ -194,7 +231,6 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
                     x = proc.exp
                     env = Env(proc.parms, exps, proc.env)
                 else:
-
                     return proc(*exps)
 
 
@@ -232,7 +268,6 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
                     quote_func = quotes[quote_char]
                     ret_list.append([quote_func, list_parse(next(lst))])
                 elif isinstance(x, dict):
-                    #print("x was a dict", x)
                     ret_list.append(x)
                     #raise("we dont't currently support atoms of dictionary")
                 else:
@@ -248,8 +283,8 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
         return symbol_table[s]
 
     
-    _quote, _if, _set, _define, _lambda, _begin, _definemacro, = map(Sym, 
-    "quote   if   set!  define   lambda   begin   define-macro".split())
+    _quote, _if, _set, _define, _lambda, _begin, _definemacro, _symbol_value = map(Sym, 
+    "quote   if   set!  define   lambda   begin   define-macro symbol-value".split())
     
     _quasiquote, _unquote, _unquotesplicing = map(Sym,
     "quasiquote   unquote   unquote-splicing".split())
@@ -259,34 +294,8 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
         # Backwards compatibility: given a str, convert it to an InPort
         if isinstance(inport, str):
             inport = InPort(io.StringIO(inport))
-        return expand(read(inport), toplevel=True)
-    
-    def readchar(inport):
-        "Read the next character from an input port."
-        if inport.line != '':
-            ch, inport.line = inport.line[0], inport.line[1:]
-            return ch
-        else:
-            return inport.file.read(1) or eof_object
-    
-    def read(inport):
-        "Read a Scheme expression from an input port."
-        def read_ahead(token):
-            if '(' == token: 
-                L = []
-                while True:
-                    token = inport.next_token()
-                    if token == ')': return L
-                    else: L.append(read_ahead(token))
-            elif ')' == token: raise SyntaxError('unexpected )')
-            elif token in quotes: return [quotes[token], read(inport)]
-            elif token is eof_object: raise SyntaxError('unexpected EOF in list')
-            else: return atom(token)
-        # body of read:
-        token1 = inport.next_token()
-        return eof_object if token1 is eof_object else read_ahead(token1)
-    
-    
+        expanded  = expand(read(inport), toplevel=True)
+        return expanded
     
     def atom(token):
         'Numbers become numbers; #t and #f are booleans; "..." string; otherwise Symbol.'
@@ -327,6 +336,23 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
             _def, v, body = x[0], x[1], x[2:]
             if isa(v, list) and v:           # (define (f args) body)
                 f, args = v[0], v[1:]        #  => (define f (lambda (args) body))
+
+                if f is _symbol_value: # a bit of a hack
+
+                    # this block is repetitive compared to the block
+                    # below, I'd like to move this a function to
+                    # reduce reptition and have a smaller testable
+                    # function
+
+                    require(x, len(x)==3)        # (define non-var/list exp) => Error
+                    exp = expand(x[2])
+                    if _def is _definemacro:     
+                        require(x, toplevel, "define-macro only allowed at top level")
+                        proc = eval(exp)       
+                        require(x, callable(proc), "macro must be a procedure")
+                        macro_table[v] = proc    # (define-macro v proc)
+                        return None              #  => None; add v:proc to macro_table
+                    return [_define, v, exp]
                 return expand([_def, f, [_lambda, args]+body])
             else:
                 require(x, len(x)==3)        # (define non-var/list exp) => Error
@@ -391,28 +417,39 @@ def make_interpreter(extra_funcs=None, extra_macros=None):
         return [[_lambda, list(vars)]+expanded_body] + expanded_vals
     
     macro_table = {_let:let} ## More macros can go here
-    def local_eval(x, extra_env=global_env):
-        if extra_env is not global_env:
-            new_env = Env()
-            new_env.update(global_env.copy())
-            new_env.update(extra_env)
-            return eval(expand(list_parse(x), toplevel=True), new_env)
-        #return generic_eval(expand(list_parse(x), macro_table, symbol_table, toplevel=True), local_env)
-        return eval(expand(list_parse(x), toplevel=True), global_env)
+    def jlisp_eval(x, extra_env=None):
+        if extra_env is None:
+            _env = global_env
+        else:
+            _env = Env()
+            _env.update(global_env.copy())
+            _env.update(extra_env)
+        expanded = expand(list_parse(x), toplevel=True)
+        # print("jlisp _env", extra_env)
+        # print(expanded)
+        return eval(expanded, _env)
 
-    def lisp_eval(expr):
-        return eval(parse(expr))
-
-
-    return local_eval, lisp_eval
+    def lisp_eval(expr, extra_env=None):
+        if extra_env is None:
+            _env = global_env
+        else:
+            _env = Env()
+            _env.update(global_env.copy())
+            _env.update(extra_env)
+        # print("scheme _env", extra_env)
+        return eval(parse(expr), _env)
+    return jlisp_eval, lisp_eval
     
     
 
-
-    
-    
-    
-    
-    
-    
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and isinstance(sys.argv[1], str):
+        with open(sys.argv[1], 'r') as f:
+            lisp_code = f.read()
+            _, lisp_eval = make_interpreter()
+            result = lisp_eval(lisp_code)
+            print("result", result)
+            if result is not None:
+                print(to_string(result))
     

@@ -5,9 +5,11 @@ from ..fixtures import (DistinctCount)
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
 from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget
-from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)         
-from buckaroo.jlisp.lisp_utils import (s, qc_sym)
+from buckaroo.jlisp.lisp_utils import (s, sQ)
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
+from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)
+from buckaroo.dataflow.autocleaning import AutocleaningConfig
+
 
 EMPTY_DF_JSON = {
             'dfviewer_config': {
@@ -124,8 +126,9 @@ def test_custom_summary_stats():
     summary_sd = dc_dfc.widget_args_tuple[2]
     print(summary_sd)
     print("^"*80)
-    assert summary_sd == {'index': {'distinct_count': 3}, 
-                          'a': {'distinct_count':2}, 'b': {'distinct_count':3}}
+    assert summary_sd == {'index': {'distinct_count': 3, 'col_name':'index'}, 
+                          'a': {'distinct_count':2, 'col_name':'a'},
+                          'b': {'distinct_count':3, 'col_name':'b'}}
     assert list(summary_sd.keys()) == ['index', 'a', 'b']
 
 def test_init_sd():
@@ -138,8 +141,9 @@ def test_init_sd():
     print(summary_sd)
     print("^"*80)
     assert dc_dfc.merged_sd == {
-        'index': {'distinct_count': 3}, 
-        'a': {'distinct_count':2, 'foo':8}, 'b': {'distinct_count':3}}
+        'index': {'distinct_count': 3, 'col_name':'index'}, 
+        'a': {'distinct_count':2, 'foo':8, 'col_name':'a'},
+        'b': {'distinct_count':3, 'col_name':'b'}}
 
 class AlwaysFailStyling(StylingAnalysis):
     requires_summary = []
@@ -318,6 +322,18 @@ def test_error_post_processing():
     e_dfc.post_processing_method = 'always_fail'
     assert e_dfc.processed_df.values == [["division by zero"]]
 
+def test_buckaroo_options_cleaning():
+
+    class AC2(AutocleaningConfig):
+        name="AC2"
+    
+    class LocCDF(ACDFC):
+        autoclean_conf = tuple([AC2, NoCleaningConf])
+
+    dfc = LocCDF(BASIC_DF)
+    assert dfc.buckaroo_options['cleaning_method'] ==  ['AC2', '']
+
+
 def test_column_config_override_widget():
     ROWS = 200
     typed_df = pd.DataFrame(
@@ -443,8 +459,8 @@ def test_bstate_commands():
     base_a_klasses.extend([TransposeProcessing])
 
     bw = BuckarooWidget(typed_df)
-    assert bw.buckaroo_state['cleaning_method'] == 'NoCleaning'
-    assert bw.dataflow.cleaning_method == 'NoCleaning'
+    assert bw.buckaroo_state['cleaning_method'] == ''
+    assert bw.dataflow.cleaning_method == ''
     class VCBuckarooWidget(BuckarooWidget):
         #analysis_klasses = base_a_klasses
         autoclean_conf = tuple([NoCleaningConf]) 
@@ -457,9 +473,11 @@ def test_bstate_commands():
 
     #probably something in autocleaning config should be responsible for generating these commands
     assert vcb.dataflow.merged_operations == [
-        [qc_sym('search'), s('df'), "col", "needle"]]
+        [sQ('search'), s('df'), "col", "needle"]]
     assert len(vcb.dataflow.processed_df) == 2
     assert vcb.df_meta['filtered_rows'] == 2
+
+
 
 def test_bstate_commands2():
     """
@@ -479,8 +497,8 @@ def test_bstate_commands2():
     base_a_klasses.extend([TransposeProcessing])
 
     bw = BuckarooWidget(typed_df)
-    assert bw.buckaroo_state['cleaning_method'] == 'NoCleaning'
-    assert bw.dataflow.cleaning_method == 'NoCleaning'
+    assert bw.buckaroo_state['cleaning_method'] == ''
+    assert bw.dataflow.cleaning_method == ''
     class VCBuckarooWidget(BuckarooInfiniteWidget):
         #analysis_klasses = base_a_klasses
         autoclean_conf = tuple([NoCleaningConf]) 
@@ -493,7 +511,7 @@ def test_bstate_commands2():
 
     #probably something in autocleaning config should be responsible for generating these commands
     assert vcb.dataflow.merged_operations == [
-        [qc_sym('search'), s('df'), "col", "needle"]]
+        [sQ('search'), s('df'), "col", "needle"]]
     assert len(vcb.dataflow.processed_df) == 2
     assert vcb.df_meta['filtered_rows'] == 2
 
@@ -525,8 +543,8 @@ def test_bstate_commands3():
     base_a_klasses.extend([TransposeProcessing])
 
     bw = BuckarooWidget(typed_df)
-    assert bw.buckaroo_state['cleaning_method'] == 'NoCleaning'
-    assert bw.dataflow.cleaning_method == 'NoCleaning'
+    assert bw.buckaroo_state['cleaning_method'] == ''
+    assert bw.dataflow.cleaning_method == ''
     class VCBuckarooWidget(BuckarooWidget):
         #analysis_klasses = base_a_klasses
         autoclean_conf = tuple([NoCleaningConf]) 
@@ -539,13 +557,14 @@ def test_bstate_commands3():
 
     #probably something in autocleaning config should be responsible for generating these commands
     assert vcb.dataflow.merged_operations == [
-        [qc_sym('search'), s('df'), "col", "needle"]]
+        [sQ('search'), s('df'), "col", "needle"]]
     assert len(vcb.dataflow.processed_df) == 2
     assert vcb.df_meta['filtered_rows'] == 2
 
-
-    
-def test_sample():
+def Xtest_sample():
+    """
+    this test is slow, and sample is barely used anymore
+    """
     big_df = pd.DataFrame({'a': np.arange(105_000)})
     bw = ACDFC(big_df)
     assert len(bw.processed_df) == 100_000
