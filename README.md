@@ -1,6 +1,6 @@
 # Buckaroo - The Data Table for Jupyter
 
-Buckaroo is a modern data table for Jupyter that expedites the most common exploratory data analysis tasks. The most basic data analysis task - looking at the raw data, is cumbersome with the existing pandas tooling.  Buckaroo starts with a modern performant data table that displays up to 10k rows, is sortable, has value formatting, and scrolls.  On top of the core table experience extra features like summary stats, histograms, smart sampling, auto-cleaning, and a low code UI are added.  All of the functionality has sensible defaults that can be overridden to customize the experience for your workflow.
+Buckaroo is a modern data table for Jupyter that expedites the most common exploratory data analysis tasks. The most basic data analysis task - looking at the raw data, is cumbersome with the existing pandas tooling.  Buckaroo starts with a modern performant data table, is sortable, has value formatting, and scrolls infinitely.  On top of the core table experience extra features like summary stats, histograms, smart sampling, auto-cleaning, and a low code UI are added.  All of the functionality has sensible defaults that can be overridden to customize the experience for your workflow.
 
 <img width="1002" alt="Polars-Buckaroo" src="https://github.com/paddymul/buckaroo/assets/40453/f48b701b-dfc4-4470-8588-05b6a9f33eec">
 
@@ -41,7 +41,7 @@ Buckaroo works in the following notebook environments
 Buckaroo works with the following DataFrame libraries
 - `pandas` (version >=1.3.5)
 - `polars` optional
-- `geopandas` optional
+- `geopandas` optional (deprecated, if you are interested in geopandas, please get in touch)
 
 
 # Learn More
@@ -53,16 +53,21 @@ Buckaroo has extensive docs and tests, the best way to learn about the system is
 The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery) lets you see different styling configurations.  You can live edit code and play with different configs.
 
 ## Videos 
-- [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE)
-- [Styling Buckaroo](https://www.youtube.com/watch?v=cbwJyo_PzKY)
+- [Autocleaning quick demo](https://youtube.com/shorts/4Jz-Wgf3YDc) 2m38s
+- [Writing your own autocleaning functions](https://youtu.be/A-GKVsqTLMI) 10m10s
+- [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE) 12m56s
+- [Styling Buckaroo](https://www.youtube.com/watch?v=cbwJyo_PzKY) 8m18s
+- [Understanding JLisp in Buckaroo](https://youtu.be/3Tf3lnuZcj8) 12m42s
 - [GeoPandas Support](https://youtu.be/8WBhoNjDJsA)
 
 ## Example Notebooks
 
 The following examples are loaded into a jupyter lite environment with Buckaroo installed.
 - [Full Tour](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb) Start here. This gives a broad overview of Buckaroo's features.
-- [Histogram Demo](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Histograms-demo.ipynb) Explantion of the embedded histograms of Buckaroo.
-- [Styling Gallery](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-gallery.ipynb) Examples of all of the different formatters and styling available for the table
+- [Live Styling Gallery](https://marimo.io/p/@paddy-mullen/buckaroo-styling-gallery)  [ipynb](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-gallery.ipynb) Examples of all of the different formatters and styling available for the table
+- [Live Autocleaning](https://marimo.io/p/@paddy-mullen/buckaroo-auto-cleaning) Marimo notebook explaining how autocleaning works and showing how to implement your own cleaning commands and heuristic strategies.
+- [Live Histogram Demo](https://marimo.io/p/@paddy-mullen/buckaroo-histogram-demo) [ipynb](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Histograms-demo.ipynb) Explantion of the embedded histograms of Buckaroo.
+- [Live JLisp overview](https://marimo.io/p/@paddy-mullen/jlisp-in-buckaroo) Buckaroo embeds a small lisp interpreter to power the lowcode UI. You don't have to understand lisp to use buckaroo, but if you want to geek out on programming language UI, check this out.
 - [Extending Buckaroo](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Extending.ipynb) Broad overview of how to add post processing methods and custom styling methods to Buckaroo
 - [Styling Howto](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-howto.ipynb) In depth explanation of how to write custom styling methods
 - [Pluggable Analysis Framework](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Pluggable-Analysis-Framework.ipynb) How to add new summary stats to Buckaroo
@@ -72,7 +77,7 @@ The following examples are loaded into a jupyter lite environment with Buckaroo 
 # Features
 
 ## High performance table
-The core data grid of buckaroo is based on [AG-Grid](https://www.ag-grid.com/). This loads 1000s of cells in less than a second, with highly customizable display, formatting and scrolling.  You no longer have to use `df.head()` to poke at portions of your data.
+The core data grid of buckaroo is based on [AG-Grid](https://www.ag-grid.com/). This loads 1000s of cells in less than a second, with highly customizable display, formatting and scrolling. Data is loaded lazily into the broser as you scroll, and serialized with parquet. You no longer have to use `df.head()` to poke at portions of your data.
 
 ## Fixed width formatting by default
 
@@ -85,21 +90,25 @@ By default numeric columns are formatted to use a fixed width font and commas ar
 ## Summary stats
 The summary stats view can be toggled by clicking on the `0` below the `Σ` icon.  Summary stats are similar to `df.describe` and extensible.
 
-## Inteligent sampling
-
-Buckaroo will display entire DataFrames up to 10k rows.  Displaying more than that would run into performance problems that would make display too slow.  When a DataFrame has more than 10k rows, Buckaroo samples a random set of 10k rows, and also adds in the rwos with the 5 most extreme values for each column.
-
 ## Sorting
 
 All of the data visible in the table (rows shown), is sortable by clicking on a column name, further clicks change sort direction then disable sort for that column.  Because extreme values are included with sample rows, you can see outlier values too.
+
+## Search
+Search is built into Buckaroo so you can quickly find the rwos you are looking for.
+
+## Lowcode UI
+
+Buckaroo has a simple low code UI with python code gen. This view can be toggled by clicking the checkbox below the ` λ `(lambda) icon.
+
+## Autocleaning
+
+Select a cleaning method from the status bar. Buckaroo has heuristic autocleaning. The autocleaning system inspects each column and runs statistics to decide if a cleaning methods should be applied to the column (parsing as dates, stripping non integer characters and treating as an integer, parsing implied booleans "yes" "no" to booleans), then adds those cleaning operations to the low code UI.  Different cleaning methods can be tried because dirty data isn't deterministic and there are multiple approaches that could properly apply to any situation.
 
 ## Extensibility at the core
 
 Buckaroo summary stats are built on the [Pluggable Analysis Framework](https://buckaroo-data.readthedocs.io/en/latest/articles/pluggable.html) that allows individual summary stats to be overridden, and new summary stats to be built in terms of existing summary stats.  Care is taken to prevent errors in summary stats from preventing display of a dataframe.
 
-## Lowcode UI (beta)
-
-Buckaroo has a simple low code UI with python code gen. This view can be toggled by clicking on the `0` below the ` λ ` icon.
 
 ## Auto cleaning (beta)
 
