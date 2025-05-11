@@ -66,18 +66,18 @@ The following examples are loaded into a jupyter lite environment with Buckaroo 
 - [Full Tour](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb) Start here. This gives a broad overview of Buckaroo's features.
 - [Live Styling Gallery](https://marimo.io/p/@paddy-mullen/buckaroo-styling-gallery)  [ipynb](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-gallery.ipynb) Examples of all of the different formatters and styling available for the table
 - [Live Autocleaning](https://marimo.io/p/@paddy-mullen/buckaroo-auto-cleaning) Marimo notebook explaining how autocleaning works and showing how to implement your own cleaning commands and heuristic strategies.
-- [Live Histogram Demo](https://marimo.io/p/@paddy-mullen/buckaroo-histogram-demo) [ipynb](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Histograms-demo.ipynb) Explantion of the embedded histograms of Buckaroo.
+- [Live Histogram Demo](https://marimo.io/p/@paddy-mullen/buckaroo-histogram-demo) [ipynb](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Histograms-demo.ipynb) Explanation of the embedded histograms of Buckaroo.
 - [Live JLisp overview](https://marimo.io/p/@paddy-mullen/jlisp-in-buckaroo) Buckaroo embeds a small lisp interpreter to power the lowcode UI. You don't have to understand lisp to use buckaroo, but if you want to geek out on programming language UI, check this out.
 - [Extending Buckaroo](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Extending.ipynb) Broad overview of how to add post processing methods and custom styling methods to Buckaroo
 - [Styling Howto](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-howto.ipynb) In depth explanation of how to write custom styling methods
 - [Pluggable Analysis Framework](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Pluggable-Analysis-Framework.ipynb) How to add new summary stats to Buckaroo
-- [Solara Buckaroo](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/Solara-Buckaroo.ipynb) Using Buckaroo with Solara
-- [GeoPandas with Bucakroo](https://github.com/paddymul/buckaroo/blob/main/example-notebooks/GeoPandas.ipynb)
+- [Solara Buckaroo](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Solara-Buckaroo.ipynb) Using Buckaroo with Solara
+- [GeoPandas with Bucakroo](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/GeoPandas.ipynb)
 
 # Features
 
 ## High performance table
-The core data grid of buckaroo is based on [AG-Grid](https://www.ag-grid.com/). This loads 1000s of cells in less than a second, with highly customizable display, formatting and scrolling. Data is loaded lazily into the broser as you scroll, and serialized with parquet. You no longer have to use `df.head()` to poke at portions of your data.
+The core data grid of buckaroo is based on [AG-Grid](https://www.ag-grid.com/). This loads 1000s of cells in less than a second, with highly customizable display, formatting and scrolling. Data is loaded lazily into the browser as you scroll, and serialized with parquet. You no longer have to use `df.head()` to poke at portions of your data.
 
 ## Fixed width formatting by default
 
@@ -151,7 +151,7 @@ npm run dev
 ```
 
 
-### UV Instuctions
+### UV Instructions
 ```sh
 cd buckaroo
 uv venv
