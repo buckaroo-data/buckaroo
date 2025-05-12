@@ -2,8 +2,7 @@
 
 Buckaroo is a modern data table for Jupyter that expedites the most common exploratory data analysis tasks. The most basic data analysis task - looking at the raw data, is cumbersome with the existing pandas tooling.  Buckaroo starts with a modern performant data table, is sortable, has value formatting, and scrolls infinitely.  On top of the core table experience extra features like summary stats, histograms, smart sampling, auto-cleaning, and a low code UI are added.  All of the functionality has sensible defaults that can be overridden to customize the experience for your workflow.
 
-<img width="1002" alt="Polars-Buckaroo" src="https://github.com/paddymul/buckaroo/assets/40453/f48b701b-dfc4-4470-8588-05b6a9f33eec">
-
+<img width="947" alt="Screenshot 2025-05-12 at 3 54 33 PM" src="https://github.com/user-attachments/assets/9238c893-8dd4-47e4-8215-b5450c8c7b3a" />
 
 ## Try it now with Marimo in your browser
 Play with Buckaroo without any installation.
@@ -64,7 +63,8 @@ The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery)
 ## Example Notebooks
 
 The following examples are loaded into a jupyter lite environment with Buckaroo installed.
-- [Full Tour Marimo Pyodide](https://marimo.io/p/@paddy-mullen/buckaroo-full-tour)   Start here. This gives a broad overview of Buckaroo's features. [Jupyterlite (old)](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb) [Google Colab](https://colab.research.google.com/github/paddymul/buckaroo/blob/feat/full-tour-colab/docs/example-notebooks/Full-tour-colab.ipynb) [Notebook on Github](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Full-tour.ipynb)
+- [Full Tour Marimo Pyodide](https://marimo.io/p/@paddy-mullen/buckaroo-full-tour)   Start here. This gives a broad overview of Buckaroo's features. [Jupyterlite (old)](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb) [Google Colab](https://colab.research.google.com/github/paddymul/buckaroo/blob/main/docs/example-notebooks/Full-tour-colab.ipynb)
+[Notebook on Github](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Full-tour.ipynb)
 
 - [Live Styling Gallery](https://marimo.io/p/@paddy-mullen/buckaroo-styling-gallery)  [ipynb](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-gallery.ipynb) Examples of all of the different formatters and styling available for the table
 - [Live Autocleaning](https://marimo.io/p/@paddy-mullen/buckaroo-auto-cleaning) Marimo notebook explaining how autocleaning works and showing how to implement your own cleaning commands and heuristic strategies.
