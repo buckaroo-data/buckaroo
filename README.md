@@ -32,10 +32,10 @@ Buckaroo works in the following notebook environments
 
 - `jupyter lab` (version >=3.6.0)
 - `jupyter notebook` (version >=7.0) 
-- [Marimo](https://marimo.io/)
+- [Marimo](https://marimo.io/p/@paddy-mullen/buckaroo-full-tour)
 - `VS Code notebooks` (with extra install)
 - [Jupyter Lite](https://paddymul.github.io/buckaroo-examples/lab/index.html)
-- `Google colab`  (with special initiation code)
+- `Google colab` 
 
 
 Buckaroo works with the following DataFrame libraries
@@ -53,6 +53,7 @@ Buckaroo has extensive docs and tests, the best way to learn about the system is
 The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery) lets you see different styling configurations.  You can live edit code and play with different configs.
 
 ## Videos 
+- [Buckaroo Full Tour](https://youtu.be/t-wk24F1G3s) 6m50s A broad introduction to Buckaroo
 - [Autocleaning quick demo](https://youtube.com/shorts/4Jz-Wgf3YDc) 2m38s
 - [Writing your own autocleaning functions](https://youtu.be/A-GKVsqTLMI) 10m10s
 - [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE) 12m56s
@@ -63,7 +64,8 @@ The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery)
 ## Example Notebooks
 
 The following examples are loaded into a jupyter lite environment with Buckaroo installed.
-- [Full Tour](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb) Start here. This gives a broad overview of Buckaroo's features.
+- [Full Tour Marimo Pyodide](https://marimo.io/p/@paddy-mullen/buckaroo-full-tour)   Start here. This gives a broad overview of Buckaroo's features. [Jupyterlite (old)](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb) [Google Colab](https://colab.research.google.com/github/paddymul/buckaroo/blob/feat/full-tour-colab/docs/example-notebooks/Full-tour-colab.ipynb) [Notebook on Github](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Full-tour.ipynb)
+
 - [Live Styling Gallery](https://marimo.io/p/@paddy-mullen/buckaroo-styling-gallery)  [ipynb](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-gallery.ipynb) Examples of all of the different formatters and styling available for the table
 - [Live Autocleaning](https://marimo.io/p/@paddy-mullen/buckaroo-auto-cleaning) Marimo notebook explaining how autocleaning works and showing how to implement your own cleaning commands and heuristic strategies.
 - [Live Histogram Demo](https://marimo.io/p/@paddy-mullen/buckaroo-histogram-demo) [ipynb](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Histograms-demo.ipynb) Explanation of the embedded histograms of Buckaroo.
@@ -193,6 +195,6 @@ We :heart: contributions.
 
 Have you had a good experience with this project? Why not share some love and contribute code, or just let us know about any issues you had with it?
 
-We welcome issue reports [here](../../issues); be sure to choose the proper issue template for your issue, so that we can be sure you're providing the necessary information.
+We welcome [issue reports](../../issues); be sure to choose the proper issue template for your issue, so that we can be sure you're providing the necessary information.
 
 
