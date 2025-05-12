@@ -1,30 +1,24 @@
-from functools import cache
 import pandas as pd
 import buckaroo
 
+
+#meant to be added to pd.DataFrame class 
+def marimo_display_func(self):
+    return buckaroo.BuckarooInfiniteWidget(self)
 class BuckarooDataFrame(pd.DataFrame):
-    """ used for marimo """
-    def _display_(self):
-        return buckaroo.BuckarooInfiniteWidget(self)
+    """used for marimo, when you don't want to call
+    marimo_monkeypatch so you can preserve regular pd.DataFrame
+    display"""
+    _display_ = marimo_display_func
 
-@cache
+
+    
 def marimo_monkeypatch():
-    if pd.read_csv.__name__ == "read_csv":
-        orig_read_csv = pd.read_csv
-    else:
-        raise Exception("it should only be possible to call marimo monkeypatch once")
-    
-    def bu_read_csv(*args, **kwargs):
-        _df = orig_read_csv(*args, **kwargs)
-        return BuckarooDataFrame(_df)
-    
-    if pd.read_parquet.__name__ == "read_parquet":
-        orig_read_parquet = pd.read_parquet
-    else:
-        raise Exception("it should only be possible to call marimo monkeypatch once")
+    pd.DataFrame._display_ = marimo_display_func
 
-    def bu_read_parquet(*args, **kwargs):
-        _df = orig_read_parquet(*args, **kwargs)
-        return BuckarooDataFrame(_df)
-    pd.read_csv = bu_read_csv
-    pd.read_parquet = bu_read_parquet
+def marimo_unmonkeypatch():
+    if hasattr(pd.DataFrame, '_display_'):
+        delattr(pd.DataFrame, '_display_')
+    else:
+        print("pd.DataFrame wasn't monkeypatched, doing nothing")
+
