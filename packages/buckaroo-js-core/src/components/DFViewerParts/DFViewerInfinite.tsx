@@ -36,25 +36,7 @@ ModuleRegistry.registerModules([InfiniteRowModelModule]);
 
 
 const AccentColor = "#2196F3"
-const myTheme = themeAlpine.withPart(colorSchemeDark).withParams({
-    spacing:5,
-    browserColorScheme: "dark",
-    cellHorizontalPaddingScale: 0.3,
-    columnBorder: true,
-    rowBorder: false,
-    rowVerticalPaddingScale: 0.5,
-    wrapperBorder: false,
-    fontSize: 12,
-    dataFontSize: "12px",
-    headerFontSize: 14,
-    iconSize: 10,
-    backgroundColor: "#181D1F",
 
-    oddRowBackgroundColor: '#222628',
-    headerVerticalPaddingScale: 0.6,
-//    cellHorizontalPadding: 3,
-
-})
 
 
 export interface DatasourceWrapper {
@@ -284,7 +266,25 @@ export function DFViewerInfiniteInner({
         },
         [outside_df_params],
     );
+    const myTheme = useMemo(() => themeAlpine.withPart(colorSchemeDark).withParams({
+        spacing: 5,
+        browserColorScheme: "dark",
+        cellHorizontalPaddingScale: 0.3,
+        columnBorder: true,
+        rowBorder: false,
+        rowVerticalPaddingScale: 0.5,
+        wrapperBorder: false,
+        fontSize: 12,
+        dataFontSize: "12px",
+        headerFontSize: 14,
+        iconSize: 10,
+        backgroundColor: "#181D1F",
 
+        oddRowBackgroundColor: '#222628',
+        headerVerticalPaddingScale: 0.6,
+        //    cellHorizontalPadding: 3,
+
+    }), []);
     const gridOptions: GridOptions = useMemo( () => {
         return {
         ...outerGridOptions(setActiveCol, df_viewer_config.extra_grid_config),

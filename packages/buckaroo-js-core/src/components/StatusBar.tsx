@@ -1,5 +1,5 @@
 // https://plnkr.co/edit/QTNwBb2VEn81lf4t?open=index.tsx
-import React, { useRef, useCallback, useState, memo, useEffect } from "react";
+import React, { useRef, useCallback, useState, memo, useEffect, useMemo } from "react";
 import _ from "lodash";
 import { AgGridReact } from "@ag-grid-community/react"; // the AG Grid React Component
 import { ColDef, GridApi, GridOptions, ModuleRegistry } from "@ag-grid-community/core";
@@ -363,10 +363,10 @@ export function StatusBar({
         cellStyle: { textAlign: "left" },
     };
 
-    const statusTheme: Theme = myTheme.withParams({
+    const statusTheme: Theme = useMemo(()=> myTheme.withParams({
         headerFontSize: 14,
         rowVerticalPaddingScale: 0.8,    
-    })
+    }), []);
     return (
         <div className="status-bar">
             <div 
