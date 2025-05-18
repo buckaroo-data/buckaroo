@@ -246,7 +246,9 @@ const ColorMapDFViewerConfig:DFViewerConfig = {
             map_name: "BLUE_TO_YELLOW",
             val_column: "c"
     }},
-    floatColumn('c', 1,4)
+    floatColumn('c', 1,4),
+    floatColumn('d', 1,4)
+
   ],
    pinned_rows: [{
     'primary_key_val': 'histogram',

@@ -427,7 +427,7 @@ class DropCol(Command):
 
 
 
-class ato_datetime(Command):
+class ToDatetime(Command):
     command_default = [s('to_datetime'), s('df'), "col"]
     command_pattern = [None]
 

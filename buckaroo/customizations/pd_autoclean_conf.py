@@ -3,7 +3,7 @@ from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.customizations.pandas_commands import (
     DropCol, MakeCategory, FillNA, Rank,
     DropDuplicates, GroupBy, GroupByTransform, RemoveOutliers, OnlyOutliers, Search, SearchCol,
-    LinearRegression)
+    ToDatetime, LinearRegression)
 
 from buckaroo.customizations.analysis import (
     DefaultSummaryStats, PdCleaningStats)
@@ -29,6 +29,7 @@ BASE_COMMANDS = [
     DropDuplicates,
     IntParse, StripIntParse,
     StrBool, USDate,
+    ToDatetime,
     
 
     #Column modifications

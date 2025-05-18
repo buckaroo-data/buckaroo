@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.12.8"
+__generated_with = "0.13.6"
 app = marimo.App(width="medium")
 
 
@@ -8,31 +8,31 @@ app = marimo.App(width="medium")
 def _(mo):
     mo.md(
         r"""
-        # Autocleaning with Buckaroo
+    # Autocleaning with Buckaroo
 
-        Dealing with dirty data accounts for a large portion of the time in doing data work. We know what good data looks like, and we know the individual pandas commands to clean columns. But we have to type the same commands over and over again.
+    Dealing with dirty data accounts for a large portion of the time in doing data work. We know what good data looks like, and we know the individual pandas commands to clean columns. But we have to type the same commands over and over again.
 
-        Buckaroo separates data cleaning for users into four steps
+    Buckaroo separates data cleaning for users into four steps
 
-        1. Look at the original data with your eyes
-        2. Cycle through different cleaning approaches
-        3. Approve which cleaned columns you like
-        4. Optionally take the generated code and use it as a function
+    1. Look at the original data with your eyes
+    2. Cycle through different cleaning approaches
+    3. Approve which cleaned columns you like
+    4. Optionally take the generated code and use it as a function
 
-        Buckaroo performs these tasks interactively and quickly because it uses heuristics, not an LLM.
+    Buckaroo performs these tasks interactively and quickly because it uses heuristics, not an LLM.
 
-        All of this is customizeable.
-        """
+    All of this is customizeable.
+    """
     )
     return
 
 
 @app.cell
-def _(dirty_df):
+def _(MyAutocleaningBuckaroo, dirty_df):
     from buckaroo.buckaroo_widget import AutocleaningBuckaroo
-    #ACBuckaroo(pd.concat([dirty_df]*3000)) # to see how this works on more rows
-    AutocleaningBuckaroo(dirty_df)
-    return (AutocleaningBuckaroo,)
+    #MyAutocleaningBuckaroo(pd.concat([dirty_df]*3000)) # to see how this works on more rows
+    MyAutocleaningBuckaroo(dirty_df)
+    return
 
 
 @app.cell
@@ -94,9 +94,9 @@ def _(pd):
 def _(mo):
     mo.md(
         r"""
-        # Writing your own cleaning routines
-        Let's start by writing a function to clean a column.  Here we are going to strip all non digit and period characters then try to coerce to int
-        """
+    # Writing your own cleaning routines
+    Let's start by writing a function to clean a column.  Here we are going to strip all non digit and period characters then try to coerce to int
+    """
     )
     return
 
@@ -127,13 +127,13 @@ def _(DataFrame, dirty_df, pd):
 def _(mo):
     mo.md(
         r"""
-        # Writing a fraction function
-        We now have a cleaning function, we'll get back to integrating it into the Buckaroo UI in a little bit
+    # Writing a fraction function
+    We now have a cleaning function, we'll get back to integrating it into the Buckaroo UI in a little bit
 
-        Fraction functions return the fraction of a column (0-1) that tells the fraction of values that are succesfully converted with this function.  Buckaroo uses fraction fuctions to integrate with heuristics to choose the correct cleaning function (if any) to apply to a column.
+    Fraction functions return the fraction of a column (0-1) that tells the fraction of values that are succesfully converted with this function.  Buckaroo uses fraction fuctions to integrate with heuristics to choose the correct cleaning function (if any) to apply to a column.
 
-        This fraction function is fairly simple, based on the conversion function.
-        """
+    This fraction function is fairly simple, based on the conversion function.
+    """
     )
     return
 
@@ -164,14 +164,14 @@ def _(dirty_df, strip_int_and_period_frac):
 def _(mo):
     mo.md(
         r"""
-        # Picking cleaning methods with heuristics
+    # Picking cleaning methods with heuristics
 
-        We have multiple available cleaning methods for each column, and we need a way to choose which one to use. Enter heuristics, and heuristic lang. Heuristic lang is a mini lisp language that allows you to choose the best fit for a column.
+    We have multiple available cleaning methods for each column, and we need a way to choose which one to use. Enter heuristics, and heuristic lang. Heuristic lang is a mini lisp language that allows you to choose the best fit for a column.
 
-        We also need to wrap our frac function into a ColAnalysis class.
+    We also need to wrap our frac function into a ColAnalysis class.
 
-        BaseHeuristic Genops generates commands for the lowcode UI based on which rule has the highest score.
-        """
+    BaseHeuristic Genops generates commands for the lowcode UI based on which rule has the highest score.
+    """
     )
     return
 
@@ -234,29 +234,17 @@ def _(pd, strip_int_and_period_frac):
             "us_dates_frac": [s("primary"), [s("f>"), 0.8]]}  #primary is a special operator that gives this rule a boost if it matches
 
         rules_op_names = frac_name_to_command
-    return (
-        BaseHeuristicCleaningGenOps,
-        ColAnalysis,
-        ConvservativeCleaningGenops,
-        HeuristicFracs,
-        cache_series_func,
-        cached_strip_int_and_period_frac,
-        frac_name_to_command,
-        regular_int_parse_frac,
-        s,
-        str_bool_frac,
-        us_dates_frac,
-    )
+    return ConvservativeCleaningGenops, HeuristicFracs, s
 
 
 @app.cell
 def _(mo):
     mo.md(
         """
-        # Writing a low code UI command
+    # Writing a low code UI command
 
-        We now need to write a command for the lowcode UI that corresponds with the
-        """
+    We now need to write a command for the lowcode UI that corresponds with the
+    """
     )
     return
 
@@ -292,11 +280,11 @@ def _(Command, re, s, strip_int_and_period):
 def _(mo):
     mo.md(
         r"""
-        # Putting it all together with Autocleaning Config
+    # Putting it all together with Autocleaning Config
 
-        Autocleaning config combines a set of fracs, genereate ops, and commands into a named cleanign configuration
-        This is a place you could play with a different implementation of a frac, heuristic, or command and give it a name in the UI.  For the most part I expect users to have different Heuristics.
-        """
+    Autocleaning config combines a set of fracs, genereate ops, and commands into a named cleanign configuration
+    This is a place you could play with a different implementation of a frac, heuristic, or command and give it a name in the UI.  For the most part I expect users to have different Heuristics.
+    """
     )
     return
 
@@ -340,29 +328,17 @@ def _(ConvservativeCleaningGenops, HeuristicFracs, StripIntParse):
         ]
         #name is what shows up in the UI
         name = "conservative"
-    return (
-        AutocleaningConfig,
-        ConservativeAC,
-        DropCol,
-        FillNA,
-        GroupBy,
-        IntParse,
-        NoOp,
-        SafeInt,
-        Search,
-        StrBool,
-        USDate,
-    )
+    return (ConservativeAC,)
 
 
 @app.cell
 def _(mo):
     mo.md(
         r"""
-        # Configuring Buckaroo
+    # Configuring Buckaroo
 
-        Here we create a new Buckaroo class with our combination of different AutoCleaningConfigs
-        """
+    Here we create a new Buckaroo class with our combination of different AutoCleaningConfigs
+    """
     )
     return
 
@@ -388,12 +364,9 @@ def _():
         BuckarooInfiniteWidget,
         DataFrame,
         DefaultMainStyling,
-        buckaroo,
         copy_extend,
         float_,
-        marimo_monkeypatch,
         mo,
-        np,
         obj_,
         pd,
         pinned_histogram,
@@ -440,7 +413,7 @@ def _(
             BuckarooInfiniteWidget.analysis_klasses, CleaningDetailStyling
         )
     MyAutocleaningBuckaroo(dirty_df)
-    return CleaningDetailStyling, MyAutocleaningBuckaroo, NoCleaningConf
+    return (MyAutocleaningBuckaroo,)
 
 
 @app.cell

@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.12.8"
+__generated_with = "0.13.5-dev6"
 app = marimo.App(width="medium")
 
 
@@ -8,18 +8,18 @@ app = marimo.App(width="medium")
 def _(mo):
     mo.md(
         r"""
-        # Buckaroo Styling Gallery
-        [Buckaroo](https://github.com/paddymul/buckaroo) can be extensively styled.  This gallery shows many examples of the column configuration language.
-        In this case all of the configs are passed in via `column_config_overrides`. 
-        Each call looks approximately like
-        ```python
-        BuckarooInfiniteWidget(df, column_config_overrides={
-            "float_obj_displayer": {
-                "displayer_args": {
-                    "displayer": "obj"}}})
-        ```
-        It is also possible to write your own styling functions that look at summary stats and return configs for columns.  This is detailed in [Styling Howto](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Styling-Howto.ipynb)
-        """
+    # Buckaroo Styling Gallery
+    [Buckaroo](https://github.com/paddymul/buckaroo) can be extensively styled.  This gallery shows many examples of the column configuration language.
+    In this case all of the configs are passed in via `column_config_overrides`. 
+    Each call looks approximately like
+    ```python
+    BuckarooInfiniteWidget(df, column_config_overrides={
+        "float_obj_displayer": {
+            "displayer_args": {
+                "displayer": "obj"}}})
+    ```
+    It is also possible to write your own styling functions that look at summary stats and return configs for columns.  This is detailed in [Styling Howto](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Styling-Howto.ipynb)
+    """
     )
     return
 
@@ -32,7 +32,7 @@ def _(DFViewerShortHelper, dropdown_dict, format_json, mo):
 
     mo.vstack(
         [
-            mo.hstack([dropdown_dict]),
+            dropdown_dict,
             DFViewerShortHelper(dropdown_dict.value[0], column_config_overrides=dropdown_dict.value[1]),
             mo.hstack([mo.md(dropdown_dict.value[2]), mo.ui.text_area(format_json(dropdown_dict.value[1]), disabled=True, max_length=500, rows=15, full_width=True)], widths="equal"),
         ]
@@ -76,7 +76,7 @@ def _(DataFrame):
     Mozilla has additonal [docs for Intl DatetimeFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/DateTimeFormat)
     """
     datetime_config = (_datetime_df, _datetime_config, _datetime_md)
-    return (datetime_config,)
+    return
 
 
 @app.cell(hide_code=True)
@@ -153,7 +153,7 @@ def _(pd):
     return (link_config,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(pd):
     # I pulled this out into a separate variable so we can eventually
     # display it in a spearate code block
@@ -224,52 +224,26 @@ def _(pd):
     return (histogram_config,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(pd):
+    # Chart cell
     # I pulled this out into a separate variable so we can eventually
     # display it in a spearate code block
 
     _chart_data = [
-        [{"lineRed":33.0, "areaGray":100, "barCustom3":40, "barCustom1":40, "name": '2000-01-01 00:00:00'},
-         {"lineRed": 33.0, "areaGray": 20, "name": '2001-01-01 00:00:00'},
-         {"lineRed": 66,  "areaGray":40, "barCustom2":60, "name":'unique'},
-         {"lineRed": 100, "areaGray":100, "barCustom1":40,"name":'end'}],
-        [{ "barCustom3":40, "barCustom1":40, "name": '2000-01-01 00:00:00'},
-         {"name": '2001-01-01 00:00:00'},
-         {"barCustom2":60,    "name":'unique'},
-         {"barCustom1":40,    "name":'end'}],
-        [{"areaRed":100, "name": '2000-01-01 00:00:00'},
-         {"areaRed": 20, "name": '2001-01-01 00:00:00'},
-         {"areaRed":40,  "name":'unique'},
-         {"areaBlue":100, "name":'end'}],
-        [{"lineRed":33.0,  "name": '2000-01-01 00:00:00'},
-         {"lineBlue": 33.0, "name": '2001-01-01 00:00:00'},
-         {"lineGray": 66, "name":'unique'},
-         {"lineGray": 100, "name":'end'}],
         [
-            {"name": "long_113", "cat_pop": 0.0},
-            {"name": "long_116", "cat_pop": 0.0},
-            {"name": "long_33", "cat_pop": 0.0},
-            {"name": "long_72", "cat_pop": 0.0},
-            {"name": "long_122", "cat_pop": 0.0},
-            {"name": "long_6", "cat_pop": 0.0},
-            {"name": "long_83", "cat_pop": 0.0},
-            {"name": "longtail", "unique": 50.0, "longtail": 47.0},
+            {"lineRed": 33.0, "areaGray": 100, "barCustom3": 40, "barCustom1": 40, "name": "2000-01-01 00:00:00"},
+            {"lineRed": 33.0, "areaGray": 20, "name": "2001-01-01 00:00:00"},
+            {"lineRed": 66, "areaGray": 40, "barCustom2": 60, "name": "unique"},
+            {"lineRed": 100, "areaGray": 100, "barCustom1": 40, "name": "end"},
         ],
+        [{"barCustom3": 40, "barCustom1": 40, "name": "2000-01-01 00:00:00"}, {"name": "2001-01-01 00:00:00"}, {"barCustom2": 60, "name": "unique"}, {"barCustom1": 40, "name": "end"}],
+        [{"areaRed": 100, "name": "2000-01-01 00:00:00"}, {"areaRed": 20, "name": "2001-01-01 00:00:00"}, {"areaRed": 40, "name": "unique"}, {"areaBlue": 100, "name": "end"}],
+        [{"lineRed": 33.0, "name": "2000-01-01 00:00:00"}, {"lineBlue": 33.0, "name": "2001-01-01 00:00:00"}, {"lineGray": 66, "name": "unique"}, {"lineGray": 100, "name": "end"}],
     ]
-    _chart_df = pd.DataFrame({"names": ["everything", "bar custom only", "area", "line", "histogram"],
-                              "chart" : _chart_data,
-                              "chart_custom_color": _chart_data,
-                              "histogram":_chart_data
-                             })
+    _chart_df = pd.DataFrame({"names": ["everything", "bar custom only", "area", "line"], "chart_displayer": _chart_data, "chart_displayer_custom_color": _chart_data})
 
-    #_histogram_config = {"histogram_props": {"displayer_args": {"displayer": "histogram"}}}
-    _chart_config = {
-        "chart_custom_color":  {"displayer_args": {"displayer":"chart",
-                    "colors":{"custom1_color":"pink", "custom2_color":"brown", "custom3_color":"beige"}}},
-        "chart":      {"displayer_args": {"displayer":"chart"}},
-        "histogram":  {"displayer_args": {"displayer":"histogram"}},
-    }
+    _chart_config = {"chart_displayer": {"displayer_args": {"displayer": "chart"}}, "chart_displayer_custom_color": {"displayer_args": {"displayer": "chart", "colors": {"custom1_color": "pink", "custom2_color": "brown", "custom3_color": "beige"}}}}
 
 
     _chart_md = """
@@ -281,19 +255,6 @@ def _(pd):
 
     chart_config = (_chart_df, _chart_config, _chart_md)
     return (chart_config,)
-
-
-@app.cell
-def _(DFViewerShortHelper, chart_config):
-    bw = DFViewerShortHelper(chart_config[0], column_config_overrides=chart_config[1])
-    bw
-    return (bw,)
-
-
-@app.cell
-def _(bw):
-    bw.df_display_args['main']['df_viewer_config']
-    return
 
 
 @app.cell(hide_code=True)
@@ -319,15 +280,20 @@ def _(DataFrame):
 
 @app.cell(hide_code=True)
 def _(pd):
-    _error_df = pd.DataFrame({"a": [10, 20, 30], "err_messages": [None, "a must be less than 19, it is 20", "a must be less than 19, it is 30"]})
+    _error_df = pd.DataFrame({"a": [10, 20, 30, 5, 3, 11, 12], "err_messages": [None, "a must be less than 19, it is 20", "a must be less than 19, it is 30", None, None, None, None]})
 
-    _error_config = {"a": {"color_map_config": {"color_rule": "color_not_null", "conditional_color": "red", "exist_column": "err_messages"}}}
+    _error_config = {
+        "a": {"color_map_config": {"color_rule": "color_not_null", "conditional_color": "red", "exist_column": "err_messages"}, "tooltip_config": {"tooltip_type": "simple", "val_column": "err_messages"}},
+        "err_messages": {"merge_rule": "hidden"},
+    }
     _error_md = """
     ## Color_map_config
     color_map_config is a spearate property from `displayer` and can be combined with displayer
 
     This example shows `color_not_null`.  A different background color is used when `exist_column` is not null.
-    This is very useful for highlighting errors
+    This is very useful for highlighting errors.  
+    Note that we also hide `err_messages` with `{'merge_rule':'hidden'}`
+
     ```typescript
     interface ColorWhenNotNullRules {
         color_rule: "color_not_null";
@@ -362,12 +328,11 @@ def _(DataFrame):
 
 @app.cell(hide_code=True)
 def _(DataFrame, np):
+    # Tooltip config
     _ROWS = 200
     # the next dataframe is used for multiple examples
     typed_df = DataFrame({"int_col": np.random.randint(1, 50, _ROWS), "float_col": np.random.randint(1, 30, _ROWS) / 0.7, "str_col": ["foobar"] * _ROWS})
-    _tooltip_config = {"str_col": {"tooltip_config": {"tooltip_type": "simple", "val_column": "int_col"}},
-                      "int_col": {"tooltip_config": {"tooltip_type": "simple", "val_column": "str_col"}}
-                      }
+    _tooltip_config = {"str_col": {"tooltip_config": {"tooltip_type": "simple", "val_column": "int_col"}}}
     _tooltip_md = """
     ## Tooltip_config
     Tooltips are configured with the `tooltip_config` property (not a `displayer`)
@@ -378,12 +343,13 @@ def _(DataFrame, np):
         val_column: string;
     }
     ```
+
     """
     tooltip_config = (typed_df, _tooltip_config, _tooltip_md)
     return tooltip_config, typed_df
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(typed_df):
     _colormap_config = {"float_col": {"color_map_config": {"color_rule": "color_map", "map_name": "BLUE_TO_YELLOW", "val_column": "int_col"}}}
     _colormap_md = """
@@ -407,21 +373,24 @@ def _(typed_df):
     return (colormap_config,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(DataFrame):
-    _explicit_colormap_df = DataFrame({
-        "ten_vals_10_colors": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        "ten_vals_5_colors": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        "five_vals_10_colors": [0, 1, 2, 3, 4, None, None, None, None, None, None],
-        "five_vals_5_colors": [0, 1, 2, 3, 4, None, None, None, None, None, None]
-    })
+    _explicit_colormap_df = DataFrame(
+        {
+            "ten_vals_10_colors": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "ten_vals_5_colors": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "five_vals_10_colors": [0, 1, 2, 3, 4, None, None, None, None, None, None],
+            "five_vals_5_colors": [0, 1, 2, 3, 4, None, None, None, None, None, None],
+        }
+    )
     _colors_10 = ["green", "blue", "red", "orange", "purple", "brown", "pink", "beige", "teal", "gray"]
-    _colors_5 =  ["green", "blue", "red", "orange", "purple"]
-    _colormap_config = {"ten_vals_10_colors": {"color_map_config": {"color_rule": "color_map", "map_name": _colors_10}},
-                        "ten_vals_5_colors": {"color_map_config": {"color_rule": "color_map", "map_name": _colors_5}},
-                        "five_vals_10_colors": {"color_map_config": {"color_rule": "color_map", "map_name": _colors_10}},
-                        "five_vals_5_colors": {"color_map_config": {"color_rule": "color_map", "map_name": _colors_5}},
-                       }
+    _colors_5 = ["green", "blue", "red", "orange", "purple"]
+    _colormap_config = {
+        "ten_vals_10_colors": {"color_map_config": {"color_rule": "color_map", "map_name": _colors_10}},
+        "ten_vals_5_colors": {"color_map_config": {"color_rule": "color_map", "map_name": _colors_5}},
+        "five_vals_10_colors": {"color_map_config": {"color_rule": "color_map", "map_name": _colors_10}},
+        "five_vals_5_colors": {"color_map_config": {"color_rule": "color_map", "map_name": _colors_5}},
+    }
     _colormap_md = """
     ## color_map_config
     In this example we pass in an explicit color map. This is very useful for flagging a value from a discrete set of conditions.
@@ -445,20 +414,14 @@ def _(DataFrame):
 
 
 @app.cell
-def _(mo):
-    get_dd_val, set_dd_val = mo.state("colormap_config")
-    return get_dd_val, set_dd_val
-
-
-@app.cell
 def _(
     DFViewerInfinite,
+    chart_config,
     color_from_col_config,
     colormap_config,
     error_config,
     explicit_colormap_config,
     float_config,
-    get_dd_val,
     histogram_config,
     img_config,
     link_config,
@@ -471,13 +434,14 @@ def _(
         "float_config": float_config,
         "str_config": str_config,
         "histogram_config": histogram_config,
+        "chart_config": chart_config,
         "img_config": img_config,
         "link_config": link_config,
         "colormap_config": colormap_config,
         "error_config": error_config,
         "explicit_colormap_config": explicit_colormap_config,
-        "tooltip_config":tooltip_config,
-        "color_from_column": color_from_col_config
+        "tooltip_config": tooltip_config,
+        "color_from_column": color_from_col_config,
     }
 
 
@@ -500,12 +464,10 @@ def _(
 
     dropdown_dict = mo.ui.dropdown(
         options=dfs,
-        #value="colormap_config",
-        value=get_dd_val(),
-
+        value="colormap_config",
         label="Choose the config",
     )
-    return DFViewerShortHelper, dfs, dropdown_dict
+    return DFViewerShortHelper, dropdown_dict
 
 
 @app.cell(hide_code=True)
@@ -517,7 +479,7 @@ async def _():
     if "pyodide" in sys.modules:  # a hacky way to figure out if we're running in pyodide
         import micropip
 
-        await micropip.install("buckaroo==0.9.16")
+        await micropip.install("buckaroo")
 
     import buckaroo
     from buckaroo import BuckarooInfiniteWidget
@@ -545,33 +507,7 @@ async def _():
         formatted_string = re.sub(r"\s+}", "}", json_string)
         # formatted_string = json_string
         return formatted_string
-    return (
-        BuckarooInfiniteWidget,
-        DFViewerInfinite,
-        DataFrame,
-        buckaroo,
-        format_json,
-        json,
-        marimo_monkeypatch,
-        micropip,
-        mo,
-        np,
-        pd,
-        re,
-        sys,
-    )
-
-
-@app.cell
-def _(BuckarooInfiniteWidget, colormap_config):
-    bw2 = BuckarooInfiniteWidget(colormap_config[0], column_config_overrides=colormap_config[1])
-    bw2.dataflow.summary_sd
-    return (bw2,)
-
-
-@app.cell
-def _():
-    return
+    return DFViewerInfinite, DataFrame, format_json, mo, np, pd
 
 
 if __name__ == "__main__":

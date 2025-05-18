@@ -122,8 +122,8 @@ class AggresiveCleaningGenOps(BaseHeuristicCleaningGenOps):
     ]
     rules = {
         "str_bool_frac": [s("f>"), 0.6],
-        "regular_int_parse_frac": [s("f>"), 0.9],
-        "strip_int_parse_frac": [s("f>"), 0.75],
+        "regular_int_parse_frac": [s("f>"), 0.7],
+        "strip_int_parse_frac": [s("f>"), 0.6],
         "none": [s("none-rule")],
         "us_dates_frac": [s("primary"), [s("f>"), 0.7]],
     }

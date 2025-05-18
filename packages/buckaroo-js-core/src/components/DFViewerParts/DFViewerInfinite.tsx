@@ -18,6 +18,8 @@ import {
     ModuleRegistry,
     SortChangedEvent,
     CellClassParams,
+    RefreshCellsParams,
+    //ColDef,
 } from "@ag-grid-community/core";
 import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-model";
 import { InfiniteRowModelModule } from "@ag-grid-community/infinite-row-model";
@@ -57,6 +59,7 @@ const staticGridOptions:GridOptions = {
     rowSelection: "single",
     enableCellTextSelection: true,
     tooltipShowDelay: 0,
+
     onRowClicked: (event) => {
         const sel = document.getSelection();
         if (sel === null) {
@@ -83,21 +86,24 @@ const outerGridOptions = (setActiveCol:SetColumnFunc, extra_grid_config?:GridOpt
         onCellClicked: (event) => {
             const colName = event.column.getColId();
             if (setActiveCol === undefined || colName === undefined) {
-                //console.log("returning because setActiveCol is undefined");
                 return;
             } else {
-                //console.log("calling setActiveCol with", colName);
-                //const oldActiveCol = event.context.activeCol;
+                const oldActiveCol = event.context.activeCol;
                 setActiveCol(colName);
-
                 event.context.activeCol = colName;
-                // this should force the selected column 
-                //event.api.refreshCells({columns:[colName, oldActiveCol]})
-                event.api.refreshCells({force:true})
+                // this section is very performance sensitive.
+                const args:RefreshCellsParams = {
+                    rowNodes: event.api.getRenderedNodes(),
+                    //@ts-ignore
+                    columns: [event.api.getColumn(colName), event.api.getColumn(oldActiveCol)],
+                    force:true
+                }
+                event.api.refreshCells(args)
             }
         },
     }
 };
+
 export function DFViewerInfinite({
     data_wrapper,
     df_viewer_config,
@@ -228,21 +234,26 @@ export function DFViewerInfiniteInner({
         return dfToAgrid(df_viewer_config);
     }, [df_viewer_config]);
 
+
     const defaultColDef = useMemo( () => {
         return {
             sortable: true,
             type: "rightAligned",
-            cellStyle: (params:CellClassParams) => {
+            cellStyle: (params: CellClassParams) => {
                 const colDef = params.column.getColDef();
                 const field = colDef.field;
                 const activeCol = params.context?.activeCol;
                 ///console.log("defaultColDef cellStyle params", params, colDef, field, params, activeCol);
-                if(activeCol  === field) {
+                //console.log("getCellStyleFunc", locCounter)
+                if (params.node.isRowPinned()) {
+                    return;
+                }
+                if (activeCol === field) {
                     //return {background:selectBackground}
-                    return {background: AccentColor}
+                    return { background: AccentColor }
 
                 }
-                return {background:"inherit"}
+                return { background: "inherit" }
             },
             enableCellChangeFlash: false,
             cellRendererSelector: getCellRendererSelector(df_viewer_config.pinned_rows)};
