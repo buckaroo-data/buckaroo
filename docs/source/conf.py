@@ -5,12 +5,12 @@
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
-import json
+import toml
 
 project = 'Buckaroo'
-copyright = '2023-2024, Paddy Mullen'
+copyright = '2023-2025, Paddy Mullen'
 author = 'Paddy Mullen'
-release = json.loads(open("../../package.json").read())['version']
+release = toml.load(open("../../pyproject.toml"))['project']['version']
 
 
 # -- General configuration ---------------------------------------------------

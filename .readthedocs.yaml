@@ -8,14 +8,11 @@ build:
   apt_packages:
     - graphviz
     - npm
-  jobs:
-    post_build:
-      - echo "Command run at 'post_build' step"
-      - echo `date`
-      - echo "$READTHEDOCS_OUTPUT/html"
-      - node --version
-      - npm install
-      - npm run build:examples
-      - pwd
-      - ls
-      - cp -r docs/build/html/examples "$READTHEDOCS_OUTPUT/html"
+
+python:
+   install:
+     - requirements: docs/requirements.txt
+
+sphinx:
+  # Path to your Sphinx configuration file.
+  configuration: docs/source/conf.py

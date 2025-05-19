@@ -10,7 +10,7 @@ test_df = pd.DataFrame({
 
 word_only_df = pd.DataFrame({'letters': 'h o r s e'.split(' ')})
 
-df = pd.read_csv('./docs/examples/data/2014-01-citibike-tripdata.csv')
+df = pd.read_csv('./docs/example-notebooks/data/2014-01-citibike-tripdata.csv')
 
 empty_df = pd.DataFrame({})
 empty_df_with_columns = pd.DataFrame({}, columns=[0])
