@@ -21,9 +21,7 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
-        with:
-          version: "0.5.x"
+      - uses: astral-sh/setup-uv@v6
       - run: |
           uv run ruff check
           # uv run ruff format  # changes too many files
@@ -44,9 +42,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           run_install: true
-      - uses: astral-sh/setup-uv@v4
-        with:
-          version: "0.5.x"
+      - uses: astral-sh/setup-uv@v6
       - name: Run tests
         run: |
           mkdir buckaroo/static || true

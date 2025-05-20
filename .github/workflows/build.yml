@@ -22,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v5
       - uses: pnpm/action-setup@v4
         with:
           node-version: "20.x"
@@ -38,12 +38,20 @@ jobs:
 
       - name: Check docs can be build + links
         if: ${{ matrix.os == 'ubuntu-latest' }}
-        working-directory: docs
+#        working-directory: docs
         run: |
           sudo apt install -y pandoc graphviz
-          pip install toml sphinx==7.1.2 pytest-check-links graphviz==0.20.1
-          make html
-          python -m pytest --check-links
+          mkdir -p buckaroo/static || true
+          touch buckaroo/static/compiled.css
+          touch buckaroo/static/widget.js
+          touch buckaroo/static/widget.css
+          uv sync  --all-extras --group dev
+          echo "about to ls"
+          ls -alhstr
+          mkdir -p docs/build/html
+          uv run pytest --check-links docs/source/*.rst
+          uv run pytest --check-links docs/example-notebooks/*.ipynb
+          uv run sphinx-build -T -b html docs/source  docs/build
 
       - name: Test the extension
         run: |
@@ -51,8 +59,6 @@ jobs:
           cd packages/buckaroo-js-core
           pnpm install && pnpm run build
           cd ../..
-          ls -alshtr packages/buckaroo-js-core/dist/ || true
-          ls -alshtr buckaroo/static/ || true
           mkdir buckaroo/static || true
           cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
           uv add build
