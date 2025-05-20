@@ -14,13 +14,11 @@ export default defineConfig({
             formats: ["cjs", "es", "esm"], // Specifies the output formats (CommonJS and ES modules).
         },
         rollupOptions: {
-            //external: [...Object.keys(peerDependencies)], // Defines external dependencies for Rollup bundling.
             external: ["react", "react-dom", 'react/jsx-runtime'],
-            globals : { react : 'React', 'react-dom': 'react-dom'},
         },
         sourcemap: true, // Generates source maps for debugging.
         emptyOutDir: true, // Clears the output directory before building.
-        minify: false
+        minify: true
     },
 
     transform: {

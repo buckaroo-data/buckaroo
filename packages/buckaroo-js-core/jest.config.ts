@@ -10,5 +10,9 @@ export default {
     "^@/(.*)$": "<rootDir>/src/$1",
   },
 
+    testMatch: [
+	"!**/*.spec.ts",
+	"**/*.test.ts"
+    ],
   setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
 };

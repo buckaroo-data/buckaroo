@@ -66,7 +66,12 @@ jobs:
         with:
           version: "0.5.x"
       - name: Run tests
-        run: uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
+        run: |
+          mkdir buckaroo/static || true
+          touch buckaroo/static/compiled.css
+          touch buckaroo/static/widget.js
+          touch buckaroo/static/widget.css
+          uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
         env:
           UV_PYTHON: ${{ matrix.python-version }}
       - uses: codecov/codecov-action@v5

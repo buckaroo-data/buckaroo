@@ -5,6 +5,8 @@
   "main": "dist/index.esm.js",
   "scripts": {
     "dev": "vite",
+    "build:tsc": "tsc -b",
+    "build:vite": "vite build",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -37,6 +39,7 @@
     "@storybook/react": "^8.5.6",
     "@storybook/react-vite": "^8.5.6",
     "@storybook/test": "^8.5.6",
+    "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/jest": "^29.5.14",
     "@types/lodash": "^4.17.13",

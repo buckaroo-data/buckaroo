@@ -43,7 +43,6 @@ version = "0.10.4"
 file = "LICENSE.txt"
 
 
-
 [tool.uv]
 dev-dependencies = [
     "anywidget[dev]>=0.9.0",
@@ -64,7 +63,7 @@ dev-dependencies = [
 
 
 [project.optional-dependencies]
-dev = ["watchfiles", "jupyterlab",     "anywidget[dev]>=0.9.0",]
+dev = ["watchfiles", "jupyterlab", "anywidget[dev]>=0.9.0",]
 
 test = [
     "nbval>=0.9",
@@ -92,7 +91,6 @@ docs = [
     "graphviz>=0.20.1",
     "pytest-check-links",
     "toml"
-    
 ]
 
     
@@ -109,16 +107,6 @@ path = "scripts/hatch_build.py"
 
 [tool.hatch.envs.default]
 installer = "uv"
-
-# temporarily commenting out to simplify build closer to quak
-# [tool.hatch.build.targets.wheel]
-# include = [
-#    "buckaroo/**/*.py",
-#    "buckaroo/static/*",
-# ]
-# [tool.hatch.build.targets.wheel.force-include]
-#    "packages/buckaroo-js-core/dist/style.css" = "packages/buckaroo-js-core/dist/style.css"
-
 
 
 [tool.isort]
