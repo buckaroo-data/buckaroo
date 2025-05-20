@@ -21,30 +21,12 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      # Disable jupyter-builder build hook because not needed for linting/formatting, and requires pnpm
-      # - run: |
-      #     sed -i '' 's/\[tool.hatch.build.hooks.\(.*\)\]/\[_tool.hatch.build.hooks.\1\]/' pyproject.toml
       - uses: astral-sh/setup-uv@v4
         with:
           version: "0.5.x"
       - run: |
           uv run ruff check
           # uv run ruff format  # changes too many files
-
-  # buckaroo isn't currently setup for mypy
-
-  # TypecheckPython:
-  #   name: Python / Typecheck
-  #   runs-on: macos-14
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     # Disable jupyter-builder build hook because not needed for typechecking, and requires pnpm
-  #     - run: |
-  #         sed -i '' 's/\[tool.hatch.build.hooks.\(.*\)\]/\[_tool.hatch.build.hooks.\1\]/' pyproject.toml
-  #     - uses: astral-sh/setup-uv@v4
-  #       with:
-  #         version: "0.5.x"
-  #     - run: uv run mypy
 
   TestPython:
     name: Python / Test
@@ -75,6 +57,24 @@ jobs:
         env:
           UV_PYTHON: ${{ matrix.python-version }}
       - uses: codecov/codecov-action@v5
+
+
+
+  # buckaroo isn't currently setup for mypy
+
+  # TypecheckPython:
+  #   name: Python / Typecheck
+  #   runs-on: macos-14
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     # Disable jupyter-builder build hook because not needed for typechecking, and requires pnpm
+  #     - run: |
+  #         sed -i '' 's/\[tool.hatch.build.hooks.\(.*\)\]/\[_tool.hatch.build.hooks.\1\]/' pyproject.toml
+  #     - uses: astral-sh/setup-uv@v4
+  #       with:
+  #         version: "0.5.x"
+  #     - run: uv run mypy
+
 
   # TODO:FIXME commenting out the playwright tests for now because I can't get them to run and they are noisy
   
