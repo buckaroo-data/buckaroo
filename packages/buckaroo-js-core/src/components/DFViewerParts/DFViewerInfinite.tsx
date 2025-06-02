@@ -59,7 +59,7 @@ const staticGridOptions:GridOptions = {
     rowSelection: "single",
     enableCellTextSelection: true,
     tooltipShowDelay: 0,
-
+    suppressFieldDotNotation:true,
     onRowClicked: (event) => {
         const sel = document.getSelection();
         if (sel === null) {
