@@ -2,7 +2,6 @@ from typing import List, Union
 from collections import defaultdict
 import pandas as pd
 import pandera.pandas as pa
-from pandera import Column, Check
 from buckaroo.buckaroo_widget import BuckarooInfiniteWidget
 
 from buckaroo.styling_helpers import obj_, pinned_histogram
@@ -66,7 +65,7 @@ def get_reason_df(cross_errors_df:pd.DataFrame) -> pd.DataFrame:
 
 def get_fails(df:pd.DataFrame, schema:pa.DataFrameSchema) -> Union[None|pd.DataFrame]:
     try:
-        validated_df = schema.validate(df, lazy=True)
+        schema.validate(df, lazy=True)
         return None
     except pa.errors.SchemaErrors as e:
         err_df: pd.DataFrame = e.failure_cases
@@ -75,7 +74,7 @@ def get_fails(df:pd.DataFrame, schema:pa.DataFrameSchema) -> Union[None|pd.DataF
 
 
 
-eq_map: List[str] = ["transparent", "pink", "#73ae80", "#90b2b3", "#6c83b5", "brown"];
+eq_map: List[str] = ["transparent", "pink", "#73ae80", "#90b2b3", "#6c83b5", "brown"]
 def make_col_config_overrides(df:pd.DataFrame):
     column_config_overrides = {}
     column:str
