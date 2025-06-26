@@ -8,8 +8,6 @@ from buckaroo.styling_helpers import obj_, pinned_histogram
 
 
 def calculate_error_color_num(error_cross_df:pd.DataFrame) -> pd.DataFrame:
-
-
     orig_column_errortype_count = defaultdict(lambda : 0)
     tuple_col_num = {}
     for col, err_type in error_cross_df.columns:
@@ -29,7 +27,7 @@ def calculate_error_color_num(error_cross_df:pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(_error_num_data)  # this will be used to uniquely highlight error states
 
 
-def get_column_reason_series(col_errors_df:pd.DataFrame): #  -> pd.Series[str]:
+def get_column_reason_series(col_errors_df:pd.DataFrame) -> pd.Series[str]:
     """
     This function is about as far as possible from a vectorized operation.
 
@@ -63,7 +61,14 @@ def get_reason_df(cross_errors_df:pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(reason_data)    
 
 
-def get_fails(df:pd.DataFrame, schema:pa.DataFrameSchema) -> Union[None|pd.DataFrame]:
+def get_fails(df:pd.DataFrame, schema:pa.DataFrameSchema) -> Union[None, pd.DataFrame]:
+    """
+      validate the dataframe with the schema.  Return any errors as a dataframe,
+      if there are no errors return None
+
+      I wish I had tests to show the actual example dataframes coming out of this function
+      the index formatting is very important
+      """
     try:
         schema.validate(df, lazy=True)
         return None
@@ -75,7 +80,24 @@ def get_fails(df:pd.DataFrame, schema:pa.DataFrameSchema) -> Union[None|pd.DataF
 
 
 eq_map: List[str] = ["transparent", "pink", "#73ae80", "#90b2b3", "#6c83b5", "brown"]
-def make_col_config_overrides(df:pd.DataFrame):
+def make_col_config_overrides(df:pd.DataFrame): # -> OverrideColumnConfig
+    """
+      This generates col_config_overrides given an orginal dataframe
+
+      This sets up the colormap config for each original column, linked to a _color column and _reason column
+      it also hides the _color and _reason columns
+
+
+
+    BaseColumnConfig = TypedDict('BaseColumnConfig', {
+      'displayer_args': DisplayerArgs,
+      'color_map_config': NotRequired[ColorMappingConfig],
+      'tooltip_config': NotRequired[TooltipConfig],
+      'ag_grid_specs': NotRequired[Dict[str, Any]]})  # AGGrid_ColDef
+
+    OverrideColumnConfig:TypeAlias = Dict[str, BaseColumnConfig]
+
+      """
     column_config_overrides = {}
     column:str
     for column in df.columns:
@@ -95,10 +117,12 @@ def BuckarooPandera(df:pd.DataFrame, schema:pa.DataFrameSchema):
     if error_df is None:
         print("all checks pass")
         return BuckarooInfiniteWidget(df)
+    #these crosstab calls are necessary to pull the pandera results out into a useable format
     cross_df1 = pd.crosstab(error_df['error_index'], [error_df['column'], error_df['check']])
     cross_df1 = cross_df1.astype('Int64').replace(0, pd.NA).dropna(axis=1, how='all')
     color_df = calculate_error_color_num(cross_df1)
     reason_df = get_reason_df(cross_df1)
+    #join the color columns with the reason columns and the original df
     complete_df = df.join(color_df, how='outer').join(reason_df, how='outer')
     cco = make_col_config_overrides(df)
 
