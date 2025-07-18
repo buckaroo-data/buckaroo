@@ -4,6 +4,7 @@ import traceback
 import polars as pl
 
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, RawDFViewerWidget
+from buckaroo.df_util import old_col_new_col
 from .customizations.polars_analysis import PL_Analysis_Klasses
 from .pluggable_analysis_framework.polars_analysis_management import (
     PlDfStats)
@@ -76,17 +77,22 @@ class PolarsBuckarooWidget(BuckarooWidget):
         return pd_to_obj(self.sampling_klass.serialize_sample(df.to_pandas()))
 
 
+def prepare_df_for_serialization(df:pl.DataFrame) -> pl.DataFrame:
+    # I don't like this copy.  modify to keep the same data with different names
+    return df.select([pl.col(old_col).alias(new_col) for old_col, new_col in old_col_new_col(df)])
+
+
 def to_parquet(df):
     # I don't like this copy.  modify to keep the same data with different names
     #df2 = df.copy()
     
-    df.columns = [str(x) for x in df.columns]
+
     #obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
     #encodings = {k:'json' for k in obj_columns}
 
     out = BytesIO()
 
-    df.with_row_index().write_parquet(out, compression='uncompressed') #engine='fastparquet', object_encoding=encodings)
+    prepare_df_for_serialization(df).with_row_index().write_parquet(out, compression='uncompressed') #engine='fastparquet', object_encoding=encodings)
     out.seek(0)
     return out.read()
 
@@ -94,7 +100,6 @@ def to_parquet(df):
 class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget):
     def _handle_payload_args(self, new_payload_args):
         start, end = new_payload_args['start'], new_payload_args['end']
-        print("payload_args changed", start, end)
         _unused, processed_df, merged_sd = self.dataflow.widget_args_tuple
         if processed_df is None:
             return

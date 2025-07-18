@@ -2,10 +2,11 @@ import pytest
 import pandas as pd
 from IPython.display import display
 from buckaroo.buckaroo_widget import BuckarooWidget
+from buckaroo.ddd_library import get_multindex_cols_df
 from buckaroo.pluggable_analysis_framework.analysis_management import PERVERSE_DF
 from .fixtures import (word_only_df)
 from buckaroo.serialization_utils import (DuplicateColumnsException)
-from buckaroo.dataflow.dataflow_extras import StylingAnalysis
+from buckaroo.dataflow.styling_core import StylingAnalysis
 
 from buckaroo.customizations.analysis import (TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
 from buckaroo.customizations.histogram import (Histogram)
@@ -94,8 +95,6 @@ def test_interpreter():
     temp_ops = w.operations.copy()
     temp_ops.append([{"symbol":"dropcol"},{"symbol":"df"},"str_col"])
 
-    print("setting operations")
-    print("-"*80)
     w.operations = temp_ops
 
     tdf = w.dataflow.cleaned_df
@@ -116,14 +115,17 @@ def test_string_column_handling():
     If the front end is passed numeric column names, nothing works, and no error is thrown
     """
     
-    df = pd.DataFrame([["a","b","c"]], columns=[10,20,30])
+    df = pd.DataFrame([["foo","bar","baz"]], columns=[10,20,30])
     bw = BuckarooWidget(df)
-    # print(bw.df_data_dict['main'])
-    # print(bw.df_display_args['main']['df_viewer_config']['column_config'])
-    #we want the column to be named the string '10' not the number t10
-    assert bw.df_display_args['main']['df_viewer_config']['column_config'][1]['col_name'] == '10'
-    assert bw.df_data_dict['main'] == [{'index': 0, '10': 'a', '20': 'b', '30': 'c'}]
-    assert bw.df_display_args['main']['df_viewer_config']['column_config'][1]['tooltip_config']['val_column'] == '10'
+    #we want the  column have col_name 'a' and the header_name to be 10
+    bw.df_display_args['main']['df_viewer_config']['column_config'][0]
+    ten_col = bw.df_display_args['main']['df_viewer_config']['column_config'][0]
+    assert ten_col['col_name'] == 'a'  # this is the field that ag-grid will read from
+    assert ten_col['header_name'] == '10'  # this should be a string
+    
+    assert bw.df_data_dict['main'] == [{'index': 0, 'a': 'foo', 'b': 'bar', 'c': 'baz', 'level_0':0}]
+    assert ten_col['tooltip_config'] == {'tooltip_type': 'simple', 'val_column': 'a'}
+
 
 
 def test_non_unique_column_names():
@@ -188,7 +190,13 @@ def test_quick_commands_run():
     #assert bw.operations == [[sQ('search'), s('df'), "col", "aa"]]
 
 
+def test_multi_index_cols() -> None:
+    df = get_multindex_cols_df()
+    bw = BuckarooWidget(df)
+    col_config = bw.df_display_args['main']['df_viewer_config']['column_config']
 
+    assert col_config[0]['col_path'] == ('foo', 'a')
+    assert col_config[1]['col_path'] == ('foo', 'b')
     
 def atest_symbol_meta():    
     """verifies that a symbol with a meta key can be added and
@@ -270,3 +278,9 @@ def test_auto_clean_preserve_error():
         "search_string": "",
         "quick_command_args": {}}
     
+def test_get_story_config():
+    df = get_multindex_cols_df()
+    bw = BuckarooWidget(df)
+    bw.get_story_config(test_name="basic_widget_test")
+    #fix this when there is more debugging done
+    #assert bw.get_story_config(test_name="basic_widget_test") == ""

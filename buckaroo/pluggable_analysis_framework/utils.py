@@ -5,14 +5,6 @@ import pandas as pd
 import numpy as np
 from pandas.util import hash_pandas_object
 
-BASE_COL_HINT = {
-    'type':'string',
-    'is_numeric': False,
-    'is_integer': None,
-    'min_digits':None,
-    'max_digits':None,
-    'formatter':None,
-    'histogram': []}
 
 FAST_SUMMARY_WHEN_GREATER = 1_000_000
 

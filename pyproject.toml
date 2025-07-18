@@ -36,7 +36,7 @@ dependencies = [
     "fastparquet"
 ]
 
-version = "0.10.5"
+version = "0.11.0"
 
 
 [project.license]
@@ -108,6 +108,25 @@ path = "scripts/hatch_build.py"
 [tool.hatch.envs.default]
 installer = "uv"
 
+[tool.basedpyright]
+# include = ["src"]
+
+exclude = ["**/node_modules",
+     "**/__pycache__"]
+#     "src/experimental",
+#     "src/typestubs"
+# ]
+# ignore = ["src/oldstuff"]
+# defineConstant = { DEBUG = true }
+# stubPath = "src/stubs"
+
+reportMissingImports = "error"
+reportMissingTypeStubs = false
+
+pythonVersion = "3.8"
+
+[tool.basedpyright.analysis.inlayHints]
+callArgumentNames = false
 
 [tool.isort]
 profile = "black"

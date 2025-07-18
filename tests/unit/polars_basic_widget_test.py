@@ -1,12 +1,14 @@
+import os
 import polars as pl
 from polars import functions as F
 import numpy as np
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import (
     PolarsAnalysis, polars_produce_series_df)
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
+from buckaroo.pluggable_analysis_framework.col_analysis import (
     ColAnalysis)
+
 from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
-from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget
+from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget, to_parquet
 from buckaroo.dataflow.dataflow import StylingAnalysis
 from buckaroo.jlisp.lisp_utils import (s, sQ)
 
@@ -18,8 +20,9 @@ def test_basic_instantiation():
 EXPECTED_DF_VIEWER_CONFIG = {
     'pinned_rows': [],
     'column_config': [
-        {'col_name': 'index', 'displayer_args': {'displayer': 'obj'}},
-        {'col_name': 'normal_int_series', 'displayer_args': {'displayer': 'obj'}}],
+        {'col_name':'a', 'header_name': 'normal_int_series', 'displayer_args': {'displayer': 'obj'}}],
+    'left_col_configs': [{'col_name': 'index', 'header_name': 'index',
+                         'displayer_args': {'displayer': 'obj'}}],
     'component_config': {},
     'extra_grid_config': {},
 }
@@ -48,7 +51,7 @@ def test_polars_all_stats():
     sdf, errs = polars_produce_series_df(
         test_df, [SelectOnlyAnalysis], 'test_df', debug=True)
     expected = {
-        'normal_int_series':  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0}}
+        'a':  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0, 'rewritten_col_name':'a', 'orig_col_name':'normal_int_series'}}
     #dsdf = replace_in_dict(sdf, [(np.nan, None)])
     class SimplePolarsBuckaroo(PolarsBuckarooWidget):
         analysis_klasses= [SelectOnlyAnalysis, StylingAnalysis]
@@ -57,9 +60,11 @@ def test_polars_all_stats():
     assert spbw.dataflow.merged_sd == expected
 
     assert spbw.df_data_dict['all_stats'] == [
-        {'index': 'null_count', 'normal_int_series': 0.0},
-        {'index': 'mean', 'normal_int_series': 2.5},
-        {'index': 'quin99', 'normal_int_series': 4.0}]
+        {'index': 'orig_col_name', 'a': 'normal_int_series', 'level_0':'orig_col_name'},
+        {'index': 'rewritten_col_name', 'a': 'a', 'level_0':'rewritten_col_name'},
+        {'index': 'null_count', 'a': 0.0, 'level_0':'null_count'},
+        {'index': 'mean', 'a': 2.5, 'level_0':'mean'},
+        {'index': 'quin99', 'a': 4.0, 'level_0':'quin99'}]
     assert spbw.df_display_args['main']['df_viewer_config'] == EXPECTED_DF_VIEWER_CONFIG
 
 def test_polars_boolean():
@@ -86,7 +91,7 @@ def test_pandas_all_stats():
 
     just make sure this doesn't fail"""
     from buckaroo.buckaroo_widget import BuckarooWidget
-    from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
+
     import pandas as pd
 
     pd_test_df = pd.DataFrame({
@@ -113,8 +118,7 @@ def test_pandas_all_stats():
 
     sbw = SimpleBuckaroo(pd_test_df)
     assert sbw.dataflow.merged_sd == {
-        'index': {'mean': 2.5, 'null_count': 0, 'quin99': 4.0, 'col_name':'index'},
-        'normal_int_series':  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0, 'col_name':'normal_int_series'}}
+        'a' :  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0, 'rewritten_col_name':'a', 'orig_col_name':'normal_int_series'}}
     assert sbw.df_display_args['main']['df_viewer_config'] == EXPECTED_DF_VIEWER_CONFIG
 
 
@@ -287,7 +291,29 @@ def test_polars_search():
 
     """
 
-    
-'''
-FIXME:test a large dataframe that forces sampling
-'''
+def get_named_col_pldf():
+    return pl.DataFrame({'foo':[1,2,3],
+                  'bar':["asdf","iiu", "asd999"],
+                  'baz':[True, False, True]
+                  })
+                  
+
+def test_serialize_regular_df():
+    df = get_named_col_pldf()
+    output = to_parquet(df)
+    #second_df = pd.read_parquet(output)
+    import polars as pl
+    second_df = pl.read_parquet(output)
+    assert set(second_df.columns) ==  set(['index','a','b','c'])
+
+def test_citibike_df():
+    from buckaroo.polars_buckaroo import PolarsBuckarooInfiniteWidget
+    print(os.getcwd())
+    citibike_df = pl.read_parquet("./docs/example-notebooks/citibike-trips-2016-04.parq")
+    PolarsBuckarooInfiniteWidget(citibike_df, debug=True)
+
+def test_citibike_minimal_failure():
+    import polars as pl
+    from buckaroo.polars_buckaroo import PolarsBuckarooInfiniteWidget
+    df = pl.read_parquet("./docs/example-notebooks/citibike-trips-2016-04.parq")
+    PolarsBuckarooInfiniteWidget(df)

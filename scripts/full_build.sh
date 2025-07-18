@@ -14,3 +14,6 @@ rm -rf dist || true
 uv build --wheel
 #time hatch build
 #python -m twine upload --repository pypi dist/*.whl
+#time ./scripts/full_build.sh && time
+#uv pip install --reinstall buckaroo@dist/buckaroo-0.10.5-py3-none-any.whl
+#./scripts/full_build.sh && uv pip install  buckaroo@dist/buckaroo-0.10.5-py3-none-any.whl && time python scripts/warm_imports.py 

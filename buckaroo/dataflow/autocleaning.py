@@ -137,7 +137,9 @@ class PandasAutocleaning:
         cols = {}
 
         changed = 0
-        for col, sd in cleaning_sd.items():
+        for rewritten_col, sd in cleaning_sd.items():
+
+            col = sd.get("orig_col_name")
             if col not in cleaned_df.columns:
                 continue
             if col == 'index':
@@ -181,7 +183,6 @@ class PandasAutocleaning:
             return None
 
         cleaning_ops, cleaning_sd = self.produce_cleaning_ops(df, cleaning_method)
-
         # [{'meta':'no-op'}] is a sentinel for the initial state
         if ops_eq(existing_operations, [{'meta':'no-op'}]) and cleaning_method == "":
             final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, [])

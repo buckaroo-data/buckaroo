@@ -433,8 +433,8 @@ div.dependent-tabs ul.tabs li.active {
 
 .histogram-component {
     margin:0;
-    border-left:1px solid #68686e;
-    border-right:1px solid #68686e;
+    /* border-left:1px solid #68686e; */
+    /* border-right:1px solid #68686e; */
 		
 	   
 }
@@ -589,3 +589,47 @@ div.cell-output-ipywidget-background {
 .cell-output-ipywidget-background .df-viewer  .theme-hanger{
     margin-top:-12px;
 }
+
+
+/* https://colorffy.com/dark-theme-generator?colors=b2317d-121212 */
+.ag-header-row .left_col_configs_header,
+.ag-row .left_col_configs_cell {
+    border-right:2px solid #717171 !important;
+}
+.ag-header-row .left_col_configs_header_last,
+.ag-row .left_col_configs_cell_last {
+
+    border-right:4px solid #717171 !important;
+    border-bottom:none;
+    border-top:none;
+
+}
+/* .ag-header-row .left_col_configs_header:first-child { */
+/*     border-left:4px solid pink !important; */
+/*     background:orange; */
+/* } */
+
+/* we don't want these applying to the status bar too*/
+.df-viewer .ag-header {
+    border-bottom:4px solid #717171 !important;
+}
+
+.df-viewer .ag-center-cols-viewport .ag-row:first-child {
+    /* first row at the top of regular rows */
+    border-top:2px solid #717171 !important;
+}
+
+/*
+.ag-floating-top {
+    border-bottom:3px solid teal;
+    border-bottom:3px solid red;
+
+}
+
+.ag-sticky-top {
+    border-top:7px solid white;
+    border-bottom:3px solid pink;
+}
+*/
+
+

@@ -1,16 +1,23 @@
+from typing import List, Literal, Tuple, Type, TypedDict, Dict as TDict, Any as TAny, Union
+from typing_extensions import override
 import six
 import warnings
 import pandas as pd
 from traitlets import Unicode, Any, observe, HasTraits, Dict
+
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, SDType
 from ..serialization_utils import pd_to_obj    
 from buckaroo.pluggable_analysis_framework.utils import (filter_analysis)
 from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
 from .autocleaning import SentinelAutocleaning
-from .dataflow_extras import (
-    EMPTY_DF_DISPLAY_ARG, merge_sds, merge_column_config,
-    style_columns, exception_protect, StylingAnalysis,
-    Sampling)
-
+from .dataflow_extras import (exception_protect, Sampling)
+from .styling_core import (
+    EMPTY_DF_DISPLAY_ARG,
+    ComponentConfig,
+    OverrideColumnConfig,
+    PinnedRowConfig,
+    merge_sd_overrides,
+    merge_sds, merge_column_config, StylingAnalysis)
 
 
 
@@ -84,7 +91,7 @@ class DataFlow(HasTraits):
 
 
     
-    def _compute_sampled_df(self, raw_df, sample_method):
+    def _compute_sampled_df(self, raw_df:pd.DataFrame, sample_method:str):
         if sample_method == "first":
             return raw_df[:1]
         return raw_df
@@ -92,12 +99,12 @@ class DataFlow(HasTraits):
 
     @observe('raw_df', 'sample_method')
     @exception_protect('sampled_df-protector')
-    def _sampled_df(self, change):
+    def _sampled_df(self, _change:Any) -> None:
         self.sampled_df = self._compute_sampled_df(self.raw_df, self.sample_method)
 
     @observe('sampled_df', 'cleaning_method', 'quick_command_args', 'operations')
     @exception_protect('operation_result-protector')
-    def _operation_result(self, change):
+    def _operation_result(self, _change:Any) -> None:
         """This function is really complex
 
         three main pieces with operations interact here.
@@ -129,8 +136,7 @@ class DataFlow(HasTraits):
             self.cleaned = result
             self.operations = result[3]
         self.operation_results = {'transformed_df':None,
-                                  'generated_py_code': self.generated_code,
-                                  }
+                                  'generated_py_code': self.generated_code}
 
     @property
     def cleaned_df(self):
@@ -173,19 +179,18 @@ class DataFlow(HasTraits):
         return None
 
     @property
-    def processed_sd(self):
+    def processed_sd(self) -> SDType:
         if self.processed_result is not None:
             return self.processed_result[1]
         return {}
 
-    def _get_summary_sd(self, df):
+    def _get_summary_sd(self, df:pd.DataFrame) -> Tuple[SDType, TAny]:
         analysis_klasses = self.analysis_klasses
         if analysis_klasses == "foo":
             return {'some-col': {'foo':8}}, {}
         if analysis_klasses == "bar":
             return {'other-col': {'bar':10}}, {}
-        index_name = df.index.name or "index"
-        ret_summary = {index_name: {}}
+        ret_summary = {}
         for col in df.columns:
             ret_summary[col] = {}
         return ret_summary, {}
@@ -204,14 +209,9 @@ class DataFlow(HasTraits):
         #summary_sd, given that processed_df is computed first. My
         #thinking was that processed_sd has greater total knowledge
         #and should supersede summary_sd.
-        self.merged_sd = merge_sds(self.cleaned_sd, self.summary_sd, self.processed_sd)
 
-    def _get_dfviewer_config(self, sd, style_method):
-        dfviewer_config = style_columns(style_method, sd)
-        base_column_config = dfviewer_config['column_config']
-        dfviewer_config['column_config'] =  merge_column_config(
-            base_column_config, self.column_config_overrides)
-        return dfviewer_config
+        self.merged_sd = merge_sds(self.cleaned_sd, self.summary_sd, self.processed_sd)
+        
 
     @observe('merged_sd', 'style_method')
     @exception_protect('widget_config-protector')
@@ -221,22 +221,35 @@ class DataFlow(HasTraits):
         # self.widget_args_tuple = [self.processed_df, self.merged_sd, dfviewer_config]
         self.widget_args_tuple = (id(self.processed_df), self.processed_df, self.merged_sd)
 
+BuckarooOptions = TypedDict('BuckarooOptions', {
+    'sampled': List[str],
+    'auto_clean': List[str],
+    'post_processing': List[str],
+    'df_display': List[str],
+    # this is a weird one I think it's a List of Literals, I forget.
+    # It's odd in the frontend too
+    'show_commands': List[str],  
+    'summary_stats': List[str],
+    })
 
+    
 class CustomizableDataflow(DataFlow):
     """
     This allows targetd extension and customization of DataFlow
     """
-    analysis_klasses = [StylingAnalysis]
+    #analysis_klasses = [StylingAnalysis]
+    analysis_klasses: List[Type[ColAnalysis]] = [StylingAnalysis]
     command_config = Dict({}).tag(sync=True)
     DFStatsClass = DfStats
     sampling_klass = Sampling
-    df_display_klasses = {}
+
+    df_display_klasses: TDict[str, Type[StylingAnalysis]]  = {}
     operations = Any([{'meta':'no-op'}]).tag(sync=True)
 
     def __init__(self, orig_df, debug=False,
-                 column_config_overrides=None,
-                 pinned_rows=None, extra_grid_config=None,
-                 component_config=None, init_sd=None, skip_main_serial=False):
+                 column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
+                 pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
+                 component_config:Union[Literal[None], ComponentConfig]=None, init_sd=None, skip_main_serial=False):
         if init_sd is None:
             self.init_sd = {}
         else:
@@ -271,7 +284,8 @@ class CustomizableDataflow(DataFlow):
         new_buckaroo_options['cleaning_method'] = list(self.ac_obj.config_dict.keys())
         self.buckaroo_options = new_buckaroo_options
 
-    def populate_df_meta(self):
+    @override
+    def populate_df_meta(self) -> None:
         if self.processed_df is None:
             self.df_meta = {
                 'columns': 0,
@@ -288,7 +302,9 @@ class CustomizableDataflow(DataFlow):
             'rows_shown': min(len(self.processed_df), self.sampling_klass.serialize_limit),  
             'total_rows': len(self.orig_df)}
 
-    buckaroo_options = Dict({
+    #typing compalins about this, but so far as this class is concerned, buckaroo_options follows theBuckarooOptions type
+    # typing doesn't get along well with traitlets
+    buckaroo_options:BuckarooOptions = Dict({
         'sampled': ['random'],
         'auto_clean': ['aggressive', 'conservative'],
         'post_processing': [],
@@ -337,7 +353,18 @@ class CustomizableDataflow(DataFlow):
         #summary_sd, given that processed_df is computed first. My
         #thinking was that processed_sd has greater total knowledge
         #and should supersede summary_sd.
-        self.merged_sd = merge_sds(self.init_sd, self.cleaned_sd, self.summary_sd, self.processed_sd)
+
+        if self.processed_df is None:
+            #on initial startup
+            self.merged_sd = merge_sds(self.init_sd, self.cleaned_sd, self.summary_sd, self.processed_sd)
+            return
+
+        #we do this to get rewrtten keys for init_sd
+        rewritten_init_sd = merge_sd_overrides({}, self.processed_df, self.init_sd)
+        intermediate_sd = merge_sds(rewritten_init_sd, self.cleaned_sd, self.summary_sd)
+        self.merged_sd  = merge_sd_overrides(
+            intermediate_sd, self.processed_df, self.processed_sd)
+
 
 
     ### start code interpreter block
@@ -351,13 +378,14 @@ class CustomizableDataflow(DataFlow):
         self.ac_obj.run_code_generator(operations)
     ### end code interpeter block
 
-    def _compute_processed_result(self, cleaned_df, post_processing_method):
+    @override
+    def _compute_processed_result(self, cleaned_df:pd.DataFrame, post_processing_method:str) -> Tuple[pd.DataFrame, SDType]:
         if post_processing_method == '':
-            return [cleaned_df, {}]
+            return (cleaned_df, {})
         else:
             post_analysis = self.post_processing_klasses[post_processing_method]
             try:
-                ret_df, sd =  post_analysis.post_process_df(cleaned_df)
+                ret_df, sd = post_analysis.post_process_df(cleaned_df)
                 return (ret_df, sd)
             except Exception as e:
                 return (self._build_error_dataframe(e), {})
@@ -367,8 +395,9 @@ class CustomizableDataflow(DataFlow):
 
 
     ### start summary stats block
-
-    def _get_summary_sd(self, processed_df):
+    #TAny closer to some error type
+    @override
+    def _get_summary_sd(self, processed_df:pd.DataFrame) -> Tuple[SDType, TDict[str, TAny]]:
         stats = self.DFStatsClass(
             processed_df,
             self.analysis_klasses,
@@ -385,18 +414,15 @@ class CustomizableDataflow(DataFlow):
 
     # ### end summary stats block        
 
-    def _sd_to_jsondf(self, sd):
+    def _sd_to_jsondf(self, sd:SDType):
         """exists so this can be overriden for polars  """
         temp_sd = sd.copy()
-        #FIXME add actual test around weird index behavior
-        if 'index' in temp_sd:
-            del temp_sd['index']
         return self._df_to_obj(pd.DataFrame(temp_sd))
 
-    def _df_to_obj(self, df:pd.DataFrame):
+    def _df_to_obj(self, df:pd.DataFrame) -> TDict[str, TAny]:
         return pd_to_obj(self.sampling_klass.serialize_sample(df))
     
-    def add_analysis(self, analysis_klass):
+    def add_analysis(self, analysis_klass:Type[ColAnalysis]) -> None:
         """
         same as get_summary_sd, call whatever to set summary_sd and trigger further comps
         """
@@ -420,6 +446,7 @@ class CustomizableDataflow(DataFlow):
         """
        put together df_dict for consumption by the frontend
         """
+       # Tuple[TAny, pd.DataFrame, SDType]
         _unused, processed_df, merged_sd = self.widget_args_tuple
         if processed_df is None:
             return
@@ -442,12 +469,11 @@ class CustomizableDataflow(DataFlow):
 
         temp_display_args = {}
         for display_name, A_Klass in self.df_display_klasses.items():
-            df_viewer_config = A_Klass.style_columns(merged_sd)
+            df_viewer_config = A_Klass.get_dfviewer_config(merged_sd, processed_df)
             base_column_config = df_viewer_config['column_config']
             df_viewer_config['column_config'] =  merge_column_config(
-                base_column_config, self.column_config_overrides)
+                base_column_config, self.processed_df, self.column_config_overrides)
             disp_arg = {'data_key': A_Klass.data_key,
-                        #'df_viewer_config': json.loads(json.dumps(df_viewer_config)),
                         'df_viewer_config': df_viewer_config,
                         'summary_stats_key': A_Klass.summary_stats_key}
             temp_display_args[display_name] = disp_arg

@@ -3,26 +3,42 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { ColumnsEditor } from "../components/ColumnsEditor";
 import { Operation } from "../components/OperationUtils";
 import { OperationResult } from "../components/DependentTabs";
-import { DFViewerConfig } from "../components/DFViewerParts/DFWhole";
+import { DFViewerConfig, NormalColumnConfig } from "../components/DFViewerParts/DFWhole";
 import "../style/dcf-npm.css"
 import { sampleOperations, bakedCommandConfig, dataCleaningOps, manyOperations } from "../components/OperationExamples";
+
+
+const INDEX_COL_CONFIG : NormalColumnConfig  = {
+          col_name: 'index',
+	  header_name: 'index',
+          displayer_args: {
+            displayer: 'string',
+          },
+        }
+
+const left_col_configs = [INDEX_COL_CONFIG];
+
 
 const df_viewer_config: DFViewerConfig = {
   column_config: [
     {
       col_name: "index",
+      header_name: "index",
       displayer_args: { displayer: "integer", min_digits: 3, max_digits: 5 },
     },
     {
       col_name: "svg_column",
+      header_name: "svg_column",
       displayer_args: { displayer: "SVGDisplayer" },
     },
     {
       col_name: "link_column",
+      header_name: "link_column",
       displayer_args: { displayer: "linkify" },
     },
     {
       col_name: "nanObject",
+      header_name: "nanObject",
       displayer_args: { displayer: "integer", min_digits: 3, max_digits: 5 },
       color_map_config: {
         color_rule: "color_map",
@@ -34,6 +50,7 @@ const df_viewer_config: DFViewerConfig = {
   extra_grid_config: { rowHeight: 105 },
   component_config: { height_fraction: 1 },
   pinned_rows: [],
+  left_col_configs
 };
 
 const baseOperationResults: OperationResult = {
@@ -41,6 +58,7 @@ const baseOperationResults: OperationResult = {
     dfviewer_config: {
       pinned_rows: [],
       column_config: [],
+      left_col_configs
     },
     data: [],
   },

@@ -1,7 +1,7 @@
 import pandas as pd
 from buckaroo.customizations.analysis import (
     DefaultSummaryStats, PdCleaningStats)
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
+from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
 from buckaroo.customizations.pandas_commands import (

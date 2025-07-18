@@ -8,9 +8,12 @@
 TODO: Add module docstring
 """
 import traceback
+from typing import Literal, Union
 import pandas as pd
+import json
 import logging
-
+import random
+import string
 
 from traitlets import List, Dict, observe, Unicode, Any
 import anywidget
@@ -20,12 +23,13 @@ from .customizations.histogram import (Histogram)
 from .customizations.pd_autoclean_conf import (CleaningConf, NoCleaningConf, AggressiveAC, ConservativeAC)
 from .customizations.styling import (DefaultSummaryStatsStyling, DefaultMainStyling, CleaningDetailStyling)
 from .pluggable_analysis_framework.analysis_management import DfStats
-from .pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
+from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.extension_utils import copy_extend
 
 from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet
-from .dataflow.dataflow import CustomizableDataflow, StylingAnalysis
-from .dataflow.dataflow_extras import (Sampling, exception_protect, merge_column_config)
+from .dataflow.dataflow import CustomizableDataflow
+from .dataflow.dataflow_extras import (Sampling, exception_protect)
+from .dataflow.styling_core import (ComponentConfig, DFViewerConfig, DisplayArgs, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
 from .dataflow.autocleaning import PandasAutocleaning
 from pathlib import Path
 
@@ -50,9 +54,6 @@ class PdSampling(Sampling):
     pre_limit = 1_000_000
 
 
-def sym(name):
-    return {'symbol':name}
-
 symDf = SymbolDf = {'symbol': 'df'}
 
 
@@ -71,6 +72,7 @@ def bidirectional_wire(outer_instance, inner_instance, prop_name):
     outer_val, inner_val = getattr(outer_instance, prop_name), getattr(inner_instance, prop_name)
     if not inner_val == outer_val:
         setattr(outer_instance, prop_name, inner_val)
+
     
 class BuckarooWidgetBase(anywidget.AnyWidget):
     """Extends CustomizableDataFlow and DOMWIdget
@@ -81,12 +83,31 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     """
 
 
+    def get_story_config(self, include_summary_stats=False, test_name=None) -> str:
+        df = self.dataflow.processed_df
+        if len(df) > 100 or len(df.columns) > 20:
+            raise Exception("This dataframe or columns is pretty big, you don't want to serialize it")
+        args_dict = {'args':
+             {'data': pd_to_obj(self.dataflow.processed_df),
+            'df_viewer_config': self.dataflow.df_display_args[self.buckaroo_state['df_display']]['df_viewer_config'],
+            'secondary_df_viewer_config': EMPTY_DFVIEWER_CONFIG}}
+        args_dict['args']['summary_stats_data'] = []
+        if include_summary_stats:
+            1/0 # not supported yet
+            # summary_stats data is big, and most of the time you won't want to serialize it
+            #args_dict['summary_stats_data'] = {} #desrialize here
+
+        test_name = test_name or ''.join(random.choices(string.ascii_letters, k=8))
+        args_json_str = json.dumps(args_dict, indent=4)
+        code_str = f"export const {test_name} :Story = {args_json_str}"
+        return code_str
+        
 
     def __init__(self, orig_df, debug=False,
-                 column_config_overrides=None,
-                 pinned_rows=None, extra_grid_config=None,
-                 component_config=None, init_sd=None,
-                 skip_main_serial=False):
+        column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
+        pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
+        component_config:Union[Literal[None], ComponentConfig]=None,
+        init_sd=None, skip_main_serial=False):
         """
         BuckarooWidget was originally designed to extend CustomizableDataFlow
 
@@ -146,7 +167,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
 
 
     df_data_dict = Dict({}).tag(sync=True)
-    df_display_args = Dict({}).tag(sync=True)
+    df_display_args: DisplayArgs = Dict({}).tag(sync=True)
     #information about the dataframe
     df_meta = Dict({
         'columns': 5, # dummy data
@@ -217,9 +238,6 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     def _sd_to_jsondf(self, sd):
         """exists so this can be overriden for polars  """
         temp_sd = sd.copy()
-        #FIXME add actual test around weird index behavior
-        if 'index' in temp_sd:
-            del temp_sd['index']
         return self._df_to_obj(pd.DataFrame(temp_sd))
 
 
@@ -240,18 +258,11 @@ class RawDFViewerWidget(BuckarooWidgetBase):
         {'a':  5  , 'b':20, 'c': 'Paddy'},
         {'a': 58.2, 'b': 9, 'c': 'Margaret'}]).tag(sync=True)
 
-    df_viewer_config = Dict({
-        'column_config': [
-            { 'col_name': 'a',
-              'displayer_args': { 'displayer': 'float',   'min_fraction_digits': 2, 'max_fraction_digits': 8 }},
-            { 'col_name': 'b',
-              'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 }},
-            { 'col_name': 'c',
-              'displayer_args': { 'displayer': 'string',  'min_digits': 3, 'max_digits': 5 }}],
-        'pinned_rows': [
-            { 'primary_key_val': 'dtype', 'displayer_args': { 'displayer': 'obj' }},
-            { 'primary_key_val': 'mean', 'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 }}]}
-                            ).tag(sync=True)
+    df_viewer_config: DFViewerConfig = Dict({
+        'column_config': [],
+        'pinned_rows': [],
+        'first_col_configs':[]}).tag(sync=True)
+
 
     summary_stats_data = List([
         { 'index': 'mean',  'a':      28,   'b':      14, 'c': 'Padarget' },
@@ -309,10 +320,10 @@ class BuckarooInfiniteWidget(BuckarooWidget):
 
         temp_display_args = {}
         for display_name, A_Klass in self.dataflow.df_display_klasses.items():
-            df_viewer_config = A_Klass.style_columns(merged_sd)
+            df_viewer_config = A_Klass.get_dfviewer_config(merged_sd, processed_df)
             base_column_config = df_viewer_config['column_config']
             df_viewer_config['column_config'] =  merge_column_config(
-                base_column_config, self.dataflow.column_config_overrides)
+                base_column_config, self.dataflow.processed_df, self.dataflow.column_config_overrides)
             disp_arg = {'data_key': A_Klass.data_key,
                         #'df_viewer_config': json.loads(json.dumps(df_viewer_config)),
                         'df_viewer_config': df_viewer_config,
@@ -330,9 +341,10 @@ class BuckarooInfiniteWidget(BuckarooWidget):
 
 
     def __init__(self, orig_df, debug=False,
-                 column_config_overrides=None,
-                 pinned_rows=None, extra_grid_config=None,
-                 component_config=None, init_sd=None):
+        column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
+        pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
+        component_config:Union[Literal[None], ComponentConfig]=None,
+        init_sd=None):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
                          extra_grid_config, component_config, init_sd,
                          skip_main_serial=True)
@@ -393,9 +405,10 @@ class DFViewerInfinite(BuckarooInfiniteWidget):
     df_id = Unicode("unknown").tag(sync=True)
 
     def __init__(self, orig_df, debug=False,
-                 column_config_overrides=None,
-                 pinned_rows=None, extra_grid_config=None,
-                 component_config=None, init_sd=None):
+        column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
+        pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
+        component_config:Union[Literal[None], ComponentConfig]=None,
+        init_sd=None):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
                          extra_grid_config, component_config, init_sd)
         self.df_id = str(id(orig_df))

@@ -1,14 +1,16 @@
 import pandas as pd
 import unittest
 import graphlib
+from buckaroo.df_util import to_chars
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
-    ColAnalysis, order_analysis, check_solvable, NotProvidedException, SelfCycle)
+    order_analysis, check_solvable, NotProvidedException, SelfCycle)
 from buckaroo.pluggable_analysis_framework.utils import cache_series_func, hash_series
 
 
 from .fixtures import (DistinctCount, Len, DistinctPer, DCLen, DependsNoProvides)
 
-class NoRoute(ColAnalysis):    
+class NoRoute(ColAnalysis):
     provides_defaults = {'not_used': False}
     requires_summary = ["does_not_exist"]
 
@@ -188,3 +190,11 @@ class TestCacheSeriesFunc(unittest.TestCase):
         assert myfunction3.counter == 255
         [myfunction3(ser) for ser in all_sers]
         assert myfunction3.counter == 258 # we had to re-execute some functions 
+
+
+    def test_to_chars(self):
+        assert to_chars(0) == 'a'
+        assert to_chars(1) == 'b'
+        assert to_chars(25) == 'z'
+        assert to_chars(26) == 'ba'  #should be aa
+        assert to_chars(27) == 'bb'

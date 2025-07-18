@@ -1,12 +1,20 @@
 import numpy as np
 import pandas as pd
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
+from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 
 test_df = pd.DataFrame({
         'normal_int_series' : pd.Series([1,2,3,4]),
         'empty_na_ser' : pd.Series([], dtype="Int64"),
         'float_nan_ser' : pd.Series([3.5, np.nan, 4.8])
     })
+
+test_multi_index_df = pd.DataFrame({
+    'normal_int_series' : pd.Series([1,2,3,4]),
+    'empty_na_ser' : pd.Series([], dtype="Int64"),
+    'float_nan_ser' : pd.Series([3.5, np.nan, 4.8])})
+
+test_multi_index_df.columns = pd.MultiIndex.from_tuples(
+[('foo', 'normal_int_series'), ('foo', 'empty_na_ser'), ('bar', 'float_nan_ser')])
 
 word_only_df = pd.DataFrame({'letters': 'h o r s e'.split(' ')})
 

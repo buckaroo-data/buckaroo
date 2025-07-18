@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { DFViewerInfinite } from "../components/DFViewerParts/DFViewerInfinite";
-import { DFViewerConfig } from "../components/DFViewerParts/DFWhole";
+import { DFViewerConfig, NormalColumnConfig } from "../components/DFViewerParts/DFWhole";
 import { SetColumnFunc } from "../components/DFViewerParts/gridUtils";
 import { DatasourceOrRaw, 
   rd } from "../components/DFViewerParts/DFViewerDataHelper";
@@ -70,6 +70,18 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+
+const INDEX_COL_CONFIG : NormalColumnConfig = {
+          col_name: 'index',
+	  header_name: 'index',
+          displayer_args: {
+            displayer: 'string',
+          },
+        }
+
+const left_col_configs = [INDEX_COL_CONFIG];
+
+
 export const Primary: Story = {
   args: {
     data_wrapper:rd,
@@ -77,6 +89,7 @@ export const Primary: Story = {
       column_config: [
       {
         col_name: 'a',
+        header_name: 'a1',
         displayer_args: {
           displayer: 'float',
           min_fraction_digits: 2,
@@ -86,6 +99,7 @@ export const Primary: Story = {
       },
       {
         col_name: 'a',
+        header_name: 'a2',
         displayer_args: {
           displayer: 'integer',
           min_digits:2, max_digits:3
@@ -93,12 +107,14 @@ export const Primary: Story = {
       },
       {
         col_name: 'b',
+        header_name: 'b',
         displayer_args: {
           displayer: 'obj',
         },
       },
     ],
-    pinned_rows:[]
+      pinned_rows:[],
+      left_col_configs
   },
   
     }

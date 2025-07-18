@@ -2,7 +2,7 @@ import polars as pl
 from buckaroo.customizations.polars_analysis import (
     VCAnalysis, PLCleaningStats, BasicAnalysis)
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlDfStats
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
+from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.dataflow.autocleaning import merge_ops, format_ops, AutocleaningConfig
 from buckaroo.polars_buckaroo import PolarsAutocleaning
 from buckaroo.customizations.polars_commands import (
@@ -58,10 +58,10 @@ def test_ops_gen():
 
 def test_format_ops():
     column_meta = {
-        'a': {'cleaning_ops':SAFE_INT_TOKEN },
+        'a': {'cleaning_ops':SAFE_INT_TOKEN, 'orig_col_name':'a', },
         'b': {'cleaning_ops': [
             {'symbol': 'replace_dirty', 'meta':{'auto_clean': True}},
-            {'symbol': 'df'}, '\n', None]}}
+            {'symbol': 'df'}, '\n', None], 'orig_col_name':'b'}}
 
     expected_ops = [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a'],

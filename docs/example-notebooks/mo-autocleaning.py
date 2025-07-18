@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.13.6"
+__generated_with = "0.13.15"
 app = marimo.App(width="medium")
 
 
@@ -31,7 +31,29 @@ def _(mo):
 def _(MyAutocleaningBuckaroo, dirty_df):
     from buckaroo.buckaroo_widget import AutocleaningBuckaroo
     #MyAutocleaningBuckaroo(pd.concat([dirty_df]*3000)) # to see how this works on more rows
-    MyAutocleaningBuckaroo(dirty_df)
+    mybw = MyAutocleaningBuckaroo(dirty_df)
+    mybw
+    return
+
+
+@app.cell
+def _(pd):
+    def clean(df):
+        TRUE_SYNONYMS = ['true', 'yes', 'on', '1']
+        FALSE_SYNONYMS = ['false', 'no', 'off', '0']
+        _ser = df['mostly_bool']
+        _int_sanitize = _ser.replace(1, True).replace(0, False) 
+        _real_bools = _int_sanitize.isin([True, False])
+        _boolean_ser = _int_sanitize.where(_real_bools, pd.NA).astype('boolean')    
+        _str_ser = _ser.astype('string').str.lower().str.strip()
+        _trues = _str_ser.isin(TRUE_SYNONYMS).replace(False, pd.NA).astype('boolean')
+        _falses =  ~ (_str_ser.isin(FALSE_SYNONYMS).replace(False, pd.NA)).astype('boolean')
+        _combined = _boolean_ser.fillna(_trues).fillna(_falses)    
+
+        df['mostly_bool'] = _combined
+        return df
+    #cdf = clean(dirty_df.copy())
+    #cdf
     return
 
 
@@ -39,8 +61,8 @@ def _(MyAutocleaningBuckaroo, dirty_df):
 def _(pd):
     dirty_df = pd.DataFrame(
         {
-            "a": [10, 20, 30, 40, 10, 20.3, None, 8, 9, 10, 11, 20, None],
-            "b": [
+            "untouched_a": [10, 20, 30, 40, 10, 20.3, None, 8, 9, 10, 11, 20, None],
+            "mostly_ints": [
                 "3",
                 "4",
                 "a",
@@ -119,7 +141,7 @@ def _(DataFrame, dirty_df, pd):
         only_numeric_str_ser = ser.str.replace(digits_and_period, "", regex=True)
         numeric_ser = pd.to_numeric(only_numeric_str_ser, errors="coerce") #, dtype_backend="pyarrow")
         return numeric_ser.astype('Int64')
-    DataFrame({'orig': dirty_df['b'], 'cleaned': strip_int_and_period(dirty_df['b'])})
+    DataFrame({'orig': dirty_df['mostly_ints'], 'cleaned': strip_int_and_period(dirty_df['mostly_ints'])})
     return re, strip_int_and_period
 
 
@@ -153,8 +175,8 @@ def _(pd, strip_int_and_period):
 @app.cell
 def _(dirty_df, strip_int_and_period_frac):
     #Try it out on dirty_df
-    {'a':           strip_int_and_period_frac(dirty_df['a']),
-     'b':           strip_int_and_period_frac(dirty_df['b']),
+    {'untouched_a':           strip_int_and_period_frac(dirty_df['untouched_a']),
+     'mostly_ints':           strip_int_and_period_frac(dirty_df['mostly_ints']),
      'mostly_bool': strip_int_and_period_frac(dirty_df['mostly_bool'])}
     #so we can see that ['b'] is a good fit, the other two are not
     return
@@ -179,9 +201,8 @@ def _(mo):
 @app.cell
 def _(pd, strip_int_and_period_frac):
     # we have defined other functions in the buckaroo code
-    from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
-        ColAnalysis,
-    )
+    from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
+
     from buckaroo.customizations.heuristics import BaseHeuristicCleaningGenOps
     from buckaroo.jlisp.lisp_utils import s
     from buckaroo.customizations.pd_fracs import (str_bool_frac, regular_int_parse_frac, us_dates_frac, cache_series_func)

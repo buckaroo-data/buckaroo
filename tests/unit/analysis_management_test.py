@@ -1,6 +1,8 @@
 import unittest
+import warnings
 
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
+import pytest
+from buckaroo.pluggable_analysis_framework.col_analysis import (
     ColAnalysis)
 
 from buckaroo.pluggable_analysis_framework.analysis_management import (
@@ -8,11 +10,13 @@ from buckaroo.pluggable_analysis_framework.analysis_management import (
     #full_produce_summary_df,
     produce_series_df)
 
+from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import NotProvidedException
 from buckaroo.pluggable_analysis_framework.safe_summary_df import (output_full_reproduce)
 
 
 from buckaroo.customizations.analysis import (TypingStats, DefaultSummaryStats)
-from .fixtures import (test_df, df, DistinctCount, Len, DistinctPer, word_only_df,
+from tests.unit.test_utils import assert_dict_eq
+from .fixtures import (test_df, df, DistinctCount, Len, DistinctPer, test_multi_index_df, word_only_df,
                        empty_df, empty_df_with_columns)
 
 class DumbTableHints(ColAnalysis):
@@ -34,6 +38,27 @@ class AlwaysErr(ColAnalysis):
     def computed_summary(summary_dict):
         1/0
 
+class AlwaysErrButQuiet(ColAnalysis):
+    """
+      quiet=True makes analysis_management swallow the errors and return the defaults
+      """
+    provides_defaults = {'foo':30}
+    quiet = True
+
+    @staticmethod
+    def computed_summary(summary_dict):
+        1/0
+
+class AlwaysWarn(ColAnalysis):
+    provides_defaults = {'foo':0}
+
+    @staticmethod
+    def series_summary(sampled_ser, ser):
+
+        warnings.warn("AlwayWarn", UserWarning)
+        return {'foo': 5}
+
+
 
 class DependsA(ColAnalysis):
 
@@ -45,6 +70,8 @@ class DependsA(ColAnalysis):
             raise Exception("DependsA expected 'a' in summary_dict, it wasn't there")
         return { 'b':'bar'}
 
+
+            
 class ProvidesAComputed(ColAnalysis):
 
     provides_defaults = { 'a':'asdf'}
@@ -69,46 +96,89 @@ class TestAnalysisPipeline(unittest.TestCase):
     def test_produce_series_df(self):
         """just make sure this doesn't fail"""
 
-        sdf, errs = produce_series_df(
-            test_df, [Len], 'test_df', debug=True)
+        sdf, _errs = produce_series_df(
+            test_df, [Len, Len], 'test_df', debug=True)
         #dict(**sdf) makes the types equal and leads to better error messages if there is a problem
-        assert dict(**sdf) ==     {
-        'empty_na_ser': {
-          'col_name': 'empty_na_ser',
-            'len': 4,
+        assert_dict_eq({
+            'a': {
+                'orig_col_name': 'normal_int_series',
+                'len': 4, 'rewritten_col_name':'a'
+            },
+            'b': {
+                'orig_col_name': 'empty_na_ser',
+                'len': 4,  'rewritten_col_name':'b'
+            },
+            'c': {
+                'orig_col_name': 'float_nan_ser',
+                'len': 4, 'rewritten_col_name':'c'
+            },
         },
-        'float_nan_ser': {
-           'col_name': 'float_nan_ser',
-            'len': 4,
-        },
-        'index': {
-           'col_name': 'index',
-            'len': 4,
-        },
-        'normal_int_series': {
-           'col_name': 'normal_int_series',
-            'len': 4,
-        },
-    }
+                       sdf)
 
-        sdf2, errs = produce_series_df(
+
+    maxDiff = None
+    def test_produce_series_df2(self):
+        """just make sure this doesn't fail"""
+
+
+        sdf2, _errs = produce_series_df(
             test_df, [DistinctCount], 'test_df', debug=True)
-        assert dict(**sdf2) == {
-            'normal_int_series': {'distinct_count': 4, 'col_name':'normal_int_series'},
-            'index':  {'distinct_count': 4,  'col_name':'index'},
-            'empty_na_ser': {'distinct_count':0,  'col_name':'empty_na_ser'},
-            'float_nan_ser': {'distinct_count':2,  'col_name':'float_nan_ser'}}
+        assert_dict_eq({
+            'a': {'distinct_count': 4, 'orig_col_name':'normal_int_series', 'rewritten_col_name':'a'},
+            'b': {'distinct_count':0,  'orig_col_name':'empty_na_ser', 'rewritten_col_name':'b'},
+            'c': {'distinct_count':2,  'orig_col_name':'float_nan_ser', 'rewritten_col_name':'c'}},
+        sdf2)
 
-        sdf3, errs = produce_series_df(
-            test_df, [DistinctCount, DistinctPer], 'test_df', debug=True)
-        assert dict(**sdf3) == {
-            'normal_int_series': {'distinct_count': 4, 'distinct_per':0, 'col_name':'normal_int_series'},
-            'index':             {'distinct_count': 4, 'distinct_per':0, 'col_name':'index'},
-            'empty_na_ser':      {'distinct_count': 0, 'distinct_per':0, 'col_name':'empty_na_ser'},
-            'float_nan_ser':     {'distinct_count': 2, 'distinct_per':0, 'col_name':'float_nan_ser'}}
 
+    def test_produce_series_df3(self):
+        """just make sure this doesn't fail,
+
+          this technically needs Len, but because of
+          provides_defaults, exceptions are caught and the defaults
+          are subsitututed
+
+        """
+        sdf3, _errs = produce_series_df(
+        test_df, [DistinctCount, DistinctPer], 'test_df', debug=True)
+
+        assert_dict_eq({
+            'a': {'distinct_count': 4, 'distinct_per':0, 'orig_col_name':'normal_int_series', 'rewritten_col_name':'a'},
+            'b': {'distinct_count': 0, 'distinct_per':0, 'orig_col_name':'empty_na_ser',      'rewritten_col_name':'b'},
+            'c': {'distinct_count': 2, 'distinct_per':0, 'orig_col_name':'float_nan_ser',     'rewritten_col_name':'c'}},
+        sdf3)
+
+    def Xtest_produce_series_debug(self):
+        """
+          I can't currently get this test to work properly
+          I want to make sure there are no warnings emitted when Debug=False
+
+          I'm pretty sure this is what happens in the notebook. I'm not sure if pytest is doing something funky
+          
+          """
+
+        with warnings.catch_warnings(record=True) as _warn_record_1:
+            _sdf3, _errs = produce_series_df(
+                test_df, [AlwaysWarn], 'test_df', debug=False)
+            
+        # print(_warn_record_1)
+        # assert _warn_record_1 == []
+        with pytest.warns() as record:
+            _sdf4, _errs = produce_series_df(
+                test_df, [AlwaysWarn], 'test_df', debug=True)
+        assert len(record) == 1
+        
+    def test_produce_series_multiindex_cols_df(self):
+        """just make sure this doesn't fail"""
+
+        sdf, _errs = produce_series_df(
+            test_multi_index_df, [Len], 'test_df', debug=True)
+        assert sdf['a'] == {'orig_col_name': ('foo', 'normal_int_series'), 'len': 4, 'rewritten_col_name':'a'}
+
+        
     def test_full_produce_summary_df(self):
         """just make sure this doesn't fail"""
+        res = DistinctCount.series_summary(test_df['normal_int_series'], test_df['normal_int_series'])
+        assert res == {'distinct_count':4}
         sdf, errs = AnalysisPipeline.full_produce_summary_df(
             test_df, [DistinctCount, Len, DistinctPer], 'test_df', debug=True)
         assert errs == {}
@@ -128,18 +198,28 @@ class TestAnalysisPipeline(unittest.TestCase):
         assert errs == {}
 
     def test_full_produce_summary_df_errs(self):
-        """just make sure this doesn't fail"""
+        """just make sure this doesn't fail with a stack trace, but
+        that errors are properly caught and returned"""
         single_col_df = test_df[['empty_na_ser']]
         sdf, errs = AnalysisPipeline.full_produce_summary_df(
             single_col_df, [AlwaysErr], 'test_df', debug=False)
 
+
         err_key = list(errs.keys())[0]
         err_val = list(errs.values())[0]
-        assert err_key == ('index', 'computed_summary')
+        #assert err_key == ('empty_na_ser', 'computed_summary')
+        assert err_key == ('a', 'computed_summary')
         assert err_val[1] ==  AlwaysErr
         #can't compare instances of Exception classes
         # assert errs == {
         #     ('empty_na_ser', 'computed_summary'): (ZeroDivisionError('division by zero'), AlwaysErr)}
+
+    def test_full_produce_summary_df_errs_quiet(self):
+        """just make sure this doesn't fail"""
+        single_col_df = test_df[['empty_na_ser']]
+        sdf, errs = AnalysisPipeline.full_produce_summary_df(
+            single_col_df, [AlwaysErrButQuiet], 'test_df', debug=False)
+        assert len(errs) == 0
 
     def test_output_full_reproduce(self):
         errs = {
@@ -162,7 +242,8 @@ class TestAnalysisPipeline(unittest.TestCase):
                 return dict(foo=8)
         assert ap.add_analysis(Foo) == (True, []) #verify no errors thrown
         sdf, _unused_errs = ap.process_df(df)
-        self.assertEqual(sdf['tripduration']['foo'], 8)
+        #self.assertEqual(sdf['tripduration']['foo'], 8)
+        self.assertEqual(sdf['a']['foo'], 8)
 
     def test_add_buggy_aobj(self):
         ap = AnalysisPipeline([TypingStats, DefaultSummaryStats])
@@ -189,7 +270,7 @@ class TestAnalysisPipeline(unittest.TestCase):
                 return dict(foo=8)
         ap.add_analysis(Foo)
         sdf, _unused_errs = ap.process_df(df)
-        self.assertEqual(sdf['tripduration']['foo'], 8)
+        self.assertEqual(sdf['a']['foo'], 8)
         #18 facts returned about tripduration
         #FIXME
         #self.assertEqual(len(sdf['tripduration']), 18)
@@ -203,7 +284,7 @@ class TestAnalysisPipeline(unittest.TestCase):
                 return dict(foo=9)
         ap.add_analysis(Foo)
         sdf2, _unused_errs = ap.process_df(df)
-        self.assertEqual(sdf2['tripduration']['foo'], 9)
+        self.assertEqual(sdf2['a']['foo'], 9)
         #still 18 facts returned about tripduration
         #self.assertEqual(len(sdf2['tripduration']), 18)
         #Create an updated Foo that returns 9
@@ -237,9 +318,30 @@ class TestDfStats(unittest.TestCase):
 
         """
         #dfs = DfStats(word_only_df, [SometimesProvides])
-        #ab = dfs.presentation_sdf
 
         #triggers a getter?
         DfStats(word_only_df, [SometimesProvides]).sdf
 
+
+
+    def test_dfstats_return(self):
+        """
+          test the actual retuns values from dfstats
+          """
+        dfs = DfStats(test_df, [Len, DistinctCount, DistinctPer], 'test_df', debug=True)
+
+        assert_dict_eq({
+            'a': {'distinct_count': 4, 'distinct_per':1.0, 'len': 4,
+                  'orig_col_name':'normal_int_series', 'rewritten_col_name':'a'},
+            'b': {'distinct_count': 0, 'distinct_per':0, 'len': 4,
+                  'orig_col_name':'empty_na_ser', 'rewritten_col_name':'b'},
+            'c': {'distinct_count': 2, 'distinct_per':0.5, 'len': 4,
+                  'orig_col_name':'float_nan_ser', 'rewritten_col_name':'c'}},
+        dfs.sdf)
+
+
+    def test_dfstats_Missing_Analysis(self):
+        # this is missing "len" and should throw an exception
+        with pytest.raises(NotProvidedException):
+            _dfs = DfStats(test_df, [DistinctCount, DistinctPer], 'test_df', debug=True)
 

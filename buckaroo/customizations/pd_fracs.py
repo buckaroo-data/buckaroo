@@ -1,7 +1,7 @@
 import re
 import pandas as pd
 import numpy as np
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
+from buckaroo.pluggable_analysis_framework.col_analysis import (
     ColAnalysis,
 )
 from buckaroo.jlisp.lisp_utils import s

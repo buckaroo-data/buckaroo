@@ -1,6 +1,7 @@
 import {
     CellRendererSelectorResult,
     ColDef,
+    ColGroupDef,
     DomLayoutType,
     ICellRendererParams,
     IDatasource,
@@ -17,6 +18,9 @@ import {
 
     DFViewerConfig,
     ComponentConfig,
+    NormalColumnConfig,
+    MultiIndexColumnConfig,
+    ColDefOrGroup,
 } from "./DFWhole";
 
 import * as _ from "lodash";
@@ -68,10 +72,20 @@ export function extractSingleSeriesSummary(
     return {
         dfviewer_config: {
             column_config: [
-                { col_name: "index", displayer_args: { displayer: "obj" } },
-                { col_name: col_name, displayer_args: { displayer: "obj" } },
+              { col_name: "index", header_name:"index",  displayer_args: { displayer: "obj" } },
+              { col_name: col_name, header_name: col_name,  displayer_args: { displayer: "obj" } },
             ],
-            pinned_rows: [],
+          pinned_rows: [],
+	  left_col_configs: [
+	    {
+              col_name: 'index',
+	      header_name: 'index',
+              displayer_args: {
+		displayer: 'string',
+              },
+            }
+	]
+	  
         },
         data: _.filter(
             _.map(full_summary_stats_df, (row) => _.pick(row, ["index", col_name])),
@@ -80,40 +94,194 @@ export function extractSingleSeriesSummary(
     };
 }
 
+export const getFieldVal = (f:ColumnConfig) : string => {
+  if(_.has(f, 'col_path')){
+    return (f as MultiIndexColumnConfig).field;
+  }
+  return (f as NormalColumnConfig).col_name;
+}
+
+export function baseColToColDef (f:ColumnConfig) : ColDef {
+  const color_map_config = f.color_map_config
+    ? getStyler(f.color_map_config) : {};
+  const colDef: ColDef = {
+    field: getFieldVal(f),
+    cellDataType: false,
+    cellStyle: undefined, // necessary for colormapped columns to have a default
+    ...getCellRendererorFormatter(f.displayer_args),
+    ...color_map_config,
+    ...getTooltipParams(f.tooltip_config),
+    ...f.ag_grid_specs,
+  };
+    return colDef
+}
+
+export function normalColToColDef (f:NormalColumnConfig) : ColDef {
+  const colDef: ColDef = {
+    headerName: f.header_name,
+    ...baseColToColDef(f)};
+  return colDef
+}
+
+export const getSubChildren = (arr:ColumnConfig[], level:number): ColumnConfig[][] => {
+  const keyFunc = (x:ColumnConfig) => {
+    if(_.has(x, 'col_path')) {
+      const xMICC: MultiIndexColumnConfig = x as MultiIndexColumnConfig
+      return xMICC.col_path[level]
+    }
+    const xNCC: NormalColumnConfig = x as NormalColumnConfig;
+    return xNCC.col_name + "!&single" + _.indexOf(arr, x).toString(); // bad magic value
+  }
+  return arr.reduce((acc: ColumnConfig[][], curr:ColumnConfig) => {
+    
+    const firstKey = keyFunc(curr)
+    const lastGroup = acc[acc.length - 1];
+    
+    if (!lastGroup || keyFunc(lastGroup[0]) !== firstKey) {
+      acc.push([curr]);
+    } else {
+      lastGroup.push(curr);
+    }
+    
+    return acc;
+  }, []);
+};
+
+
+export function childColDef(f:MultiIndexColumnConfig, level:number) : ColDefOrGroup {
+  /*
+  returns the proper colDef at level
+   */
+  console.log("f",f, f.ag_grid_specs)
+  return {
+    headerName:f.col_path[level],
+    ...baseColToColDef(f),
+  }
+}
+
+
+
+export function multiIndexColToColDef (f:MultiIndexColumnConfig[], level:number=0) : ColGroupDef {
+  // this will return the nested groups of ColGroupDef with children
+  if (f.length == 0) {
+    // this will never happen
+    throw new Error("f shouldn't be empty");
+  }
+
+  const rootColPath = f[0].col_path;
+  const rootHeader = rootColPath[level]
+
+  const rootDepth = rootColPath.length;
+  if (level == rootDepth) {
+    throw new Error("something went wrong, level is too deep");
+  }
+  const childLevel = level + 1;
+  if(rootDepth == 1) {
+    const colDef: ColGroupDef = {
+      //headerName: rootHeader,
+      children: _.map(f, (x) => childColDef(x, 0)),
+      ...(f[0].ag_grid_specs)
+    };
+
+    console.log(" colDef from multiIndexColToColDef", colDef)
+    return colDef
+  }
+
+  if (childLevel == (rootDepth -1)) {
+    const colDef: ColGroupDef = {
+      headerName: rootHeader,
+      children: _.map(f, (x) => childColDef(x, childLevel)),
+      ...(f[0].ag_grid_specs)
+    };
+    console.log(" colDef from multiIndexColToColDef", colDef)
+    return colDef
+  } else {
+    const groupedColumnConfigs = getSubChildren(f, childLevel);
+    const colDef: ColGroupDef = {
+      headerName: rootHeader,
+      children: _.map(groupedColumnConfigs, (x) => multiIndexColToColDef(x as MultiIndexColumnConfig[], childLevel)),
+      ...(f[0].ag_grid_specs)
+    };
+    console.log(" colDef from multiIndexColToColDef", colDef)
+    return colDef
+  }
+}
+
+
+const switchToColDef = (x:ColumnConfig[]): ColDef|ColGroupDef => {
+  if (x.length == 0) {
+    //neverp
+    throw new Error("x shouldn't be empty");
+  }
+  if(_.has(x[0], 'col_path')) {
+    return multiIndexColToColDef(x as MultiIndexColumnConfig[])
+  } else {
+    if (x.length > 1) {
+      throw new Error(`for NormalColumnConfig, length should be 1, improperly grouped ${x}`);
+    }
+    return normalColToColDef(x[0] as NormalColumnConfig)
+  }
+}
+export function mergeCellClass(
+  cOrig:ColDef|ColGroupDef, classSpec:"headerClass"|"cellClass", extraClass:string) : ColDef|ColGroupDef {
+    const c = _.cloneDeep(cOrig);
+    //@ts-ignore
+    if(c[classSpec] === undefined) { 
+      //@ts-ignore
+      c[classSpec] = extraClass
+    } else {
+      console.log("c", c, classSpec)
+      //@ts-ignore
+      if(_.isArray(c[classSpec])) {
+	//@ts-ignore
+	c[classSpec].push(extraClass)
+      } else {
+	//@ts-ignore
+	c[classSpec] = [c[classSpec], extraClass]
+      }
+    }
+    return c
+  }
+
 export function dfToAgrid(
     dfviewer_config: DFViewerConfig,
-): ColDef[] {
-    //more convienient df format for some formatters
-    //const hdf = extractSDFT(full_summary_stats_df || []);
+): (ColDef|ColGroupDef)[] {
+  /*
+  gets the aggrid column config given the buckaroo inputs
+   */
+  const groupedIndexColumnConfigs = getSubChildren(dfviewer_config.left_col_configs, 0)
+  const flattenedIndexColumnConfigs = groupedIndexColumnConfigs.map(switchToColDef)
+  const lcc = flattenedIndexColumnConfigs.map((x) => mergeCellClass(x,"headerClass", "left_col_configs_header"))
+  
+  const lcc2 = lcc.map((x) => mergeCellClass(x,"cellClass", "left_col_configs_cell"))
+  if (lcc2.length > 0) {
+    const lastI = lcc2.length -1;
+    lcc2[lastI] =  mergeCellClass(lcc2[lastI], "headerClass", "left_col_configs_header_last")
+    lcc2[lastI] =  mergeCellClass(lcc2[lastI], "cellClass", "left_col_configs_cell_last")
+  }
+  const addPinned = (x:ColDef|ColGroupDef) :ColDef => {
+    return {
+    ...x,
+    pinned:'left'}
+  }
+  const lcc3 = lcc2.map(addPinned)
+  console.log("lcc3", lcc3);
 
-    const retColumns: ColDef[] = dfviewer_config.column_config.map((f: ColumnConfig) => {
-        // const single_series_summary_df = extractSingleSeriesSummary(
-        //     full_summary_stats_df,
-        //     f.col_name,
-        // );
+  const columnConfigs: ColumnConfig[] =  dfviewer_config.column_config;
+  const groupedColumnConfigs = getSubChildren(columnConfigs, 0);
+  const flattenedColumnConfigs = groupedColumnConfigs.map(switchToColDef)
 
-        const color_map_config = f.color_map_config
-            ? getStyler(f.color_map_config) : {};
-
-        const colDef: ColDef = {
-            field: f.col_name,
-            headerName: f.col_name,
-            cellDataType: false,
-            cellStyle: undefined, // necessary for colormapped columns to have a default
-            ...getCellRendererorFormatter(f.displayer_args),
-            ...color_map_config,
-            ...getTooltipParams(f.tooltip_config),
-            ...f.ag_grid_specs,
-        };
-        return colDef;
-    });
-    return retColumns;
+  const retMultiColumns:(ColDef|ColGroupDef)[] = [
+    ...lcc2,
+    ...flattenedColumnConfigs]
+  return retMultiColumns
 }
 
 // this is very similar to the colDef parts of dfToAgrid
 export function getCellRendererSelector(pinned_rows: PinnedRowConfig[]) {
     const anyRenderer: CellRendererSelectorResult = {
         component: getTextCellRenderer(objFormatter),
+      //params: {colDef: {cellClass:"pinned_row_cell_class"}}
     };
     return (params: ICellRendererParams<any, any, any>): CellRendererSelectorResult | undefined => {
         if (params.node.rowPinned) {
@@ -143,10 +311,13 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[]) {
                     component: getTextCellRenderer(
                         getFormatter(prc.displayer_args as FormatterArgs),
                     ),
+		  //		  params: {colDef: {cellClass:"pinned_row_cell_class"}}
                 };
                 return formattedRenderer;
             }
-            return { component: possibCellRenderer };
+          return { component: possibCellRenderer, 
+	    //params: {colDef: {cellClass:"pinned_row_cell_class"}}
+	  };
         } else {
             return undefined; // rows that are not pinned don't use a row level cell renderer
         }

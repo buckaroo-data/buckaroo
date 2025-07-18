@@ -1,44 +1,49 @@
 from collections import defaultdict 
 import traceback
+from typing import List, Type
+
 import warnings
 
 import pandas as pd
 import numpy as np
 
 
+from buckaroo.df_util import ColIdentifier, old_col_new_col
 from buckaroo.pluggable_analysis_framework.safe_summary_df import output_full_reproduce, output_reproduce_preamble
 
 from buckaroo.pluggable_analysis_framework.utils import FAST_SUMMARY_WHEN_GREATER, PERVERSE_DF
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (
-    order_analysis, check_solvable)
+ order_analysis, check_solvable)
+from buckaroo.pluggable_analysis_framework.col_analysis import (
+    AObjs, ColAnalysis, ColMeta, ErrDict, SDErrsTuple, SDType)
 
-def produce_series_df(df, ordered_objs, df_name='test_df', debug=False):
+
+
+def produce_series_df(
+        df:pd.DataFrame, ordered_objs:AObjs,
+    df_name:str='test_df', debug:bool=False)-> SDErrsTuple:
     """ just executes the series methods
 
-    """
-    errs = {}
-    series_stats = defaultdict(lambda: {})
 
-    cols = []
-    if hasattr(df, "index"):
-        #hack around polars not having indexes"
-        cols.append("index")
-    cols.extend(df.columns)
-    for possib_ser_name in cols:
-        if possib_ser_name == "index":
-            ser_name = df.index.name or "index"
-            ser = df.index.to_series()
-        else:
-            ser_name = possib_ser_name
-            ser = df[ser_name]
-        #FIXME: actually sample the series.  waiting until I have time
-        #to proeprly benchmark
+      A lot of numeric code throws warnings
+      Debug False means warnings are swallowed, useful for finding errors
+      Debug True displays warnings... which polutes the output in a notebook
+
+
+      quiet=True swallows exceptions and subsitutes the default
+    """
+    errs: ErrDict = {}
+    series_stats: SDType = defaultdict(lambda: {})
+
+    for orig_ser_name, rewritten_col_name in old_col_new_col(df):
+        ser = df[orig_ser_name]
         sampled_ser = ser
-        series_stats[ser_name]['col_name'] = ser_name
+        series_stats[rewritten_col_name]['orig_col_name'] = orig_ser_name
+        series_stats[rewritten_col_name]['rewritten_col_name'] = rewritten_col_name
         for a_kls in ordered_objs:
 
 
-            col_stat_dict = a_kls.provides_defaults.copy()
+            col_stat_dict: SDType = a_kls.provides_defaults.copy()
             try:
                 if a_kls.quiet or a_kls.quiet_warnings:
                     if debug is False:
@@ -49,10 +54,11 @@ def produce_series_df(df, ordered_objs, df_name='test_df', debug=False):
                 else:
                     col_stat_dict.update(a_kls.series_summary(sampled_ser, ser))
 
-                series_stats[ser_name].update(col_stat_dict)
+                #series_stats[orig_ser_name].update(col_stat_dict)
+                series_stats[rewritten_col_name].update(col_stat_dict)
             except Exception as e:
                 if not a_kls.quiet:
-                    errs[(ser_name, "series_summary")] = e, a_kls
+                    errs[(orig_ser_name, "series_summary")] = e, a_kls
                 if debug:
                     traceback.print_exc()
                 continue
@@ -60,27 +66,88 @@ def produce_series_df(df, ordered_objs, df_name='test_df', debug=False):
 
 
 
-def produce_summary_df(df, series_stats, ordered_objs, df_name='test_df', debug=False):
+def produce_summary_df(
+    df:pd.DataFrame, series_stats:SDType,
+    ordered_objs:AObjs, df_name:str='test_df', debug:bool=False) -> SDErrsTuple:
     """
-    takes a dataframe and a list of analyses that have been ordered by a graph sort,
-    then it produces a summary dataframe
+      takes a dataframe and a list of analyses that have been ordered by a graph sort,
+    then it produces the summary SDType
+
+      this executes computed_summary on analysis objects, but it requires the previous steps of series_summary completed
+
+      
+      
     """
-    errs = {}
-    summary_col_dict = {}
-    cols = []
-    if hasattr(df, "index"):
-        #hack around polars not having indexes"
-        cols.append("index")
+    errs: ErrDict = {}
+    summary_col_dict: SDType = {}
+    cols: List[ColIdentifier] = []
     cols.extend(df.columns)
-    for possib_ser_name in cols:
-        if possib_ser_name == "index":
-            ser_name = df.index.name or "index"
-        else:
-            ser_name = possib_ser_name
-    #figure out how to add in "index"... but just for table_hints
-    #for ser_name in df.columns:
-        #base_summary_dict = series_stats[ser_name]
-        base_summary_dict = series_stats.get(ser_name, {})
+    for orig_ser_name, rewritten_col_name in old_col_new_col(df):
+
+        #base_summary_dict: ColMeta = series_stats.get(rewritten_col_name, {})
+        base_summary_dict: ColMeta = series_stats.get(rewritten_col_name, {})
+        # print(f"DEBUG: Processing {orig_ser_name} -> {rewritten_col_name}")
+        # print(f"DEBUG: base_summary_dict type: {type(base_summary_dict)}")
+        # print(f"DEBUG: base_summary_dict value: {base_summary_dict}")
+        
+        # Handle case where series_stats contains error strings instead of dicts
+        if isinstance(base_summary_dict, str):
+            # print(f"DEBUG: Found error string for {orig_ser_name}: {base_summary_dict}")
+            base_summary_dict = {}
+        
+        # print(f"DEBUG: base_summary_dict keys: {list(base_summary_dict.keys())}")
+        
+        for a_kls in ordered_objs:
+            try:
+                #print(f"DEBUG: Calling {a_kls.__name__}.computed_summary with keys: {list(base_summary_dict.keys())}")
+                if a_kls.quiet or a_kls.quiet_warnings:
+                    if debug is False:
+                        warnings.filterwarnings('ignore')
+                    summary_res = a_kls.computed_summary(base_summary_dict)
+                    warnings.filterwarnings('default')
+                else:
+                    summary_res = a_kls.computed_summary(base_summary_dict)
+                #print(f"DEBUG: {a_kls.__name__} returned: {list(summary_res.keys())}")
+                for k,v in summary_res.items():
+                    base_summary_dict.update(summary_res)
+            except Exception as e:
+                print(f"DEBUG: Error in {a_kls.__name__}.computed_summary: {e}")
+                print(f"DEBUG: Missing keys that {a_kls.__name__} expects:")
+                if hasattr(a_kls, 'requires_summary'):
+                    for req_key in a_kls.requires_summary:
+                        if req_key not in base_summary_dict:
+                            print(f"  - {req_key}")
+                if not a_kls.quiet:
+                    errs[(rewritten_col_name, "computed_summary")] = e, a_kls
+                if debug:
+                    traceback.print_exc()
+                continue
+        summary_col_dict[rewritten_col_name] = base_summary_dict
+    return summary_col_dict, errs
+
+
+def produce_summary_df_rewritten_names(
+    df:pd.DataFrame, series_stats:SDType,
+    ordered_objs:AObjs, df_name:str='test_df', debug:bool=False) -> SDErrsTuple:
+    """
+      takes dataframes that havent had the names changed. the version to be used for pandas
+      
+    takes a dataframe and a list of analyses that have been ordered by a graph sort,
+    then it produces the summary SDType
+
+      this executes computed_summary on analysis objects, but it requires the previous steps of series_summary completed
+
+      
+      
+    """
+    errs: ErrDict = {}
+    summary_col_dict: SDType = {}
+    cols: List[ColIdentifier] = []
+    cols.extend(df.columns)
+    for orig_ser_name, rewritten_col_name in old_col_new_col(df):
+
+        #base_summary_dict: ColMeta = series_stats.get(rewritten_col_name, {})
+        base_summary_dict: ColMeta = series_stats.get(orig_ser_name, {})
         for a_kls in ordered_objs:
             try:
                 if a_kls.quiet or a_kls.quiet_warnings:
@@ -94,11 +161,11 @@ def produce_summary_df(df, series_stats, ordered_objs, df_name='test_df', debug=
                     base_summary_dict.update(summary_res)
             except Exception as e:
                 if not a_kls.quiet:
-                    errs[(ser_name, "computed_summary")] = e, a_kls
+                    errs[(rewritten_col_name, "computed_summary")] = e, a_kls
                 if debug:
                     traceback.print_exc()
                 continue
-        summary_col_dict[ser_name] = base_summary_dict
+        summary_col_dict[rewritten_col_name] = base_summary_dict
     return summary_col_dict, errs
 
 
@@ -117,7 +184,10 @@ class AnalysisPipeline(object):
     #full_produce_func: List[Callable[[DFT, List[AT], str, bool], Any]] =
 
     @staticmethod
-    def full_produce_summary_df(df, ordered_objs, df_name='test_df', debug=False):
+    def full_produce_summary_df(
+        df:pd.DataFrame, ordered_objs:AObjs,
+        df_name:str='test_df', debug:bool=False) -> SDErrsTuple:
+
         if len(df) == 0:
             return {}, {}
 
@@ -141,26 +211,27 @@ class AnalysisPipeline(object):
                     del summary_dict[k]
         return summary_df, series_errs
 
-    style_method = None
-    
-    def __init__(self, analysis_objects, unit_test_objs=True):
+    ordered_a_objs: AObjs
+    def __init__(self, analysis_objects:AObjs, unit_test_objs:bool=True) -> None:
 
         self.summary_stats_display = "all"
         self.unit_test_objs = unit_test_objs
-        self.verify_analysis_objects(analysis_objects)
+        _ = self.verify_analysis_objects(analysis_objects)
 
-    def process_summary_facts_set(self):
+    def process_summary_facts_set(self) -> bool:
         all_provided = []
         for a_obj in self.ordered_a_objs:
             all_provided.extend(list(a_obj.provides_defaults.keys()))
 
         self.provided_summary_facts_set = set(all_provided)
+        return True
 
 
-    def verify_analysis_objects(self, analysis_objects):
+    def verify_analysis_objects(self, analysis_objects:AObjs) -> bool:
         self.ordered_a_objs = order_analysis(analysis_objects)
         check_solvable(self.ordered_a_objs)
         self.process_summary_facts_set()
+        return True
 
     def unit_test(self):
         """test a single, or each col_analysis object with a set of commonly difficult series.
@@ -180,11 +251,11 @@ class AnalysisPipeline(object):
             pass
 
 
-    def process_df(self, input_df, debug=False):
+    def process_df(self, input_df:pd.DataFrame, debug:bool=False) -> SDErrsTuple:
         output_df, errs = self.full_produce_summary_df(input_df, self.ordered_a_objs, debug=debug)
         return output_df, errs
 
-    def add_analysis(self, new_aobj):
+    def add_analysis(self, new_aobj:Type[ColAnalysis]):
         new_cname = new_aobj.cname()
         new_aobj_set = []
         for aobj in self.ordered_a_objs:
@@ -201,16 +272,21 @@ class AnalysisPipeline(object):
 
 class DfStats(object):
     '''
-    DfStats exists to handle inteligent downampling and applying the ColAnalysis functions
+    DfStats exists to tie the different Pluggable Analysis pieces together that are relevant to a dataframe type.
+
+      this allows DataFlow to only specify DfStats or PlDfStats, and all the other methods work the same.
+      
+      
     '''
 
     ap_class = AnalysisPipeline
 
     @classmethod
-    def verify_analysis_objects(kls, col_analysis_objs):
+    def verify_analysis_objects(kls, col_analysis_objs:AObjs):
         kls.ap_class(col_analysis_objs)
 
-    def __init__(self, df_stats_df, col_analysis_objs, operating_df_name=None, debug=False):
+    def __init__(self, df_stats_df:pd.DataFrame, col_analysis_objs:AObjs,
+        operating_df_name:str=None, debug:bool=False) -> None:
         self.df = self.get_operating_df(df_stats_df, force_full_eval=False)
         self.col_order = self.df.columns
         self.ap = self.ap_class(col_analysis_objs)
@@ -231,11 +307,7 @@ class DfStats(object):
         else:
             return df
 
-    @property
-    def presentation_sdf(self):
-        raise Exception("deprecated")
-
-    def add_analysis(self, a_obj):
+    def add_analysis(self, a_obj:Type[ColAnalysis]):
         passed_unit_tests, ut_errs = self.ap.add_analysis(a_obj)
         #if you're adding analysis interactively, of course you want debug info... I think
         self.sdf, errs = self.ap.process_df(self.df, debug=True)

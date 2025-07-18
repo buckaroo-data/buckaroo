@@ -81,6 +81,8 @@ export const HistogramCell = (props:
     {api:GridApi, colDef:ColDef, 
      column:Column, context:Context, value:any}
 ) => {
+  console.log("HistogramCell")
+  console.log(props.colDef);
     // relevant args here 
     // https://www.ag-grid.com/react-data-grid/component-cell-renderer/
     if (props === undefined ) {
@@ -92,12 +94,13 @@ export const HistogramCell = (props:
     if (potentialHistogramArr === undefined || !_.isArray(potentialHistogramArr)) {
         return <span></span>;
     }
-    const histogramArr = potentialHistogramArr as HistogramBar[];
-    return TypedHistogramCell({histogramArr, context:props.context});
+  const histogramArr = potentialHistogramArr as HistogramBar[];
+  //@ts-ignore
+  return TypedHistogramCell({histogramArr, context:props.context, className:props.colDef.cellClass|| ""});
 }
 
-export const TypedHistogramCell = ({histogramArr, context}:
-    {histogramArr:HistogramBar[], context:any}) => {
+export const TypedHistogramCell = ({histogramArr, context, className}:
+    {histogramArr:HistogramBar[], context:any, className?:string}) => {
     const dumbClickHandler = (rechartsArgs: any, _unused_react: any) => {
         //we can access the rest of the data model through context
     
@@ -123,8 +126,9 @@ export const TypedHistogramCell = ({histogramArr, context}:
         x: number;
         y: number;
     } | null>(null);
-    return (
-        <div className="histogram-component">
+      const classes = `histogram-component ${className}`;
+      return (
+	<div className={classes} >
             <BarChart
                 width={100}
                 height={24}

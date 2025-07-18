@@ -105,7 +105,7 @@ class BasicAnalysis(PolarsAnalysis):
 
     @staticmethod
     def computed_summary(summary_dict):
-        
+        #print("summary_dict", summary_dict)
         if 'value_counts' in summary_dict:
             temp_df = pl.DataFrame({'vc': summary_dict['value_counts'].explode()}).unnest('vc')
             regular_col_vc_df = temp_df.select(pl.all().exclude('count').alias('key'), pl.col('count'))

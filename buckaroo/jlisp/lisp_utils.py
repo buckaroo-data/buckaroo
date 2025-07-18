@@ -75,7 +75,7 @@ def format_ops(column_meta):
         ops = v['cleaning_ops']
         if len(ops) > 0:
             temp_ops = ops.copy()
-            temp_ops.insert(2, k)
+            temp_ops.insert(2, v['orig_col_name'])   # important change with the rewritten_col_names dfstats change
             ret_ops.append(temp_ops)
     return ret_ops
 

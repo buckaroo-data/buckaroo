@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 
 
 def force_float(n):

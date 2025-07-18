@@ -1,42 +1,45 @@
-import numpy as np
 import pandas as pd
 import pytest
 from ..fixtures import (DistinctCount)
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
+from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget
 from buckaroo.jlisp.lisp_utils import (s, sQ)
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
 from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)
 from buckaroo.dataflow.autocleaning import AutocleaningConfig
+from buckaroo.ddd_library import get_basic_df2
 
-
+BASIC_DF = get_basic_df2()
 EMPTY_DF_JSON = {
             'dfviewer_config': {
                 'pinned_rows': [],
                 'column_config': []},
             'data': []}
 
-BASIC_DF = pd.DataFrame({'a': [10, 20, 20], 'b':['foo', 'bar', 'baz']})
-BASIC_DF_JSON_DATA = [{'index':0, 'a':10, 'b':'foo'},
-                        {'index':1, 'a':20, 'b':'bar'},
-                        {'index':2, 'a':20, 'b':'baz'}]
+
+BASIC_DF_JSON_DATA = [
+                        {'index':0, 'a':10, 'b':'foo', 'level_0':0},
+                        {'index':1, 'a':20, 'b':'bar', 'level_0':1},
+                        {'index':2, 'a':20, 'b':'baz', 'level_0':2}]
 DFVIEWER_CONFIG_DEFAULT = {
                    'pinned_rows': [],
                    'column_config':  [
-                       {'col_name':'index', 'displayer_args': {'displayer': 'obj'}},
-                       {'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
-                       {'col_name':'b', 'displayer_args': {'displayer': 'obj'}}],
+                       {'col_name':'a', 'header_name':'foo_col', 'displayer_args': {'displayer': 'obj'}},
+                       {'col_name':'b', 'header_name':'bar_col', 'displayer_args': {'displayer': 'obj'}}],
+                   'left_col_configs': [{'header_name': 'index', 'col_name':'index',
+                       'displayer_args': {'displayer': 'obj'}}],
                     'component_config': {},
                     'extra_grid_config': {},
 }
 DFVIEWER_CONFIG_WITHOUT_B = {
     'pinned_rows': [],
     'column_config':  [
-        {'col_name':'index', 'displayer_args': {'displayer': 'obj'}},
         ## note that col_name:'b' isn't present because of the merge rule
-        {'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
+        {'col_name':'a', 'header_name':'foo_col', 'displayer_args': {'displayer': 'obj'}},
     ],
+    'left_col_configs': [{'col_name': 'index', 'header_name':'index',
+                         'displayer_args': {'displayer': 'obj'}}],
     'component_config': {},
     'extra_grid_config': {},
 }
@@ -93,9 +96,10 @@ def test_custom_dataflow():
     DFVIEWER_CONFIG_INT = {
                    'pinned_rows': [],
                    'column_config':  [
-                       {'col_name':'index', 'displayer_args': {'displayer': 'int'}},
-                       {'col_name':'a', 'displayer_args': {'displayer': 'int'}},
-                       {'col_name':'b', 'displayer_args': {'displayer': 'int'}}],
+                       {'header_name':'foo_col', 'col_name':'a', 'displayer_args': {'displayer': 'int'}},
+                       {'header_name':'bar_col', 'col_name':'b', 'displayer_args': {'displayer': 'int'}}],
+                   'left_col_configs': [{'col_name': 'index', 'header_name':'index',
+                       'displayer_args': {'displayer': 'obj'}}],
                     'component_config': {},
                     'extra_grid_config': {},
     }
@@ -111,7 +115,7 @@ def test_hide_column_config_overrides():
     assert cdfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
 
     cdfc2 = ACDFC(BASIC_DF,
-                      column_config_overrides={'b': {'merge_rule': 'hidden'}}
+                      column_config_overrides={'bar_col': {'merge_rule': 'hidden'}}
                       )
 
     assert cdfc2.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_WITHOUT_B
@@ -124,26 +128,23 @@ def test_custom_summary_stats():
     dc_dfc = DCDFC(BASIC_DF)
 
     summary_sd = dc_dfc.widget_args_tuple[2]
-    print(summary_sd)
-    print("^"*80)
-    assert summary_sd == {'index': {'distinct_count': 3, 'col_name':'index'}, 
-                          'a': {'distinct_count':2, 'col_name':'a'},
-                          'b': {'distinct_count':3, 'col_name':'b'}}
-    assert list(summary_sd.keys()) == ['index', 'a', 'b']
+    assert summary_sd == {
+                          'a': {'distinct_count':2, 'rewritten_col_name':'a', 'orig_col_name':'foo_col', },
+                          'b': {'distinct_count':3, 'rewritten_col_name':'b', 'orig_col_name':'bar_col', }}
+    assert list(summary_sd.keys()) == ['a', 'b']
 
 def test_init_sd():
+    """
+      verify that values put into init_sd end up in merged_sd
+      """
     class DCDFC(ACDFC):
         analysis_klasses = [DistinctCount, StylingAnalysis]
 
-    dc_dfc = DCDFC(BASIC_DF, init_sd={'a':{'foo':8}})
+    dc_dfc = DCDFC(BASIC_DF, init_sd={'foo_col':{'foo':8}})
 
-    summary_sd = dc_dfc.widget_args_tuple[2]
-    print(summary_sd)
-    print("^"*80)
     assert dc_dfc.merged_sd == {
-        'index': {'distinct_count': 3, 'col_name':'index'}, 
-        'a': {'distinct_count':2, 'foo':8, 'col_name':'a'},
-        'b': {'distinct_count':3, 'col_name':'b'}}
+        'a': {'orig_col_name':'foo_col', 'rewritten_col_name':'a', 'distinct_count':2, 'foo':8},
+        'b': {'orig_col_name':'bar_col', 'rewritten_col_name':'b', 'distinct_count':3}}
 
 class AlwaysFailStyling(StylingAnalysis):
     requires_summary = []
@@ -163,9 +164,8 @@ def test_always_fail_styling():
     dc_dfc = DCDFC(BASIC_DF) #, init_sd={'a':{'foo':8}})
 
     summary_sd = dc_dfc.widget_args_tuple[2]
-    print(summary_sd)
-    print("^"*80)
-
+    #BS test, but punting
+    assert len(summary_sd) > 0 
 
 
 SENTINEL_DF = pd.DataFrame({'sent_int_col':[11, 22, 33], 'sent_str_col':['ka', 'b', 'c']})
@@ -204,9 +204,10 @@ class HidePostProcessingAnalysis(ColAnalysis):
 SENTINEL_CONFIG_WITHOUT_INT = {
     'pinned_rows': [],
     'column_config':  [
-        {'col_name':'index', 'displayer_args': {'displayer': 'obj'}},
-        {'col_name':'sent_str_col', 'displayer_args': {'displayer': 'obj'}},
+        {'col_name': 'b', 'header_name':'sent_str_col', 'displayer_args': {'displayer': 'obj'}},
     ],
+    'left_col_configs': [{'col_name': 'index', 'header_name':'index',
+                         'displayer_args': {'displayer': 'obj'}}],
     'component_config': {},
     'extra_grid_config': {},
 }
@@ -270,7 +271,7 @@ class HidePostProcessingAnalysis2(ColAnalysis):
 
     @classmethod
     def post_process_df(kls, cleaned_df):
-        return [cleaned_df, {'b': {'merge_rule': 'hidden'}}]
+        return [cleaned_df, {'bar_col': {'merge_rule': 'hidden'}}]
 
 
 def test_hide_column_config_post_processing2():
@@ -345,8 +346,32 @@ def test_column_config_override_widget():
         column_config_overrides={
             'float_col':
             {'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 }}})
-    float_col_config = bw2.df_display_args['main']['df_viewer_config']['column_config'][2]
-    assert float_col_config == {'col_name': 'float_col', 'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 }}
+        
+    float_col_config = bw2.df_display_args['main']['df_viewer_config']['column_config'][1]
+    assert float_col_config == {'col_name': 'b', 'header_name':'float_col', 'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 },
+    #'tooltip_config': {'tooltip_type': 'simple', 'val_column': 'c'}
+    }
+
+def test_column_config_override_rewrite():
+    ROWS = 200
+    typed_df = pd.DataFrame(
+        {'int_col': [1] * ROWS,
+         'float_col': [.5] * ROWS,
+         "str_col": ["foobar"]* ROWS})
+    bw2 = BuckarooWidget(
+        typed_df, 
+        column_config_overrides={
+            'float_col': {
+                'tooltip_config': {'tooltip_type': 'simple', 'val_column': 'str_col'}}})
+            
+        
+    float_col_config = bw2.df_display_args['main']['df_viewer_config']['column_config'][1]
+    expected = {'col_name': 'b', 'header_name':'float_col', 
+                'displayer_args': {'displayer': 'float',
+                                   'max_fraction_digits': 3,
+                                   'min_fraction_digits': 3},
+                'tooltip_config': {'tooltip_type': 'simple', 'val_column': 'c'}}
+    assert expected == float_col_config
     
 
 
@@ -560,15 +585,3 @@ def test_bstate_commands3():
         [sQ('search'), s('df'), "col", "needle"]]
     assert len(vcb.dataflow.processed_df) == 2
     assert vcb.df_meta['filtered_rows'] == 2
-
-def Xtest_sample():
-    """
-    this test is slow, and sample is barely used anymore
-    """
-    big_df = pd.DataFrame({'a': np.arange(105_000)})
-    bw = ACDFC(big_df)
-    assert len(bw.processed_df) == 100_000
-    print(list(bw.df_data_dict.keys()))
-    assert len(bw.df_data_dict['main']) == 5_000
-
-

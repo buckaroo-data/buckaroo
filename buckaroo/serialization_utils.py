@@ -1,16 +1,19 @@
 from io import BytesIO
 import json
 import pandas as pd
-from typing import Union, Any
+from typing import Dict, Any, List, Tuple
 from pandas._libs.tslibs import timezones
 from pandas.core.dtypes.dtypes import DatetimeTZDtype
 from fastparquet import json as fp_json
 import logging
+
+from buckaroo.df_util import old_col_new_col, to_chars
 logger = logging.getLogger()
 
-def is_col_dt_safe(col_or_index):
-    if isinstance(col_or_index.dtype, DatetimeTZDtype):
-        dt = col_or_index.dtype
+#realy pd.Series
+def is_ser_dt_safe(ser:Any) -> bool:
+    if isinstance(ser.dtype, DatetimeTZDtype):
+        dt = ser.dtype
         if timezones.is_utc(dt.tz):
             return True
         elif hasattr(dt.tz, 'zone'):
@@ -18,20 +21,19 @@ def is_col_dt_safe(col_or_index):
         return False
     return True
 
-def is_dataframe_datetime_safe(df):
-    for col in df:
-        if not is_col_dt_safe(df[col]):
+def is_dataframe_datetime_safe(df:pd.DataFrame) -> bool:
+    for col in df.columns:
+        if not is_ser_dt_safe(df[col]):
             return False
-    if not is_col_dt_safe(df.index):
+    if not is_ser_dt_safe(df.index):
         return False
     return True
 
-def fix_df_dates(df):
-    for col in df:
-        if not is_col_dt_safe(df[col]):
-            print("col", col)
+def fix_df_dates(df:pd.DataFrame) -> pd.DataFrame:
+    for col in df.columns:
+        if not is_ser_dt_safe(df[col]):
             df[col] = pd.to_datetime(df[col], utc=True)
-    if not is_col_dt_safe(df.index):
+    if not is_ser_dt_safe(df.index):
         df.index = df.index.tz_convert('UTC')
     return df
 
@@ -39,7 +41,7 @@ class DuplicateColumnsException(Exception):
     pass
 
 
-def check_and_fix_df(df):
+def check_and_fix_df(df:pd.DataFrame) -> pd.DataFrame:
     if not df.columns.is_unique:
         print("Your dataframe has duplicate columns. Buckaroo requires distinct column names")
         raise DuplicateColumnsException("Your dataframe has duplicate columns. Buckaroo requires distinct column names")
@@ -47,15 +49,6 @@ def check_and_fix_df(df):
         print("your dataframe has a column or index with a datetime series without atimezone.  Setting a default UTC timezone to proceed with display. https://github.com/paddymul/buckaroo/issues/277")
         return fix_df_dates(df)
     return df
-
-def get_outlier_idxs(ser):
-    if not pd.api.types.is_numeric_dtype(ser.dtype):
-        return []
-    outlier_idxs = []
-    outlier_idxs.extend(ser.nlargest(5).index)
-    outlier_idxs.extend(ser.nsmallest(5).index)
-    return outlier_idxs
-
 
 
 
@@ -116,40 +109,16 @@ def force_to_pandas(df_pd_or_pl) -> pd.DataFrame:
     else:
         raise Exception("unexpected type for dataframe, got %r" % (type(df_pd_or_pl)))
 
-#def generate_column_config(df:pd.DataFrame, summary_dict) -> List[ColumnConfig]:
-def generate_column_config(df:pd.DataFrame, summary_dict):
-    ret_conf = []
-    index_name = df.index.name or "index"
-    ret_conf.append({'col_name':index_name, 'displayer_args' : { 'displayer':'obj'}})
-    for col in df.columns:
-        ret_conf.append({'col_name': str(col), 'displayer_args' : { 'displayer':'obj'} })
-    return ret_conf
-        
 
-#def df_to_obj(unknown_df:Union[pd.DataFrame, Any], summary_dict:Any) -> DFWhole:
-def df_to_obj(unknown_df:Union[pd.DataFrame, Any], summary_dict:Any):
-    df = force_to_pandas(unknown_df)
-    data = pd_to_obj(df)
-    #dfviewer_config:DFViewerConfig = {
-    dfviewer_config = {
-        'pinned_rows'   : [],
-        'column_config' : generate_column_config(df, summary_dict)
-    }
-    return {'data':data, 'dfviewer_config': dfviewer_config}
 
-def pd_to_obj(df:pd.DataFrame):
-    obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
-
-    if isinstance(df.index, pd.MultiIndex):
-        old_index = df.index
-        temp_index = pd.Index(df.index.to_list(), tupleize_cols=False)
-        df.index = temp_index
-        obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
-        df.index = old_index
-    else:
-        obj = json.loads(df.to_json(orient='table', indent=2, default_handler=str))
-    return obj['data']
-
+    
+def pd_to_obj(df:pd.DataFrame) -> Dict[str, Any]:
+    df2 = prepare_df_for_serialization(df)
+    try:
+        obj = json.loads(df2.to_json(orient='table', indent=2, default_handler=str))
+        return obj['data']
+    finally:
+        pass
 
 
 class MyJsonImpl(fp_json.BaseImpl):
@@ -166,6 +135,30 @@ class MyJsonImpl(fp_json.BaseImpl):
     def loads(self, s):
         return self.api.loads(s)
 
+def get_multiindex_to_cols_sers(index) -> List[Tuple[str, Any]]: #pd.Series[Any]
+    if not isinstance(index, pd.MultiIndex):
+        return []
+    objs: List[Tuple[str, Any]] = [] #pd.Series[Any] = []
+    for i in range(index.nlevels):
+        col_name = "index_" + to_chars(i)
+        ser = pd.Series(index.get_level_values(i), index=pd.RangeIndex(len(index)))
+        objs.append((col_name, ser))
+    return objs
+
+
+def prepare_df_for_serialization(df:pd.DataFrame) -> pd.DataFrame:
+    # I don't like this copy.  modify to keep the same data with different names
+    df2 = df.copy()    
+    attempted_columns = [new_col for _, new_col in old_col_new_col(df)]
+    df2.columns = attempted_columns
+    if isinstance(df2.index, pd.MultiIndex):
+        new_idx = pd.RangeIndex(len(df2))
+        for index_col_name, index_series in get_multiindex_to_cols_sers(df2.index):
+            df2[index_col_name] = index_series.values
+        df2.index = new_idx
+    else:
+        df2['index'] = df2.index
+    return df2
 
 def to_parquet(df):
     data: BytesIO = BytesIO()
@@ -174,9 +167,7 @@ def to_parquet(df):
     orig_close = data.close
     data.close = lambda: None
     # I don't like this copy.  modify to keep the same data with different names
-    df2 = df.copy()
-    df2['index'] = df2.index
-    df2.columns = [str(x) for x in df2.columns]
+    df2 = prepare_df_for_serialization(df)
     obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
     encodings = {k:'json' for k in obj_columns}
 
@@ -193,7 +184,6 @@ def to_parquet(df):
     finally:
         data.close = orig_close
         fp_json._get_cached_codec = orig_get_cached_codec
-
 
     data.seek(0)
     return data.read()

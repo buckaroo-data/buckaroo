@@ -1,3 +1,4 @@
+import unittest
 import polars as pl
 import numpy as np
 from polars import functions as F
@@ -10,10 +11,10 @@ from buckaroo.pluggable_analysis_framework.utils import (json_postfix, replace_i
 
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import (
     PolarsAnalysisPipeline, polars_produce_series_df, PolarsAnalysis, PlDfStats)
+from tests.unit.test_utils import assert_dict_eq
 
 test_df = pl.DataFrame({
         'normal_int_series' : pl.Series([1,2,3,4]),
-        #'empty_na_ser' : pl.Series([pl.Null] * 4, dtype="Int64"),
         'float_nan_ser' : pl.Series([3.5, np.nan, 4.8, 2.2])})
 
 word_only_df = pl.DataFrame({'letters': 'h o r s e'.split(' ')})
@@ -26,11 +27,26 @@ empty_df = pl.DataFrame({})
 
 
 class SelectOnlyAnalysis(PolarsAnalysis):
-    provides_defaults = {}
+    provides_defaults = {'null_count':3}
     select_clauses = [
         F.all().null_count().name.map(json_postfix('null_count')),
         F.all().mean().name.map(json_postfix('mean')),
         F.all().quantile(.99).name.map(json_postfix('quin99'))]
+
+class RequiresNullCount(PolarsAnalysis):
+    requires_summary = ['null_count']
+    provides_defaults = {'null_count2':-1}
+
+    @staticmethod
+    def computed_summary(summary_dict):
+        return {'null_count2': summary_dict['null_count']}
+
+
+class MixedAnalysis(PolarsAnalysis):
+    provides_defaults = dict(
+    empty_count=0, sum=0)
+
+
 
 
 def test_non_full_analysis():
@@ -42,11 +58,11 @@ def test_non_full_analysis():
             F.col(pl.Utf8).str.count_matches("^$").sum().name.map(json_postfix('empty_count')),
             cs.numeric().sum().name.map(json_postfix('sum'))]
 
-    df = pl.DataFrame({'a': [10, 20], 'b': ['', 'bar']})
+    df = pl.DataFrame({'foo_col': [10, 20], 'bar_col': ['', 'bar']})
         
     pdf = PlDfStats(df, [MixedAnalysis])
-    assert pdf.sdf == {'a': dict(empty_count=0, sum=30),
-                       'b': dict(empty_count=1, sum=0)}
+    assert pdf.sdf == {'a': dict(empty_count=0, sum=30, orig_col_name='foo_col', rewritten_col_name='a'),
+                       'b': dict(empty_count=1, sum=0, orig_col_name='bar_col', rewritten_col_name='b')}
     
 
 def test_produce_series_df():
@@ -55,8 +71,9 @@ def test_produce_series_df():
     sdf, errs = polars_produce_series_df(
         test_df, [SelectOnlyAnalysis], 'test_df', debug=True)
     expected = {
-        'float_nan_ser':      {'mean': None, 'null_count':  0, 'quin99': None},
-        'normal_int_series':  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0}}
+    'b': {'mean': None, 'null_count':  0, 'quin99': None, 'orig_col_name':'float_nan_ser', 'rewritten_col_name':'b'},
+    'a' :{'mean': 2.5,  'null_count':  0, 'quin99':  4.0, 'orig_col_name':'normal_int_series', 'rewritten_col_name':'a'}
+}
     dsdf = replace_in_dict(sdf, [(np.nan, None)])
     assert dsdf == expected
 
@@ -70,8 +87,11 @@ def test_produce_series_combine_df():
     sdf, errs = polars_produce_series_df(
         test_df, [SelectOnlyAnalysis, MaxAnalysis], 'test_df', debug=True)
     expected = {
-        'float_nan_ser':      {'mean': None, 'null_count':  0, 'quin99': None, 'max': 4.8},
-        'normal_int_series':  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0, 'max': 4.0},
+        
+    'b': {'mean': None, 'null_count':  0, 'quin99': None,
+          'orig_col_name':'float_nan_ser', 'rewritten_col_name':'b', 'max': 4.8},
+    'a' :{'mean': 2.5,  'null_count':  0, 'quin99':  4.0,
+          'orig_col_name':'normal_int_series', 'rewritten_col_name':'a', 'max':4.0}
         }
     dsdf = replace_in_dict(sdf, [(np.nan, None)])
     assert dsdf == expected
@@ -113,7 +133,8 @@ def test_errors_analysis():
     key = list(errs.keys())[0]
     err = list(errs.values())[0]
 
-    assert key == ('bools', 'computed_summary')
+    #assert key == ('bools', 'computed_summary')
+    assert key == ('a', 'computed_summary')
     assert isinstance(err[0], ZeroDivisionError)
 
 def test_histogram_analysis():
@@ -125,11 +146,11 @@ def test_histogram_analysis():
 
     summary_df, errs = PolarsAnalysisPipeline.full_produce_summary_df(df, HA_CLASSES, debug=True)
 
-    actual_cats = summary_df["categories"]["categorical_histogram"]
+    actual_cats = summary_df["a"]["categorical_histogram"]
     expected_cats = {'bar': 0.5, 'foo': 0.3, 'longtail': 0.1, 'unique': 0.1}
     assert actual_cats == expected_cats
 
-    actual_numcats = summary_df["numerical_categories"]["categorical_histogram"]
+    actual_numcats = summary_df["b"]["categorical_histogram"]
     rounded_actual_numcats = dict([(k, np.round(v,2)) for k,v in actual_numcats.items()])
     expected_categorical_histogram = {3:.3, 7:.7, 'longtail': 0.0, 'unique': 0.0}
     assert rounded_actual_numcats == expected_categorical_histogram
@@ -211,3 +232,53 @@ def test_pl_typing():
                BasicAnalysis, VCAnalysis,
                ComputedDefaultSummaryStats])
     
+
+class PLLen(PolarsAnalysis):
+
+
+    provides_defaults = {'len':0}
+
+    select_clauses = [
+        F.all().len().name.map(json_postfix('len'))]
+
+    
+class TestDfStats(unittest.TestCase):
+    def test_dfstats_sometimes_present(self):
+        """many ColAnalysis objects are written such that they only
+        provide stats for certain dtypes. This used to cause
+        instantiation failures. This test verifies that there are no
+        stack traces. The alternative would be to have ColAnalyis
+        objects always return every key, even if NA. That's a less
+        natural style to write analyis code.
+
+        Possible future improvement is to run through PERVERSE_DF and
+        verify that each ColAnalyis provides its specified value as
+        non NA at least once
+
+        """
+        #dfs = DfStats(word_only_df, [SometimesProvides])
+
+        #triggers a getter?
+        #PlDfStats(word_only_df, [SometimesProvides]).sdf
+        pass
+
+
+
+    def test_dfstats_return(self):
+        """
+          test the actual retuns values from dfstats
+          """
+        dfs = PlDfStats(test_df, [PLLen], 'test_df', debug=True)
+
+        assert_dict_eq({
+            'a': {'len': 4,
+                  'orig_col_name':'normal_int_series', 'rewritten_col_name':'a'},
+            'b': {'len': 4,
+                  'orig_col_name':'float_nan_ser', 'rewritten_col_name':'b'}},
+        dfs.sdf)
+
+
+    # def test_dfstats_Missing_Analysis(self):
+    #     # this is missing "len" and should throw an exception
+    #     with pytest.raises(NotProvidedException):
+    #         dfs = DfStats(test_df, [DistinctCount, DistinctPer], 'test_df', debug=True)

@@ -1,75 +1,12 @@
 import graphlib
 from collections import OrderedDict
-from typing import List, Union, Any, Mapping, Tuple, Callable
-
-class ColAnalysis:
-    """
-    Col Analysis runs on a single column
-
-    this is the pandas based implementation
-    """
-    requires_raw = False
-    requires_summary:List[str] = [] # What summary stats does this analysis provide
-
-    provides_series_stats:List[str] = [] # what does this provide at a series level
-    provides_defaults:Mapping[str, any] = {}
-
-
-    @classmethod
-    @property
-    def provides_summary(kls):
-        return list(kls.provides_defaults.keys())
-
-
-    @classmethod
-    def full_provides(kls):
-        if not isinstance(kls.provides_defaults, dict):
-            raise Exception("no provides Defaults for %r" %kls)
-        a = kls.provides_series_stats.copy()
-        #I can't figure out why the property won't work here
-        a.extend(list(kls.provides_defaults.keys()))
-        return a
-
-    @classmethod
-    def verify_no_cycle(kls):
-        requires = set(kls.requires_summary)
-        provides = set(kls.provides_defaults.keys())
-        if len(requires.intersection(provides)) == 0:
-            return True
-        return False
-
-    summary_stats_display:Union[List[str], None] = None
-    quiet = False
-    quiet_warnings = False
-    
-    @staticmethod
-    def series_summary(sampled_ser, ser):
-        return {}
-
-    @staticmethod
-    def computed_summary(summary_dict):
-        return {}
-
-    @staticmethod
-    def column_order(sampled_ser, summary_ser):
-        pass
-
-    @staticmethod
-    def column_config(summary_dict): # -> ColumnConfig partial without col_name
-        pass
-
-    @classmethod
-    def cname(kls):
-        return kls.__qualname__
-
-    select_clauses:List[Any] = []
-    column_ops: Mapping[str, Tuple[List[Any], Callable[[Any], Any]]] = {}
+from .col_analysis import AObjs
 
     
 class NotProvidedException(Exception):
     pass
 
-def check_solvable(a_objs):
+def check_solvable(a_objs:AObjs) -> None:
     """
     checks that all of the required  inputs are provided by another analysis object.
     """
@@ -103,7 +40,7 @@ def clean_list(full_class_list):
 class SelfCycle(Exception):
     pass
 
-def order_analysis(a_objs):
+def order_analysis(a_objs:AObjs) -> AObjs:
     """order a set of col analysis objects such that the dag of their
     provides_summary and requires_summary is ordered for computation
     """

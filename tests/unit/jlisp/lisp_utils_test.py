@@ -37,10 +37,10 @@ def test_format_ops():
     make sure that format_ops joins the correct column names to ops
     """
     column_meta = {
-        'a': {'cleaning_ops':SAFE_INT_TOKEN },
+        'a': {'cleaning_ops':SAFE_INT_TOKEN , 'orig_col_name':'a'},
         'b': {'cleaning_ops': [
             {'symbol': 'replace_dirty', 'meta':{'auto_clean': True}},
-            {'symbol': 'df'}, '\n', None]}}
+            {'symbol': 'df'}, '\n', None], 'orig_col_name':'b'}}
 
     expected_ops = [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a'],

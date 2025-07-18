@@ -3,6 +3,7 @@ import { OperationViewer } from "./Operations";
 import { Operation } from "./OperationUtils";
 import { CommandConfigT } from "./CommandUtils";
 import { DependentTabs, OperationResult } from "./DependentTabs";
+import { getFieldVal } from "./DFViewerParts/gridUtils";
 
 export type OperationSetter = (ops: Operation[]) => void;
 export interface WidgetConfig {
@@ -28,7 +29,7 @@ export function ColumnsEditor({
     console.log("ColumnsEditor", df_viewer_config, activeColumn, operations, 
         operation_result, command_config);
     */
-    const allColumns = df_viewer_config.column_config.map((field) => field.col_name);
+  const allColumns = df_viewer_config.column_config.map(getFieldVal)
     return (
         <div className="columns-editor" style={{ width: "100%" }}>
             <div>

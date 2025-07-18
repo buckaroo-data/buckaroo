@@ -4,7 +4,7 @@ import numpy as np
 from buckaroo import BuckarooWidget
 from buckaroo.customizations.analysis import (
     DefaultSummaryStats, PdCleaningStats)
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
+from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.dataflow.autocleaning import PandasAutocleaning, generate_quick_ops
 from buckaroo.jlisp.lisp_utils import (s, sA, sQ)
@@ -51,12 +51,16 @@ class ACConf(AutocleaningConfig):
 
 
 def test_handle_user_ops():
+    """
+      autocleaning should only replace the autocleaning ops,  but the existing user ops should stay.
+      
+      """
 
     ac = PandasAutocleaning([ACConf, NoCleaningConf])
     df = pd.DataFrame({'a': [10, 20, 30]})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
+    _cleaned_df, _cleaning_sd, _generated_code, merged_operations = cleaning_result
     assert merged_operations == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
 
@@ -64,7 +68,7 @@ def test_handle_user_ops():
         [{'symbol': 'old_safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
     cleaning_result2 = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=existing_ops)
-    cleaned_df, cleaning_sd, generated_code, merged_operations2 = cleaning_result2
+    _cleaned_df, _cleaning_sd, _generated_code, merged_operations2 = cleaning_result2
     assert merged_operations2 == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
 
@@ -72,7 +76,7 @@ def test_handle_user_ops():
         [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
     cleaning_result3 = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=user_ops)
-    cleaned_df, cleaning_sd, generated_code, merged_operations3 = cleaning_result3
+    _cleaned_df, _cleaning_sd, _generated_code, merged_operations3 = cleaning_result3
     assert merged_operations3 == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a'],
         [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']
@@ -87,21 +91,35 @@ def test_make_origs_different_dtype():
             'a': [30, 40],
             'a_orig': [30,  "40"]})
     combined = PandasAutocleaning.make_origs(
-        raw, cleaned, {'a':{'add_orig': True}})
+        raw, cleaned, {'a':{'add_orig': True, 'orig_col_name': 'a'}})
     assert combined.to_dict() == expected.to_dict()
 
-def Xtest_make_origs_preserve():
+def test_make_origs_preserve():
     """
     I keep seeing nan's pop up.  We should be using the better Pandas nullable types
     """
     raw = pd.DataFrame({'a': [30, "40", "not_used"]})
-    cleaned = pd.DataFrame({'a': [30, 40]})
+    cleaned = pd.DataFrame({'a': pd.Series([30, 40, None], dtype='Int64')})
     expected = pd.DataFrame(
         {
             'a': pd.Series([30, 40, None], dtype='Int64'),
             'a_orig': [30,  "40", "not_used"]})
     combined = PandasAutocleaning.make_origs(
-        raw, cleaned, {'a':{'add_orig': True, 'preserve_orig_index':True}})
+        raw, cleaned, {'a':{'add_orig': True, 'preserve_orig_index':True, 'orig_col_name':'a'}})
+    assert combined.to_dict() == expected.to_dict()
+
+def test_make_origs_non_alphabetpreserve():
+    """
+    I keep seeing nan's pop up.  We should be using the better Pandas nullable types
+    """
+    raw = pd.DataFrame({'a_modified': [30, "40", "not_used"]})
+    cleaned = pd.DataFrame({'a_modified': pd.Series([30, 40, None], dtype='Int64')})
+    expected = pd.DataFrame(
+        {
+            'a_modified': pd.Series([30, 40, None], dtype='Int64'),
+            'a_modified_orig': [30,  "40", "not_used"]})
+    combined = PandasAutocleaning.make_origs(
+        raw, cleaned, {'a_modified':{'add_orig': True, 'preserve_orig_index':True, 'orig_col_name':'a_modified'}})
     assert combined.to_dict() == expected.to_dict()
 
 def Xtest_make_origs_filtered_new():
@@ -377,7 +395,7 @@ class SentinelCleaningGenOps(ColAnalysis):
 
     @classmethod
     def computed_summary(kls, column_metadata):
-        ops = [sA('noop', clean_col=column_metadata['col_name']), s('df')]
+        ops = [sA('noop', clean_col=column_metadata['orig_col_name']), s('df')]
         return {'cleaning_ops': ops}
 
 class SentinelConfig(AutocleaningConfig):
@@ -403,7 +421,7 @@ class SentinelCleaningGenOps2(ColAnalysis):
 
     @classmethod
     def computed_summary(kls, column_metadata):
-        if column_metadata['col_name'] == 'c':
+        if column_metadata['orig_col_name'] == 'c':
             ops = [
                 sA('noop2', clean_col='c'),
                 {'symbol': 'df'}]

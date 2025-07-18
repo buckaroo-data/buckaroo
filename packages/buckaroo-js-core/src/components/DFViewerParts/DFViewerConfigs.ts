@@ -2,6 +2,7 @@ import { ColumnConfig, DFViewerConfig } from "./DFWhole";
 
 export const objColumn = (col_name: string): ColumnConfig => ({
   col_name,
+  header_name:col_name,
   displayer_args: {
     displayer: 'obj' as const,
   },
@@ -9,6 +10,7 @@ export const objColumn = (col_name: string): ColumnConfig => ({
 
 export const floatColumn = (col_name: string, min_fraction_digits: number, max_fraction_digits: number): ColumnConfig => ({
   col_name,
+  header_name:col_name,
   displayer_args: {
     displayer: 'float' as const,
     min_fraction_digits,
@@ -18,6 +20,7 @@ export const floatColumn = (col_name: string, min_fraction_digits: number, max_f
 
 export const integerColumn = (col_name: string, min_digits: number, max_digits: number): ColumnConfig => ({
   col_name,
+  header_name:col_name,
   displayer_args: {
     displayer: 'integer' as const,
     min_digits,
@@ -32,10 +35,12 @@ export const primaryConfigPrimary: DFViewerConfig = {
     objColumn('b'),
     {
       col_name: 'b',
+      header_name:'b',
       displayer_args: {
         displayer: 'string',
       },
     },
   ],
   pinned_rows: [],
+  left_col_configs: []
 }; 

@@ -1,24 +1,26 @@
 from buckaroo.dataflow.dataflow import StylingAnalysis
-from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import (ColAnalysis)
+from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget
 import polars as pl 
 from polars.testing import assert_frame_equal
-import numpy as np
+
 
 simple_df = pl.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
-BASIC_DF_JSON_DATA = [{'index':0, 'a':10, 'b':'foo'},
-                        {'index':1, 'a':20, 'b':'bar'},
-                        {'index':2, 'a':20, 'b':'baz'}]
+BASIC_DF_JSON_DATA = [
+    {'index':0, 'a':1, 'b':'a', 'level_0':0},
+    {'index':1, 'a':2, 'b':'b', 'level_0':1},
+    {'index':2, 'a':3, 'b':'c', 'level_0':2}]
 
-BASIC_DF = pl.DataFrame({'a': [10, 20, 20], 'b':['foo', 'bar', 'baz']})
+BASIC_DF = pl.DataFrame({'foo_col': [10, 20, 20], 'bar_col':['foo', 'bar', 'baz']})
 
 
 DFVIEWER_CONFIG_DEFAULT = {
                    'pinned_rows': [],
                    'column_config':  [
-                       {'col_name':'index', 'displayer_args': {'displayer': 'obj'}},
-                       {'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
-                       {'col_name':'b', 'displayer_args': {'displayer': 'obj'}}],
+                       {'col_name':'a', 'header_name':'int_col', 'displayer_args': {'displayer': 'obj'}},
+                       {'col_name':'b', 'header_name':'str_col', 'displayer_args': {'displayer': 'obj'}}],
+                   'left_col_configs': [{'col_name': 'index', 'header_name':'index',
+                       'displayer_args': {'displayer': 'obj'}}],
                    'component_config' : {},
                    'extra_grid_config': {},
 }
@@ -30,10 +32,10 @@ class BasicStyling(StylingAnalysis):
     
 
 def test_widget_instatiation():
-    dfc = PolarsBuckarooWidget(BASIC_DF)
+    dfc = PolarsBuckarooWidget(simple_df)
     #the BasicStyling is simple and predictable, it writes to 'basic' which nothing else should
     dfc.add_analysis(BasicStyling)
-    assert_frame_equal(dfc.dataflow.widget_args_tuple[1], BASIC_DF)
+    assert_frame_equal(dfc.dataflow.widget_args_tuple[1], simple_df)
     assert dfc.df_data_dict['main'] == BASIC_DF_JSON_DATA
 
     actual_column_config = dfc.df_display_args['basic']['df_viewer_config']['column_config']
@@ -62,15 +64,16 @@ def test_custom_dataflow():
     class TwoStyleDFC(PolarsBuckarooWidget):
         analysis_klasses = [StylingAnalysis, IntStyling]
         
-    cdfc = TwoStyleDFC(BASIC_DF)
-    assert_frame_equal(cdfc.dataflow.widget_args_tuple[1], BASIC_DF)
+    cdfc = TwoStyleDFC(simple_df)
+    assert_frame_equal(cdfc.dataflow.widget_args_tuple[1], simple_df)
     assert cdfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
     DFVIEWER_CONFIG_INT = {
                    'pinned_rows': [],
                    'column_config':  [
-                       {'col_name':'index', 'displayer_args': {'displayer': 'obj'}},
-                       {'col_name':'a', 'displayer_args': {'displayer': 'int'}},
-                       {'col_name':'b', 'displayer_args': {'displayer': 'int'}}],
+                       {'col_name':'a', 'header_name':'int_col', 'displayer_args': {'displayer': 'int'}},
+                       {'col_name':'b', 'header_name':'str_col', 'displayer_args': {'displayer': 'int'}}],
+                   'left_col_configs': [{'col_name': 'index', 'header_name':'index',
+                       'displayer_args': {'displayer': 'obj'}}],
                    'component_config' : {},
                    'extra_grid_config': {},
     }
@@ -174,16 +177,16 @@ def test_always_error_post_processing():
     temp_buckaroo_state['post_processing'] = 'always_error'
     bw.buckaroo_state = temp_buckaroo_state
     
-    #print(bw.processed_df.to_numpy().tolist())
     assert bw.dataflow.processed_df.to_numpy().tolist() ==  [['division by zero']]
 
 ROWS = 5
 typed_df = pl.DataFrame(
     {'int_col': [1] * ROWS,
-     'float_col': [.5] * ROWS,
-     "str_col": ["foobar"]* ROWS})
+     # 'float_col': [.5] * ROWS,
+     # "str_col": ["foobar"]* ROWS},
+    })
 
-EXPECTED_OVERRIDE = {'color_map_config': {'color_rule': 'color_from_column', 'col_name': 'Volume_colors'}}
+EXPECTED_OVERRIDE = {'color_map_config': {'color_rule': 'color_from_column', 'col_name': 'a'}}
 class ColumnConfigOverride(ColAnalysis):
     provides_defaults = {}
     @classmethod
@@ -193,33 +196,48 @@ class ColumnConfigOverride(ColAnalysis):
 	        'column_config_override': EXPECTED_OVERRIDE}}]
     post_processing_method = "override"
 
+
+
+def test_column_config_override2():
+    """
+      verifies that PolarsBuckarooWidget __init__ column_config_overrides works
+      and that color_map_config inside column_config_overrides is properly overwritten
+      """
+    bw = PolarsBuckarooWidget(typed_df, debug=False, column_config_overrides={
+        'int_col':EXPECTED_OVERRIDE})
+
+
+    cc_after = bw.df_display_args['main']['df_viewer_config']['column_config']
+    int_cc_after = cc_after[0]
+    assert int_cc_after['col_name'] == 'a' #make sure we found the right row
+    assert int_cc_after['header_name'] == 'int_col' #make sure we found the right row
+    assert int_cc_after['color_map_config'] == EXPECTED_OVERRIDE['color_map_config']
+    
 def test_column_config_override():
 
     bw = PolarsBuckarooWidget(typed_df, debug=False)
 
     bw.add_analysis(ColumnConfigOverride)
-
-    assert 'column_config_override' not in bw.dataflow.merged_sd['int_col']
+    assert 'column_config_override' not in bw.dataflow.merged_sd['a']
+    assert bw.dataflow.merged_sd['a']['orig_col_name'] == 'int_col'
     cc_initial = bw.df_display_args['main']['df_viewer_config']['column_config']
-    int_cc_initial = cc_initial[1]
-    assert int_cc_initial['col_name'] == 'int_col' #make sure we found the right row
+    int_cc_initial = cc_initial[0]
+    assert int_cc_initial['col_name'] == 'a' #make sure we found the right row
+    assert int_cc_initial['header_name'] == 'int_col' #make sure we found the right row
     assert 'color_map_config' not in int_cc_initial
     
     temp_buckaroo_state = bw.buckaroo_state.copy()
     temp_buckaroo_state['post_processing'] = 'override'
     bw.buckaroo_state = temp_buckaroo_state
-    
-    assert bw.dataflow.merged_sd['int_col']['column_config_override'] == EXPECTED_OVERRIDE
+    #assert list(bw.dataflow.merged_sd.keys()) == ['a']
+    assert bw.dataflow.processed_sd == {
+            'int_col':{
+	        'column_config_override': EXPECTED_OVERRIDE}}
+    assert bw.dataflow.cleaned_sd == {}
+    assert list(bw.dataflow.summary_sd.keys()) == ['a']
+    assert bw.dataflow.merged_sd['a']['column_config_override'] == EXPECTED_OVERRIDE
     cc_after = bw.df_display_args['main']['df_viewer_config']['column_config']
-    int_cc_after = cc_after[1]
-    assert int_cc_after['col_name'] == 'int_col' #make sure we found the right row
-    assert int_cc_after['color_map_config'] == EXPECTED_OVERRIDE['color_map_config']
-
-def Xtest_sample():
-    """
-    this test is slow, sampling isn't used much
-    """
-    big_df = pl.DataFrame({'a': np.arange(30_000)})
-    bw = PolarsBuckarooWidget(big_df)
-    assert len(bw.dataflow.processed_df) == len(big_df)
-    assert len(bw.df_data_dict['main']) == 5_000
+    assert len(cc_after) == 1
+    int_cc_after = cc_after[0]
+    assert int_cc_after['col_name'] == 'a' #make sure we found the right row
+    assert int_cc_after['header_name'] == 'int_col' #make sure we found the right row
