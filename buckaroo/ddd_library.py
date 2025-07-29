@@ -20,14 +20,14 @@ def get_basic_df_with_named_index():
     basic_index_with_df.index.name = "named_index"
     return basic_index_with_df
 
-def get_multindex_cols_df(rows=15) -> pd.DataFrame:
+def get_multiindex_cols_df(rows=15) -> pd.DataFrame:
     cols = pd.MultiIndex.from_tuples(
     [('foo', 'a'), ('foo', 'b'),  ('bar', 'a'), ('bar', 'b'), ('bar', 'c')])
     return pd.DataFrame(
         [["asdf","foo_b", "bar_a", "bar_b", "bar_c"]] * rows,
         columns=cols)
 
-def get_multindex_with_names_cols_df(rows=15) -> pd.DataFrame:
+def get_multiindex_with_names_cols_df(rows=15) -> pd.DataFrame:
     cols = pd.MultiIndex.from_tuples(
         [('foo', 'a'), ('foo', 'b'),  ('bar', 'a'), ('bar', 'b'), ('bar', 'c')],
         names=['level_a', 'level_b'])
@@ -36,7 +36,7 @@ def get_multindex_with_names_cols_df(rows=15) -> pd.DataFrame:
         columns=cols)
 
 def get_tuple_cols_df(rows=15) -> pd.DataFrame:
-    multi_col_df = get_multindex_cols_df(rows)
+    multi_col_df = get_multiindex_cols_df(rows)
     multi_col_df.columns = multi_col_df.columns.to_flat_index()
     return multi_col_df
 

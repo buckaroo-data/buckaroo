@@ -97,7 +97,7 @@ const DFViewerInfiniteWrapInner = ({
   const activeConfig = useSecondaryConfig ? (secondary_df_viewer_config || df_viewer_config) : df_viewer_config;
   const currentError = showError ? "some error" : undefined;
 
-  const [activeCol, setActiveCol] = useState("b");
+  const [activeCol, setActiveCol] = useState<[string, string]>(["b", "b_header"]);
   return (
       <div style={{ height: 500, width: 800 }}>
         <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>

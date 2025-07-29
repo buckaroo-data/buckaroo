@@ -33,6 +33,12 @@ def _(MyAutocleaningBuckaroo, dirty_df):
     #MyAutocleaningBuckaroo(pd.concat([dirty_df]*3000)) # to see how this works on more rows
     mybw = MyAutocleaningBuckaroo(dirty_df)
     mybw
+    return (mybw,)
+
+
+@app.cell
+def _(mybw):
+    mybw.buckaroo_state
     return
 
 

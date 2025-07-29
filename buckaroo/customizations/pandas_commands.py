@@ -485,7 +485,10 @@ class Search(Command):
 
     @staticmethod 
     def transform_to_py(df, col, val):
-        return "    df.fillna({'%s':%r}, inplace=True)" % (col, val)
+        return f"""    from buckaroo.customizations.pandas_commands import search_df_str
+    return search_df_str(df, '{val}')"""
+
+
 
 
 def search_col_str(df, col, needle:str):
@@ -513,8 +516,8 @@ class SearchCol(Command):
 
     @staticmethod 
     def transform_to_py(df, col, needle):
-        return f"    df = df[~(df['{col}'].str.find('{needle}').fillna(-1) == -1).fillna(False)]"
-
+        return f"""    from buckaroo.customizations.pandas_commands import search_col_str
+    return search_col_str(df, '{col}', '{needle}')"""
 
 
 class DropDuplicates(Command):

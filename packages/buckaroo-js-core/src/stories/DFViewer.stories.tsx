@@ -16,7 +16,7 @@ const DFViewerWrap = ({
     df_data:DFData,
     df_viewer_config: DFViewerConfig;
     summary_stats_data?: DFData;
-    activeCol?: string;
+    activeCol?: [string, string];
     setActiveCol?: SetColumnFunc;
     // these are the parameters that could affect the table,
     // dfviewer doesn't need to understand them, but it does need to use
@@ -27,7 +27,11 @@ const DFViewerWrap = ({
 
   if(setActiveCol === undefined) {
     //@ts-ignore
-    let [activeCol, setActiveCol] = useState('b');
+    let [activeCol, setActiveCol] = useState<[string, string]>(['b','b']);
+  }
+  if (activeCol === undefined) {
+    //@ts-ignore
+    let [activeCol, setActiveCol] = useState<[string, string]>(['b','b']);
   }
   return (
      <div style={{height:500, width:800}}>

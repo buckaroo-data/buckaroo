@@ -150,7 +150,7 @@ export function BuckarooInfiniteWidget({
             // putting buckaroo_state.post_processing doesn't work properly
         //}, [operations, buckaroo_state]);
         }, [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method]);
-        const [activeCol, setActiveCol] = useState("stoptime");
+      const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 
         const cDisp = df_display_args[buckaroo_state.df_display];
 
@@ -237,7 +237,7 @@ export function DFViewerInfiniteDS({
             //
             // putting buckaroo_state.post_processing doesn't work properly
         }, []);
-        const [activeCol, setActiveCol] = useState("stoptime");
+      const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 
         const cDisp = df_display_args["main"];
 

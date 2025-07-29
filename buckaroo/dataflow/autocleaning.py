@@ -192,7 +192,6 @@ class PandasAutocleaning:
             cleaning_sd = {}
         else:
             final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, existing_operations)
-
         if ops_eq(final_ops,[]) and cleaning_method == "":
             #nothing to be done here, no point in running the interpreter
             #this also has the nice effect of not copying the DF, which the interpreter does

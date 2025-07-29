@@ -370,7 +370,9 @@ class BuckarooInfiniteWidget(BuckarooWidget):
             if sort:
                 sort_dir = new_payload_args.get('sort_direction')
                 ascending = sort_dir == 'asc'
-                sorted_df = processed_df.sort_values(by=[sort], ascending=ascending)
+                processed_sd = self.dataflow.widget_args_tuple[2]
+                converted_sort_column = processed_sd[sort]['orig_col_name']
+                sorted_df = processed_df.sort_values(by=[converted_sort_column], ascending=ascending)
                 slice_df = sorted_df[start:end]
                 self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)}, [to_parquet(slice_df)])
             else:

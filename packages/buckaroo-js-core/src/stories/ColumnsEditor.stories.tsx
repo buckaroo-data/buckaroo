@@ -84,7 +84,7 @@ export const Default: Story = {
     return (
       <ColumnsEditor
         df_viewer_config={df_viewer_config}
-        activeColumn="index"
+        activeColumn={["b", "index"]}
         operation_result={baseOperationResults}
         command_config={bakedCommandConfig}
         operations={operations}
@@ -100,7 +100,7 @@ export const Empty: Story = {
     return (
       <ColumnsEditor
         df_viewer_config={df_viewer_config}
-        activeColumn="index"
+        activeColumn={["a", "index"]}
         operation_result={baseOperationResults}
         command_config={bakedCommandConfig}
         operations={operations}
@@ -116,7 +116,7 @@ export const SingleOperation: Story = {
     return (
       <ColumnsEditor
         df_viewer_config={df_viewer_config}
-        activeColumn="index"
+        activeColumn={["a", "index"]}
         operation_result={baseOperationResults}
         command_config={bakedCommandConfig}
         operations={operations}
@@ -132,7 +132,7 @@ export const DataCleaning: Story = {
     return (
       <ColumnsEditor
         df_viewer_config={df_viewer_config}
-        activeColumn="index"
+        activeColumn={["a", "index"]}
         operation_result={baseOperationResults}
         command_config={bakedCommandConfig}
         operations={operations}
@@ -148,7 +148,7 @@ export const ManyOperations: Story = {
     return (
       <ColumnsEditor
         df_viewer_config={df_viewer_config}
-        activeColumn="index"
+        activeColumn={["a", "index"]}
         operation_result={baseOperationResults}
         command_config={bakedCommandConfig}
         operations={operations}

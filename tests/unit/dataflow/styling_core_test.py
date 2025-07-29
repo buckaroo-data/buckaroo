@@ -1,7 +1,7 @@
 from typing import Dict, List
 import pandas as pd
 from buckaroo.dataflow.styling_core import ColumnConfig, DFViewerConfig, NormalColumnConfig, PartialColConfig, StylingAnalysis, merge_sd_overrides, rewrite_override_col_references
-from buckaroo.ddd_library import get_basic_df2, get_multiindex_index_df, get_multiindex_index_multiindex_with_names_cols_df, get_multiindex_index_with_names_multiindex_cols_df, get_multiindex_with_names_both, get_multiindex_with_names_index_df, get_multindex_cols_df, get_multindex_with_names_cols_df, get_tuple_cols_df
+from buckaroo.ddd_library import get_basic_df2, get_multiindex_index_df, get_multiindex_index_multiindex_with_names_cols_df, get_multiindex_index_with_names_multiindex_cols_df, get_multiindex_with_names_both, get_multiindex_with_names_index_df, get_multiindex_cols_df, get_multiindex_with_names_cols_df, get_tuple_cols_df
 from buckaroo.df_util import ColIdentifier
 from buckaroo.pluggable_analysis_framework.col_analysis import SDType
 BASIC_DF = get_basic_df2()
@@ -23,7 +23,7 @@ def test_simple_styling() -> None:
 
 def test_multi_index_styling() -> None:
 
-    mic_df: pd.DataFrame = get_multindex_cols_df()
+    mic_df: pd.DataFrame = get_multiindex_cols_df()
     fake_sd:SDType = {
         "a": {'orig_col_name':('foo','a')},
         "b": {'orig_col_name':('foo','b')},
@@ -77,7 +77,7 @@ def test_index_styling1():
 
 def test_index_styling2():
     assert [{'col_path':['level_a', 'level_b', 'index'],
-            'field':'index', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multindex_with_names_cols_df())
+            'field':'index', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_with_names_cols_df())
 def test_index_styling3():
     assert [{'col_path':['index_name_1'], 'field':'index_a', 'displayer_args': {'displayer': 'obj'}},
     {'col_path':['index_name_2'], 'field':'index_b', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_with_names_index_df())

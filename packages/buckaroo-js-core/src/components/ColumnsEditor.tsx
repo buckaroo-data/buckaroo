@@ -19,7 +19,7 @@ export function ColumnsEditor({
     command_config,
 }: {
     df_viewer_config: DFViewerConfig;
-    activeColumn: string;
+  activeColumn: [string, string];
     operations: Operation[];
     setOperations: OperationSetter;
     operation_result: OperationResult;
@@ -36,7 +36,7 @@ export function ColumnsEditor({
                 <OperationViewer
                     operations={operations}
                     setOperations={setOperations}
-                    activeColumn={activeColumn}
+                    activeColumn={activeColumn[1]}
                     allColumns={allColumns}
                     command_config={command_config}
                 />

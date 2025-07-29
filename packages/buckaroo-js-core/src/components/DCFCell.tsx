@@ -36,7 +36,7 @@ export function WidgetDCFCell({
     on_buckaroo_state: React.Dispatch<React.SetStateAction<BuckarooState>>;
     buckaroo_options: BuckarooOptions;
 }) {
-    const [activeCol, setActiveCol] = useState("stoptime");
+  const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 
     const cDisp = df_display_args[buckaroo_state.df_display];
     if (cDisp === undefined) {

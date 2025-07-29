@@ -396,7 +396,7 @@ export const getDs = (
     };
     return dsLoc;
 };
-export type SetColumnFunc = (newCol: string) => void;
+export type SetColumnFunc = (newCol: [string, string]) => void;
 export type PossibleAutosizeStrategy = SizeColumnsToFitProvidedWidthStrategy |
     SizeColumnsToContentStrategy;
 

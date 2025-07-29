@@ -125,7 +125,7 @@ class DefaultSummaryStats(ColAnalysis):
             mode=get_mode(ser),
             min=np.nan,
             max=np.nan)
-        if is_numeric and not is_bool:
+        if is_numeric and not is_bool and base_d['null_count'] < l:
             base_d.update({
                 'std': ser.std(),
                 'mean': ser.mean(),
