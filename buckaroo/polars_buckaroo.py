@@ -79,20 +79,18 @@ class PolarsBuckarooWidget(BuckarooWidget):
 
 def prepare_df_for_serialization(df:pl.DataFrame) -> pl.DataFrame:
     # I don't like this copy.  modify to keep the same data with different names
-    return df.select([pl.col(old_col).alias(new_col) for old_col, new_col in old_col_new_col(df)])
+    def col_alias(old_col, new_col):
+        return pl.col(old_col).alias(new_col)
+    select_clauses = [col_alias(old, new) for old, new in old_col_new_col(df.select(pl.exclude('index'))) if not old == "index"]
+    select_clauses.append(pl.col("index"))
+    return df.select(select_clauses)
 
 
 def to_parquet(df):
-    # I don't like this copy.  modify to keep the same data with different names
-    #df2 = df.copy()
-    
-
-    #obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
-    #encodings = {k:'json' for k in obj_columns}
-
     out = BytesIO()
 
-    prepare_df_for_serialization(df).with_row_index().write_parquet(out, compression='uncompressed') #engine='fastparquet', object_encoding=encodings)
+    #engine='fastparquet', object_encoding=encodings)
+    prepare_df_for_serialization(df).write_parquet(out, compression='uncompressed')
     out.seek(0)
     return out.read()
 
@@ -109,12 +107,14 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
             if sort:
                 sort_dir = new_payload_args.get('sort_direction')
                 ascending = sort_dir == 'asc'
-                sorted_df = processed_df.sort(sort, descending=not ascending)
+                processed_sd = self.dataflow.widget_args_tuple[2]
+                converted_sort_column = processed_sd[sort]['orig_col_name']
+                sorted_df = processed_df.with_row_index().sort(converted_sort_column, descending=not ascending)
                 slice_df = sorted_df[start:end]
                 #slice_df['index'] = slice_df.index
                 self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)}, [to_parquet(slice_df)])
             else:
-                slice_df = processed_df[start:end]
+                slice_df = processed_df.with_row_index()[start:end]
                 #slice_df['index'] = slice_df.index
                 self.send({ "type": "infinite_resp", 'key':new_payload_args,
                             'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
@@ -124,7 +124,7 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
                     return
                 
                 extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
-                extra_df = processed_df[extra_start:extra_end]
+                extra_df = processed_df.with_row_index()[extra_start:extra_end]
                 extra_df['index'] = extra_df.index
                 self.send(
                     {"type": "infinite_resp", 'key':second_pa, 'data':[], 'length':len(processed_df)},

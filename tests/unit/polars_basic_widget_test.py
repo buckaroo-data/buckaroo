@@ -299,7 +299,8 @@ def get_named_col_pldf():
                   
 
 def test_serialize_regular_df():
-    df = get_named_col_pldf()
+    #this is a bit of a hack, but to_parquet expects the index to alread have an index column.  This is necessary for proper slicing in the infinite widget
+    df = get_named_col_pldf().with_row_index()
     output = to_parquet(df)
     #second_df = pd.read_parquet(output)
     import polars as pl

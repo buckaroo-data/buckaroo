@@ -139,6 +139,9 @@ index=row_index)
 def df_with_infinity() -> pd.DataFrame:
     return pd.DataFrame({'a': [np.nan, np.inf, np.inf * -1]})
 
+def df_with_really_big_number() -> pd.DataFrame:
+    return pd.DataFrame({"col1": [9999999999999999999, 1]})
+
 def df_with_col_named_index() -> pd.DataFrame:
     return pd.DataFrame({'a':      ["asdf", "foo_b", "bar_a", "bar_b", "bar_c"],
                          'index':  ["7777", "ooooo", "--- -", "33333", "assdf"]})
