@@ -37,7 +37,7 @@ def _(buckaroo, mo):
         'buckaroo': buckaroo_disp,
         'great_tables': great_tables_disp,
         'itables': itables_disp
-    
+
     }
 
 
@@ -236,6 +236,19 @@ def _(ddd):
     return (df_with_infinity_config,)
 
 
+@app.cell
+def _(ddd):
+
+    _df = ddd.df_with_really_big_number()
+
+    _explain_md = """
+    ##  df_with_big_numbers
+     There is interaction between js numbers and python numbers that need to be managed
+    """
+    df_with_really_big_number_config = (_df, _explain_md)
+    return (df_with_really_big_number_config,)
+
+
 @app.cell(hide_code=True)
 def _(ddd):
 
@@ -270,6 +283,7 @@ def _(
     df_with_col_named_index_config,
     df_with_infinity_config,
     df_with_named_index_config,
+    df_with_really_big_number_config,
     mo,
     multiindex3_index_df_config,
     multiindex_index_df_config,
@@ -295,6 +309,7 @@ def _(
         'multiindex_index_with_names_multiindex_cols_df_config': multiindex_index_with_names_multiindex_cols_df_config,
         'multiindex_with_names_both_config': multiindex_with_names_both_config,
         'df_with_infinity_config': df_with_infinity_config,
+        'df_with_really_big_number': df_with_really_big_number_config,
         'df_with_col_named_index_config': df_with_col_named_index_config,
         'df_with_named_index_config': df_with_named_index_config,
     }
