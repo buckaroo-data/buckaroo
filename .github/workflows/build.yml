@@ -27,6 +27,7 @@ jobs:
         with:
           node-version: "20.x"
           cache: pnpm
+          package_json_file: packages/package.json
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: pandoc graphviz

@@ -42,6 +42,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           run_install: true
+          package_json_file: packages/package.json          
       - uses: astral-sh/setup-uv@v6
       - name: Run tests
         run: |
@@ -54,8 +55,6 @@ jobs:
         env:
           UV_PYTHON: ${{ matrix.python-version }}
       - uses: codecov/codecov-action@v5
-
-
 
   # buckaroo isn't currently setup for mypy
 

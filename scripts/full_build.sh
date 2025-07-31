@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-rm -rf node_modules buckaroo/widget.js || true
+rm -rf packages/node_modules buckaroo/widget.js || true
 rm -rf  packages/buckaroo-js-core/dist packages/buckaroo-js-core/node_modules || true
 cd packages/buckaroo-js-core
 pnpm install
@@ -9,7 +9,9 @@ pnpm run build:vite
 cd ../..
 cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
 rm -rf packages/buckaroo-js-core/node_modules || true
+cd packages
 pnpm install && pnpm run build
+cd ..
 rm -rf dist || true
 uv build --wheel
 #time hatch build

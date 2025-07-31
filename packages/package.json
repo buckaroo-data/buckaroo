@@ -2,7 +2,7 @@
 	"scripts": {
 		"dev": "npm run build -- --sourcemap=inline --watch",
 	    "build:old": "pwd && ls packages/buckaroo-js-core && ls packages/buckaroo-js-core/node_modules/ && esbuild js/widget.tsx --format=esm --bundle --outdir=buckaroo/static/",
-		"build": "pwd && ls packages/buckaroo-js-core && esbuild js/widget.tsx --format=esm --bundle --outdir=buckaroo/static/",
+		"build": "pwd && ls buckaroo-js-core && esbuild js/widget.tsx --format=esm --bundle --outdir=../buckaroo/static/",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

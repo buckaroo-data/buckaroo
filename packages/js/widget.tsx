@@ -3,7 +3,7 @@ import * as ReactDOM from "react-dom/client";
 import { useState } from "react";
 import srt from "buckaroo-js-core";
 import "./widget.css";
-import "../packages/buckaroo-js-core/dist/style.css";
+import "../buckaroo-js-core/dist/style.css";
 
 
 
