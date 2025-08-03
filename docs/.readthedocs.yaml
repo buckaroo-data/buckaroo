@@ -25,6 +25,7 @@ build:
         - uv tree
         - uv venv
         - uv run sphinx-build -T -b html docs/source  $READTHEDOCS_OUTPUT/html
+        - cp docs/extra-html/* $READTHEDOCS_OUTPUT/html
 #       - uv run sphinx-build -v -T -b html -c docs/source/ docs/source $READTHEDOCS_OUTPUT/html
 # Build documentation in the docs/ directory with Sphinx
 sphinx:
