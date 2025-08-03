@@ -48,6 +48,24 @@ class MixedAnalysis(PolarsAnalysis):
 
 
 
+test_df = pl.DataFrame({
+        'normal_int_series' : pl.Series([1,2,3,4]),
+        'float_nan_ser' : pl.Series([3.5, np.nan, 4.8, 2.2])})
+    
+def test_simple_mixed_pipeline():
+    """ show that a simple polars pipeline where one analysis depends on the other succesfully computes"""
+
+    pdf = PlDfStats(test_df, [SelectOnlyAnalysis, RequiresNullCount])
+    
+    sdf, errs = polars_produce_series_df(
+        test_df, [SelectOnlyAnalysis], 'test_df', debug=True)
+    expected = {
+    'b': {'mean': None,  'null_count':  0, 'null_count2':0, 'quin99': None,
+          'orig_col_name':'float_nan_ser', 'rewritten_col_name':'b'},
+    'a' :{'mean': 2.5,  'null_count':  0, 'null_count2':0, 'quin99':  4.0,
+          'orig_col_name':'normal_int_series', 'rewritten_col_name':'a'}}
+    dsdf = replace_in_dict(pdf.sdf, [(np.nan, None)])
+    assert dsdf == expected
 
 def test_non_full_analysis():
     class MixedAnalysis(PolarsAnalysis):
@@ -63,7 +81,6 @@ def test_non_full_analysis():
     pdf = PlDfStats(df, [MixedAnalysis])
     assert pdf.sdf == {'a': dict(empty_count=0, sum=30, orig_col_name='foo_col', rewritten_col_name='a'),
                        'b': dict(empty_count=1, sum=0, orig_col_name='bar_col', rewritten_col_name='b')}
-    
 
 def test_produce_series_df():
     """just make sure this doesn't fail"""
