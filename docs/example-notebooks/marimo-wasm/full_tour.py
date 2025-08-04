@@ -1,14 +1,26 @@
 import marimo
 
-__generated_with = "0.12.8"
+__generated_with = "0.13.7-dev22"
 app = marimo.App(width="medium")
+
+async with app.setup:
+    # Initialization code that runs before all other cells
+    import marimo as mo
+    import numpy as np
+    import sys
+
+    if "pyodide" in sys.modules:  # make sure we're running in pyodide/WASM
+        import micropip
+
+        await micropip.install("buckaroo")
+        await micropip.install("pyarrow")
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _():
     mo.md(
         r"""
-    # Tour of Buckaroo
+    # Tour of Buckaroo 107
     Buckaroo expedites the core task of data work - looking at the data - by showing histograms and summary stats with every DataFrame.
 
     This notebook gives a tour of Buckaroo features.
@@ -18,24 +30,41 @@ def _(mo):
     * Sorting and Search
     * Autocleaning and the lowcode UI
     * Styling and other customizations
+
+    [Narrated video demonstrating Buckaroo](https://youtu.be/t-wk24F1G3s)
+    """
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(
+        r"""
+    ## Demonstrating Buckaroo on Citibike data.
+    Click `main` below Σ to toggle the summary stats view.
+
+    You can click on column headers like "tripduration" to cycle through sort.
     """
     )
     return
 
 
 @app.cell
-def _(pd):
-    citibike_df = pd.read_parquet("./citibike-trips-2016-04.parq")
+def _():
+    import pandas as pd
+    import buckaroo
+    
+    citibike_df = pd.read_parquet(mo.notebook_location() / "public" / "citibike-trips-2016-04.parq")
     citibike_df
-    return (citibike_df,)
+    return citibike_df, pd
 
 
 @app.cell
-def _(mo):
-    import buckaroo  # for most notebook environments
-
-
-    mo.md("""## Running buckaroo
+def _():
+    mo.md(
+        """
+    ## Running buckaroo
 
     Buckaroo runs in many python notebook environments including Jupyter Notebook, Jupyter Lab, [Marimo](https://marimo.io/), VS Code, and Google Colab.
 
@@ -48,25 +77,13 @@ def _(mo):
     ```python
     import buckaroo```
     in the notebook.  Buckaroo will become the default way of displaying dataframes in that environment.
-    """)
-    return (buckaroo,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(
-        r"""
-    ## Demonstrating Buckaroo on Citibike data.
-    Click `main` below Σ to toggle the summary stats view.
-
-    You can click on column headers like "tripduration" to cycle through sort.
     """
     )
     return
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _():
     mo.md(
         r"""
     ## Histograms
@@ -88,7 +105,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(bimodal, np, pd, random_categorical):
+def _(bimodal, pd, random_categorical):
     N = 4000
 
     # random_categorical and bimodal are defined in a hidden code block at the top of this notebook
@@ -98,18 +115,16 @@ def _(bimodal, np, pd, random_categorical):
             "3_vals": random_categorical({"foo": 0.6, "bar": 0.25, "baz": 0.15}, unique_per=0, na_per=0, longtail_per=0, N=N),
             "all_unique": random_categorical({}, unique_per=1, na_per=0, longtail_per=0, N=N),
             "bimodal": bimodal(20, 40, N),
-            "longtail_unique": random_categorical({1:.3, 2:.1}, unique_per=.1, na_per=.3, longtail_per=.2, N=N),
+            "longtail_unique": random_categorical({1: 0.3, 2: 0.1}, unique_per=0.1, na_per=0.3, longtail_per=0.2, N=N),
             "one": [1] * N,
             "increasing": [i for i in range(N)],
-
             "all_NA": pd.Series([pd.NA] * N, dtype="UInt8"),
             "half_NA": random_categorical({1: 0.55}, unique_per=0, na_per=0.45, longtail_per=0.0, N=N),
-
             "longtail": random_categorical({}, unique_per=0, na_per=0.2, longtail_per=0.8, N=N),
         }
     )
     histogram_df
-    return N, histogram_df
+    return (histogram_df,)
 
 
 @app.cell(hide_code=True)
@@ -168,7 +183,7 @@ def _(pd):
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _():
     mo.md(
         r"""
     ## Auto cleaning and the lowcode UI
@@ -188,15 +203,16 @@ def _(mo):
 
 
 @app.cell
-def _(dirty_df, sys):
+def _(dirty_df):
     from buckaroo.buckaroo_widget import AutocleaningBuckaroo
-    sys #necessary so this runs after the main important block at the bottom
+
+    sys  # necessary so this runs after the main important block at the bottom
     AutocleaningBuckaroo(dirty_df)
-    return (AutocleaningBuckaroo,)
+    return
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _():
     mo.md(
         r"""
     ## Styling Buckaroo
@@ -210,13 +226,15 @@ def _(mo):
 
 
 @app.cell
-def _(BuckarooInfiniteWidget, histogram_df):
+def _(histogram_df):
+    from buckaroo import BuckarooInfiniteWidget
+
     BuckarooInfiniteWidget(histogram_df, column_config_overrides={"bimodal": {"color_map_config": {"color_rule": "color_map", "map_name": "DIVERGING_RED_WHITE_BLUE", "val_column": "normal"}}})
-    return
+    return (BuckarooInfiniteWidget,)
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _():
     mo.md(
         r"""
     ## Extending Buckaroo
@@ -237,6 +255,7 @@ def _(mo):
 def _(BuckarooInfiniteWidget, citibike_df, pd):
     bw = BuckarooInfiniteWidget(citibike_df)
 
+
     @bw.add_processing
     def outliers(df):
         mask = pd.Series(False, index=df.index)
@@ -245,12 +264,14 @@ def _(BuckarooInfiniteWidget, citibike_df, pd):
             p1, p99 = ser.quantile(0.01), ser.quantile(0.99)
             mask |= (ser <= p1) | (ser >= p99)
         return df[mask]
+
+
     bw
-    return bw, outliers
+    return
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _():
     mo.md(
         r"""
     ## Try Buckaroo
@@ -268,22 +289,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-async def _():
-    import marimo as mo
-    import pandas as pd
-    import numpy as np
-    import sys
-
-    if "pyodide" in sys.modules:  # make sure we're running in pyodide/WASM
-        import micropip
-
-        await micropip.install("buckaroo")
-    from buckaroo import BuckarooInfiniteWidget
-    return BuckarooInfiniteWidget, micropip, mo, np, pd, sys
-
-
-@app.cell(hide_code=True)
-def _(np, pd):
+def _(pd):
     # because this doesn't import numpy and the first block does, this will run after
 
 
@@ -327,7 +333,7 @@ def _(np, pd):
             return pd.Series(all_arr, dtype="UInt64")
         except:
             return pd.Series(all_arr, dtype=pd.StringDtype())
-    return bimodal, rand_cat, random_categorical
+    return bimodal, random_categorical
 
 
 @app.cell
