@@ -8,10 +8,12 @@ build:
   apt_packages:
     - graphviz
     - npm
-
   jobs:
     pre_create_environment:
       - asdf plugin add uv
+      - asdf plugin add pnpm
+      - asdf install pnpm 9.5.0
+      - asdf global pnpm 9.5.0
       - asdf install uv 0.6.12
       - asdf global uv 0.6.12
     create_environment:
@@ -20,6 +22,7 @@ build:
     install:
       - uv sync  --all-extras --group dev
       - uv tree
+      - pnpm -C packages/buckaroo-js-core install
     build:
       html:
         - uv tree
@@ -28,9 +31,10 @@ build:
         - ./scripts/marimo_wasm_output.sh buckaroo_ddd_tour.py run
         - ./scripts/marimo_wasm_output.sh buckaroo_compare.py edit
         - ./scripts/marimo_wasm_output.sh full_tour.py edit
+        - pnpm -C packages/buckaroo-js-core run build-storybook
+        - cp -r packages/buckaroo-js-core/dist/storybook docs/extra-html/
         - cp -r docs/extra-html/* $READTHEDOCS_OUTPUT/html
-        
-#       - uv run sphinx-build -v -T -b html -c docs/source/ docs/source $READTHEDOCS_OUTPUT/html
+
 # Build documentation in the docs/ directory with Sphinx
 sphinx:
    configuration: docs/source/conf.py

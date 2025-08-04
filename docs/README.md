@@ -52,3 +52,11 @@ https://github.com/marimo-team/marimo/issues/5901
 for local dev
 npx http-server -o ./
 this is much faster than the python server
+
+
+## Storybook
+
+lives at 
+https://buckaroo-data--421.org.readthedocs.build/en/421/storybook/?path=/docs/configure-your-project--docs
+in sample builds
+
