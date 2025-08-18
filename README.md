@@ -53,6 +53,7 @@ The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery)
 
 ## Videos 
 - [Buckaroo Full Tour](https://youtu.be/t-wk24F1G3s) 6m50s A broad introduction to Buckaroo
+- [Buckaroo PyData Boston 2025](https://www.youtube.com/watch?v=HtahDDEnBwE) 49m A tour of Buckaroo at PyData Boston.  Includes questions from the audience.
 - [Autocleaning quick demo](https://youtube.com/shorts/4Jz-Wgf3YDc) 2m38s
 - [Writing your own autocleaning functions](https://youtu.be/A-GKVsqTLMI) 10m10s
 - [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE) 12m56s
