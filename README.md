@@ -54,12 +54,18 @@ The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery)
 ## Videos 
 - [Buckaroo Full Tour](https://youtu.be/t-wk24F1G3s) 6m50s A broad introduction to Buckaroo
 - [Buckaroo PyData Boston 2025](https://www.youtube.com/watch?v=HtahDDEnBwE) 49m A tour of Buckaroo at PyData Boston.  Includes questions from the audience.
+- [Using Buckaroo and pandas to investigate large CSVs](https://www.youtube.com/watch?v=_ZmYy8uvZN8) 9m
 - [Autocleaning quick demo](https://youtube.com/shorts/4Jz-Wgf3YDc) 2m38s
 - [Writing your own autocleaning functions](https://youtu.be/A-GKVsqTLMI) 10m10s
 - [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE) 12m56s
 - [Styling Buckaroo](https://www.youtube.com/watch?v=cbwJyo_PzKY) 8m18s
 - [Understanding JLisp in Buckaroo](https://youtu.be/3Tf3lnuZcj8) 12m42s
 - [GeoPandas Support](https://youtu.be/8WBhoNjDJsA)
+
+## Articles
+- [Using Buckaroo and pandas to investigate large CSVs](https://medium.com/@paddy_mullen/using-buckaroo-and-pandas-to-investigate-large-csvs-2a200aebae31)
+- [Speed up exploratory data analysis with Buckaroo](https://medium.com/data-science-collective/speed-up-initial-data-analysis-with-buckaroo-71d00660d3fc)
+
 
 ## Example Notebooks
 
