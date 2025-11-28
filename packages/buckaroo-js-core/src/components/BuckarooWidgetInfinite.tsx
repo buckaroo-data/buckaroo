@@ -246,7 +246,7 @@ export function DFViewerInfiniteDS({
                 getDataWrapper(cDisp.data_key, df_data_dict, mainDs, df_meta.total_rows),
                 df_data_dict[cDisp.summary_stats_key],
             ],
-            [cDisp]
+            [cDisp, df_data_dict, mainDs, df_meta.total_rows]
         );
         
         //used to denote "this dataframe has been transformed", This is

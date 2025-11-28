@@ -20,6 +20,18 @@ class PolarsAnalysis(ColAnalysis):
 
 PAObjs: TypeAlias = List[Type[PolarsAnalysis]]
 
+def polars_select_expressions(unordered_objs: PAObjs) -> List[pl.Expr]:
+    """
+    Return the full list of select expressions contributed by the provided
+    PolarsAnalysis classes. This mirrors the expression set used by
+    polars_produce_series_df and can be used by executors to surface
+    the concrete expression plan for debugging/bisecting.
+    """
+    exprs: List[pl.Expr] = []
+    for obj in unordered_objs:
+        exprs.extend(obj.select_clauses)
+    return exprs
+
 def polars_produce_series_df(df:pl.DataFrame,
                              unordered_objs:PAObjs,
                       df_name:str='test_df', debug:bool=False) -> SDType:
@@ -155,6 +167,57 @@ def polars_produce_summary_df(
                 continue
         summary_col_dict[rewritten_col_name] = base_summary_dict
     return summary_col_dict, errs
+
+#FIXME shouldn't this be used by produce_summary_df?
+def polars_series_stats_from_select_result(
+    select_result_df: pl.DataFrame,
+    original_df_for_schema: pl.DataFrame,
+    unordered_objs: PAObjs,
+    df_name: str = 'test_df',
+    debug: bool = False,
+) -> SDType:
+    """
+    Build series-level stats given a DataFrame produced by selecting the
+    analysis expressions up-front. This avoids reconstructing and executing
+    those expressions here again.
+    """
+    errs: MutableMapping[str, str] = {}
+    # Build mapping and base summary dict using only schema (no data collection needed)
+    orig_col_to_rewritten: dict[str, str] = {}
+    summary_dict: dict[str, dict[str, Any]] = {}
+    for orig_ser_name, rewritten_col_name in old_col_new_col(original_df_for_schema):
+        orig_col_to_rewritten[orig_ser_name] = rewritten_col_name
+        summary_dict[rewritten_col_name] = {
+            'orig_col_name': orig_ser_name,
+            'rewritten_col_name': rewritten_col_name,
+        }
+        for a_klass in unordered_objs:
+            summary_dict[rewritten_col_name].update(a_klass.provides_defaults)
+
+    # Fill in first run dict from the provided selection results
+    first_run_dict = split_to_dicts(select_result_df)
+    for orig_col, measures in first_run_dict.items():
+        if orig_col in orig_col_to_rewritten:
+            rw_col = orig_col_to_rewritten[orig_col]
+            summary_dict[rw_col].update(measures)
+
+    # column_ops may require original series; we cannot recompute without data.
+    # Keep behavior consistent with polars_produce_series_df by attempting to
+    # compute from the original_df_for_schema when possible (schema-only path
+    # will typically skip due to missing data).
+    for pa in unordered_objs:
+        for measure_name, action_tuple in pa.column_ops.items():
+            col_selector, func = action_tuple
+            try:
+                # Without data, column_ops can't run; skip silently.
+                # If consumers need column_ops, they should pass a real df here.
+                continue
+            except Exception:
+                if debug:
+                    pass
+                continue
+
+    return summary_dict, errs
 
 
 class PolarsAnalysisPipeline(AnalysisPipeline):

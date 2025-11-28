@@ -130,6 +130,29 @@ const renderBuckarooWidget = createRender(() => {
 	const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
 	const [df_display_args, _set_dda] = useModelState("df_display_args");
 	const [df_meta, _set_df_meta] = useModelState("df_meta");
+	// Diagnostics: log all_stats shape and pinned_rows config when they change
+	React.useEffect(() => {
+		try {
+			const allStats = (df_data_dict && df_data_dict['all_stats']) || [];
+			// eslint-disable-next-line no-console
+			console.info(
+				"[WidgetTSX][Model] df_data_dict all_stats len",
+				allStats.length,
+				"sample",
+				allStats[0] || null,
+			);
+		} catch {}
+	}, [df_data_dict]);
+	React.useEffect(() => {
+		try {
+			const pr = df_display_args?.main?.df_viewer_config?.pinned_rows || [];
+			// eslint-disable-next-line no-console
+			console.info(
+				"[WidgetTSX][Model] pinned_rows",
+				pr.map((x:any)=>x?.primary_key_val),
+			);
+		} catch {}
+	}, [df_display_args]);
 
 	const [operations, on_operations] = useModelState("operations");
 	const [operation_results, _set_opr] = useModelState("operation_results");
@@ -190,7 +213,8 @@ const srcClosureRBI = (src) => {
     const renderDFViewerInfiniteWidget = createRender((a,b,c) => {
 	const model = useModel()
 	const [df_meta, _set_df_meta] = useModelState("df_meta");
-	const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
+	  const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
+      console.log("widget.tsx:217 df_data_dict['all_stats']", df_data_dict['all_stats'])
 	const [df_display_args, _set_dda] = useModelState("df_display_args");
         const [df_id, _set_df_id] = useModelState("df_id");
 	return (

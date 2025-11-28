@@ -379,6 +379,7 @@ export const getDs = (
                 sort: sm.length === 1 ? sm[0].colId : undefined,
                 sort_direction: sm.length === 1 ? sm[0].sort : undefined,
             };
+            console.log("[getRows] dsPayloadArgs", dsPayloadArgs, "context.outside_df_params", outside_params_string);
             const successWrapper = (df:DFData, length:number) => {
 		//@ts-ignore
                 console.log("successWrapper called 217",  createTime, ((new Date()) - createTime));

@@ -563,6 +563,40 @@ describe('KeyAwareSmartRowCache tests', () => {
 	expect(sentLength2).toStrictEqual(17)
     })
 
+    test('KeyAwareSmartRowCache returns only [start,origEnd] on cache hit (do not expand to sentLength)', () => {
+        // Note on semantics:
+        // - start/end: the full desired window (may exceed what is currently cached)
+        // - origEnd: the immediate upper bound the grid needs right now (guaranteed in cache on a hit)
+        // On a cache hit we must return [start, origEnd] from the cache, and optionally
+        // schedule a follow-on request to extend beyond origEnd up to end (or padding).
+        // Arrange: prime cache with [0,70], and dataset length (sentLength) larger than origEnd
+        const mockRequestFn = jest.fn((_pa:PayloadArgs) => {});
+        const src = new KeyAwareSmartRowCache(mockRequestFn);
+        const paCache: PayloadArgs = { sourceName: "keyA", start: 0, end: 70, origEnd: 70 };
+        const data70 = genRows(0, 70)[1];
+        // In PayloadResponse, `length` is the total dataset length for this source (sentLength),
+        // not the size of `data`. `data.length` is the slice size; `length` informs end-of-data logic.
+        const resp: PayloadResponse = { key: paCache, data: data70, length: 1256 };
+        src.addPayloadResponse(resp);
+
+        // Act: request rows with an 'end' much larger than what's cached, but origEnd equal to cached end
+        const paRequest: PayloadArgs = { sourceName: "keyA", start: 0, end: 1000, origEnd: 70 };
+        const mockCb = jest.fn((_df:DFData, _length:number) => {});
+        src.getRequestRows(paRequest, mockCb, failNOP);
+
+        // Assert: request is served from cache without expanding beyond origEnd
+        expect(mockCb).toHaveBeenCalledTimes(1);
+        const [received, receivedLen] = mockCb.mock.calls[0];
+        expect(received).toStrictEqual(data70);
+        expect(receivedLen).toBe(1256); // dataset length still reported
+        // And only a follow-on request is fired starting at cached end (70) with padding (200)
+        expect(mockRequestFn).toHaveBeenCalledTimes(1);
+        const follow = mockRequestFn.mock.calls[0][0] as PayloadArgs;
+        expect(follow.start).toBe(70);
+        expect(follow.end).toBe(270);
+        expect(follow.origEnd).toBe(270);
+    })
+
     test('KeyAwareSmartRowCache test last rows', () => {
 	// verify that a request that overlaps the end of the data is handled proeprly
 	let src:KeyAwareSmartRowCache;

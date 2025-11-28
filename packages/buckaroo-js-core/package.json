@@ -12,7 +12,11 @@
     "preview": "vite preview",
     "test": "jest",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build -o dist/storybook"
+    "build-storybook": "storybook build -o dist/storybook",
+    "test:pw": "playwright test",
+    "test:pw:headed": "playwright test --headed",
+    "test:pw:ui": "playwright test --ui",
+    "test:pw:report": "playwright show-report"
   },
   "files": [
     "/dist"

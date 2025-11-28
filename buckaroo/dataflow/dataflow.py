@@ -20,8 +20,9 @@ from .styling_core import (
     merge_sds, merge_column_config, StylingAnalysis)
 
 
-
-class DataFlow(HasTraits):
+from .abc_dataflow import ABCDataflow
+    
+class DataFlow(ABCDataflow):
     """This class is meant to only represent the dataflow through
     buckaroo with no accomodation for widget particulars
 

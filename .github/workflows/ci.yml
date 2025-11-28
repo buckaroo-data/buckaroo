@@ -18,13 +18,21 @@ concurrency:
 jobs:
   LintPython:
     name: Python / Lint
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: |
           uv run ruff check
-          # uv run ruff format  # changes too many files
+
+  # LintPythonMac: # just see if this builds and works on macos,  currently broken
+  #   name: Python / Lint
+  #   runs-on: macos-15
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: astral-sh/setup-uv@v6
+  #     - run: |
+  #         uv run ruff check
 
   TestPython:
     name: Python / Test
@@ -33,10 +41,12 @@ jobs:
       matrix:
         python-version:
           # - "3.8" #other conflicts
-          - "3.9"
+          #- "3.9"
           #- "3.10"
-          #- "3.11"
-          #- "3.12"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          #- "3.14"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

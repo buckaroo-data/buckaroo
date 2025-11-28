@@ -160,6 +160,45 @@ npm install
 npm run dev
 ```
 
+### Storybook (JS core components)
+
+Run Storybook locally:
+```bash
+cd packages/buckaroo-js-core
+pnpm install
+pnpm storybook
+# open http://localhost:6006
+```
+
+Build a static Storybook site:
+```bash
+cd packages/buckaroo-js-core
+pnpm install
+pnpm build-storybook
+# output: packages/buckaroo-js-core/dist/storybook
+```
+
+### Playwright (UI tests against Storybook)
+
+Install browsers:
+```bash
+cd packages/buckaroo-js-core
+pnpm install
+pnpm exec playwright install
+```
+
+Run tests (auto-starts Storybook via Playwright webServer, or reuses an existing one):
+```bash
+pnpm test:pw --reporter=line
+```
+
+Useful variants:
+```bash
+pnpm test:pw:headed   # visible browser
+pnpm test:pw:ui       # Playwright UI
+pnpm test:pw:report   # open HTML report
+```
+
 
 ### UV Instructions
 ```sh
