@@ -244,20 +244,74 @@ class HistogramAnalysis(PolarsAnalysis):
     def computed_summary(summary_dict):
         if len(summary_dict.keys()) == 0:
             return {}
+        #FIXME
+        vc = summary_dict.get('value_counts')
+        if vc is None or (hasattr(vc, 'len') and vc.len() == 0):
+            # Return empty defaults if value_counts is missing or empty
+            return {}
         
-        vc = summary_dict['value_counts']
-        cd = categorical_dict_from_vc(vc)
+        # Check if value_counts is the default error value_counts
+        # The default is: pl.Series("", [{'a': 'error', 'count': 1}], dtype=pl.Struct({'a': pl.String, 'count': pl.UInt32}))
+        # We need to check both the structure and that it's the exact default (name is empty string "")
+        try:
+            if hasattr(vc, 'name') and vc.name == "" and hasattr(vc, 'explode'):
+                vc_exploded = vc.explode()
+                if len(vc_exploded) == 1:
+                    vc_dict = vc_exploded[0]
+                    if isinstance(vc_dict, dict) and vc_dict.get('a') == 'error' and vc_dict.get('count') == 1:
+                        # This is the default error value_counts, not real data
+                        return {}
+        except Exception:
+            pass  # If we can't check, proceed with normal processing
+        
+        try:
+            cd = categorical_dict_from_vc(vc)
+        except Exception:
+            # If categorical_dict_from_vc fails, return empty defaults
+            return {}
+        
         is_numeric = summary_dict.get('is_numeric', False)
-        nan_per = summary_dict['null_count']
-        if is_numeric and len(vc.explode()) > 5:
-            histogram_args = summary_dict['histogram_args']
-            min_, max_, nan_per = summary_dict['min'], summary_dict['max'], summary_dict['nan_per']
-            temp_histo =  numeric_histogram(histogram_args, min_, max_, nan_per)
-            if len(temp_histo) > 5:
-                #if we had basically a categorical variable encoded into an integer.. don't return it
-                return {'histogram': temp_histo,
-                        'histogram_bins': summary_dict['histogram_args']['meat_histogram'][1]
-                        }
+        # nan_per should be a percentage (0-1), computed by ComputedDefaultSummaryStats
+        # If not available, compute from null_count/length if possible, otherwise default to 0.0
+        nan_per = summary_dict.get('nan_per', 0.0)
+        if nan_per == 0.0 and 'null_count' in summary_dict and 'length' in summary_dict:
+            length = summary_dict.get('length', 1)
+            if length > 0:
+                nan_per = summary_dict.get('null_count', 0.0) / length
+        
+        # Prefer numeric histograms when:
+        #   - the column is numeric, and
+        #   - either value_counts indicates many distinct values, OR
+        #   - histogram_args is present (e.g., on the PAF/ColumnExecutor path where
+        #     value_counts may not be fully populated but histogram_args is).
+        if is_numeric:
+            try:
+                vc_exploded_len = len(vc.explode()) if vc is not None else 0
+            except Exception:
+                vc_exploded_len = 0
+            
+            histogram_args = summary_dict.get('histogram_args')
+            if histogram_args and (
+                vc_exploded_len > 5 or histogram_args
+            ):
+                if histogram_args and isinstance(histogram_args, dict):
+                    meat_histogram = histogram_args.get('meat_histogram')
+                    if meat_histogram and isinstance(meat_histogram, list) and len(meat_histogram) > 1:
+                        min_ = summary_dict.get('min')
+                        max_ = summary_dict.get('max')
+                        nan_per = summary_dict.get('nan_per', nan_per)
+                        if min_ is not None and max_ is not None:
+                            try:
+                                temp_histo = numeric_histogram(histogram_args, min_, max_, nan_per)
+                                if len(temp_histo) > 5:
+                                    # if we had basically a categorical variable encoded into an integer.. don't return it
+                                    return {
+                                        'histogram': temp_histo,
+                                        'histogram_bins': meat_histogram[1],
+                                    }
+                            except Exception:
+                                pass  # Fall through to categorical histogram
+        
         return {'categorical_histogram': cd, 'histogram' : categorical_histogram_from_cd(cd, nan_per),
                 'histogram_bins': ['faked']
                 }

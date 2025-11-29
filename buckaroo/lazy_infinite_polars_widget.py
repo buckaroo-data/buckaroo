@@ -9,21 +9,19 @@ from pathlib import Path
 import anywidget
 import polars as pl
 import logging
-from traitlets import Dict as TDict, Unicode, observe
+from traitlets import Dict as TDict, Unicode
 
 from .dataflow.column_executor_dataflow import ColumnExecutorDataflow
-from .customizations.polars_analysis import PL_Analysis_Klasses, ComputedDefaultSummaryStats, NOT_STRUCTS
+from .customizations.polars_analysis import PL_Analysis_Klasses, NOT_STRUCTS
 from buckaroo.pluggable_analysis_framework.utils import json_postfix
+from buckaroo.styling_helpers import obj_, pinned_histogram
 from .pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
 from .df_util import old_col_new_col
 from .serialization_utils import pd_to_obj
-from .customizations.polars_analysis import HistogramAnalysis as _H
-from buckaroo.file_cache.base import Executor as _SyncExec  # type: ignore            
+from buckaroo.file_cache.base import AbstractFileCache, Executor as _SyncExec  # type: ignore            
 #from buckaroo.file_cache.threaded_executor import ThreadedExecutor as _ParExec  # type: ignore
 from buckaroo.file_cache.multiprocessing_executor import MultiprocessingExecutor as _ParExec
-from buckaroo.file_cache.base import FileCache as _FC  # type: ignore
 
-import polars.selectors as cs
 from polars import functions as F
 
 
@@ -79,7 +77,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         debug: bool = False,
         column_executor_class: Optional[type] = None,
         file_path: Optional[str] = None,
-        file_cache: Optional["FileCache"] = None,
+        file_cache: Optional["AbstractFileCache"] = None,
         sync_executor_class: Optional[type] = None,
         #don't need parallel_executor_class  
         parallel_executor_class: Optional[type] = None,
@@ -87,8 +85,8 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         super().__init__()
         self._debug = debug
         self._ldf = ldf
-        #default_analyses = PL_Analysis_Klasses
-        default_analyses = [SimpleAnalysis]
+        default_analyses = PL_Analysis_Klasses
+        #default_analyses = [SimpleAnalysis]
 
         self._analyses = list(analysis_klasses) if analysis_klasses is not None else default_analyses
 
@@ -123,11 +121,11 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         def _on_progress_update(aggregated_summary: Dict[str, Dict[str, Any]]) -> None:
             try:
                 rows = self._summary_to_rows(aggregated_summary or {})
-                logger.info(
-                    "Progress rows update: all_stats len=%s sample=%s",
-                    len(rows),
-                    (rows[0] if rows else None),
-                )
+                # logger.info(
+                #     "Progress rows update: all_stats len=%s sample=%s",
+                #     len(rows),
+                #     (rows[0] if rows else None),
+                # )
                 self.df_data_dict = {'main': [], 'all_stats': rows, 'empty': []}
             except Exception:
                 logger.exception("error updating df_data_dict from progress")
@@ -156,9 +154,9 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         def _listener(note):
             # Minimal progress surface; expand as needed
 
-            logger.info(
-                "ProgressNotification for %s  status %s message %s",
-                note.col_group, note.success, note.failure_message)
+            # logger.info(
+            #     "ProgressNotification for %s  status %s message %s",
+            #     note.col_group, note.success, note.failure_message)
 
             self.executor_progress = {
                 'success': note.success,
@@ -207,13 +205,15 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         #FIXME,  this isn't showing any pinned rows
         df_viewer_config = {
             "pinned_rows": [
+                obj_('dtype'),
+                pinned_histogram(),
                 {'primary_key_val': 'unique_count',     'displayer_args': {'displayer': 'obj' } },
                 {'primary_key_val': 'null_count',     'displayer_args': {'displayer': 'obj' } },
                 {'primary_key_val': 'empty_count',     'displayer_args': {'displayer': 'obj' } },
             ],
             "column_config": initial_col_config,
-            "left_col_configs": [{"col_name": "index", "header_name": "index", "displayer_args": {"displayer": "obj"}}],
-        }
+            "left_col_configs": [{"col_name": "index", "header_name": "index", "displayer_args": {"displayer": "obj"}}],}
+        
         logger.info("LazyInfinite init: total_rows=%s; initial columns=%s", total_rows, [c.get("header_name") for c in initial_col_config])
         logger.info(
             "Setting df_display_args with pinned_rows=%s",

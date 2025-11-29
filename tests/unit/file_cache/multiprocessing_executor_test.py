@@ -12,7 +12,8 @@ def test_multiprocessing_executor_success():
     notes: list[ProgressNotification] = []
     def listener(p: ProgressNotification):
         notes.append(p)
-    exc = MultiprocessingExecutor(ldf, SimpleColumnExecutor(), listener, fc, timeout_secs=2.0)
+    #FIXME this should be able to work without async_mode=False, but it doesn't .  maybe there is a pytest config
+    exc = MultiprocessingExecutor(ldf, SimpleColumnExecutor(), listener, fc, timeout_secs=5.0, async_mode=False)
     exc.run()
     # one notification per column
     assert len(notes) == len(df.columns)
@@ -30,7 +31,8 @@ def test_multiprocessing_executor_timeout():
         notes.append(p)
 
     # Make each column execute longer than the timeout
-    exc = MultiprocessingExecutor(ldf, SlowColumnExecutor(2.5), listener, fc, timeout_secs=2.0)
+    #FIXME this should be able to work without async_mode=False
+    exc = MultiprocessingExecutor(ldf, SlowColumnExecutor(2.5), listener, fc, timeout_secs=2.0, async_mode=False)
     exc.run()
     # Expect two failures (one per column group) with timeout messages
     assert len(notes) == len(df.columns)

@@ -3,10 +3,8 @@ from polars import functions as F
 
 from buckaroo.dataflow.column_executor_dataflow import ColumnExecutorDataflow
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
-from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.pluggable_analysis_framework.utils import json_postfix
 from buckaroo.dataflow.styling_core import merge_sds
-import time
 
 
 class SelectOnlyAnalysis(PolarsAnalysis):

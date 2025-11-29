@@ -3,7 +3,7 @@ from typing_extensions import override
 import six
 import warnings
 import pandas as pd
-from traitlets import Unicode, Any, observe, HasTraits, Dict
+from traitlets import Unicode, Any, observe, Dict
 
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, SDType
 from ..serialization_utils import pd_to_obj    

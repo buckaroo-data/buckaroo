@@ -36,7 +36,9 @@ def polars_produce_series_df(df:pl.DataFrame,
                              unordered_objs:PAObjs,
                       df_name:str='test_df', debug:bool=False) -> SDType:
     """ just executes the series methods
-
+    
+    Now uses polars_series_stats_from_select_result internally to ensure
+    consistency with PAFColumnExecutor.
     """
     errs: MutableMapping[str, str] = {}
     all_clauses = []
@@ -65,11 +67,56 @@ def polars_produce_series_df(df:pl.DataFrame,
             
             # Combine results horizontally 
             if individual_results:
-                result_df = individual_results[0]
-                for additional_result in individual_results[1:]:
-                    result_df = result_df.hstack(additional_result)
-                if debug:
-                    print(f"Fallback successful: {result_df.shape}")
+                try:
+                    result_df = individual_results[0]
+                    for additional_result in individual_results[1:]:
+                        result_df = result_df.hstack(additional_result)
+                    if debug:
+                        print(f"Fallback successful: {result_df.shape}")
+                except Exception as hstack_error:
+                    # If hstack fails (e.g., height mismatches), extract values from each
+                    # result separately and merge them, then reconstruct a DataFrame
+                    # This matches PAFColumnExecutor behavior
+                    if debug:
+                        print(f"hstack failed: {hstack_error}")
+                        print("Extracting values from individual results...")
+                    from buckaroo.pluggable_analysis_framework.polars_utils import split_to_dicts
+                    from collections import defaultdict
+                    import json
+                    
+                    merged_dict = defaultdict(dict)
+                    for individual_result in individual_results:
+                        result_dict = split_to_dicts(individual_result)
+                        for orig_col, measures in result_dict.items():
+                            merged_dict[orig_col].update(measures)
+                    
+                    # Reconstruct DataFrame from merged dict
+                    # For value_counts, we need to preserve the Series structure
+                    # For other measures, extract scalar values
+                    reconstructed_cols = {}
+                    for orig_col, measures in merged_dict.items():
+                        for measure, value in measures.items():
+                            col_name = json.dumps([orig_col, measure])
+                            if measure == 'value_counts' and isinstance(value, pl.Series):
+                                # Preserve the Series for value_counts (it's a Series of structs)
+                                reconstructed_cols[col_name] = [value]
+                            elif isinstance(value, pl.Series):
+                                # For other Series, extract first element
+                                scalar_val = value[0] if value.len() > 0 else None
+                                reconstructed_cols[col_name] = [scalar_val]
+                            elif isinstance(value, list):
+                                scalar_val = value[0] if value else None
+                                reconstructed_cols[col_name] = [scalar_val]
+                            else:
+                                reconstructed_cols[col_name] = [value]
+                    
+                    if reconstructed_cols:
+                        result_df = pl.DataFrame(reconstructed_cols)
+                    else:
+                        # If no expressions worked, return error strings
+                        if debug:
+                            df.write_parquet('error.parq')
+                        return dict([[k, str(e)] for k in df.columns]), {}
             else:
                 # If no clauses worked, return error strings
                 if debug:
@@ -81,42 +128,14 @@ def polars_produce_series_df(df:pl.DataFrame,
                 df.write_parquet('error.parq')
             return dict([[k, str(e)] for k in df.columns]), {}
 
-    orig_col_to_rewritten = {}
-    summary_dict = {}
-    for orig_ser_name, rewritten_col_name in old_col_new_col(df):
-        orig_col_to_rewritten[orig_ser_name] = rewritten_col_name
-        summary_dict[rewritten_col_name] = {}
-        summary_dict[rewritten_col_name]['orig_col_name'] = orig_ser_name
-        summary_dict[rewritten_col_name]['rewritten_col_name'] = rewritten_col_name
-
-        for a_klass in unordered_objs:
-            summary_dict[rewritten_col_name].update(a_klass.provides_defaults)
+    # Use polars_series_stats_from_select_result to build series stats
+    # This ensures consistency with PAFColumnExecutor
+    # Note: we pass run_computed_summary=False because that's done in polars_produce_summary_df
+    series_stats, errs = polars_series_stats_from_select_result(
+        result_df, df, unordered_objs, df_name, debug, run_computed_summary=False
+    )
     
-    first_run_dict = split_to_dicts(result_df)
-
-    # Map from original column names to rewritten column names
-    for orig_col, measures in first_run_dict.items():
-        if orig_col in orig_col_to_rewritten:
-            rw_col = orig_col_to_rewritten[orig_col]
-            summary_dict[rw_col].update(measures)
-
-    for pa in unordered_objs:
-        for measure_name, action_tuple in pa.column_ops.items():
-            col_selector, func = action_tuple
-            try:
-                if col_selector == "all":
-                    sub_df = df.select(pl.all())
-                else:
-                    sub_df = df.select(pl.col(col_selector))
-                for col in sub_df.columns:
-                    rw_col = orig_col_to_rewritten[col]
-                    summary_dict[rw_col][measure_name] = func(df[col])
-            except Exception as e:
-                if debug:
-                    print(f"Error in column_ops for {measure_name}: {e}")
-                continue
-    
-    return summary_dict, errs
+    return series_stats, errs
 
 
 def polars_produce_summary_df(
@@ -175,6 +194,7 @@ def polars_series_stats_from_select_result(
     unordered_objs: PAObjs,
     df_name: str = 'test_df',
     debug: bool = False,
+    run_computed_summary: bool = True,
 ) -> SDType:
     """
     Build series-level stats given a DataFrame produced by selecting the
@@ -201,21 +221,75 @@ def polars_series_stats_from_select_result(
             rw_col = orig_col_to_rewritten[orig_col]
             summary_dict[rw_col].update(measures)
 
-    # column_ops may require original series; we cannot recompute without data.
-    # Keep behavior consistent with polars_produce_series_df by attempting to
-    # compute from the original_df_for_schema when possible (schema-only path
-    # will typically skip due to missing data).
-    for pa in unordered_objs:
-        for measure_name, action_tuple in pa.column_ops.items():
-            col_selector, func = action_tuple
-            try:
-                # Without data, column_ops can't run; skip silently.
-                # If consumers need column_ops, they should pass a real df here.
-                continue
-            except Exception:
-                if debug:
-                    pass
-                continue
+    # column_ops may require original series; execute them if data is available.
+    # If original_df_for_schema has data (height > 0), execute column_ops similar
+    # to polars_produce_series_df. If it's empty (schema-only), skip column_ops
+    # for backward compatibility.
+    if original_df_for_schema.height > 0:
+        for pa in unordered_objs:
+            for measure_name, action_tuple in pa.column_ops.items():
+                col_selector, func = action_tuple
+                try:
+                    if col_selector == "all":
+                        sub_df = original_df_for_schema.select(pl.all())
+                    elif isinstance(col_selector, list):
+                        # col_selector is a list of data types (e.g., NUMERIC_POLARS_DTYPES)
+                        # Filter columns by matching dtype
+                        matching_cols = [
+                            c
+                            for c in original_df_for_schema.columns
+                            if original_df_for_schema[c].dtype in col_selector
+                        ]
+                        if not matching_cols:
+                            continue
+                        sub_df = original_df_for_schema.select(matching_cols)
+                    else:
+                        # col_selector is a column name (legacy behavior from polars_produce_series_df)
+                        sub_df = original_df_for_schema.select(pl.col(col_selector))
+
+                    for col in sub_df.columns:
+                        rw_col = orig_col_to_rewritten.get(col, col)
+                        if rw_col in summary_dict:
+                            summary_dict[rw_col][measure_name] = func(original_df_for_schema[col])
+                except Exception as e:
+                    if debug:
+                        print(f"Error in column_ops for {measure_name}: {e}")
+                    continue
+
+    # After base measures + column_ops, optionally run computed_summary for each analysis.
+    # When run_computed_summary=False (used by polars_produce_series_df), this step is skipped
+    # and computed_summary is run later in polars_produce_summary_df.
+    # When run_computed_summary=True (used by PAFColumnExecutor), computed_summary runs here
+    # to populate derived fields such as histogram, histogram_bins, categorical_histogram, etc.
+    if run_computed_summary:
+        # Note: we intentionally iterate over original_df_for_schema so that
+        # old_col_new_col provides a stable mapping from original -> rewritten names.
+        for orig_ser_name, rewritten_col_name in old_col_new_col(original_df_for_schema):
+            base_summary_dict = summary_dict.get(rewritten_col_name, {})
+
+            # Handle case where the entry is an error string instead of a dict
+            if isinstance(base_summary_dict, str):
+                base_summary_dict = {}
+
+            for a_kls in unordered_objs:
+                try:
+                    if a_kls.quiet or a_kls.quiet_warnings:
+                        if debug is False:
+                            warnings.filterwarnings('ignore')
+                        summary_res = a_kls.computed_summary(base_summary_dict)
+                        warnings.filterwarnings('default')
+                    else:
+                        summary_res = a_kls.computed_summary(base_summary_dict)
+                    base_summary_dict.update(summary_res)
+                except Exception as e:
+                    # Mirror behaviour of polars_produce_summary_df: record/log errors
+                    # via debug prints only; callers that need structured errs should
+                    # extend this function to surface them.
+                    if debug:
+                        print(f"Error in {a_kls.__name__}.computed_summary: {e}")
+                    continue
+
+            summary_dict[rewritten_col_name] = base_summary_dict
 
     return summary_dict, errs
 

@@ -1,4 +1,3 @@
-import pytest
 import polars as pl
 from polars import functions as F
 

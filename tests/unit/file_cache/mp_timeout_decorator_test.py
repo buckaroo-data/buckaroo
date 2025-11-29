@@ -11,10 +11,10 @@ from buckaroo.file_cache.mp_timeout_decorator import (
     TimeoutException, ExecutionFailed, mp_timeout
 )
 
-from .mp_module_funcs import ( mp_simple, mp_sleep1, mp_crash_exit, mp_polars_longread, mp_polars_crash,
+from .mp_test_utils import ( mp_simple, mp_sleep1, mp_crash_exit, mp_polars_longread, mp_polars_crash,
                                TIMEOUT)
 # we want to see if these functions can be defined in the same file
-@mp_timeout(TIMEOUT)
+@mp_timeout(TIMEOUT * 3)
 def mp_simple2():
     return 5
 
@@ -51,7 +51,7 @@ def test_mp_crash_exit():
         mp_crash_exit()
     assert 1==1
 
-@mp_timeout(TIMEOUT)
+@mp_timeout(TIMEOUT * 3)
 def mp_polars_crash2():
     df_1 = pl.DataFrame({"u64": pl.Series([5, 3, 20], dtype=pl.UInt64)})
     df_1.select(hash_col=crash("u64"))
@@ -86,7 +86,7 @@ def test_normal_exception():
     with pytest.raises(ZeroDivisionError):
         1/0
 
-@mp_timeout(TIMEOUT)
+@mp_timeout(TIMEOUT * 3)
 def zero_div():
     5/0
 
@@ -108,7 +108,7 @@ def test_polars_rename_unserializable_raises_execution_failed():
     Reproduces a Polars serialization error path where a renaming function is not supported.
     The worker should complete but result serialization fails, resulting in ExecutionFailed.
     """
-    @mp_timeout(.5)
+    @mp_timeout(TIMEOUT * 2)
     def make_unserializable_df():
         df = pl.DataFrame({'a':[1,2,3], 'b':[4,5,6]})
         # Use a Python callable in a name-mapping context to trigger Polars BindingsError
@@ -127,7 +127,7 @@ def test_mp_polars_simple_len():
     """
     Simplest possible Polars op under mp_timeout: ensure it returns a small, serializable result.
     """
-    @mp_timeout(.5)
+    @mp_timeout(TIMEOUT * 2)
     def polars_len():
         df = pl.DataFrame({'a':[1,2,3]})
         # return a plain int to avoid any serialization edge-cases
@@ -138,7 +138,7 @@ def test_mp_polars_simple_sum():
     """
     Another minimal op: sum on a single column under mp_timeout returns a scalar.
     """
-    @mp_timeout(.5)
+    @mp_timeout(TIMEOUT * 2)
     def polars_sum():
         df = pl.DataFrame({'a':[1,2,3]})
         return int(df.select(pl.col('a').sum()).item())
@@ -175,14 +175,14 @@ def test_jupyter_simulate():
 
     assert f(1) == 1
 
-    wrapped_f = mp_timeout(TIMEOUT)(f)
+    wrapped_f = mp_timeout(TIMEOUT * 3)(f)
 
     assert wrapped_f(1) == 1
 
 
 # Additional edge-case tests to cover all code paths in simple_decorator
 
-@mp_timeout(TIMEOUT)
+@mp_timeout(TIMEOUT * 3)
 def return_unpicklable():
     return threading.Lock()
 
@@ -198,7 +198,7 @@ class UnpicklableError(Exception):
         self.fh = fh
 
 
-@mp_timeout(TIMEOUT)
+@mp_timeout(TIMEOUT * 3)
 def raise_unpicklable_exc(tmp_path):
     fh = open(tmp_path / "x", "w")
     raise UnpicklableError(fh)

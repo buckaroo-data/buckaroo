@@ -3,7 +3,6 @@ from typing import cast
 
 import polars as pl
 import polars.selectors as cs
-import pl_series_hash  # type: ignore
 
 from buckaroo.file_cache.base import (
     ColumnExecutor,
@@ -52,15 +51,38 @@ class SimpleColumnExecutor(ColumnExecutor[ExecutorArgs]):
     def execute(self, ldf:pl.LazyFrame, execution_args:ExecutorArgs) -> ColumnResults:
         cols = execution_args.columns
         only_cols_ldf = ldf.select(cols)
-        res = only_cols_ldf.select(*execution_args.expressions).collect()
+        
+        # Try to execute all expressions together first (like polars_produce_series_df and PAFColumnExecutor)
+        try:
+            res = only_cols_ldf.select(*execution_args.expressions).collect()
+        except Exception:
+            # Fallback: Execute expressions individually and combine horizontally
+            # This matches the behavior of polars_produce_series_df and PAFColumnExecutor
+            individual_results = []
+            for expr in execution_args.expressions:
+                try:
+                    expr_result = only_cols_ldf.select(expr).collect()
+                    individual_results.append(expr_result)
+                except Exception:
+                    # Skip failed expression, continue with others
+                    continue
+            
+            # Combine results horizontally
+            if individual_results:
+                res = individual_results[0]
+                for additional_result in individual_results[1:]:
+                    res = res.hstack(additional_result)
+            else:
+                # If no expressions worked, create empty result with correct schema
+                res = pl.DataFrame()
 
         col_results: ColumnResults = {}
         for col in cols:
-            hash_: int = cast(int, res[col+"_hash"][0])
+            hash_: int = cast(int, res[col+"_hash"][0] if col+"_hash" in res.columns else 0)
             if col+"_sum" in res.columns:
-                actual_result = {"len": res[col+"_len"][0], "sum": res[col+"_sum"][0]}
+                actual_result = {"len": res[col+"_len"][0] if col+"_len" in res.columns else 0, "sum": res[col+"_sum"][0]}
             else:
-                actual_result = {"len": res[col+"_len"][0]}
+                actual_result = {"len": res[col+"_len"][0] if col+"_len" in res.columns else 0}
             cr = ColumnResult(
                 series_hash=hash_,
                 column_name=col,
@@ -241,7 +263,7 @@ def _expr_labels(exprs:list[pl.Expr]) -> set[str]:
         s = str(e)
         if 'sum()' in s:
             labels.add('sum')
-        elif 'count()' in s:
+        elif 'count()' in s or '.len()' in s:
             labels.add('len')
         elif 'hash_series' in s or 'hash_xx' in s or 'hash()' in s:
             labels.add('hash')

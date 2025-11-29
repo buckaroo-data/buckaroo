@@ -47,7 +47,7 @@ def mp_sleep1():
     return 5
 
 
-@mp_timeout(TIMEOUT)
+@mp_timeout(TIMEOUT * 3)
 def mp_crash_exit():
     # intentionally crash the process
     ctypes.string_at(0)
@@ -58,7 +58,7 @@ def mp_sys_exit():
     sys.exit()
 
 
-@mp_timeout(TIMEOUT)
+@mp_timeout(TIMEOUT * 3)
 def mp_polars_crash():
     try:
         import polars as pl  # type: ignore

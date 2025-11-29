@@ -1,7 +1,6 @@
 import polars as pl
 import polars.selectors as cs
 import time
-from typing import cast
 
 from buckaroo.file_cache.base import (
     ColumnExecutor,

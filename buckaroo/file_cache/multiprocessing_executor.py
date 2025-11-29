@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime as dtdt
-from typing import Optional, Dict
+from typing import Optional
 import threading
-import time
 
 import polars as pl
 
@@ -69,7 +68,7 @@ class MultiprocessingExecutor(BaseExecutor):
                         failure_message=None
                     ))
                     self.executor_log.log_end_col_group(self.dfi, ex_args)
-                except TimeoutException as e:
+                except TimeoutException:
                     t2 = dtdt.now()
                     self.listener(ProgressNotification(
                         success=False,
@@ -80,7 +79,7 @@ class MultiprocessingExecutor(BaseExecutor):
                         failure_message=f"timeout after {self.timeout_secs}s",
                     ))
                     continue
-                except ExecutionFailed as e:
+                except ExecutionFailed:
                     t2 = dtdt.now()
                     # ExecutionFailed means the worker process exited abnormally (non-zero exit,
                     # crash/SystemExit, or failed to serialize/return a result). Other exceptions

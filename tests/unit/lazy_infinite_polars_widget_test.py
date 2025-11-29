@@ -3,8 +3,6 @@ import polars as pl
 from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget
 from buckaroo.file_cache.base import FileCache
 from pathlib import Path
-import pytest
-import time
 from buckaroo.file_cache.base import Executor as _Exec
 
 
@@ -237,7 +235,8 @@ def test_executor_selection_thresholds_and_fallback():
 
     w = LazyInfinitePolarsBuckarooWidget(ldf, sync_executor_class=TrackingSync, parallel_executor_class=TrackingPar)
     assert TrackingPar.used is True
-
+    assert w # we want w to be able to use it for future tests that we haven't written yet, this keeps ruff happy
+    
     # Now test fallback: small df chooses sync, but sync fails, fallback to parallel
     small_df = pl.DataFrame({'x': [1, 2, 3]})
     small_ldf = small_df.lazy()

@@ -19,6 +19,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           run_install: true
+          package_json_file: packages/package.json
       - uses: astral-sh/setup-uv@v6
       - name: Run tests
         working-directory: ./packages/buckaroo-js-core
@@ -45,7 +46,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./docs/_output
+          path: ./packages/buckaroo-js-core/dist/storybook
 
   deploy:
     needs: build

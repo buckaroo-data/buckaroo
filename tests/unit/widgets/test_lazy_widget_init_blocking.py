@@ -1,6 +1,5 @@
 import time
 import polars as pl
-import pytest
 
 from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget
 from buckaroo.file_cache.paf_column_executor import PAFColumnExecutor

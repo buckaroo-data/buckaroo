@@ -228,7 +228,7 @@ typed_df = pl.DataFrame(
      'timestamp':["2020-01-01 01:00Z", "2020-01-01 02:00Z",
                   "2020-02-28 02:00Z", "2020-03-15 02:00Z", None],
      "str_col": ["foobar", "Realllllly long string", "", None, "normal"]})
-typed_df = typed_df.with_columns(timestamp=pl.col('timestamp').str.to_datetime() )
+typed_df = typed_df.with_columns(timestamp=pl.col('timestamp').str.to_datetime(time_zone="UTC") )
 column_config_overrides={'float_col': {'color_map_config': {
     'color_rule': 'color_not_null',
     'conditional_color': 'red', 'exist_column': 'errored_float'}}}
