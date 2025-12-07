@@ -182,7 +182,7 @@ export function DFViewerInfiniteInner({
     activeCol,
     setActiveCol,
     outside_df_params,
-    renderStartTime,
+    renderStartTime: _renderStartTime,
     hs
 }: {
     data_wrapper: DatasourceOrRaw;
@@ -238,14 +238,7 @@ export function DFViewerInfiniteInner({
         return dfToAgrid(df_viewer_config);
     }, [df_viewer_config]);
 
-    // Log expected grid fields when column defs change
-    useEffect(() => {
-        try {
-            const fields = (styledColumns as any[]).map((c: any) => c?.field).filter(Boolean);
-            // eslint-disable-next-line no-console
-            console.info("[DFViewerInfinite][Cols] fields", fields);
-        } catch (_e) {}
-    }, [styledColumns]);
+    // Column defs are ready
 
     const defaultColDef = useMemo( () => {
         return {
@@ -283,30 +276,7 @@ export function DFViewerInfiniteInner({
         () => extractPinnedRows(summary_stats_data, pinned_rows ? pinned_rows : []) as DFDataRow[],
         [summary_stats_data, pinned_rows]
     );
-    useEffect(() => {
-        try {
-            const prKeys = (pinned_rows || []).map((p) => p.primary_key_val);
-            // eslint-disable-next-line no-console
-            console.info(
-                "[DFViewerInfinite][PinnedRows] extracted",
-                { pinnedKeys: prKeys, summaryLen: summary_stats_data?.length || 0, topLen: topRowData?.length || 0 },
-            );
-            // eslint-disable-next-line no-console
-            console.info(
-                "[DFViewerInfinite][PinnedRows] summary first row keys",
-                Object.keys((summary_stats_data && summary_stats_data[0]) ? summary_stats_data[0] : {}),
-            );
-            if ((topRowData || []).length > 0) {
-                // eslint-disable-next-line no-console
-                console.debug("[DFViewerInfinite][PinnedRows] first row", topRowData[0]);
-                // eslint-disable-next-line no-console
-                console.info(
-                    "[DFViewerInfinite][PinnedRows] first row keys",
-                    Object.keys(topRowData[0] || {}),
-                );
-            }
-        } catch (_e) {}
-    }, [summary_stats_data, pinned_rows, topRowData]);
+    // Pinned rows are extracted and ready
 
 
     const getRowId = useCallback(
@@ -347,8 +317,7 @@ export function DFViewerInfiniteInner({
         domLayout:  hs.domLayout,
         autoSizeStrategy: getAutoSize(styledColumns.length),
         onFirstDataRendered: (_params) => {
-            console.log(`[DFViewerInfinite] AG-Grid finished rendering at ${new Date().toISOString()}`);
-            console.log(`[DFViewerInfinite] Total render time: ${Date.now() - renderStartTime}ms`);
+            // Grid finished rendering
         },
         columnDefs:styledColumns,
         getRowId,
@@ -392,18 +361,30 @@ export function DFViewerInfiniteInner({
             try {
                 const rows = (topRowData || []).map((r) => ({ ...r })); // force new refs
                 topRowsRef.current = rows;
-                // eslint-disable-next-line no-console
-                console.info("[DFViewerInfinite][PinnedRows] applying via setGridOption len", rows?.length || 0);
                 gridRef.current?.api?.setGridOption('pinnedTopRowData', rows);
-                // Read back state
-                const cnt = gridRef.current?.api?.getPinnedTopRowCount?.();
-                const first = gridRef.current?.api?.getPinnedTopRow?.(0)?.data;
-                // eslint-disable-next-line no-console
-                console.info("[DFViewerInfinite][PinnedRows] after apply count", cnt, "first", first);
             } catch (_e) {
                 // ignore until grid ready
             }
         }, [pinnedSig]);
+        
+        // Force update rowData when Raw data changes
+        const rawDataSig = useMemo(() => {
+            if (data_wrapper.data_type === "Raw") {
+                return JSON.stringify(data_wrapper.data);
+            }
+            return null;
+        }, [data_wrapper]);
+        
+        useEffect(() => {
+            if (data_wrapper.data_type === "Raw" && gridRef.current?.api && rawDataSig) {
+                try {
+                    // Force AG Grid to update by setting rowData via API
+                    gridRef.current.api.setGridOption('rowData', data_wrapper.data);
+                } catch (_e) {
+                    // ignore errors
+                }
+            }
+        }, [rawDataSig, data_wrapper.data_type, data_wrapper]);
 
         return (
 
@@ -419,22 +400,7 @@ export function DFViewerInfiniteInner({
                     onGridReady={(params) => {
                         try {
                             // Ensure pinned rows are applied once API is ready
-                            // eslint-disable-next-line no-console
-                            console.info("[DFViewerInfinite][PinnedRows] onGridReady apply len", topRowsRef.current?.length || 0);
                             params.api.setGridOption('pinnedTopRowData', topRowsRef.current || []);
-                            // Read back state
-                            const cnt = params.api.getPinnedTopRowCount?.();
-                            const first = params.api.getPinnedTopRow?.(0)?.data;
-                            // eslint-disable-next-line no-console
-                            console.info("[DFViewerInfinite][PinnedRows] onGridReady current count", cnt, "first", first);
-                        } catch (_e) {}
-                    }}
-                    onFirstDataRendered={(params: any) => {
-                        try {
-                            const cnt = params.api.getPinnedTopRowCount?.();
-                            const first = params.api.getPinnedTopRow?.(0)?.data;
-                            // eslint-disable-next-line no-console
-                            console.info("[DFViewerInfinite][PinnedRows] onFirstDataRendered pinned count", cnt, "first", first);
                         } catch (_e) {}
                     }}
                     context={{ outside_df_params, ...extra_context }}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import _ from "lodash";
 import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
@@ -18,6 +18,7 @@ import { DatasourceOrRaw, DFViewerInfinite } from "./DFViewerParts/DFViewerInfin
 import { IDatasource } from "@ag-grid-community/core";
 import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "./DFViewerParts/SmartRowCache";
 import { parquetRead, parquetMetadata } from 'hyparquet'
+import { MessageBox } from "./MessageBox";
 
 export const getDataWrapper = (
     data_key: string,
@@ -212,15 +213,19 @@ export function DFViewerInfiniteDS({
         df_data_dict,
         df_display_args,
         src,
-        df_id
+        df_id,
+        message_log,
+        show_message_box
     }: {
         df_meta: DFMeta;
         df_data_dict: Record<string, DFData>;
         df_display_args: Record<string, IDisplayArgs>;
         src: KeyAwareSmartRowCache,
         df_id: string // the memory id 
+        message_log?: { messages?: Array<any> };
+        show_message_box?: { enabled?: boolean };
     }) {
-        console.log("221 DFViewerWidget");
+        // DFViewerInfiniteDS rendering
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
         // so having it live between relaods is key
         //const [respError, setRespError] = useState<string | undefined>(undefined);
@@ -256,6 +261,31 @@ export function DFViewerInfiniteDS({
         const outsideDFParams: unknown = [df_id];
         
 
+        const messagesEnabled = show_message_box?.enabled ?? false;
+        // Ensure messages is always an array and reacts to changes
+        const messages = React.useMemo(() => {
+            const msgs = message_log?.messages;
+            if (!msgs) return [];
+            if (!Array.isArray(msgs)) {
+                console.warn("[DFViewerInfiniteDS] message_log.messages is not an array:", typeof msgs, msgs);
+                return [];
+            }
+            return msgs;
+        }, [message_log?.messages]);
+        
+        // Debug: Log when messages change
+        React.useEffect(() => {
+            console.log("[DFViewerInfiniteDS] Message box state changed:", {
+                messagesEnabled,
+                messageCount: messages.length,
+                message_log_type: typeof message_log,
+                message_log_keys: message_log ? Object.keys(message_log) : null,
+                message_log_messages_type: message_log?.messages ? typeof message_log.messages : null,
+                message_log_messages_isArray: Array.isArray(message_log?.messages),
+                firstFewMessages: messages.slice(0, 3),
+            });
+        }, [messages, messagesEnabled, message_log]);
+
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
              style={{ width: "100%", height: "100%" }}>
@@ -266,6 +296,7 @@ export function DFViewerInfiniteDS({
                         overflow: "hidden",
                     }}
                 >
+                {messagesEnabled && <MessageBox messages={messages} />}
                     <DFViewerInfinite
                         data_wrapper={data_wrapper}
                         df_viewer_config={cDisp.df_viewer_config}
@@ -276,6 +307,7 @@ export function DFViewerInfiniteDS({
                         error_info={""}
                     />
                 </div>
+
             </div>
         );
     }

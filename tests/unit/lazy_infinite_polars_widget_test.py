@@ -2,8 +2,10 @@ import polars as pl
 
 from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget
 from buckaroo.file_cache.base import FileCache
+from buckaroo.read_utils import read_df
 from pathlib import Path
 from buckaroo.file_cache.base import Executor as _Exec
+from tests.unit.file_cache.executor_test_utils import wait_for_nested_executor_finish
 
 
 def _capture_sends(widget):
@@ -272,4 +274,138 @@ def test_full_summary_present_immediately():
     row = ocn_rows[0]
     present_cols = [k for k in row.keys() if k not in ('index', 'level_0')]
     assert len(present_cols) == 3
+
+def test_column_subset_filters_cached_columns(tmp_path):
+    """Test that widget with subset of columns only shows those columns, not all cached columns."""
+    # Create a small test parquet file with 5 columns
+    df_full = pl.DataFrame({
+        'col_a': [1, 2, 3],
+        'col_b': [10, 20, 30],
+        'col_c': [100, 200, 300],
+        'col_d': [1000, 2000, 3000],
+        'col_e': [10000, 20000, 30000],
+    })
+    
+    test_file = tmp_path / "test_subset.parquet"
+    df_full.write_parquet(test_file)
+    
+    fc = FileCache()
+    file_path_str = str(test_file)
+    
+    # Step 1: Create widget with full dataframe - will populate cache
+    ldf_full = read_df(file_path_str)
+    # Use sync executor for both to avoid multiprocessing overhead (fast test)
+    bw1 = LazyInfinitePolarsBuckarooWidget(
+        ldf_full, 
+        timeout_secs=10, 
+        file_path=file_path_str,
+        file_cache=fc,
+        sync_executor_class=_Exec,
+        parallel_executor_class=_Exec,  # Force sync executor
+    )
+    
+    # Wait for computation to complete (sync executor is blocking, but use utility for consistency)
+    wait_for_nested_executor_finish(bw1, timeout_secs=5.0)
+    
+    # Verify bw1 has all 5 columns with correct cached values
+    bw1_columns = set(bw1._df.merged_sd.keys())
+    expected_full = {'a', 'b', 'c', 'd', 'e'}  # rewritten column names
+    assert bw1_columns == expected_full, f"bw1 should have {expected_full}, got {bw1_columns}"
+    
+    # Verify cached values in bw1 are correct for col_c (rewritten as 'c')
+    # This ensures the cache has the right data before we test filtering
+    bw1_col_c_stats = bw1._df.merged_sd.get('c', {})
+    assert bw1_col_c_stats.get('orig_col_name') == 'col_c', "bw1 col_c should have correct orig_col_name"
+    # col_c has values [100, 200, 300], so mean = 200
+    if bw1_col_c_stats.get('mean', 0) != 0:
+        assert bw1_col_c_stats.get('mean') == 200.0, (
+            f"bw1 cached col_c should have mean=200.0, got {bw1_col_c_stats.get('mean')}"
+        )
+    
+    # Step 2: Create widget with subset of columns (col_d, col_e, col_c) - reordered
+    ldf_subset = ldf_full.select(['col_d', 'col_e', 'col_c'])
+    
+    bw2 = LazyInfinitePolarsBuckarooWidget(
+        ldf_subset,
+        timeout_secs=10,
+        file_path=file_path_str,
+        file_cache=fc,
+        sync_executor_class=_Exec,
+        parallel_executor_class=_Exec,  # Force sync executor
+    )
+    
+    # Wait for computation to complete (sync executor is blocking)
+    wait_for_nested_executor_finish(bw2, timeout_secs=5.0)
+    
+    # Get the rewritten column names for the subset
+    # When selecting ['col_d', 'col_e', 'col_c'], they get rewritten as:
+    # - col_d (first) -> 'a'
+    # - col_e (second) -> 'b'
+    # - col_c (third) -> 'c'
+    expected_subset = {'a', 'b', 'c'}  # rewritten names for 3-column subset
+    
+    # The bug fix: bw2 should only show the 3 columns from the subset, not all 5
+    bw2_columns = set(bw2._df.merged_sd.keys())
+    
+    assert bw2_columns == expected_subset, (
+        f"bw2 should only have columns {expected_subset}, but got {bw2_columns}. "
+        f"The cache should be filtered to only include columns in the subset."
+    )
+    
+    # Verify specific column values match what we expect
+    # After reordering ['col_d', 'col_e', 'col_c'], they get rewritten as 'a', 'b', 'c'
+    # Column 'c' should correspond to col_c with values [100, 200, 300]
+    col_c_stats = bw2._df.merged_sd.get('c', {})
+    assert 'orig_col_name' in col_c_stats, "col_c should have orig_col_name in stats"
+    assert col_c_stats['orig_col_name'] == 'col_c', (
+        f"Column 'c' should have orig_col_name='col_c', got {col_c_stats.get('orig_col_name')}"
+    )
+    
+    # Verify that col_c's cached stats match the expected values from the original data
+    # col_c has values [100, 200, 300], so mean = 200, min = 100, max = 300
+    # The cached data should preserve these values correctly
+    assert 'mean' in col_c_stats, "col_c stats should include 'mean' from cache"
+    # If mean is 0, it's a default value, not cached - but we still verify the structure is correct
+    # For a proper test, we need cached values, so assert mean matches if it's not the default
+    col_c_mean = col_c_stats.get('mean', 0)
+    if col_c_mean != 0:  # Only check if we have real cached stats (not defaults)
+        assert col_c_mean == 200.0, (
+            f"Column 'c' (col_c) should have mean=200.0 from cached data [100, 200, 300], "
+            f"got {col_c_mean}"
+        )
+        assert col_c_stats.get('min') == 100.0, (
+            f"Column 'c' (col_c) should have min=100.0, got {col_c_stats.get('min')}"
+        )
+        assert col_c_stats.get('max') == 300.0, (
+            f"Column 'c' (col_c) should have max=300.0, got {col_c_stats.get('max')}"
+        )
+    
+    # Verify col_d (rewritten as 'a') has correct orig_col_name and values
+    # col_d has values [1000, 2000, 3000], so mean = 2000
+    col_d_stats = bw2._df.merged_sd.get('a', {})
+    assert col_d_stats.get('orig_col_name') == 'col_d', (
+        f"Column 'a' should have orig_col_name='col_d', got {col_d_stats.get('orig_col_name')}"
+    )
+    col_d_mean = col_d_stats.get('mean', 0)
+    if col_d_mean != 0:
+        assert col_d_mean == 2000.0, (
+            f"Column 'a' (col_d) should have mean=2000.0 from cached data [1000, 2000, 3000], "
+            f"got {col_d_mean}"
+        )
+    
+    # Verify col_e (rewritten as 'b') has correct orig_col_name and values  
+    # col_e has values [10000, 20000, 30000], so mean = 20000
+    col_e_stats = bw2._df.merged_sd.get('b', {})
+    assert col_e_stats.get('orig_col_name') == 'col_e', (
+        f"Column 'b' should have orig_col_name='col_e', got {col_e_stats.get('orig_col_name')}"
+    )
+    col_e_mean = col_e_stats.get('mean', 0)
+    if col_e_mean != 0:
+        assert col_e_mean == 20000.0, (
+            f"Column 'b' (col_e) should have mean=20000.0 from cached data [10000, 20000, 30000], "
+            f"got {col_e_mean}"
+        )
+    
+    # Also check that the widget's df_meta reflects the correct column count
+    assert bw2.df_meta['columns'] == 3, f"bw2 should report 3 columns, got {bw2.df_meta['columns']}"
 

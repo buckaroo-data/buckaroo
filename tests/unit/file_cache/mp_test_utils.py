@@ -23,16 +23,9 @@ TIMEOUT = LOCAL_TIMEOUT if IS_RUNNING_LOCAL else CI_TIMEOUT
 
 @mp_timeout(TIMEOUT)
 def mp_polars_longread(i=0):
-    if not IS_RUNNING_LOCAL:
-        time.sleep(TIMEOUT * 1.5)
-        return 5
-    if i == 0:
-        try:
-            import polars as pl  # type: ignore
-            pl.read_csv("~/3m_july.csv")
-        except Exception:
-            # Any failure should be treated as a worker failure by the decorator
-            raise
+    # Simulate a long-running polars operation that will timeout
+    # Sleep for longer than TIMEOUT to ensure it times out
+    time.sleep(TIMEOUT * 1.5)
     return 5
 
 

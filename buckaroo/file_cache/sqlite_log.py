@@ -21,7 +21,7 @@ class SQLiteExecutorLog(ExecutorLog):
     """
 
     def __init__(self, db_path: str = ":memory:") -> None:
-        self._conn = sqlite3.connect(db_path)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS events (
@@ -85,6 +85,23 @@ class SQLiteExecutorLog(ExecutorLog):
         )
         (cnt,) = cur.fetchone()
         return cnt > 0
+    
+    def check_log_for_completed(self, dfi: DFIdentifier, args:ExecutorArgs) -> bool:
+        """
+        Check if this column group was already completed successfully.
+        Returns True if there is a completed event with matching args.
+        """
+        dfi_k = _dfi_key(dfi)
+        cols, include_hash, row_start, row_end, expr_count = self._args_key_parts(args)
+        cur = self._conn.execute(
+            """
+            SELECT COUNT(1) FROM events
+            WHERE dfi=? AND columns_json=? AND include_hash=? AND IFNULL(row_start,-1)=IFNULL(?, -1) AND IFNULL(row_end,-1)=IFNULL(?, -1) AND completed=1
+            """,
+            (dfi_k, cols, include_hash, row_start, row_end)
+        )
+        (cnt,) = cur.fetchone()
+        return cnt > 0
 
     def get_log_events(self) -> list[ExecutorLogEvent]:
         res: list[ExecutorLogEvent] = []
@@ -113,5 +130,19 @@ class SQLiteExecutorLog(ExecutorLog):
             )
             res.append(ev)
         return res
+
+    def has_incomplete_for_executor(self, dfi: DFIdentifier, executor_class_name: str) -> bool:
+        """
+        Check if there are incomplete events for the given dataframe identifier and executor class.
+        """
+        dfi_k = _dfi_key(dfi)
+        # Note: executor_class_name is not stored in the SQLite schema currently,
+        # so we check for any incomplete events for this dfi
+        cur = self._conn.execute(
+            "SELECT COUNT(1) FROM events WHERE dfi=? AND completed=0",
+            (dfi_k,)
+        )
+        (cnt,) = cur.fetchone()
+        return cnt > 0
 
 

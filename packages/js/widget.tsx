@@ -41,6 +41,7 @@ export function useExperimental() {
 	return ctx.experimental;
 }
 
+
 /**
  * A React Hook to use model-backed state in a component.
  *
@@ -214,9 +215,11 @@ const srcClosureRBI = (src) => {
 	const model = useModel()
 	const [df_meta, _set_df_meta] = useModelState("df_meta");
 	  const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
-      console.log("widget.tsx:217 df_data_dict['all_stats']", df_data_dict['all_stats'])
+      // df_data_dict ready
 	const [df_display_args, _set_dda] = useModelState("df_display_args");
         const [df_id, _set_df_id] = useModelState("df_id");
+	const [message_log, _set_message_log] = useModelState("message_log");
+	const [show_message_box, _set_show_message_box] = useModelState("show_message_box");
 	return (
 	    <div className="buckaroo_anywidget">
 		<srt.DFViewerInfiniteDS
@@ -225,6 +228,8 @@ const srcClosureRBI = (src) => {
                     df_display_args={df_display_args}
                     df_id={df_id}
 	            src={src}
+		    message_log={message_log}
+		    show_message_box={show_message_box}
 		/>
 		</div>
 	);

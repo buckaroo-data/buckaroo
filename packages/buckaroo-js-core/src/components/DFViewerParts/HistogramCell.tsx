@@ -81,8 +81,6 @@ export const HistogramCell = (props:
     {api:GridApi, colDef:ColDef, 
      column:Column, context:Context, value:any}
 ) => {
-  console.log("HistogramCell")
-  console.log(props.colDef);
     // relevant args here 
     // https://www.ag-grid.com/react-data-grid/component-cell-renderer/
     if (props === undefined ) {

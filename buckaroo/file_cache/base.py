@@ -5,9 +5,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     Any, Optional, TypeAlias, Callable, Dict, Literal,
-    Generic, TypeVar)
+    Generic, TypeVar, Union)
+import logging
 import polars as pl
 import itertools
+
+from .batch_planning import (
+    PlanningFunction, PlanningContext, extract_execution_history,
+    simple_one_column_planning
+)
 
 now = dtdt.now
 
@@ -24,6 +30,27 @@ FileDFIdentifier: TypeAlias = tuple[Path, int]
                                     #id of dataframe, joined string of all columns
 MemoryDFIdentifer:TypeAlias = tuple[int, str]
 DFIdentifier: TypeAlias = FileDFIdentifier | MemoryDFIdentifer
+
+# File path type aliases
+MaybeFilepathLike: TypeAlias = Union[str, Path, None]
+MaybeFilepath: TypeAlias = Optional[Path]
+
+
+def ensure_filepath(file_path: MaybeFilepathLike) -> MaybeFilepath:
+    """
+    Normalize a file path to Path | None.
+    
+    Args:
+        file_path: A string, Path, or None
+        
+    Returns:
+        Path if file_path is str or Path, None if file_path is None
+    """
+    if file_path is None:
+        return None
+    if isinstance(file_path, (str, Path)):
+        return Path(file_path)
+    raise TypeError(f"file_path must be str, Path, or None, got {type(file_path)}")
 
 
 def flatten(*lists):
@@ -333,6 +360,8 @@ class ExecutorArgs:
     row_start: int|None
     row_end: int|None
     extra: Any
+    # If True, skip execution - all columns are already cached with complete stats
+    no_exec: bool = False
 
 
 @dataclass
@@ -391,6 +420,17 @@ class ExecutorLog(ABC):
             if ev.dfi == dfi and ev.args is args:
                 return ev
         return None
+    
+    def check_log_for_completed(self, dfi: DFIdentifier, args: ExecutorArgs) -> bool:
+        """
+        Check if this column group was already completed successfully.
+        Returns True if there is a completed event with matching args.
+        This can be used to skip re-execution of work that's already been done.
+        """
+        ev = self.find_event(dfi, args)
+        if ev:
+            return ev.completed
+        return False
 
 class SimpleExecutorLog(ExecutorLog):
 
@@ -425,6 +465,17 @@ class SimpleExecutorLog(ExecutorLog):
         if ev:
             return not ev.completed
         return False
+    
+    def check_log_for_completed(self, dfi: DFIdentifier, args:ExecutorArgs) -> bool:
+        """
+        Check if this column group was already completed successfully.
+        Returns True if there is a completed event with matching args.
+        This can be used to skip re-execution of work that's already been done.
+        """
+        ev = self.find_event(dfi, args)
+        if ev:
+            return ev.completed
+        return False
 
     def get_log_events(self) -> list[ExecutorLogEvent]:
         """
@@ -445,55 +496,111 @@ class Executor:
         ldf:pl.LazyFrame, column_executor:ColumnExecutor,
         listener:ProgressListener, fc:AbstractFileCache,
         executor_log: ExecutorLog | None = None,
-        file_path: str | Path | None = None) -> None:
+        file_path: MaybeFilepathLike = None,
+        cached_merged_sd: dict[str, dict[str, Any]] | None = None,
+        orig_to_rw_map: dict[str, str] | None = None,
+        planning_function: Optional[PlanningFunction] = None) -> None:
         self.ldf = ldf
         self.column_executor = column_executor
         self.listener = listener
         self.fc = fc
         self.executor_log = executor_log or SimpleExecutorLog()
 
-        #FIXME wtf is this.  it's either none or a path.  why not just use the path?
-        self.file_path: Path | None = Path(file_path) if isinstance(file_path, (str, Path)) else None
+        self.file_path: MaybeFilepath = ensure_filepath(file_path)
 
         self.dfi = (id(self.ldf), str(self.file_path) if self.file_path else "",)
         self.executor_class_name = self.__class__.__name__
+        
+        # Store cached merged_sd and mapping for checking complete columns
+        self.cached_merged_sd = cached_merged_sd or {}
+        self.orig_to_rw_map = orig_to_rw_map or {}
+        
+        # Batch planning
+        self.planning_function = planning_function or simple_one_column_planning
+        self._planning_state: Optional[dict[str, Any]] = None
+        
+        # Track if run() has been called (for testing utilities)
+        self.has_run_been_called = False
 
     def run(self) -> None:
-
-        #had_failure = False
-        last_ex_args: ExecutorArgs | None = None
-
-        for col_group in self.get_column_chunks():
-            # Build existing stats by consulting file cache using per-file series hashes if available
+        """Execute column analysis, skipping cached columns.
+        
+        Uses get_next_column_chunk() to get batches one at a time until all columns
+        are processed or there's no way to proceed (e.g., single column timeout).
+        """
+        self.has_run_been_called = True
+        logger = logging.getLogger("buckaroo.executor")
+        
+        logger.info(f"Executor.run() START - file_path={self.file_path}")
+        logger.debug(f"  cached_merged_sd keys: {list(self.cached_merged_sd.keys()) if self.cached_merged_sd else []}")
+        
+        # Keep calling get_next_column_chunk() until it returns None
+        while True:
+            col_group = self.get_next_column_chunk()
+            if col_group is None:
+                break
+            
+            # Build existing stats by consulting file cache using per-file series hashes
             file_hashes: dict[str, int] = {}
             if self.file_path and self.fc.check_file(self.file_path):
                 fh = self.fc.get_file_series_hashes(self.file_path) or {}
                 file_hashes = {str(k): int(v) for k, v in fh.items()}
 
+            # Build existing_cached dict with ALL columns in the group
             existing_cached: dict[str, Any] = {}
             missing_hash_columns: list[str] = []
             for col in col_group:
                 h = file_hashes.get(col)
                 if h:
-                    existing_cached[col] = self.fc.get_series_results(h) or {}
+                    cached_results = self.fc.get_series_results(h)
+                    existing_cached[col] = cached_results or {}
                 else:
-                    # mark explicitly that this column is missing a file-level series hash
                     existing_cached[col] = {'__missing_hash__': True}
                     missing_hash_columns.append(col)
-
+            
+            # Get execution args - ColumnExecutor already filtered out cached columns
             ex_args = self.column_executor.get_execution_args(existing_cached)
+            
+            # Check if original column group was already completed in executor log
+            original_group_args = ExecutorArgs(
+                columns=list(col_group),
+                column_specific_expressions=ex_args.column_specific_expressions,
+                include_hash=ex_args.include_hash,
+                expressions=ex_args.expressions,
+                row_start=ex_args.row_start,
+                row_end=ex_args.row_end,
+                extra=ex_args.extra,
+                no_exec=False
+            )
+            
+            if self.executor_log.check_log_for_completed(self.dfi, original_group_args):
+                logger.info(f"Executor.run() SKIPPING group {col_group} - already completed (found in executor log)")
+                # Update planning state to mark these columns as done
+                self._update_planning_state_after_execution(list(col_group))
+                continue
+            
+            # If no columns need execution (all were filtered out), skip this column group
+            if not ex_args.columns:
+                logger.debug(f"  Skipping column group {col_group} - all columns cached")
+                # Update planning state
+                self._update_planning_state_after_execution(list(col_group))
+                continue
+            
+            logger.info(f"Executor.run() EXECUTING group {col_group} with {len(ex_args.columns)} columns: {ex_args.columns}")
             # annotate args with missing-hash info so executors can act accordingly
-            try:
-                extra_map: dict[str, Any] = dict(ex_args.extra) if isinstance(ex_args.extra, dict) else {}
-                extra_map['missing_hash_columns'] = list(missing_hash_columns)
-                if self.file_path:
-                    extra_map['file_path'] = str(self.file_path)
-                ex_args.extra = extra_map
-            except Exception:
-                pass
-            last_ex_args = ex_args
+            extra_map: dict[str, Any] = dict(ex_args.extra) if isinstance(ex_args.extra, dict) else {}
+            extra_map['missing_hash_columns'] = list(missing_hash_columns)
+            if self.file_path:
+                extra_map['file_path'] = str(self.file_path)
+            ex_args.extra = extra_map
+
             if self.executor_log.check_log_for_previous_failure(self.dfi, ex_args):
-                return # not sure what to do here or what progress notification to send back
+                # Halt execution immediately on previous failure to make cache write failures very obvious.
+                # Note: This means subsequent column groups that haven't failed won't be processed.
+                # If writing to the cache fails here, there could still be valid column groups that
+                # aren't written to the cache that could succeed, but we intentionally fail fast.
+                # TODO: Consider running bisectors here to diagnose failures, especially for MultiprocessingExecutor
+                return
             
             self.executor_log.log_start_col_group(self.dfi, ex_args, self.executor_class_name)
             t1 = now()
@@ -504,38 +611,48 @@ class Executor:
                 notification = ProgressNotification(
                     success=True,
                     col_group=col_group,
-                    execution_args=[], #FIXME
+                    execution_args=ex_args,
                     result=res,
                     execution_time=t2-t1,
                     failure_message=None)
 
+                executed_columns = []
                 for col, col_result in res.items():
                     self.fc.upsert_key(col_result.series_hash, col_result.result)
+                    executed_columns.append(col)
+                    # cache insert errors should be really rare, if we get here, something weird has happened and trying to defensivly code around it is a fools errand
 
-                #FIXME,  make sure this means that the spurious 0s generated by PAFcolumnexecutor for series hashes aren't inserted    
                 # If file hashes were missing and we have a file path, persist newly discovered hashes
+                # Skip spurious 0 hashes (default value when hash can't be computed)
                 if self.file_path and missing_hash_columns:
                     new_hashes: dict[str, int] = {}
                     for c in missing_hash_columns:
-                        if c in res and res[c].series_hash:
+                        if c in res and res[c].series_hash is not None and res[c].series_hash != 0:
                             new_hashes[c] = int(res[c].series_hash)
                     if new_hashes:
                         self.fc.upsert_file_series_hashes(self.file_path, new_hashes)
 
                 self.listener(notification)
-                self.executor_log.log_end_col_group(self.dfi, last_ex_args)    
+                self.executor_log.log_end_col_group(self.dfi, ex_args)
+                
+                # Update planning state after successful execution
+                self._update_planning_state_after_execution(executed_columns)
+                
             except Exception as e:
                 t3 = now()
                 notification = ProgressNotification(
                     success=False,
                     col_group=col_group,
-                    execution_args=[], #FIXME
+                    execution_args=ex_args,
                     result=None,
                     execution_time=t3-t1,
                     failure_message=str(e))
                 self.listener(notification)
-                #had_failure = True
-                # continue to next column group without marking completion
+                # Update planning state to prevent infinite loop
+                # Remove columns from remaining even on failure to avoid retrying forever
+                # Note: This means we won't retry failed columns, but prevents infinite loops
+                # Future: Could track failures and allow limited retries
+                self._update_planning_state_after_execution(list(col_group))
                 continue
 
                 
@@ -558,11 +675,135 @@ class Executor:
     
 
 
-    def get_column_chunks(self) -> list[ColumnGroup]:
+    def get_next_column_chunk(self) -> Optional[ColumnGroup]:
         """
-          dumb impl
-          """
-        return [[column] for column in self.ldf.collect_schema().names()]
+        Get next column chunk using batch planning.
+        
+        Returns None when all columns are processed or there's no way to proceed.
+        This allows other code (like bisectors) to be called between chunks.
+        
+        Uses planning_function to determine next batch. Default is simple_one_column_planning
+        which returns one column at a time (backward compatible).
+        """
+        logger = logging.getLogger("buckaroo.executor")
+        if self._planning_state is None:
+            # Initialize planning state
+            all_columns = list(self.ldf.collect_schema().names())
+            log_msg_init = f"Executor.get_next_column_chunk() INITIALIZING planning state - executor_id={id(self)}, all_columns={all_columns}, count={len(all_columns)}"
+            logger.info(log_msg_init)
+            self._planning_state = {
+                'all_columns': all_columns,
+                'remaining': all_columns.copy(),
+                'baseline_overhead': timedelta(0),
+                'current_batches': [],
+                'batch_index': 0,
+                'last_returned_group': None,  # Track last returned to detect infinite loops
+                'consecutive_same_returns': 0,  # Count consecutive same returns
+            }
+        
+        # Use iteration instead of recursion to avoid stack overflow
+        state = self._planning_state
+        max_iterations = 100 + len(state['all_columns'])
+        iteration = 0
+        
+        while iteration < max_iterations:
+            iteration += 1
+            state = self._planning_state
+            
+            log_msg_iter = f"Executor.get_next_column_chunk() ITERATION {iteration} - executor_id={id(self)}, remaining={len(state.get('remaining', []))}, current_batches={len(state.get('current_batches', []))}, batch_index={state.get('batch_index', 0)}"
+            logger.debug(log_msg_iter)
+            
+            # If we have batches queued, return next one
+            if state['current_batches'] and state['batch_index'] < len(state['current_batches']):
+                batch = state['current_batches'][state['batch_index']]
+                state['batch_index'] += 1
+                if batch.columns:
+                    group = batch.columns
+                    log_msg_batch = f"Executor.get_next_column_chunk() RETURNING queued batch - executor_id={id(self)}, group={group}, batch_index={state['batch_index']-1}"
+                    logger.info(log_msg_batch)
+                    # Check for infinite loop: same group returned consecutively
+                    if group == state.get('last_returned_group'):
+                        state['consecutive_same_returns'] = state.get('consecutive_same_returns', 0) + 1
+                        if state['consecutive_same_returns'] > 3:
+                            log_msg_loop = f"Executor.get_next_column_chunk() INFINITE LOOP DETECTED - executor_id={id(self)}, group={group}, removing from remaining"
+                            logger.warning(log_msg_loop)
+                            # Infinite loop detected - remove columns from remaining and return None
+                            for col in group:
+                                if col in state['remaining']:
+                                    state['remaining'].remove(col)
+                            return None
+                    else:
+                        state['consecutive_same_returns'] = 0
+                    state['last_returned_group'] = group
+                    return group
+                # Empty batch - skip it (shouldn't happen with calibration, but handle gracefully)
+                continue
+            
+            # Need to plan new batches
+            if not state['remaining']:
+                log_msg_no_remaining = f"Executor.get_next_column_chunk() NO REMAINING COLUMNS - executor_id={id(self)}, returning None"
+                logger.info(log_msg_no_remaining)
+                return None
+            
+            # Extract history from executor log
+            log_msg_planning = f"Executor.get_next_column_chunk() CALLING PLANNING FUNCTION - executor_id={id(self)}, remaining={len(state['remaining'])}, planning_function={self.planning_function.__name__ if hasattr(self.planning_function, '__name__') else type(self.planning_function).__name__}"
+            logger.info(log_msg_planning)
+            
+            history = extract_execution_history(self.executor_log, self.dfi)
+            
+            # Get timeout (default 30s, can be overridden by subclasses)
+            timeout_secs = getattr(self, 'timeout_secs', 30.0)
+            
+            # Get baseline overhead from calibration (if not already set)
+            if state['baseline_overhead'] == timedelta(0):
+                from .mp_calibration import get_calibrated_overhead
+                state['baseline_overhead'] = get_calibrated_overhead()
+            
+            # Create planning context
+            context = PlanningContext(
+                all_columns=state['all_columns'],
+                baseline_overhead=state['baseline_overhead'],
+                timeout_secs=timeout_secs,
+                execution_history=history,
+                remaining_columns=state['remaining']
+            )
+            
+            # Plan next batches
+            plan_result = self.planning_function(context)
+            
+            log_msg_plan_result = f"Executor.get_next_column_chunk() PLANNING RESULT - executor_id={id(self)}, phase={plan_result.phase}, batches={len(plan_result.batches)}, notes={plan_result.notes}"
+            logger.info(log_msg_plan_result)
+            
+            if not plan_result.batches:
+                # No more batches - done or error
+                if plan_result.phase == "error":
+                    log_msg_error = f"Executor.get_next_column_chunk() PLANNING ERROR - executor_id={id(self)}, returning None"
+                    logger.warning(log_msg_error)
+                    # Single column timed out - should trigger bisector
+                    return None
+                log_msg_no_batches = f"Executor.get_next_column_chunk() NO BATCHES - executor_id={id(self)}, returning None"
+                logger.info(log_msg_no_batches)
+                return None
+            
+            # Store batches and continue loop to return first
+            state['current_batches'] = plan_result.batches
+            state['batch_index'] = 0
+            log_msg_batches_queued = f"Executor.get_next_column_chunk() BATCHES QUEUED - executor_id={id(self)}, count={len(plan_result.batches)}, continuing loop"
+            logger.info(log_msg_batches_queued)
+            # Continue loop to process first batch
+        
+        # Max iterations reached - safety fallback
+        log_msg_max_iter = f"Executor.get_next_column_chunk() MAX ITERATIONS REACHED - executor_id={id(self)}, returning None"
+        logger.warning(log_msg_max_iter)
+        return None
+    
+    def _update_planning_state_after_execution(self, executed_columns: list[str]) -> None:
+        """Update planning state after a batch is executed."""
+        if self._planning_state:
+            # Remove executed columns from remaining
+            for col in executed_columns:
+                if col in self._planning_state['remaining']:
+                    self._planning_state['remaining'].remove(col)
 
     
 # fc = FileCache()    

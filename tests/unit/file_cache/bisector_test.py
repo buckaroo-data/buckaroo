@@ -16,6 +16,7 @@ from buckaroo.file_cache.base import (
     ExecutorLogEvent,
     SimpleExecutorLog,
 )
+from buckaroo.file_cache.batch_planning import simple_one_column_planning
 from buckaroo.file_cache.bisector import (
     ExpressionBisector,
     ColumnBisector,
@@ -275,7 +276,7 @@ def test_bisect():
     def listener(progress:ProgressNotification) -> None:
         pass
 
-    exc = Executor(ldf, FailOnSumExecutor(), listener, fc)
+    exc = Executor(ldf, FailOnSumExecutor(), listener, fc, planning_function=simple_one_column_planning)
     exc.run()
     evs = exc.executor_log.get_log_events()
     failing_events = [ev for ev in evs if not ev.completed]
@@ -302,7 +303,7 @@ def test_bisector_multiple_failing_expressions():
     def listener(progress:ProgressNotification) -> None:
         pass
 
-    exc = Executor(ldf, FailOnHashOrSumExecutor(), listener, fc)
+    exc = Executor(ldf, FailOnHashOrSumExecutor(), listener, fc, planning_function=simple_one_column_planning)
     exc.run()
     evs = exc.executor_log.get_log_events()
     failing_events = [ev for ev in evs if not ev.completed]
@@ -329,7 +330,7 @@ def test_bisector_on_success_event_noop():
     def listener(progress:ProgressNotification) -> None:
         pass
 
-    exc = Executor(ldf, SimpleColumnExecutor(), listener, fc)
+    exc = Executor(ldf, SimpleColumnExecutor(), listener, fc, planning_function=simple_one_column_planning)
     existing_stats = {'a1':{}, 'b2':{}}
     starting_args = SimpleColumnExecutor().get_execution_args(existing_stats)  # type: ignore
     success_input = ExecutorLogEvent(
@@ -357,7 +358,7 @@ def test_column_bisector():
     fc = FileCache()
     def listener(progress:ProgressNotification) -> None:
         pass
-    exc = Executor(ldf, FailOnColumnExecutor('a1'), listener, fc)
+    exc = Executor(ldf, FailOnColumnExecutor('a1'), listener, fc, planning_function=simple_one_column_planning)
     existing_stats = {'a1':{}, 'b2':{}}
     starting_args = SimpleColumnExecutor().get_execution_args(existing_stats)  # type: ignore
     starting_ev = ExecutorLogEvent(
@@ -413,7 +414,7 @@ def test_column_bisector_on_success_event_noop():
     fc = FileCache()
     def listener(progress:ProgressNotification) -> None:
         pass
-    exc = Executor(ldf, SimpleColumnExecutor(), listener, fc)
+    exc = Executor(ldf, SimpleColumnExecutor(), listener, fc, planning_function=simple_one_column_planning)
     existing_stats = {'a1':{}, 'b2':{}}
     starting_args = SimpleColumnExecutor().get_execution_args(existing_stats)  # type: ignore
     starting_ev = ExecutorLogEvent(
