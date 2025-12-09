@@ -229,8 +229,7 @@ class MemoryFileCache(AbstractFileCache):
 
           we can't attach metadata to a series, but we can track the series by memory location
           """
-        # if col:
-        #     print("add col", col, self._get_buffer_key(series))
+        import pl_series_hash  # noqa: F401
         if not self.check_series(series):
             buffer_info = self._get_buffer_key(series)
             df = pl.DataFrame({'a':series})

@@ -8,10 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Any
 
-import polars as pl
 
-
-def read_df(file_path: str | Path, **kwargs) -> pl.LazyFrame:
+def read_df(file_path: str | Path, **kwargs): # -> "pl.LazyFrame":
     """
     Read a file (CSV, Parquet, Avro, JSON) into a Polars LazyFrame.
     
@@ -34,6 +32,8 @@ def read_df(file_path: str | Path, **kwargs) -> pl.LazyFrame:
         >>> ldf = buckaroo.read("data.parquet")
         >>> ldf = buckaroo.read("data.json")
     """
+    #keep polars out of module level imports so that polars cna be an optional dependency
+    import polars as pl # noqa: F401
     file_path = Path(file_path)
     
     if not file_path.exists():

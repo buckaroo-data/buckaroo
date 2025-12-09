@@ -1,5 +1,6 @@
 import multiprocessing
 from typing import Any
+import inspect
 import cloudpickle as _cloudpickle  # type: ignore
 
 """
@@ -18,6 +19,28 @@ class ExecutionFailed(Exception):
       
       """
     pass
+
+def is_running_in_mp_timeout() -> bool:
+    """
+    Check if the current code is running inside an mp_timeout decorator.
+    
+    Returns True if the current call stack includes either _execute_and_report
+    or _execute_and_report_fork, which are the functions that execute code
+    within the multiprocessing worker processes created by mp_timeout.
+    
+    Returns:
+        bool: True if running inside mp_timeout decorator, False otherwise
+    """
+    try:
+        stack = inspect.stack()
+        for frame_info in stack:
+            func_name = frame_info.function
+            if func_name in ('_execute_and_report', '_execute_and_report_fork'):
+                return True
+        return False
+    except Exception:
+        # If we can't inspect the stack, assume we're not in mp_timeout
+        return False
 
 def _execute_and_report(func_bytes, args_bytes, queue) -> None:
     """Run func(*args, **kwargs) in a child process and report the outcome.

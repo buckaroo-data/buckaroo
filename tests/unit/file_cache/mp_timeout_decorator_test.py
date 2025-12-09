@@ -5,7 +5,7 @@ import pytest
 import polars as pl  # type: ignore
 
 from buckaroo.file_cache.mp_timeout_decorator import (
-    TimeoutException, ExecutionFailed, mp_timeout
+    TimeoutException, ExecutionFailed, mp_timeout, is_running_in_mp_timeout
 )
 
 from .mp_test_utils import ( mp_simple, mp_sleep1, mp_crash_exit, mp_polars_longread, mp_polars_crash,
@@ -190,3 +190,20 @@ def test_sys_exit_is_execution_failed():
     pytest.skip("Diagnostic test - edge case for sys.exit handling, run explicitly if needed")
     with pytest.raises(ExecutionFailed):
         exit_now()
+
+def test_is_running_in_mp_timeout():
+    """
+    Test that is_running_in_mp_timeout correctly detects when code is running
+    inside an mp_timeout decorator.
+    """
+    # When called directly (not in mp_timeout), should return False
+    assert is_running_in_mp_timeout() is False
+    
+    # Create a function that checks if it's running in mp_timeout
+    @mp_timeout(TIMEOUT * 3)
+    def check_inside_mp_timeout():
+        return is_running_in_mp_timeout()
+    
+    # When called via mp_timeout decorator, should return True
+    result = check_inside_mp_timeout()
+    assert result is True, "is_running_in_mp_timeout should return True when called inside mp_timeout decorator"

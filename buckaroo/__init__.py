@@ -88,10 +88,10 @@ try:
         print("Buckaroo has been enabled as the default DataFrame viewer.  To return to default dataframe visualization use `from buckaroo import disable; disable()`")
     
     else:
-        print("must be running inside ipython to enable default display via enable()")
-
-
-    warn_on_incompatible()
+        from buckaroo.file_cache.mp_timeout_decorator import is_running_in_mp_timeout
+        if not is_running_in_mp_timeout():
+            print("must be running inside ipython to enable default display via enable()")
+            warn_on_incompatible()
 except:
     print("error enabling buckaroo as default display formatter for dataframes (ignore message during testing/builds")
 
