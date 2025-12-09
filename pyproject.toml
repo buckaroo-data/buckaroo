@@ -34,14 +34,11 @@ dependencies = [
     "anywidget >= 0.9.0",
     "graphlib_backport>=1.0.0",
     "fastparquet",
-
-    "polars",
     "cloudpickle>=3.1.1",
-    "pytest>=7.3.2",
-    "pyarrow>=21.0.0",
+    "pyarrow>=18.0.0"
 ]
 
-version = "0.12.1"
+version = "0.12.2"
 
 
 [project.license]
@@ -74,6 +71,8 @@ dev = [
     "mistune<3.1"
 ]
 polars = [
+    "polars",
+
     "polars>=1.24.0",
     "polars[timezone]",
     "pl-series-hash==0.2.1",
