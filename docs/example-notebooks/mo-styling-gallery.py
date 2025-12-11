@@ -1,16 +1,15 @@
 import marimo
 
-__generated_with = "0.13.5-dev6"
+__generated_with = "0.17.6"
 app = marimo.App(width="medium")
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Buckaroo Styling Gallery
     [Buckaroo](https://github.com/paddymul/buckaroo) can be extensively styled.  This gallery shows many examples of the column configuration language.
-    In this case all of the configs are passed in via `column_config_overrides`. 
+    In this case all of the configs are passed in via `column_config_overrides`.
     Each call looks approximately like
     ```python
     BuckarooInfiniteWidget(df, column_config_overrides={
@@ -19,8 +18,7 @@ def _(mo):
                 "displayer": "obj"}}})
     ```
     It is also possible to write your own styling functions that look at summary stats and return configs for columns.  This is detailed in [Styling Howto](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Styling-Howto.ipynb)
-    """
-    )
+    """)
     return
 
 

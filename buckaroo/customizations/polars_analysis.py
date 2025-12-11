@@ -281,9 +281,8 @@ class HistogramAnalysis(PolarsAnalysis):
         
         # Prefer numeric histograms when:
         #   - the column is numeric, and
-        #   - either value_counts indicates many distinct values, OR
-        #   - histogram_args is present (e.g., on the PAF/ColumnExecutor path where
-        #     value_counts may not be fully populated but histogram_args is).
+        #   - value_counts indicates many distinct values (> 5), and
+        #   - histogram_args is present
         if is_numeric:
             try:
                 vc_exploded_len = len(vc.explode()) if vc is not None else 0
@@ -291,12 +290,11 @@ class HistogramAnalysis(PolarsAnalysis):
                 vc_exploded_len = 0
             
             histogram_args = summary_dict.get('histogram_args')
-            if histogram_args and (
-                vc_exploded_len > 5 or histogram_args
-            ):
+            if histogram_args and vc_exploded_len > 5:
                 if histogram_args and isinstance(histogram_args, dict):
                     meat_histogram = histogram_args.get('meat_histogram')
-                    if meat_histogram and isinstance(meat_histogram, list) and len(meat_histogram) > 1:
+                    # meat_histogram is a tuple (counts, edges) from normalize_polars_histogram_ser
+                    if meat_histogram and isinstance(meat_histogram, (list, tuple)) and len(meat_histogram) == 2:
                         min_ = summary_dict.get('min')
                         max_ = summary_dict.get('max')
                         nan_per = summary_dict.get('nan_per', nan_per)

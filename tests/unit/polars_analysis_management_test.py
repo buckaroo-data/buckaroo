@@ -176,6 +176,30 @@ def test_histogram_analysis():
     assert rounded_actual_numcats == expected_categorical_histogram
 
 
+def test_numeric_histograms():
+    """Test that numeric columns with many distinct values get numeric histograms"""
+    # Create a numeric column with many distinct values (> 5)
+    numeric_data = np.random.randn(100)  # 100 random values, all distinct
+    df = pl.DataFrame({'numeric_col': numeric_data})
+    
+    summary_df, errs = PolarsAnalysisPipeline.full_produce_summary_df(df, HA_CLASSES, debug=False)
+    
+    # Check that we got a numeric histogram (not categorical)
+    histogram = summary_df.get('a', {}).get('histogram', [])
+    assert len(histogram) > 0, "Should have a histogram"
+    
+    # Numeric histograms have 'population' or 'tail' keys, not 'cat_pop'
+    has_numeric_keys = any('population' in item or 'tail' in item for item in histogram)
+    has_categorical_keys = any('cat_pop' in item for item in histogram)
+    
+    assert has_numeric_keys, f"Expected numeric histogram with 'population' or 'tail' keys, got: {histogram}"
+    assert not has_categorical_keys, f"Should not have categorical keys, got: {histogram}"
+    
+    # Check that histogram_bins is present and not the fake value
+    histogram_bins = summary_df.get('a', {}).get('histogram_bins', [])
+    assert histogram_bins != ['faked'], "Should have real histogram_bins, not fake"
+
+
 def Xtest_numeric_histograms():
     """
     The Polars implementations of histograms have been very unstable in the 1.0 release series.

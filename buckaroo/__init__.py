@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import inspect
 from ._version import __version__
 from .buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, AutocleaningBuckaroo
 from .dataflow.widget_extension_utils import DFViewer
@@ -77,6 +78,29 @@ def debug_packages():
             path = "not installed"
         print(f"{package:<17}:", path)
 
+def is_running_in_mp_timeout() -> bool:
+    """
+    Check if the current code is running inside an mp_timeout decorator.
+    
+    Returns True if the current call stack includes either _execute_and_report
+    or _execute_and_report_fork, which are the functions that execute code
+    within the multiprocessing worker processes created by mp_timeout.
+    
+    Returns:
+        bool: True if running inside mp_timeout decorator, False otherwise
+    """
+    try:
+        stack = inspect.stack()
+        for frame_info in stack:
+            func_name = frame_info.function
+            if func_name in ('_execute_and_report', '_execute_and_report_fork'):
+                return True
+        return False
+    except Exception:
+        # If we can't inspect the stack, assume we're not in mp_timeout
+        return False
+
+has_initted = False
 try:
     if is_in_marimo():
         print("Buckaroo has been enabled as the default DataFrame viewer.  To return to default dataframe visualization use `from buckaroo.marimo_utils import marimo_unmonkeypatch; marimo_unmonkeypatch()`")
@@ -88,11 +112,17 @@ try:
         print("Buckaroo has been enabled as the default DataFrame viewer.  To return to default dataframe visualization use `from buckaroo import disable; disable()`")
     
     else:
-        from buckaroo.file_cache.mp_timeout_decorator import is_running_in_mp_timeout
-        if not is_running_in_mp_timeout():
+        if not is_running_in_mp_timeout() and not has_initted:
             print("must be running inside ipython to enable default display via enable()")
             warn_on_incompatible()
+    try:
+        import polars
+        from buckaroo.read_utils import read, read_df
+    except ImportError:
+        #if polars is installed, make read available as a base import
+        pass
 except:
     print("error enabling buckaroo as default display formatter for dataframes (ignore message during testing/builds")
-
+finally:
+    has_initted = True
 

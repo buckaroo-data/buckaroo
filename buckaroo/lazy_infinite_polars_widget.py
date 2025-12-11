@@ -39,15 +39,8 @@ if not logger.handlers:
     _h = logging.StreamHandler()
     _h.setFormatter(logging.Formatter("[buckaroo] %(message)s"))
     logger.addHandler(_h)
-#logger.setLevel(logging.INFO)
-
-# To quiet logs in notebooks, set the logging level to WARNING or ERROR:
-# import logging
-# logging.getLogger("buckaroo").setLevel(logging.WARNING)  # or logging.ERROR
 
 class SimpleAnalysis(PolarsAnalysis):
-
-
     provides_defaults = {'length':2, 'null_count':3, 'unique_count':5, 'empty_count':8}
     select_clauses = [
         (NOT_STRUCTS.len() - NOT_STRUCTS.is_duplicated().sum()).name.map(json_postfix('unique_count')),
@@ -571,7 +564,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         #don't need parallel_executor_class  
         parallel_executor_class: Optional[type] = None,
         planning_function: Optional["PlanningFunction"] = None,  # type: ignore
-        timeout_secs: float = 10.0,  # Timeout for multiprocessing executor (default 120s for large files)
+        timeout_secs: float = 14.0,  # Timeout for multiprocessing executor
         show_message_box: bool = False,  # Enable message box for logging
     ) -> None:
         logger = logging.getLogger("buckaroo.lazy_widget")

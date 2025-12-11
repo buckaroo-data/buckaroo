@@ -1,13 +1,12 @@
 import marimo
 
-__generated_with = "0.13.15"
+__generated_with = "0.17.6"
 app = marimo.App(width="medium")
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Autocleaning with Buckaroo
 
     Dealing with dirty data accounts for a large portion of the time in doing data work. We know what good data looks like, and we know the individual pandas commands to clean columns. But we have to type the same commands over and over again.
@@ -22,8 +21,7 @@ def _(mo):
     Buckaroo performs these tasks interactively and quickly because it uses heuristics, not an LLM.
 
     All of this is customizeable.
-    """
-    )
+    """)
     return
 
 
@@ -120,12 +118,10 @@ def _(pd):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Writing your own cleaning routines
     Let's start by writing a function to clean a column.  Here we are going to strip all non digit and period characters then try to coerce to int
-    """
-    )
+    """)
     return
 
 
@@ -153,16 +149,14 @@ def _(DataFrame, dirty_df, pd):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Writing a fraction function
     We now have a cleaning function, we'll get back to integrating it into the Buckaroo UI in a little bit
 
     Fraction functions return the fraction of a column (0-1) that tells the fraction of values that are succesfully converted with this function.  Buckaroo uses fraction fuctions to integrate with heuristics to choose the correct cleaning function (if any) to apply to a column.
 
     This fraction function is fairly simple, based on the conversion function.
-    """
-    )
+    """)
     return
 
 
@@ -190,8 +184,7 @@ def _(dirty_df, strip_int_and_period_frac):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Picking cleaning methods with heuristics
 
     We have multiple available cleaning methods for each column, and we need a way to choose which one to use. Enter heuristics, and heuristic lang. Heuristic lang is a mini lisp language that allows you to choose the best fit for a column.
@@ -199,8 +192,7 @@ def _(mo):
     We also need to wrap our frac function into a ColAnalysis class.
 
     BaseHeuristic Genops generates commands for the lowcode UI based on which rule has the highest score.
-    """
-    )
+    """)
     return
 
 
@@ -266,13 +258,11 @@ def _(pd, strip_int_and_period_frac):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     # Writing a low code UI command
 
     We now need to write a command for the lowcode UI that corresponds with the
-    """
-    )
+    """)
     return
 
 
@@ -305,14 +295,12 @@ def _(Command, re, s, strip_int_and_period):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Putting it all together with Autocleaning Config
 
     Autocleaning config combines a set of fracs, genereate ops, and commands into a named cleanign configuration
     This is a place you could play with a different implementation of a frac, heuristic, or command and give it a name in the UI.  For the most part I expect users to have different Heuristics.
-    """
-    )
+    """)
     return
 
 
@@ -360,13 +348,11 @@ def _(ConvservativeCleaningGenops, HeuristicFracs, StripIntParse):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Configuring Buckaroo
 
     Here we create a new Buckaroo class with our combination of different AutoCleaningConfigs
-    """
-    )
+    """)
     return
 
 

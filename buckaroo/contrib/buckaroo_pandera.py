@@ -27,7 +27,7 @@ def calculate_error_color_num(error_cross_df:pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(_error_num_data)  # this will be used to uniquely highlight error states
 
 
-def get_column_reason_series(col_errors_df:pd.DataFrame) -> pd.Series[str]:
+def get_column_reason_series(col_errors_df:pd.DataFrame): # -> pd.Series[str]:
     """
     This function is about as far as possible from a vectorized operation.
 

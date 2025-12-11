@@ -98,4 +98,4 @@ def read_df(file_path: str | Path, **kwargs): # -> "pl.LazyFrame":
 def read(file_path: str | Path, **kwargs) -> Any:
     from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget
     ldf = read_df(file_path)
-    return LazyInfinitePolarsBuckarooWidget(ldf, file_path=file_path)
+    return LazyInfinitePolarsBuckarooWidget(ldf, file_path=file_path, **kwargs)
