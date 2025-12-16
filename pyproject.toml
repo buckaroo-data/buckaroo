@@ -35,7 +35,7 @@ dependencies = [
     "graphlib_backport>=1.0.0",
     "fastparquet",
     "cloudpickle>=3.1.1",
-    "pyarrow>=18.0.0"
+    "pyarrow>=18.0.0"    
 ]
 
 version = "0.12.3"
@@ -68,11 +68,11 @@ dev = [
     "graphviz>=0.20.1",
     "pytest-check-links",
     "toml",
-    "mistune<3.1"
+    "mistune<3.1",
+    "pl-series-hash==0.2.1",
 ]
 polars = [
     "polars",
-
     "polars>=1.24.0",
     "polars[timezone]",
     "pl-series-hash==0.2.1",
@@ -89,7 +89,8 @@ test = [
     "ruff",
     "anywidget",
     "nbstripout",
-    "pandera"
+    "pandera",
+    "codecov"
 ]
 
 jupyterlab = ["jupyterlab>=3.6.0"]

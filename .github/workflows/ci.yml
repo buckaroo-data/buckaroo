@@ -21,9 +21,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: |
-          uv run ruff check
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install the project
+        run: uv sync --locked --all-extras --dev
+      - name: Run ruff
+        run: uv run ruff check
 
   # LintPythonMac: # just see if this builds and works on macos,  currently broken
   #   name: Python / Lint
@@ -53,14 +58,17 @@ jobs:
         with:
           run_install: true
           package_json_file: packages/package.json          
-      - uses: astral-sh/setup-uv@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
       - name: Run tests
         run: |
           mkdir buckaroo/static || true
           touch buckaroo/static/compiled.css
           touch buckaroo/static/widget.js
           touch buckaroo/static/widget.css
-          uv sync  --all-extras --group dev
+          uv sync --locked --all-extras
           uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
         env:
           UV_PYTHON: ${{ matrix.python-version }}

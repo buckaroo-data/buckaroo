@@ -205,6 +205,7 @@ dev = [
     { name = "mistune" },
     { name = "nbval" },
     { name = "pandas" },
+    { name = "pl-series-hash" },
     { name = "playwright" },
     { name = "pyarrow" },
     { name = "pydantic" },
@@ -233,6 +234,7 @@ polars = [
 ]
 test = [
     { name = "anywidget" },
+    { name = "codecov" },
     { name = "hypothesis" },
     { name = "nbstripout" },
     { name = "nbval" },
@@ -276,6 +278,7 @@ requires-dist = [
     { name = "anywidget", extras = ["dev"], marker = "extra == 'dev'", specifier = ">=0.9.0" },
     { name = "build", marker = "extra == 'packaging-tools'" },
     { name = "cloudpickle", specifier = ">=3.1.1" },
+    { name = "codecov", marker = "extra == 'test'" },
     { name = "fastparquet" },
     { name = "graphlib-backport", specifier = ">=1.0.0" },
     { name = "graphviz", marker = "extra == 'dev'", specifier = ">=0.20.1" },
@@ -291,6 +294,7 @@ requires-dist = [
     { name = "pandas", marker = "extra == 'dev'", specifier = ">=1.3.5" },
     { name = "pandas", marker = "extra == 'test'", specifier = ">=1.3.5" },
     { name = "pandera", marker = "extra == 'test'" },
+    { name = "pl-series-hash", marker = "extra == 'dev'", specifier = "==0.2.1" },
     { name = "pl-series-hash", marker = "extra == 'polars'", specifier = "==0.2.1" },
     { name = "playwright", marker = "extra == 'dev'" },
     { name = "polars", marker = "extra == 'polars'" },
@@ -485,6 +489,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/52/39/069100b84d7418bc358d81669d5748efb14b9cceacd2f9c75f550424132f/cloudpickle-3.1.1.tar.gz", hash = "sha256:b216fa8ae4019d5482a8ac3c95d8f6346115d8835911fd4aefd1a445e4242c64", size = 22113, upload_time = "2025-01-14T17:02:05.085Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/e8/64c37fadfc2816a7701fa8a6ed8d87327c7d54eacfbfb6edab14a2f2be75/cloudpickle-3.1.1-py3-none-any.whl", hash = "sha256:c8c5a44295039331ee9dad40ba100a9c7297b6f988e50e87ccdf3765a668350e", size = 20992, upload_time = "2025-01-14T17:02:02.417Z" },
+]
+
+[[package]]
+name = "codecov"
+version = "2.1.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "coverage" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2c/bb/594b26d2c85616be6195a64289c578662678afa4910cef2d3ce8417cf73e/codecov-2.1.13.tar.gz", hash = "sha256:2362b685633caeaf45b9951a9b76ce359cd3581dd515b430c6c3f5dfb4d92a8c", size = 21416, upload_time = "2023-04-17T23:11:39.779Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/af/02/18785edcdf6266cdd6c6dc7635f1cbeefd9a5b4c3bb8aff8bd681e9dd095/codecov-2.1.13-py2.py3-none-any.whl", hash = "sha256:c2ca5e51bba9ebb43644c43d0690148a55086f7f5e6fd36170858fa4206744d5", size = 16512, upload_time = "2023-04-17T23:11:37.344Z" },
 ]
 
 [[package]]
