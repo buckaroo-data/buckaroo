@@ -62,10 +62,7 @@ jobs:
           cd ../..
           mkdir buckaroo/static || true
           cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
-          uv add build
           uv build
-          #python -m build .
-          #python -m pytest tests/unit
           pnpm -C packages/buckaroo-js-core run test
         env:
           UV_PYTHON: ${{ matrix.python-version }}

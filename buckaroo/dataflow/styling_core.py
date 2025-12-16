@@ -255,13 +255,17 @@ def rewrite_override_col_references(rewrites: Dict[ColIdentifier, ColIdentifier]
     obj = copy.deepcopy(override)
     if obj.get('color_map_config'):
         if obj['color_map_config'].get('val_column'):
-            obj['color_map_config']['val_column'] = rewrites[obj['color_map_config']['val_column']]
+            val_col = obj['color_map_config']['val_column']
+            # Only rewrite if the column exists in rewrites, otherwise keep original
+            obj['color_map_config']['val_column'] = rewrites.get(val_col, val_col)
 
         if obj['color_map_config'].get('exist_column'):
-            obj['color_map_config']['exist_column'] = rewrites[obj['color_map_config']['exist_column']]
+            exist_col = obj['color_map_config']['exist_column']
+            obj['color_map_config']['exist_column'] = rewrites.get(exist_col, exist_col)
     if obj.get('tooltip_config'):
         if obj['tooltip_config'].get('val_column'):
-            obj['tooltip_config']['val_column'] = rewrites[obj['tooltip_config']['val_column']]
+            val_col = obj['tooltip_config']['val_column']
+            obj['tooltip_config']['val_column'] = rewrites.get(val_col, val_col)
     return obj
 
 
