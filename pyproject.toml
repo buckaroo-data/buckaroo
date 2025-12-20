@@ -21,13 +21,14 @@ keywords = [
 ]
 classifiers = [
     "Framework :: Jupyter",
+    "Framework :: Jupyter :: JupyterLab",  
+    "Framework :: Jupyter :: JupyterLab :: Extensions",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: BSD License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
 ]
 dependencies = [
@@ -38,7 +39,7 @@ dependencies = [
     "pyarrow>=18.0.0"    
 ]
 
-version = "0.12.3"
+version = "0.12.4"
 
 
 [project.license]

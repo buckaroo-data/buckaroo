@@ -186,7 +186,7 @@ wheels = [
 
 [[package]]
 name = "buckaroo"
-version = "0.12.3"
+version = "0.12.4"
 source = { editable = "." }
 dependencies = [
     { name = "anywidget" },
