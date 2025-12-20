@@ -57,16 +57,12 @@ jobs:
           uv run pytest --check-links docs/example-notebooks/*.ipynb
           uv run sphinx-build -T -b html docs/source  docs/build
 
-      - name: Test the extension
+      - name: Test the JS extension
         run: |
-          #python -m pip install --upgrade -v -e ".[test, examples, docs]"
+          ./scripts/full_build.sh
           cd packages/buckaroo-js-core
           pnpm install && pnpm run build
-          cd ../..
-          mkdir buckaroo/static || true
-          cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
-          uv build
-          pnpm -C packages/buckaroo-js-core run test
+          pnpm run test
         env:
           UV_PYTHON: ${{ matrix.python-version }}
 
@@ -81,12 +77,7 @@ jobs:
 
       - name: Package
         run: |
-          cd packages/buckaroo-js-core
-          pnpm install && pnpm run build
-          cd ../..
-          mkdir buckaroo/static || true
-          cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
-          uv build
+          ./scripts/full_build.sh
 
       - name: Upload builds
         uses: actions/upload-artifact@v4
@@ -95,6 +86,31 @@ jobs:
           path: |
             ./dist
             ./js/*.tgz
+
+      - name: Run Polars Widget Integration Test
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          # Ensure uv environment is set up
+          uv sync --all-extras --group dev
+          
+          # Install the built buckaroo wheel
+          uv pip install --force-reinstall dist/*.whl
+          
+          # Install test dependencies (polars, jupyterlab)
+          uv pip install polars jupyterlab
+          
+          # Detect venv location (uv sync creates .venv by default, but check if it exists)
+          if [ -d ".venv" ]; then
+            VENV_LOCATION=".venv"
+          else
+            # Fallback: try to detect from uv's Python environment
+            VENV_LOCATION=$(uv run python -c "import sys; print(sys.prefix)" 2>/dev/null || echo ".venv")
+          fi
+          
+          # Run the integration test script with venv location
+          bash scripts/test_polars_widget_integration.sh --venv-location="$VENV_LOCATION"
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
 
 
 # ui-test:

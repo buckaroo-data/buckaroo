@@ -27,8 +27,8 @@ importers:
         specifier: ^0.0.8
         version: 0.0.8(@types/react-dom@18.3.7(@types/react@18.3.21))(@types/react@18.3.21)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       buckaroo-js-core:
-        specifier: ./packages/buckaroo-js-core
-        version: link:packages/buckaroo-js-core
+        specifier: ./buckaroo-js-core
+        version: link:buckaroo-js-core
       lodash:
         specifier: ^4.17.21
         version: 4.17.21

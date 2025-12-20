@@ -14,10 +14,11 @@
     "test": "jest",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build -o dist/storybook",
-    "test:pw": "playwright test",
-    "test:pw:headed": "playwright test --headed",
-    "test:pw:ui": "playwright test --ui",
-    "test:pw:report": "playwright show-report"
+    "test:pw": "pnpm exec playwright test",
+    "test:pw:headed": "pnpm exec playwright test --headed",
+    "test:pw:ui": "pnpm exec playwright test --ui",
+    "test:pw:report": "pnpm exec playwright show-report",
+    "test:integration": "pnpm exec playwright test --config playwright.config.integration.ts --reporter=line"
   },
   "files": [
     "/dist"

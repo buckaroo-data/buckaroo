@@ -7,6 +7,7 @@ pnpm install
 pnpm run build:tsc
 pnpm run build:vite 
 cd ../..
+mkdir buckaroo/static || true
 cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
 rm -rf packages/buckaroo-js-core/node_modules || true
 cd packages
