@@ -74,12 +74,15 @@ NOTEBOOKS=(
     "test_buckaroo_infinite_widget.ipynb"
     "test_polars_widget.ipynb"
     "test_polars_infinite_widget.ipynb"
-    "test_lazy_infinite_polars_widget.ipynb"
+    "test_dfviewer.ipynb"
+    "test_dfviewer_infinite.ipynb"
+    "test_polars_dfviewer.ipynb"
+    "test_polars_dfviewer_infinite.ipynb"
 )
 
-# If a specific notebook is provided, test only that one
+# If specific notebook(s) provided, test only those (comma-separated)
 if [ -n "$NOTEBOOK" ]; then
-    NOTEBOOKS=("$NOTEBOOK")
+    IFS=',' read -ra NOTEBOOKS <<< "$NOTEBOOK"
 fi
 
 echo "🧪 Starting Buckaroo Widget Integration Tests"
@@ -223,7 +226,7 @@ test_notebook() {
     local notebook_name=$1
     local notebook_source="$ROOT_DIR/tests/integration_notebooks/$notebook_name"
     
-    log_message "Testing notebook: $notebook_name"
+    log_message "Testing notebook: $notebook_name [$CURRENT_TEST/$TOTAL_NOTEBOOKS]"
     
     # Copy test notebook to current directory
     if [ ! -f "$notebook_source" ]; then
@@ -239,46 +242,55 @@ test_notebook() {
     return 0
 }
 
-# Start JupyterLab in background (using virtual environment Python)
-log_message "Starting JupyterLab..."
-# Kill any existing JupyterLab processes on port 8889
-lsof -ti:8889 | xargs kill -9 2>/dev/null || true
-sleep 1
-
-export JUPYTER_TOKEN="test-token-12345"
-PYTHON_EXECUTABLE="$VENV_DIR/bin/python"
-log_message "Using virtual environment Python: $PYTHON_EXECUTABLE"
-
-# Set JupyterLab to allow root (needed for CI) and disable token check for localhost
-python -m jupyter lab --no-browser --port=8889 --ServerApp.token=$JUPYTER_TOKEN --ServerApp.allow_origin='*' --ServerApp.disable_check_xsrf=True &
-JUPYTER_PID=$!
-log_message "JupyterLab started with PID: $JUPYTER_PID"
-
-# Wait for JupyterLab to be ready
-log_message "Waiting for JupyterLab to start..."
-MAX_WAIT=30
-COUNTER=0
-while ! curl -s -f http://localhost:8889/lab?token=$JUPYTER_TOKEN > /dev/null 2>&1; do
-    if [ $COUNTER -ge $MAX_WAIT ]; then
-        error "JupyterLab failed to start within $MAX_WAIT seconds"
-        # Show JupyterLab logs for debugging
-        log_message "Checking JupyterLab process status..."
-        if kill -0 $JUPYTER_PID 2>/dev/null; then
-            log_message "JupyterLab process is still running"
-        else
-            error "JupyterLab process has exited"
+# Function to start JupyterLab
+start_jupyter() {
+    log_message "Starting JupyterLab..."
+    # Kill any existing JupyterLab processes on port 8889 (but not browsers)
+    lsof -ti:8889 | while read pid; do
+        if ps -p "$pid" -o comm= 2>/dev/null | grep -qE 'jupyter|python'; then
+            kill -9 "$pid" 2>/dev/null || true
         fi
-        exit 1
-    fi
-    sleep 2
-    COUNTER=$((COUNTER + 2))
-    log_message "Still waiting... ($COUNTER/$MAX_WAIT seconds)"
-done
-success "JupyterLab is ready at http://localhost:8889"
+    done || true
+    
+    # Clear JupyterLab workspace state to ensure clean start
+    rm -rf .jupyter/lab/workspaces 2>/dev/null || true
+    rm -rf ~/.jupyter/lab/workspaces 2>/dev/null || true
 
-# Give JupyterLab extra time to fully initialize (especially important in CI)
-log_message "Waiting for JupyterLab to fully initialize..."
-sleep 5
+    export JUPYTER_TOKEN="test-token-12345"
+    
+    # Start JupyterLab with clean workspace
+    python -m jupyter lab --no-browser --port=8889 --ServerApp.token=$JUPYTER_TOKEN --ServerApp.allow_origin='*' --ServerApp.disable_check_xsrf=True &
+    JUPYTER_PID=$!
+    log_message "JupyterLab started with PID: $JUPYTER_PID"
+
+    # Wait for JupyterLab to be ready
+    MAX_WAIT=30
+    COUNTER=0
+    while ! curl -s -f http://localhost:8889/lab?token=$JUPYTER_TOKEN > /dev/null 2>&1; do
+        if [ $COUNTER -ge $MAX_WAIT ]; then
+            error "JupyterLab failed to start within $MAX_WAIT seconds"
+            return 1
+        fi
+        sleep 2
+        COUNTER=$((COUNTER + 2))
+    done
+    success "JupyterLab is ready at http://localhost:8889"
+}
+
+# Function to stop JupyterLab
+stop_jupyter() {
+    if [ -n "$JUPYTER_PID" ] && kill -0 $JUPYTER_PID 2>/dev/null; then
+        log_message "Stopping JupyterLab (PID: $JUPYTER_PID)"
+        kill -15 $JUPYTER_PID 2>/dev/null || true
+        kill -9 $JUPYTER_PID 2>/dev/null || true
+    fi
+    # Also kill any stragglers on port 8889
+    lsof -ti:8889 | while read pid; do
+        if ps -p "$pid" -o comm= 2>/dev/null | grep -qE 'jupyter|python'; then
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    done || true
+}
 
 # Install npm dependencies for Playwright
 log_message "Installing npm dependencies for Playwright..."
@@ -313,26 +325,32 @@ success "npm dependencies and Playwright browsers ready"
 # Test all notebooks
 OVERALL_RESULT=0
 FAILED_NOTEBOOKS=()
+TOTAL_NOTEBOOKS=${#NOTEBOOKS[@]}
+CURRENT_TEST=0
 
 for notebook in "${NOTEBOOKS[@]}"; do
+    CURRENT_TEST=$((CURRENT_TEST + 1))
     log_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    log_message "Testing: $notebook"
+    log_message "Testing: $notebook [$CURRENT_TEST/$TOTAL_NOTEBOOKS]"
     log_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    # Copy notebook to root directory (where JupyterLab serves from)
+    # Start fresh JupyterLab for each notebook
     cd "$ROOT_DIR"
+    start_jupyter
+    
+    # Copy notebook to root directory (where JupyterLab serves from)
     if ! test_notebook "$notebook"; then
         error "Failed to prepare notebook: $notebook"
         OVERALL_RESULT=1
         FAILED_NOTEBOOKS+=("$notebook (preparation failed)")
+        stop_jupyter
         continue
     fi
     
     # Run Playwright test (from packages/buckaroo-js-core)
     cd packages/buckaroo-js-core
     log_message "Running Playwright test for $notebook..."
-    # Increase timeout for individual test to handle multiple kernels
-    if npx playwright test --config playwright.config.integration.ts --reporter=line --timeout=180000; then
+    if npx playwright test --config playwright.config.integration.ts --reporter=line --timeout=30000; then
         success "✅ Playwright test passed for $notebook!"
     else
         error "❌ Playwright test failed for $notebook!"
@@ -344,9 +362,8 @@ for notebook in "${NOTEBOOKS[@]}"; do
     cd "$ROOT_DIR"
     rm -f "$notebook"
     
-    # Small delay between tests to let kernels and resources settle
-    log_message "Waiting for resources to settle before next test..."
-    sleep 3
+    # Stop JupyterLab to ensure clean state for next test
+    stop_jupyter
 done
 
 cd ../..

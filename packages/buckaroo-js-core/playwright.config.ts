@@ -30,9 +30,12 @@ export default defineConfig({
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
-    // launchoptions:{
-    //   slowMo:1500,
-    // }
+    
+    /* Use fresh browser context with no storage to avoid state leakage between tests */
+    storageState: undefined,
+    contextOptions: {
+      ignoreHTTPSErrors: true,
+    },
   },
 
   /* Configure projects for major browsers */

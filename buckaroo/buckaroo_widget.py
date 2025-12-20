@@ -268,6 +268,21 @@ class RawDFViewerWidget(BuckarooWidgetBase):
         { 'index': 'mean',  'a':      28,   'b':      14, 'c': 'Padarget' },
         { 'index': 'dtype', 'a': 'float64', 'b': 'int64', 'c': 'object' }]).tag(sync=True)
 
+    def __init__(self, df_data=None, df_viewer_config=None, summary_stats_data=None, **kwargs):
+        """Initialize RawDFViewerWidget with pre-computed data.
+        
+        This bypasses the normal BuckarooWidgetBase initialization which requires orig_df.
+        Instead, it accepts pre-computed df_data, df_viewer_config, and summary_stats_data.
+        """
+        # Call anywidget.AnyWidget.__init__ directly, bypassing BuckarooWidgetBase.__init__
+        super(BuckarooWidgetBase, self).__init__(**kwargs)
+        if df_data is not None:
+            self.df_data = df_data
+        if df_viewer_config is not None:
+            self.df_viewer_config = df_viewer_config
+        if summary_stats_data is not None:
+            self.summary_stats_data = summary_stats_data
+
 """
 interface PayloadArgs {
     sourceName: string;

@@ -2,6 +2,7 @@ from io import BytesIO
 import traceback
 
 import polars as pl
+from traitlets import Unicode
 
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, RawDFViewerWidget
 from buckaroo.df_util import old_col_new_col
@@ -164,6 +165,20 @@ def PolarsDFViewer(df,
     summary_stats_data = bw.df_data_dict['all_stats']
     return RawDFViewerWidget(
         df_data=df_data, df_viewer_config=dfv_config, summary_stats_data=summary_stats_data)
+
+
+class PolarsDFViewerInfinite(PolarsBuckarooInfiniteWidget):
+    render_func_name = Unicode("DFViewerInfinite").tag(sync=True)
+    df_id = Unicode("unknown").tag(sync=True)
+
+    def __init__(self, orig_df, debug=False,
+        column_config_overrides=None,
+        pinned_rows=None, extra_grid_config=None,
+        component_config=None,
+        init_sd=None):
+        super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
+                         extra_grid_config, component_config, init_sd)
+        self.df_id = str(id(orig_df))
 
 
 

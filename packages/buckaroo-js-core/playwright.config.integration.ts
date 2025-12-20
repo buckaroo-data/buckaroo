@@ -9,12 +9,15 @@ export default defineConfig({
   workers: 1, // Only one worker for integration tests
   reporter: 'html',
   use: {
-    trace: 'on-first-retry',
-    // Timeouts for integration tests (increased for CI)
-    actionTimeout: 30000,
-    navigationTimeout: 60000,
-    timeout: 120000, // Test timeout - 2 minutes for CI
+    trace: 'off',
+    actionTimeout: 10000,
+    navigationTimeout: 15000,
+    storageState: undefined,
+    launchOptions: {
+      args: ['--incognito'],
+    },
   },
+  timeout: 30000, // 30s per test
 
   projects: [
     {
