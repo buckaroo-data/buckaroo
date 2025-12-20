@@ -53,6 +53,8 @@ The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery)
 
 ## Videos 
 - [Buckaroo Full Tour](https://youtu.be/t-wk24F1G3s) 6m50s A broad introduction to Buckaroo
+- [The Column's the limit - PyData Boston 2025 (conference)](https://www.youtube.com/watch?v=JUCvHnpmx-Y) 43m Explanation of how LazyBuckaroo reliably process laptop large data
+- [19 Million row scrolling and stats demo](https://www.youtube.com/shorts/x1UnW4Y_tOk) 58s
 - [Buckaroo PyData Boston 2025](https://www.youtube.com/watch?v=HtahDDEnBwE) 49m A tour of Buckaroo at PyData Boston.  Includes questions from the audience.
 - [Using Buckaroo and pandas to investigate large CSVs](https://www.youtube.com/watch?v=_ZmYy8uvZN8) 9m
 - [Autocleaning quick demo](https://youtube.com/shorts/4Jz-Wgf3YDc) 2m38s
