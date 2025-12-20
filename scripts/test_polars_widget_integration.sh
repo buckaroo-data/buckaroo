@@ -1,13 +1,15 @@
 #!/bin/bash
-# Integration test script for PolarsBuckarooWidget
+# Integration test script for Buckaroo widgets
 # Usage:
-#   bash scripts/test_polars_widget_integration.sh                    # Creates test venv and builds buckaroo
-#   bash scripts/test_polars_widget_integration.sh --use-local-venv   # Uses existing .venv (skips build)
+#   bash scripts/test_polars_widget_integration.sh                    # Tests all widgets (creates test venv and builds buckaroo)
+#   bash scripts/test_polars_widget_integration.sh --use-local-venv   # Tests all widgets (uses existing .venv, skips build)
+#   bash scripts/test_polars_widget_integration.sh --notebook=test_polars_widget.ipynb  # Test specific notebook
 #   bash scripts/test_polars_widget_integration.sh --venv-location=/path/to/venv  # Uses specified venv location
 set -e
 
 # Make sure we're in the buckaroo directory (scripts/ is one level down from root)
 cd "$(dirname "$0")/.."
+ROOT_DIR="$(pwd)"
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,6 +37,7 @@ warning() {
 # Parse command line arguments
 USE_LOCAL_VENV=false
 VENV_LOCATION=""
+NOTEBOOK=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -50,6 +53,14 @@ while [[ $# -gt 0 ]]; do
             VENV_LOCATION="$2"
             shift 2
             ;;
+        --notebook=*)
+            NOTEBOOK="${1#*=}"
+            shift
+            ;;
+        --notebook)
+            NOTEBOOK="$2"
+            shift 2
+            ;;
         *)
             # Unknown option, skip it (might be for future use)
             shift
@@ -57,7 +68,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "🧪 Starting PolarsBuckarooWidget Integration Test"
+# Define all notebooks to test
+NOTEBOOKS=(
+    "test_buckaroo_widget.ipynb"
+    "test_buckaroo_infinite_widget.ipynb"
+    "test_polars_widget.ipynb"
+    "test_polars_infinite_widget.ipynb"
+    "test_lazy_infinite_polars_widget.ipynb"
+)
+
+# If a specific notebook is provided, test only that one
+if [ -n "$NOTEBOOK" ]; then
+    NOTEBOOKS=("$NOTEBOOK")
+fi
+
+echo "🧪 Starting Buckaroo Widget Integration Tests"
 
 # Create and activate a virtual environment for the test
 if [ -n "$VENV_LOCATION" ]; then
@@ -94,8 +119,15 @@ cleanup() {
         kill $JUPYTER_PID 2>/dev/null || true
         wait $JUPYTER_PID 2>/dev/null || true
     fi
-    # Remove test notebook if it exists
-    rm -f test_polars_widget.ipynb
+    # Remove test notebooks if they exist
+    if [ -n "${NOTEBOOKS+x}" ]; then
+        for notebook in "${NOTEBOOKS[@]}"; do
+            rm -f "$notebook"
+        done
+    else
+        # Fallback: remove common test notebook names
+        rm -f test_*.ipynb
+    fi
     # Remove virtual environment only if it's a test venv (not existing venv)
     if [ -z "$VENV_LOCATION" ] && [ "$USE_LOCAL_VENV" = false ] && [ -d "$VENV_DIR" ]; then
         log_message "Removing virtual environment..."
@@ -186,55 +218,26 @@ except ImportError as e:
     exit 1
 }
 
-# Create test notebook
-log_message "Creating test notebook..."
-cat > test_polars_widget.ipynb << 'EOF'
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    "# Test buckaroo import\n",
-    "try:\n",
-    "    import buckaroo\n",
-    "    print(f\"✅ buckaroo imported successfully: {buckaroo.__version__}\")\n",
-    "except ImportError as e:\n",
-    "    print(f\"❌ Failed to import buckaroo: {e}\")\n",
-    "    raise\n",
-    "\n",
-    "import polars as pl\n",
-    "from buckaroo.polars_buckaroo import PolarsBuckarooWidget\n",
-    "\n",
-    "# Create test data\n",
-    "df = pl.DataFrame({\n",
-    "    'name': ['Alice', 'Bob', 'Charlie'],\n",
-    "    'age': [25, 30, 35],\n",
-    "    'score': [85.5, 92.0, 78.3]\n",
-    "})\n",
-    "print(f\"✅ Created DataFrame with shape: {df.shape}\")\n",
-    "\n",
-    "# Display the widget\n",
-    "widget = PolarsBuckarooWidget(df)\n",
-    "print(\"✅ PolarsBuckarooWidget created successfully\")\n",
-    "widget"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3",
-   "language": "python",
-   "name": "python3"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 4
+# Function to test a single notebook
+test_notebook() {
+    local notebook_name=$1
+    local notebook_source="$ROOT_DIR/tests/integration_notebooks/$notebook_name"
+    
+    log_message "Testing notebook: $notebook_name"
+    
+    # Copy test notebook to current directory
+    if [ ! -f "$notebook_source" ]; then
+        error "Test notebook not found at $notebook_source"
+        return 1
+    fi
+    cp "$notebook_source" "$notebook_name"
+    success "Test notebook copied: $notebook_name"
+    
+    # Export notebook name for Playwright test
+    export TEST_NOTEBOOK="$notebook_name"
+    
+    return 0
 }
-EOF
-success "Test notebook created"
 
 # Start JupyterLab in background (using virtual environment Python)
 log_message "Starting JupyterLab..."
@@ -307,22 +310,59 @@ fi
 
 success "npm dependencies and Playwright browsers ready"
 
-# Run Playwright test
-log_message "Running Playwright test..."
-if npx playwright test --config playwright.config.integration.ts --reporter=line --timeout=120000; then
-    success "Playwright test passed!"
-    TEST_RESULT=0
-else
-    error "Playwright test failed!"
-    TEST_RESULT=1
-fi
+# Test all notebooks
+OVERALL_RESULT=0
+FAILED_NOTEBOOKS=()
+
+for notebook in "${NOTEBOOKS[@]}"; do
+    log_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_message "Testing: $notebook"
+    log_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Copy notebook to root directory (where JupyterLab serves from)
+    cd "$ROOT_DIR"
+    if ! test_notebook "$notebook"; then
+        error "Failed to prepare notebook: $notebook"
+        OVERALL_RESULT=1
+        FAILED_NOTEBOOKS+=("$notebook (preparation failed)")
+        continue
+    fi
+    
+    # Run Playwright test (from packages/buckaroo-js-core)
+    cd packages/buckaroo-js-core
+    log_message "Running Playwright test for $notebook..."
+    # Increase timeout for individual test to handle multiple kernels
+    if npx playwright test --config playwright.config.integration.ts --reporter=line --timeout=180000; then
+        success "✅ Playwright test passed for $notebook!"
+    else
+        error "❌ Playwright test failed for $notebook!"
+        OVERALL_RESULT=1
+        FAILED_NOTEBOOKS+=("$notebook")
+    fi
+    
+    # Clean up notebook file (from root directory)
+    cd "$ROOT_DIR"
+    rm -f "$notebook"
+    
+    # Small delay between tests to let kernels and resources settle
+    log_message "Waiting for resources to settle before next test..."
+    sleep 3
+done
+
 cd ../..
 
-if [ $TEST_RESULT -eq 0 ]; then
-    success "🎉 INTEGRATION TEST PASSED: PolarsBuckarooWidget works in JupyterLab!"
-    log_message "ag-grid renders correctly in JupyterLab environment"
+# Final summary
+log_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+if [ $OVERALL_RESULT -eq 0 ]; then
+    success "🎉 ALL INTEGRATION TESTS PASSED!"
+    log_message "All widgets work correctly in JupyterLab"
 else
-    error "💥 INTEGRATION TEST FAILED: PolarsBuckarooWidget has issues"
+    error "💥 SOME INTEGRATION TESTS FAILED"
+    log_message "Failed notebooks:"
+    for failed in "${FAILED_NOTEBOOKS[@]}"; do
+        error "  - $failed"
+    done
 fi
+log_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-exit $TEST_RESULT
+exit $OVERALL_RESULT

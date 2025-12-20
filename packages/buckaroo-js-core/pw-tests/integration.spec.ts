@@ -66,18 +66,19 @@ test.describe('JupyterLab Connection Tests', () => {
   test('✅ Can access test notebook file via API', async ({ request }) => {
     console.log('🔍 Checking if test notebook exists...');
     
-    const notebookResponse = await request.get(`${JUPYTER_BASE_URL}/api/contents/test_polars_widget.ipynb?token=${JUPYTER_TOKEN}`);
+    const notebookName = process.env.TEST_NOTEBOOK || 'test_polars_widget.ipynb';
+    const notebookResponse = await request.get(`${JUPYTER_BASE_URL}/api/contents/${notebookName}?token=${JUPYTER_TOKEN}`);
     expect(notebookResponse.status()).toBe(200);
     
     const notebookData = await notebookResponse.json();
     expect(notebookData).toHaveProperty('content');
     expect(notebookData.type).toBe('notebook');
-    console.log('✅ Test notebook file is accessible via API');
+    console.log(`✅ Test notebook file is accessible via API: ${notebookName}`);
   });
 });
 
-test.describe('PolarsBuckarooWidget JupyterLab Integration', () => {
-  test('🎯 PolarsBuckarooWidget renders ag-grid in JupyterLab', async ({ page }) => {
+test.describe('Buckaroo Widget JupyterLab Integration', () => {
+  test('🎯 Buckaroo widget renders ag-grid in JupyterLab', async ({ page }) => {
     // Capture console errors and warnings
     const consoleMessages: Array<{ type: string; text: string }> = [];
     page.on('console', (msg) => {
@@ -96,8 +97,9 @@ test.describe('PolarsBuckarooWidget JupyterLab Integration', () => {
     });
     
     // Navigate directly to the test notebook
-    console.log('📓 Opening test notebook...');
-    await page.goto(`${JUPYTER_BASE_URL}/lab/tree/test_polars_widget.ipynb?token=${JUPYTER_TOKEN}`, { timeout: NAVIGATION_TIMEOUT });
+    const notebookName = process.env.TEST_NOTEBOOK || 'test_polars_widget.ipynb';
+    console.log(`📓 Opening test notebook: ${notebookName}...`);
+    await page.goto(`${JUPYTER_BASE_URL}/lab/tree/${notebookName}?token=${JUPYTER_TOKEN}`, { timeout: NAVIGATION_TIMEOUT });
 
     // Wait for notebook to load
     console.log('⏳ Waiting for notebook to load...');
@@ -106,7 +108,7 @@ test.describe('PolarsBuckarooWidget JupyterLab Integration', () => {
     console.log('✅ Notebook loaded');
 
     // Find and run the first code cell
-    console.log('▶️ Executing PolarsBuckarooWidget code...');
+    console.log(`▶️ Executing widget code from ${notebookName}...`);
     // Wait for notebook to be fully interactive (use domcontentloaded instead of networkidle)
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
     // Focus on the notebook and use keyboard shortcut to run cell (Shift+Enter)
@@ -133,10 +135,10 @@ test.describe('PolarsBuckarooWidget JupyterLab Integration', () => {
     }
 
     // Wait for the buckaroo widget to appear within the output area
-    console.log('⏳ Waiting for PolarsBuckarooWidget...');
+    console.log('⏳ Waiting for buckaroo widget...');
     try {
         await outputArea.locator('.buckaroo-widget').waitFor({ state: 'visible', timeout: DEFAULT_TIMEOUT });
-        console.log('✅ PolarsBuckarooWidget appeared');
+        console.log('✅ Buckaroo widget appeared');
     } catch (error) {
         // Comprehensive error diagnostics
         console.log('❌ Widget failed to appear. Gathering diagnostic information...');
@@ -259,7 +261,7 @@ test.describe('PolarsBuckarooWidget JupyterLab Integration', () => {
     await expect(ageCell).toBeVisible();
     await expect(scoreCell).toBeVisible();
 
-    console.log(`🎉 SUCCESS: PolarsBuckarooWidget rendered ag-grid with ${rowCount} rows, ${headerCount} columns, and ${cellCount} cells`);
+    console.log(`🎉 SUCCESS: Widget from ${notebookName} rendered ag-grid with ${rowCount} rows, ${headerCount} columns, and ${cellCount} cells`);
     console.log('📊 Verified data: Alice (age 25, score 85.5)');
   });
 });
