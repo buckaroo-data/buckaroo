@@ -100,6 +100,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
     _esm = Path(__file__).parent / "static" / "widget.js"
     _css = Path(__file__).parent / "static" / "compiled.css"
     render_func_name = Unicode("DFViewerInfinite").tag(sync=True)
+    record_transcript = TDict({'enabled': False}).tag(sync=True)
     
     def _log_cache_info(self, cached_sd: Dict[str, Dict[str, Any]], show_message_box: bool) -> None:
         """Calculate and log cache information."""
@@ -566,6 +567,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         planning_function: Optional["PlanningFunction"] = None,  # type: ignore
         timeout_secs: float = 14.0,  # Timeout for multiprocessing executor
         show_message_box: bool = False,  # Enable message box for logging
+        record_transcript: bool = False,  # Enable transcript recording for replay
     ) -> None:
         logger = logging.getLogger("buckaroo.lazy_widget")
         # Store original widget ID and PID for logging and tracking
@@ -577,7 +579,8 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         self._debug = debug
         self._ldf = ldf
         self.show_message_box = {'enabled': show_message_box}
-        logger.info(f"LazyInfinitePolarsBuckarooWidget.__init__: show_message_box={show_message_box}, setting trait to {self.show_message_box}")
+        self.record_transcript = {'enabled': record_transcript}
+        logger.info(f"LazyInfinitePolarsBuckarooWidget.__init__: show_message_box={show_message_box}, record_transcript={record_transcript}")
         default_analyses = PL_Analysis_Klasses
         #default_analyses = [SimpleAnalysis]
 

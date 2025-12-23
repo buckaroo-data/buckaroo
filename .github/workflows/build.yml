@@ -87,7 +87,12 @@ jobs:
             ./dist
             ./js/*.tgz
 
-      - name: Run Polars Widget Integration Test
+      - name: Run Storybook Playwright Tests
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          bash scripts/test_playwright_storybook.sh
+
+      - name: Run JupyterLab Playwright Tests
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
           # Ensure uv environment is set up
@@ -108,7 +113,7 @@ jobs:
           fi
           
           # Run the integration test script with venv location
-          bash scripts/test_polars_widget_integration.sh --venv-location="$VENV_LOCATION"
+          bash scripts/test_playwright_jupyter.sh --venv-location="$VENV_LOCATION"
         env:
           UV_PYTHON: ${{ matrix.python-version }}
 

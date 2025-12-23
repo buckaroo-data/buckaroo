@@ -164,3 +164,11 @@ docs/*js*
 docs/source/_static/*woff*
 
 packages/buckaroo-js-core/tsconfig.tsbuildinfo
+
+# Large data files - should not be in repo
+*.parq
+*.parquet
+error.parq
+docs/example-notebooks/*.parq
+docs/example-notebooks/**/*.parquet
+docs/example-notebooks/**/*.parq

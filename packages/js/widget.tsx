@@ -5,7 +5,133 @@ import srt from "buckaroo-js-core";
 import "./widget.css";
 import "../buckaroo-js-core/dist/style.css";
 
+// ============================================================================
+// Transcript Recording (Plain JS - no React needed)
+// FIXME: Feature-flag this via a Python trait (e.g. enable_transcript_recording)
+// ============================================================================
 
+/**
+ * Helper to convert values to JSON-safe format (handles BigInt, etc.)
+ */
+function toJsonSafe(val: any): any {
+	if (typeof val === "bigint") return val.toString();
+	if (Array.isArray(val)) return val.map(toJsonSafe);
+	if (val && typeof val === "object") {
+		const out: Record<string, any> = {};
+		for (const k in val) {
+			try { out[k] = toJsonSafe(val[k]); } catch { out[k] = null; }
+		}
+		return out;
+	}
+	return val;
+}
+
+/**
+ * Extract ArrayBuffer from various buffer wrapper types (DataView, Uint8Array, etc.)
+ */
+function extractArrayBuffer(buffer: any): ArrayBuffer | null {
+	if (buffer instanceof ArrayBuffer) return buffer;
+	if (buffer instanceof DataView) return buffer.buffer;
+	if (buffer instanceof Uint8Array || (buffer && buffer.buffer instanceof ArrayBuffer)) {
+		return buffer.buffer;
+	}
+	return null;
+}
+
+/**
+ * Set up transcript recording on a model. Listens to backbone events and records
+ * to window._buckarooTranscript for debugging/replay in Storybook.
+ * 
+ * This is pure JS - no React hooks needed.
+ */
+function setupTranscriptRecording(model: any) {
+	// @ts-ignore
+	window._buckarooTranscript = window._buckarooTranscript || [];
+	
+	// Listen for custom messages (infinite_resp with parquet data)
+	const customMsgHandler = (msg: any, buffers?: ArrayBuffer[]) => {
+		try {
+			console.info("[Transcript] custom_msg:", msg?.type);
+			// @ts-ignore
+			window._buckarooTranscript.push({
+				ts: Date.now(),
+				event: "custom_msg",
+				msg,
+				buffers_len: buffers?.length || 0,
+			});
+			
+			// Parse parquet buffers from infinite_resp messages
+			if (msg && msg.type === "infinite_resp" && buffers && buffers.length > 0) {
+				const rawBuffer = extractArrayBuffer(buffers[0]);
+				if (rawBuffer) {
+					console.info("[Transcript] Parsing parquet buffer, size:", rawBuffer.byteLength);
+					
+					// Use parquetRead/parquetMetadata from srt (buckaroo-js-core)
+					const parquetMetadataFn = (srt as any).parquetMetadata;
+					const parquetReadFn = (srt as any).parquetRead;
+					
+					if (parquetMetadataFn && parquetReadFn) {
+						try {
+							const metadata = parquetMetadataFn(rawBuffer);
+							parquetReadFn({
+								file: rawBuffer,
+								metadata,
+								rowFormat: "object",
+								onComplete: (rows: any[]) => {
+									console.info("[Transcript] Parquet parsed, rows:", rows?.length);
+									// @ts-ignore
+									window._buckarooTranscript.push({
+										ts: Date.now(),
+										event: "infinite_resp_parsed",
+										key: msg.key || null,
+										rows_len: Array.isArray(rows) ? rows.length : 0,
+										total_len: msg.length ?? null,
+										rows: toJsonSafe(rows || []),
+									});
+								},
+							});
+						} catch (e) {
+							console.warn("[Transcript] Failed to parse parquet:", e);
+							// @ts-ignore
+							window._buckarooTranscript.push({
+								ts: Date.now(),
+								event: "infinite_resp_parse_error",
+								error: String(e),
+							});
+						}
+					}
+				}
+			}
+		} catch (e) {
+			console.warn("[Transcript] Error in customMsgHandler:", e);
+		}
+	};
+	
+	// Listen for model state changes (for non-infinite widgets)
+	const stateChangeHandler = (key: string) => (value: any) => {
+		try {
+			if (key === "df_data_dict") {
+				const allStats = (value && value['all_stats']) || [];
+				// @ts-ignore
+				window._buckarooTranscript.push({
+					ts: Date.now(),
+					event: "all_stats_update",
+					len: allStats.length,
+					sample: allStats[0] || null,
+					all_stats: toJsonSafe(allStats),
+				});
+			}
+		} catch {}
+	};
+	
+	// Register handlers
+	model.on("msg:custom", customMsgHandler);
+	model.on("change:df_data_dict", stateChangeHandler("df_data_dict"));
+	
+	console.info("[Transcript] Recording enabled for model");
+}
+
+// ============================================================================
 
 /**
  * @template {Record<string, any>} T
@@ -131,29 +257,6 @@ const renderBuckarooWidget = createRender(() => {
 	const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
 	const [df_display_args, _set_dda] = useModelState("df_display_args");
 	const [df_meta, _set_df_meta] = useModelState("df_meta");
-	// Diagnostics: log all_stats shape and pinned_rows config when they change
-	React.useEffect(() => {
-		try {
-			const allStats = (df_data_dict && df_data_dict['all_stats']) || [];
-			// eslint-disable-next-line no-console
-			console.info(
-				"[WidgetTSX][Model] df_data_dict all_stats len",
-				allStats.length,
-				"sample",
-				allStats[0] || null,
-			);
-		} catch {}
-	}, [df_data_dict]);
-	React.useEffect(() => {
-		try {
-			const pr = df_display_args?.main?.df_viewer_config?.pinned_rows || [];
-			// eslint-disable-next-line no-console
-			console.info(
-				"[WidgetTSX][Model] pinned_rows",
-				pr.map((x:any)=>x?.primary_key_val),
-			);
-		} catch {}
-	}, [df_display_args]);
 
 	const [operations, on_operations] = useModelState("operations");
 	const [operation_results, _set_opr] = useModelState("operation_results");
@@ -181,7 +284,6 @@ const renderBuckarooWidget = createRender(() => {
 
 const srcClosureRBI = (src) => {
     const renderBuckarooInfiniteWidget = createRender((a,b,c) => {
-	const model = useModel()
 	const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
 	const [df_display_args, _set_dda] = useModelState("df_display_args");
 	const [df_meta, _set_df_meta] = useModelState("df_meta");
@@ -191,10 +293,10 @@ const srcClosureRBI = (src) => {
 	const [command_config, _set_cc] = useModelState("command_config");
 	const [buckaroo_state, on_buckaroo_state] = useModelState("buckaroo_state");
 	const [buckaroo_options, _set_boptions] = useModelState("buckaroo_options");
+
 	return (
 	    <div className="buckaroo_anywidget">
 	    <srt.BuckarooInfiniteWidget
-	    
 	    df_data_dict={df_data_dict}
 	    df_display_args={df_display_args}
 	    df_meta={df_meta}
@@ -212,7 +314,6 @@ const srcClosureRBI = (src) => {
     });
 
     const renderDFViewerInfiniteWidget = createRender((a,b,c) => {
-	const model = useModel()
 	const [df_meta, _set_df_meta] = useModelState("df_meta");
 	  const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
       // df_data_dict ready
@@ -240,8 +341,39 @@ const srcClosureRBI = (src) => {
 
 export default async () => {
     let extraState = {};
+    
+    const setupTranscriptIfNeeded = (model: any) => {
+	// Check if already set up for this model
+	// @ts-ignore
+	if (model._transcriptSetupDone) return; // Only set up once per model
+	
+	const recordTranscript = model.get('record_transcript');
+	console.log('[Transcript] Checking record_transcript:', recordTranscript, typeof recordTranscript);
+	
+	// Handle both boolean (BuckarooWidget) and dict (LazyInfinitePolarsBuckarooWidget) formats
+	const shouldRecord = recordTranscript === true || 
+			     (recordTranscript && typeof recordTranscript === 'object' && recordTranscript.enabled === true);
+	console.log('[Transcript] shouldRecord:', shouldRecord);
+	
+	if (shouldRecord) {
+	    console.log('[Transcript] Setting up transcript recording...');
+	    setupTranscriptRecording(model);
+	    // @ts-ignore
+	    model._transcriptSetupDone = true;
+	}
+    };
+    
     return {
 	initialize({ model }) {
+	    // Set up transcript recording only if record_transcript is enabled
+	    // Check immediately
+	    setupTranscriptIfNeeded(model);
+	    
+	    // Also observe changes to record_transcript in case it's set after initialize
+	    model.on('change:record_transcript', () => {
+		setupTranscriptIfNeeded(model);
+	    });
+	    
 	    // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
 	    // so having it live between relaods is key
 	    //const [respError, setRespError] = useState<string | undefined>(undefined);
@@ -252,6 +384,9 @@ export default async () => {
 	    extraState['renderDFViewerInfinite'] = renderDFViewerInfinite;
 	},
 	render({ model, el, experimental }) {
+	    // Check again in render in case trait wasn't synced during initialize
+	    setupTranscriptIfNeeded(model);
+	    
 	    const render_func_name = model.get("render_func_name");
 	    if (render_func_name === "DFViewer") {
 		renderDFV({ el, model, experimental });

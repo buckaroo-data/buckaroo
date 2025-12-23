@@ -159,7 +159,7 @@ def PolarsDFViewer(df,
         extra_pinned_rows=extra_pinned_rows, pinned_rows=pinned_rows,
         extra_analysis_klasses=extra_analysis_klasses, analysis_klasses=analysis_klasses)
 
-    bw = BuckarooKls(df, column_config_overrides=column_config_overrides)
+    bw = BuckarooKls(df, column_config_overrides=column_config_overrides, record_transcript=False)
     dfv_config = bw.df_display_args['dfviewer_special']['df_viewer_config']
     df_data = bw.df_data_dict['main']
     summary_stats_data = bw.df_data_dict['all_stats']
@@ -175,9 +175,9 @@ class PolarsDFViewerInfinite(PolarsBuckarooInfiniteWidget):
         column_config_overrides=None,
         pinned_rows=None, extra_grid_config=None,
         component_config=None,
-        init_sd=None):
+        init_sd=None, record_transcript=False):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
-                         extra_grid_config, component_config, init_sd)
+                         extra_grid_config, component_config, init_sd, record_transcript=record_transcript)
         self.df_id = str(id(orig_df))
 
 

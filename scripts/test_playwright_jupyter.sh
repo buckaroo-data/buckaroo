@@ -1,10 +1,10 @@
 #!/bin/bash
-# Integration test script for Buckaroo widgets
+# Playwright tests against JupyterLab for Buckaroo widgets
 # Usage:
-#   bash scripts/test_polars_widget_integration.sh                    # Tests all widgets (creates test venv and builds buckaroo)
-#   bash scripts/test_polars_widget_integration.sh --use-local-venv   # Tests all widgets (uses existing .venv, skips build)
-#   bash scripts/test_polars_widget_integration.sh --notebook=test_polars_widget.ipynb  # Test specific notebook
-#   bash scripts/test_polars_widget_integration.sh --venv-location=/path/to/venv  # Uses specified venv location
+#   bash scripts/test_playwright_jupyter.sh                          # Tests all widgets (creates test venv and builds buckaroo)
+#   bash scripts/test_playwright_jupyter.sh --use-local-venv         # Tests all widgets (uses existing .venv, skips build)
+#   bash scripts/test_playwright_jupyter.sh --notebook=test_polars_widget.ipynb  # Test specific notebook
+#   bash scripts/test_playwright_jupyter.sh --venv-location=/path/to/venv  # Uses specified venv location
 set -e
 
 # Make sure we're in the buckaroo directory (scripts/ is one level down from root)
@@ -78,6 +78,7 @@ NOTEBOOKS=(
     "test_dfviewer_infinite.ipynb"
     "test_polars_dfviewer.ipynb"
     "test_polars_dfviewer_infinite.ipynb"
+    "test_infinite_scroll_transcript.ipynb"
 )
 
 # If specific notebook(s) provided, test only those (comma-separated)
@@ -292,6 +293,28 @@ stop_jupyter() {
     done || true
 }
 
+# Function to reset JupyterLab state between tests (without restarting)
+reset_jupyter_state() {
+    # Get all running kernels and shut them down individually
+    KERNELS=$(curl -s "http://localhost:8889/api/kernels?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
+    if [ "$KERNELS" != "[]" ] && [ -n "$KERNELS" ]; then
+        echo "$KERNELS" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"$//' | while read kernel_id; do
+            curl -s -X DELETE "http://localhost:8889/api/kernels/$kernel_id?token=$JUPYTER_TOKEN" 2>/dev/null || true
+        done
+    fi
+    
+    # Get all sessions and close them
+    SESSIONS=$(curl -s "http://localhost:8889/api/sessions?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
+    if [ "$SESSIONS" != "[]" ] && [ -n "$SESSIONS" ]; then
+        echo "$SESSIONS" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"$//' | while read session_id; do
+            curl -s -X DELETE "http://localhost:8889/api/sessions/$session_id?token=$JUPYTER_TOKEN" 2>/dev/null || true
+        done
+    fi
+    
+    # Brief pause to let JupyterLab settle
+    sleep 0.5
+}
+
 # Install npm dependencies for Playwright
 log_message "Installing npm dependencies for Playwright..."
 cd packages/buckaroo-js-core
@@ -326,31 +349,47 @@ success "npm dependencies and Playwright browsers ready"
 OVERALL_RESULT=0
 FAILED_NOTEBOOKS=()
 TOTAL_NOTEBOOKS=${#NOTEBOOKS[@]}
-CURRENT_TEST=0
 
+# Start JupyterLab once for all tests
+cd "$ROOT_DIR"
+start_jupyter
+
+# Test each notebook individually (more reliable for CI)
 for notebook in "${NOTEBOOKS[@]}"; do
     CURRENT_TEST=$((CURRENT_TEST + 1))
     log_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     log_message "Testing: $notebook [$CURRENT_TEST/$TOTAL_NOTEBOOKS]"
     log_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    # Start fresh JupyterLab for each notebook
     cd "$ROOT_DIR"
-    start_jupyter
+    
+    # Reset JupyterLab state between tests (shutdown kernels, close sessions)
+    if [ $CURRENT_TEST -gt 1 ]; then
+        reset_jupyter_state
+    fi
     
     # Copy notebook to root directory (where JupyterLab serves from)
     if ! test_notebook "$notebook"; then
         error "Failed to prepare notebook: $notebook"
         OVERALL_RESULT=1
         FAILED_NOTEBOOKS+=("$notebook (preparation failed)")
-        stop_jupyter
         continue
     fi
     
     # Run Playwright test (from packages/buckaroo-js-core)
     cd packages/buckaroo-js-core
     log_message "Running Playwright test for $notebook..."
-    if npx playwright test --config playwright.config.integration.ts --reporter=line --timeout=30000; then
+    
+    # Use special test file for transcript testing, otherwise use integration.spec.ts only
+    if [[ "$notebook" == "test_infinite_scroll_transcript.ipynb" ]]; then
+        PW_TEST_FILE="pw-tests/infinite-scroll-transcript.spec.ts"
+        PW_TIMEOUT=45000
+    else
+        PW_TEST_FILE="pw-tests/integration.spec.ts"
+        PW_TIMEOUT=30000
+    fi
+    
+    if npx playwright test "$PW_TEST_FILE" --config playwright.config.integration.ts --reporter=line --timeout=$PW_TIMEOUT; then
         success "✅ Playwright test passed for $notebook!"
     else
         error "❌ Playwright test failed for $notebook!"
@@ -361,20 +400,20 @@ for notebook in "${NOTEBOOKS[@]}"; do
     # Clean up notebook file (from root directory)
     cd "$ROOT_DIR"
     rm -f "$notebook"
-    
-    # Stop JupyterLab to ensure clean state for next test
-    stop_jupyter
 done
 
-cd ../..
+# Stop JupyterLab after all tests
+stop_jupyter
+
+cd "$ROOT_DIR"
 
 # Final summary
 log_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 if [ $OVERALL_RESULT -eq 0 ]; then
-    success "🎉 ALL INTEGRATION TESTS PASSED!"
+    success "🎉 ALL JUPYTER PLAYWRIGHT TESTS PASSED!"
     log_message "All widgets work correctly in JupyterLab"
 else
-    error "💥 SOME INTEGRATION TESTS FAILED"
+    error "💥 SOME JUPYTER TESTS FAILED"
     log_message "Failed notebooks:"
     for failed in "${FAILED_NOTEBOOKS[@]}"; do
         error "  - $failed"

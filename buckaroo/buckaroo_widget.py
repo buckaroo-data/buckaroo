@@ -15,7 +15,7 @@ import logging
 import random
 import string
 
-from traitlets import List, Dict, observe, Unicode, Any
+from traitlets import List, Dict, observe, Unicode, Any, Bool
 import anywidget
 
 from .customizations.analysis import (TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
@@ -81,6 +81,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     Also adds buckaroo_state object and communication to simpler CustomizableDataFlow implementations
     
     """
+    record_transcript = Bool(False).tag(sync=True)
 
 
     def get_story_config(self, include_summary_stats=False, test_name=None) -> str:
@@ -107,7 +108,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None, skip_main_serial=False):
+        init_sd=None, skip_main_serial=False, record_transcript=False):
         """
         BuckarooWidget was originally designed to extend CustomizableDataFlow
 
@@ -120,6 +121,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
 
         """
         super().__init__()
+        self.record_transcript = record_transcript
         self.exception = None
         kls = self.__class__
         class InnerDataFlow(CustomizableDataflow):
@@ -359,10 +361,10 @@ class BuckarooInfiniteWidget(BuckarooWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None):
+        init_sd=None, record_transcript=False):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
                          extra_grid_config, component_config, init_sd,
-                         skip_main_serial=True)
+                         skip_main_serial=True, record_transcript=record_transcript)
 
         def widget_tuple_args_bridge(change_unused):
             self._handle_widget_change(change_unused)

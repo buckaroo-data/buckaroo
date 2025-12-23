@@ -1,22 +1,27 @@
 #!/bin/bash
 set -e
-rm -rf packages/node_modules buckaroo/widget.js || true
-rm -rf  packages/buckaroo-js-core/dist packages/buckaroo-js-core/node_modules || true
-cd packages/buckaroo-js-core
-pnpm install
-pnpm run build:tsc
-pnpm run build:vite 
-cd ../..
-mkdir buckaroo/static || true
-cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
-rm -rf packages/buckaroo-js-core/node_modules || true
+
+# Clean previous builds
+rm -rf packages/buckaroo-js-core/dist || true
+rm -rf buckaroo/static/*.js buckaroo/static/*.css || true
+
+# Install all workspace dependencies (once)
 cd packages
-pnpm install && pnpm run build
+pnpm install
+
+# Build buckaroo-js-core first (tsc + vite)
+pnpm --filter buckaroo-js-core run build
+
+# Copy CSS to Python package
+cd ..
+mkdir -p buckaroo/static
+cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
+
+# Build anywidget wrapper (esbuild)
+cd packages
+pnpm --filter buckaroo-widget run build
+
+# Build Python wheel
 cd ..
 rm -rf dist || true
 uv build --wheel
-#time hatch build
-#python -m twine upload --repository pypi dist/*.whl
-#time ./scripts/full_build.sh && time
-#uv pip install --reinstall buckaroo@dist/buckaroo-0.10.5-py3-none-any.whl
-#./scripts/full_build.sh && uv pip install  buckaroo@dist/buckaroo-0.10.5-py3-none-any.whl && time python scripts/warm_imports.py 

@@ -1,29 +1,13 @@
 {
+	"name": "buckaroo-packages",
+	"private": true,
+	"packageManager": "pnpm@9.10.0",
 	"scripts": {
-		"dev": "npm run build -- --sourcemap=inline --watch",
-	    "build:old": "pwd && ls packages/buckaroo-js-core && ls packages/buckaroo-js-core/node_modules/ && esbuild js/widget.tsx --format=esm --bundle --outdir=buckaroo/static/",
-		"build": "pwd && ls buckaroo-js-core && esbuild js/widget.tsx --format=esm --bundle --outdir=../buckaroo/static/",
-		"typecheck": "tsc --noEmit"
-	},
-	"dependencies": {
-		"@ag-grid-community/client-side-row-model": "^32.3.2",
-		"@ag-grid-community/core": "^32.3.2",
-		"@ag-grid-community/infinite-row-model": "^32.3.2",
-		"@ag-grid-community/react": "^32.3.2",
-		"@ag-grid-community/styles": "^32.3.2",
-		"@anywidget/react": "^0.0.8",
-		"buckaroo-js-core": "./buckaroo-js-core",
-		"lodash": "^4.17.21",
-		"react": "^18.3.1",
-		"react-dom": "^18.3.1",
-		"recharts": "^2.13.1"
+		"build:core": "pnpm --filter buckaroo-js-core run build",
+		"build:widget": "pnpm --filter buckaroo-widget run build",
+		"build": "pnpm build:core && pnpm build:widget"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "1.9.4",
-		"@types/react": "^18.3.12",
-		"@types/react-dom": "^18.3.1",
-		"esbuild": "^0.24.0",
-		"typescript": "^5.7.2"
-	},
-	"packageManager": "pnpm@9.10.0"
+		"@biomejs/biome": "1.9.4"
+	}
 }

@@ -1,0 +1,37 @@
+Work independently.  Run the tests yourself.
+
+
+When you make changes, always verify the existing tests already pass.
+
+When you add tests, prefer to slot them into an existing file vs creating a new test file.
+
+Liberally create tests that help you understand the exisitng code, put these in separate files, put them in files named something like "test_cursor_understand__foo.py"
+
+prefer surgical changes, and gneeralizable changes, don't spcial case code to pass tests.
+
+for python:
+Dont add bare except statements.  I generally want exceptions to bubble up.
+Don't put imports in functions unless absolutely necessary.
+
+
+
+
+
+run tests with
+`cd ~/buckaroo && . .venv/bin/activate && time pytest -vv tests/unit/`
+
+run ruff with
+`cd ~/buckaroo/; . .venv/bin/activate; uv run ruff check --fix`
+
+finally after iterating on those two, verify that full_build works
+./scripts/full_build.sh
+
+have a timeout of 40 seconds for the whole test suite
+
+
+tell me you have read cursorrules and the md5sum of this file
+
+always tell me the name of the LLM model that returned an answer
+
+
+
