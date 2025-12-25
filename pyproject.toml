@@ -263,7 +263,8 @@ dev = [
 
     "playwright",
     "pydantic>=2.5.2",
-    "pyarrow",
+    "pyarrow ; python_version <= '3.13'",
+    "pyarrow >= 22.0.0; python_version >= '3.14'",
     "polars[timezone]",
     "hypothesis>=6.88.1",
     "nbval>=0.9",
