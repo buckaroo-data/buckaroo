@@ -34,10 +34,11 @@ classifiers = [
 dependencies = [
     "anywidget >= 0.9.0",
     "graphlib_backport>=1.0.0",
-    "fastparquet",
+    "fastparquet>=2025.12.0",
     "cloudpickle>=3.1.1",
     "pyarrow>=18.0.0 ; python_version < '3.13'",
     "pyarrow ; python_version >= '3.13'",
+    "numpy >= 2.2.5; python_version >= '3.13'",
 ]
 
 version = "0.12.4"
