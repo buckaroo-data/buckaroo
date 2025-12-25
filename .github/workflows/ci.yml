@@ -51,7 +51,7 @@ jobs:
           - "3.11"
           - "3.12"
           - "3.13"
-          #- "3.14"
+          - "3.14"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -72,18 +72,7 @@ jobs:
           touch buckaroo/static/widget.css
 
       - name: Install the project
-        run: uv sync --locked --all-extras --dev
-
-      # - name: UV SYNC tests
-      #   run: |
-      #     mkdir buckaroo/static || true
-      #     touch buckaroo/static/compiled.css
-      #     touch buckaroo/static/widget.js
-      #     touch buckaroo/static/widget.css
-      #     uv sync --locked --all-extras
-      #   env:
-      #     UV_PYTHON: ${{ matrix.python-version }}
-
+        run: uv sync  --all-extras --dev
       - name: Run tests
         run: |
           uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
