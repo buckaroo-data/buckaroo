@@ -56,10 +56,12 @@ jobs:
         os: [depot-ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Buckaroo-js-core pnpm  
+        uses: pnpm/action-setup@v4
         with:
           run_install: true
-          package_json_file: packages/buckaroo-js-core/package.json          
+          package_json_file: packages/buckaroo-js-core/package.json
+          cache: true
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
