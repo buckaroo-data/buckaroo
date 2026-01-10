@@ -60,6 +60,16 @@ jobs:
         with:
           run_install: true
           cache: true
+          package_json_file: packages/buckaroo-js-core/package.json
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: true
+          cache: true
+          package_json_file: packages/js/package.json
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: true
+          cache: true
           package_json_file: packages/package.json
       - name: Install uv
         uses: astral-sh/setup-uv@v7
