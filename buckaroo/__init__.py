@@ -118,7 +118,7 @@ try:
             warn_on_incompatible()
     try:
         import polars
-        if platform.system() not "Windows":
+        if not platform.system() == "Windows":
             from buckaroo.read_utils import read, read_df
     except ImportError:
         #if polars is installed, make read available as a base import
