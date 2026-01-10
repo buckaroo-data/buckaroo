@@ -11,12 +11,19 @@ multiprocessing  an behave differently when a function is defined in an imported
   """
 
 
-LOCAL_TIMEOUT = 1
-CI_TIMEOUT = 5
+LOCAL_TIMEOUT = 0.8
+CI_TIMEOUT = 1.0
 
+# Speed up factor for test sleeps - makes tests run much faster
+# Speeds up actual sleep calls while ensuring timeout tests still timeout correctly
+SPEEDUP_FACTOR = 30
+
+def fast_sleep(seconds):
+    """Sleep function that respects speedup factor for faster tests."""
+    actual_sleep = max(seconds / SPEEDUP_FACTOR, 0.001)
+    time.sleep(actual_sleep)
 
 IS_RUNNING_LOCAL = "Paddy" in socket.gethostname()
-#print(socket.gethostname())
 TIMEOUT = LOCAL_TIMEOUT if IS_RUNNING_LOCAL else CI_TIMEOUT
 
 
@@ -24,8 +31,8 @@ TIMEOUT = LOCAL_TIMEOUT if IS_RUNNING_LOCAL else CI_TIMEOUT
 @mp_timeout(TIMEOUT)
 def mp_polars_longread(i=0):
     # Simulate a long-running polars operation that will timeout
-    # Sleep for longer than TIMEOUT to ensure it times out
-    time.sleep(TIMEOUT * 1.5)
+    # Sleep for long enough that even with speedup, it exceeds the timeout
+    fast_sleep(TIMEOUT * SPEEDUP_FACTOR * 1.5)
     return 5
 
 
@@ -36,7 +43,10 @@ def mp_simple():
 
 @mp_timeout(TIMEOUT)
 def mp_sleep1():
-    time.sleep(TIMEOUT*3)
+    # Sleep for long enough that even with speedup, it exceeds the timeout
+    # With TIMEOUT=1.0 and SPEEDUP=30, need at least 1.0*30 = 30 seconds worth
+    # to get 1.0 second actual sleep, but we want more to ensure timeout
+    fast_sleep(TIMEOUT * SPEEDUP_FACTOR * 1.5)
     return 5
 
 
