@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import inspect
+import platform
 from ._version import __version__
 from .buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, AutocleaningBuckaroo
 from .dataflow.widget_extension_utils import DFViewer
@@ -117,7 +118,8 @@ try:
             warn_on_incompatible()
     try:
         import polars
-        from buckaroo.read_utils import read, read_df
+        if platform.system() not "Windows":
+            from buckaroo.read_utils import read, read_df
     except ImportError:
         #if polars is installed, make read available as a base import
         pass
