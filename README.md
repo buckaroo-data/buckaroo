@@ -4,6 +4,9 @@ Buckaroo is a modern data table for Jupyter that expedites the most common explo
 
 <img width="947" alt="Screenshot 2025-05-12 at 3 54 33 PM" src="https://github.com/user-attachments/assets/9238c893-8dd4-47e4-8215-b5450c8c7b3a" />
 
+# Note buckaroo has moved to
+https://github.com/buckaroo-data/buckaroo
+
 ## Try it now with Marimo in your browser
 Play with Buckaroo without any installation.
 [Full Tour](https://marimo.io/p/@paddy-mullen/buckaroo-full-tour)
