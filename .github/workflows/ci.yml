@@ -18,7 +18,7 @@ concurrency:
 jobs:
   LintPython:
     name: Python / Lint
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -41,7 +41,7 @@ jobs:
 
   TestPython:
     name: Python / Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         python-version:
@@ -51,7 +51,9 @@ jobs:
           - "3.11"
           - "3.12"
           - "3.13"
-          #- "3.14"
+          #- "3.14
+        #os: [depot-ubuntu-latest#, depot-windows-2025]
+        os: [depot-ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -62,17 +64,60 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      - name: Run tests
+          python-version: ${{ matrix.python-version }}
+
+      - name: setup js files
         run: |
           mkdir buckaroo/static || true
           touch buckaroo/static/compiled.css
           touch buckaroo/static/widget.js
           touch buckaroo/static/widget.css
-          uv sync --locked --all-extras
+
+      - name: Install the project
+        run: uv sync  --all-extras --dev
+      - name: Run tests
+        run: |
           uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
-        env:
-          UV_PYTHON: ${{ matrix.python-version }}
+        # env:
+        #   UV_PYTHON: ${{ matrix.python-version }}
       - uses: codecov/codecov-action@v5
+
+  TestPythonMaxVersions:
+    name: Python / Test (Max Versions)
+    runs-on: depot-ubuntu-latest
+    strategy:
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: packages/package.json
+          run_install: false
+      - name: Install pnpm workspace dependencies
+        working-directory: packages
+        run: pnpm install
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: setup js files
+        run: |
+          mkdir buckaroo/static || true
+          touch buckaroo/static/compiled.css
+          touch buckaroo/static/widget.js
+          touch buckaroo/static/widget.css
+
+      - name: Install the project with maximum versions
+        run: uv sync --resolution=highest --all-extras --dev
+      - name: Run tests
+        run: |
+          uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
 
   # buckaroo isn't currently setup for mypy
 
