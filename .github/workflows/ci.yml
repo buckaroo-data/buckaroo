@@ -56,35 +56,15 @@ jobs:
         os: [depot-ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
-      - name: setup pnpm dependencies buckaroo-js-core
-        uses: pnpm/action-setup@v4
-        with:
-          cache: true
-          package_json_file: packages/buckaroo-js-core/package.json
-          run_install: |
-            - recursive: false
-      - name: setup pnpm dependencies packages/js
-        uses: pnpm/action-setup@v4
-        with:
-          cache: true
-          package_json_file: packages/js/package.json
-      - name: Install dependencies
-        run: pnpm install
       - uses: pnpm/action-setup@v4
         with:
-          cache: true
-          package_json_file: packages/package.json
-      - name: Install dependencies
-        run: pnpm install
-
+          run_install: true
+          package_json_file: packages/buckaroo-js-core/package.json          
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
-      - name: "Check cache status" 
-        if: steps.setup-uv.outputs.cache-hit == 'true'
-        run: echo "Cache was restored"
 
       - name: setup js files
         run: |
