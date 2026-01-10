@@ -41,7 +41,7 @@ jobs:
 
   TestPython:
     name: Python / Test
-    runs-on: depot-ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         python-version:
@@ -51,7 +51,8 @@ jobs:
           - "3.11"
           - "3.12"
           - "3.13"
-          #- "3.14"
+          #- "3.14
+        os: [depot-ubuntu-latest, depot-windows-2025]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
