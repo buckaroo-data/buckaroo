@@ -52,7 +52,8 @@ jobs:
           - "3.12"
           - "3.13"
           #- "3.14
-        os: [depot-ubuntu-latest, depot-windows-2025]
+        #os: [depot-ubuntu-latest#, depot-windows-2025]
+        os: [depot-ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
