@@ -141,11 +141,8 @@ def _execute_and_report_fork(func, args, kwargs, queue) -> None:
             queue.put(("error", None))
         except Exception:
             pass
-try:
-    ctx = multiprocessing.get_context("forkserver")
-except:
-    print("error with forkserver")
-    ctx = multiprocessing.get_context("spawn")
+
+ctx = multiprocessing.get_context("forkserver")
 #ctx = multiprocessing.get_context("fork")
 #ctx = multiprocessing.get_context("spawn")
 def mp_timeout(timeout_secs: float):

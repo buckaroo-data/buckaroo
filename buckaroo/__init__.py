@@ -120,6 +120,10 @@ try:
         import polars
         if not platform.system() == "Windows":
             from buckaroo.read_utils import read, read_df
+        else:
+            #FIXME post some error message here explianing that these features aren't available on windows
+            pass
+
     except ImportError:
         #if polars is installed, make read available as a base import
         pass
