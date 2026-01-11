@@ -79,14 +79,13 @@ jobs:
           key: uv-python-${{ runner.os }}-v1
           restore-keys: |
             uv-python-${{ runner.os }}-
-      - name: Install uv
+      - name: Install uv and setup Python
         run: |
           if [ ! -f "$HOME/.local/bin/uv" ]; then
             curl -LsSf https://astral.sh/uv/0.9.24/install.sh | sh
           fi
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-      - name: Setup Python
-        run: uv python install ${{ matrix.python-version }}
+          uv python install ${{ matrix.python-version }} --no-progress
 
       - name: setup js files
         run: |
@@ -134,14 +133,13 @@ jobs:
           key: uv-python-${{ runner.os }}-v1
           restore-keys: |
             uv-python-${{ runner.os }}-
-      - name: Install uv
+      - name: Install uv and setup Python
         run: |
           if [ ! -f "$HOME/.local/bin/uv" ]; then
             curl -LsSf https://astral.sh/uv/0.9.24/install.sh | sh
           fi
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-      - name: Setup Python
-        run: uv python install ${{ matrix.python-version }}
+          uv python install ${{ matrix.python-version }} --no-progress
 
       - name: setup js files
         run: |
