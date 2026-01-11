@@ -72,11 +72,13 @@ jobs:
         with:
           path: ~/.local/bin/uv
           key: uv-0.9.24-${{ runner.os }}
-      - name: Cache Python installation
+      - name: Cache Python installations
         uses: actions/cache@v4
         with:
           path: ~/.local/share/uv/python
-          key: uv-python-${{ matrix.python-version }}-${{ runner.os }}
+          key: uv-python-${{ runner.os }}-v1
+          restore-keys: |
+            uv-python-${{ runner.os }}-
       - name: Install uv
         run: |
           if [ ! -f "$HOME/.local/bin/uv" ]; then
@@ -125,11 +127,13 @@ jobs:
         with:
           path: ~/.local/bin/uv
           key: uv-0.9.24-${{ runner.os }}
-      - name: Cache Python installation
+      - name: Cache Python installations
         uses: actions/cache@v4
         with:
           path: ~/.local/share/uv/python
-          key: uv-python-${{ matrix.python-version }}-${{ runner.os }}
+          key: uv-python-${{ runner.os }}-v1
+          restore-keys: |
+            uv-python-${{ runner.os }}-
       - name: Install uv
         run: |
           if [ ! -f "$HOME/.local/bin/uv" ]; then
