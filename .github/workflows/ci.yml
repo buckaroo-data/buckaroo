@@ -25,6 +25,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          version: "0.9.24"
       - name: Install the project
         run: uv sync --locked --all-extras --dev
       - name: Run ruff
@@ -64,6 +65,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          version: "0.9.24"
           python-version: ${{ matrix.python-version }}
 
       - name: setup js files
@@ -104,6 +106,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          version: "0.9.24"
           python-version: ${{ matrix.python-version }}
 
       - name: setup js files
