@@ -21,7 +21,7 @@ jobs:
     runs-on: depot-ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Cache uv
+      - name: Cache uv binary
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/uv
@@ -31,8 +31,7 @@ jobs:
           if [ ! -f "$HOME/.local/bin/uv" ]; then
             curl -LsSf https://astral.sh/uv/0.9.24/install.sh | sh
           fi
-      - name: Add uv to PATH
-        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Install the project
         run: uv sync --locked --all-extras --dev
       - name: Run ruff
@@ -68,18 +67,22 @@ jobs:
         with:
           run_install: true
           package_json_file: packages/package.json
-      - name: Cache uv
+      - name: Cache uv binary
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/uv
           key: uv-0.9.24-${{ runner.os }}
+      - name: Cache Python installation
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/uv/python
+          key: uv-python-${{ matrix.python-version }}-${{ runner.os }}
       - name: Install uv
         run: |
           if [ ! -f "$HOME/.local/bin/uv" ]; then
             curl -LsSf https://astral.sh/uv/0.9.24/install.sh | sh
           fi
-      - name: Add uv to PATH
-        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Setup Python
         run: uv python install ${{ matrix.python-version }}
 
@@ -117,18 +120,22 @@ jobs:
       - name: Install pnpm workspace dependencies
         working-directory: packages
         run: pnpm install
-      - name: Cache uv
+      - name: Cache uv binary
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/uv
           key: uv-0.9.24-${{ runner.os }}
+      - name: Cache Python installation
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/uv/python
+          key: uv-python-${{ matrix.python-version }}-${{ runner.os }}
       - name: Install uv
         run: |
           if [ ! -f "$HOME/.local/bin/uv" ]; then
             curl -LsSf https://astral.sh/uv/0.9.24/install.sh | sh
           fi
-      - name: Add uv to PATH
-        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Setup Python
         run: uv python install ${{ matrix.python-version }}
 
