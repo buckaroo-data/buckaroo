@@ -56,10 +56,18 @@ jobs:
         os: [depot-ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          run_install: true
-          package_json_file: packages/package.json          
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -93,13 +101,18 @@ jobs:
           - "3.13"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          package_json_file: packages/package.json
-          run_install: false
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm workspace dependencies
         working-directory: packages
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
