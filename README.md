@@ -76,8 +76,7 @@ The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery)
 
 The following examples are loaded into a jupyter lite environment with Buckaroo installed.
 - [Full Tour Marimo Pyodide](https://marimo.io/p/@paddy-mullen/buckaroo-full-tour)   Start here. This gives a broad overview of Buckaroo's features. [Jupyterlite (old)](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Full-tour.ipynb) [Google Colab](https://colab.research.google.com/github/paddymul/buckaroo/blob/main/docs/example-notebooks/Full-tour-colab.ipynb)
-[Notebook on Github](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Full-tour.ipynb)
-
+- [Notebook on Github](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Full-tour.ipynb)
 
 - [Live Styling Gallery](https://marimo.io/p/@paddy-mullen/buckaroo-styling-gallery)  [ipynb](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-gallery.ipynb) Examples of all of the different formatters and styling available for the table
 - [Live Autocleaning](https://marimo.io/p/@paddy-mullen/buckaroo-auto-cleaning) Marimo notebook explaining how autocleaning works and showing how to implement your own cleaning commands and heuristic strategies.
@@ -88,6 +87,12 @@ The following examples are loaded into a jupyter lite environment with Buckaroo 
 - [Pluggable Analysis Framework](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Pluggable-Analysis-Framework.ipynb) How to add new summary stats to Buckaroo
 - [Solara Buckaroo](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Solara-Buckaroo.ipynb) Using Buckaroo with Solara
 - [GeoPandas with Bucakroo](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/GeoPandas.ipynb)
+
+
+## Example apps built on buckaroo
+More full featured integrations that can be built on a table UI
+- [Buckaroo Compare](https://marimo.io/p/@paddy-mullen/buckaroo-compare-preview) Join two dataframes and highlight visual differences between them
+- [Buckaroo Pandera](https://marimo.io/p/@paddy-mullen/buckaroo-pandera) Example showing validating a dataframe with Pandera, then visually highlighting where it fails the schema.
 
 # Features
 
