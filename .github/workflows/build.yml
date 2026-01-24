@@ -12,12 +12,9 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-    # runs-on: depot-ubuntu-24.04
     strategy:
       fail-fast: false
        matrix:
-        #os: [ubuntu-latest, windows-latest, macos-latest]
-        #os: [ubuntu-latest]
         os: [depot-ubuntu-latest, depot-windows-2025]
         python-version: ["3.11"]
     steps:
