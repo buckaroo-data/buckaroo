@@ -20,13 +20,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          prune-cache: false
       - name: Install the project
         run: uv sync --locked --all-extras --dev
+      - uses: actions/setup-node@v4
       - uses: pnpm/action-setup@v4
         with:
           node-version: "20.x"
@@ -85,64 +86,3 @@ jobs:
           path: |
             ./dist
             ./js/*.tgz
-
-      - name: Run Storybook Playwright Tests
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        run: |
-          bash scripts/test_playwright_storybook.sh
-
-      - name: Run JupyterLab Playwright Tests
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        run: |
-          # Ensure uv environment is set up
-          uv sync --all-extras --group dev
-          
-          # Install the built buckaroo wheel
-          uv pip install --force-reinstall dist/*.whl
-          
-          # Install test dependencies (polars, jupyterlab)
-          uv pip install polars jupyterlab
-          
-          # Detect venv location (uv sync creates .venv by default, but check if it exists)
-          if [ -d ".venv" ]; then
-            VENV_LOCATION=".venv"
-          else
-            # Fallback: try to detect from uv's Python environment
-            VENV_LOCATION=$(uv run python -c "import sys; print(sys.prefix)" 2>/dev/null || echo ".venv")
-          fi
-          
-          # Run the integration test script with venv location
-          bash scripts/test_playwright_jupyter.sh --venv-location="$VENV_LOCATION"
-        env:
-          UV_PYTHON: ${{ matrix.python-version }}
-
-
-# ui-test:
-#   needs: [build]
-#   runs-on: ubuntu-latest
-#   steps:
-#     - uses: actions/checkout@v4
-#     - uses: actions/download-artifact@v4
-#       with:
-#         name: buckaroo-dist-${{ github.run_number }}
-
-#     - name: Install Python
-#       uses: actions/setup-python@v4
-#       with:
-#         python-version: 3.9
-
-#     - name: Setup buckaroo ui test
-#       run: pip install `echo dist/*.whl`[ui-test] -r requirements-ui-test.txt
-
-#     - name: Install playwright browsers
-#       run: playwright install chromium
-
-#     - name: Run ui-tests
-#       run: SOLARA_TEST_RUNNERS=jupyter_lab pytest tests/ui/ --video=retain-on-failure
-
-#     - name: Upload Test artifacts
-#       if: always()
-#       uses: actions/upload-artifact@v4
-#       with:
-#         name: buckaroo-test-results-${{ github.run_number }}
-#         path: test-results

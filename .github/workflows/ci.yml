@@ -30,15 +30,6 @@ jobs:
       - name: Run ruff
         run: uv run ruff check
 
-  # LintPythonMac: # just see if this builds and works on macos,  currently broken
-  #   name: Python / Lint
-  #   runs-on: macos-15
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: astral-sh/setup-uv@v6
-  #     - run: |
-  #         uv run ruff check
-
   TestPython:
     name: Python / Test
     runs-on: ${{ matrix.os }}
@@ -86,9 +77,35 @@ jobs:
       - name: Run tests
         run: |
           uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
-        # env:
-        #   UV_PYTHON: ${{ matrix.python-version }}
       - uses: codecov/codecov-action@v5
+      - name: Run Storybook Playwright Tests
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          bash scripts/test_playwright_storybook.sh
+
+      - name: Run JupyterLab Playwright Tests
+        run: |
+          # Ensure uv environment is set up
+          uv sync --all-extras --group dev
+          
+          # Install the built buckaroo wheel
+          uv pip install --force-reinstall dist/*.whl
+          
+          # Install test dependencies (polars, jupyterlab)
+          uv pip install polars jupyterlab
+          
+          # Detect venv location (uv sync creates .venv by default, but check if it exists)
+          if [ -d ".venv" ]; then
+            VENV_LOCATION=".venv"
+          else
+            # Fallback: try to detect from uv's Python environment
+            VENV_LOCATION=$(uv run python -c "import sys; print(sys.prefix)" 2>/dev/null || echo ".venv")
+          fi
+          
+          # Run the integration test script with venv location
+          bash scripts/test_playwright_jupyter.sh --venv-location="$VENV_LOCATION"
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
 
   TestPythonMaxVersions:
     name: Python / Test (Max Versions)
@@ -133,78 +150,3 @@ jobs:
         run: |
           uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
 
-  # buckaroo isn't currently setup for mypy
-
-  # TypecheckPython:
-  #   name: Python / Typecheck
-  #   runs-on: macos-14
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     # Disable jupyter-builder build hook because not needed for typechecking, and requires pnpm
-  #     - run: |
-  #         sed -i '' 's/\[tool.hatch.build.hooks.\(.*\)\]/\[_tool.hatch.build.hooks.\1\]/' pyproject.toml
-  #     - uses: astral-sh/setup-uv@v4
-  #       with:
-  #         version: "0.5.x"
-  #     - run: uv run mypy
-
-
-  # TODO:FIXME commenting out the playwright tests for now because I can't get them to run and they are noisy
-  
-  # UITestPython:
-  #   #needs: [TestPython]
-  #   name: Playwright UI Test
-  #   runs-on: ubuntu-latest
-  #   strategy:
-  #     matrix:
-  #       python-version:
-  #         # - "3.8" #other conflicts
-  #         - "3.9"
-  #         #- "3.10"
-  #         #- "3.11"
-  #         #- "3.12"
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: pnpm/action-setup@v4
-  #       with:
-  #         run_install: true
-  #     - uses: astral-sh/setup-uv@v4
-  #       with:
-  #         version: "0.5.x"
-  #     - name: Run tests
-  #       run: |
-  #         uv run playwright install chromium
-  #         SOLARA_TEST_RUNNERS=jupyter_lab uv run  pytest tests/ui/ --video=retain-on-failure
-  #       #run: uv run --with pytest-cov pytest ./tests/ui --color=yes --cov anywidget --cov-report xml
-  #       env:
-  #         UV_PYTHON: ${{ matrix.python-version }}
-
-  # LintJavaScript:
-  #   name: JavaScript / Lint
-  #   runs-on: macos-14
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: biomejs/setup-biome@v2
-  #       with:
-  #         version: latest
-  #     - run: biome ci .
-
-  # TypecheckJavaScript:
-  #   name: JavaScript / Typecheck
-  #   runs-on: macos-14
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: pnpm/action-setup@v4
-  #       with:
-  #         run_install: true
-  #     - run: pnpm typecheck
-
-  # TestJavaScript:
-  #   name: JavaScript / Test
-  #   runs-on: macos-14
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: pnpm/action-setup@v4
-  #       with:
-  #         run_install: true
-  #     - run: pnpm test
