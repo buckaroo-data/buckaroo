@@ -62,6 +62,7 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
           prune-cache: false
+          cache-python: true
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -106,6 +107,7 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
+          cache-python: true
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
