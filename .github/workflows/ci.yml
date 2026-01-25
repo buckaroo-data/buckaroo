@@ -61,6 +61,7 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
+          prune-cache: false
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -100,6 +101,11 @@ jobs:
           - "3.13"
     steps:
       - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -112,11 +118,6 @@ jobs:
       - name: Install pnpm workspace dependencies
         working-directory: packages
         run: pnpm install --frozen-lockfile
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          python-version: ${{ matrix.python-version }}
 
       - name: setup js files
         run: |
