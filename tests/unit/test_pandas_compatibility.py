@@ -6,7 +6,7 @@ particularly catching regressions like the pandas 3.0 to_json(orient='table') is
 """
 import pandas as pd
 import pytest
-from packaging import version
+# from packaging import version
 
 
 # def test_pandas_version_is_3_or_higher():
