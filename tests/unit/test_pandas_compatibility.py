@@ -9,15 +9,15 @@ import pytest
 from packaging import version
 
 
-def test_pandas_version_is_3_or_higher():
-    """
-    Debug test to verify pandas 3.0+ is installed in TestPythonMaxVersions CI job.
-    This test passes if pandas >= 3.0, fails otherwise.
-    """
-    pandas_version = version.parse(pd.__version__)
-    print(f"Pandas version: {pd.__version__}")
-    assert pandas_version >= version.parse("3.0.0"), \
-        f"Expected pandas >= 3.0.0, got {pd.__version__}"
+# def test_pandas_version_is_3_or_higher():
+#     """
+#     Debug test to verify pandas 3.0+ is installed in TestPythonMaxVersions CI job.
+#     This test passes if pandas >= 3.0, fails otherwise.
+#     """
+#     pandas_version = version.parse(pd.__version__)
+#     print(f"Pandas version: {pd.__version__}")
+#     assert pandas_version >= version.parse("3.0.0"), \
+#         f"Expected pandas >= 3.0.0, got {pd.__version__}"
 
 
 def test_widget_serialization_pandas_compatibility():
