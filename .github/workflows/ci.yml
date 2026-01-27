@@ -155,7 +155,13 @@ jobs:
           touch buckaroo/static/widget.css
 
       - name: Install the project with maximum versions
-        run: uv sync --resolution=highest --upgrade --all-extras --dev
+        run: |
+          # Remove lock file to force fresh resolution
+          rm -f uv.lock
+          uv sync --resolution=highest --all-extras --dev
+          # Force upgrade pandas to 3.0 to test compatibility
+          uv pip install "pandas>=3.0"
+          uv pip list | grep -i pandas
       - name: Run tests
         run: |
           uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
