@@ -155,7 +155,7 @@ jobs:
           touch buckaroo/static/widget.css
 
       - name: Install the project with maximum versions
-        run: uv sync --resolution=highest --all-extras --dev
+        run: uv sync --resolution=highest --upgrade --all-extras --dev
       - name: Run tests
         run: |
           uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
