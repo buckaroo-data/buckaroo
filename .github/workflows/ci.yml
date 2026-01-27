@@ -164,5 +164,6 @@ jobs:
           uv pip list | grep -i pandas
       - name: Run tests
         run: |
-          uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
+          # Use .venv/bin/pytest directly to avoid uv run re-syncing and downgrading pandas
+          .venv/bin/python -m pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
 
