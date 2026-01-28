@@ -34,6 +34,7 @@ jobs:
     name: Python / Test
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         python-version:
           # - "3.8" #other conflicts
@@ -121,6 +122,7 @@ jobs:
     name: Python / Test (Max Versions)
     runs-on: depot-ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version:
           - "3.11"
@@ -155,8 +157,22 @@ jobs:
           touch buckaroo/static/widget.css
 
       - name: Install the project with maximum versions
-        run: uv sync --resolution=highest --all-extras --dev
+        run: |
+          # Remove lock file to force fresh resolution with highest versions
+          rm -f uv.lock
+          # Add override to bypass datacompy's pandas<=2.3.3 constraint
+          # This allows --resolution=highest to pick the actual latest pandas
+          cat >> pyproject.toml << 'EOF'
+
+          [tool.uv]
+          override-dependencies = ["pandas"]
+          EOF
+          # Sync with highest resolution, excluding datacompy group
+          uv sync --resolution=highest --all-extras --dev --no-group datacompy
+          # Show resolved pandas version
+          uv pip list | grep -i pandas
       - name: Run tests
         run: |
-          uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
+          # Use .venv/bin/python directly to avoid uv run re-syncing
+          .venv/bin/python -m pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
 

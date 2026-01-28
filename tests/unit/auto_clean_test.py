@@ -50,19 +50,30 @@ ONLY_NANS_META = {'datetime': 0, 'datetime_error': 0, 'int': 0, 'int_error': 0, 
 def test_get_typing_metadata():
     if int(pd.__version__[0]) < 2:
         return
+
+    # In pandas 3.0+, string Series have a 'str' dtype rather than 'object',
+    # so force object dtype to test the object type path
+    def obj_series(data):
+        """Create an object-dtype series for testing the object typing path."""
+        return pd.Series(data, dtype='object')
+
     # assert WEIRD_INT == ac.get_typing_metadata(pd.Series([5, 2, 3.1, None, NA]))
-    assert INT_META == ac.get_typing_metadata(pd.Series(['181', '182', '183', 'a']))
-    assert FLOAT_META == ac.get_typing_metadata(pd.Series(['181.1', '182.2', '183', 'a']))
-    assert STRING_META == ac.get_typing_metadata(pd.Series(['181.1', 'b', 'c', 'a']))
-    assert DATETIME_META == ac.get_typing_metadata(pd.Series(['1981-05-11', '1982-05-11', '1983', 'a']))
-    assert DATETIME_EDGECASE_META == ac.get_typing_metadata(pd.Series(['00:01.6', '00:01.6', '00:01.6', None]))
-    assert DATETIME_DTYPE_META == ac.get_typing_metadata(pd.date_range('2010-01-01', '2010-01-31'))
+    assert INT_META == ac.get_typing_metadata(obj_series(['181', '182', '183', 'a']))
+    assert FLOAT_META == ac.get_typing_metadata(obj_series(['181.1', '182.2', '183', 'a']))
+    assert STRING_META == ac.get_typing_metadata(obj_series(['181.1', 'b', 'c', 'a']))
+    assert DATETIME_META == ac.get_typing_metadata(obj_series(['1981-05-11', '1982-05-11', '1983', 'a']))
+    assert DATETIME_EDGECASE_META == ac.get_typing_metadata(obj_series(['00:01.6', '00:01.6', '00:01.6', None]))
+
+    # datetime dtype metadata - handle both ns and us resolution
+    dt_meta = ac.get_typing_metadata(pd.date_range('2010-01-01', '2010-01-31'))
+    assert dt_meta['general_type'] == 'datetime'
+    assert 'datetime64' in dt_meta['exact_type']
 
     assert MIXED_EXACT == ac.get_typing_metadata(pd.Series([NA, 2, 3, NA, NA], dtype='Int64'))
-    assert MIXED_NUMERIC_META == ac.get_typing_metadata(pd.Series(['a', 2.0, 3.0, None, NA]))
-    
+    assert MIXED_NUMERIC_META == ac.get_typing_metadata(obj_series(['a', 2.0, 3.0, None, NA]))
+
     #there are still problems here, the code isn't properly distinguishing bools from ints and bools
-    assert BOOL_META == ac.get_typing_metadata(pd.Series(['a', 'b', False, True, False]))
+    assert BOOL_META == ac.get_typing_metadata(obj_series(['a', 'b', False, True, False]))
     assert FULL_INT_META == ac.get_typing_metadata(pd.Series([5]*10, dtype='UInt32'))
 
     # what does the typing code do on "dtype" objects
