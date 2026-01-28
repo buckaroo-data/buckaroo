@@ -160,10 +160,15 @@ jobs:
         run: |
           # Remove lock file to force fresh resolution with highest versions
           rm -f uv.lock
-          # Sync with highest resolution, excluding datacompy (which pins pandas<=2.3.3)
+          # Add override to bypass datacompy's pandas<=2.3.3 constraint
+          # This allows --resolution=highest to pick the actual latest pandas
+          cat >> pyproject.toml << 'EOF'
+
+          [tool.uv]
+          override-dependencies = ["pandas"]
+          EOF
+          # Sync with highest resolution, excluding datacompy group
           uv sync --resolution=highest --all-extras --dev --no-group datacompy
-          # Upgrade pandas to latest (datacompy constraint no longer applies after sync)
-          uv pip install --upgrade pandas
           # Show resolved pandas version
           uv pip list | grep -i pandas
       - name: Run tests
