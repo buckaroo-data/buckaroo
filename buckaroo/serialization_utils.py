@@ -114,6 +114,10 @@ def force_to_pandas(df_pd_or_pl) -> pd.DataFrame:
     
 def pd_to_obj(df:pd.DataFrame) -> Dict[str, Any]:
     df2 = prepare_df_for_serialization(df)
+    # Add level_0 for JSON serialization to maintain backwards compatibility
+    # This is only needed for JSON, not for Parquet serialization
+    if not isinstance(df.index, pd.MultiIndex):
+        df2['level_0'] = df2['index']
     try:
         # Use index=False to avoid pandas 3.0 ValueError when column named 'index'
         # overlaps with the DataFrame's index name (which defaults to None/'index')
@@ -159,10 +163,7 @@ def prepare_df_for_serialization(df:pd.DataFrame) -> pd.DataFrame:
             df2[index_col_name] = index_series.values
         df2.index = new_idx
     else:
-        # Add both 'index' and 'level_0' columns to maintain backwards compatibility
-        # 'level_0' matches what pandas' to_json(orient='table') would add for the index
         df2['index'] = df2.index
-        df2['level_0'] = df2.index
     return df2
 
 def to_parquet(df):
@@ -173,6 +174,13 @@ def to_parquet(df):
     data.close = lambda: None
     # I don't like this copy.  modify to keep the same data with different names
     df2 = prepare_df_for_serialization(df)
+
+    # Convert PyArrow-backed string columns to object dtype for fastparquet compatibility
+    # pandas 3.0+ uses PyArrow strings by default, which fastparquet can't handle directly
+    for col in df2.columns:
+        if pd.api.types.is_string_dtype(df2[col].dtype) and not pd.api.types.is_object_dtype(df2[col].dtype):
+            df2[col] = df2[col].astype('object')
+
     obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
     encodings = {k:'json' for k in obj_columns}
 
