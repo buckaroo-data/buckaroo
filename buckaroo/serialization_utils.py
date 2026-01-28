@@ -115,7 +115,9 @@ def force_to_pandas(df_pd_or_pl) -> pd.DataFrame:
 def pd_to_obj(df:pd.DataFrame) -> Dict[str, Any]:
     df2 = prepare_df_for_serialization(df)
     try:
-        obj = json.loads(df2.to_json(orient='table', indent=2, default_handler=str))
+        # Use index=False to avoid pandas 3.0 ValueError when column named 'index'
+        # overlaps with the DataFrame's index name (which defaults to None/'index')
+        obj = json.loads(df2.to_json(orient='table', indent=2, default_handler=str, index=False))
         return obj['data']
     finally:
         pass
@@ -148,7 +150,7 @@ def get_multiindex_to_cols_sers(index) -> List[Tuple[str, Any]]: #pd.Series[Any]
 
 def prepare_df_for_serialization(df:pd.DataFrame) -> pd.DataFrame:
     # I don't like this copy.  modify to keep the same data with different names
-    df2 = df.copy()    
+    df2 = df.copy()
     attempted_columns = [new_col for _, new_col in old_col_new_col(df)]
     df2.columns = attempted_columns
     if isinstance(df2.index, pd.MultiIndex):
@@ -157,7 +159,10 @@ def prepare_df_for_serialization(df:pd.DataFrame) -> pd.DataFrame:
             df2[index_col_name] = index_series.values
         df2.index = new_idx
     else:
+        # Add both 'index' and 'level_0' columns to maintain backwards compatibility
+        # 'level_0' matches what pandas' to_json(orient='table') would add for the index
         df2['index'] = df2.index
+        df2['level_0'] = df2.index
     return df2
 
 def to_parquet(df):
