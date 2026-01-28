@@ -59,11 +59,12 @@ def test_onehot():
 def test_groupby():
     base_df = pd.DataFrame({
         'a':['cc', 'cc', 'cc', 'ee', 'ff'], 'b': [pd.NA, 2, 2, 2, pd.NA]})
-    
+
     output_df = same(GroupBy, [[s('groupby'), s('df'), "a", {'b':'count'}]], base_df)
     expected_output = pd.DataFrame({'b': {'cc': 2, 'ee': 1, 'ff': 0}},
                                    index=pd.Index(['cc', 'ee', 'ff'], dtype='object', name='a'))
-    pd.testing.assert_frame_equal(output_df, expected_output)
+    # Use check_index_type=False to handle pandas 3.0 where string index is 'str' instead of 'object'
+    pd.testing.assert_frame_equal(output_df, expected_output, check_index_type=False)
     
 def test_reindex():
     base_df = pd.DataFrame({
