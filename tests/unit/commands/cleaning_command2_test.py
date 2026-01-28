@@ -79,7 +79,7 @@ expected_df = pd.DataFrame({
 ]
 , dtype='Int64'),
     'mostly_ints_orig': dirty_df['mostly_ints'],
-    'us_dates' : pd.Series([
+    'us_dates' : pd.to_datetime([
         "NaT",
         "1982-07-10 00:00:00",
         "1982-07-15 00:00:00",
@@ -93,7 +93,7 @@ expected_df = pd.DataFrame({
         "2024-06-22 00:00:00",
         "1776-07-04 00:00:00",
         "1969-07-20 00:00:00"
-    ], dtype='datetime64[ns]'),
+    ]),  # Use pd.to_datetime to get the default datetime resolution for the pandas version
     'us_dates_orig': dirty_df['us_dates'],
     'mostly_bool': pd.Series([
         True,
