@@ -4,10 +4,8 @@ Tests for buckaroo/customizations/pandas_commands.py
 This file tests commands that were previously untested to improve coverage.
 """
 import pandas as pd
-import numpy as np
 import pytest
 
-from buckaroo.jlisp.lisp_utils import s
 from buckaroo.jlisp.configure_utils import configure_buckaroo
 from buckaroo.customizations.pandas_commands import (
     NoOp, SafeInt, MakeCategory, RemoveOutliers, OnlyOutliers,
@@ -135,8 +133,8 @@ def test_coerce_series_bool():
     ser = pd.Series([1, 0, 1, None, 0])
     result = coerce_series(ser, 'bool')
     assert result.dtype == 'boolean'
-    assert result.iloc[0] is True or result.iloc[0] == True
-    assert result.iloc[1] is False or result.iloc[1] == False
+    assert result.iloc[0] is True or bool(result.iloc[0]) is True
+    assert result.iloc[1] is False or bool(result.iloc[1]) is False
 
 
 def test_coerce_series_datetime():
