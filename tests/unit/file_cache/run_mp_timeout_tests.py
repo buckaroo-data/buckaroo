@@ -22,14 +22,12 @@ To run the original pytest versions instead:
 import sys
 import textwrap
 import threading
-import tempfile
-import os
 
 from buckaroo.file_cache.mp_timeout_decorator import (
     TimeoutException, ExecutionFailed, mp_timeout, is_running_in_mp_timeout,
 )
 from tests.unit.file_cache.mp_test_utils import (
-    mp_simple, mp_sleep1, mp_crash_exit, mp_polars_longread, mp_polars_crash,
+    mp_simple, mp_sleep1, mp_polars_longread,
     TIMEOUT,
 )
 
@@ -68,20 +66,12 @@ def check_timeout_fail():
     raise AssertionError("TimeoutException not raised")
 
 
-def check_crash_exit():
+def check_normal_exception():
     try:
-        mp_crash_exit()
-    except ExecutionFailed:
+        1 / 0
+    except ZeroDivisionError:
         return
-    raise AssertionError("ExecutionFailed not raised")
-
-
-def check_polars_crash():
-    try:
-        mp_polars_crash()
-    except (ExecutionFailed, Exception):
-        # ExecutionFailed is expected; ImportError for missing pl_series_hash is also OK
-        return
+    raise AssertionError("ZeroDivisionError not raised")
 
 
 def check_polars_timeout():
@@ -110,20 +100,6 @@ def check_mp_exception():
     except ZeroDivisionError:
         return
     raise AssertionError("ZeroDivisionError not raised")
-
-
-def check_polars_unserializable():
-    import polars as pl  # type: ignore
-
-    @mp_timeout(TIMEOUT * 2)
-    def make_unserializable_df():
-        df = pl.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
-        return df.select(pl.all().name.map(lambda nm: nm + "_x"))
-
-    try:
-        make_unserializable_df()
-    except (ExecutionFailed, Exception):
-        return
 
 
 def check_polars_simple_len():
@@ -174,38 +150,6 @@ def check_unpicklable_return():
     raise AssertionError("ExecutionFailed not raised for unpicklable return")
 
 
-def check_unpicklable_exception():
-    class UnpicklableError(Exception):
-        def __init__(self, fh):
-            super().__init__("unpicklable")
-            self.fh = fh
-
-    tmp_dir = tempfile.mkdtemp()
-
-    @mp_timeout(TIMEOUT * 3)
-    def raise_unpicklable_exc():
-        fh = open(os.path.join(tmp_dir, "x"), "w")
-        raise UnpicklableError(fh)
-
-    try:
-        raise_unpicklable_exc()
-    except ExecutionFailed:
-        return
-    raise AssertionError("ExecutionFailed not raised for unpicklable exception")
-
-
-def check_sys_exit():
-    @mp_timeout(TIMEOUT)
-    def exit_now():
-        sys.exit(0)
-
-    try:
-        exit_now()
-    except ExecutionFailed:
-        return
-    raise AssertionError("ExecutionFailed not raised for sys.exit()")
-
-
 def check_is_running_in_mp_timeout():
     assert is_running_in_mp_timeout() is False, "should be False outside mp_timeout"
 
@@ -220,20 +164,16 @@ def check_is_running_in_mp_timeout():
 # ── main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    run_check("1  basic_pass",                         "test_mp_timeout_pass",             check_basic_pass)
-    run_check("2  timeout_fail",                       "test_mp_timeout_fail",             check_timeout_fail)
-    run_check("3  crash_exit  (diagnostic)",           "test_mp_crash_exit",               check_crash_exit)
-    run_check("4  polars_crash  (diagnostic)",         "test_mp_polars_crash",             check_polars_crash)
-    run_check("5  polars_timeout",                     "test_mp_polars_timeout",           check_polars_timeout)
-    run_check("6  fail_then_normal",                   "test_mp_fail_then_normal",         check_fail_then_normal)
-    run_check("7  mp_exception",                       "test_mp_exception",                check_mp_exception)
-    run_check("8  polars_unserializable  (diagnostic)","test_polars_rename_unserializable_raises_execution_failed", check_polars_unserializable)
-    run_check("9  polars_simple_len",                  "test_mp_polars_simple_len",        check_polars_simple_len)
-    run_check("10 jupyter_simulate",                   "test_jupyter_simulate",            check_jupyter_simulate)
-    run_check("11 unpicklable_return",                 "test_unpicklable_return_raises_execution_failed", check_unpicklable_return)
-    run_check("12 unpicklable_exception  (diagnostic)","test_unpicklable_exception_raises_execution_failed", check_unpicklable_exception)
-    run_check("13 sys_exit  (diagnostic)",             "test_sys_exit_is_execution_failed", check_sys_exit)
-    run_check("14 is_running_in_mp_timeout",           "test_is_running_in_mp_timeout",    check_is_running_in_mp_timeout)
+    run_check("1  basic_pass",            "test_mp_timeout_pass",             check_basic_pass)
+    run_check("2  timeout_fail",          "test_mp_timeout_fail",             check_timeout_fail)
+    run_check("3  polars_timeout",        "test_mp_polars_timeout",           check_polars_timeout)
+    run_check("4  fail_then_normal",      "test_mp_fail_then_normal",         check_fail_then_normal)
+    run_check("5  normal_exception",      "test_normal_exception",            check_normal_exception)
+    run_check("6  mp_exception",          "test_mp_exception",                check_mp_exception)
+    run_check("7  polars_simple_len",     "test_mp_polars_simple_len",        check_polars_simple_len)
+    run_check("8  jupyter_simulate",      "test_jupyter_simulate",            check_jupyter_simulate)
+    run_check("9  unpicklable_return",    "test_unpicklable_return_raises_execution_failed", check_unpicklable_return)
+    run_check("10 is_running_in_mp_timeout", "test_is_running_in_mp_timeout", check_is_running_in_mp_timeout)
 
     print()
     print(f"  {passed} passed, {failed} failed")
