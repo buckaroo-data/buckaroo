@@ -146,7 +146,12 @@ jobs:
       - name: Create venv and install dependencies
         run: |
           uv venv .venv --python ${{ matrix.python-version }}
-          uv pip install --python .venv/bin/python dist/*.whl polars jupyterlab pandas
+          ls -la dist/
+          uv pip install --python .venv/bin/python --verbose dist/*.whl polars jupyterlab pandas
+          echo "--- Installed packages ---"
+          uv pip list --python .venv/bin/python
+          echo "--- Test import ---"
+          .venv/bin/python -c "import buckaroo; print('OK')"
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -185,7 +190,12 @@ jobs:
       - name: Create venv and install dependencies (max versions)
         run: |
           uv venv .venv --python ${{ matrix.python-version }}
-          uv pip install --python .venv/bin/python --resolution=highest dist/*.whl polars jupyterlab pandas
+          ls -la dist/
+          uv pip install --python .venv/bin/python --resolution=highest --verbose dist/*.whl polars jupyterlab pandas
+          echo "--- Installed packages ---"
+          uv pip list --python .venv/bin/python
+          echo "--- Test import ---"
+          .venv/bin/python -c "import buckaroo; print('OK')"
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
