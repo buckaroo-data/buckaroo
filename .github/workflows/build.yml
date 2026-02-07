@@ -15,7 +15,7 @@ jobs:
     # runs-on: depot-ubuntu-24.04
     strategy:
       fail-fast: false
-       matrix:
+      matrix:
         #os: [ubuntu-latest, windows-latest, macos-latest]
         #os: [ubuntu-latest]
         os: [depot-ubuntu-latest, depot-windows-2025]
@@ -88,6 +88,7 @@ jobs:
           path: |
             ./dist
             ./js/*.tgz
+          overwrite: true
 
       - name: Run Storybook Playwright Tests
         if: ${{ matrix.os == 'ubuntu-latest' }}
@@ -119,33 +120,80 @@ jobs:
         env:
           UV_PYTHON: ${{ matrix.python-version }}
 
+  PlaywrightJupyter:
+    name: Playwright Jupyter / ${{ matrix.python-version }}
+    needs: build
+    runs-on: depot-ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+          prune-cache: false
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-dist-${{ github.run_number }}
+      - name: Create venv and install dependencies
+        run: |
+          uv venv .venv --python ${{ matrix.python-version }}
+          uv pip install --python .venv/bin/python dist/*.whl polars jupyterlab pandas
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Run Playwright Jupyter tests
+        run: bash scripts/test_playwright_jupyter.sh --venv-location=.venv
 
-# ui-test:
-#   needs: [build]
-#   runs-on: ubuntu-latest
-#   steps:
-#     - uses: actions/checkout@v4
-#     - uses: actions/download-artifact@v4
-#       with:
-#         name: buckaroo-dist-${{ github.run_number }}
-
-#     - name: Install Python
-#       uses: actions/setup-python@v4
-#       with:
-#         python-version: 3.9
-
-#     - name: Setup buckaroo ui test
-#       run: pip install `echo dist/*.whl`[ui-test] -r requirements-ui-test.txt
-
-#     - name: Install playwright browsers
-#       run: playwright install chromium
-
-#     - name: Run ui-tests
-#       run: SOLARA_TEST_RUNNERS=jupyter_lab pytest tests/ui/ --video=retain-on-failure
-
-#     - name: Upload Test artifacts
-#       if: always()
-#       uses: actions/upload-artifact@v4
-#       with:
-#         name: buckaroo-test-results-${{ github.run_number }}
-#         path: test-results
+  PlaywrightJupyterMaxVersions:
+    name: Playwright Jupyter Max / ${{ matrix.python-version }}
+    needs: build
+    runs-on: depot-ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+          prune-cache: false
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-dist-${{ github.run_number }}
+      - name: Create venv and install dependencies (max versions)
+        run: |
+          uv venv .venv --python ${{ matrix.python-version }}
+          uv pip install --python .venv/bin/python --resolution=highest dist/*.whl polars jupyterlab pandas
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Run Playwright Jupyter tests
+        run: bash scripts/test_playwright_jupyter.sh --venv-location=.venv

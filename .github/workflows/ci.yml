@@ -92,32 +92,6 @@ jobs:
         run: |
           bash scripts/test_playwright_storybook.sh
 
-      # - name: Run JupyterLab Playwright Tests
-      #   run: |
-      #     # Ensure uv environment is set up
-      #     uv sync --all-extras --group dev
-          
-      #     # Install the built buckaroo wheel
-      #     uv pip install --force-reinstall dist/*.whl
-          
-      #     # Install test dependencies (polars, jupyterlab)
-      #     uv pip install polars jupyterlab
-          
-      #     # Detect venv location (uv sync creates .venv by default, but check if it exists)
-      #     if [ -d ".venv" ]; then
-      #       VENV_LOCATION=".venv"
-      #     else
-      #       # Fallback: try to detect from uv's Python environment
-      #       VENV_LOCATION=$(uv run python -c "import sys; print(sys.prefix)" 2>/dev/null || echo ".venv")
-      #     fi
-          
-      #     # Run the integration test script with venv location
-      #     bash scripts/test_playwright_jupyter.sh --venv-location="$VENV_LOCATION"
-      #   env:
-      #     UV_PYTHON: ${{ matrix.python-version }}
-
-
-
   TestPythonMaxVersions:
     name: Python / Test (Max Versions)
     runs-on: depot-ubuntu-latest
