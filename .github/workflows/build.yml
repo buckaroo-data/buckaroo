@@ -143,12 +143,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: buckaroo-dist-${{ github.run_number }}
-      - name: Setup static files
-        run: |
-          mkdir -p buckaroo/static
-          touch buckaroo/static/compiled.css
-          touch buckaroo/static/widget.js
-          touch buckaroo/static/widget.css
+      - name: Extract static files from wheel
+        run: unzip -o dist/*.whl "buckaroo/static/*" -d .
       - name: Create venv and install dependencies
         run: |
           uv venv .venv --python ${{ matrix.python-version }}
@@ -188,12 +184,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: buckaroo-dist-${{ github.run_number }}
-      - name: Setup static files
-        run: |
-          mkdir -p buckaroo/static
-          touch buckaroo/static/compiled.css
-          touch buckaroo/static/widget.js
-          touch buckaroo/static/widget.css
+      - name: Extract static files from wheel
+        run: unzip -o dist/*.whl "buckaroo/static/*" -d .
       - name: Create venv and install dependencies (max versions)
         run: |
           uv venv .venv --python ${{ matrix.python-version }}
