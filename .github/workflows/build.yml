@@ -158,6 +158,17 @@ jobs:
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages/buckaroo-js-core
+        run: pnpm install --frozen-lockfile
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/pnpm-lock.yaml') }}
+      - name: Install Playwright browsers
+        working-directory: packages/buckaroo-js-core
+        run: pnpm exec playwright install chromium
       - name: Run Playwright Jupyter tests
         run: bash scripts/test_playwright_jupyter.sh --venv-location=.venv
 
@@ -199,5 +210,16 @@ jobs:
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages/buckaroo-js-core
+        run: pnpm install --frozen-lockfile
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/pnpm-lock.yaml') }}
+      - name: Install Playwright browsers
+        working-directory: packages/buckaroo-js-core
+        run: pnpm exec playwright install chromium
       - name: Run Playwright Jupyter tests
         run: bash scripts/test_playwright_jupyter.sh --venv-location=.venv
