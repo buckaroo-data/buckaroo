@@ -254,4 +254,3 @@ Have you had a good experience with this project? Why not share some love and co
 
 We welcome [issue reports](../../issues); be sure to choose the proper issue template for your issue, so that we can be sure you're providing the necessary information.
 
-
