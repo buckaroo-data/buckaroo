@@ -1,0 +1,45 @@
+from dataclasses import dataclass, field
+from typing import Optional
+import pandas as pd
+
+
+@dataclass
+class SessionState:
+    session_id: str
+    path: str
+    df: Optional[pd.DataFrame] = None
+    metadata: dict = field(default_factory=dict)
+    ws_clients: set = field(default_factory=set)
+    df_display_args: dict = field(default_factory=dict)
+    df_data_dict: dict = field(default_factory=dict)
+    df_meta: dict = field(default_factory=dict)
+
+
+class SessionManager:
+    def __init__(self):
+        self.sessions: dict[str, SessionState] = {}
+
+    def get(self, session_id: str) -> Optional[SessionState]:
+        return self.sessions.get(session_id)
+
+    def create(self, session_id: str, path: str) -> SessionState:
+        session = SessionState(session_id=session_id, path=path)
+        self.sessions[session_id] = session
+        return session
+
+    def get_or_create(self, session_id: str, path: str) -> SessionState:
+        existing = self.get(session_id)
+        if existing:
+            existing.path = path
+            return existing
+        return self.create(session_id, path)
+
+    def add_ws_client(self, session_id: str, client):
+        session = self.get(session_id)
+        if session:
+            session.ws_clients.add(client)
+
+    def remove_ws_client(self, session_id: str, client):
+        session = self.get(session_id)
+        if session:
+            session.ws_clients.discard(client)

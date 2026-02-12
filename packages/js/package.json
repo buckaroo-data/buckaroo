@@ -5,7 +5,9 @@
 	"type": "module",
 	"scripts": {
 		"build": "esbuild widget.tsx --format=esm --bundle --outdir=../../buckaroo/static/",
-		"dev": "esbuild widget.tsx --format=esm --bundle --outdir=../../buckaroo/static/ --sourcemap=inline --watch"
+		"build:standalone": "esbuild standalone.tsx --format=esm --bundle --minify --outdir=../../buckaroo/static/",
+		"dev": "esbuild widget.tsx --format=esm --bundle --outdir=../../buckaroo/static/ --sourcemap=inline --watch",
+		"dev:standalone": "esbuild standalone.tsx --format=esm --bundle --outdir=../../buckaroo/static/ --sourcemap=inline --watch"
 	},
 	"dependencies": {
 		"@anywidget/react": "^0.0.8",
