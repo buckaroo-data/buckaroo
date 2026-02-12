@@ -10,7 +10,7 @@ def load_file(path: str) -> pd.DataFrame:
         return pd.read_csv(path)
     elif ext == ".tsv":
         return pd.read_csv(path, sep="\t")
-    elif ext == ".parquet":
+    elif ext in (".parquet", ".parq"):
         return pd.read_parquet(path)
     elif ext == ".json":
         return pd.read_json(path)
