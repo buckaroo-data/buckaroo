@@ -99,6 +99,7 @@ test = [
     "codecov"
 ]
 
+mcp = ["mcp"]
 jupyterlab = ["jupyterlab>=3.6.0"]
 notebook = ["notebook>=7.0.0"]
 packaging_tools = [
@@ -107,6 +108,9 @@ packaging_tools = [
 ]
 
     
+[project.scripts]
+buckaroo-table = "buckaroo.mcp_tool:main"
+
 [project.urls]
 Homepage = "https://github.com/paddymul/buckaroo"
 

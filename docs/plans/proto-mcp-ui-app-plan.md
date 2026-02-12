@@ -1,4 +1,45 @@
-# Buckaroo MCP — Proto-Plan
+# Buckaroo MCP — Living Plan
+
+## Implementation Status
+
+### Done — Mode A: Claude Code (Browser Tab)
+
+**Data Server** (`buckaroo/server/`) — Tornado HTTP + WebSocket, fully working:
+- `GET /health` — returns `{"status": "ok"}`
+- `POST /load` — accepts `{ session, path }`, returns `{ session, path, rows, columns: [{name, dtype}] }`
+- `GET /s/<session-id>` — serves Buckaroo HTML page with standalone JS
+- `WS /ws/<session-id>` — binary Parquet streaming with infinite scroll
+- Browser focus via AppleScript on macOS (`buckaroo/server/focus.py`)
+- Supports: CSV, TSV, Parquet, JSON
+- Default port: 8888 (configurable via `--port`)
+- Start: `python -m buckaroo.server [--port PORT] [--no-browser]`
+
+**MCP Tool** (`buckaroo/mcp_tool.py`) — FastMCP stdio server, ~70 lines:
+- `view_data(path: str)` — the only tool, one string argument
+- Auto-starts data server if not running (health check → spawn → poll)
+- Session isolation via per-process UUID (`SESSION_ID`)
+- Returns text summary to LLM: row count, column names/dtypes, interactive URL
+- Uses only stdlib HTTP (`urllib.request`) — no extra deps beyond `mcp`
+
+**Packaging** (`pyproject.toml`):
+- Optional dep group: `mcp = ["mcp"]` — install with `pip install buckaroo[mcp]`
+- Console script: `buckaroo-table = "buckaroo.mcp_tool:main"`
+- Claude Code config: `.mcp.json` in project root
+
+**How to use:**
+1. `uv sync --extra mcp`
+2. Restart Claude Code — `buckaroo-table` appears as MCP server
+3. Ask Claude to view a CSV/Parquet file — auto-starts server, opens browser, returns summary
+
+### Not Yet Done
+
+- Mode B: Claude Desktop iframe (see architecture below)
+- `updateModelContext` for LLM awareness of user's view state
+- Idle timeout / server shutdown
+- Multiple files per session (tabbed UI)
+- PyPI distribution as standalone package
+
+---
 
 ## What We Proved (2026-02-12)
 
@@ -243,47 +284,32 @@ The JS client handles all rendering, caching (SmartRowCache), and interaction. S
 
 ---
 
+## Resolved Decisions
+
+1. **MCP server language** — All Python. MCP tool uses FastMCP (Python MCP SDK), data server is Tornado. ✅
+2. **Parquet binary transfer** — Working. Two-frame WebSocket protocol (JSON text + binary Parquet). ✅
+3. **JS bundle strategy** — Mode A serves static files from `buckaroo/static/`. Mode B will need `vite-plugin-singlefile`.
+4. **Python packaging** — Optional dep group in `buckaroo` package: `pip install buckaroo[mcp]`. Console script `buckaroo-table`. For PyPI standalone distribution, TBD.
+
 ## Open Questions / Next Steps
 
-### 1. MCP server language: Python or Node?
-- **Python** makes sense since Buckaroo's data processing (Polars, Pandas, Parquet reading) is Python
-- The MCP server (stdio transport) could be Node (using the official SDK) but then needs to spawn a Python WS server
-- OR write the MCP server in Python using the Python MCP SDK, and the WS server is the same process
-- **Recommendation: All Python** — MCP server in Python, data server in Python
-
-### 2. Parquet binary transfer over WebSocket
-- Buckaroo already does this in Jupyter (hyparquet decodes Parquet in browser)
-- Can reuse the same approach over raw WebSocket binary frames
-- This is the most efficient transfer format — no JSON serialization overhead
-
-### 3. JS bundle strategy
-- Mode A (browser tab): server serves static JS files normally — no single-file constraint
-- Mode B (iframe): needs full bundle inlined into HTML (`vite-plugin-singlefile`)
-- Both use the same Buckaroo JS core, just different entry points / packaging
-- May need a build variant that replaces the anywidget model interface with a raw WebSocket interface
-
-### 4. Python packaging
-- Distribute as `buckaroo-mcp` on PyPI
-- Entry point: `uvx buckaroo-mcp` or `pipx run buckaroo-mcp`
-- Claude Desktop config: `{ "command": "uvx", "args": ["buckaroo-mcp"] }`
-- Claude Code config: same, in `~/.claude/settings.json` or project `.mcp.json`
-
-### 5. updateModelContext for LLM awareness (Mode B)
+### 1. updateModelContext for LLM awareness (Mode B)
 - The iframe can call `app.updateModelContext()` to tell the LLM what the user is seeing
 - e.g., "User is viewing rows 50,000-50,050 of sales.parquet, sorted by revenue desc, filtered to state=CA (12,340 matches)"
 - This enables the LLM to react: "I see you filtered to CA, want me to drill into that subset?"
 - Design this carefully — don't spam context updates on every scroll
 
-### 6. Multiple files per session
+### 2. Multiple files per session
 - Each `view_data` call within a session could replace the current view or open a new tab/panel
 - Simplest: replace current view (one file per session at a time)
 - Future: tabbed interface within the Buckaroo page (multiple files, user switches between them)
 
-### 7. Server shutdown
+### 3. Server shutdown
 - The data server is a long-lived background process — when does it stop?
 - Options: idle timeout (stop after N minutes with no WebSocket connections), explicit `buckaroo-server stop` command, or just leave it running until the user kills it
 - Leaning toward idle timeout with a generous default (e.g., 30 minutes)
 
-### 8. Priority
-- **Mode A (Claude Code, browser tab) is the primary target** — simpler, works today, no MCP App SDK dependency
-- Mode B (Claude Desktop, iframe) is a future enhancement using the same server codebase
+### 4. PyPI standalone distribution
+- Currently in-tree as part of `buckaroo` package
+- For wider distribution: `buckaroo-mcp` on PyPI, `uvx buckaroo-mcp`
+- Claude Desktop config: `{ "command": "uvx", "args": ["buckaroo-mcp"] }`
