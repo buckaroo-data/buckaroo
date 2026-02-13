@@ -17,9 +17,10 @@ cd ..
 mkdir -p buckaroo/static
 cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
 
-# Build anywidget wrapper (esbuild)
+# Build anywidget wrapper + standalone entry point (esbuild)
 cd packages
 pnpm --filter buckaroo-widget run build
+pnpm --filter buckaroo-widget run build:standalone
 
 # Build Python wheel
 cd ..
