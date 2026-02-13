@@ -36,6 +36,7 @@ jobs:
           cache: pnpm
           package_json_file: packages/package.json
       - uses: awalsh128/cache-apt-pkgs-action@latest
+        if: ${{ contains(matrix.os, 'ubuntu') }}
         with:
           packages: pandoc graphviz
 
@@ -45,7 +46,7 @@ jobs:
           pnpm -C packages/buckaroo-js-core install
 
       - name: Check docs can be build + links
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ contains(matrix.os, 'ubuntu') }}
 #        working-directory: docs
         run: |
           mkdir -p buckaroo/static || true
@@ -61,41 +62,41 @@ jobs:
 
       - name: Test the JS extension
         run: |
-          ./scripts/full_build.sh
+          bash ./scripts/full_build.sh
           cd packages/buckaroo-js-core
           pnpm install && pnpm run build
           pnpm run test
         env:
           UV_PYTHON: ${{ matrix.python-version }}
-
-
+        shell: bash
 
       - name: Linting
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ contains(matrix.os, 'ubuntu') }}
         run: |
           # pnpm -C packages/buckaroo-js-core run lint
           pip install ruff
-          ruff check . 
+          ruff check .
 
       - name: Package
         run: |
-          ./scripts/full_build.sh
+          bash ./scripts/full_build.sh
+        shell: bash
 
       - name: Upload builds
         uses: actions/upload-artifact@v4
         with:
-          name: buckaroo-dist-${{ github.run_number }}
+          name: buckaroo-dist-${{ matrix.os }}-${{ github.run_number }}
           path: |
             ./dist
             ./js/*.tgz
 
       - name: Run Storybook Playwright Tests
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ contains(matrix.os, 'ubuntu') }}
         run: |
           bash scripts/test_playwright_storybook.sh
 
       - name: Run JupyterLab Playwright Tests
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ contains(matrix.os, 'ubuntu') }}
         run: |
           # Ensure uv environment is set up
           uv sync --all-extras --group dev
