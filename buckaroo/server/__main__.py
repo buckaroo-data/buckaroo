@@ -11,7 +11,7 @@ def main():
     parser.add_argument("--no-browser", action="store_true", help="Don't open browser on start")
     args = parser.parse_args()
 
-    app = make_app(port=args.port)
+    app = make_app(port=args.port, open_browser=not args.no_browser)
     app.listen(args.port)
     print(f"Buckaroo server running at http://localhost:{args.port}")
 

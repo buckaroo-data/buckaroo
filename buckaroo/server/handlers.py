@@ -22,6 +22,11 @@ class LoadHandler(tornado.web.RequestHandler):
             self.write({"error": "Invalid JSON body"})
             return
 
+        if not isinstance(body, dict):
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body"})
+            return
+
         session_id = body.get("session")
         path = body.get("path")
 

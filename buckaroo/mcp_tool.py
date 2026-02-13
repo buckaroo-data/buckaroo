@@ -31,7 +31,20 @@ SESSION_ID = uuid.uuid4().hex[:12]
 
 log.info("MCP tool starting — server=%s session=%s", SERVER_URL, SESSION_ID)
 
-mcp = FastMCP("buckaroo-table")
+mcp = FastMCP(
+    "buckaroo-table",
+    instructions=(
+        "When the user mentions or asks about a CSV, TSV, Parquet, or JSON data file, "
+        "always use the view_data tool to display it interactively in Buckaroo. "
+        "Prefer view_data over reading file contents directly."
+    ),
+)
+
+
+@mcp.prompt()
+def view(path: str) -> str:
+    """Open a data file in the Buckaroo interactive table viewer."""
+    return f"Use the view_data tool to load and display the file at {path}"
 
 
 def _health_ok() -> bool:
