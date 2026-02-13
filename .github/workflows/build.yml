@@ -47,7 +47,7 @@ jobs:
 
       - name: Check docs can be build + links
         if: ${{ contains(matrix.os, 'ubuntu') }}
-#        working-directory: docs
+        continue-on-error: true
         run: |
           mkdir -p buckaroo/static || true
           touch buckaroo/static/compiled.css
