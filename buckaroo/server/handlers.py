@@ -4,7 +4,10 @@ import webbrowser
 
 import tornado.web
 
-from buckaroo.server.data_loading import load_file, get_metadata, get_display_state
+from buckaroo.server.data_loading import (
+    load_file, get_metadata, get_display_state,
+    create_dataflow, get_buckaroo_display_state,
+)
 from buckaroo.server.focus import focus_browser_tab
 
 
@@ -50,17 +53,34 @@ class LoadHandler(tornado.web.RequestHandler):
             self.write({"error": traceback.format_exc()})
             return
 
+        mode = body.get("mode", "viewer")
+
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.df = df
+        session.mode = mode
         metadata = get_metadata(df, path)
         session.metadata = metadata
 
-        # Compute display state for the JS client
-        display_state = get_display_state(df, path)
-        session.df_display_args = display_state["df_display_args"]
-        session.df_data_dict = display_state["df_data_dict"]
-        session.df_meta = display_state["df_meta"]
+        if mode == "buckaroo":
+            # Run the full Buckaroo analysis pipeline
+            dataflow = create_dataflow(df)
+            session.dataflow = dataflow
+            buckaroo_state = get_buckaroo_display_state(dataflow)
+            session.df_display_args = buckaroo_state["df_display_args"]
+            session.df_data_dict = buckaroo_state["df_data_dict"]
+            session.df_meta = buckaroo_state["df_meta"]
+            session.buckaroo_state = buckaroo_state["buckaroo_state"]
+            session.buckaroo_options = buckaroo_state["buckaroo_options"]
+            session.command_config = buckaroo_state["command_config"]
+            session.operation_results = buckaroo_state["operation_results"]
+            session.operations = buckaroo_state["operations"]
+        else:
+            # Compute minimal display state for the JS client
+            display_state = get_display_state(df, path)
+            session.df_display_args = display_state["df_display_args"]
+            session.df_data_dict = display_state["df_data_dict"]
+            session.df_meta = display_state["df_meta"]
 
         # Push metadata to connected WebSocket clients
         push_msg = json.dumps({"type": "metadata", **metadata})

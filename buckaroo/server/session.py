@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 import pandas as pd
 
 
@@ -13,6 +13,14 @@ class SessionState:
     df_display_args: dict = field(default_factory=dict)
     df_data_dict: dict = field(default_factory=dict)
     df_meta: dict = field(default_factory=dict)
+    # Buckaroo mode fields
+    mode: str = "viewer"  # "viewer" or "buckaroo"
+    dataflow: Any = None  # ServerDataflow instance when mode="buckaroo"
+    buckaroo_state: dict = field(default_factory=dict)
+    buckaroo_options: dict = field(default_factory=dict)
+    command_config: dict = field(default_factory=dict)
+    operation_results: dict = field(default_factory=dict)
+    operations: list = field(default_factory=list)
 
 
 class SessionManager:

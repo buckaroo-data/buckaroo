@@ -19,6 +19,7 @@ export class WebSocketModel {
     private pendingMsg: any = null;
     private handlers: Map<string, Set<Function>> = new Map();
     private state: Record<string, any>;
+    private pendingChanges: Set<string> = new Set();
 
     constructor(ws: WebSocket, initialState: Record<string, any>) {
         this.state = { ...initialState };
@@ -69,11 +70,20 @@ export class WebSocketModel {
 
     set(key: string, value: any): void {
         this.state[key] = value;
+        this.pendingChanges.add(key);
         this.emit(`change:${key}`, value);
     }
 
     save_changes(): void {
-        // No-op — standalone mode doesn't sync traits back to a Python kernel
+        if (this.ws.readyState !== WebSocket.OPEN) return;
+        // Sync buckaroo_state changes back to the server
+        if (this.pendingChanges.has("buckaroo_state")) {
+            this.ws.send(JSON.stringify({
+                type: "buckaroo_state_change",
+                new_state: this.state["buckaroo_state"],
+            }));
+        }
+        this.pendingChanges.clear();
     }
 
     on(event: string, handler: Function): void {

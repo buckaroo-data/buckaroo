@@ -1,7 +1,134 @@
 import os
+import traceback
 import pandas as pd
-from buckaroo.serialization_utils import to_parquet
+from buckaroo.serialization_utils import to_parquet, pd_to_obj, check_and_fix_df
 from buckaroo.df_util import old_col_new_col
+
+from buckaroo.dataflow.dataflow import CustomizableDataflow
+from buckaroo.dataflow.dataflow_extras import Sampling
+from buckaroo.dataflow.autocleaning import PandasAutocleaning
+from buckaroo.dataflow.styling_core import StylingAnalysis
+from buckaroo.customizations.analysis import (
+    TypingStats, DefaultSummaryStats, ComputedDefaultSummaryStats)
+from buckaroo.customizations.histogram import Histogram
+from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
+from buckaroo.customizations.pd_autoclean_conf import CleaningConf, NoCleaningConf
+from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
+
+
+class ServerSampling(Sampling):
+    """Sampling for headless server mode — matches InfinitePdSampling."""
+    serialize_limit = -1  # infinite mode
+    pre_limit = 1_000_000
+
+    @classmethod
+    def pre_stats_sample(kls, df):
+        df = check_and_fix_df(df)
+        if len(df.columns) > kls.max_columns:
+            df = df[df.columns[:kls.max_columns]]
+        if kls.pre_limit and len(df) > kls.pre_limit:
+            sampled = df.sample(kls.pre_limit)
+            if isinstance(sampled, pd.DataFrame):
+                return sampled.sort_index()
+            return sampled
+        return df
+
+
+class ServerDataflow(CustomizableDataflow):
+    """Headless dataflow matching BuckarooInfiniteWidget's pipeline."""
+    sampling_klass = ServerSampling
+    autocleaning_klass = PandasAutocleaning
+    DFStatsClass = DfStats
+    autoclean_conf = tuple([CleaningConf, NoCleaningConf])
+    analysis_klasses = [
+        TypingStats, DefaultSummaryStats,
+        Histogram,
+        ComputedDefaultSummaryStats,
+        StylingAnalysis,
+        DefaultSummaryStats,
+        DefaultSummaryStatsStyling, DefaultMainStyling,
+    ]
+
+    def _df_to_obj(self, df):
+        # No sampling — matches BuckarooInfiniteWidget._df_to_obj
+        return pd_to_obj(df)
+
+
+def create_dataflow(df: pd.DataFrame) -> ServerDataflow:
+    """Instantiate the full Buckaroo analysis pipeline headlessly."""
+    return ServerDataflow(df, skip_main_serial=True)
+
+
+def get_buckaroo_display_state(dataflow: ServerDataflow) -> dict:
+    """Extract all state needed by the JS BuckarooInfiniteWidget."""
+    return {
+        "df_data_dict": dataflow.df_data_dict,
+        "df_display_args": dataflow.df_display_args,
+        "df_meta": dataflow.df_meta,
+        "buckaroo_options": dataflow.buckaroo_options,
+        "buckaroo_state": {
+            "cleaning_method": "",
+            "post_processing": "",
+            "sampled": False,
+            "show_commands": False,
+            "df_display": "main",
+            "search_string": "",
+            "quick_command_args": {},
+        },
+        "command_config": dataflow.command_config,
+        "operation_results": {
+            "transformed_df": {"schema": {"fields": []}, "data": []},
+            "generated_py_code": "# server mode",
+        },
+        "operations": [],
+    }
+
+
+def handle_infinite_request_buckaroo(
+    dataflow: ServerDataflow, payload_args: dict
+) -> tuple[dict, bytes]:
+    """Infinite scroll handler using the dataflow's processed_df and merged_sd."""
+    start = payload_args["start"]
+    end = payload_args["end"]
+    _unused, processed_df, merged_sd = dataflow.widget_args_tuple
+    if processed_df is None:
+        return (
+            {"type": "infinite_resp", "key": payload_args, "data": [], "length": 0},
+            b"",
+        )
+
+    try:
+        sort = payload_args.get("sort")
+        if sort:
+            ascending = payload_args.get("sort_direction") == "asc"
+            # merged_sd maps renamed col -> stats dict with 'orig_col_name'
+            converted_sort_column = merged_sd[sort]["orig_col_name"]
+            sorted_df = processed_df.sort_values(
+                by=[converted_sort_column], ascending=ascending
+            )
+            slice_df = sorted_df[start:end]
+        else:
+            slice_df = processed_df[start:end]
+
+        parquet_bytes = to_parquet(slice_df)
+        msg = {
+            "type": "infinite_resp",
+            "key": payload_args,
+            "data": [],
+            "length": len(processed_df),
+        }
+        return msg, parquet_bytes
+    except Exception:
+        return (
+            {
+                "type": "infinite_resp",
+                "key": payload_args,
+                "data": [],
+                "length": 0,
+                "error_info": traceback.format_exc(),
+            },
+            b"",
+        )
 
 
 def load_file(path: str) -> pd.DataFrame:
