@@ -1,6 +1,8 @@
 import json
+import logging
+import os
+import time
 import traceback
-import webbrowser
 
 import tornado.web
 
@@ -8,12 +10,20 @@ from buckaroo.server.data_loading import (
     load_file, get_metadata, get_display_state,
     create_dataflow, get_buckaroo_display_state,
 )
-from buckaroo.server.focus import focus_browser_tab
+from buckaroo.server.focus import find_or_create_session_window
+
+log = logging.getLogger("buckaroo.server.handlers")
 
 
 class HealthHandler(tornado.web.RequestHandler):
     def get(self):
-        self.write({"status": "ok"})
+        start_time = self.application.settings.get("server_start_time", 0)
+        self.write({
+            "status": "ok",
+            "pid": os.getpid(),
+            "started": start_time,
+            "uptime_s": round(time.time() - start_time, 1),
+        })
 
 
 class LoadHandler(tornado.web.RequestHandler):
@@ -90,24 +100,26 @@ class LoadHandler(tornado.web.RequestHandler):
             except Exception:
                 session.ws_clients.discard(client)
 
-        # Browser management: open or focus (disabled in tests)
+        # Browser management: find existing window or create one (disabled in tests)
+        browser_action = "disabled"
         if self.application.settings.get("open_browser", True):
             port = self.application.settings.get("port", 8888)
-            if not session.ws_clients:
-                # No browser tab connected yet — open one
-                url = f"http://localhost:{port}/s/{session_id}"
-                webbrowser.open(url)
-            else:
-                # Tab already exists — bring it to front
-                focus_browser_tab(session_id, port)
+            browser_action = find_or_create_session_window(session_id, port)
 
-        self.write({"session": session_id, **metadata})
+        log.info("load session=%s path=%s rows=%d browser=%s", session_id, path, metadata["rows"], browser_action)
+
+        self.write({
+            "session": session_id,
+            "server_pid": os.getpid(),
+            "browser_action": browser_action,
+            **metadata,
+        })
 
 
 class SessionPageHandler(tornado.web.RequestHandler):
     def get(self, session_id):
         self.set_header("Content-Type", "text/html")
-        self.write(SESSION_HTML)
+        self.write(SESSION_HTML.replace("__SESSION_ID__", session_id))
 
 
 SESSION_HTML = """\
@@ -115,7 +127,7 @@ SESSION_HTML = """\
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Buckaroo</title>
+    <title>Buckaroo — __SESSION_ID__</title>
     <link rel="stylesheet" href="/static/compiled.css">
     <link rel="stylesheet" href="/static/standalone.css">
     <style>

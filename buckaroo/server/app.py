@@ -1,9 +1,13 @@
 import os
+import time
+
 import tornado.web
 
 from buckaroo.server.handlers import HealthHandler, LoadHandler, SessionPageHandler
 from buckaroo.server.websocket_handler import DataStreamHandler
 from buckaroo.server.session import SessionManager
+
+SERVER_START_TIME = time.time()
 
 
 def make_app(sessions: SessionManager | None = None, port: int = 8888, open_browser: bool = True) -> tornado.web.Application:
@@ -23,4 +27,5 @@ def make_app(sessions: SessionManager | None = None, port: int = 8888, open_brow
         port=port,
         open_browser=open_browser,
         static_path=os.path.abspath(static_path),
+        server_start_time=SERVER_START_TIME,
     )

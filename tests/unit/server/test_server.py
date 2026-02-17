@@ -44,7 +44,10 @@ class TestHealth(tornado.testing.AsyncHTTPTestCase):
         resp = self.fetch("/health")
         self.assertEqual(resp.code, 200)
         body = json.loads(resp.body)
-        self.assertEqual(body, {"status": "ok"})
+        self.assertEqual(body["status"], "ok")
+        self.assertIn("pid", body)
+        self.assertIn("started", body)
+        self.assertIn("uptime_s", body)
 
 
 class TestLoad(tornado.testing.AsyncHTTPTestCase):

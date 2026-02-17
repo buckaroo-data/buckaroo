@@ -47,24 +47,37 @@ def view(path: str) -> str:
     return f"Use the view_data tool to load and display the file at {path}"
 
 
-def _health_ok() -> bool:
+def _health_check() -> dict | None:
+    """Returns the health response dict, or None if the server isn't reachable."""
     try:
         resp = urlopen(f"{SERVER_URL}/health", timeout=2)
-        ok = resp.status == 200
-        log.debug("Health check: status=%d ok=%s", resp.status, ok)
-        return ok
+        if resp.status == 200:
+            data = json.loads(resp.read())
+            log.debug("Health check OK: %s", data)
+            return data
     except (URLError, OSError) as exc:
         log.debug("Health check failed: %s", exc)
-        return False
+    return None
 
 
-def ensure_server() -> None:
-    """Start the Buckaroo data server if it isn't already running."""
-    if _health_ok():
-        log.info("Server already running")
-        return
+def ensure_server() -> dict:
+    """Start the Buckaroo data server if it isn't already running.
 
-    cmd = [sys.executable, "-m", "buckaroo.server", "--no-browser"]
+    Returns a dict with:
+      - server_status: "reused" or "started"
+      - server_pid: int
+      - server_uptime_s: float
+    """
+    health = _health_check()
+    if health:
+        log.info("Server already running — pid=%s uptime=%.0fs", health.get("pid"), health.get("uptime_s", 0))
+        return {
+            "server_status": "reused",
+            "server_pid": health.get("pid"),
+            "server_uptime_s": health.get("uptime_s", 0),
+        }
+
+    cmd = [sys.executable, "-m", "buckaroo.server"]
     log.info("Starting server: %s", " ".join(cmd))
 
     server_log = os.path.join(LOG_DIR, "server.log")
@@ -73,9 +86,14 @@ def ensure_server() -> None:
 
     for i in range(20):
         time.sleep(0.25)
-        if _health_ok():
-            log.info("Server ready after %.1fs", (i + 1) * 0.25)
-            return
+        health = _health_check()
+        if health:
+            log.info("Server ready after %.1fs — pid=%s", (i + 1) * 0.25, health.get("pid"))
+            return {
+                "server_status": "started",
+                "server_pid": health.get("pid"),
+                "server_uptime_s": health.get("uptime_s", 0),
+            }
 
     log.error("Server failed to start within 5s — see %s", server_log)
     raise RuntimeError(f"Failed to start Buckaroo data server — see {server_log}")
@@ -92,7 +110,7 @@ def view_data(path: str) -> str:
     log.info("view_data called — path=%s", path)
 
     try:
-        ensure_server()
+        server_info = ensure_server()
     except Exception:
         log.error("ensure_server failed:\n%s", traceback.format_exc())
         raise
@@ -106,7 +124,7 @@ def view_data(path: str) -> str:
             data=payload,
             headers={"Content-Type": "application/json"},
         )
-        resp = urlopen(req, timeout=10)
+        resp = urlopen(req, timeout=30)
         body = resp.read()
         log.debug("Response status=%d body=%s", resp.status, body[:500])
     except Exception as exc:
@@ -127,13 +145,19 @@ def view_data(path: str) -> str:
     col_lines = "\n".join(f"  - {c['name']} ({c['dtype']})" for c in cols)
 
     url = f"{SERVER_URL}/s/{SESSION_ID}"
+    browser_action = result.get("browser_action", "unknown")
+    server_pid = result.get("server_pid", server_info.get("server_pid", "?"))
+
     summary = (
         f"Loaded **{os.path.basename(path)}** — "
         f"{rows:,} rows, {len(cols)} columns\n\n"
         f"Columns:\n{col_lines}\n\n"
-        f"Interactive view: {url}"
+        f"Interactive view: {url}\n"
+        f"Server: pid={server_pid} ({server_info['server_status']}) | "
+        f"Browser: {browser_action} | Session: {SESSION_ID}"
     )
-    log.info("view_data success — %d rows, %d cols", rows, len(cols))
+    log.info("view_data success — %d rows, %d cols, browser=%s, server=%s(%s)",
+             rows, len(cols), browser_action, server_pid, server_info["server_status"])
     return summary
 
 
