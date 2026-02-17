@@ -380,12 +380,6 @@ div.dependent-tabs ul.tabs li.active {
 
 
 
-/* Utility classes used by components */
-.flex { display: flex; }
-.flex-col { flex-direction: column; }
-/* orig-df uses "flex flex-row" but layout must be column (status bar on top, table below) */
-.orig-df.flex-row { flex-direction: column; }
-
 .status-bar {
     /*
       useful debugging props.  maybe figure out a way to turn on/off in storybook
@@ -394,15 +388,7 @@ div.dependent-tabs ul.tabs li.active {
     background:orange;
 
    */
-    margin-bottom: 0;
-}
 
-/* Remove the gap between status-bar and df-viewer in the buckaroo widget */
-.buckaroo-widget .df-viewer {
-    margin-top: 0;
-}
-.buckaroo-widget .df-viewer .theme-hanger {
-    margin-top: -12px;
 }
 .status-bar .ag-center-cols-viewport {
     min-height: unset !important;

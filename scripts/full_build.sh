@@ -3,6 +3,7 @@ set -e
 
 # Clean previous builds
 rm -rf packages/buckaroo-js-core/dist || true
+rm -f packages/buckaroo-js-core/tsconfig.tsbuildinfo || true
 rm -rf buckaroo/static/*.js buckaroo/static/*.css || true
 
 # Install all workspace dependencies (once)
