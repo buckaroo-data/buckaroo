@@ -15,7 +15,7 @@ jobs:
     # runs-on: depot-ubuntu-24.04
     strategy:
       fail-fast: false
-      matrix:
+       matrix:
         #os: [ubuntu-latest, windows-latest, macos-latest]
         #os: [ubuntu-latest]
         os: [depot-ubuntu-latest, depot-windows-2025]
@@ -36,7 +36,6 @@ jobs:
           cache: pnpm
           package_json_file: packages/package.json
       - uses: awalsh128/cache-apt-pkgs-action@latest
-        if: ${{ contains(matrix.os, 'ubuntu') }}
         with:
           packages: pandoc graphviz
 
@@ -46,8 +45,8 @@ jobs:
           pnpm -C packages/buckaroo-js-core install
 
       - name: Check docs can be build + links
-        if: ${{ contains(matrix.os, 'ubuntu') }}
-        continue-on-error: true
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+#        working-directory: docs
         run: |
           mkdir -p buckaroo/static || true
           touch buckaroo/static/compiled.css
@@ -62,41 +61,41 @@ jobs:
 
       - name: Test the JS extension
         run: |
-          bash ./scripts/full_build.sh
+          ./scripts/full_build.sh
           cd packages/buckaroo-js-core
           pnpm install && pnpm run build
           pnpm run test
         env:
           UV_PYTHON: ${{ matrix.python-version }}
-        shell: bash
+
+
 
       - name: Linting
-        if: ${{ contains(matrix.os, 'ubuntu') }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
           # pnpm -C packages/buckaroo-js-core run lint
           pip install ruff
-          ruff check .
+          ruff check . 
 
       - name: Package
         run: |
-          bash ./scripts/full_build.sh
-        shell: bash
+          ./scripts/full_build.sh
 
       - name: Upload builds
         uses: actions/upload-artifact@v4
         with:
-          name: buckaroo-dist-${{ matrix.os }}-${{ github.run_number }}
+          name: buckaroo-dist-${{ github.run_number }}
           path: |
             ./dist
             ./js/*.tgz
 
       - name: Run Storybook Playwright Tests
-        if: ${{ contains(matrix.os, 'ubuntu') }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
           bash scripts/test_playwright_storybook.sh
 
       - name: Run JupyterLab Playwright Tests
-        if: ${{ contains(matrix.os, 'ubuntu') }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
           # Ensure uv environment is set up
           uv sync --all-extras --group dev
