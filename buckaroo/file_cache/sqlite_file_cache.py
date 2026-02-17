@@ -5,7 +5,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
-import polars as pl
 from io import BytesIO
 
 from .base import SummaryStats, AbstractFileCache
@@ -117,6 +116,7 @@ class SQLiteFileCache(AbstractFileCache):
 
     def _merged_sd_to_parquet_blob(self, merged_sd: dict[str, dict[str, Any]]) -> bytes:
         """Convert merged_sd dict to parquet blob for storage."""
+        import polars as pl
         # Store as parquet with one row per (column, stat_key) pair
         # Store all values as JSON strings to avoid schema inference issues with mixed types
         rows = []
@@ -155,6 +155,7 @@ class SQLiteFileCache(AbstractFileCache):
     
     def _parquet_blob_to_merged_sd(self, blob: bytes) -> Optional[dict[str, dict[str, Any]]]:
         """Convert parquet blob back to merged_sd dict."""
+        import polars as pl
         if not blob:
             return None
         try:
@@ -266,6 +267,7 @@ class SQLiteFileCache(AbstractFileCache):
 
     # Helpers ---------------------------------------------------------------
     def _dict_to_parquet_bytes(self, d: dict[str, Any]) -> bytes:
+        import polars as pl
         # Create a single-row DataFrame with dynamic columns
         # Convert non-serializable values to strings to avoid parquet errors
         serializable_dict = {}
@@ -290,6 +292,7 @@ class SQLiteFileCache(AbstractFileCache):
         return buf.getvalue()
 
     def _parquet_bytes_to_dict(self, b: bytes) -> dict[str, Any]:
+        import polars as pl
         buf = BytesIO(b)
         df = pl.read_parquet(buf)
         if df.height == 0:
