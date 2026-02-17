@@ -150,7 +150,16 @@ SESSION_HTML = """\
     <link rel="stylesheet" href="/static/compiled.css">
     <link rel="stylesheet" href="/static/standalone.css">
     <style>
-        html, body, #root { margin: 0; padding: 0; width: 100%; height: 100vh; }
+        html, body, #root { margin: 0; padding: 0; width: 100%; height: 100vh; background: #181D1F; }
+        /* Flex utility classes used by components */
+        .flex { display: flex; }
+        .flex-col { flex-direction: column; }
+        /* orig-df uses "flex flex-row" but layout must be column (status bar on top, table below) */
+        .orig-df.flex-row { flex-direction: column; }
+        /* Match Jupyter's .cell-output-ipywidget-background gap removal */
+        .status-bar { margin-bottom: 0; }
+        .df-viewer { margin-top: 0; }
+        .df-viewer .theme-hanger { margin-top: -12px; }
     </style>
 </head>
 <body>
