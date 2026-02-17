@@ -247,7 +247,7 @@ class TestLoadPushesToWebSocket(tornado.testing.AsyncHTTPTestCase):
         return make_app()
 
     @tornado.testing.gen_test
-    async def test_load_pushes_metadata_to_ws(self):
+    async def test_load_pushes_full_state_to_ws(self):
         with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
             _write_test_csv(f.name)
             try:
@@ -258,15 +258,18 @@ class TestLoadPushesToWebSocket(tornado.testing.AsyncHTTPTestCase):
                 ws = await tornado.websocket.websocket_connect(
                     f"ws://localhost:{self.get_http_port()}/ws/push-1")
 
-                # POST /load (async) — should push metadata to the WS client
+                # POST /load (async) — should push full state to the WS client
                 await _async_fetch(self.get_http_port(), "/load",
                     method="POST",
                     body=json.dumps({"session": "push-1", "path": f.name}))
 
                 msg = await ws.read_message()
                 pushed = json.loads(msg)
-                self.assertEqual(pushed["type"], "metadata")
-                self.assertEqual(pushed["rows"], 5)
+                self.assertEqual(pushed["type"], "initial_state")
+                self.assertEqual(pushed["metadata"]["rows"], 5)
+                self.assertIn("df_display_args", pushed)
+                self.assertIn("df_data_dict", pushed)
+                self.assertIn("df_meta", pushed)
 
                 ws.close()
             finally:

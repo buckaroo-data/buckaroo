@@ -92,19 +92,38 @@ class LoadHandler(tornado.web.RequestHandler):
             session.df_data_dict = display_state["df_data_dict"]
             session.df_meta = display_state["df_meta"]
 
-        # Push metadata to connected WebSocket clients
-        push_msg = json.dumps({"type": "metadata", **metadata})
-        for client in list(session.ws_clients):
-            try:
-                client.write_message(push_msg)
-            except Exception:
-                session.ws_clients.discard(client)
+        # Push full state to connected WebSocket clients so they pick up
+        # the new dataset without a page reload.  This mirrors the
+        # initial_state message sent by DataStreamHandler.open().
+        if session.ws_clients:
+            state_msg = {
+                "type": "initial_state",
+                "metadata": metadata,
+                "df_display_args": session.df_display_args,
+                "df_data_dict": session.df_data_dict,
+                "df_meta": session.df_meta,
+                "mode": session.mode,
+            }
+            if session.mode == "buckaroo":
+                state_msg["buckaroo_state"] = session.buckaroo_state
+                state_msg["buckaroo_options"] = session.buckaroo_options
+                state_msg["command_config"] = session.command_config
+                state_msg["operation_results"] = session.operation_results
+                state_msg["operations"] = session.operations
+            push_msg = json.dumps(state_msg)
+            for client in list(session.ws_clients):
+                try:
+                    client.write_message(push_msg)
+                except Exception:
+                    session.ws_clients.discard(client)
 
         # Browser management: find existing window or create one (disabled in tests)
+        # reload_if_found=True triggers a page reload when the tab already
+        # exists so it picks up the newly-loaded dataset.
         browser_action = "disabled"
         if self.application.settings.get("open_browser", True):
             port = self.application.settings.get("port", 8888)
-            browser_action = find_or_create_session_window(session_id, port)
+            browser_action = find_or_create_session_window(session_id, port, reload_if_found=True)
 
         log.info("load session=%s path=%s rows=%d browser=%s", session_id, path, metadata["rows"], browser_action)
 

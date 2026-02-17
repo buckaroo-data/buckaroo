@@ -46,13 +46,21 @@ def _detect_chromium_browser() -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _applescript_find_and_focus(browser: str, session_id: str, port: int) -> bool:
+def _applescript_find_and_focus(browser: str, session_id: str, port: int, reload: bool = False) -> bool:
     """Find an existing tab by session URL, activate it and its window.
 
     Works even when the tab is buried behind other tabs or the browser is
-    in the background.  Returns True if the tab was found.
+    in the background.  When *reload* is True, also reloads the tab so it
+    picks up freshly-loaded data from the server.
+
+    Order matters: ``activate`` first (brings Chrome forward), then
+    ``set index of w to 1`` last (forces our window on top, overriding
+    whatever z-order ``activate`` imposed).
+
+    Returns True if the tab was found.
     """
     url_fragment = f"localhost:{port}/s/{session_id}"
+    reload_line = "set URL of t to (URL of t)" if reload else ""
     script = f'''
     tell application "{browser}"
         repeat with w in windows
@@ -61,8 +69,9 @@ def _applescript_find_and_focus(browser: str, session_id: str, port: int) -> boo
                 set i to i + 1
                 if URL of t contains "{url_fragment}" then
                     set active tab index of w to i
-                    set index of w to 1
+                    {reload_line}
                     activate
+                    set index of w to 1
                     return "found"
                 end if
             end repeat
@@ -173,16 +182,19 @@ def _app_mode_find_and_focus(session_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def find_or_create_session_window(session_id: str, port: int) -> str:
+def find_or_create_session_window(session_id: str, port: int, reload_if_found: bool = False) -> str:
     """Find and focus the existing browser window for *session_id*, or create one.
 
     Idempotent: calling this multiple times never creates duplicate windows.
 
+    When *reload_if_found* is True and an existing tab is found, the tab is
+    reloaded so it picks up freshly-loaded data from the server.  This is
+    used after ``/load`` replaces the session's dataset with a new file.
+
     Returns a short status string describing what happened, e.g.:
-      "focused existing Google Chrome window"
+      "focused+reloaded existing Google Chrome window"
       "created new Google Chrome window"
       "opened in default browser"
-      "skipped (non-macOS)"
     """
     if platform.system() != "Darwin":
         webbrowser.open(_session_url(session_id, port))
@@ -207,8 +219,9 @@ def find_or_create_session_window(session_id: str, port: int) -> str:
     # Standard mode: try each available Chromium browser
     browser = _detect_chromium_browser()
     if browser:
-        if _applescript_find_and_focus(browser, session_id, port):
-            status = f"focused existing {browser} window"
+        if _applescript_find_and_focus(browser, session_id, port, reload=reload_if_found):
+            verb = "focused+reloaded" if reload_if_found else "focused"
+            status = f"{verb} existing {browser} window"
             log.info(status)
             return status
         if _applescript_create_window(browser, url):
