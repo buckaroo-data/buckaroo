@@ -313,3 +313,12 @@ The JS client handles all rendering, caching (SmartRowCache), and interaction. S
 - Currently in-tree as part of `buckaroo` package
 - For wider distribution: `buckaroo-mcp` on PyPI, `uvx buckaroo-mcp`
 - Claude Desktop config: `{ "command": "uvx", "args": ["buckaroo-mcp"] }`
+
+
+# Open questions
+
+## Electron-lite
+what about my electron-lite idea.  use chrome on the user's machine, but open up a separate instance, and we
+  use that instance for buckaroo stuff.  At some point we'll probably make an electron app, but I'd like to wait
+  on that for a while.
+  
