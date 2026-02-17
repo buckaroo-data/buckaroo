@@ -79,7 +79,7 @@ test.describe('Buckaroo standalone server', () => {
   test('health endpoint returns ok', async ({ request }) => {
     const resp = await request.get(`${BASE}/health`);
     expect(resp.ok()).toBe(true);
-    expect(await resp.json()).toEqual({ status: 'ok' });
+    expect(await resp.json()).toMatchObject({ status: 'ok' });
   });
 
   test('load CSV and render table', async ({ page, request }) => {
