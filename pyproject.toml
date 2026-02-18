@@ -99,7 +99,7 @@ test = [
     "codecov"
 ]
 
-mcp = ["mcp"]
+mcp = ["mcp", "tornado>=6.0"]
 jupyterlab = ["jupyterlab>=3.6.0"]
 notebook = ["notebook>=7.0.0"]
 packaging_tools = [
