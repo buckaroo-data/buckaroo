@@ -3,7 +3,7 @@ import time
 
 import tornado.web
 
-from buckaroo.server.handlers import HealthHandler, LoadHandler, SessionPageHandler
+from buckaroo.server.handlers import HealthHandler, DiagnosticsHandler, LoadHandler, SessionPageHandler
 from buckaroo.server.websocket_handler import DataStreamHandler
 from buckaroo.server.session import SessionManager
 
@@ -19,6 +19,7 @@ def make_app(sessions: SessionManager | None = None, port: int = 8888, open_brow
     return tornado.web.Application(
         [
             (r"/health", HealthHandler),
+            (r"/diagnostics", DiagnosticsHandler),
             (r"/load", LoadHandler),
             (r"/s/([^/]+)", SessionPageHandler),
             (r"/ws/([^/]+)", DataStreamHandler),

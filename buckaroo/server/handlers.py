@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import platform
+import sys
 import time
 import traceback
 
@@ -14,16 +16,93 @@ from buckaroo.server.focus import find_or_create_session_window
 
 log = logging.getLogger("buckaroo.server.handlers")
 
+LOG_DIR = os.path.join(os.path.expanduser("~"), ".buckaroo", "logs")
+
+CRITICAL_STATIC_FILES = [
+    "standalone.js",
+    "standalone.css",
+    "compiled.css",
+    "widget.js",
+]
+
+
+def _get_static_file_info(static_path: str) -> dict:
+    """Check existence and size of critical static files."""
+    result = {}
+    for name in CRITICAL_STATIC_FILES:
+        fpath = os.path.join(static_path, name)
+        if os.path.isfile(fpath):
+            result[name] = {"exists": True, "size_bytes": os.path.getsize(fpath)}
+        else:
+            result[name] = {"exists": False, "size_bytes": 0}
+    return result
+
+
+def _check_dependency(module_name: str) -> bool:
+    try:
+        __import__(module_name)
+        return True
+    except ImportError:
+        return False
+
 
 class HealthHandler(tornado.web.RequestHandler):
     def get(self):
         start_time = self.application.settings.get("server_start_time", 0)
+        static_path = self.application.settings.get("static_path", "")
         self.write({
             "status": "ok",
             "pid": os.getpid(),
             "started": start_time,
             "uptime_s": round(time.time() - start_time, 1),
+            "static_files": _get_static_file_info(static_path),
         })
+
+
+class DiagnosticsHandler(tornado.web.RequestHandler):
+    def get(self):
+        import tornado as _tornado
+        import buckaroo
+
+        static_path = self.application.settings.get("static_path", "")
+        start_time = self.application.settings.get("server_start_time", 0)
+
+        self.write({
+            "status": "ok",
+            "pid": os.getpid(),
+            "uptime_s": round(time.time() - start_time, 1),
+            "python_version": platform.python_version(),
+            "python_executable": sys.executable,
+            "platform": platform.platform(),
+            "buckaroo_version": getattr(buckaroo, "__version__", "unknown"),
+            "tornado_version": _tornado.version,
+            "static_path": os.path.abspath(static_path),
+            "static_files": _get_static_file_info(static_path),
+            "log_dir": LOG_DIR,
+            "log_files": _list_log_files(),
+            "dependencies": {
+                "tornado": _check_dependency("tornado"),
+                "pandas": _check_dependency("pandas"),
+                "pyarrow": _check_dependency("pyarrow"),
+                "fastparquet": _check_dependency("fastparquet"),
+                "mcp": _check_dependency("mcp"),
+                "polars": _check_dependency("polars"),
+            },
+        })
+
+
+def _list_log_files() -> list:
+    """List log files in the buckaroo log directory."""
+    try:
+        if os.path.isdir(LOG_DIR):
+            return [
+                {"name": f, "size_bytes": os.path.getsize(os.path.join(LOG_DIR, f))}
+                for f in sorted(os.listdir(LOG_DIR))
+                if f.endswith(".log")
+            ]
+    except OSError:
+        pass
+    return []
 
 
 class LoadHandler(tornado.web.RequestHandler):

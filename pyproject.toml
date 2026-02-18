@@ -41,7 +41,7 @@ dependencies = [
     "numpy >= 2.2.5; python_version >= '3.13'",
 ]
 
-version = "0.12.6"
+version = "0.12.7"
 
 
 [project.license]
@@ -99,7 +99,7 @@ test = [
     "codecov"
 ]
 
-mcp = ["mcp"]
+mcp = ["mcp", "tornado>=6.0", "polars"]
 jupyterlab = ["jupyterlab>=3.6.0"]
 notebook = ["notebook>=7.0.0"]
 packaging_tools = [
@@ -116,7 +116,7 @@ Homepage = "https://github.com/paddymul/buckaroo"
 
 [tool.hatch.build]
 only-packages = true
-artifacts = ["buckaroo/static/widget.js", "buckaroo/static/compiled.css", "scripts/hatch_build.py"]
+artifacts = ["buckaroo/static/widget.js", "buckaroo/static/compiled.css", "buckaroo/static/standalone.js", "buckaroo/static/standalone.css","scripts/hatch_build.py"]
 
 [tool.hatch.build.force-include]
 "buckaroo_mcp_tool.py" = "buckaroo_mcp_tool.py"
