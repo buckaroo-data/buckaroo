@@ -1,8 +1,10 @@
 """Buckaroo MCP tool — lets Claude Code view tabular data files."""
 
+import atexit
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -30,6 +32,45 @@ SERVER_URL = f"http://localhost:{SERVER_PORT}"
 SESSION_ID = uuid.uuid4().hex[:12]
 
 log.info("MCP tool starting — server=%s session=%s", SERVER_URL, SESSION_ID)
+
+# Track server subprocess so we can kill it on exit
+_server_proc: subprocess.Popen | None = None
+
+
+def _cleanup_server():
+    """Terminate the data server if we started it."""
+    global _server_proc
+    if _server_proc is None:
+        return
+    try:
+        if _server_proc.poll() is None:  # still running
+            log.info("Shutting down server (pid=%d)", _server_proc.pid)
+            _server_proc.terminate()
+            try:
+                _server_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                log.warning("Server didn't stop after SIGTERM, sending SIGKILL")
+                _server_proc.kill()
+    except OSError as exc:
+        log.debug("Cleanup error (harmless): %s", exc)
+    _server_proc = None
+
+
+atexit.register(_cleanup_server)
+
+
+def _signal_handler(signum, frame):
+    """Handle SIGTERM/SIGINT by cleaning up the server, then re-raising."""
+    log.info("Received signal %s — cleaning up", signal.Signals(signum).name)
+    _cleanup_server()
+    # Re-raise with default handler so the process actually exits
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+signal.signal(signal.SIGTERM, _signal_handler)
+signal.signal(signal.SIGINT, _signal_handler)
+
 
 mcp = FastMCP(
     "buckaroo-table",
@@ -125,12 +166,13 @@ def ensure_server() -> dict:
             "server_uptime_s": health.get("uptime_s", 0),
         }
 
+    global _server_proc
     cmd = [sys.executable, "-m", "buckaroo.server"]
     log.info("Starting server: %s", " ".join(cmd))
 
     server_log = os.path.join(LOG_DIR, "server.log")
     server_log_fh = open(server_log, "a")
-    subprocess.Popen(cmd, stdout=server_log_fh, stderr=server_log_fh)
+    _server_proc = subprocess.Popen(cmd, stdout=server_log_fh, stderr=server_log_fh)
 
     for i in range(20):
         time.sleep(0.25)
