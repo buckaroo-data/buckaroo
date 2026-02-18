@@ -102,6 +102,7 @@ class TestServerProcessCleanup:
         m = buckaroo_mcp_tool
 
         fake_proc = MagicMock(spec=subprocess.Popen)
+        fake_proc.pid = 99999
         fake_health = {"pid": 12345, "uptime_s": 0.1, "static_files": {}}
 
         with (
@@ -111,6 +112,7 @@ class TestServerProcessCleanup:
             patch("time.sleep"),
         ):
             old_proc = m._server_proc
+            old_monitor = getattr(m, "_server_monitor", None)
             try:
                 result = m.ensure_server()
                 assert result["server_status"] == "started"
@@ -119,6 +121,14 @@ class TestServerProcessCleanup:
                 )
             finally:
                 m._server_proc = old_proc
+                if hasattr(m, "_server_monitor"):
+                    if m._server_monitor is not None and m._server_monitor is not old_monitor:
+                        try:
+                            m._server_monitor.terminate()
+                            m._server_monitor.wait(timeout=2)
+                        except (OSError, subprocess.TimeoutExpired):
+                            pass
+                    m._server_monitor = old_monitor
 
     def test_cleanup_terminates_running_process(self):
         """_cleanup_server() must actually terminate a running subprocess."""

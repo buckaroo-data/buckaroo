@@ -35,25 +35,59 @@ log.info("MCP tool starting — server=%s session=%s", SERVER_URL, SESSION_ID)
 
 # Track server subprocess so we can kill it on exit
 _server_proc: subprocess.Popen | None = None
+_server_monitor: subprocess.Popen | None = None
+
+
+def _start_server_monitor(server_pid: int):
+    """Spawn a tiny watchdog process that kills the server if we die.
+
+    The monitor blocks on a pipe from us.  When we exit — for ANY reason,
+    including SIGKILL or os._exit() — the OS closes the pipe and the
+    monitor wakes up and sends SIGTERM to the server.
+    """
+    global _server_monitor
+    monitor_code = (
+        "import os, sys, signal\n"
+        f"server_pid = {server_pid}\n"
+        "sys.stdin.buffer.read()\n"
+        "try:\n"
+        f"    os.kill(server_pid, signal.SIGTERM)\n"
+        "except OSError:\n"
+        "    pass\n"
+    )
+    _server_monitor = subprocess.Popen(
+        [sys.executable, "-c", monitor_code],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    log.info("Started server monitor (pid=%d) watching server pid=%d",
+             _server_monitor.pid, server_pid)
 
 
 def _cleanup_server():
-    """Terminate the data server if we started it."""
-    global _server_proc
-    if _server_proc is None:
-        return
-    try:
-        if _server_proc.poll() is None:  # still running
-            log.info("Shutting down server (pid=%d)", _server_proc.pid)
-            _server_proc.terminate()
-            try:
-                _server_proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                log.warning("Server didn't stop after SIGTERM, sending SIGKILL")
-                _server_proc.kill()
-    except OSError as exc:
-        log.debug("Cleanup error (harmless): %s", exc)
-    _server_proc = None
+    """Terminate the data server and monitor if we started them."""
+    global _server_proc, _server_monitor
+    if _server_proc is not None:
+        try:
+            if _server_proc.poll() is None:  # still running
+                log.info("Shutting down server (pid=%d)", _server_proc.pid)
+                _server_proc.terminate()
+                try:
+                    _server_proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    log.warning("Server didn't stop after SIGTERM, sending SIGKILL")
+                    _server_proc.kill()
+        except OSError as exc:
+            log.debug("Cleanup error (harmless): %s", exc)
+        _server_proc = None
+    if _server_monitor is not None:
+        try:
+            _server_monitor.terminate()
+            _server_monitor.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        _server_monitor = None
 
 
 atexit.register(_cleanup_server)
@@ -187,6 +221,7 @@ def ensure_server() -> dict:
             ]
             if missing:
                 log.warning("Static files missing or empty: %s — pages may be blank", missing)
+            _start_server_monitor(_server_proc.pid)
             return {
                 "server_status": "started",
                 "server_pid": health.get("pid"),
