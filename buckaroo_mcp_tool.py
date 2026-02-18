@@ -60,6 +60,54 @@ def _health_check() -> dict | None:
     return None
 
 
+def _get_diagnostics() -> dict | None:
+    """Fetch /diagnostics from the running server."""
+    try:
+        resp = urlopen(f"{SERVER_URL}/diagnostics", timeout=5)
+        if resp.status == 200:
+            return json.loads(resp.read())
+    except (URLError, OSError):
+        pass
+    return None
+
+
+def _read_server_log_tail(n_lines: int = 30) -> str:
+    """Read the last N lines of the server log for diagnostics."""
+    server_log = os.path.join(LOG_DIR, "server.log")
+    try:
+        if os.path.isfile(server_log):
+            with open(server_log) as f:
+                lines = f.readlines()
+            return "".join(lines[-n_lines:])
+    except OSError:
+        pass
+    return "(server log not found)"
+
+
+def _format_startup_failure() -> str:
+    """Build a detailed error message when the server fails to start."""
+    server_log = os.path.join(LOG_DIR, "server.log")
+    mcp_log = LOG_FILE
+
+    tail = _read_server_log_tail(20)
+
+    return (
+        f"Buckaroo data server failed to start.\n\n"
+        f"## Diagnostic info\n"
+        f"- Python: {sys.executable} ({sys.version.split()[0]})\n"
+        f"- Server URL: {SERVER_URL}\n"
+        f"- Log dir: {LOG_DIR}\n\n"
+        f"## Server log (last 20 lines)\n```\n{tail}\n```\n\n"
+        f"## What to check\n"
+        f"1. Is port {SERVER_PORT} already in use? "
+        f"(`lsof -i :{SERVER_PORT}`)\n"
+        f"2. Check the full server log: `cat {server_log}`\n"
+        f"3. Check the MCP tool log: `cat {mcp_log}`\n"
+        f"4. Try starting the server manually: "
+        f"`{sys.executable} -m buckaroo.server --no-browser --port {SERVER_PORT}`\n"
+    )
+
+
 def ensure_server() -> dict:
     """Start the Buckaroo data server if it isn't already running.
 
@@ -89,6 +137,14 @@ def ensure_server() -> dict:
         health = _health_check()
         if health:
             log.info("Server ready after %.1fs — pid=%s", (i + 1) * 0.25, health.get("pid"))
+            # Check static files on first start
+            static_files = health.get("static_files", {})
+            missing = [
+                name for name, info in static_files.items()
+                if not info.get("exists") or info.get("size_bytes", 0) == 0
+            ]
+            if missing:
+                log.warning("Static files missing or empty: %s — pages may be blank", missing)
             return {
                 "server_status": "started",
                 "server_pid": health.get("pid"),
@@ -96,7 +152,7 @@ def ensure_server() -> dict:
             }
 
     log.error("Server failed to start within 5s — see %s", server_log)
-    raise RuntimeError(f"Failed to start Buckaroo data server — see {server_log}")
+    raise RuntimeError(_format_startup_failure())
 
 
 def _view_impl(path: str) -> str:
@@ -174,6 +230,73 @@ def buckaroo_table(path: str) -> str:
     of the dataset (row count, column names and dtypes).
     """
     return _view_impl(path)
+
+
+@mcp.tool()
+def buckaroo_diagnostics() -> str:
+    """Run diagnostics on the Buckaroo data server.
+
+    Returns server health, static file status, dependency info, and log
+    locations to help debug issues like blank pages or server startup failures.
+    """
+    log.info("buckaroo_diagnostics called")
+
+    # Try to reach the server
+    health = _health_check()
+    if not health:
+        return (
+            "Buckaroo server is NOT running.\n\n"
+            + _format_startup_failure()
+        )
+
+    # Fetch full diagnostics
+    diag = _get_diagnostics()
+    if not diag:
+        return (
+            f"Server is running (pid={health.get('pid')}) but /diagnostics "
+            f"endpoint unavailable. Server may be an older version.\n\n"
+            f"Health: {json.dumps(health, indent=2)}"
+        )
+
+    # Format static file warnings
+    static_files = diag.get("static_files", {})
+    warnings = []
+    for name, info in static_files.items():
+        if not info.get("exists"):
+            warnings.append(f"  MISSING: {name}")
+        elif info.get("size_bytes", 0) == 0:
+            warnings.append(f"  EMPTY: {name} (0 bytes — will cause blank page)")
+
+    static_summary = "\n".join(
+        f"  {name}: {'OK' if info.get('exists') and info.get('size_bytes', 0) > 0 else 'PROBLEM'} "
+        f"({info.get('size_bytes', 0):,} bytes)"
+        for name, info in static_files.items()
+    )
+
+    deps = diag.get("dependencies", {})
+    dep_lines = "\n".join(
+        f"  {name}: {'installed' if ok else 'MISSING'}"
+        for name, ok in deps.items()
+    )
+
+    result = (
+        f"## Buckaroo Server Diagnostics\n\n"
+        f"Server: pid={diag.get('pid')} uptime={diag.get('uptime_s')}s\n"
+        f"Python: {diag.get('python_version')} ({diag.get('python_executable')})\n"
+        f"Buckaroo: {diag.get('buckaroo_version')}\n"
+        f"Tornado: {diag.get('tornado_version')}\n"
+        f"Platform: {diag.get('platform')}\n\n"
+        f"### Static files\n{static_summary}\n\n"
+        f"### Dependencies\n{dep_lines}\n\n"
+        f"### Log files\n"
+        f"  Log dir: {diag.get('log_dir')}\n"
+        f"  Static path: {diag.get('static_path')}\n"
+    )
+
+    if warnings:
+        result += "\n### WARNINGS\n" + "\n".join(warnings) + "\n"
+
+    return result
 
 
 def main():
