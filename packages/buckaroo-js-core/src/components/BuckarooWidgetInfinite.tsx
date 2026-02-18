@@ -152,7 +152,7 @@ export function BuckarooInfiniteWidget({
             //
             // putting buckaroo_state.post_processing doesn't work properly
         //}, [operations, buckaroo_state]);
-        }, [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method]);
+        }, [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, JSON.stringify(buckaroo_state.quick_command_args)]);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 
         const cDisp = df_display_args[buckaroo_state.df_display];
@@ -168,7 +168,7 @@ export function BuckarooInfiniteWidget({
         //used to denote "this dataframe has been transformed", This is
         //evantually spliced back into the request args from scrolling/
         //the data source
-        const outsideDFParams = [operations, buckaroo_state.post_processing];
+        const outsideDFParams = [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args];
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
              style={{ width: "100%", height: "100%" }}>
