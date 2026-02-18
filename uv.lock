@@ -232,6 +232,7 @@ jupyterlab = [
 ]
 mcp = [
     { name = "mcp" },
+    { name = "tornado" },
 ]
 notebook = [
     { name = "notebook" },
@@ -336,6 +337,7 @@ requires-dist = [
     { name = "solara", extras = ["pytest"], marker = "extra == 'dev'" },
     { name = "sphinx", marker = "extra == 'dev'", specifier = ">=1.5" },
     { name = "toml", marker = "extra == 'dev'" },
+    { name = "tornado", marker = "extra == 'mcp'", specifier = ">=6.0" },
     { name = "twine", marker = "extra == 'packaging-tools'" },
     { name = "watchfiles", marker = "extra == 'dev'" },
 ]
