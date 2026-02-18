@@ -6,7 +6,7 @@ import pandas as pd
 from traitlets import Unicode, Any, observe, Dict
 
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, SDType
-from ..serialization_utils import pd_to_obj    
+from ..serialization_utils import pd_to_obj, sd_to_parquet_b64
 from buckaroo.pluggable_analysis_framework.utils import (filter_analysis)
 from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
 from .autocleaning import SentinelAutocleaning
@@ -416,9 +416,11 @@ class CustomizableDataflow(DataFlow):
     # ### end summary stats block        
 
     def _sd_to_jsondf(self, sd:SDType):
-        """exists so this can be overriden for polars  """
-        temp_sd = sd.copy()
-        return self._df_to_obj(pd.DataFrame(temp_sd))
+        """Serialize summary stats dict. Returns parquet-b64 tagged dict by default.
+
+        Exists so this can be overridden for polars/geopandas.
+        """
+        return sd_to_parquet_b64(sd)
 
     def _df_to_obj(self, df:pd.DataFrame) -> TDict[str, TAny]:
         return pd_to_obj(self.sampling_klass.serialize_sample(df))

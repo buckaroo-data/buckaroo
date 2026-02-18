@@ -190,6 +190,15 @@ export type DFDataRow = Record<
 
 export type DFData = DFDataRow[];
 
+// Tagged union for multi-format data transfer (JSON or parquet-b64)
+export interface ParquetB64Payload {
+    format: 'parquet_b64';
+    data: string;  // base64-encoded parquet bytes
+}
+
+// A value in df_data_dict can be plain JSON (DFData) or a tagged parquet payload
+export type DFDataOrPayload = DFData | ParquetB64Payload;
+
 /*
 When I want to start tagging metadata onto DFData
 export interface DFData {

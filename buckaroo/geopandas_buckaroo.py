@@ -4,7 +4,7 @@ import buckaroo
 from buckaroo.customizations.styling import DefaultMainStyling, StylingAnalysis
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 from .dataflow.dataflow_extras import (Sampling)
-from buckaroo.serialization_utils import pd_to_obj
+from buckaroo.serialization_utils import pd_to_obj, sd_to_parquet_b64
 from buckaroo.customizations.analysis import (TypingStats)
 import geopandas
 
@@ -61,16 +61,11 @@ class GeopandasBase(buckaroo.BuckarooWidget):
         return pd_to_obj(self.sampling_klass.serialize_sample(pd_df))
 
     def _sd_to_jsondf(self, sd):
-        """exists so this can be overriden for polars  """
+        """Serialize summary stats dict as parquet-b64."""
         temp_sd = sd.copy()
-        #FIXME add actual test around weird index behavior
         if 'index' in temp_sd:
             del temp_sd['index']
-        # we need this to go through the regular pandas path, not our
-        # special serialization the special serialization gives
-        # numeric indexes, when summary stats needs string indexes of
-        # the stats name
-        return pd_to_obj(pd.DataFrame(temp_sd))
+        return sd_to_parquet_b64(temp_sd)
 
 class GeopandasBuckarooWidget(GeopandasBase):
     pass
