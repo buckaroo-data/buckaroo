@@ -48,10 +48,12 @@ def _check_dependency(module_name: str) -> bool:
 
 class HealthHandler(tornado.web.RequestHandler):
     def get(self):
+        import buckaroo
         start_time = self.application.settings.get("server_start_time", 0)
         static_path = self.application.settings.get("static_path", "")
         self.write({
             "status": "ok",
+            "version": getattr(buckaroo, "__version__", "unknown"),
             "pid": os.getpid(),
             "started": start_time,
             "uptime_s": round(time.time() - start_time, 1),

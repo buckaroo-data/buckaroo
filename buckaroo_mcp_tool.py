@@ -191,14 +191,34 @@ def ensure_server() -> dict:
       - server_pid: int
       - server_uptime_s: float
     """
+    import buckaroo
+    expected_version = getattr(buckaroo, "__version__", "unknown")
+
     health = _health_check()
     if health:
-        log.info("Server already running — pid=%s uptime=%.0fs", health.get("pid"), health.get("uptime_s", 0))
-        return {
-            "server_status": "reused",
-            "server_pid": health.get("pid"),
-            "server_uptime_s": health.get("uptime_s", 0),
-        }
+        running_version = health.get("version", "unknown")
+        if running_version == expected_version:
+            log.info("Server already running (v%s) — pid=%s uptime=%.0fs",
+                     running_version, health.get("pid"), health.get("uptime_s", 0))
+            return {
+                "server_status": "reused",
+                "server_pid": health.get("pid"),
+                "server_uptime_s": health.get("uptime_s", 0),
+            }
+        else:
+            old_pid = health.get("pid")
+            log.info("Version mismatch: running=%s expected=%s — killing old server (pid=%s)",
+                     running_version, expected_version, old_pid)
+            if old_pid:
+                try:
+                    os.kill(old_pid, signal.SIGTERM)
+                    time.sleep(1)
+                    # Verify it's gone; SIGKILL if not
+                    if _health_check():
+                        os.kill(old_pid, signal.SIGKILL)
+                        time.sleep(0.5)
+                except OSError as exc:
+                    log.debug("Kill old server error (harmless): %s", exc)
 
     global _server_proc
     cmd = [sys.executable, "-m", "buckaroo.server"]
