@@ -123,6 +123,11 @@ export interface DFViewerConfig {
 }
 export type DFDataRow = Record<string, string | number | boolean | any[] | Record<string, any> | null>;
 export type DFData = DFDataRow[];
+export interface ParquetB64Payload {
+    format: 'parquet_b64';
+    data: string;
+}
+export type DFDataOrPayload = DFData | ParquetB64Payload;
 export interface DFWhole {
     dfviewer_config: DFViewerConfig;
     data: DFData;
