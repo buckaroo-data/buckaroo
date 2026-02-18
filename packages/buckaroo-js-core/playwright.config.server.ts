@@ -8,7 +8,7 @@ const PYTHON = process.env.BUCKAROO_SERVER_PYTHON ?? 'uv run python';
 
 export default defineConfig({
   testDir: './pw-tests',
-  testMatch: ['server.spec.ts', 'server-buckaroo-summary.spec.ts'],
+  testMatch: ['server.spec.ts', 'server-buckaroo-search.spec.ts', 'server-buckaroo-summary.spec.ts'],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
