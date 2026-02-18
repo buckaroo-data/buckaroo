@@ -139,14 +139,14 @@ def test_lazy_widget_multiprocessing_executor_populates_stats():
 
     # If we waited long enough and async computation completed, we should have real stats
     if len(widget._df.merged_sd) > 0:
-        data_rows = [row for row in all_stats if row.get('index') not in ['orig_col_name', 'rewritten_col_name']]
-        if data_rows:
-            first_data_row = data_rows[0]
-            print(f"First data row: {first_data_row}")
-            # Should have some non-zero stats
+        # Find the 'length' stat row specifically
+        length_row = next((row for row in all_stats if row.get('index') == 'length'), None)
+        if length_row:
+            print(f"Length row: {length_row}")
+            # Should have non-zero length for at least one column
             has_stats = any(
-                first_data_row.get(k, 0) != 0 
-                for k in ['unique_count', 'null_count', 'length'] 
-                if k in first_data_row
+                length_row.get(k, 0) > 0
+                for k in ['a', 'b', 'c']
+                if k in length_row
             )
-            assert has_stats, f"First data row has no stats: {first_data_row}"
+            assert has_stats, f"Length row has no stats: {length_row}"
