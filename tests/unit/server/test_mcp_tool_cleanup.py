@@ -280,3 +280,196 @@ sys.stdin.buffer.read()
                     os.kill(server_pid, signal.SIGKILL)
                 except OSError:
                     pass
+
+
+# ---------------------------------------------------------------------------
+# Tests — monitor starts immediately (even if health check fails)
+# ---------------------------------------------------------------------------
+
+class TestMonitorStartsEarly:
+    """The pipe-based monitor must start RIGHT AFTER Popen, not only
+    after the health check succeeds.  Otherwise, if the health check
+    fails (e.g. server takes too long), the server is orphaned."""
+
+    def test_monitor_starts_before_health_check(self):
+        """After Popen is called, _start_server_monitor must be called
+        before the health-check loop returns — even if the health check
+        never succeeds (all attempts return None)."""
+        m = buckaroo_mcp_tool
+
+        fake_proc = MagicMock(spec=subprocess.Popen)
+        fake_proc.pid = 99999
+
+        call_order = []
+
+        def tracking_popen(*args, **kwargs):
+            call_order.append("Popen")
+            return fake_proc
+
+        def tracking_monitor(server_pid):
+            call_order.append("monitor")
+
+        old_proc = m._server_proc
+        old_monitor = getattr(m, "_server_monitor", None)
+        try:
+            with (
+                # Health check always fails → health-check loop exhausted
+                patch.object(m, "_health_check", return_value=None),
+                patch("subprocess.Popen", side_effect=tracking_popen),
+                patch.object(m, "_start_server_monitor", side_effect=tracking_monitor),
+                patch("builtins.open", MagicMock()),
+                patch("time.sleep"),
+                patch.object(m, "_format_startup_failure", return_value="startup failed"),
+            ):
+                try:
+                    m.ensure_server()
+                except RuntimeError:
+                    pass  # expected — health check never succeeded
+
+            assert "Popen" in call_order, "Popen was never called"
+            assert "monitor" in call_order, (
+                "_start_server_monitor was never called — monitor only "
+                "starts after health check, so server will be orphaned "
+                "if health check fails"
+            )
+            popen_idx = call_order.index("Popen")
+            monitor_idx = call_order.index("monitor")
+            assert monitor_idx == popen_idx + 1, (
+                f"_start_server_monitor called at index {monitor_idx} but "
+                f"Popen at {popen_idx} — monitor must start immediately "
+                f"after Popen, not after health check"
+            )
+        finally:
+            m._server_proc = old_proc
+            if hasattr(m, "_server_monitor"):
+                m._server_monitor = old_monitor
+
+
+# ---------------------------------------------------------------------------
+# Tests — parent death detection (uvx intermediate process)
+# ---------------------------------------------------------------------------
+
+class TestParentDeathDetection:
+    """When the MCP tool runs via uvx, there's an intermediate ``uv``
+    process.  If Claude kills ``uv`` (SIGKILL), the MCP Python process
+    is orphaned but still alive, keeping the monitor pipe open.  The
+    MCP tool must detect its parent's death and exit, allowing the
+    pipe-based monitor to fire."""
+
+    def test_has_parent_watcher(self):
+        """_start_parent_watcher() function must exist."""
+        assert hasattr(buckaroo_mcp_tool, "_start_parent_watcher"), (
+            "_start_parent_watcher missing — tool won't detect when uvx "
+            "is killed, leaving the server orphaned"
+        )
+        assert callable(buckaroo_mcp_tool._start_parent_watcher)
+
+    def test_server_cleaned_up_on_grandparent_death(self):
+        """Server must die when the GRANDPARENT (simulating uvx) is killed.
+
+        This simulates: Claude kills uvx → MCP tool is orphaned →
+        parent watcher detects reparent → cleanup → monitor kills server.
+        """
+        # "Grandparent" script spawns a "parent" which spawns "server"
+        # and starts the parent watcher + monitor.  We SIGKILL the
+        # grandparent, and the server should still be cleaned up.
+        inner_script = r'''
+import sys, os, types, subprocess, signal, time
+from unittest.mock import MagicMock
+
+# Mock mcp
+mcp_mod = types.ModuleType("mcp")
+mcp_server = types.ModuleType("mcp.server")
+mcp_fastmcp = types.ModuleType("mcp.server.fastmcp")
+fake = MagicMock()
+fake.tool.return_value = lambda fn: fn
+fake.prompt.return_value = lambda fn: fn
+mcp_fastmcp.FastMCP = MagicMock(return_value=fake)
+sys.modules["mcp"] = mcp_mod
+sys.modules["mcp.server"] = mcp_server
+sys.modules["mcp.server.fastmcp"] = mcp_fastmcp
+
+import buckaroo_mcp_tool as m
+
+# Start a "server" (sleep process)
+server = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(600)"],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+m._server_proc = server
+
+# Start monitor
+if hasattr(m, "_start_server_monitor"):
+    m._start_server_monitor(server.pid)
+
+# Start parent watcher
+if hasattr(m, "_start_parent_watcher"):
+    m._start_parent_watcher()
+
+# Report server PID
+print(server.pid, flush=True)
+
+# Block (simulating mcp.run())
+sys.stdin.buffer.read()
+'''
+
+        # Grandparent spawns the "parent" (simulating uvx spawning Python)
+        grandparent_script = f'''
+import sys, os, subprocess, signal
+parent = subprocess.Popen(
+    [sys.executable, "-c", {inner_script!r}],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+    cwd={REPO_ROOT!r},
+)
+# Read server PID from child and forward it
+line = parent.stdout.readline()
+sys.stdout.buffer.write(line)
+sys.stdout.buffer.flush()
+# Block until killed
+sys.stdin.buffer.read()
+'''
+
+        grandparent = subprocess.Popen(
+            [sys.executable, "-c", grandparent_script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            cwd=REPO_ROOT,
+        )
+
+        server_pid = None
+        try:
+            line = grandparent.stdout.readline().decode().strip()
+            server_pid = int(line)
+            assert _is_alive(server_pid), "Server should be alive after start"
+
+            # SIGKILL grandparent (simulating Claude killing uvx)
+            grandparent.kill()
+            grandparent.wait(timeout=5)
+
+            # The parent (inner script) is now orphaned.
+            # Parent watcher should detect reparent, clean up, and exit,
+            # which breaks the monitor pipe, which kills the server.
+            for _ in range(30):  # up to 7.5 seconds
+                if not _is_alive(server_pid):
+                    break
+                time.sleep(0.25)
+
+            assert not _is_alive(server_pid), (
+                f"Server (pid={server_pid}) survived grandparent SIGKILL — "
+                f"parent watcher didn't detect reparent or monitor didn't fire"
+            )
+        finally:
+            if grandparent.poll() is None:
+                grandparent.kill()
+                try:
+                    grandparent.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+            if server_pid:
+                try:
+                    os.kill(server_pid, signal.SIGKILL)
+                except OSError:
+                    pass
