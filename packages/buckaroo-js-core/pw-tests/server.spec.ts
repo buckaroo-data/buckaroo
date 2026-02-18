@@ -390,6 +390,66 @@ test.describe('session page and static assets', () => {
   });
 });
 
+// ---------- tests: static asset integrity (catch blank-page bug) -------------
+
+test.describe('static asset integrity', () => {
+  test('standalone.js is non-empty and contains JavaScript', async ({ request }) => {
+    const resp = await request.get(`${BASE}/static/standalone.js`);
+    expect(resp.ok()).toBe(true);
+    const body = await resp.text();
+    // An empty or stub file would cause a blank page — the #1 user-reported issue
+    expect(body.length).toBeGreaterThan(100);
+    expect(body).toMatch(/function|const|var|import|export/);
+  });
+
+  test('standalone.css is served and non-empty', async ({ request }) => {
+    const resp = await request.get(`${BASE}/static/standalone.css`);
+    expect(resp.ok()).toBe(true);
+    const body = await resp.text();
+    expect(body.length).toBeGreaterThan(0);
+  });
+
+  test('compiled.css is non-empty and contains CSS rules', async ({ request }) => {
+    const resp = await request.get(`${BASE}/static/compiled.css`);
+    expect(resp.ok()).toBe(true);
+    const body = await resp.text();
+    expect(body.length).toBeGreaterThan(100);
+    expect(body).toMatch(/\{[\s\S]*\}/); // contains at least one CSS rule
+  });
+});
+
+// ---------- tests: server diagnostics ----------------------------------------
+
+test.describe('server diagnostics', () => {
+  test('health endpoint includes static file info', async ({ request }) => {
+    const resp = await request.get(`${BASE}/health`);
+    expect(resp.ok()).toBe(true);
+    const body = await resp.json();
+    // Diagnostics: which static files exist and their sizes
+    expect(body.static_files).toBeDefined();
+    expect(body.static_files['standalone.js']).toBeDefined();
+    expect(body.static_files['standalone.js'].exists).toBe(true);
+    expect(body.static_files['standalone.js'].size_bytes).toBeGreaterThan(0);
+    expect(body.static_files['compiled.css']).toBeDefined();
+    expect(body.static_files['compiled.css'].exists).toBe(true);
+  });
+
+  test('diagnostics endpoint returns environment info', async ({ request }) => {
+    const resp = await request.get(`${BASE}/diagnostics`);
+    expect(resp.ok()).toBe(true);
+    const body = await resp.json();
+    expect(body.python_version).toBeDefined();
+    expect(body.buckaroo_version).toBeDefined();
+    expect(body.tornado_version).toBeDefined();
+    expect(body.static_files).toBeDefined();
+    expect(body.log_dir).toBeDefined();
+    // Dependency checks — these are the packages needed for [mcp] to work
+    expect(body.dependencies).toBeDefined();
+    expect(body.dependencies.tornado).toBe(true);
+    expect(body.dependencies.pandas).toBe(true);
+  });
+});
+
 // ---------- tests: WebSocket data flow ---------------------------------------
 
 test.describe('WebSocket data flow', () => {

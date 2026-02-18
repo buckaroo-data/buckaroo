@@ -4,6 +4,8 @@
 # Verifies that `buckaroo[mcp]` contains everything needed to run
 # the standalone data server — no dev extras, no polars, no full env.
 #
+# Expects a pre-built wheel in dist/. Run full_build.sh first.
+#
 # Usage:
 #   bash scripts/test_playwright_server.sh
 set -e
@@ -31,13 +33,12 @@ error() {
 
 echo "Starting Buckaroo Server Playwright Tests"
 
-# ---------- 1. Build the wheel (skip if dist/ already has one) ----------------
+# ---------- 1. Find the pre-built wheel --------------------------------------
 
 WHEEL=$(ls "$ROOT_DIR"/dist/buckaroo-*.whl 2>/dev/null | head -1)
 if [ -z "$WHEEL" ]; then
-    log_message "Building wheel..."
-    uv build --wheel -q
-    WHEEL=$(ls "$ROOT_DIR"/dist/buckaroo-*.whl | head -1)
+    error "No wheel found in dist/. Run full_build.sh first."
+    exit 1
 fi
 log_message "Using wheel: $WHEEL"
 
@@ -46,7 +47,7 @@ log_message "Using wheel: $WHEEL"
 MCP_VENV="$ROOT_DIR/.venv-mcp-test"
 log_message "Creating clean venv at $MCP_VENV ..."
 rm -rf "$MCP_VENV"
-uv venv "$MCP_VENV" --python 3.12 -q
+uv venv "$MCP_VENV" -q
 uv pip install --python "$MCP_VENV/bin/python" "${WHEEL}[mcp]" -q
 
 # Sanity-check: server module must be importable
