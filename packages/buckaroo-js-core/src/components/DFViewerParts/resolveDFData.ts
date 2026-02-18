@@ -75,17 +75,20 @@ function parseParquetRow(row: Record<string, any>): DFDataRow {
  * - If it is a parquet-b64 payload, decode and parse the parquet into DFData.
  * - Falls back to an empty array on errors.
  *
- * hyparquet's parquetRead with onComplete fires synchronously when given an
- * in-memory ArrayBuffer, so this function is synchronous.
+ * NOTE: hyparquet's parquetRead onComplete may fire asynchronously in some
+ * bundler environments (e.g. esbuild standalone). In such cases this function
+ * returns [] and the result is cached when onComplete fires. Prefer
+ * resolveDFDataAsync() for reliable decoding.
  */
 export function resolveDFData(val: DFDataOrPayload | undefined | null): DFData {
     if (val === undefined || val === null) return [];
     if (Array.isArray(val)) return val as DFData;
 
     if (isParquetB64(val)) {
-        // Check cache
+        // Check cache — only return cached if non-empty (async decode may have
+        // cached [] before onComplete fired)
         const cached = _cache.get(val.data);
-        if (cached) return cached;
+        if (cached && cached.length > 0) return cached;
 
         try {
             const buf = b64ToArrayBuffer(val.data);
@@ -98,9 +101,13 @@ export function resolveDFData(val: DFDataOrPayload | undefined | null): DFData {
                 onComplete: (data: any[]) => {
                     // JSON-parse each cell to recover typed values
                     result = (data as DFDataRow[]).map(parseParquetRow);
+                    cacheSet(val.data, result);
                 },
             });
-            cacheSet(val.data, result);
+            // If synchronous (Jupyter/webpack), result is already populated
+            if (result.length > 0) {
+                cacheSet(val.data, result);
+            }
             return result;
         } catch (e) {
             console.error('resolveDFData: failed to decode parquet_b64', e);
@@ -111,4 +118,74 @@ export function resolveDFData(val: DFDataOrPayload | undefined | null): DFData {
     // Unknown format — treat as empty
     console.warn('resolveDFData: unknown payload format', val);
     return [];
+}
+
+/**
+ * Asynchronously resolve a DFDataOrPayload to DFData.
+ *
+ * Unlike resolveDFData(), this properly awaits hyparquet's parquetRead
+ * so it works reliably in all bundler environments.
+ */
+export async function resolveDFDataAsync(val: DFDataOrPayload | undefined | null): Promise<DFData> {
+    if (val === undefined || val === null) return [];
+    if (Array.isArray(val)) return val as DFData;
+
+    if (isParquetB64(val)) {
+        const cached = _cache.get(val.data);
+        if (cached && cached.length > 0) return cached;
+
+        try {
+            const buf = b64ToArrayBuffer(val.data);
+            const metadata = parquetMetadata(buf);
+            const data = await new Promise<any[]>((resolve, reject) => {
+                try {
+                    parquetRead({
+                        file: buf,
+                        metadata,
+                        rowFormat: 'object',
+                        onComplete: (rows: any[]) => resolve(rows),
+                    });
+                } catch (e) {
+                    reject(e);
+                }
+            });
+            const result = (data as DFDataRow[]).map(parseParquetRow);
+            cacheSet(val.data, result);
+            return result;
+        } catch (e) {
+            console.error('resolveDFDataAsync: failed to decode parquet_b64', e);
+            return [];
+        }
+    }
+
+    console.warn('resolveDFDataAsync: unknown payload format', val);
+    return [];
+}
+
+/**
+ * Pre-resolve all parquet_b64 values in a df_data_dict.
+ *
+ * Returns a new dict where parquet_b64 payloads have been decoded to DFData arrays.
+ * This should be called before passing df_data_dict to React components so that
+ * the synchronous resolveDFData() sees plain arrays and passes them through.
+ */
+export async function preResolveDFDataDict(
+    dict: Record<string, DFDataOrPayload> | undefined | null
+): Promise<Record<string, DFDataOrPayload>> {
+    if (!dict) return {};
+    const result: Record<string, DFDataOrPayload> = {};
+    const promises: Promise<void>[] = [];
+    for (const [key, val] of Object.entries(dict)) {
+        if (isParquetB64(val)) {
+            promises.push(
+                resolveDFDataAsync(val).then((resolved) => {
+                    result[key] = resolved;
+                })
+            );
+        } else {
+            result[key] = val;
+        }
+    }
+    await Promise.all(promises);
+    return result;
 }
