@@ -36,13 +36,15 @@ function ViewerApp({ model, src }: { model: WebSocketModel; src: any }) {
     React.useEffect(() => {
         const onMeta = (msg: any) => {
             setDfMeta(model.get("df_meta") || { total_rows: msg.rows || 0 });
-            setDfDataDict(model.get("df_data_dict") || {});
+            srt.preResolveDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
             setDfDisplayArgs(model.get("df_display_args") || {});
         };
         model.on("metadata", onMeta);
 
         const onDfMeta = (v: any) => setDfMeta(v);
-        const onDfDataDict = (v: any) => setDfDataDict(v);
+        const onDfDataDict = (v: any) => {
+            srt.preResolveDFDataDict(v).then(setDfDataDict);
+        };
         const onDfDisplayArgs = (v: any) => setDfDisplayArgs(v);
         model.on("change:df_meta", onDfMeta);
         model.on("change:df_data_dict", onDfDataDict);
@@ -88,7 +90,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
     React.useEffect(() => {
         const onMeta = () => {
             setDfMeta(model.get("df_meta") || { total_rows: 0 });
-            setDfDataDict(model.get("df_data_dict") || {});
+            srt.preResolveDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
             setDfDisplayArgs(model.get("df_display_args") || {});
             setBuckarooState(model.get("buckaroo_state") || {});
             setBuckarooOptions(model.get("buckaroo_options") || {});
@@ -104,9 +106,14 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
             return handler;
         };
 
+        // df_data_dict needs async pre-resolution of parquet_b64 values
+        const onDfDataDict = (v: any) => {
+            srt.preResolveDFDataDict(v).then(setDfDataDict);
+        };
+        model.on("change:df_data_dict", onDfDataDict);
+
         const handlers: [string, Function][] = [
             ["df_meta", onChange("df_meta", setDfMeta)],
-            ["df_data_dict", onChange("df_data_dict", setDfDataDict)],
             ["df_display_args", onChange("df_display_args", setDfDisplayArgs)],
             ["buckaroo_state", onChange("buckaroo_state", setBuckarooState)],
             ["buckaroo_options", onChange("buckaroo_options", setBuckarooOptions)],
@@ -117,6 +124,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
 
         return () => {
             model.off("metadata", onMeta);
+            model.off("change:df_data_dict", onDfDataDict);
             for (const [key, handler] of handlers) {
                 model.off(`change:${key}`, handler);
             }
@@ -198,6 +206,14 @@ async function main() {
             resolve({});
         }, 500);
     });
+
+    // Pre-resolve parquet_b64 values in df_data_dict before creating the model.
+    // hyparquet's parquetRead is async in esbuild bundles, so synchronous
+    // resolveDFData() in React useMemo can't decode them. Pre-resolving here
+    // ensures components receive plain DFData arrays.
+    if (initialState.df_data_dict) {
+        initialState.df_data_dict = await srt.preResolveDFDataDict(initialState.df_data_dict);
+    }
 
     const model = new WebSocketModel(ws, initialState);
 
