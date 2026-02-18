@@ -232,6 +232,7 @@ jupyterlab = [
 ]
 mcp = [
     { name = "mcp" },
+    { name = "polars" },
     { name = "tornado" },
 ]
 notebook = [
@@ -318,6 +319,7 @@ requires-dist = [
     { name = "pl-series-hash", marker = "extra == 'dev'", specifier = "==0.2.1" },
     { name = "pl-series-hash", marker = "extra == 'polars'", specifier = "==0.2.1" },
     { name = "playwright", marker = "extra == 'dev'" },
+    { name = "polars", marker = "extra == 'mcp'" },
     { name = "polars", marker = "extra == 'polars'" },
     { name = "polars", marker = "extra == 'polars'", specifier = ">=1.24.0" },
     { name = "polars", extras = ["timezone"], marker = "extra == 'polars'" },
