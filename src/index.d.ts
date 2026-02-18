@@ -3,7 +3,7 @@ import { DFViewer, DFViewerInfinite } from './components/DFViewerParts/DFViewerI
 import { WidgetDCFCell } from './components/DCFCell';
 import { BuckarooInfiniteWidget, DFViewerInfiniteDS } from './components/BuckarooWidgetInfinite';
 import { parquetRead, parquetMetadata } from 'hyparquet';
-import { resolveDFData } from './components/DFViewerParts/resolveDFData';
+import { resolveDFData, preResolveDFDataDict } from './components/DFViewerParts/resolveDFData';
 import { DependentTabs } from './components/DependentTabs';
 import { StatusBar } from './components/StatusBar';
 import * as CommandUtils from "./components/CommandUtils";
@@ -46,5 +46,6 @@ declare const _default: {
     parquetRead: typeof parquetRead;
     parquetMetadata: typeof parquetMetadata;
     resolveDFData: typeof resolveDFData;
+    preResolveDFDataDict: typeof preResolveDFDataDict;
 };
 export default _default;
