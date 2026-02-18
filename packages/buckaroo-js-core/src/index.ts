@@ -13,6 +13,7 @@ import { WidgetDCFCell } from "./components/DCFCell";
 import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from "./components/BuckarooWidgetInfinite";
 // Re-export hyparquet functions for transcript parsing in widget.tsx
 import { parquetRead, parquetMetadata } from 'hyparquet';
+import { resolveDFData } from './components/DFViewerParts/resolveDFData';
 
 import { HistogramCell } from "./components/DFViewerParts/HistogramCell";
 import { InfiniteEx } from "./components/DFViewerParts/TableInfinite";
@@ -49,6 +50,7 @@ export default {
     // Parquet parsing for transcript replay
     parquetRead,
     parquetMetadata,
+    resolveDFData,
 };
 
 

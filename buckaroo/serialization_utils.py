@@ -1,7 +1,8 @@
 from io import BytesIO
+import base64
 import json
 import pandas as pd
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Union
 from pandas._libs.tslibs import timezones
 from pandas.core.dtypes.dtypes import DatetimeTZDtype
 from fastparquet import json as fp_json
@@ -200,4 +201,65 @@ def to_parquet(df):
 
     data.seek(0)
     return data.read()
+
+
+def to_parquet_b64(df: pd.DataFrame) -> str:
+    """Convert a DataFrame to a base64-encoded parquet string.
+
+    Note: to_parquet already calls prepare_df_for_serialization internally,
+    so the caller should pass a raw DataFrame (not pre-prepared).
+    """
+    raw_bytes = to_parquet(df)
+    return base64.b64encode(raw_bytes).decode('ascii')
+
+
+def _make_json_safe(val):
+    """Recursively convert non-JSON-serializable types (datetime keys, etc.) to strings."""
+    if isinstance(val, dict):
+        return {str(k): _make_json_safe(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple)):
+        return [_make_json_safe(v) for v in val]
+    return val
+
+
+def _json_encode_cell(val):
+    """JSON-encode a single cell value for parquet transport."""
+    return json.dumps(_make_json_safe(val), default=str)
+
+
+def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
+    """Convert a summary stats dict to a tagged parquet-b64 payload.
+
+    Summary stats DataFrames have mixed-type columns (strings, numbers, lists)
+    which fastparquet can't handle directly. We JSON-encode every cell value
+    first so each column becomes a pure string column, then use pyarrow for
+    parquet serialization. The JS side decodes parquet then JSON.parse's each cell.
+
+    Returns {'format': 'parquet_b64', 'data': '<base64 string>'}
+    Falls back to JSON if parquet serialization fails.
+    """
+    # JSON-encode every value so parquet sees only string columns
+    json_sd: Dict[str, Any] = {}
+    for col, stats in sd.items():
+        if isinstance(stats, dict):
+            json_sd[col] = {k: _json_encode_cell(v) for k, v in stats.items()}
+        else:
+            json_sd[col] = stats
+
+    df = pd.DataFrame(json_sd)
+    df2 = prepare_df_for_serialization(df)
+    # Add level_0 for backwards compatibility with JSON path (pd_to_obj adds it)
+    if not isinstance(df.index, pd.MultiIndex):
+        df2['level_0'] = df2['index']
+
+    try:
+        data = BytesIO()
+        df2.to_parquet(data, engine='pyarrow')
+        data.seek(0)
+        raw_bytes = data.read()
+        b64 = base64.b64encode(raw_bytes).decode('ascii')
+        return {'format': 'parquet_b64', 'data': b64}
+    except Exception as e:
+        logger.warning("Failed to serialize summary stats as parquet, falling back to JSON: %r", e)
+        return pd_to_obj(pd.DataFrame(sd))
 

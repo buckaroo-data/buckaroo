@@ -3,7 +3,8 @@ import _ from "lodash";
 import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
 
-import { DFData } from "./DFViewerParts/DFWhole";
+import { DFDataOrPayload } from "./DFViewerParts/DFWhole";
+import { resolveDFData } from "./DFViewerParts/resolveDFData";
 import { DFViewer } from "./DFViewerParts/DFViewerInfinite";
 import { StatusBar } from "./StatusBar";
 import { BuckarooState } from "./WidgetTypes";
@@ -26,7 +27,7 @@ export function WidgetDCFCell({
     buckaroo_options,
 }: {
     df_meta: DFMeta;
-    df_data_dict: Record<string, DFData>;
+    df_data_dict: Record<string, DFDataOrPayload>;
     df_display_args: Record<string, IDisplayArgs>;
     operations: Operation[];
     on_operations: (ops: Operation[]) => void;
@@ -44,8 +45,8 @@ export function WidgetDCFCell({
     } else {
         //  console.log("cDisp", cDisp);
     }
-    const dfData = df_data_dict[cDisp.data_key];
-    const summaryStatsData = df_data_dict[cDisp.summary_stats_key];
+    const dfData = resolveDFData(df_data_dict[cDisp.data_key]);
+    const summaryStatsData = resolveDFData(df_data_dict[cDisp.summary_stats_key]);
 
     return (
         <div className="dcf-root flex flex-col buckaroo-widget" style={{ width: "100%", height: "100%" }}>
