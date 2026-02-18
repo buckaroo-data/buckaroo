@@ -19,6 +19,7 @@ import {
 import { BuckarooOptions, BuckarooState, DFMeta } from "../components/WidgetTypes";
 import { CommandConfigT } from "../components/CommandUtils";
 import { Operation } from "../components/OperationUtils";
+import { baseOperationResults } from "../components/DependentTabs";
 
 // ---------- mock data ----------
 
@@ -90,7 +91,7 @@ const buckarooOptions: BuckarooOptions = {
   show_commands: [],
 };
 
-const commandConfig: CommandConfigT = { commands: [] };
+const commandConfig: CommandConfigT = { argspecs: {}, defaultArgs: {} };
 
 // ---------- component ----------
 
@@ -162,7 +163,7 @@ const BuckarooWidgetTestComponent: React.FC = () => {
         df_display_args={df_display_args}
         operations={operations}
         on_operations={setOperations}
-        operation_results={{}}
+        operation_results={baseOperationResults}
         command_config={commandConfig}
         buckaroo_state={buckarooState}
         on_buckaroo_state={setBuckarooState}
