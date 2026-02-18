@@ -164,11 +164,11 @@ export function BuckarooInfiniteWidget({
             ],
             [cDisp, operations, buckaroo_state],
         );
-        
+
         //used to denote "this dataframe has been transformed", This is
         //evantually spliced back into the request args from scrolling/
         //the data source
-        const outsideDFParams = [operations, buckaroo_state.post_processing];
+        const outsideDFParams = [operations, buckaroo_state.post_processing, buckaroo_state.df_display];
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
              style={{ width: "100%", height: "100%" }}>
