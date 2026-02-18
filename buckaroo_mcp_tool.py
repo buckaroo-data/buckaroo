@@ -207,6 +207,7 @@ def ensure_server() -> dict:
     server_log = os.path.join(LOG_DIR, "server.log")
     server_log_fh = open(server_log, "a")
     _server_proc = subprocess.Popen(cmd, stdout=server_log_fh, stderr=server_log_fh)
+    _start_server_monitor(_server_proc.pid)
 
     for i in range(20):
         time.sleep(0.25)
@@ -221,7 +222,6 @@ def ensure_server() -> dict:
             ]
             if missing:
                 log.warning("Static files missing or empty: %s — pages may be blank", missing)
-            _start_server_monitor(_server_proc.pid)
             return {
                 "server_status": "started",
                 "server_pid": health.get("pid"),
@@ -376,7 +376,34 @@ def buckaroo_diagnostics() -> str:
     return result
 
 
+def _start_parent_watcher():
+    """Watch for parent process death (e.g. uvx killed by Claude).
+
+    When this MCP tool is run via ``uvx``, there is an intermediate ``uv``
+    process between Claude and us.  If Claude kills ``uv`` (SIGKILL), we
+    become an orphan (reparented to PID 1 / launchd).  Detect that and
+    exit so the pipe-based server monitor can fire.
+    """
+    import threading
+
+    original_ppid = os.getppid()
+    log.info("Parent watcher: original ppid=%d", original_ppid)
+
+    def _watcher():
+        while True:
+            time.sleep(1)
+            current_ppid = os.getppid()
+            if current_ppid != original_ppid:
+                log.info("Parent changed %d → %d — cleaning up", original_ppid, current_ppid)
+                _cleanup_server()
+                os._exit(0)
+
+    t = threading.Thread(target=_watcher, daemon=True)
+    t.start()
+
+
 def main():
+    _start_parent_watcher()
     mcp.run()
 
 
