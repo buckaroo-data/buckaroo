@@ -2,7 +2,7 @@ from io import BytesIO
 import base64
 import json
 import pandas as pd
-from typing import Dict, Any, List, Tuple, Union
+from typing import Dict, Any, List, Tuple
 from pandas._libs.tslibs import timezones
 from pandas.core.dtypes.dtypes import DatetimeTZDtype
 from fastparquet import json as fp_json

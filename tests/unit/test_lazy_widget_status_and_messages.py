@@ -51,7 +51,6 @@ def test_stats_start_with_pending_status():
             for key, val in status_row.items() 
             if key != 'index'
         ), f"Expected at least one column with 'pending' status, got: {status_row}"
-        assert status_row is not None or len(all_stats) > 0, "Should have stats data"
 
 
 def test_stats_clear_status_on_success():

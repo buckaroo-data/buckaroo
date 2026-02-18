@@ -12,6 +12,9 @@ from buckaroo.pluggable_analysis_framework.col_analysis import (
     ColAnalysis)
 
 from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
+from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget, to_parquet
+from buckaroo.dataflow.dataflow import StylingAnalysis
+from buckaroo.jlisp.lisp_utils import (s, sQ)
 
 
 def _resolve_all_stats(all_stats):
@@ -38,9 +41,6 @@ def _resolve_all_stats(all_stats):
             parsed_rows.append(parsed)
         return parsed_rows
     return all_stats
-from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget, to_parquet
-from buckaroo.dataflow.dataflow import StylingAnalysis
-from buckaroo.jlisp.lisp_utils import (s, sQ)
 
 def test_basic_instantiation():
     PolarsBuckarooWidget(

@@ -16,7 +16,6 @@ import sys
 import anywidget
 import polars as pl
 from polars import functions as F
-import pandas as pd
 import logging
 from traitlets import Dict as TDict, Unicode
 
@@ -26,7 +25,7 @@ from buckaroo.pluggable_analysis_framework.utils import json_postfix
 from buckaroo.styling_helpers import obj_, pinned_histogram
 from .pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
 from .df_util import old_col_new_col
-from .serialization_utils import pd_to_obj, sd_to_parquet_b64
+from .serialization_utils import sd_to_parquet_b64
 from buckaroo.file_cache.base import AbstractFileCache, Executor as _SyncExec, ExecutorLog  # type: ignore
 from buckaroo.file_cache.multiprocessing_executor import MultiprocessingExecutor as _ParExec
 from buckaroo.file_cache.cache_utils import get_global_file_cache, get_global_executor_log
