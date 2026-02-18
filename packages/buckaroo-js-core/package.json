@@ -18,7 +18,9 @@
     "test:pw:headed": "pnpm exec playwright test --headed",
     "test:pw:ui": "pnpm exec playwright test --ui",
     "test:pw:report": "pnpm exec playwright show-report",
-    "test:integration": "pnpm exec playwright test --config playwright.config.integration.ts --reporter=line"
+    "test:integration": "pnpm exec playwright test --config playwright.config.integration.ts --reporter=line",
+    "test:server": "pnpm exec playwright test --config playwright.config.server.ts",
+    "test:server:headed": "pnpm exec playwright test --config playwright.config.server.ts --headed"
   },
   "files": [
     "/dist"
