@@ -27,6 +27,26 @@ pd.DataFrame({'a':[1, 2, 10, 30, 50, 60, 50], 'b': ['foo', 'foo', 'bar', pd.NA, 
 
 When you run `import buckaroo` in a Jupyter notebook, Buckaroo becomes the default display method for Pandas and Polars DataFrames
 
+## Claude Code MCP Integration
+
+Buckaroo can be used as an [MCP](https://modelcontextprotocol.io/) server in [Claude Code](https://docs.anthropic.com/en/docs/claude-code), giving Claude the ability to open data files in an interactive table viewer.
+
+### Install
+
+```bash
+claude mcp add buckaroo-table -- uvx --from "buckaroo[mcp]" buckaroo-table
+```
+
+That's it. This downloads Buckaroo from PyPI into an isolated environment and registers the MCP server. No other installation steps are needed.
+
+### Usage
+
+Once installed, ask Claude Code to view any CSV, TSV, Parquet, or JSON file:
+
+> show me sales_data.csv
+
+Claude will call the `view_data` tool, which opens the file in Buckaroo's interactive table UI in your browser.
+
 
 ## Compatibility
 
@@ -38,6 +58,7 @@ Buckaroo works in the following notebook environments
 - `VS Code notebooks` (with extra install)
 - [Jupyter Lite](https://paddymul.github.io/buckaroo-examples/lab/index.html)
 - `Google colab` 
+- `Claude Code`
 
 
 Buckaroo works with the following DataFrame libraries

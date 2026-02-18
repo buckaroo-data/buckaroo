@@ -17,8 +17,8 @@ jobs:
       fail-fast: false
        matrix:
         #os: [ubuntu-latest, windows-latest, macos-latest]
-        #os: [ubuntu-latest]
-        os: [depot-ubuntu-latest, depot-windows-2025]
+        #os: [ubuntu-latest] , depot-windows-2025]
+        os: [depot-ubuntu-latest]
         python-version: ["3.11"]
     steps:
       - name: Checkout

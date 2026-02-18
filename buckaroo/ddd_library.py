@@ -84,11 +84,11 @@ def get_multiindex_index_multiindex_with_names_cols_df() -> pd.DataFrame:
         ('baz', 'a')])
 
     return pd.DataFrame([
-        [10,20,30,40, 50, 60],
-        ['foo', 'bar', 'baz', 'quux', 'boff', None],
-        [10,20,30,40, 50, 60],
-        ['foo', 'bar', 'baz', 'quux', 'boff', None],
-        [10,20,30,40, 50, 60],
+        [   10,    20,    30,     40,     50,    60],
+        ['foo', 'bar', 'baz', 'quux', 'boff',  None],
+        [   10,    20,    30,     40,     50,    60],
+        ['foo', 'bar', 'baz', 'quux', 'boff',  None],
+        [   10,    20,    30,     40,     50,    60],
         ['foo', 'bar', 'baz', 'quux', 'boff', None]],
     columns=cols,
 index=row_index)
