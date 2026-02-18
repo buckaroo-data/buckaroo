@@ -6,16 +6,20 @@ from .buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, Autocleanin
 from .dataflow.widget_extension_utils import DFViewer
 from .widget_utils import is_in_ipython, is_in_marimo, enable, disable, determine_jupter_env
 from .read_utils import read
-from .file_cache.cache_utils import (
-    get_global_file_cache,
-    get_global_executor_log,
-    ensure_executor_sqlite,
-    get_cache_size,
-    clear_file_cache,
-    clear_executor_log,
-    clear_oldest_cache_entries,
-    format_cache_size,
-)
+try:
+    from .file_cache.cache_utils import (
+        get_global_file_cache,
+        get_global_executor_log,
+        ensure_executor_sqlite,
+        get_cache_size,
+        clear_file_cache,
+        clear_executor_log,
+        clear_oldest_cache_entries,
+        format_cache_size,
+    )
+except ImportError:
+    # file_cache requires polars; make these available only when polars is installed
+    pass
 
 
 

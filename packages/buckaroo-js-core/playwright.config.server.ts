@@ -2,6 +2,10 @@ import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 8701;
 
+// Allow overriding the Python used to start the server.
+// In CI this points at a clean venv that only has buckaroo[mcp] installed.
+const PYTHON = process.env.BUCKAROO_SERVER_PYTHON ?? 'uv run python';
+
 export default defineConfig({
   testDir: './pw-tests',
   testMatch: ['server.spec.ts'],
@@ -25,7 +29,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `uv run python -m buckaroo.server --no-browser --port ${PORT}`,
+    command: `${PYTHON} -m buckaroo.server --no-browser --port ${PORT}`,
     cwd: '../..',
     url: `http://localhost:${PORT}/health`,
     reuseExistingServer: !process.env.CI,

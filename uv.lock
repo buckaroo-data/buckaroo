@@ -190,7 +190,7 @@ wheels = [
 
 [[package]]
 name = "buckaroo"
-version = "0.12.6"
+version = "0.12.7"
 source = { editable = "." }
 dependencies = [
     { name = "anywidget" },
@@ -232,6 +232,8 @@ jupyterlab = [
 ]
 mcp = [
     { name = "mcp" },
+    { name = "polars" },
+    { name = "tornado" },
 ]
 notebook = [
     { name = "notebook" },
@@ -317,6 +319,7 @@ requires-dist = [
     { name = "pl-series-hash", marker = "extra == 'dev'", specifier = "==0.2.1" },
     { name = "pl-series-hash", marker = "extra == 'polars'", specifier = "==0.2.1" },
     { name = "playwright", marker = "extra == 'dev'" },
+    { name = "polars", marker = "extra == 'mcp'" },
     { name = "polars", marker = "extra == 'polars'" },
     { name = "polars", marker = "extra == 'polars'", specifier = ">=1.24.0" },
     { name = "polars", extras = ["timezone"], marker = "extra == 'polars'" },
@@ -336,6 +339,7 @@ requires-dist = [
     { name = "solara", extras = ["pytest"], marker = "extra == 'dev'" },
     { name = "sphinx", marker = "extra == 'dev'", specifier = ">=1.5" },
     { name = "toml", marker = "extra == 'dev'" },
+    { name = "tornado", marker = "extra == 'mcp'", specifier = ">=6.0" },
     { name = "twine", marker = "extra == 'packaging-tools'" },
     { name = "watchfiles", marker = "extra == 'dev'" },
 ]
