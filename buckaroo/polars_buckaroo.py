@@ -9,7 +9,7 @@ from buckaroo.df_util import old_col_new_col
 from .customizations.polars_analysis import PL_Analysis_Klasses
 from .pluggable_analysis_framework.polars_analysis_management import (
     PlDfStats)
-from .serialization_utils import pd_to_obj
+from .serialization_utils import pd_to_obj, sd_to_parquet_b64
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .customizations.pl_autocleaning_conf import NoCleaningConfPl
 from .dataflow.dataflow import Sampling
@@ -57,14 +57,8 @@ class PolarsBuckarooWidget(BuckarooWidget):
     sampling_klass = PLSampling
 
     def _sd_to_jsondf(self, sd):
-        """exists so this can be overriden for polars  """
-        import pandas as pd
-        temp_sd = sd.copy()
-
-        #FIXME add actual test around weird index behavior
-        # if 'index' in temp_sd:
-        #     del temp_sd['index']
-        return pd_to_obj(pd.DataFrame(temp_sd))
+        """Serialize summary stats dict as parquet-b64."""
+        return sd_to_parquet_b64(sd)
 
     def _build_error_dataframe(self, e):
         return pl.DataFrame({'err': [str(e)]})

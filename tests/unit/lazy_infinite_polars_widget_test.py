@@ -1,4 +1,8 @@
 import polars as pl
+import pandas as pd
+import base64
+from io import BytesIO
+import json
 
 from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget
 from buckaroo.file_cache.base import FileCache
@@ -6,6 +10,33 @@ from buckaroo.read_utils import read_df
 from pathlib import Path
 from buckaroo.file_cache.base import Executor as _Exec
 from tests.unit.file_cache.executor_test_utils import wait_for_nested_executor_finish
+
+
+def _resolve_all_stats(all_stats):
+    """Resolve all_stats to a list of row dicts, whether it's JSON or parquet_b64."""
+    if isinstance(all_stats, list):
+        return all_stats
+    if isinstance(all_stats, dict) and all_stats.get('format') == 'parquet_b64':
+        raw = base64.b64decode(all_stats['data'])
+        df = pd.read_parquet(BytesIO(raw), engine='pyarrow')
+        rows = json.loads(df.to_json(orient='records'))
+        # JSON-parse each cell (they were JSON-encoded on the Python side)
+        parsed_rows = []
+        for row in rows:
+            parsed = {}
+            for k, v in row.items():
+                if k in ('index', 'level_0'):
+                    parsed[k] = v
+                elif isinstance(v, str):
+                    try:
+                        parsed[k] = json.loads(v)
+                    except (json.JSONDecodeError, ValueError):
+                        parsed[k] = v
+                else:
+                    parsed[k] = v
+            parsed_rows.append(parsed)
+        return parsed_rows
+    return all_stats
 
 
 def _capture_sends(widget):
@@ -37,7 +68,7 @@ def test_lazy_infinite_widget_init_and_summary():
     assert w.df_data_dict['all_stats'] != []
 
     # All stats should include orig/rewritten indicators after populated
-    all_stats = w.df_data_dict['all_stats']
+    all_stats = _resolve_all_stats(w.df_data_dict['all_stats'])
     idx_keys = [row['index'] for row in all_stats]
     assert 'orig_col_name' in idx_keys
     assert 'rewritten_col_name' in idx_keys
@@ -213,7 +244,8 @@ def test_cache_short_circuit_populates_immediately(tmp_path):
 
     w = LazyInfinitePolarsBuckarooWidget(ldf, file_path=str(fpath), file_cache=fc, sync_executor_class=FailingExec)
     assert w.df_data_dict['all_stats'] != []
-    idx_keys = [row['index'] for row in w.df_data_dict['all_stats']]
+    all_stats = _resolve_all_stats(w.df_data_dict['all_stats'])
+    idx_keys = [row['index'] for row in all_stats]
     assert 'orig_col_name' in idx_keys and 'mean' in idx_keys
 
 def test_executor_selection_thresholds_and_fallback():
@@ -267,7 +299,7 @@ def test_full_summary_present_immediately():
             return super().execute(ldf, execution_args)
 
     w = LazyInfinitePolarsBuckarooWidget(ldf, column_executor_class=SlowPAFColumnExecutor)
-    rows = w.df_data_dict['all_stats']
+    rows = _resolve_all_stats(w.df_data_dict['all_stats'])
     assert rows != []
     ocn_rows = [r for r in rows if r.get('index') == 'orig_col_name']
     assert ocn_rows

@@ -3,7 +3,8 @@ import _ from "lodash";
 import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
 
-import { DFData } from "./DFViewerParts/DFWhole";
+import { DFData, DFDataOrPayload } from "./DFViewerParts/DFWhole";
+import { resolveDFData } from "./DFViewerParts/resolveDFData";
 import { StatusBar } from "./StatusBar";
 import { BuckarooState } from "./WidgetTypes";
 import { BuckarooOptions } from "./WidgetTypes";
@@ -22,7 +23,7 @@ import { MessageBox } from "./MessageBox";
 
 export const getDataWrapper = (
     data_key: string,
-    df_data_dict: Record<string, DFData>,
+    df_data_dict: Record<string, DFDataOrPayload>,
     ds: IDatasource,
     total_rows?: number
 ): DatasourceOrRaw => {
@@ -33,10 +34,11 @@ export const getDataWrapper = (
             length: total_rows || 50,
         };
     } else {
+        const resolved = resolveDFData(df_data_dict[data_key]);
         return {
             data_type: "Raw",
-            data: df_data_dict[data_key],
-            length: df_data_dict[data_key].length,
+            data: resolved,
+            length: resolved.length,
         };
     }
 };
@@ -121,7 +123,7 @@ export function BuckarooInfiniteWidget({
         src
     }: {
         df_meta: DFMeta;
-        df_data_dict: Record<string, DFData>;
+        df_data_dict: Record<string, DFDataOrPayload>;
         df_display_args: Record<string, IDisplayArgs>;
         operations: Operation[];
         on_operations: (ops: Operation[]) => void;
@@ -158,7 +160,7 @@ export function BuckarooInfiniteWidget({
         const [data_wrapper, summaryStatsData] = useMemo(
             () => [
                 getDataWrapper(cDisp.data_key, df_data_dict, mainDs, df_meta.total_rows),
-                df_data_dict[cDisp.summary_stats_key],
+                resolveDFData(df_data_dict[cDisp.summary_stats_key]),
             ],
             [cDisp, operations, buckaroo_state],
         );
@@ -218,10 +220,10 @@ export function DFViewerInfiniteDS({
         show_message_box
     }: {
         df_meta: DFMeta;
-        df_data_dict: Record<string, DFData>;
+        df_data_dict: Record<string, DFDataOrPayload>;
         df_display_args: Record<string, IDisplayArgs>;
         src: KeyAwareSmartRowCache,
-        df_id: string // the memory id 
+        df_id: string // the memory id
         message_log?: { messages?: Array<any> };
         show_message_box?: { enabled?: boolean };
     }) {
@@ -249,7 +251,7 @@ export function DFViewerInfiniteDS({
         const [data_wrapper, summaryStatsData] = useMemo(
             () => [
                 getDataWrapper(cDisp.data_key, df_data_dict, mainDs, df_meta.total_rows),
-                df_data_dict[cDisp.summary_stats_key],
+                resolveDFData(df_data_dict[cDisp.summary_stats_key]),
             ],
             [cDisp, df_data_dict, mainDs, df_meta.total_rows]
         );

@@ -27,11 +27,20 @@ def test_stats_start_with_pending_status():
     # Check initial summary defaults immediately after init - before computation completes
     # The initial_sd is set in _initial_summary_defaults() which includes __status__='pending'
     # But by the time we check, computation may have already started
-    # So we check the df_data_dict which should reflect initial state
-    all_stats = widget.df_data_dict.get('all_stats', [])
-    
-    # Find the __status__ row if it exists
-    status_row = next((row for row in all_stats if row.get('index') == '__status__'), None)
+    # So we check the merged_sd dict directly (all_stats may be parquet_b64 encoded)
+    merged_sd = widget._df.merged_sd or {}
+    has_status_col = any(
+        isinstance(v, dict) and '__status__' in v
+        for v in merged_sd.values()
+    )
+    # Build a pseudo status_row from merged_sd for the assertion below
+    if has_status_col:
+        status_row = {'index': '__status__'}
+        for col, stats in merged_sd.items():
+            if isinstance(stats, dict) and '__status__' in stats:
+                status_row[col] = stats['__status__']
+    else:
+        status_row = None
     
     # If status row exists, check that it has pending values
     if status_row:

@@ -26,7 +26,7 @@ from .pluggable_analysis_framework.analysis_management import DfStats
 from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.extension_utils import copy_extend
 
-from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet
+from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, sd_to_parquet_b64
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import (Sampling, exception_protect)
 from .dataflow.styling_core import (ComponentConfig, DFViewerConfig, DisplayArgs, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
@@ -238,9 +238,11 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         self.buckaroo_state = temp_buckaroo_state
 
     def _sd_to_jsondf(self, sd):
-        """exists so this can be overriden for polars  """
-        temp_sd = sd.copy()
-        return self._df_to_obj(pd.DataFrame(temp_sd))
+        """Serialize summary stats dict. Returns parquet-b64 tagged dict by default.
+
+        Exists so this can be overridden for polars/geopandas.
+        """
+        return sd_to_parquet_b64(sd)
 
 
 
@@ -266,7 +268,9 @@ class RawDFViewerWidget(BuckarooWidgetBase):
         'first_col_configs':[]}).tag(sync=True)
 
 
-    summary_stats_data = List([
+    # Can be DFData (list of row dicts) for JSON, or
+    # {'format': 'parquet_b64', 'data': '<base64>'} for parquet
+    summary_stats_data = Any([
         { 'index': 'mean',  'a':      28,   'b':      14, 'c': 'Padarget' },
         { 'index': 'dtype', 'a': 'float64', 'b': 'int64', 'c': 'object' }]).tag(sync=True)
 
