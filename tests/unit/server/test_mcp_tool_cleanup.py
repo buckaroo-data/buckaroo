@@ -4,6 +4,7 @@ These tests verify that:
 1. ensure_server() stores the Popen handle in _server_proc
 2. _cleanup_server() terminates the subprocess
 3. Signal handlers are registered for SIGTERM/SIGINT
+4. A pipe-based monitor kills the server even when the parent is SIGKILL'd
 
 The ``mcp`` package is not installed in the dev environment, so we mock it
 before importing buckaroo_mcp_tool.
@@ -13,6 +14,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 import types
 from unittest.mock import MagicMock, patch
 
@@ -48,6 +50,9 @@ _ensure_mcp_mock()
 sys.modules.pop("buckaroo_mcp_tool", None)
 import buckaroo_mcp_tool  # noqa: E402
 
+# Repo root — needed so subprocess can find buckaroo_mcp_tool.py
+REPO_ROOT = os.path.dirname(os.path.abspath(buckaroo_mcp_tool.__file__))
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -72,7 +77,7 @@ def _is_alive(pid: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Tests — signal/atexit cleanup (graceful exit)
 # ---------------------------------------------------------------------------
 
 class TestServerProcessCleanup:
@@ -162,3 +167,106 @@ class TestServerProcessCleanup:
         assert handler is not signal.SIG_IGN, (
             "SIGTERM handler is SIG_IGN — process won't exit on mcp remove"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests — pipe-based monitor (survives SIGKILL / os._exit)
+# ---------------------------------------------------------------------------
+
+class TestServerMonitor:
+    """Verify that a pipe-based monitor kills the server when the MCP tool
+    dies unexpectedly (SIGKILL, os._exit, etc.) — cases where atexit and
+    signal handlers do NOT run."""
+
+    def test_module_has_start_server_monitor(self):
+        """_start_server_monitor() function must exist."""
+        assert hasattr(buckaroo_mcp_tool, "_start_server_monitor"), (
+            "_start_server_monitor missing — server will be orphaned on hard kill"
+        )
+        assert callable(buckaroo_mcp_tool._start_server_monitor)
+
+    def test_server_killed_on_parent_death(self):
+        """Server must die when MCP tool parent is SIGKILL'd.
+
+        This simulates the worst case: Claude kills the MCP tool hard,
+        bypassing all signal handlers and atexit callbacks. The only
+        reliable mechanism is a pipe-based monitor process.
+        """
+        # Parent script imports buckaroo_mcp_tool (with mcp mocked),
+        # spawns a "server" (sleep), starts the monitor, then blocks.
+        parent_script = """\
+import sys, os, types, subprocess, signal
+from unittest.mock import MagicMock
+
+# Mock mcp
+mcp_mod = types.ModuleType("mcp")
+mcp_server = types.ModuleType("mcp.server")
+mcp_fastmcp = types.ModuleType("mcp.server.fastmcp")
+fake = MagicMock()
+fake.tool.return_value = lambda fn: fn
+fake.prompt.return_value = lambda fn: fn
+mcp_fastmcp.FastMCP = MagicMock(return_value=fake)
+sys.modules["mcp"] = mcp_mod
+sys.modules["mcp.server"] = mcp_server
+sys.modules["mcp.server.fastmcp"] = mcp_fastmcp
+
+import buckaroo_mcp_tool as m
+
+# Start a "server" (sleep process)
+server = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(600)"],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+m._server_proc = server
+
+# Start monitor if available (the fix adds this)
+if hasattr(m, "_start_server_monitor"):
+    m._start_server_monitor(server.pid)
+
+# Report server PID
+print(server.pid, flush=True)
+
+# Block on stdin (simulating mcp.run())
+sys.stdin.buffer.read()
+"""
+
+        parent = subprocess.Popen(
+            [sys.executable, "-c", parent_script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            cwd=REPO_ROOT,
+        )
+
+        server_pid = None
+        try:
+            line = parent.stdout.readline().decode().strip()
+            server_pid = int(line)
+            assert _is_alive(server_pid), "Server should be alive after start"
+
+            # SIGKILL parent — no handlers run, no atexit, nothing.
+            # Only the pipe-based monitor can save us.
+            parent.kill()
+            parent.wait(timeout=5)
+
+            # Give the monitor time to detect pipe break and kill server
+            for _ in range(20):
+                if not _is_alive(server_pid):
+                    break
+                time.sleep(0.25)
+
+            assert not _is_alive(server_pid), (
+                f"Server (pid={server_pid}) survived parent SIGKILL — orphan!"
+            )
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+                try:
+                    parent.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+            if server_pid:
+                try:
+                    os.kill(server_pid, signal.SIGKILL)
+                except OSError:
+                    pass
