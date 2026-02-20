@@ -13,9 +13,9 @@ Optional dependency: install with `buckaroo[xorq]`.
 """
 from __future__ import annotations
 
-from typing import Any, List, Mapping, Tuple
+from typing import Any, List, Tuple
 
-from .col_analysis import ColAnalysis, ColMeta, SDType, ErrDict
+from .col_analysis import ColAnalysis, SDType, ErrDict
 
 
 # Guard optional imports
@@ -26,7 +26,7 @@ except ImportError:
     HAS_XORQ = False
 
 try:
-    import ibis
+    import ibis  # noqa: F401
     HAS_IBIS = True
 except ImportError:
     HAS_IBIS = False
