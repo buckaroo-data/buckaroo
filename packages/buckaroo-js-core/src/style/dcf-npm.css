@@ -70,13 +70,18 @@
 .python-displayer, .command-displayer {
   width: 100%;
   height: 100%;
-  background: hsl(0, 0%, 13%);
+  background: var(--ag-background-color, hsl(0, 0%, 13%));
   overflow: hidden;
   padding: 2px;
   /*border:1px solid red; */
 }
 .python-displayer pre, .command-displayer pre {
   color: #41FF00;
+}
+@media (prefers-color-scheme: light) {
+  .python-displayer pre, .command-displayer pre {
+    color: #006400;
+  }
 }
 
 .command-displayer pre {
@@ -360,7 +365,7 @@
     margin-bottom:9px;
 }
 
-.ag-theme-alpine-dark  {
+.ag-theme-alpine-dark, .ag-theme-alpine  {
     --ag-grid-size:3px;
     --ag-list-item-height: 20px;
  }
@@ -576,8 +581,15 @@ When debugging CSS inside a weird environment I did the following
 	    <srt.BuckarooInfiniteWidget
 Then set the `style_block` property from ptyhon.  
 */
-div.cell-output-ipywidget-background {
+@media (prefers-color-scheme: dark) {
+  div.cell-output-ipywidget-background {
     background:#1f1f1f !important;
+  }
+}
+@media (prefers-color-scheme: light) {
+  div.cell-output-ipywidget-background {
+    background:#ffffff !important;
+  }
 }
 .cell-output-ipywidget-background .status-bar {
     margin-bottom:0;
@@ -594,12 +606,12 @@ div.cell-output-ipywidget-background {
 /* https://colorffy.com/dark-theme-generator?colors=b2317d-121212 */
 .ag-header-row .left_col_configs_header,
 .ag-row .left_col_configs_cell {
-    border-right:2px solid #717171 !important;
+    border-right:2px solid var(--ag-border-color, #717171) !important;
 }
 .ag-header-row .left_col_configs_header_last,
 .ag-row .left_col_configs_cell_last {
 
-    border-right:4px solid #717171 !important;
+    border-right:4px solid var(--ag-border-color, #717171) !important;
     border-bottom:none;
     border-top:none;
 
@@ -611,12 +623,12 @@ div.cell-output-ipywidget-background {
 
 /* we don't want these applying to the status bar too*/
 .df-viewer .ag-header {
-    border-bottom:4px solid #717171 !important;
+    border-bottom:4px solid var(--ag-border-color, #717171) !important;
 }
 
 .df-viewer .ag-center-cols-viewport .ag-row:first-child {
     /* first row at the top of regular rows */
-    border-top:2px solid #717171 !important;
+    border-top:2px solid var(--ag-border-color, #717171) !important;
 }
 
 /*
