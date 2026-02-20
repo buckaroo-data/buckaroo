@@ -9,8 +9,9 @@ import { BuckarooOptions } from "./WidgetTypes";
 import { BuckarooState, BKeys } from "./WidgetTypes";
 import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-model";
 import { CustomCellEditorProps } from '@ag-grid-community/react';
-import { myTheme } from "./DFViewerParts/gridUtils";
+import { getThemeForScheme } from "./DFViewerParts/gridUtils";
 import { Theme } from "@ag-grid-community/theming";
+import { useColorScheme } from "./useColorScheme";
 
 export type setColumFunc = (newCol: string) => void;
 ModuleRegistry.registerModules([ClientSideRowModelModule]);
@@ -363,14 +364,16 @@ export function StatusBar({
         cellStyle: { textAlign: "left" },
     };
 
-    const statusTheme: Theme = useMemo(()=> myTheme.withParams({
+    const colorScheme = useColorScheme();
+    const statusTheme: Theme = useMemo(()=> getThemeForScheme(colorScheme).withParams({
         headerFontSize: 14,
-        rowVerticalPaddingScale: 0.8,    
-    }), []);
+        rowVerticalPaddingScale: 0.8,
+    }), [colorScheme]);
+    const themeClass = colorScheme === 'light' ? 'ag-theme-alpine' : 'ag-theme-alpine-dark';
     return (
         <div className="status-bar">
-            <div 
-            className="theme-hanger ag-theme-alpine-dark">
+            <div
+            className={`theme-hanger ${themeClass}`}>
                 <AgGridReact
                     ref={gridRef}
                     theme={statusTheme}
