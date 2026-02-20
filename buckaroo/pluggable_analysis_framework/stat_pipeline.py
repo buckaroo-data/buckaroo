@@ -5,16 +5,15 @@ Accepts a mix of v2 @stat functions and v1 ColAnalysis classes (via adapter).
 """
 from __future__ import annotations
 
-import traceback
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
 from buckaroo.df_util import old_col_new_col
 
-from .col_analysis import ColAnalysis, ColMeta, ErrDict, SDType
+from .col_analysis import ColAnalysis, ErrDict, SDType
 from .stat_func import (
-    StatFunc, StatKey, RawSeries, SampledSeries, RawDataFrame,
+    StatFunc, RawSeries, SampledSeries, RawDataFrame,
     RAW_MARKER_TYPES, MISSING, collect_stat_funcs,
 )
 from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator

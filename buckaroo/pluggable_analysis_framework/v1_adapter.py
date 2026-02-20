@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any, List, Type
 
 from .col_analysis import ColAnalysis
-from .stat_func import StatFunc, StatKey, RawSeries, MISSING
+from .stat_func import StatFunc, StatKey, RawSeries
 
 
 def _has_custom_series_summary(kls: Type[ColAnalysis]) -> bool:
@@ -53,8 +53,6 @@ def col_analysis_to_stat_funcs(kls: Type[ColAnalysis]) -> List[StatFunc]:
     has_series = _has_custom_series_summary(kls)
     has_computed = _has_custom_computed_summary(kls)
 
-    # Determine which keys are provided by series vs computed phases
-    all_provided_names = set(kls.full_provides())
     defaults = kls.provides_defaults.copy()
 
     if has_series:
