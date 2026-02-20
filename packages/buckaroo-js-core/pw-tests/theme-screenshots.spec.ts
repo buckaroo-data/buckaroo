@@ -1,6 +1,9 @@
 import { test } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const STORYBOOK_BASE = 'http://localhost:6006/iframe.html?viewMode=story&id=';
 
