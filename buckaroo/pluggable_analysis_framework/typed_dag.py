@@ -21,7 +21,7 @@ class DAGConfigError(Exception):
     pass
 
 
-def build_typed_dag(stat_funcs: List[StatFunc]) -> List[StatFunc]:
+def build_typed_dag(stat_funcs: List[StatFunc], external_keys: Set[str] = frozenset()) -> List[StatFunc]:
     """Build and topologically sort a typed stat DAG.
 
     1. Builds provides map: stat_name -> (StatKey, StatFunc)
@@ -32,6 +32,7 @@ def build_typed_dag(stat_funcs: List[StatFunc]) -> List[StatFunc]:
 
     Args:
         stat_funcs: list of StatFunc objects to order
+        external_keys: keys provided externally (e.g. orig_col_name), skip validation
 
     Returns:
         Topologically sorted list of StatFunc objects
@@ -53,6 +54,9 @@ def build_typed_dag(stat_funcs: List[StatFunc]) -> List[StatFunc]:
         for req in sf.requires:
             if req.type in RAW_MARKER_TYPES:
                 continue  # Raw types are provided by the executor, not the DAG
+
+            if req.name in external_keys:
+                continue  # Provided externally
 
             if req.name not in provides_map:
                 raise DAGConfigError(
@@ -103,6 +107,7 @@ def build_typed_dag(stat_funcs: List[StatFunc]) -> List[StatFunc]:
 def build_column_dag(
     all_stat_funcs: List[StatFunc],
     column_dtype,
+    external_keys: Set[str] = frozenset(),
 ) -> List[StatFunc]:
     """Filter stat functions by column dtype and build DAG.
 
@@ -130,7 +135,7 @@ def build_column_dag(
         prev_count = len(candidates)
 
         # Build current provides set
-        provides: Set[str] = set()
+        provides: Set[str] = set(external_keys)
         for sf in candidates:
             for sk in sf.provides:
                 provides.add(sk.name)
@@ -147,4 +152,4 @@ def build_column_dag(
     if not candidates:
         return []
 
-    return build_typed_dag(candidates)
+    return build_typed_dag(candidates, external_keys=external_keys)

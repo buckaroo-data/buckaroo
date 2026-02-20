@@ -1,6 +1,6 @@
 import pandas as pd
 from buckaroo.jlisp.lisp_utils import s, sQ, merge_ops, format_ops, ops_eq
-from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
+from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from ..customizations.all_transforms import configure_buckaroo, DefaultCommandKlsList
 
 def dumb_merge_ops(existing_ops, cleaning_ops):
@@ -81,7 +81,7 @@ class PandasAutocleaning:
     #     self.command_klasses = without_incoming
     #     self.setup_from_command_kls_list()
 
-    DFStatsKlass = DfStats
+    DFStatsKlass = DfStatsV2
     #until we plumb in swapping configs, just stick with default
     def __init__(self, ac_configs=tuple([AutocleaningConfig()]), conf_name=""):
 

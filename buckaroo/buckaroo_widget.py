@@ -22,7 +22,7 @@ from .customizations.analysis import (TypingStats, ComputedDefaultSummaryStats, 
 from .customizations.histogram import (Histogram)
 from .customizations.pd_autoclean_conf import (CleaningConf, NoCleaningConf, AggressiveAC, ConservativeAC)
 from .customizations.styling import (DefaultSummaryStatsStyling, DefaultMainStyling, CleaningDetailStyling)
-from .pluggable_analysis_framework.analysis_management import DfStats
+from .pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.extension_utils import copy_extend
 
@@ -164,7 +164,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
 
     sampling_klass = PdSampling
     autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
-    DFStatsClass = DfStats # Pandas Specific
+    DFStatsClass = DfStatsV2 # Pandas Specific
     autoclean_conf = tuple([CleaningConf, NoCleaningConf]) #override the base CustomizableDataFlow conf
 
 
