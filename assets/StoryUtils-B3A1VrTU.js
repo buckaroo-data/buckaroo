@@ -70,18 +70,13 @@ import{j as r}from"./jsx-runtime-DiklIkkE.js";import{r as d,R as s}from"./index-
 .python-displayer, .command-displayer {
   width: 100%;
   height: 100%;
-  background: var(--ag-background-color, hsl(0, 0%, 13%));
+  background: hsl(0, 0%, 13%);
   overflow: hidden;
   padding: 2px;
   /*border:1px solid red; */
 }
 .python-displayer pre, .command-displayer pre {
   color: #41FF00;
-}
-@media (prefers-color-scheme: light) {
-  .python-displayer pre, .command-displayer pre {
-    color: #006400;
-  }
 }
 
 .command-displayer pre {
@@ -365,7 +360,7 @@ import{j as r}from"./jsx-runtime-DiklIkkE.js";import{r as d,R as s}from"./index-
     margin-bottom:9px;
 }
 
-.ag-theme-alpine-dark, .ag-theme-alpine  {
+.ag-theme-alpine-dark  {
     --ag-grid-size:3px;
     --ag-list-item-height: 20px;
  }
@@ -413,30 +408,8 @@ div.dependent-tabs ul.tabs li.active {
    */
    border-top-left-radius: 0;
    border-top-right-radius: 0;
-}
 
-/* Light mode: add visible border so the widget doesn't blend into white backgrounds */
-@media (prefers-color-scheme: light) {
-    .status-bar .ag-root-wrapper {
-        border: 1px solid #c0c0c0 !important;
-        border-bottom: none !important;
-    }
-    .df-viewer .ag-root-wrapper {
-        border: 1px solid #c0c0c0 !important;
-    }
-    .buckaroo-widget .df-viewer .ag-root-wrapper {
-        border-top: none !important;
-    }
-}
 
-/* Ensure empty grid area below rows has proper background */
-.theme-hanger {
-    background-color: #181D1F;
-}
-@media (prefers-color-scheme: light) {
-    .theme-hanger {
-        background-color: #ffffff;
-    }
 }
 
 
@@ -581,27 +554,8 @@ div div div .buckaroo_anywidget {
   padding:0;
 }
 
-.statusBar .ag-column-first .FakeSearchEditor input{
+.statusBar .ag-column-first .FakeSearchEditor input{ 
   outline:none;
-}
-
-/* Search input and button styling — borderless, fill the AG-Grid cell */
-.FakeSearchEditor {
-    width: 100%;
-}
-.FakeSearchEditor input {
-    border: none;
-    background: transparent;
-    color: inherit;
-    outline: none;
-}
-.FakeSearchEditor button {
-    border: none;
-    border-left: 1px solid var(--ag-border-color, #68686e);
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-    padding: 0 4px;
 }
 
 
@@ -622,15 +576,8 @@ When debugging CSS inside a weird environment I did the following
 	    <srt.BuckarooInfiniteWidget
 Then set the \`style_block\` property from ptyhon.  
 */
-@media (prefers-color-scheme: dark) {
-  div.cell-output-ipywidget-background {
+div.cell-output-ipywidget-background {
     background:#1f1f1f !important;
-  }
-}
-@media (prefers-color-scheme: light) {
-  div.cell-output-ipywidget-background {
-    background:#ffffff !important;
-  }
 }
 .cell-output-ipywidget-background .status-bar {
     margin-bottom:0;
@@ -647,12 +594,12 @@ Then set the \`style_block\` property from ptyhon.
 /* https://colorffy.com/dark-theme-generator?colors=b2317d-121212 */
 .ag-header-row .left_col_configs_header,
 .ag-row .left_col_configs_cell {
-    border-right:2px solid var(--ag-border-color, #717171) !important;
+    border-right:2px solid #717171 !important;
 }
 .ag-header-row .left_col_configs_header_last,
 .ag-row .left_col_configs_cell_last {
 
-    border-right:4px solid var(--ag-border-color, #717171) !important;
+    border-right:4px solid #717171 !important;
     border-bottom:none;
     border-top:none;
 
@@ -664,12 +611,12 @@ Then set the \`style_block\` property from ptyhon.
 
 /* we don't want these applying to the status bar too*/
 .df-viewer .ag-header {
-    border-bottom:4px solid var(--ag-border-color, #717171) !important;
+    border-bottom:4px solid #717171 !important;
 }
 
 .df-viewer .ag-center-cols-viewport .ag-row:first-child {
     /* first row at the top of regular rows */
-    border-top:2px solid var(--ag-border-color, #717171) !important;
+    border-top:2px solid #717171 !important;
 }
 
 /*
