@@ -47,5 +47,9 @@ export interface HeightStyleI {
 export declare const getHeightStyle2: (maxDataPinnedRows: number, maxRows: number, component_config?: ComponentConfig, rowHeight?: number) => HeightStyleI;
 export declare const heightStyle: (hArgs: HeightStyleArgs) => HeightStyleI;
 export declare const getAutoSize: (numColumns: number) => SizeColumnsToFitProvidedWidthStrategy | SizeColumnsToContentStrategy;
+export declare const myThemeDark: Theme;
+export declare const myThemeLight: Theme;
+/** @deprecated Use getThemeForScheme() instead */
 export declare const myTheme: Theme;
+export declare function getThemeForScheme(scheme: 'light' | 'dark'): Theme;
 export {};
