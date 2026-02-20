@@ -94,6 +94,24 @@ def _execute_stat_func(
         if req.name in accumulator:
             result = accumulator[req.name]
             if isinstance(result, Ok):
+                # Type check at the boundary: catch mismatched stat definitions early
+                if (req.type is not Any
+                        and req.type not in RAW_MARKER_TYPES
+                        and result.value is not None
+                        and not isinstance(result.value, req.type)):
+                    type_err = TypeError(
+                        f"'{sf.name}' expects '{req.name}' as {req.type.__name__}, "
+                        f"but got {type(result.value).__name__}: {result.value!r}"
+                    )
+                    for sk in sf.provides:
+                        accumulator[sk.name] = Err(
+                            error=type_err,
+                            stat_func_name=sf.name,
+                            column_name=column_name,
+                            inputs={},
+                        )
+                    has_upstream_err = True
+                    break
                 kwargs[req.name] = result.value
             elif isinstance(result, Err):
                 # Upstream error — propagate to all outputs
