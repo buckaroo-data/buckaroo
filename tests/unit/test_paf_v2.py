@@ -642,6 +642,29 @@ class TestStatPipeline:
         assert result['fails_with_default'] == -1
         assert errors == []
 
+    def test_type_enforcement_at_boundary(self):
+        """If a provider declares int but produces str, the consumer gets a TypeError."""
+        @stat()
+        def bad_length(ser: RawSeries) -> int:
+            return "not_an_int"  # lies about its return type
+
+        @stat()
+        def needs_int(bad_length: int) -> float:
+            return bad_length * 2.0
+
+        pipeline = StatPipeline([bad_length, needs_int], unit_test=False)
+        ser = pd.Series([1, 2, 3])
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+
+        # bad_length itself succeeds (it returned a value)
+        assert result['bad_length'] == "not_an_int"
+        # but needs_int should fail with TypeError because it declared int
+        assert result['needs_int'] is None
+        assert len(errors) == 1
+        assert isinstance(errors[0].error, TypeError)
+        assert 'int' in str(errors[0].error)
+        assert 'str' in str(errors[0].error)
+
     def test_column_filter(self):
         """Numeric-only stat should not appear for string columns."""
         pipeline = StatPipeline(
