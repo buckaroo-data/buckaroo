@@ -20,7 +20,9 @@
     "test:pw:report": "pnpm exec playwright show-report",
     "test:integration": "pnpm exec playwright test --config playwright.config.integration.ts --reporter=line",
     "test:server": "pnpm exec playwright test --config playwright.config.server.ts",
-    "test:server:headed": "pnpm exec playwright test --config playwright.config.server.ts --headed"
+    "test:server:headed": "pnpm exec playwright test --config playwright.config.server.ts --headed",
+    "test:marimo": "pnpm exec playwright test --config playwright.config.marimo.ts",
+    "test:marimo:headed": "pnpm exec playwright test --config playwright.config.marimo.ts --headed"
   },
   "files": [
     "/dist"
