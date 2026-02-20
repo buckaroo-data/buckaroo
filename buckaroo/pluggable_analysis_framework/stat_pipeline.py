@@ -73,7 +73,37 @@ def _execute_stat_func(
     - Upstream error propagation
     - Multi-value return unpacking (for TypedDict and v1 adapter dict returns)
     - Default fallback on error
+    - v1_computed mode: pass full accumulator as single dict arg
+    - spread_dict_result mode: spread all dict keys into accumulator
     """
+    # v1_computed mode: pass full resolved accumulator as single dict arg
+    if sf.v1_computed:
+        summary_dict = {}
+        for k, v in accumulator.items():
+            if isinstance(v, Ok):
+                summary_dict[k] = v.value
+        try:
+            result = sf.func(summary_dict)
+        except Exception as e:
+            if sf.default is not MISSING:
+                for sk in sf.provides:
+                    accumulator[sk.name] = Ok(sf.default)
+            else:
+                for sk in sf.provides:
+                    accumulator[sk.name] = Err(
+                        error=e,
+                        stat_func_name=sf.name,
+                        column_name=column_name,
+                        inputs=summary_dict.copy(),
+                    )
+            return
+        if sf.spread_dict_result and isinstance(result, dict):
+            for k, v in result.items():
+                accumulator[k] = Ok(v)
+        elif len(sf.provides) == 1:
+            accumulator[sf.provides[0].name] = Ok(result)
+        return
+
     # Build kwargs from requires
     kwargs = {}
     has_upstream_err = False
@@ -147,9 +177,13 @@ def _execute_stat_func(
     try:
         result = sf.func(**kwargs)
 
-        # Unpack result — always try dict unpacking first
-        # This handles both TypedDict returns (v2) and v1 adapter dict returns
-        if isinstance(result, dict) and any(sk.name in result for sk in sf.provides):
+        # Unpack result
+        if sf.spread_dict_result and isinstance(result, dict):
+            # v1 compat: spread all dict keys into accumulator
+            for k, v in result.items():
+                accumulator[k] = Ok(v)
+        elif isinstance(result, dict) and any(sk.name in result for sk in sf.provides):
+            # TypedDict returns (v2) and v1 adapter dict returns
             for sk in sf.provides:
                 if sk.name in result:
                     accumulator[sk.name] = Ok(result[sk.name])
@@ -195,6 +229,12 @@ class StatPipeline:
         result, errors = pipeline.process_df(my_df)
     """
 
+    EXTERNAL_KEYS = frozenset({'orig_col_name', 'rewritten_col_name'})
+
+    @property
+    def ordered_a_objs(self):
+        return list(self._original_inputs)
+
     def __init__(
         self,
         stat_funcs: list,
@@ -204,7 +244,8 @@ class StatPipeline:
         self._original_inputs = list(stat_funcs)
 
         # Validate the full DAG (raises DAGConfigError if invalid)
-        self.ordered_stat_funcs = build_typed_dag(self.all_stat_funcs)
+        self.ordered_stat_funcs = build_typed_dag(
+            self.all_stat_funcs, external_keys=self.EXTERNAL_KEYS)
 
         # Build key -> StatFunc mapping for error reporting
         self._key_to_func: Dict[str, StatFunc] = {}
@@ -225,6 +266,7 @@ class StatPipeline:
         raw_series=None,
         sampled_series=None,
         raw_dataframe=None,
+        initial_stats: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], List[StatError]]:
         """Process a single column through the stat DAG.
 
@@ -233,10 +275,17 @@ class StatPipeline:
         3. Returns (plain_dict, errors)
         """
         # Build column-specific DAG (filters by dtype)
-        column_funcs = build_column_dag(self.all_stat_funcs, column_dtype)
+        external = set(self.EXTERNAL_KEYS)
+        if initial_stats:
+            external |= set(initial_stats.keys())
+        column_funcs = build_column_dag(
+            self.all_stat_funcs, column_dtype, external_keys=external)
 
         # Execute in order
         accumulator: Dict[str, StatResult] = {}
+        if initial_stats:
+            for k, v in initial_stats.items():
+                accumulator[k] = Ok(v)
         for sf in column_funcs:
             _execute_stat_func(
                 sf, accumulator, column_name,
@@ -280,11 +329,11 @@ class StatPipeline:
                 raw_series=ser,
                 sampled_series=ser,
                 raw_dataframe=df,
+                initial_stats={
+                    'orig_col_name': orig_col_name,
+                    'rewritten_col_name': rewritten_col_name,
+                },
             )
-
-            # Add metadata (matches v1 behavior)
-            col_result['orig_col_name'] = orig_col_name
-            col_result['rewritten_col_name'] = rewritten_col_name
 
             summary[rewritten_col_name] = col_result
             all_errors.extend(col_errors)
@@ -339,7 +388,7 @@ class StatPipeline:
 
         try:
             new_funcs = _normalize_inputs(new_inputs)
-            new_ordered = build_typed_dag(new_funcs)
+            new_ordered = build_typed_dag(new_funcs, external_keys=self.EXTERNAL_KEYS)
         except DAGConfigError as e:
             return False, [StatError(
                 column="<dag>", stat_key="<config>",

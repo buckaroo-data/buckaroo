@@ -97,6 +97,8 @@ class StatFunc:
     column_filter: Optional[Callable] = None
     quiet: bool = False
     default: Any = field(default_factory=lambda: MISSING)
+    spread_dict_result: bool = False  # v1 compat: spread all dict keys into accumulator
+    v1_computed: bool = False  # v1 compat: pass full accumulator as single dict arg
 
 
 # ---------------------------------------------------------------------------
