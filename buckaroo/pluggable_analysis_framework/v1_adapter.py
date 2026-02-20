@@ -60,14 +60,6 @@ def col_analysis_to_stat_funcs(kls: Type[ColAnalysis]) -> List[StatFunc]:
         # (v1 merges defaults first, then updates with series_summary result)
         series_provide_names = set(kls.provides_series_stats) | set(defaults.keys())
 
-        # If there's also a computed phase, the computed phase may override some
-        # of these keys. But for DAG purposes, the series func provides them first.
-        if has_computed:
-            # Computed phase will provide its own keys. Remove keys that are
-            # ONLY set by computed (i.e., not in series_stats or defaults).
-            # In practice, v1 classes have series + computed provide different keys.
-            pass
-
         series_provides = [StatKey(name, Any) for name in sorted(series_provide_names)]
         series_requires = [StatKey('ser', RawSeries)]
 
@@ -96,37 +88,32 @@ def col_analysis_to_stat_funcs(kls: Type[ColAnalysis]) -> List[StatFunc]:
             provides=series_provides,
             needs_raw=True,
             quiet=kls.quiet,
+            spread_dict_result=True,
         ))
 
-    if has_computed and kls.requires_summary:
-        # Computed phase: takes stats from requires_summary, produces provides_defaults keys
+    if has_computed:
+        # Computed phase: uses v1_computed mode to receive full accumulator
+        # Only declare requires_summary keys for DAG ordering purposes
+        dag_req_names = set(kls.requires_summary)
+        computed_requires = [StatKey(name, Any) for name in sorted(dag_req_names)]
+
+        # Provide keys from provides_defaults; if empty, use a synthetic status key
         computed_provide_names = set(defaults.keys())
-        # If series phase already provides some of these, the computed phase
-        # will update/override them (matching v1 behavior where computed_summary
-        # result is merged on top of series_summary result)
+        if not computed_provide_names:
+            computed_provide_names = {f'__{kls.__name__}__status'}
         computed_provides = [StatKey(name, Any) for name in sorted(computed_provide_names)]
 
-        computed_requires = [StatKey(name, Any) for name in kls.requires_summary]
-
         _kls = kls
-        _defaults = defaults.copy()
-        _req_names = list(kls.requires_summary)
 
-        def _make_computed_func(kls_ref, defaults_ref, req_names):
-            def v1_computed_wrapper(**kwargs):
-                # Build the summary dict that v1's computed_summary expects
-                # It should contain all stats computed so far
-                summary_dict = dict(kwargs)
-                result = defaults_ref.copy()
-                computed = kls_ref.computed_summary(summary_dict)
-                result.update(computed)
-                return result
+        def _make_computed_func(kls_ref):
+            def v1_computed_wrapper(summary_dict):
+                return kls_ref.computed_summary(summary_dict)
             v1_computed_wrapper.__name__ = f"{kls_ref.__name__}__computed"
             v1_computed_wrapper.__qualname__ = f"{kls_ref.__qualname__}__computed"
             v1_computed_wrapper.__module__ = getattr(kls_ref, '__module__', __name__)
             return v1_computed_wrapper
 
-        computed_func = _make_computed_func(_kls, _defaults, _req_names)
+        computed_func = _make_computed_func(_kls)
 
         funcs.append(StatFunc(
             name=f"{kls.__name__}__computed",
@@ -135,6 +122,8 @@ def col_analysis_to_stat_funcs(kls: Type[ColAnalysis]) -> List[StatFunc]:
             provides=computed_provides,
             needs_raw=False,
             quiet=kls.quiet,
+            v1_computed=True,
+            spread_dict_result=True,
         ))
 
     elif not has_series and not has_computed:

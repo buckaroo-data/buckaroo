@@ -8,7 +8,7 @@ from traitlets import Unicode, Any, observe, Dict
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, SDType
 from ..serialization_utils import pd_to_obj, sd_to_parquet_b64
 from buckaroo.pluggable_analysis_framework.utils import (filter_analysis)
-from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
+from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from .autocleaning import SentinelAutocleaning
 from .dataflow_extras import (exception_protect, Sampling)
 from .styling_core import (
@@ -241,7 +241,7 @@ class CustomizableDataflow(DataFlow):
     #analysis_klasses = [StylingAnalysis]
     analysis_klasses: List[Type[ColAnalysis]] = [StylingAnalysis]
     command_config = Dict({}).tag(sync=True)
-    DFStatsClass = DfStats
+    DFStatsClass = DfStatsV2
     sampling_klass = Sampling
 
     df_display_klasses: TDict[str, Type[StylingAnalysis]]  = {}

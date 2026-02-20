@@ -531,7 +531,7 @@ class TestV1Adapter:
     def test_computed_func_executes(self):
         funcs = col_analysis_to_stat_funcs(V1DistinctPer)
         sf = funcs[0]
-        result = sf.func(length=10, distinct_count=5)
+        result = sf.func({'length': 10, 'distinct_count': 5})
         assert isinstance(result, dict)
         assert result['distinct_per'] == 0.5
 
