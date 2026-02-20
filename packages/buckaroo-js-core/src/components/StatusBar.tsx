@@ -143,11 +143,11 @@ export const fakeSearchCell = function (_params: any) {
         <div
             className={"FakeSearchEditor"}
             tabIndex={1} // important - without this the key presses wont be caught
-            style={{ display: "flex", "flexDirection": "row" }}
+            style={{ display: "flex", flexDirection: "row", width: "100%" }}
         >
             <input
                 type="text"
-                style={{ flex: "auto", width: 133 }}
+                style={{ flex: "1 1 auto", minWidth: 0 }}
                 value={searchVal}
                 onChange={({ target: { value }}) => setSearchVal(value)}
                 onSubmit={setVal}

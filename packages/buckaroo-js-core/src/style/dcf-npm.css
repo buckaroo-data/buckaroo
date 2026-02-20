@@ -413,8 +413,25 @@ div.dependent-tabs ul.tabs li.active {
    */
    border-top-left-radius: 0;
    border-top-right-radius: 0;
+}
 
+/* Light mode: add visible border so the widget doesn't blend into white backgrounds */
+@media (prefers-color-scheme: light) {
+    .status-bar .ag-root-wrapper {
+        border: 1px solid #c0c0c0 !important;
+        border-bottom: none !important;
+    }
+    .df-viewer .ag-root-wrapper {
+        border: 1px solid #c0c0c0 !important;
+    }
+    .buckaroo-widget .df-viewer .ag-root-wrapper {
+        border-top: none !important;
+    }
+}
 
+/* Ensure empty grid area below rows has proper background */
+.theme-hanger {
+    background-color: var(--ag-background-color, #181D1F);
 }
 
 
@@ -559,8 +576,29 @@ div div div .buckaroo_anywidget {
   padding:0;
 }
 
-.statusBar .ag-column-first .FakeSearchEditor input{ 
+.statusBar .ag-column-first .FakeSearchEditor input{
   outline:none;
+}
+
+/* Search input and button styling for theme adaptability */
+.FakeSearchEditor {
+    width: 100%;
+}
+.FakeSearchEditor input {
+    border: 1px solid var(--ag-border-color, #68686e);
+    border-radius: 2px;
+    background: transparent;
+    color: inherit;
+}
+.FakeSearchEditor button {
+    border: 1px solid var(--ag-border-color, #68686e);
+    border-radius: 2px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    padding: 0 3px;
+    min-width: 22px;
+    box-sizing: border-box;
 }
 
 
