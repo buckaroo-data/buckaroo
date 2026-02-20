@@ -431,7 +431,12 @@ div.dependent-tabs ul.tabs li.active {
 
 /* Ensure empty grid area below rows has proper background */
 .theme-hanger {
-    background-color: var(--ag-background-color, #181D1F);
+    background-color: #181D1F;
+}
+@media (prefers-color-scheme: light) {
+    .theme-hanger {
+        background-color: #ffffff;
+    }
 }
 
 
