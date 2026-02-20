@@ -3,8 +3,9 @@ import React from "react";
 import { createPortal } from "react-dom";
 
 import { Bar, BarChart, Tooltip } from "recharts";
-import { ChartColors } from "./ChartCell";
+import { getChartColors } from "./ChartCell";
 import { ColDef, Column, Context, GridApi } from "@ag-grid-community/core";
+import { useColorScheme } from "../useColorScheme";
 
 export interface HistogramNode {
     name: string;
@@ -78,11 +79,12 @@ export interface HistogramBar {
 
 
 export const HistogramCell = (props:
-    {api:GridApi, colDef:ColDef, 
+    {api:GridApi, colDef:ColDef,
      column:Column, context:Context, value:any}
 ) => {
-    // relevant args here 
+    // relevant args here
     // https://www.ag-grid.com/react-data-grid/component-cell-renderer/
+    const colorScheme = useColorScheme();
     if (props === undefined ) {
         return <span></span>;
     }
@@ -94,20 +96,26 @@ export const HistogramCell = (props:
     }
   const histogramArr = potentialHistogramArr as HistogramBar[];
   //@ts-ignore
-  return TypedHistogramCell({histogramArr, context:props.context, className:props.colDef.cellClass|| ""});
+  return TypedHistogramCell({histogramArr, context:props.context, className:props.colDef.cellClass|| "", colorScheme});
 }
 
-export const TypedHistogramCell = ({histogramArr, context, className}:
-    {histogramArr:HistogramBar[], context:any, className?:string}) => {
+export const TypedHistogramCell = ({histogramArr, context, className, colorScheme = 'dark'}:
+    {histogramArr:HistogramBar[], context:any, className?:string, colorScheme?: 'light' | 'dark'}) => {
     const dumbClickHandler = (rechartsArgs: any, _unused_react: any) => {
         //we can access the rest of the data model through context
-    
+
         // I can't find the type for rechartsArgs
         // these are probably the keys we care about
         // activeTooltipIndex
         // activeLabel
         console.log("dumbClickHandler", rechartsArgs, context);
     };
+
+    const cc = getChartColors(colorScheme);
+    const isLight = colorScheme === 'light';
+    const barStroke = isLight ? '#888' : '#000';
+    const barFill = isLight ? '#999' : 'gray';
+    const boolFalseStroke = isLight ? '#666' : '#000';
 
     // used to prevent duplicate IDs which lead to a nasty bug where patterns aren't applied
     // https://github.com/paddymul/buckaroo/issues/292
@@ -140,7 +148,7 @@ export const TypedHistogramCell = ({histogramArr, context, className}:
             >
                 <defs>
                     <pattern id={starId} width="10" height="10" patternUnits="userSpaceOnUse">
-                        <polygon stroke="pink" points="0,0 2,5 0,10 5,8 10,10 8,5 10,0 5,2" />
+                        <polygon stroke={cc.cat_pop} points="0,0 2,5 0,10 5,8 10,10 8,5 10,0 5,2" />
                     </pattern>
                     <pattern
                         id={stripeId}
@@ -149,10 +157,10 @@ export const TypedHistogramCell = ({histogramArr, context, className}:
                         patternUnits="userSpaceOnUse"
                         patternTransform="rotate(45)"
                     >
-                        <rect width="2" height="4" fill={ChartColors.NA} />
+                        <rect width="2" height="4" fill={cc.NA} />
                     </pattern>
                     <pattern id={circleId} width="4" height="4" patternUnits="userSpaceOnUse">
-                        <circle data-color="outline" stroke="pink" cx=".5" cy=".5" r="1.5"></circle>
+                        <circle data-color="outline" stroke={cc.cat_pop} cx=".5" cy=".5" r="1.5"></circle>
                     </pattern>
 
                     <pattern
@@ -163,7 +171,7 @@ export const TypedHistogramCell = ({histogramArr, context, className}:
                         height="4"
                         patternUnits="userSpaceOnUse"
                     >
-                        <rect stroke="#0f0" x="0" width="2" height="2" y="0"></rect>
+                        <rect stroke={cc.unique} x="0" width="2" height="2" y="0"></rect>
                         <rect x="2" width="2" height="2" y="2"></rect>
                     </pattern>
 
@@ -177,7 +185,7 @@ export const TypedHistogramCell = ({histogramArr, context, className}:
                         patternTransform="translate(1, 1) rotate(0) skewX(0)"
                     >
                         <svg width="5" height="5" viewBox="0 0 100 100">
-                            <g fill="teal" opacity="1">
+                            <g fill={cc.longtail} opacity="1">
                                 <path d="M99.9557 99.9557C45.4895 98.3748 1.6248 54.5101 0.0439453 0.0439453C54.5101 1.6248 98.3748 45.4895 99.9557 99.9557Z"></path>
                             </g>
                         </svg>
@@ -185,15 +193,15 @@ export const TypedHistogramCell = ({histogramArr, context, className}:
                 </defs>
                 <Bar
                     dataKey="population"
-                    stroke="#000"
-                    fill="gray"
+                    stroke={barStroke}
+                    fill={barFill}
                     stackId="stack"
                     isAnimationActive={false}
                 />
                 <Bar
                     dataKey="tail"
-                    stroke="#000"
-                    fill="gray"
+                    stroke={barStroke}
+                    fill={barFill}
                     stackId="stack"
                     isAnimationActive={false}
                 />
@@ -206,41 +214,41 @@ export const TypedHistogramCell = ({histogramArr, context, className}:
                 />
                 <Bar
                     dataKey="false"
-                    stroke="#000"
+                    stroke={boolFalseStroke}
                     fill="#fff"
                     stackId="stack"
                     isAnimationActive={false}
                 />
                 <Bar
                     dataKey="cat_pop"
-                    stroke={ChartColors.cat_pop}
+                    stroke={cc.cat_pop}
                     fill={circleUrl}
                     stackId="stack"
                     isAnimationActive={false}
                 />
                 <Bar
                     dataKey="unique"
-                    stroke={ChartColors.unique}
+                    stroke={cc.unique}
                     fill={checkersUrl}
                     stackId="stack"
                     isAnimationActive={false}
                 />
                 <Bar
                     dataKey="longtail"
-                    stroke={ChartColors.longtail}
+                    stroke={cc.longtail}
                     fill={leafsUrl}
                     stackId="stack"
                     isAnimationActive={false}
                 />
                 <Bar
                     dataKey="user1"
-                    stroke="teal"
+                    stroke={cc.longtail}
                     fill={starUrl}
                     stackId="stack"
                     isAnimationActive={false}
                 />
-                <Bar dataKey="NA" fill={stripeUrl} 
-                     stackId="stack" 
+                <Bar dataKey="NA" fill={stripeUrl}
+                     stackId="stack"
                      isAnimationActive={false} />
                 <Tooltip
                     formatter={formatter}
