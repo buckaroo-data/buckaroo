@@ -585,25 +585,23 @@ div div div .buckaroo_anywidget {
   outline:none;
 }
 
-/* Search input and button styling for theme adaptability */
+/* Search input and button styling — borderless, fill the AG-Grid cell */
 .FakeSearchEditor {
     width: 100%;
 }
 .FakeSearchEditor input {
-    border: 1px solid var(--ag-border-color, #68686e);
-    border-radius: 2px;
+    border: none;
     background: transparent;
     color: inherit;
+    outline: none;
 }
 .FakeSearchEditor button {
-    border: 1px solid var(--ag-border-color, #68686e);
-    border-radius: 2px;
+    border: none;
+    border-left: 1px solid var(--ag-border-color, #68686e);
     background: transparent;
     color: inherit;
     cursor: pointer;
-    padding: 0 3px;
-    min-width: 22px;
-    box-sizing: border-box;
+    padding: 0 4px;
 }
 
 
