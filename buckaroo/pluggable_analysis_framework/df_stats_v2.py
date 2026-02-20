@@ -54,9 +54,7 @@ class DfStatsV2:
 
         # Process using v1-compatible output format
         self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, self.debug)
-
-        # Also keep v2 errors for richer diagnostics
-        _, self.stat_errors = self.ap.process_df(self.df, self.debug)
+        self.stat_errors = []
 
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)
