@@ -6,13 +6,12 @@ stat_pipeline, v1_adapter, df_stats_v2.
 import warnings
 from typing import Any, TypedDict
 
-import numpy as np
 import pandas as pd
 import pytest
 
 from buckaroo.pluggable_analysis_framework.stat_func import (
-    StatKey, StatFunc, RawSeries, SampledSeries, RawDataFrame,
-    RAW_MARKER_TYPES, MISSING, stat, collect_stat_funcs,
+    StatKey, StatFunc, RawSeries,
+    MISSING, stat, collect_stat_funcs,
 )
 from buckaroo.pluggable_analysis_framework.stat_result import (
     Ok, Err, UpstreamError, StatError, resolve_accumulator,
@@ -124,9 +123,9 @@ class V1DistinctPer(ColAnalysis):
 
     @staticmethod
     def computed_summary(summary_dict):
-        l = summary_dict['length']
+        length = summary_dict['length']
         dc = summary_dict['distinct_count']
-        return {'distinct_per': dc / l if l > 0 else 0.0}
+        return {'distinct_per': dc / length if length > 0 else 0.0}
 
 
 class V1Combined(ColAnalysis):
@@ -349,7 +348,7 @@ class TestBuildTypedDag:
         f1 = StatFunc('length', lambda: 10, [], [StatKey('length', int)], False)
         f2 = StatFunc('dc', lambda: 5, [], [StatKey('distinct_count', int)], False)
         f3 = StatFunc(
-            'dp', lambda l, d: d / l,
+            'dp', lambda length, d: d / length,
             [StatKey('length', int), StatKey('distinct_count', int)],
             [StatKey('distinct_per', float)],
             False,
