@@ -34,10 +34,4 @@ export declare const ChartColors: {
     NA: string;
     cat_pop: string;
 };
-export declare function getChartColors(scheme: 'light' | 'dark'): {
-    unique: string;
-    longtail: string;
-    NA: string;
-    cat_pop: string;
-};
 export declare const getChartCell: (multiChartCellProps: ChartDisplayerA) => (props: any) => import("react/jsx-runtime").JSX.Element;
