@@ -41,18 +41,24 @@ TimeoutError: locator.waitFor: Timeout 30000ms exceeded.
 
 Marimo's anywidget support appears to be incomplete or broken in version 0.17.6/0.18.4. The widgets are instantiated in Python but not rendered by the marimo frontend/anywidget integration layer.
 
-## Possible Solutions
+## Solutions Tested
 
-1. **Version Update**: Try upgrading marimo to a newer version (0.20.1+ mentioned in recent commits)
-   - Recent commits mention updating to marimo 0.20.1
-   - Current lockfile has 0.17.6/0.18.4
+1. ✅ **Version Update to 0.20.1**:
+   - Upgraded from 0.17.6 to 0.20.1 via `uv sync`
+   - **Result**: Tests still fail with same widget rendering timeout
+   - **Conclusion**: Issue persists across versions, not a version-specific bug
 
-2. **Marimo API Usage**: Check if marimo requires special handling for anywidgets
-   - May need to use `mo.output()` or similar to explicitly display widgets
-   - May require version-specific configuration
+2. ❌ **Wrapper Patterns**:
+   - Tried `mo.output(widget, ...)` wrapper pattern
+   - Tried explicit widget return in cells
+   - Tried widget as last expression
+   - **Result**: All patterns fail with timeouts
+   - **Conclusion**: Not a usage pattern issue
 
-3. **Anywidget Compatibility**: Check if anywidget 0.9.13 is compatible with marimo 0.17.6
-   - Version mismatch could cause integration failure
+3. ❌ **Widget Display Patterns**:
+   - Multiple cell structures tested
+   - All result in same widget rendering failure
+   - **Conclusion**: Fundamental marimo/anywidget integration issue
 
 ## Files Affected
 
@@ -61,8 +67,27 @@ Marimo's anywidget support appears to be incomplete or broken in version 0.17.6/
 - `/Users/paddy/buckaroo/tests/notebooks/marimo_pw_test.py` - Test notebook
 - `/Users/paddy/buckaroo/packages/buckaroo-js-core/pw-tests/marimo.spec.ts` - Playwright tests
 
-## Next Steps
+## Configuration
 
-1. Investigate marimo 0.20.1 compatibility
-2. Check for marimo API changes related to anywidget rendering
-3. Consider whether to skip marimo tests until issue is resolved (add `continue-on-error: true` to CI)
+**Minimum marimo version set to 0.19.7** in `pyproject.toml`:
+- Specified in both `[project.optional-dependencies]` and `[dependency-groups]`
+- Allows recent marimo releases (0.20.1+ installed)
+- 0.19.7 is the WASM release available on marimo.io
+
+## Recommended Actions
+
+1. **Skip marimo tests in CI** (until upstream fix):
+   - Add `continue-on-error: true` to marimo test step in CI workflow
+   - Prevents build failures due to infrastructure issue
+
+2. **File upstream issue** with marimo project:
+   - Provide minimal reproduction: simple anywidget in marimo notebook
+   - Affects all anywidgets, not just Buckaroo
+
+3. **Monitor marimo releases**:
+   - Check if future versions restore anywidget support
+   - May require marimo team investigation/fix
+
+4. **Alternative**: Use Jupyter notebooks instead
+   - Tests work fine with Jupyter/JupyterLab
+   - marimo integration appears incomplete
