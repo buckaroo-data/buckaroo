@@ -104,7 +104,7 @@ test = [
     "codecov"
 ]
 
-mcp = ["mcp", "tornado>=6.0", "polars"]
+mcp = ["mcp", "tornado>=6.0", "polars", "fastparquet>=2025.12.0"]
 jupyterlab = ["jupyterlab>=3.6.0"]
 notebook = ["notebook>=7.0.0"]
 packaging_tools = [
