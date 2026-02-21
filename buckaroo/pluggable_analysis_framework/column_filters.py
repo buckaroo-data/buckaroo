@@ -103,6 +103,11 @@ def is_boolean(dtype) -> bool:
     return False
 
 
+def is_numeric_not_bool(dtype) -> bool:
+    """True for numeric types excluding boolean."""
+    return is_numeric(dtype) and not is_boolean(dtype)
+
+
 def any_of(*predicates: Callable) -> Callable:
     """Combinator: returns True if any predicate matches."""
     def combined(dtype) -> bool:
