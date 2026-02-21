@@ -1,0 +1,28 @@
+{
+  "name": "timeseries_anomalies",
+  "description": "Daily time series with injected anomalies: spikes, flat-lines, missing data, unit errors",
+  "category": "timeseries",
+  "tags": [
+    "time_series",
+    "anomaly_detection",
+    "outliers",
+    "seasonality"
+  ],
+  "affected_columns": [
+    "daily_sales"
+  ],
+  "row_count": 365,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Sudden spikes (day 30-31: 5x normal)",
+    "Negative value in non-negative metric (day 60)",
+    "Exact zero (suspicious, day 90)",
+    "Single missing day and missing week",
+    "Flat-line / stuck sensor (days 180-182)",
+    "Saturated at system max (days 200-210: 999999)",
+    "Sign flip (day 250)",
+    "Off by factor of 100 (day 300, likely unit error)",
+    "Zeros during holiday (days 340-344, should be null?)"
+  ],
+  "notes": ""
+}

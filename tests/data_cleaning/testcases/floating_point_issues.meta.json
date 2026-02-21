@@ -1,0 +1,28 @@
+{
+  "name": "floating_point_issues",
+  "description": "Numeric column with floating point edge cases: precision, infinity, NaN, epsilon",
+  "category": "numeric_edge_cases",
+  "tags": [
+    "float",
+    "precision",
+    "NaN",
+    "infinity",
+    "ieee754"
+  ],
+  "affected_columns": [
+    "amount"
+  ],
+  "row_count": 20,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Classic 0.1 + 0.2 != 0.3",
+    "Infinity and negative infinity",
+    "NaN (not equal to itself)",
+    "Negative zero (-0.0 == 0.0 but different bits)",
+    "Precision loss at 2^53 boundary",
+    "Machine epsilon values",
+    "Very large/small values near float64 limits",
+    "Repeating decimal representation"
+  ],
+  "notes": ""
+}

@@ -1,0 +1,26 @@
+{
+  "name": "multilingual_mixing",
+  "description": "Product names using homoglyphs, fullwidth chars, and invisible Unicode \u2014 visually identical but different bytes",
+  "category": "encoding_whitespace",
+  "tags": [
+    "unicode",
+    "homoglyphs",
+    "deduplication",
+    "security"
+  ],
+  "affected_columns": [
+    "product_name"
+  ],
+  "row_count": 15,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Cyrillic/Cherokee homoglyphs (looks like ASCII but isn't)",
+    "Fullwidth characters (common from CJK input methods)",
+    "Zero-width spaces (invisible separators)",
+    "En-space vs regular space",
+    "Trademark/special symbols",
+    "Accented lookalike characters",
+    "All these may look identical in a UI but fail equality checks"
+  ],
+  "notes": "Homoglyph attacks are a real security concern. Cyrillic '\u0430' (U+0430) looks like Latin 'a' (U+0061) but is a different character."
+}

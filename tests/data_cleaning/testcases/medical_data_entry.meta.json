@@ -1,0 +1,33 @@
+{
+  "name": "medical_data_entry",
+  "description": "Clinical data with entry errors: reversed BP, mixed F/C, lbs in kg column, qualitative values",
+  "category": "domain_specific",
+  "tags": [
+    "medical",
+    "clinical",
+    "units",
+    "data_entry",
+    "patient_safety"
+  ],
+  "affected_columns": [
+    "blood_pressure",
+    "temperature",
+    "weight_kg"
+  ],
+  "row_count": 20,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Blood pressure: various delimiter formats (/, -, space, backslash)",
+    "Reversed systolic/diastolic (80/120)",
+    "BP as single number, qualitative, or with extra values",
+    "European BP shorthand (12/8 means 120/80)",
+    "Temperature: mixed Fahrenheit and Celsius",
+    "Missing decimal in temperature (986 vs 98.6)",
+    "Qualitative terms (afebrile, normal, WNL)",
+    "Weight in lbs stored in kg column",
+    "Negative weight, suspiciously static weight across visits",
+    "Sentinel value 9999",
+    "Units embedded in value string"
+  ],
+  "notes": "Errors in medical data can be life-threatening. A weight of 154 in a kg column likely means lbs \u2014 dosing medications at 154kg instead of 70kg is dangerous."
+}

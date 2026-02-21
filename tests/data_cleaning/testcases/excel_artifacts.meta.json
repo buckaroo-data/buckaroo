@@ -1,0 +1,28 @@
+{
+  "name": "excel_artifacts",
+  "description": "Data exported from Excel containing formula errors, leaked formulas, and format artifacts",
+  "category": "source_artifacts",
+  "tags": [
+    "excel",
+    "formulas",
+    "errors",
+    "formatting"
+  ],
+  "affected_columns": [
+    "value"
+  ],
+  "row_count": 20,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Excel error codes (#REF!, #N/A, #VALUE!, #DIV/0!, #NAME?, #NULL!, #NUM!)",
+    "Raw formulas leaked into data (=SUM, =VLOOKUP)",
+    "Scientific notation from Excel display",
+    "Long numbers that may have lost precision",
+    "Leading zeros stripped (zip codes)",
+    "Excel epoch date (1/1/1900)",
+    "Format name 'General' leaked into data",
+    "### display artifact (column too narrow)",
+    "Formatted numbers with $ and commas"
+  ],
+  "notes": ""
+}

@@ -1,0 +1,32 @@
+{
+  "name": "survey_freetext_in_structured",
+  "description": "Survey responses where freetext answers ended up in structured/numeric fields",
+  "category": "mixed_types",
+  "tags": [
+    "survey",
+    "freetext",
+    "numeric",
+    "categorical",
+    "human_input"
+  ],
+  "affected_columns": [
+    "age",
+    "income",
+    "satisfaction",
+    "would_recommend"
+  ],
+  "row_count": 15,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Spelled-out numbers (thirty-two)",
+    "Age ranges instead of values (18-24, 25-34)",
+    "Generational labels instead of age (Gen Z, millennial)",
+    "Emoji and unicode art in responses",
+    "Income as ranges, relative terms, or ambiguous units",
+    "Satisfaction on different scales (1-5, 1-10, percentage, letter grade, stars)",
+    "Yes/no with qualifiers and enthusiasm markers",
+    "Reflexive/meta-answers (per year or per month?, ask me later)",
+    "Refusals (prefer not to say)"
+  ],
+  "notes": ""
+}

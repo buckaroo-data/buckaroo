@@ -1,0 +1,31 @@
+{
+  "name": "address_field_chaos",
+  "description": "Address data split inconsistently across fields, with partial and corrupted entries",
+  "category": "field_contamination",
+  "tags": [
+    "address",
+    "partial_data",
+    "wrong_field",
+    "geocoding"
+  ],
+  "affected_columns": [
+    "full_address",
+    "city",
+    "state",
+    "zip"
+  ],
+  "row_count": 15,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Partial address (only city, only zip, only state)",
+    "Phone number in address field",
+    "URL in address field",
+    "Reference text ('same as above')",
+    "Multiline address in single field",
+    "Inconsistent casing and punctuation",
+    "Excessive whitespace",
+    "Duplicate data across full_address and split fields",
+    "PO Box addresses"
+  ],
+  "notes": ""
+}

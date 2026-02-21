@@ -1,0 +1,27 @@
+{
+  "name": "mostly_int_with_strings",
+  "description": "Numeric column that is ~80% integers but has various string outliers",
+  "category": "mixed_types",
+  "tags": [
+    "integers",
+    "strings",
+    "mixed_types",
+    "null_representations"
+  ],
+  "affected_columns": [
+    "quantity"
+  ],
+  "row_count": 50,
+  "difficulty": "easy",
+  "expected_issues": [
+    "N/A, null, unknown, TBD as missing-data strings",
+    "#REF! from Excel error",
+    "Dash as missing value",
+    "Free-text in numeric column",
+    "Float in integer column",
+    "Whitespace-padded number",
+    "Comma-formatted number",
+    "Very large number as string"
+  ],
+  "notes": ""
+}

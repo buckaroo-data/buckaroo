@@ -1,0 +1,28 @@
+{
+  "name": "impossible_dates",
+  "description": "Dates that are logically impossible, suspicious, or edge-case",
+  "category": "date_chaos",
+  "tags": [
+    "dates",
+    "validation",
+    "impossible_values",
+    "edge_cases"
+  ],
+  "affected_columns": [
+    "birth_date"
+  ],
+  "row_count": 15,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Future birth dates",
+    "Dates before 1900",
+    "0000-00-00 as null sentinel",
+    "Non-existent days (Feb 30, Jun 31, Apr 31)",
+    "Invalid month (13, 0)",
+    "Invalid leap day (1900-02-29)",
+    "Hour > 23",
+    "Suspiciously exactly Unix epoch",
+    "Max date 9999-12-31"
+  ],
+  "notes": ""
+}

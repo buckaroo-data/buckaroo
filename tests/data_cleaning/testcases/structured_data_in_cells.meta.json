@@ -1,0 +1,28 @@
+{
+  "name": "structured_data_in_cells",
+  "description": "Cells containing embedded structured data (JSON, XML, CSV, config files)",
+  "category": "schema_issues",
+  "tags": [
+    "nested_data",
+    "json",
+    "xml",
+    "denormalization"
+  ],
+  "affected_columns": [
+    "config",
+    "tags"
+  ],
+  "row_count": 10,
+  "difficulty": "medium",
+  "expected_issues": [
+    "JSON objects as string values",
+    "Python dict repr (single quotes, not valid JSON)",
+    "XML fragments in cells",
+    "YAML/config file content in cells",
+    "CSV/TSV data inside cells",
+    "Multiple list delimiter conventions",
+    "Hashtag-style tags",
+    "String 'None' instead of null"
+  ],
+  "notes": ""
+}

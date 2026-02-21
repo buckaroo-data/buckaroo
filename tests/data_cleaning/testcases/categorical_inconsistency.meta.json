@@ -1,0 +1,27 @@
+{
+  "name": "categorical_inconsistency",
+  "description": "Country names expressed in dozens of different ways, with typos and abbreviations",
+  "category": "categorical_inconsistency",
+  "tags": [
+    "categorical",
+    "normalization",
+    "typos",
+    "abbreviations",
+    "i18n"
+  ],
+  "affected_columns": [
+    "country"
+  ],
+  "row_count": 30,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Full name vs 2-letter vs 3-letter ISO codes",
+    "Case variations",
+    "Leading/trailing whitespace",
+    "Common typos (Unied, Untied, Sates)",
+    "Native language names (Deutschland, \u65e5\u672c)",
+    "Semantic ambiguity (England vs United Kingdom)",
+    "Dots vs no dots in abbreviations"
+  ],
+  "notes": ""
+}

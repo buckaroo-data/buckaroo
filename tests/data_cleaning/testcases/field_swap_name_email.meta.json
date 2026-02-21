@@ -1,0 +1,29 @@
+{
+  "name": "field_swap_name_email",
+  "description": "Name field contaminated with emails, usernames, SSNs, and formatting artifacts",
+  "category": "field_contamination",
+  "tags": [
+    "PII",
+    "email",
+    "name",
+    "wrong_field",
+    "SSN"
+  ],
+  "affected_columns": [
+    "name"
+  ],
+  "row_count": 15,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Full email address in name field",
+    "Username (not real name) in name field",
+    "SSN in name field (critical PII leak)",
+    "Over-formatted names with titles/suffixes",
+    "Department info appended to name",
+    "Mixed character scripts",
+    "Last, First format mixed with First Last",
+    "Empty/blank name",
+    "Partial email fragments"
+  ],
+  "notes": ""
+}

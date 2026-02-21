@@ -1,0 +1,30 @@
+{
+  "name": "jagged_schema",
+  "description": "Data merged from multiple CSV exports with different schemas and conventions",
+  "category": "schema_issues",
+  "tags": [
+    "schema",
+    "merged_data",
+    "mixed_types",
+    "missing"
+  ],
+  "affected_columns": [
+    "age",
+    "salary",
+    "department",
+    "start_date",
+    "extra_col_from_2023_export",
+    "Unnamed: 6"
+  ],
+  "row_count": 10,
+  "difficulty": "medium",
+  "expected_issues": [
+    "String values in numeric columns (age='unknown', salary='confidential')",
+    "Column only populated for half the rows (schema change over time)",
+    "Unnamed column from trailing CSV comma",
+    "Free text in date field ('hired in 2020')",
+    "Mixed None and empty string for missing values",
+    "Qualitative values in quantitative columns ('entry_level' for salary)"
+  ],
+  "notes": ""
+}

@@ -1,0 +1,26 @@
+{
+  "name": "large_integer_precision",
+  "description": "Large integers that lose precision when converted to float64 or serialized through JSON",
+  "category": "numeric_edge_cases",
+  "tags": [
+    "precision",
+    "int64",
+    "float64",
+    "JSON",
+    "JavaScript"
+  ],
+  "affected_columns": [
+    "big_id"
+  ],
+  "row_count": 10,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Integers beyond 2^53 lose precision in float64",
+    "JSON serialization silently rounds large integers",
+    "JavaScript Number type can't represent these exactly",
+    "uint64 max value",
+    "Mixed string and integer representations of same ID",
+    "Parquet preserves int64 but downstream consumers may not"
+  ],
+  "notes": ""
+}

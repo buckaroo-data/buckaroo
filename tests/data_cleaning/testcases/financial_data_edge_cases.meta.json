@@ -1,0 +1,28 @@
+{
+  "name": "financial_data_edge_cases",
+  "description": "Financial transactions with precision issues, mixed currencies, and edge cases",
+  "category": "numeric_edge_cases",
+  "tags": [
+    "financial",
+    "precision",
+    "currency",
+    "rounding"
+  ],
+  "affected_columns": [
+    "amount",
+    "currency"
+  ],
+  "row_count": 20,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Sub-cent amounts and rounding artifacts",
+    "Floating point imprecision in financial calculations",
+    "Banker's rounding edge case (2.675)",
+    "Negative zero amount",
+    "NaN as missing transaction amount",
+    "Mixed currencies with different decimal conventions (JPY=0, KWD=3, BTC=8)",
+    "Duplicate transactions (potential double-charge)",
+    "Very large amounts near float precision limits"
+  ],
+  "notes": ""
+}

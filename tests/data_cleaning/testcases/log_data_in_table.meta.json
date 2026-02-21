@@ -1,0 +1,29 @@
+{
+  "name": "log_data_in_table",
+  "description": "Server log data crudely converted to tabular format with operational notes and artifacts",
+  "category": "source_artifacts",
+  "tags": [
+    "logs",
+    "time_series",
+    "operational",
+    "unstructured"
+  ],
+  "affected_columns": [
+    "timestamp",
+    "level",
+    "message"
+  ],
+  "row_count": 15,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Log line leaked into timestamp field",
+    "Operational notes as data rows (--- server restart ---)",
+    "Timestamps going backwards (timezone or clock issue)",
+    "Exact duplicate timestamps",
+    "NULL string instead of null value",
+    "Stack traces in message field",
+    "IP addresses in log messages (PII)",
+    "Mixed granularity (milliseconds)"
+  ],
+  "notes": ""
+}

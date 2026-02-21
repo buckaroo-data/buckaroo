@@ -1,0 +1,29 @@
+{
+  "name": "copy_paste_artifacts",
+  "description": "Text fields with HTML tags, markdown, CSV artifacts, and injection attempts",
+  "category": "source_artifacts",
+  "tags": [
+    "html",
+    "markdown",
+    "csv",
+    "injection",
+    "encoding"
+  ],
+  "affected_columns": [
+    "description"
+  ],
+  "row_count": 15,
+  "difficulty": "medium",
+  "expected_issues": [
+    "HTML tags in plain text fields",
+    "HTML entities (&amp;, &lt;)",
+    "Markdown formatting in plain text",
+    "Tab characters from TSV copy-paste",
+    "Spurious or doubled CSV quote escaping",
+    "Commas that confuse CSV parsers",
+    "Null bytes in strings",
+    "ANSI terminal escape codes",
+    "CSV injection / formula injection attempts"
+  ],
+  "notes": ""
+}

@@ -1,0 +1,22 @@
+{
+  "name": "boolean_chaos",
+  "description": "A single boolean column expressed 30 different ways",
+  "category": "categorical_inconsistency",
+  "tags": [
+    "boolean",
+    "mixed_types",
+    "inconsistent_coding"
+  ],
+  "affected_columns": [
+    "is_active"
+  ],
+  "row_count": 30,
+  "difficulty": "easy",
+  "expected_issues": [
+    "Python bool vs int vs string representations",
+    "Case variations (true/True/TRUE)",
+    "yes/no vs true/false vs 1/0 vs Y/N vs on/off",
+    "Single-character abbreviations"
+  ],
+  "notes": ""
+}
