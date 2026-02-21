@@ -222,7 +222,7 @@ dev = [
     { name = "pytest-check-links" },
     { name = "pytest-playwright" },
     { name = "ruff" },
-    { name = "solara", extra = ["pytest"] },
+    { name = "solara", extra = ["pytest"], marker = "python_full_version < '3.14'" },
     { name = "sphinx" },
     { name = "toml" },
     { name = "watchfiles", version = "1.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
@@ -283,7 +283,7 @@ dev = [
     { name = "pytest-check-links" },
     { name = "pytest-playwright" },
     { name = "ruff" },
-    { name = "solara", extra = ["pytest"] },
+    { name = "solara", extra = ["pytest"], marker = "python_full_version < '3.14'" },
     { name = "sphinx" },
     { name = "toml" },
     { name = "watchfiles", version = "1.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
@@ -338,8 +338,8 @@ requires-dist = [
     { name = "pytest-playwright", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.2" },
     { name = "ruff", marker = "extra == 'test'" },
-    { name = "solara", marker = "extra == 'dev'" },
-    { name = "solara", extras = ["pytest"], marker = "extra == 'dev'" },
+    { name = "solara", marker = "python_full_version < '3.14' and extra == 'dev'" },
+    { name = "solara", extras = ["pytest"], marker = "python_full_version < '3.14' and extra == 'dev'" },
     { name = "sphinx", marker = "extra == 'dev'", specifier = ">=1.5" },
     { name = "toml", marker = "extra == 'dev'" },
     { name = "tornado", marker = "extra == 'mcp'", specifier = ">=6.0" },
@@ -366,8 +366,8 @@ dev = [
     { name = "pytest-check-links" },
     { name = "pytest-playwright" },
     { name = "ruff", specifier = ">=0.6.2" },
-    { name = "solara" },
-    { name = "solara", extras = ["pytest"] },
+    { name = "solara", marker = "python_full_version < '3.14'" },
+    { name = "solara", extras = ["pytest"], marker = "python_full_version < '3.14'" },
     { name = "sphinx", specifier = ">=1.5" },
     { name = "toml" },
     { name = "watchfiles" },
@@ -1266,7 +1266,7 @@ name = "ipyvue"
 version = "1.11.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ipywidgets" },
+    { name = "ipywidgets", marker = "python_full_version < '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9a/6c/01b55711d120dcc9e31e2c514671fe0d6932e6fd402871d18fd034220da5/ipyvue-1.11.3.tar.gz", hash = "sha256:80b3b6108b448eb17b7c9eb0c39b5ad384718abdcd24a82f853ad3062b83b41b", size = 1744625, upload_time = "2025-09-10T11:18:59.295Z" }
 wheels = [
@@ -1278,7 +1278,7 @@ name = "ipyvuetify"
 version = "1.11.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ipyvue" },
+    { name = "ipyvue", marker = "python_full_version < '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a4/07/31c9615532b6c190a3033460e4aa83a64ac532281758ff734e1bc42e3c00/ipyvuetify-1.11.3.tar.gz", hash = "sha256:3580afa76d9add4ae04ccb7fd57d4a0cf03a261705742e7137def3ebb65ac71d", size = 6170730, upload_time = "2025-07-02T11:25:12.691Z" }
 wheels = [
@@ -3285,8 +3285,8 @@ name = "reacton"
 version = "1.9.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ipywidgets" },
-    { name = "typing-extensions" },
+    { name = "ipywidgets", marker = "python_full_version < '3.14'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/31/61/f526e87c02f28749c700c3d198365f214c4f9bc76a2fddb6111dfa443816/reacton-1.9.1.tar.gz", hash = "sha256:035acb0dce9fb14c9604d5410d2f838cc5792046ed116266b8d56665c2fb638b", size = 100368, upload_time = "2025-02-10T10:52:57.117Z" }
 wheels = [
@@ -3396,9 +3396,9 @@ name = "rich-click"
 version = "1.9.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "rich" },
+    { name = "click", marker = "python_full_version < '3.14'" },
+    { name = "colorama", marker = "python_full_version < '3.14' and sys_platform == 'win32'" },
+    { name = "rich", marker = "python_full_version < '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/bf/d8/f2c1b7e9a645ba40f756d7a5b195fc104729bc6b19061ba3ab385f342931/rich_click-1.9.4.tar.gz", hash = "sha256:af73dc68e85f3bebb80ce302a642b9fe3b65f3df0ceb42eb9a27c467c1b678c8", size = 73632, upload_time = "2025-10-25T01:08:49.142Z" }
 wheels = [
@@ -3673,29 +3673,28 @@ name = "solara"
 version = "1.30.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cachetools" },
-    { name = "click" },
-    { name = "filelock" },
-    { name = "humanize" },
-    { name = "ipykernel" },
-    { name = "ipyvue" },
-    { name = "ipyvuetify" },
-    { name = "ipywidgets" },
-    { name = "jinja2" },
-    { name = "jupyter-client" },
-    { name = "markdown" },
-    { name = "markupsafe" },
-    { name = "nbformat" },
-    { name = "pymdown-extensions" },
-    { name = "reacton" },
-    { name = "requests" },
-    { name = "rich-click" },
-    { name = "starlette" },
-    { name = "uvicorn" },
-    { name = "watchdog" },
+    { name = "cachetools", marker = "python_full_version < '3.14'" },
+    { name = "click", marker = "python_full_version < '3.14'" },
+    { name = "filelock", marker = "python_full_version < '3.14'" },
+    { name = "humanize", marker = "python_full_version < '3.14'" },
+    { name = "ipykernel", marker = "python_full_version < '3.14'" },
+    { name = "ipyvue", marker = "python_full_version < '3.14'" },
+    { name = "ipyvuetify", marker = "python_full_version < '3.14'" },
+    { name = "ipywidgets", marker = "python_full_version < '3.14'" },
+    { name = "jinja2", marker = "python_full_version < '3.14'" },
+    { name = "jupyter-client", marker = "python_full_version < '3.14'" },
+    { name = "markdown", marker = "python_full_version < '3.14'" },
+    { name = "markupsafe", marker = "python_full_version < '3.14'" },
+    { name = "nbformat", marker = "python_full_version < '3.14'" },
+    { name = "pymdown-extensions", marker = "python_full_version < '3.14'" },
+    { name = "reacton", marker = "python_full_version < '3.14'" },
+    { name = "requests", marker = "python_full_version < '3.14'" },
+    { name = "rich-click", marker = "python_full_version < '3.14'" },
+    { name = "starlette", marker = "python_full_version < '3.14'" },
+    { name = "uvicorn", marker = "python_full_version < '3.14'" },
+    { name = "watchdog", marker = "python_full_version < '3.14'" },
     { name = "watchfiles", version = "1.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
-    { name = "watchfiles", version = "1.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
-    { name = "websockets" },
+    { name = "websockets", marker = "python_full_version < '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/51/aa/9e98c05a895d6d60138d535647e7f9083841ff5bf3c25ca7e1e71800bf9c/solara-1.30.1.tar.gz", hash = "sha256:86ca619ce2e5209ebe0bda9f6f13036eac045dfea2a5f11def336f51e93d136f", size = 1146246, upload_time = "2024-04-03T15:36:45.461Z" }
 wheels = [
@@ -3704,13 +3703,13 @@ wheels = [
 
 [package.optional-dependencies]
 pytest = [
-    { name = "jupyterlab" },
-    { name = "pillow" },
-    { name = "pixelmatch" },
-    { name = "playwright" },
-    { name = "pytest" },
-    { name = "pytest-playwright" },
-    { name = "voila" },
+    { name = "jupyterlab", marker = "python_full_version < '3.14'" },
+    { name = "pillow", marker = "python_full_version < '3.14'" },
+    { name = "pixelmatch", marker = "python_full_version < '3.14'" },
+    { name = "playwright", marker = "python_full_version < '3.14'" },
+    { name = "pytest", marker = "python_full_version < '3.14'" },
+    { name = "pytest-playwright", marker = "python_full_version < '3.14'" },
+    { name = "voila", marker = "python_full_version < '3.14'" },
 ]
 
 [[package]]
@@ -4101,14 +4100,14 @@ name = "voila"
 version = "0.5.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "jupyter-client" },
-    { name = "jupyter-core" },
-    { name = "jupyter-server" },
-    { name = "jupyterlab-server" },
-    { name = "nbclient" },
-    { name = "nbconvert" },
-    { name = "traitlets" },
-    { name = "websockets" },
+    { name = "jupyter-client", marker = "python_full_version < '3.14'" },
+    { name = "jupyter-core", marker = "python_full_version < '3.14'" },
+    { name = "jupyter-server", marker = "python_full_version < '3.14'" },
+    { name = "jupyterlab-server", marker = "python_full_version < '3.14'" },
+    { name = "nbclient", marker = "python_full_version < '3.14'" },
+    { name = "nbconvert", marker = "python_full_version < '3.14'" },
+    { name = "traitlets", marker = "python_full_version < '3.14'" },
+    { name = "websockets", marker = "python_full_version < '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/41/86/326265eaf855cba11c4b523f065e4d4826b154cef7fc6af3e56e1fbd296e/voila-0.5.11.tar.gz", hash = "sha256:12057fe409298024a104b75bbb1050576b89f42fe6e8fead8f5d1f79ace66b19", size = 5345040, upload_time = "2025-08-25T13:55:58.018Z" }
 wheels = [
