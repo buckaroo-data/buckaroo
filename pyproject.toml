@@ -101,6 +101,10 @@ test = [
     "codecov"
 ]
 
+xorq = [
+    "ibis-framework[duckdb]>=9.0.0",
+    "xorq>=0.1.0",
+]
 mcp = ["mcp", "tornado>=6.0", "polars"]
 marimo = [
     "marimo>=0.19.7",
