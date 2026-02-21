@@ -12,8 +12,6 @@ async def _():
 
     if "pyodide" in sys.modules:
         import micropip
-        # Note: keep_going=True skips packages without pure-Python wheels
-        # (e.g., great_tables, itables, fastparquet)
         await micropip.install("buckaroo", keep_going=True)
 
     import buckaroo
