@@ -12,7 +12,14 @@ async def _():
 
     if "pyodide" in sys.modules:
         import micropip
-        await micropip.install("buckaroo", keep_going=True)
+        # Install native WASM packages from Pyodide's bundle first
+        # (Pyodide 0.27.7 bundles fastparquet 2024.5.0, pyarrow, numpy, etc.)
+        await micropip.install("fastparquet")
+        await micropip.install("pyarrow")
+        # Install buckaroo's pure-python deps, then buckaroo itself with deps=False
+        # to skip dependency resolution (which fails on non-pure-Python deps)
+        await micropip.install(["anywidget", "graphlib_backport", "cloudpickle"])
+        await micropip.install("buckaroo", deps=False)
 
     import buckaroo
     from buckaroo import BuckarooWidget, BuckarooInfiniteWidget

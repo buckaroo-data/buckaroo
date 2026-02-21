@@ -5,7 +5,12 @@ import pandas as pd
 from typing import Dict, Any, List, Tuple
 from pandas._libs.tslibs import timezones
 from pandas.core.dtypes.dtypes import DatetimeTZDtype
-from fastparquet import json as fp_json
+try:
+    from fastparquet import json as fp_json
+    HAS_FASTPARQUET = True
+except ImportError:
+    fp_json = None
+    HAS_FASTPARQUET = False
 import logging
 
 from buckaroo.df_util import old_col_new_col, to_chars
@@ -128,19 +133,20 @@ def pd_to_obj(df:pd.DataFrame) -> Dict[str, Any]:
         pass
 
 
-class MyJsonImpl(fp_json.BaseImpl):
-    def __init__(self):
-        pass
-        #for some reason the following line causes errors, so I have to reimport ujson_dumps
-        # from pandas._libs.json import ujson_dumps
-        # self.dumps = ujson_dumps
+if HAS_FASTPARQUET:
+    class MyJsonImpl(fp_json.BaseImpl):
+        def __init__(self):
+            pass
+            #for some reason the following line causes errors, so I have to reimport ujson_dumps
+            # from pandas._libs.json import ujson_dumps
+            # self.dumps = ujson_dumps
 
-    def dumps(self, data):
-        from pandas._libs.json import ujson_dumps
-        return ujson_dumps(data, default_handler=str).encode("utf-8")
+        def dumps(self, data):
+            from pandas._libs.json import ujson_dumps
+            return ujson_dumps(data, default_handler=str).encode("utf-8")
 
-    def loads(self, s):
-        return self.api.loads(s)
+        def loads(self, s):
+            return self.api.loads(s)
 
 def get_multiindex_to_cols_sers(index) -> List[Tuple[str, Any]]: #pd.Series[Any]
     if not isinstance(index, pd.MultiIndex):
@@ -168,6 +174,12 @@ def prepare_df_for_serialization(df:pd.DataFrame) -> pd.DataFrame:
     return df2
 
 def to_parquet(df):
+    if not HAS_FASTPARQUET:
+        raise ImportError(
+            "fastparquet is required for parquet serialization but is not installed. "
+            "Install it with: pip install fastparquet"
+        )
+
     data: BytesIO = BytesIO()
 
     # data.close doesn't work in pyodide, so we make close a no-op
