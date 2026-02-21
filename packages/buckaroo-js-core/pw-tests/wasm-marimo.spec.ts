@@ -13,7 +13,22 @@ import { test, expect } from '@playwright/test';
  * https://github.com/buckaroo-data/buckaroo/issues/513
  */
 
+// Collect browser console output for debugging CI failures
+const consoleLogs: string[] = [];
+
+test.afterEach(() => {
+  if (consoleLogs.length > 0) {
+    console.log('--- Browser Console Output ---');
+    consoleLogs.forEach(l => console.log(l));
+    console.log('--- End Console Output ---');
+  }
+  consoleLogs.length = 0;
+});
+
 test('marimo WASM page loads and cells execute', async ({ page }) => {
+  page.on('console', msg => consoleLogs.push(`[${msg.type()}] ${msg.text()}`));
+  page.on('pageerror', err => consoleLogs.push(`[PAGE ERROR] ${err.message}`));
+
   await page.goto('/');
 
   // 1. Wait for Pyodide to initialize and cells to produce output.
