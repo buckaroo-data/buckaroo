@@ -92,6 +92,11 @@ jobs:
         run: |
           bash scripts/test_playwright_storybook.sh
 
+      - name: Capture Theme Screenshots
+        if: matrix.python-version == '3.13'
+        run: |
+          bash scripts/test_playwright_screenshots.sh
+
       - name: Run Server Playwright Tests
         run: |
           bash scripts/test_playwright_server.sh
@@ -99,6 +104,14 @@ jobs:
       - name: Run Marimo Playwright Tests
         run: |
           bash scripts/test_playwright_marimo.sh
+
+      - name: Upload Theme Screenshots
+        if: matrix.python-version == '3.13' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-screenshots
+          path: packages/buckaroo-js-core/screenshots/
+          if-no-files-found: ignore
 
       # - name: Run JupyterLab Playwright Tests
       #   run: |
