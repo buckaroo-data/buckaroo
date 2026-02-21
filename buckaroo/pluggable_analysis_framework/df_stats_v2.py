@@ -84,3 +84,37 @@ class DfStatsV2:
 
         if errors or self.stat_errors:
             self.ap.print_errors(errors + self.stat_errors)
+
+
+class PlDfStatsV2:
+    """Drop-in for PlDfStats. Uses StatPipeline with @stat polars functions."""
+
+    @classmethod
+    def verify_analysis_objects(cls, objs):
+        StatPipeline(objs)
+
+    def get_operating_df(self, df):
+        rows, cols = len(df), len(df.columns)
+        if rows * cols > FAST_SUMMARY_WHEN_GREATER:
+            return df.sample(n=min(50_000, rows), seed=42)
+        return df
+
+    def __init__(self, df, col_analysis_objs, operating_df_name=None, debug=False):
+        self.df = self.get_operating_df(df)
+        self.ap = StatPipeline(col_analysis_objs, unit_test=False)
+        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, debug)
+        self.stat_errors = []
+        if self.errs:
+            output_full_reproduce(self.errs, self.sdf, operating_df_name)
+
+    def add_analysis(self, a_obj):
+        """Add a new analysis class interactively."""
+        passed, errors = self.ap.add_stat(a_obj)
+        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, debug=True)
+        _, self.stat_errors = self.ap.process_df(self.df, debug=True)
+        if not passed:
+            print("Unit tests failed")
+        if self.errs:
+            print("Errors on original dataframe")
+        if errors or self.stat_errors:
+            self.ap.print_errors(errors + self.stat_errors)

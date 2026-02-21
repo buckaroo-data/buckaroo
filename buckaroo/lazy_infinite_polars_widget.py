@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 # coding: utf-8
+# TODO(pl-v2): migrate to PL_ANALYSIS_V2 + PolarsStatPipelineColumnExecutor.
+# PAFColumnExecutor requires PolarsAnalysis.select_clauses; see pl_stats_v2.py.
+# PolarsStatPipelineColumnExecutor would: create StatPipeline(analysis_klasses),
+# collect column group, call pipeline.process_column(rw_name, ser.dtype, ser) per col.
 from __future__ import annotations
 import copy
 import datetime
