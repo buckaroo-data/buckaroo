@@ -68,12 +68,13 @@ dev = [
     "pytest-check-links",
     "pytest",
     "toml",
-    "watchfiles", 
+    "watchfiles",
     "graphviz>=0.20.1",
     "pytest-check-links",
     "toml",
     "mistune<3.1",
     "pl-series-hash==0.2.1",
+    "marimo>=0.19.7",
 ]
 polars = [
     "polars",
@@ -283,5 +284,5 @@ dev = [
     "graphviz>=0.20.1",
     "pytest-check-links",
     "toml",
-    "marimo"
+    "marimo>=0.19.7"
 ]
