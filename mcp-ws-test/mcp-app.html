@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hello MCP App</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 20px; background: #f0f0f0; }
+    .red-box {
+      background: #dc2626; color: white; padding: 24px;
+      border-radius: 12px; margin-bottom: 16px;
+    }
+    .red-box h1 { font-size: 32px; margin: 0; }
+    .purple-box {
+      background: #7c3aed; color: white; padding: 24px;
+      border-radius: 12px; margin-bottom: 16px;
+    }
+    .purple-box h2 { font-size: 24px; margin: 0; }
+    #result { margin-top: 8px; font-size: 18px; opacity: 0.9; }
+    .ws-box {
+      padding: 24px; border-radius: 12px; margin-bottom: 16px;
+      font-size: 20px; font-weight: bold; text-align: center;
+      background: #854d0e; color: #facc15; border: 3px solid #facc15;
+    }
+    .ws-ok { background: #0a3d0a; color: #4ade80; border-color: #4ade80; }
+    .ws-fail { background: #3d0a0a; color: #f87171; border-color: #f87171; }
+    #ws-status { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="red-box">
+    <h1>MCP App is Alive!</h1>
+  </div>
+  <div class="purple-box">
+    <h2>Tool Result:</h2>
+    <p id="result">Waiting for tool result...</p>
+  </div>
+  <div class="ws-box">
+    <div id="ws-status">Testing ws://localhost:9999 ...</div>
+  </div>
+  <script type="module" src="/src/mcp-app.ts"></script>
+</body>
+</html>

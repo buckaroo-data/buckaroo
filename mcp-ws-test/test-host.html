@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Simulated MCP App Host</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 20px; background: #111; color: #eee; }
+    h1 { font-size: 16px; margin-bottom: 8px; }
+    p { font-size: 13px; color: #999; margin-bottom: 16px; }
+    .test { margin-bottom: 24px; }
+    .test h2 { font-size: 14px; margin-bottom: 4px; }
+    .test .desc { font-size: 12px; color: #888; margin-bottom: 8px; }
+    iframe { width: 100%; height: 300px; border: 1px solid #444; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Simulated MCP App Host — Iframe Sandbox Tests</h1>
+  <p>Each iframe below loads mcp-app.html with different sandbox/CSP settings to see which (if any) allow ws://localhost:9999</p>
+
+  <div class="test">
+    <h2>Test 1: sandbox="allow-scripts" (no allow-same-origin)</h2>
+    <div class="desc">Most restrictive. Scripts run but origin is opaque. WebSocket likely blocked.</div>
+    <iframe sandbox="allow-scripts" src="dist/mcp-app.html"></iframe>
+  </div>
+
+  <div class="test">
+    <h2>Test 2: sandbox="allow-scripts allow-same-origin"</h2>
+    <div class="desc">Scripts + same-origin. WebSocket to localhost may work since we're serving from localhost.</div>
+    <iframe sandbox="allow-scripts allow-same-origin" src="dist/mcp-app.html"></iframe>
+  </div>
+
+  <div class="test">
+    <h2>Test 3: CSP via meta tag — connect-src ws://localhost:9999</h2>
+    <div class="desc">Uses srcdoc with inline CSP. This simulates a host injecting CSP headers.</div>
+    <iframe sandbox="allow-scripts" id="csp-test"></iframe>
+  </div>
+
+  <script>
+    // For test 3: inject the mcp-app.html content with a CSP meta tag prepended
+    fetch('dist/mcp-app.html')
+      .then(r => r.text())
+      .then(html => {
+        const cspTag = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src ws://localhost:9999 http://localhost:9999;">`;
+        const modifiedHtml = html.replace('<head>', '<head>' + cspTag);
+        document.getElementById('csp-test').srcdoc = modifiedHtml;
+      });
+  </script>
+</body>
+</html>
