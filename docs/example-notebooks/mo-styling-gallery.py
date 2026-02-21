@@ -8,7 +8,7 @@ app = marimo.App(width="medium")
 def _(mo):
     mo.md(r"""
     # Buckaroo Styling Gallery
-    [Buckaroo](https://github.com/paddymul/buckaroo) can be extensively styled.  This gallery shows many examples of the column configuration language.
+    [Buckaroo](https://github.com/buckaroo-data/buckaroo) can be extensively styled.  This gallery shows many examples of the column configuration language.
     In this case all of the configs are passed in via `column_config_overrides`.
     Each call looks approximately like
     ```python
@@ -17,7 +17,7 @@ def _(mo):
             "displayer_args": {
                 "displayer": "obj"}}})
     ```
-    It is also possible to write your own styling functions that look at summary stats and return configs for columns.  This is detailed in [Styling Howto](https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Styling-Howto.ipynb)
+    It is also possible to write your own styling functions that look at summary stats and return configs for columns.  This is detailed in [Styling Howto](https://github.com/buckaroo-data/buckaroo/blob/main/docs/example-notebooks/Styling-Howto.ipynb)
     """)
     return
 
@@ -135,7 +135,7 @@ def _(DataFrame):
 
 @app.cell(hide_code=True)
 def _(pd):
-    _link_df = pd.DataFrame({"raw": ["https://github.com/paddymul/buckaroo", "https://github.com/pola-rs/polars"], "linkify": ["https://github.com/paddymul/buckaroo", "https://github.com/pola-rs/polars"]})
+    _link_df = pd.DataFrame({"raw": ["https://github.com/buckaroo-data/buckaroo", "https://github.com/pola-rs/polars"], "linkify": ["https://github.com/buckaroo-data/buckaroo", "https://github.com/pola-rs/polars"]})
     _link_config = {"linkify": {"displayer_args": {"displayer": "linkify"}}}
     _link_md = """
     ## Link Displayer

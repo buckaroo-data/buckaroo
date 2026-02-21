@@ -60,8 +60,8 @@ datetime_config = {
     'timestamp_datetime_locale_en-US-Long': locale_col_conf('en-US', { 'weekday': 'long'}),
     'timestamp_datetime_locale_en-GB' : locale_col_conf('en-GB')}
 
-link_df = pd.DataFrame({'raw':      ['https://github.com/paddymul/buckaroo', 'https://github.com/pola-rs/polars'],
-                    'linkify' : ['https://github.com/paddymul/buckaroo', 'https://github.com/pola-rs/polars']})
+link_df = pd.DataFrame({'raw':      ['https://github.com/buckaroo-data/buckaroo', 'https://github.com/pola-rs/polars'],
+                    'linkify' : ['https://github.com/buckaroo-data/buckaroo', 'https://github.com/pola-rs/polars']})
 link_config = {'linkify': {'displayer_args':  {  'displayer': 'linkify'}}}
 
 #fixme no underline or blue highlighting of links... but they are links

@@ -282,7 +282,7 @@ def _():
     uv add buckaroo
     ```
 
-    Give us a star on [github](https://github.com/paddymul/buckaroo)
+    Give us a star on [github](https://github.com/buckaroo-data/buckaroo)
     """
     )
     return
