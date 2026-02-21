@@ -1,14 +1,9 @@
 name: CI
-# copied from anywidget, adpated to buckaroo
-# and https://github.com/manzt/quak/tree/main
 on:
   push:
-    branches:
-      - main
-
+    branches: [main]
   pull_request:
     branches: "*"
-
   workflow_dispatch:
 
 concurrency:
@@ -30,22 +25,55 @@ jobs:
       - name: Run ruff
         run: uv run ruff check
 
+  BuildWheel:
+    name: Build JS + Python Wheel
+    runs-on: depot-ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Install the project
+        run: uv sync --all-extras --dev
+      - name: Build JS extension + Python wheel
+        run: ./scripts/full_build.sh
+      - name: Run Jest tests
+        run: |
+          cd packages/buckaroo-js-core
+          pnpm install && pnpm run build
+          pnpm run test
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: buckaroo-build
+          path: |
+            ./dist
+            ./buckaroo/static/
+            ./packages/buckaroo-js-core/dist/
+            ./packages/buckaroo-widget/dist/
+
   TestPython:
     name: Python / Test
-    runs-on: ${{ matrix.os }}
+    runs-on: depot-ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version:
-          # - "3.8" #other conflicts
-          #- "3.9"
-          #- "3.10"
-          - "3.11"
-          - "3.12"
-          - "3.13"
-          #- "3.14
-        #os: [depot-ubuntu-latest#, depot-windows-2025]
-        os: [depot-ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -72,14 +100,12 @@ jobs:
           touch buckaroo/static/compiled.css
           touch buckaroo/static/widget.js
           touch buckaroo/static/widget.css
-
       - name: Install the project
-        run: uv sync  --all-extras --dev
+        run: uv sync --all-extras --dev
       - name: Run tests
-        run: |
-          uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
+        run: uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
       - uses: codecov/codecov-action@v5
-      - name: Test the JS extension
+      - name: Build JS extension
         run: |
           ./scripts/full_build.sh
           cd packages/buckaroo-js-core
@@ -87,30 +113,11 @@ jobs:
           pnpm run test
         env:
           UV_PYTHON: ${{ matrix.python-version }}
-
       - name: Run Storybook Playwright Tests
-        run: |
-          bash scripts/test_playwright_storybook.sh
-
+        run: bash scripts/test_playwright_storybook.sh
       - name: Capture Theme Screenshots
         if: matrix.python-version == '3.13'
-        run: |
-          bash scripts/test_playwright_screenshots.sh
-
-      - name: Run Server Playwright Tests
-        run: |
-          bash scripts/test_playwright_server.sh
-
-      - name: Run Marimo Playwright Tests
-        continue-on-error: true
-        run: |
-          bash scripts/test_playwright_marimo.sh
-
-      - name: Run WASM Marimo Playwright Tests
-        continue-on-error: true
-        run: |
-          bash scripts/test_playwright_wasm_marimo.sh
-
+        run: bash scripts/test_playwright_screenshots.sh
       - name: Upload Theme Screenshots
         if: matrix.python-version == '3.13' && always()
         uses: actions/upload-artifact@v4
@@ -119,31 +126,104 @@ jobs:
           path: packages/buckaroo-js-core/screenshots/
           if-no-files-found: ignore
 
-      # - name: Run JupyterLab Playwright Tests
-      #   run: |
-      #     # Ensure uv environment is set up
-      #     uv sync --all-extras --group dev
-          
-      #     # Install the built buckaroo wheel
-      #     uv pip install --force-reinstall dist/*.whl
-          
-      #     # Install test dependencies (polars, jupyterlab)
-      #     uv pip install polars jupyterlab
-          
-      #     # Detect venv location (uv sync creates .venv by default, but check if it exists)
-      #     if [ -d ".venv" ]; then
-      #       VENV_LOCATION=".venv"
-      #     else
-      #       # Fallback: try to detect from uv's Python environment
-      #       VENV_LOCATION=$(uv run python -c "import sys; print(sys.prefix)" 2>/dev/null || echo ".venv")
-      #     fi
-          
-      #     # Run the integration test script with venv location
-      #     bash scripts/test_playwright_jupyter.sh --venv-location="$VENV_LOCATION"
-      #   env:
-      #     UV_PYTHON: ${{ matrix.python-version }}
+  TestServer:
+    name: Server Playwright Tests
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Run Server Playwright Tests
+        run: bash scripts/test_playwright_server.sh
 
+  TestMarimo:
+    name: Marimo Playwright Tests
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Install the project
+        run: uv sync --all-extras --dev
+      - name: Run Marimo Playwright Tests
+        run: bash scripts/test_playwright_marimo.sh
 
+  TestWASMMarimo:
+    name: WASM Marimo Playwright Tests
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Install the project
+        run: uv sync --all-extras --dev
+      - name: Run WASM Marimo Playwright Tests
+        run: bash scripts/test_playwright_wasm_marimo.sh
 
   TestPythonMaxVersions:
     name: Python / Test (Max Versions)
@@ -151,10 +231,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version:
-          - "3.11"
-          - "3.12"
-          - "3.13"
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -175,31 +252,21 @@ jobs:
       - name: Install pnpm workspace dependencies
         working-directory: packages
         run: pnpm install --frozen-lockfile
-
       - name: setup js files
         run: |
           mkdir buckaroo/static || true
           touch buckaroo/static/compiled.css
           touch buckaroo/static/widget.js
           touch buckaroo/static/widget.css
-
       - name: Install the project with maximum versions
         run: |
-          # Remove lock file to force fresh resolution with highest versions
           rm -f uv.lock
-          # Add override to bypass datacompy's pandas<=2.3.3 constraint
-          # This allows --resolution=highest to pick the actual latest pandas
-          cat >> pyproject.toml << 'EOF'
+          cat >> pyproject.toml << 'PYEOF'
 
           [tool.uv]
           override-dependencies = ["pandas"]
-          EOF
-          # Sync with highest resolution, excluding datacompy group
+          PYEOF
           uv sync --resolution=highest --all-extras --dev --no-group datacompy
-          # Show resolved pandas version
           uv pip list | grep -i pandas
       - name: Run tests
-        run: |
-          # Use .venv/bin/python directly to avoid uv run re-syncing
-          .venv/bin/python -m pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
-
+        run: .venv/bin/python -m pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
