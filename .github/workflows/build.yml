@@ -46,7 +46,7 @@ jobs:
           pnpm -C packages/buckaroo-js-core install
 
       - name: Check docs can be build + links
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'depot-ubuntu-latest' }}
 #        working-directory: docs
         run: |
           mkdir -p buckaroo/static || true
@@ -77,12 +77,12 @@ jobs:
             ./js/*.tgz
 
       - name: Run Storybook Playwright Tests
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'depot-ubuntu-latest' }}
         run: |
           bash scripts/test_playwright_storybook.sh
 
       - name: Run JupyterLab Playwright Tests
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'depot-ubuntu-latest' }}
         run: |
           # Ensure uv environment is set up
           uv sync --all-extras --group dev
