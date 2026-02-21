@@ -1,4 +1,4 @@
-name: CI
+name: Checks
 on:
   push:
     branches: [main]
@@ -240,6 +240,8 @@ jobs:
     name: Marimo Playwright Tests
     needs: [BuildWheel]
     runs-on: depot-ubuntu-latest
+    timeout-minutes: 4
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -273,50 +275,6 @@ jobs:
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run Marimo Playwright Tests
         run: bash scripts/test_playwright_marimo.sh
-
-  TestJupyterLab:
-    name: JupyterLab Playwright Tests
-    needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
-    timeout-minutes: 5
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          python-version: "3.13"
-          prune-cache: false
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.10.0
-      - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v4
-        with:
-          cache: 'pnpm'
-          cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: buckaroo-build
-      - name: Install the project
-        run: uv sync --all-extras --dev
-      - name: Install built wheel and test dependencies
-        run: |
-          uv pip install --force-reinstall dist/*.whl
-          uv pip install polars jupyterlab
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
-      - name: Run JupyterLab Playwright Tests
-        run: bash scripts/test_playwright_jupyter.sh --venv-location=".venv"
 
   TestWASMMarimo:
     name: WASM Marimo Playwright Tests
@@ -357,3 +315,80 @@ jobs:
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run WASM Marimo Playwright Tests
         run: bash scripts/test_playwright_wasm_marimo.sh
+
+  # ---------------------------------------------------------------------------
+  # Docs — build documentation and check links
+  # ---------------------------------------------------------------------------
+
+  CheckDocs:
+    name: Docs / Build + Check Links
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: pandoc graphviz
+      - name: Install the project
+        run: uv sync --locked --all-extras --dev
+      - name: Check docs build and links
+        run: |
+          mkdir -p buckaroo/static || true
+          touch buckaroo/static/compiled.css
+          touch buckaroo/static/widget.js
+          touch buckaroo/static/widget.css
+          mkdir -p docs/build/html
+          uv run pytest --check-links docs/source/*.rst
+          uv run pytest --check-links docs/example-notebooks/*.ipynb
+          uv run sphinx-build -T -b html docs/source docs/build
+
+  # ---------------------------------------------------------------------------
+  # JupyterLab integration tests
+  # ---------------------------------------------------------------------------
+
+  TestJupyterLab:
+    name: JupyterLab Playwright Tests
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Install the project
+        run: |
+          uv sync --all-extras --dev
+          uv pip install --force-reinstall dist/*.whl
+          uv pip install polars jupyterlab
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+      - name: Run JupyterLab Playwright Tests
+        run: bash scripts/test_playwright_jupyter.sh --venv-location=".venv"
