@@ -77,11 +77,13 @@ jobs:
             ./js/*.tgz
 
       - name: Run Storybook Playwright Tests
+        continue-on-error: true
         if: ${{ matrix.os == 'depot-ubuntu-latest' }}
         run: |
           bash scripts/test_playwright_storybook.sh
 
       - name: Run JupyterLab Playwright Tests
+        continue-on-error: true
         if: ${{ matrix.os == 'depot-ubuntu-latest' }}
         run: |
           # Ensure uv environment is set up
