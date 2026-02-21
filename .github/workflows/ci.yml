@@ -22,7 +22,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install the project
-        run: uv sync --locked --all-extras --dev
+        run: uv sync --locked --dev --no-install-project
       - name: Run ruff
         run: uv run ruff check
 
