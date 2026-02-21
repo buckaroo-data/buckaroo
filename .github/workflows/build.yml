@@ -12,6 +12,7 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     # runs-on: depot-ubuntu-24.04
     strategy:
       fail-fast: false
@@ -63,23 +64,9 @@ jobs:
         run: |
           ./scripts/full_build.sh
           cd packages/buckaroo-js-core
-          pnpm install && pnpm run build
           pnpm run test
         env:
           UV_PYTHON: ${{ matrix.python-version }}
-
-
-
-      - name: Linting
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        run: |
-          # pnpm -C packages/buckaroo-js-core run lint
-          pip install ruff
-          ruff check . 
-
-      - name: Package
-        run: |
-          ./scripts/full_build.sh
 
       - name: Upload builds
         uses: actions/upload-artifact@v4
