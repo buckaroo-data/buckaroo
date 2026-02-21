@@ -14,6 +14,7 @@ jobs:
   LintPython:
     name: Python / Lint
     runs-on: depot-ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -28,6 +29,7 @@ jobs:
   TestJS:
     name: JS / Build + Test
     runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Setup pnpm
@@ -51,6 +53,7 @@ jobs:
   BuildWheel:
     name: Build JS + Python Wheel
     runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -92,6 +95,7 @@ jobs:
   TestPython:
     name: Python / Test
     runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -119,6 +123,7 @@ jobs:
   TestPythonMaxVersions:
     name: Python / Test (Max Versions)
     runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -131,18 +136,6 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
           prune-cache: false
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.10.0
-      - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v4
-        with:
-          cache: 'pnpm'
-          cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm workspace dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
       - name: setup js files
         run: |
           mkdir buckaroo/static || true
@@ -170,6 +163,7 @@ jobs:
     name: Storybook Playwright Tests
     needs: [BuildWheel]
     runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Setup pnpm
@@ -209,6 +203,7 @@ jobs:
     name: Server Playwright Tests
     needs: [BuildWheel]
     runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
