@@ -57,7 +57,7 @@ The operations UI allows quick manipulation of dataframes.  Commands operate on 
 Disabling Dataframe Autodisplay
 -------------------------------
 
-When you run ``import buckaroo`` the Buckaroo widget is automatically registered with the jupyter notebook as the default display mechanism for objects of type ``pd.DataFrame``.  Occasionally you will run into bugs with Buckaroo, that prevent the table from working.  Please file a bug at `Buckaroo issues <https://github.com/paddymul/buckaroo/issues>`_ .  You can restore the default pandas behavior with
+When you run ``import buckaroo`` the Buckaroo widget is automatically registered with the jupyter notebook as the default display mechanism for objects of type ``pd.DataFrame``.  Occasionally you will run into bugs with Buckaroo, that prevent the table from working.  Please file a bug at `Buckaroo issues <https://github.com/buckaroo-data/buckaroo/issues>`_ .  You can restore the default pandas behavior with
 
 .. code-block:: python
 

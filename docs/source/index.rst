@@ -39,4 +39,4 @@ Indices and tables
 * :ref:`modindex`
 * :ref:`search`
 
-* `Buckaroo on github <https://github.com/paddymul/buckaroo>`_
+* `Buckaroo on github <https://github.com/buckaroo-data/buckaroo>`_

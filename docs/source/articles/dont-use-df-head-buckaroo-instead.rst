@@ -12,7 +12,7 @@ In tutorials and common use, whenever we inspect a new dataset with pandas and j
 
 
 
-.. image:: https://raw.githubusercontent.com/paddymul/buckaroo-assets/main/quick-buckaroo.gif
+.. image:: https://raw.githubusercontent.com/buckaroo-data/buckaroo-assets/main/quick-buckaroo.gif
    :alt: df.head() vs buckaroo annotated walkthrough
    :align: right
 

@@ -92,5 +92,5 @@ https://marimo.io/p/@paddy-mullen/buckaroo-auto-cleaning) [![Autocleaning in dep
 
 * Look at the data, Don't use `df.head()`
 * `pip install buckaroo`
-* Give [https://github.com/paddymul/buckaroo](https://github.com/paddymul/buckaroo) a star on github 
+* Give [https://github.com/buckaroo-data/buckaroo](https://github.com/buckaroo-data/buckaroo) a star on github 
 * Get in touch [paddy@paddymullen.com](mailto:paddy@paddymullen.com)

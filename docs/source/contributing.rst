@@ -39,7 +39,7 @@ The easiest way to develop and contribute to Buckaroo is to add ``Commands``.  W
 
 When you use the ``add_command`` decorator, the command is instantly added to the UI of the corresponding widget.  Subsequent re-evalutations of the same cell, will replace a ``Command`` in the widget with the same name.  This allows you to iteratively develop commands.
 
-Once you have developed a ``Command`` you can either continue to use it internally as with the ``add_command`` decorator or you can open a PR and add it to the builtin commands for Buckaroo `all_transforms.py <https://github.com/paddymul/buckaroo/blob/main/buckaroo/customizations/all_transforms.py>`_.
+Once you have developed a ``Command`` you can either continue to use it internally as with the ``add_command`` decorator or you can open a PR and add it to the builtin commands for Buckaroo `all_transforms.py <https://github.com/buckaroo-data/buckaroo/blob/main/buckaroo/customizations/all_transforms.py>`_.
 
 The upside of just using the @add_command decorator is that you don't have to setup a development environment.
 
@@ -58,7 +58,7 @@ First, you need to fork the project. Then setup your environment:
    # download buckaroo from your GitHub fork
    git clone https://github.com/<your-github-username>/buckaroo.git
    # or start by cloning the main repo
-   git clone https://github.com/paddymul/buckaroo.git
+   git clone https://github.com/buckaroo-data/buckaroo.git
 
    # install JS dependencies and build js assets
    cd buckaroo
