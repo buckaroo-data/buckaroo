@@ -296,7 +296,7 @@ requires-dist = [
     { name = "build", marker = "extra == 'packaging-tools'" },
     { name = "cloudpickle", specifier = ">=3.1.1" },
     { name = "codecov", marker = "extra == 'test'" },
-    { name = "fastparquet", specifier = ">=2025.12.0" },
+    { name = "fastparquet", specifier = ">=2024.5.0" },
     { name = "graphlib-backport", specifier = ">=1.0.0" },
     { name = "graphviz", marker = "extra == 'dev'", specifier = ">=0.20.1" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.88.1" },
