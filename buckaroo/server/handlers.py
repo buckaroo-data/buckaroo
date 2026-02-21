@@ -109,83 +109,133 @@ def _list_log_files() -> list:
 
 
 class LoadHandler(tornado.web.RequestHandler):
-    async def post(self):
+    def _parse_request_body(self) -> dict:
+        """Parse and validate JSON request body."""
         try:
             body = json.loads(self.request.body)
         except (json.JSONDecodeError, TypeError):
             self.set_status(400)
             self.write({"error": "Invalid JSON body"})
-            return
+            return None
 
         if not isinstance(body, dict):
             self.set_status(400)
             self.write({"error": "Invalid JSON body"})
-            return
+            return None
 
+        return body
+
+    def _validate_request(self, body: dict) -> tuple:
+        """Validate and extract session_id, path, and mode from request."""
         session_id = body.get("session")
         path = body.get("path")
 
         if not session_id or not path:
             self.set_status(400)
             self.write({"error": "Missing 'session' or 'path'"})
-            return
+            return None, None, None
 
         mode = body.get("mode", "viewer")
+        return session_id, path, mode
+
+    def _load_lazy_polars(self, session, path: str, ldf, metadata: dict):
+        """Set up lazy polars session state."""
+        display_state, orig_to_rw, rw_to_orig = get_display_state_lazy(ldf)
+        display_state["df_meta"]["total_rows"] = metadata["rows"]
+
+        session.ldf = ldf
+        session.orig_to_rw = orig_to_rw
+        session.rw_to_orig = rw_to_orig
+        session.metadata = metadata
+        session.df_display_args = display_state["df_display_args"]
+        session.df_data_dict = display_state["df_data_dict"]
+        session.df_meta = display_state["df_meta"]
+        return True
+
+    def _push_state_to_clients(self, session, metadata: dict):
+        """Push updated state to all connected WebSocket clients."""
+        if not session.ws_clients:
+            return
+
+        state_msg = {
+            "type": "initial_state",
+            "metadata": metadata,
+            "df_display_args": session.df_display_args,
+            "df_data_dict": session.df_data_dict,
+            "df_meta": session.df_meta,
+            "mode": session.mode,
+        }
+        if session.mode == "buckaroo":
+            state_msg["buckaroo_state"] = session.buckaroo_state
+            state_msg["buckaroo_options"] = session.buckaroo_options
+            state_msg["command_config"] = session.command_config
+            state_msg["operation_results"] = session.operation_results
+            state_msg["operations"] = session.operations
+
+        push_msg = json.dumps(state_msg)
+        for client in list(session.ws_clients):
+            try:
+                client.write_message(push_msg)
+            except Exception:
+                session.ws_clients.discard(client)
+
+    def _handle_browser_window(self, session_id: str) -> str:
+        """Handle browser window management."""
+        if not self.application.settings.get("open_browser", True):
+            return "disabled"
+
+        port = self.application.settings.get("port", 8888)
+        return find_or_create_session_window(session_id, port, reload_if_found=True)
+
+    def _load_file_with_error_handling(self, path: str, is_lazy: bool):
+        """Load file and handle errors. Returns (file_obj, metadata) or (None, None)."""
+        try:
+            if is_lazy:
+                ldf = load_file_lazy(path)
+                metadata = get_metadata_lazy(ldf, path)
+                return ldf, metadata
+            else:
+                df = load_file(path)
+                metadata = get_metadata(df, path)
+                return df, metadata
+        except FileNotFoundError:
+            self.set_status(404)
+            self.write({"error": f"File not found: {path}"})
+            return None, None
+        except ValueError as e:
+            self.set_status(400)
+            self.write({"error": str(e)})
+            return None, None
+        except Exception:
+            self.set_status(500)
+            self.write({"error": traceback.format_exc()})
+            return None, None
+
+    async def post(self):
+        body = self._parse_request_body()
+        if body is None:
+            return
+
+        session_id, path, mode = self._validate_request(body)
+        if session_id is None:
+            return
+
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
 
+        # Load data in appropriate mode
+        file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
+        if file_obj is None:
+            return
+
         if mode == "lazy":
-            # Polars lazy mode — never loads the full file into memory
-            try:
-                ldf = load_file_lazy(path)
-            except FileNotFoundError:
-                self.set_status(404)
-                self.write({"error": f"File not found: {path}"})
-                return
-            except ValueError as e:
-                self.set_status(400)
-                self.write({"error": str(e)})
-                return
-            except Exception:
-                self.set_status(500)
-                self.write({"error": traceback.format_exc()})
-                return
-
-            metadata = get_metadata_lazy(ldf, path)
-            display_state, orig_to_rw, rw_to_orig = get_display_state_lazy(ldf)
-            display_state["df_meta"]["total_rows"] = metadata["rows"]
-
-            session.ldf = ldf
-            session.orig_to_rw = orig_to_rw
-            session.rw_to_orig = rw_to_orig
-            session.metadata = metadata
-            session.df_display_args = display_state["df_display_args"]
-            session.df_data_dict = display_state["df_data_dict"]
-            session.df_meta = display_state["df_meta"]
+            self._load_lazy_polars(session, path, file_obj, metadata)
         else:
-            # Pandas eager modes ("viewer" / "buckaroo")
-            try:
-                df = load_file(path)
-            except FileNotFoundError:
-                self.set_status(404)
-                self.write({"error": f"File not found: {path}"})
-                return
-            except ValueError as e:
-                self.set_status(400)
-                self.write({"error": str(e)})
-                return
-            except Exception:
-                self.set_status(500)
-                self.write({"error": traceback.format_exc()})
-                return
-
-            session.df = df
-            metadata = get_metadata(df, path)
+            session.df = file_obj
             session.metadata = metadata
-
             if mode == "buckaroo":
-                dataflow = create_dataflow(df)
+                dataflow = create_dataflow(file_obj)
                 session.dataflow = dataflow
                 buckaroo_state = get_buckaroo_display_state(dataflow)
                 session.df_display_args = buckaroo_state["df_display_args"]
@@ -197,43 +247,14 @@ class LoadHandler(tornado.web.RequestHandler):
                 session.operation_results = buckaroo_state["operation_results"]
                 session.operations = buckaroo_state["operations"]
             else:
-                display_state = get_display_state(df, path)
+                display_state = get_display_state(file_obj, path)
                 session.df_display_args = display_state["df_display_args"]
                 session.df_data_dict = display_state["df_data_dict"]
                 session.df_meta = display_state["df_meta"]
 
-        # Push full state to connected WebSocket clients so they pick up
-        # the new dataset without a page reload.  This mirrors the
-        # initial_state message sent by DataStreamHandler.open().
-        if session.ws_clients:
-            state_msg = {
-                "type": "initial_state",
-                "metadata": metadata,
-                "df_display_args": session.df_display_args,
-                "df_data_dict": session.df_data_dict,
-                "df_meta": session.df_meta,
-                "mode": session.mode,
-            }
-            if session.mode == "buckaroo":
-                state_msg["buckaroo_state"] = session.buckaroo_state
-                state_msg["buckaroo_options"] = session.buckaroo_options
-                state_msg["command_config"] = session.command_config
-                state_msg["operation_results"] = session.operation_results
-                state_msg["operations"] = session.operations
-            push_msg = json.dumps(state_msg)
-            for client in list(session.ws_clients):
-                try:
-                    client.write_message(push_msg)
-                except Exception:
-                    session.ws_clients.discard(client)
-
-        # Browser management: find existing window or create one (disabled in tests)
-        # reload_if_found=True triggers a page reload when the tab already
-        # exists so it picks up the newly-loaded dataset.
-        browser_action = "disabled"
-        if self.application.settings.get("open_browser", True):
-            port = self.application.settings.get("port", 8888)
-            browser_action = find_or_create_session_window(session_id, port, reload_if_found=True)
+        # Notify connected clients and open browser
+        self._push_state_to_clients(session, metadata)
+        browser_action = self._handle_browser_window(session_id)
 
         log.info("load session=%s path=%s rows=%d browser=%s", session_id, path, metadata["rows"], browser_action)
 
