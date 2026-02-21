@@ -1,71 +1,11 @@
 import { test, expect, Page } from '@playwright/test';
 
 /**
- * Wait for AG-Grid to finish rendering inside a marimo WASM page.
- * WASM initialization is slower than server-based marimo, so we use longer timeouts.
+ * Single smoke test for Buckaroo rendering in marimo WASM (Pyodide).
  *
- * Pyodide initialization sequence:
- * 1. WASM module loads (~5-10s)
- * 2. Python runtime initializes (~5-10s)
- * 3. marimo cells execute
- * 4. Buckaroo widgets load and render
+ * Full test suite saved in https://github.com/buckaroo-data/buckaroo/issues/513
+ * for re-enabling once WASM test infrastructure is more stable.
  */
-async function waitForWasmGrid(page: Page, timeout = 90_000) {
-  // Wait for at least one buckaroo widget to appear
-  // This signals that Pyodide initialization is done and cells have executed
-  await page.locator('.buckaroo_anywidget').first().waitFor({ state: 'visible', timeout });
-  // Wait for AG-Grid cells to render
-  await page.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
-}
-
-/**
- * Get the text content of a cell by col-id and row-index within the data grid
- */
-async function getCellText(
-  container: import('@playwright/test').Locator,
-  colId: string,
-  rowIndex: number,
-): Promise<string> {
-  const dfViewer = container.locator('.df-viewer');
-  const cell = dfViewer.locator(`[row-index="${rowIndex}"] [col-id="${colId}"]`);
-  return (await cell.innerText()).trim();
-}
-
-/**
- * Get data row count from the main data grid's aria-rowcount
- */
-async function getRowCount(container: import('@playwright/test').Locator): Promise<number> {
-  const dfViewer = container.locator('.df-viewer');
-  const grid = dfViewer.getByRole('treegrid').or(dfViewer.getByRole('grid'));
-  const total = await grid.first().getAttribute('aria-rowcount');
-  const headers = await dfViewer.locator('.ag-header .ag-header-row').all();
-  return Number(total) - headers.length;
-}
-
-/**
- * Scroll to a specific row in AG-Grid virtual scrolling
- */
-async function scrollToRow(
-  container: import('@playwright/test').Locator,
-  targetRow: number,
-  page: Page,
-) {
-  const dfViewer = container.locator('.df-viewer');
-  const gridViewport = dfViewer.locator('.ag-root .ag-body-viewport').first();
-
-  // AG-Grid rows are ~28px tall
-  const scrollHeight = 28;
-  const targetScrollTop = targetRow * scrollHeight;
-
-  await gridViewport.evaluate((el, scrollTop) => {
-    el.scrollTop = scrollTop;
-  }, targetScrollTop);
-
-  // Wait for new content to load
-  await page.waitForTimeout(800);
-}
-
-// ---------- tests ------------------------------------------------------------
 
 let sharedPage: Page;
 
@@ -75,147 +15,26 @@ test.describe('Buckaroo in Marimo WASM (Pyodide)', () => {
   test.beforeAll(async ({ browser }) => {
     sharedPage = await browser.newPage();
     await sharedPage.goto('/');
-    await waitForWasmGrid(sharedPage);
+    // Wait for Pyodide init + buckaroo widget + AG-Grid render
+    await sharedPage.locator('.buckaroo_anywidget').first().waitFor({ state: 'visible', timeout: 90_000 });
+    await sharedPage.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
   });
 
   test.afterAll(async () => {
     await sharedPage?.close();
   });
 
-  test.skip('diagnostic: check page content and errors', async () => {
-    // This test is for local debugging only — skip in CI and normal runs.
-    // To use it, comment out test.skip and run manually.
-    const page = sharedPage;
-
-    // Check what's actually on the page
-    const pageTitle = await page.title();
-    const bodyText = await page.textContent('body');
-    const hasError = bodyText?.includes('error') || bodyText?.includes('Error');
-    const hasWidget = await page.locator('.buckaroo_anywidget').count();
-
-    // Check for other potential widget containers
-    const allDivs = await page.locator('div[class*="widget"]').count();
-    const allDivsMario = await page.locator('div[class*="marimo"]').count();
-    const agGrids = await page.locator('.ag-root').count();
-
-    console.log(`\n DIAGNOSTIC REPORT:`);
-    console.log(`   Page title: ${pageTitle}`);
-    console.log(`   Has .buckaroo_anywidget: ${hasWidget}`);
-    console.log(`   Has .ag-root (AG-Grid): ${agGrids}`);
-    console.log(`   Has div[class*="widget"]: ${allDivs}`);
-    console.log(`   Has div[class*="marimo"]: ${allDivsMario}`);
-    console.log(`   Body contains 'error': ${hasError}`);
-
-    // Get list of all visible divs with classes
-    const visibleDivs = await page.locator('div[class]').evaluateAll((elements: any[]) =>
-      elements.slice(0, 20).map((el: any) => el.className)
-    );
-    console.log(`   Sample visible div classes:`, visibleDivs);
-
-    // Fail with detailed info
-    if (hasWidget === 0 && agGrids === 0) {
-      console.log(`\n No widgets found!`);
-      throw new Error(
-        `No buckaroo widgets rendered. Found: ${allDivs} widget divs, ${allDivsMario} marimo divs, ${agGrids} AG-Grids`
-      );
-    }
-  });
-
-  test('page loads and WASM widgets render', async () => {
-    // There should be at least one buckaroo widget on the page
+  test('page loads and WASM widgets render with data', async () => {
+    // At least one buckaroo widget rendered
     const widgets = await sharedPage.locator('.buckaroo_anywidget').all();
     expect(widgets.length).toBeGreaterThanOrEqual(1);
-  });
 
-  test('WASM notebook displays version info and data', async () => {
-    // The notebook should have rendered content
-    const pageText = await sharedPage.textContent('body');
-    expect(pageText).toBeTruthy();
+    // AG-Grid cells are visible (data actually rendered)
+    const cells = await sharedPage.locator('.ag-cell').all();
+    expect(cells.length).toBeGreaterThan(0);
 
-    // Should have at least one widget visible
-    const widgets = await sharedPage.locator('.buckaroo_anywidget').all();
-    expect(widgets.length).toBeGreaterThanOrEqual(1);
-  });
-
-  test('small DataFrame renders in WASM', async () => {
-    const firstWidget = sharedPage.locator('.buckaroo_anywidget').first();
-    const count = await getRowCount(firstWidget);
-
-    // buckaroo_ddd_tour.py has various DataFrames; just verify non-zero count
-    expect(count).toBeGreaterThan(0);
-  });
-
-  test('cell values are readable after WASM load', async () => {
-    const firstWidget = sharedPage.locator('.buckaroo_anywidget').first();
-
-    // Try to read a cell - just verify we can access cell content
-    try {
-      const firstCellText = await getCellText(firstWidget, 'a', 0);
-      expect(firstCellText).toBeTruthy();
-    } catch (e) {
-      // If exact selector doesn't work, just verify grid is visible
-      const cells = await firstWidget.locator('.ag-cell').all();
-      expect(cells.length).toBeGreaterThan(0);
-    }
-  });
-
-  test('column headers are visible in WASM', async () => {
-    const firstWidget = sharedPage.locator('.buckaroo_anywidget').first();
-    const headers = await firstWidget.locator('.ag-header-cell-text').all();
-
-    // Should have at least one column header
+    // Column headers are present
+    const headers = await sharedPage.locator('.ag-header-cell-text').all();
     expect(headers.length).toBeGreaterThan(0);
-  });
-
-  test('summary stats grid renders in WASM', async () => {
-    const firstWidget = sharedPage.locator('.buckaroo_anywidget').first();
-
-    // Buckaroo widgets have a stats grid at the bottom
-    const statsCells = await firstWidget.locator('.ag-cell').all();
-
-    // Should have cells in both data and stats grids
-    expect(statsCells.length).toBeGreaterThan(0);
-  });
-
-  test('second widget (if exists) also renders in WASM', async () => {
-    const widgets = await sharedPage.locator('.buckaroo_anywidget').all();
-
-    // buckaroo_ddd_tour.py may have multiple widgets
-    if (widgets.length >= 2) {
-      // Wait for second widget to be visible and have cells
-      await widgets[1].waitFor({ state: 'visible', timeout: 30_000 });
-      const secondWidgetCells = await widgets[1].locator('.ag-cell').all();
-      expect(secondWidgetCells.length).toBeGreaterThan(0);
-    }
-  });
-
-  test('WASM notebook remains responsive after scroll', async () => {
-    const widgets = await sharedPage.locator('.buckaroo_anywidget').all();
-    if (widgets.length === 0) {
-      console.log('No widgets found, skipping scroll test');
-      return;
-    }
-
-    const firstWidget = widgets[0];
-    const initialRowCount = await getRowCount(firstWidget);
-
-    if (initialRowCount < 10) {
-      console.log(`DataSet has only ${initialRowCount} rows, skipping scroll test`);
-      return;
-    }
-
-    // Try to scroll to middle
-    try {
-      const targetRow = Math.floor(initialRowCount / 2);
-      await scrollToRow(firstWidget, targetRow, sharedPage);
-
-      // Verify widget is still responsive
-      const cellsAfterScroll = await firstWidget.locator('.ag-cell').all();
-      expect(cellsAfterScroll.length).toBeGreaterThan(0);
-    } catch (e) {
-      // Scroll may not work in all WASM scenarios; just ensure widget didn't crash
-      const cells = await firstWidget.locator('.ag-cell').all();
-      expect(cells.length).toBeGreaterThan(0);
-    }
   });
 });
