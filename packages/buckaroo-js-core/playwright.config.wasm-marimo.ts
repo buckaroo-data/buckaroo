@@ -11,7 +11,7 @@ export default defineConfig({
   testMatch: ['wasm-marimo.spec.ts'],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  retries: 0,
   workers: 1,
   reporter: 'html',
   use: {
@@ -20,7 +20,7 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
   },
   // Longer timeout for WASM: Pyodide initialization can be slow (15-30s)
-  timeout: 90_000,
+  timeout: 60_000,
 
   projects: [
     {
