@@ -233,6 +233,7 @@ jupyterlab = [
     { name = "jupyterlab" },
 ]
 mcp = [
+    { name = "fastparquet" },
     { name = "mcp" },
     { name = "polars" },
     { name = "tornado" },
@@ -300,6 +301,7 @@ requires-dist = [
     { name = "build", marker = "extra == 'packaging-tools'" },
     { name = "cloudpickle", specifier = ">=3.1.1" },
     { name = "codecov", marker = "extra == 'test'" },
+    { name = "fastparquet", marker = "extra == 'mcp'", specifier = ">=2025.12.0" },
     { name = "fastparquet", marker = "extra == 'parquet'", specifier = ">=2025.12.0" },
     { name = "graphlib-backport", specifier = ">=1.0.0" },
     { name = "graphviz", marker = "extra == 'dev'", specifier = ">=0.20.1" },
