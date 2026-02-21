@@ -68,6 +68,56 @@ async function scrollToRow(
 // ---------- tests ------------------------------------------------------------
 
 test.describe('Buckaroo in Marimo WASM (Pyodide)', () => {
+  test('diagnostic: check page content and errors', async ({ page }) => {
+    // Collect console messages for debugging
+    const consoleLogs: string[] = [];
+    page.on('console', msg => {
+      consoleLogs.push(`[${msg.type()}] ${msg.text()}`);
+    });
+
+    page.on('pageerror', error => {
+      consoleLogs.push(`[error] ${error.message}`);
+    });
+
+    await page.goto('/');
+    await page.waitForTimeout(15000); // Wait 15s for Pyodide init
+
+    // Check what's actually on the page
+    const pageTitle = await page.title();
+    const bodyText = await page.textContent('body');
+    const hasError = bodyText?.includes('error') || bodyText?.includes('Error');
+    const hasWidget = await page.locator('.buckaroo_anywidget').count();
+
+    // Check for other potential widget containers
+    const allDivs = await page.locator('div[class*="widget"]').count();
+    const allDivsMario = await page.locator('div[class*="marimo"]').count();
+    const agGrids = await page.locator('.ag-root').count();
+
+    console.log(`\n📋 DIAGNOSTIC REPORT:`);
+    console.log(`   Page title: ${pageTitle}`);
+    console.log(`   Has .buckaroo_anywidget: ${hasWidget}`);
+    console.log(`   Has .ag-root (AG-Grid): ${agGrids}`);
+    console.log(`   Has div[class*="widget"]: ${allDivs}`);
+    console.log(`   Has div[class*="marimo"]: ${allDivsMario}`);
+    console.log(`   Body contains 'error': ${hasError}`);
+    console.log(`   Console logs (last 10):`);
+    consoleLogs.slice(-10).forEach(log => console.log(`     ${log}`));
+
+    // Get list of all visible divs with classes
+    const visibleDivs = await page.locator('div[class]').evaluateAll((elements: any[]) =>
+      elements.slice(0, 20).map((el: any) => el.className)
+    );
+    console.log(`   Sample visible div classes:`, visibleDivs);
+
+    // Fail with detailed info
+    if (hasWidget === 0 && agGrids === 0) {
+      console.log(`\n❌ No widgets found!`);
+      throw new Error(
+        `No buckaroo widgets rendered. Found: ${allDivs} widget divs, ${allDivsMario} marimo divs, ${agGrids} AG-Grids`
+      );
+    }
+  });
+
   test('page loads and WASM widgets render', async ({ page }) => {
     // Log page load start
     const startTime = Date.now();
