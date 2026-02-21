@@ -34,7 +34,7 @@ import { getFormatterFromArgs, getCellRenderer, objFormatter, getFormatter } fro
 import { CSSProperties, Dispatch, SetStateAction } from "react";
 import { CommandConfigT } from "../CommandUtils";
 import { KeyAwareSmartRowCache, PayloadArgs } from "./SmartRowCache";
-import { colorSchemeDark, themeAlpine, Theme } from "@ag-grid-community/theming";
+import { colorSchemeDark, colorSchemeLight, themeAlpine, Theme } from "@ag-grid-community/theming";
 
 
 // for now colDef stuff with less than 3 implementantions should stay in this file
@@ -527,21 +527,37 @@ export const getAutoSize = (
 
 
 
-export const myTheme: Theme = themeAlpine.withPart(colorSchemeDark).withParams({
-    spacing:5,
-    browserColorScheme: "dark",
+const sharedThemeParams = {
+    spacing: 5,
     cellHorizontalPaddingScale: 0.3,
     columnBorder: true,
     rowBorder: false,
     rowVerticalPaddingScale: 0.5,
     wrapperBorder: false,
     fontSize: 12,
-    dataFontSize: "12px",
+    dataFontSize: "12px" as const,
     headerFontSize: 14,
     iconSize: 10,
+    headerVerticalPaddingScale: 0.6,
+};
+
+export const myThemeDark: Theme = themeAlpine.withPart(colorSchemeDark).withParams({
+    ...sharedThemeParams,
+    browserColorScheme: "dark",
     backgroundColor: "#181D1F",
     oddRowBackgroundColor: '#222628',
-    headerVerticalPaddingScale: 0.6,
-//    cellHorizontalPadding: 3,
+});
 
-})
+export const myThemeLight: Theme = themeAlpine.withPart(colorSchemeLight).withParams({
+    ...sharedThemeParams,
+    browserColorScheme: "light",
+    backgroundColor: "#ffffff",
+    oddRowBackgroundColor: '#f5f5f5',
+});
+
+/** @deprecated Use getThemeForScheme() instead */
+export const myTheme: Theme = myThemeDark;
+
+export function getThemeForScheme(scheme: 'light' | 'dark'): Theme {
+    return scheme === 'light' ? myThemeLight : myThemeDark;
+}

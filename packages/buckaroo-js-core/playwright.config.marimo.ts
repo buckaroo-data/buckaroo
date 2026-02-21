@@ -4,7 +4,7 @@ const PORT = 2718;
 
 export default defineConfig({
   testDir: './pw-tests',
-  testMatch: ['marimo.spec.ts'],
+  testMatch: ['marimo.spec.ts', 'theme-screenshots-marimo.spec.ts'],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

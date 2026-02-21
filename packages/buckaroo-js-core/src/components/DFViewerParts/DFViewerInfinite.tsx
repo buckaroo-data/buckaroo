@@ -30,8 +30,8 @@ import {
     HeightStyleI,
     SetColumnFunc
 } from "./gridUtils";
-import { themeAlpine} from '@ag-grid-community/theming';
-import { colorSchemeDark } from '@ag-grid-community/theming';
+import { getThemeForScheme } from './gridUtils';
+import { useColorScheme } from '../useColorScheme';
 
 ModuleRegistry.registerModules([ClientSideRowModelModule]);
 ModuleRegistry.registerModules([InfiniteRowModelModule]);
@@ -156,7 +156,9 @@ export function DFViewerInfinite({
         )}, [hsCacheKey]
     );
   const defaultActiveCol:[string, string] = ["", ""];
-    const divClass = df_viewer_config?.component_config?.className || "ag-theme-alpine-dark";
+    const colorScheme = useColorScheme();
+    const defaultThemeClass = colorScheme === 'light' ? 'ag-theme-alpine' : 'ag-theme-alpine-dark';
+    const divClass = df_viewer_config?.component_config?.className || defaultThemeClass;
     return (
         <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
             <pre>{error_info ? error_info : ""}</pre>
@@ -288,29 +290,15 @@ export function DFViewerInfiniteInner({
         [outside_df_params],
     );
 
-  // working from https://colorffy.com/dark-theme-generator?colors=b2317d-121212
-    const myTheme = useMemo(() => themeAlpine.withPart(colorSchemeDark).withParams({
-        spacing: 5,
-        browserColorScheme: "dark",
-        cellHorizontalPaddingScale: 0.3,
-        columnBorder: true,
+    const colorScheme = useColorScheme();
+    const myTheme = useMemo(() => getThemeForScheme(colorScheme).withParams({
         headerRowBorder: true,
         headerColumnBorder: true,
         headerColumnResizeHandleWidth: 0,
-
-        rowBorder: false,
-        rowVerticalPaddingScale: 0.5,
-        wrapperBorder: false,
-        fontSize: 12,
-        dataFontSize: "12px",
-        headerFontSize: 14,
-        iconSize: 10,
-        backgroundColor: "#121212",
-        oddRowBackgroundColor: '#3f3f3f',
-        headerVerticalPaddingScale: 0.6,
-        //    cellHorizontalPadding: 3,
-
-    }), []);
+        ...(colorScheme === 'dark'
+            ? { backgroundColor: "#121212", oddRowBackgroundColor: '#3f3f3f' }
+            : { backgroundColor: "#ffffff", oddRowBackgroundColor: '#f0f0f0' }),
+    }), [colorScheme]);
     const gridOptions: GridOptions = useMemo( () => {
         return {
         ...outerGridOptions(setActiveCol, df_viewer_config.extra_grid_config),

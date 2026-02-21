@@ -6,6 +6,7 @@ import tornado.websocket
 from buckaroo.server.data_loading import (
     handle_infinite_request,
     handle_infinite_request_buckaroo,
+    handle_infinite_request_lazy,
     get_buckaroo_display_state,
 )
 
@@ -18,7 +19,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
 
         # Send initial state if session already has data loaded
         session = sessions.get(session_id)
-        if session and session.df is not None:
+        if session and (session.df is not None or session.ldf is not None):
             msg = {
                 "type": "initial_state",
                 "metadata": session.metadata,
@@ -101,7 +102,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
 
-        if not session or session.df is None:
+        if not session or (session.df is None and session.ldf is None):
             self.write_message(json.dumps({
                 "type": "infinite_resp",
                 "key": payload_args,
@@ -112,7 +113,12 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             return
 
         try:
-            if session.mode == "buckaroo" and session.dataflow:
+            if session.mode == "lazy" and session.ldf is not None:
+                resp_msg, parquet_bytes = handle_infinite_request_lazy(
+                    session.ldf, session.orig_to_rw, session.rw_to_orig,
+                    session.metadata.get("rows", 0), payload_args,
+                )
+            elif session.mode == "buckaroo" and session.dataflow:
                 resp_msg, parquet_bytes = handle_infinite_request_buckaroo(
                     session.dataflow, payload_args
                 )
@@ -127,7 +133,12 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # Handle second_request (eager loading)
             second_pa = payload_args.get("second_request")
             if second_pa:
-                if session.mode == "buckaroo" and session.dataflow:
+                if session.mode == "lazy" and session.ldf is not None:
+                    resp2, parquet2 = handle_infinite_request_lazy(
+                        session.ldf, session.orig_to_rw, session.rw_to_orig,
+                        session.metadata.get("rows", 0), second_pa,
+                    )
+                elif session.mode == "buckaroo" and session.dataflow:
                     resp2, parquet2 = handle_infinite_request_buckaroo(
                         session.dataflow, second_pa
                     )

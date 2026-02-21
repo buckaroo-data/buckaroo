@@ -99,6 +99,15 @@ export const ChartColors = {
     cat_pop: "pink",
 }
 
+export function getChartColors(scheme: 'light' | 'dark') {
+    return scheme === 'light' ? {
+        unique: '#228B22',
+        longtail: '#006060',
+        NA: '#cc0000',
+        cat_pop: '#c06',
+    } : ChartColors;
+}
+
 
 export const getChartCell = (multiChartCellProps: ChartDisplayerA) => {
     const colorDefaults = {

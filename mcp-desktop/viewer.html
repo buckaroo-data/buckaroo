@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Buckaroo Viewer</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+    iframe { border: none; width: 100%; height: 100%; }
+    #loading { display: flex; align-items: center; justify-content: center; height: 100%;
+               font-family: system-ui, sans-serif; color: #666; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <div id="loading">Loading Buckaroo...</div>
+  <iframe id="viewer" style="display:none" sandbox="allow-scripts allow-same-origin"></iframe>
+  <script type="module" src="/src/viewer-app.ts"></script>
+</body>
+</html>

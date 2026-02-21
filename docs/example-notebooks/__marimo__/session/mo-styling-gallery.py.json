@@ -1,0 +1,216 @@
+{
+  "version": "1",
+  "metadata": {
+    "marimo_version": "0.17.6"
+  },
+  "cells": [
+    {
+      "id": "Hbol",
+      "code_hash": "2aebb1b46841957ceb9e2995f2ab1b3b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h1 id=\"buckaroo-styling-gallery\">Buckaroo Styling Gallery</h1>\n<span class=\"paragraph\"><a href=\"https://github.com/paddymul/buckaroo\" rel=\"noopener\" target=\"_blank\">Buckaroo</a> can be extensively styled.  This gallery shows many examples of the column configuration language.\nIn this case all of the configs are passed in via <code>column_config_overrides</code>.\nEach call looks approximately like\n<div class=\"language-python codehilite\"><pre><span></span><code><span class=\"n\">BuckarooInfiniteWidget</span><span class=\"p\">(</span><span class=\"n\">df</span><span class=\"p\">,</span> <span class=\"n\">column_config_overrides</span><span class=\"o\">=</span><span class=\"p\">{</span>\n    <span class=\"s2\">&quot;float_obj_displayer&quot;</span><span class=\"p\">:</span> <span class=\"p\">{</span>\n        <span class=\"s2\">&quot;displayer_args&quot;</span><span class=\"p\">:</span> <span class=\"p\">{</span>\n            <span class=\"s2\">&quot;displayer&quot;</span><span class=\"p\">:</span> <span class=\"s2\">&quot;obj&quot;</span><span class=\"p\">}}})</span>\n</code></pre></div>\nIt is also possible to write your own styling functions that look at summary stats and return configs for columns.  This is detailed in <a href=\"https://github.com/paddymul/buckaroo/blob/main/docs/example-notebooks/Styling-Howto.ipynb\" rel=\"noopener\" target=\"_blank\">Styling Howto</a></span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "MJUe",
+      "code_hash": "0645da1f1d1e02685798b8be5d9502ab",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/html": "<div style='display: flex;flex: 1;flex-direction: column;justify-content: flex-start;align-items: normal;flex-wrap: nowrap;gap: 0.5rem'><marimo-ui-element object-id='iLit-0' random-id='4dcbe3c6-44cf-4faf-bd03-86a55f578cad'><marimo-dropdown data-initial-value='[&quot;colormap_config&quot;]' data-label='&quot;&lt;span class=&#92;&quot;markdown prose dark:prose-invert contents&#92;&quot;&gt;&lt;span class=&#92;&quot;paragraph&#92;&quot;&gt;Choose the config&lt;/span&gt;&lt;/span&gt;&quot;' data-options='[&quot;float_config&quot;,&quot;str_config&quot;,&quot;histogram_config&quot;,&quot;chart_config&quot;,&quot;img_config&quot;,&quot;link_config&quot;,&quot;colormap_config&quot;,&quot;error_config&quot;,&quot;explicit_colormap_config&quot;,&quot;tooltip_config&quot;,&quot;color_from_column&quot;]' data-allow-select-none='false' data-searchable='false' data-full-width='false'></marimo-dropdown></marimo-ui-element><marimo-ui-element object-id='MJUe-1' random-id='c91dd7db-5dc4-5961-2dcf-d80a28c0c1e8'><marimo-anywidget data-initial-value='{&quot;buckaroo_options&quot;:{&quot;sampled&quot;:[&quot;random&quot;],&quot;auto_clean&quot;:[&quot;aggressive&quot;,&quot;conservative&quot;],&quot;post_processing&quot;:[&quot;&quot;],&quot;df_display&quot;:[&quot;main&quot;,&quot;summary&quot;],&quot;show_commands&quot;:[&quot;on&quot;],&quot;summary_stats&quot;:[&quot;all&quot;],&quot;cleaning_method&quot;:[&quot;default&quot;,&quot;&quot;]},&quot;buckaroo_state&quot;:{&quot;cleaning_method&quot;:&quot;&quot;,&quot;post_processing&quot;:&quot;&quot;,&quot;sampled&quot;:false,&quot;show_commands&quot;:false,&quot;df_display&quot;:&quot;main&quot;,&quot;search_string&quot;:&quot;&quot;,&quot;quick_command_args&quot;:{}},&quot;command_config&quot;:{&quot;argspecs&quot;:{&quot;dropcol&quot;:[null],&quot;fillna&quot;:[[3,&quot;fillVal&quot;,&quot;type&quot;,&quot;integer&quot;]],&quot;make_category&quot;:[null],&quot;drop_duplicates&quot;:[[3,&quot;keep&quot;,&quot;enum&quot;,[&quot;first&quot;,&quot;last&quot;,&quot;False&quot;]]],&quot;regular_int_parse&quot;:[],&quot;strip_int_parse&quot;:[],&quot;str_bool&quot;:[],&quot;us_date&quot;:[],&quot;to_datetime&quot;:[null],&quot;rank&quot;:[[3,&quot;method&quot;,&quot;enum&quot;,[&quot;None&quot;,&quot;min&quot;,&quot;dense&quot;]],[4,&quot;new_col&quot;,&quot;bool&quot;]],&quot;remove_outliers&quot;:[[3,&quot;remove_outliers&quot;,&quot;type&quot;,&quot;float&quot;]],&quot;only_outliers&quot;:[[3,&quot;only_outliers&quot;,&quot;type&quot;,&quot;float&quot;]],&quot;search&quot;:[[3,&quot;term&quot;,&quot;type&quot;,&quot;string&quot;]],&quot;search_col&quot;:[[3,&quot;term&quot;,&quot;type&quot;,&quot;string&quot;]],&quot;groupby&quot;:[[3,&quot;colMap&quot;,&quot;colEnum&quot;,[&quot;null&quot;,&quot;mean&quot;,&quot;median&quot;,&quot;min&quot;,&quot;max&quot;,&quot;sum&quot;,&quot;count&quot;,&quot;count_null&quot;,&quot;std&quot;,&quot;empty&quot;,&quot;h&quot;,&quot;nunique&quot;,&quot;is_monotonic&quot;,&quot;is_monotonic_decreasing&quot;,&quot;is_monotonic_increasing&quot;,&quot;all&quot;,&quot;any&quot;,&quot;autocorr&quot;,&quot;kurt&quot;,&quot;mad&quot;,&quot;sem&quot;,&quot;skew&quot;,&quot;i&quot;,&quot;idxmin&quot;,&quot;dtype&quot;,&quot;dtypes&quot;,&quot;nbytes&quot;,&quot;ndim&quot;,&quot;size&quot;]]],&quot;groupby_transform&quot;:[[3,&quot;colMap&quot;,&quot;colEnum&quot;,[&quot;null&quot;,&quot;mean&quot;,&quot;median&quot;,&quot;min&quot;,&quot;max&quot;,&quot;sum&quot;,&quot;count&quot;,&quot;count_null&quot;,&quot;std&quot;,&quot;empty&quot;,&quot;h&quot;,&quot;nunique&quot;,&quot;is_monotonic&quot;,&quot;is_monotonic_decreasing&quot;,&quot;is_monotonic_increasing&quot;,&quot;all&quot;,&quot;any&quot;,&quot;autocorr&quot;,&quot;kurt&quot;,&quot;mad&quot;,&quot;sem&quot;,&quot;skew&quot;,&quot;i&quot;,&quot;idxmin&quot;,&quot;dtype&quot;,&quot;dtypes&quot;,&quot;nbytes&quot;,&quot;ndim&quot;,&quot;size&quot;]]],&quot;linear_regression&quot;:[[3,&quot;x_cols&quot;,&quot;colEnum&quot;,[&quot;null&quot;,&quot;basic&quot;,&quot;one_hot&quot;]]]},&quot;defaultArgs&quot;:{&quot;dropcol&quot;:[{&quot;symbol&quot;:&quot;dropcol&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;],&quot;fillna&quot;:[{&quot;symbol&quot;:&quot;fillna&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;,8],&quot;make_category&quot;:[{&quot;symbol&quot;:&quot;make_category&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;],&quot;drop_duplicates&quot;:[{&quot;symbol&quot;:&quot;drop_duplicates&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;,&quot;first&quot;],&quot;regular_int_parse&quot;:[{&quot;symbol&quot;:&quot;regular_int_parse&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;],&quot;strip_int_parse&quot;:[{&quot;symbol&quot;:&quot;strip_int_parse&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;],&quot;str_bool&quot;:[{&quot;symbol&quot;:&quot;str_bool&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;],&quot;us_date&quot;:[{&quot;symbol&quot;:&quot;us_date&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;],&quot;to_datetime&quot;:[{&quot;symbol&quot;:&quot;to_datetime&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;],&quot;rank&quot;:[{&quot;symbol&quot;:&quot;rank&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;,&quot;None&quot;,false],&quot;remove_outliers&quot;:[{&quot;symbol&quot;:&quot;remove_outliers&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;,0.01],&quot;only_outliers&quot;:[{&quot;symbol&quot;:&quot;only_outliers&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;,0.01],&quot;search&quot;:[{&quot;symbol&quot;:&quot;search&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;,&quot;&quot;],&quot;search_col&quot;:[{&quot;symbol&quot;:&quot;search_col&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;,&quot;&quot;],&quot;groupby&quot;:[{&quot;symbol&quot;:&quot;groupby&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;,{}],&quot;groupby_transform&quot;:[{&quot;symbol&quot;:&quot;groupby_transform&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;,{}],&quot;linear_regression&quot;:[{&quot;symbol&quot;:&quot;linear_regression&quot;},{&quot;symbol&quot;:&quot;df&quot;},&quot;col&quot;,{}]}},&quot;df_data_dict&quot;:{&quot;main&quot;:[],&quot;all_stats&quot;:[{&quot;a&quot;:&quot;float_obj_displayer&quot;,&quot;b&quot;:&quot;float_float_displayer_1__3&quot;,&quot;c&quot;:&quot;float_float_displayer_0__3&quot;,&quot;d&quot;:&quot;float_float_displayer_3__3&quot;,&quot;e&quot;:&quot;float_float_displayer_3_13&quot;,&quot;index&quot;:&quot;orig_col_name&quot;,&quot;level_0&quot;:&quot;orig_col_name&quot;},{&quot;a&quot;:&quot;a&quot;,&quot;b&quot;:&quot;b&quot;,&quot;c&quot;:&quot;c&quot;,&quot;d&quot;:&quot;d&quot;,&quot;e&quot;:&quot;e&quot;,&quot;index&quot;:&quot;rewritten_col_name&quot;,&quot;level_0&quot;:&quot;rewritten_col_name&quot;},{&quot;a&quot;:&quot;float64&quot;,&quot;b&quot;:&quot;float64&quot;,&quot;c&quot;:&quot;float64&quot;,&quot;d&quot;:&quot;float64&quot;,&quot;e&quot;:&quot;float64&quot;,&quot;index&quot;:&quot;dtype&quot;,&quot;level_0&quot;:&quot;dtype&quot;},{&quot;a&quot;:true,&quot;b&quot;:true,&quot;c&quot;:true,&quot;d&quot;:true,&quot;e&quot;:true,&quot;index&quot;:&quot;is_numeric&quot;,&quot;level_0&quot;:&quot;is_numeric&quot;},{&quot;a&quot;:false,&quot;b&quot;:false,&quot;c&quot;:false,&quot;d&quot;:false,&quot;e&quot;:false,&quot;index&quot;:&quot;is_integer&quot;,&quot;level_0&quot;:&quot;is_integer&quot;},{&quot;a&quot;:false,&quot;b&quot;:false,&quot;c&quot;:false,&quot;d&quot;:false,&quot;e&quot;:false,&quot;index&quot;:&quot;is_datetime&quot;,&quot;level_0&quot;:&quot;is_datetime&quot;},{&quot;a&quot;:false,&quot;b&quot;:false,&quot;c&quot;:false,&quot;d&quot;:false,&quot;e&quot;:false,&quot;index&quot;:&quot;is_bool&quot;,&quot;level_0&quot;:&quot;is_bool&quot;},{&quot;a&quot;:true,&quot;b&quot;:true,&quot;c&quot;:true,&quot;d&quot;:true,&quot;e&quot;:true,&quot;index&quot;:&quot;is_float&quot;,&quot;level_0&quot;:&quot;is_float&quot;},{&quot;a&quot;:&quot;float&quot;,&quot;b&quot;:&quot;float&quot;,&quot;c&quot;:&quot;float&quot;,&quot;d&quot;:&quot;float&quot;,&quot;e&quot;:&quot;float&quot;,&quot;index&quot;:&quot;_type&quot;,&quot;level_0&quot;:&quot;_type&quot;},{&quot;a&quot;:false,&quot;b&quot;:false,&quot;c&quot;:false,&quot;d&quot;:false,&quot;e&quot;:false,&quot;index&quot;:&quot;is_string&quot;,&quot;level_0&quot;:&quot;is_string&quot;},{&quot;a&quot;:180,&quot;b&quot;:180,&quot;c&quot;:180,&quot;d&quot;:180,&quot;e&quot;:180,&quot;index&quot;:&quot;memory_usage&quot;,&quot;level_0&quot;:&quot;memory_usage&quot;},{&quot;a&quot;:6,&quot;b&quot;:6,&quot;c&quot;:6,&quot;d&quot;:6,&quot;e&quot;:6,&quot;index&quot;:&quot;length&quot;,&quot;level_0&quot;:&quot;length&quot;},{&quot;a&quot;:-999.345245234,&quot;b&quot;:-999.345245234,&quot;c&quot;:-999.345245234,&quot;d&quot;:-999.345245234,&quot;e&quot;:-999.345245234,&quot;index&quot;:&quot;min&quot;,&quot;level_0&quot;:&quot;min&quot;},{&quot;a&quot;:13.23,&quot;b&quot;:13.23,&quot;c&quot;:13.23,&quot;d&quot;:13.23,&quot;e&quot;:13.23,&quot;index&quot;:&quot;max&quot;,&quot;level_0&quot;:&quot;max&quot;},{&quot;a&quot;:-199.4250490468,&quot;b&quot;:-199.4250490468,&quot;c&quot;:-199.4250490468,&quot;d&quot;:-199.4250490468,&quot;e&quot;:-199.4250490468,&quot;index&quot;:&quot;mean&quot;,&quot;level_0&quot;:&quot;mean&quot;},{&quot;a&quot;:1,&quot;b&quot;:1,&quot;c&quot;:1,&quot;d&quot;:1,&quot;e&quot;:1,&quot;index&quot;:&quot;null_count&quot;,&quot;level_0&quot;:&quot;null_count&quot;},{&quot;a&quot;:[1,1,1,1,1],&quot;b&quot;:[1,1,1,1,1],&quot;c&quot;:[1,1,1,1,1],&quot;d&quot;:[1,1,1,1,1],&quot;e&quot;:[1,1,1,1,1],&quot;index&quot;:&quot;value_counts&quot;,&quot;level_0&quot;:&quot;value_counts&quot;},{&quot;a&quot;:null,&quot;b&quot;:null,&quot;c&quot;:null,&quot;d&quot;:null,&quot;e&quot;:null,&quot;index&quot;:&quot;mode&quot;,&quot;level_0&quot;:&quot;mode&quot;},{&quot;a&quot;:447.260371941,&quot;b&quot;:447.260371941,&quot;c&quot;:447.260371941,&quot;d&quot;:447.260371941,&quot;e&quot;:447.260371941,&quot;index&quot;:&quot;std&quot;,&quot;level_0&quot;:&quot;std&quot;},{&quot;a&quot;:-8.0,&quot;b&quot;:-8.0,&quot;c&quot;:-8.0,&quot;d&quot;:-8.0,&quot;e&quot;:-8.0,&quot;index&quot;:&quot;median&quot;,&quot;level_0&quot;:&quot;median&quot;},{&quot;a&quot;:5,&quot;b&quot;:5,&quot;c&quot;:5,&quot;d&quot;:5,&quot;e&quot;:5,&quot;index&quot;:&quot;non_null_count&quot;,&quot;level_0&quot;:&quot;non_null_count&quot;},{&quot;a&quot;:5.0,&quot;b&quot;:5.0,&quot;c&quot;:5.0,&quot;d&quot;:5.0,&quot;e&quot;:5.0,&quot;index&quot;:&quot;most_freq&quot;,&quot;level_0&quot;:&quot;most_freq&quot;},{&quot;a&quot;:-8.0,&quot;b&quot;:-8.0,&quot;c&quot;:-8.0,&quot;d&quot;:-8.0,&quot;e&quot;:-8.0,&quot;index&quot;:&quot;2nd_freq&quot;,&quot;level_0&quot;:&quot;2nd_freq&quot;},{&quot;a&quot;:13.23,&quot;b&quot;:13.23,&quot;c&quot;:13.23,&quot;d&quot;:13.23,&quot;e&quot;:13.23,&quot;index&quot;:&quot;3rd_freq&quot;,&quot;level_0&quot;:&quot;3rd_freq&quot;},{&quot;a&quot;:-8.01,&quot;b&quot;:-8.01,&quot;c&quot;:-8.01,&quot;d&quot;:-8.01,&quot;e&quot;:-8.01,&quot;index&quot;:&quot;4th_freq&quot;,&quot;level_0&quot;:&quot;4th_freq&quot;},{&quot;a&quot;:-999.345245234,&quot;b&quot;:-999.345245234,&quot;c&quot;:-999.345245234,&quot;d&quot;:-999.345245234,&quot;e&quot;:-999.345245234,&quot;index&quot;:&quot;5th_freq&quot;,&quot;level_0&quot;:&quot;5th_freq&quot;},{&quot;a&quot;:0.8333333333,&quot;b&quot;:0.8333333333,&quot;c&quot;:0.8333333333,&quot;d&quot;:0.8333333333,&quot;e&quot;:0.8333333333,&quot;index&quot;:&quot;distinct_per&quot;,&quot;level_0&quot;:&quot;distinct_per&quot;},{&quot;a&quot;:0.0,&quot;b&quot;:0.0,&quot;c&quot;:0.0,&quot;d&quot;:0.0,&quot;e&quot;:0.0,&quot;index&quot;:&quot;empty_per&quot;,&quot;level_0&quot;:&quot;empty_per&quot;},{&quot;a&quot;:0.8333333333,&quot;b&quot;:0.8333333333,&quot;c&quot;:0.8333333333,&quot;d&quot;:0.8333333333,&quot;e&quot;:0.8333333333,&quot;index&quot;:&quot;unique_per&quot;,&quot;level_0&quot;:&quot;unique_per&quot;},{&quot;a&quot;:0.1666666667,&quot;b&quot;:0.1666666667,&quot;c&quot;:0.1666666667,&quot;d&quot;:0.1666666667,&quot;e&quot;:0.1666666667,&quot;index&quot;:&quot;nan_per&quot;,&quot;level_0&quot;:&quot;nan_per&quot;},{&quot;a&quot;:5,&quot;b&quot;:5,&quot;c&quot;:5,&quot;d&quot;:5,&quot;e&quot;:5,&quot;index&quot;:&quot;unique_count&quot;,&quot;level_0&quot;:&quot;unique_count&quot;},{&quot;a&quot;:0,&quot;b&quot;:0,&quot;c&quot;:0,&quot;d&quot;:0,&quot;e&quot;:0,&quot;index&quot;:&quot;empty_count&quot;,&quot;level_0&quot;:&quot;empty_count&quot;},{&quot;a&quot;:5,&quot;b&quot;:5,&quot;c&quot;:5,&quot;d&quot;:5,&quot;e&quot;:5,&quot;index&quot;:&quot;distinct_count&quot;,&quot;level_0&quot;:&quot;distinct_count&quot;},{&quot;a&quot;:[{&quot;name&quot;:&quot;5.0&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-8.0&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;13.23&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-8.01&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-999.345245234&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;unique&quot;,&quot;unique&quot;:83.0},{&quot;name&quot;:&quot;NA&quot;,&quot;NA&quot;:17.0}],&quot;b&quot;:[{&quot;name&quot;:&quot;5.0&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-8.0&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;13.23&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-8.01&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-999.345245234&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;unique&quot;,&quot;unique&quot;:83.0},{&quot;name&quot;:&quot;NA&quot;,&quot;NA&quot;:17.0}],&quot;c&quot;:[{&quot;name&quot;:&quot;5.0&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-8.0&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;13.23&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-8.01&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-999.345245234&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;unique&quot;,&quot;unique&quot;:83.0},{&quot;name&quot;:&quot;NA&quot;,&quot;NA&quot;:17.0}],&quot;d&quot;:[{&quot;name&quot;:&quot;5.0&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-8.0&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;13.23&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-8.01&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-999.345245234&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;unique&quot;,&quot;unique&quot;:83.0},{&quot;name&quot;:&quot;NA&quot;,&quot;NA&quot;:17.0}],&quot;e&quot;:[{&quot;name&quot;:&quot;5.0&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-8.0&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;13.23&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-8.01&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;-999.345245234&quot;,&quot;cat_pop&quot;:17.0},{&quot;name&quot;:&quot;unique&quot;,&quot;unique&quot;:83.0},{&quot;name&quot;:&quot;NA&quot;,&quot;NA&quot;:17.0}],&quot;index&quot;:&quot;histogram&quot;,&quot;level_0&quot;:&quot;histogram&quot;},{&quot;a&quot;:{&quot;meat_histogram&quot;:[[2,0,0,0,0,0,0,0,0,1],[-8.01,-6.709,-5.408,-4.107,-2.806,-1.505,-0.204,1.097,2.398,3.699,5.0]],&quot;normalized_populations&quot;:[0.6666666667,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.3333333333],&quot;low_tail&quot;:-959.6918354246,&quot;high_tail&quot;:12.9008},&quot;b&quot;:{&quot;meat_histogram&quot;:[[2,0,0,0,0,0,0,0,0,1],[-8.01,-6.709,-5.408,-4.107,-2.806,-1.505,-0.204,1.097,2.398,3.699,5.0]],&quot;normalized_populations&quot;:[0.6666666667,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.3333333333],&quot;low_tail&quot;:-959.6918354246,&quot;high_tail&quot;:12.9008},&quot;c&quot;:{&quot;meat_histogram&quot;:[[2,0,0,0,0,0,0,0,0,1],[-8.01,-6.709,-5.408,-4.107,-2.806,-1.505,-0.204,1.097,2.398,3.699,5.0]],&quot;normalized_populations&quot;:[0.6666666667,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.3333333333],&quot;low_tail&quot;:-959.6918354246,&quot;high_tail&quot;:12.9008},&quot;d&quot;:{&quot;meat_histogram&quot;:[[2,0,0,0,0,0,0,0,0,1],[-8.01,-6.709,-5.408,-4.107,-2.806,-1.505,-0.204,1.097,2.398,3.699,5.0]],&quot;normalized_populations&quot;:[0.6666666667,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.3333333333],&quot;low_tail&quot;:-959.6918354246,&quot;high_tail&quot;:12.9008},&quot;e&quot;:{&quot;meat_histogram&quot;:[[2,0,0,0,0,0,0,0,0,1],[-8.01,-6.709,-5.408,-4.107,-2.806,-1.505,-0.204,1.097,2.398,3.699,5.0]],&quot;normalized_populations&quot;:[0.6666666667,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.3333333333],&quot;low_tail&quot;:-959.6918354246,&quot;high_tail&quot;:12.9008},&quot;index&quot;:&quot;histogram_args&quot;,&quot;level_0&quot;:&quot;histogram_args&quot;},{&quot;a&quot;:[-8.01,-6.709,-5.408,-4.107,-2.806,-1.505,-0.204,1.097,2.398,3.699,5.0],&quot;b&quot;:[-8.01,-6.709,-5.408,-4.107,-2.806,-1.505,-0.204,1.097,2.398,3.699,5.0],&quot;c&quot;:[-8.01,-6.709,-5.408,-4.107,-2.806,-1.505,-0.204,1.097,2.398,3.699,5.0],&quot;d&quot;:[-8.01,-6.709,-5.408,-4.107,-2.806,-1.505,-0.204,1.097,2.398,3.699,5.0],&quot;e&quot;:[-8.01,-6.709,-5.408,-4.107,-2.806,-1.505,-0.204,1.097,2.398,3.699,5.0],&quot;index&quot;:&quot;histogram_bins&quot;,&quot;level_0&quot;:&quot;histogram_bins&quot;}],&quot;empty&quot;:[]},&quot;df_display_args&quot;:{&quot;main&quot;:{&quot;data_key&quot;:&quot;main&quot;,&quot;df_viewer_config&quot;:{&quot;pinned_rows&quot;:[],&quot;column_config&quot;:[{&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;obj&quot;},&quot;col_name&quot;:&quot;a&quot;,&quot;header_name&quot;:&quot;float_obj_displayer&quot;},{&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:1,&quot;max_fraction_digits&quot;:3},&quot;col_name&quot;:&quot;b&quot;,&quot;header_name&quot;:&quot;float_float_displayer_1__3&quot;},{&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:0,&quot;max_fraction_digits&quot;:3},&quot;col_name&quot;:&quot;c&quot;,&quot;header_name&quot;:&quot;float_float_displayer_0__3&quot;},{&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:3,&quot;max_fraction_digits&quot;:3},&quot;col_name&quot;:&quot;d&quot;,&quot;header_name&quot;:&quot;float_float_displayer_3__3&quot;},{&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:3,&quot;max_fraction_digits&quot;:13},&quot;col_name&quot;:&quot;e&quot;,&quot;header_name&quot;:&quot;float_float_displayer_3_13&quot;}],&quot;left_col_configs&quot;:[{&quot;col_name&quot;:&quot;index&quot;,&quot;header_name&quot;:&quot;index&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;obj&quot;}}],&quot;extra_grid_config&quot;:{},&quot;component_config&quot;:{&quot;dfvHeight&quot;:200}},&quot;summary_stats_key&quot;:&quot;all_stats&quot;},&quot;summary&quot;:{&quot;data_key&quot;:&quot;empty&quot;,&quot;df_viewer_config&quot;:{&quot;pinned_rows&quot;:[{&quot;primary_key_val&quot;:&quot;dtype&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;obj&quot;}},{&quot;primary_key_val&quot;:&quot;non_null_count&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:0,&quot;max_fraction_digits&quot;:0}},{&quot;primary_key_val&quot;:&quot;null_count&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:0,&quot;max_fraction_digits&quot;:0}},{&quot;primary_key_val&quot;:&quot;unique_count&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:0,&quot;max_fraction_digits&quot;:0}},{&quot;primary_key_val&quot;:&quot;distinct_count&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:0,&quot;max_fraction_digits&quot;:0}},{&quot;primary_key_val&quot;:&quot;mean&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:3,&quot;max_fraction_digits&quot;:3}},{&quot;primary_key_val&quot;:&quot;std&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:3,&quot;max_fraction_digits&quot;:3}},{&quot;primary_key_val&quot;:&quot;min&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:3,&quot;max_fraction_digits&quot;:3}},{&quot;primary_key_val&quot;:&quot;median&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:3,&quot;max_fraction_digits&quot;:3}},{&quot;primary_key_val&quot;:&quot;max&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:3,&quot;max_fraction_digits&quot;:3}},{&quot;primary_key_val&quot;:&quot;most_freq&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;obj&quot;}},{&quot;primary_key_val&quot;:&quot;2nd_freq&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;obj&quot;}},{&quot;primary_key_val&quot;:&quot;3rd_freq&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;obj&quot;}},{&quot;primary_key_val&quot;:&quot;4th_freq&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;obj&quot;}},{&quot;primary_key_val&quot;:&quot;5th_freq&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;obj&quot;}}],&quot;column_config&quot;:[{&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;obj&quot;},&quot;col_name&quot;:&quot;a&quot;,&quot;header_name&quot;:&quot;float_obj_displayer&quot;},{&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:1,&quot;max_fraction_digits&quot;:3},&quot;col_name&quot;:&quot;b&quot;,&quot;header_name&quot;:&quot;float_float_displayer_1__3&quot;},{&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:0,&quot;max_fraction_digits&quot;:3},&quot;col_name&quot;:&quot;c&quot;,&quot;header_name&quot;:&quot;float_float_displayer_0__3&quot;},{&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:3,&quot;max_fraction_digits&quot;:3},&quot;col_name&quot;:&quot;d&quot;,&quot;header_name&quot;:&quot;float_float_displayer_3__3&quot;},{&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;float&quot;,&quot;min_fraction_digits&quot;:3,&quot;max_fraction_digits&quot;:13},&quot;col_name&quot;:&quot;e&quot;,&quot;header_name&quot;:&quot;float_float_displayer_3_13&quot;}],&quot;left_col_configs&quot;:[{&quot;col_name&quot;:&quot;index&quot;,&quot;header_name&quot;:&quot;index&quot;,&quot;displayer_args&quot;:{&quot;displayer&quot;:&quot;obj&quot;}}],&quot;extra_grid_config&quot;:{},&quot;component_config&quot;:{&quot;dfvHeight&quot;:200}},&quot;summary_stats_key&quot;:&quot;all_stats&quot;}},&quot;df_id&quot;:&quot;4468283024&quot;,&quot;df_meta&quot;:{&quot;columns&quot;:5,&quot;filtered_rows&quot;:6,&quot;rows_shown&quot;:-1,&quot;total_rows&quot;:6},&quot;operation_results&quot;:{&quot;transformed_df&quot;:null,&quot;generated_py_code&quot;:&quot;&quot;},&quot;operations&quot;:[],&quot;record_transcript&quot;:false,&quot;render_func_name&quot;:&quot;DFViewerInfinite&quot;}' data-label='null' data-js-url='&quot;./@file/3511330-8175103-wUV98CqK.js&quot;' data-js-hash='&quot;5c83f440edc04df4269be9381ecd2616&quot;' data-css='&quot;.columns-editor{padding:2px;margin:0;border-radius:2px}.column-list{width:100%;font-size:1rem}.column-list dl{display:flex;margin:0;padding:0}.column-list dl div.list-item{padding:3px}.column-list dl div.list-item dt{float:left;max-width:90px;overflow:hidden;max-height:1rem}.column-list dl div.list-item dd{float:right}.column-list dl div.list-item .column-editor{width:100%;clear:both;height:30px}.column-list dl div.list-item .column-editor label span,.column-list dl div.list-item .column-editor label input[type=checkbox]{float:left}.dependent-tabs{font-size:.95rem;padding:2px 2px 0}.dependent-tabs ul.tabs{margin-top:0;margin-bottom:0;padding-left:0}.dependent-tabs ul.tabs li{float:left;background:var(--ag-background-color);color:var(--ag-foreground-color);border:1px solid purple;border-bottom:none;list-style:none;margin-right:2px;padding:1px 4px;font-size:.95em}.dependent-tabs ul.tabs li.active{background:var(--ag-range-selection-background-color-3);color:var(--ag-alpine-active-color)}.dependent-tabs .output-area{clear:both;float:none;padding:0}.python-displayer,.command-displayer{width:100%;height:100%;background:#212121;overflow:hidden;padding:2px}.python-displayer pre,.command-displayer pre{color:#41ff00}.command-displayer pre{overflow:hidden}.modal{position:absolute;background-color:#fff;border:1px solid black;padding:16px;list-style:none}.modal&gt;li{padding:8px}.operations-box{margin-top:1px;padding:1px 2px;background:none;border-radius:2px}.operations-box h4{font-size:.95em;margin:0 0 1px;color:#2c3e50;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif}.operation-adder{display:flex;align-items:center;gap:1px;margin-bottom:1px;padding:1px 2px;background:none;border-radius:2px}.operation-adder span.column-name{font-weight:600;color:#2c3e50;padding:1px 2px;background-color:#e9ecef;border-radius:0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;font-size:.95em}.operation-adder fieldset{border:none;margin:0;padding:0;display:flex;gap:1px}.operation-adder button{padding:1px 2px;background-color:#007bff;color:#fff;border:none;border-radius:0;cursor:pointer;font-size:.85em;transition:background-color .2s}.operation-adder button:hover{background-color:#0056b3}.operations-list{display:flex;flex-direction:row;gap:1px;flex-wrap:wrap;align-items:flex-start;margin-top:1px;margin-left:1px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif}.operations-list .operation-item{display:flex;align-items:flex-start;justify-content:space-between;gap:1px;padding:1px 2px;background-color:#fff;border:1px solid #dee2e6;border-radius:2px;cursor:pointer;transition:all .2s;width:80px;box-shadow:none;font-size:.95em}.operations-list .operation-item:hover{border-color:#adb5bd}.operations-list .operation-item.active.auto_clean{background-color:#e1bee7!important;border:2px solid #4dabf7!important;color:#856404}.operations-list .operation-item.active{background-color:#fff3cd!important;border:1px solid #ffeeba!important;color:#856404}.operations-list .operation-item.auto_clean{border:2px solid #4dabf7!important;background-color:#f3e5f5!important}.operations-list .operation-item.auto_clean:hover{border-color:#339af0!important;background-color:#e1bee7!important}.operations-list .operation-item.default-operation{background-color:#fff;border:1px solid #dee2e6}.operations-list .operation-item.default-operation:hover{border-color:#adb5bd;background-color:#f8f9fa}.operations-list .operation-content{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}.operations-list .operation-content .symbol{font-weight:500;color:#495057;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.operations-list .operation-content .arg{font-size:12px;color:#868e96;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.operations-list .operation-content .clean-strategy{font-size:11px;color:#4dabf7;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.operations-list .preserve-button,.operations-list .delete-button{border:none;cursor:pointer;border-radius:2px;transition:all .2s}.operations-list .preserve-button{background-color:#4dabf7;color:#fff;font-size:11px;padding:1px 2px;margin-top:1px;font-weight:400;width:100%}.operations-list .delete-button{background:none;color:#adb5bd;padding:0;font-size:14px;line-height:1;margin-left:1px}.operations-list .preserve-button:hover{background-color:#339af0}.operations-list .delete-button:hover{color:#fa5252}.operation-detail{margin-top:1px;padding:1px 2px;background-color:#fff3cd;border-radius:2px}.operation-detail .arg-getters{display:flex;flex-direction:column;gap:8px}.operation-detail .arg-getters fieldset{border:1px solid #dee2e6;border-radius:3px;padding:2px 4px;margin-bottom:2px}.operation-detail .arg-getters div.col-enum{width:100%;overflow-x:auto}.operation-detail .arg-getters div.col-enum table{width:100%;border-collapse:collapse}.operation-detail .arg-getters div.col-enum table td,.operation-detail .arg-getters div.col-enum table th{border:1px solid #dee2e6;padding:4px 8px;text-align:left}.operation-detail .arg-getters div.col-enum table th{background-color:#e9ecef;font-weight:600}.operations-viewer{border:none;border-radius:2px;padding:0;background:none;box-shadow:none;font-size:.95rem}.operations-viewer .operation-adder{clear:both}.operations-viewer .operations-box{clear:left;display:flex;overflow:auto}.operations-viewer .operations-box h4{font-size:1em;border:1px orange;color:#000}.operations-viewer .operations-box div{overflow-x:scroll}.col-enum table{margin-bottom:9px}.ag-theme-alpine-dark{--ag-grid-size:3px;--ag-list-item-height: 20px}div.dependent-tabs ul.tabs li.active{background:#2196f37d}.ag-row .ag-cell{font-family:monospace;white-space:pre}.left-menu{color:#000}.status-bar .ag-center-cols-viewport{min-height:unset!important}.status-bar .ag-root-wrapper{border-bottom-left-radius:0;border-bottom-right-radius:0}.buckaroo-widget .df-viewer .ag-root-wrapper{border-top-left-radius:0;border-top-right-radius:0}.marimo .orig-df{display:flex;flex-direction:column}.marimo .statusBar{width:100%;order:1}.marimo .orig-df .df-viewer{order:1}.custom-tooltip{color:#000;background:green}.histogram-component{margin:0}.floating-tooltip{color:#000;background:#fff}.floating-tooltip dl{border:1px solid black;padding:1px 4px;margin:0;display:flow-root}.floating-tooltip dl dt{font-weight:700;float:left;margin:0;padding:0}.floating-tooltip dl dd{float:left;margin:0 0 0 10px;clear:right}.df-viewer{width:100%}.df-viewer.short-mode .ag-center-cols-viewport{min-height:50px}.df-viewer.in-iframe.short-mode .ag-center-cols-viewport,.df-viewer.in-iframe .ag-center-cols-viewport{min-height:450px}.ag-root-wrapper-body .ag-cell-inline-editing{height:100%}.buckaroo_anywidget{min-width:900px}div div div .buckaroo_anywidget{min-width:inherit}.statusBar .ag-ltr .ag-cell-focus:not(.ag-cell-range-selected):focus-within,.statusBar .ag-ltr .ag-context-menu-open .ag-cell-focus:not(.ag-cell-range-selected),.statusBar .ag-ltr .ag-full-width-row.ag-row-focus:focus .ag-cell-wrapper.ag-row-group,.statusBar .ag-ltr .ag-cell-range-single-cell,.statusBar .ag-ltr .ag-cell-range-single-cell.ag-cell-range-handle,.statusBar .ag-rtl .ag-cell-focus:not(.ag-cell-range-selected):focus-within,.statusBar .ag-rtl .ag-context-menu-open .ag-cell-focus:not(.ag-cell-range-selected),.statusBar .ag-rtl .ag-full-width-row.ag-row-focus:focus .ag-cell-wrapper.ag-row-group,.statusBar .ag-rtl .ag-cell-range-single-cell,.statusBar .ag-rtl .ag-cell-range-single-cell.ag-cell-range-handle{border-style:none;outline:initial}.statusBar .ag-column-first{padding:0}.statusBar .ag-column-first .FakeSearchEditor input{outline:none}div.cell-output-ipywidget-background{background:#1f1f1f!important}.cell-output-ipywidget-background .status-bar{margin-bottom:0}.cell-output-ipywidget-background .df-viewer{margin-top:0}.cell-output-ipywidget-background .df-viewer .theme-hanger{margin-top:-12px}.ag-header-row .left_col_configs_header,.ag-row .left_col_configs_cell{border-right:2px solid #717171!important}.ag-header-row .left_col_configs_header_last,.ag-row .left_col_configs_cell_last{border-right:4px solid #717171!important;border-bottom:none;border-top:none}.df-viewer .ag-header{border-bottom:4px solid #717171!important}.df-viewer .ag-center-cols-viewport .ag-row:first-child{border-top:2px solid #717171!important}&#92;n&quot;' data-buffer-paths='[]'></marimo-anywidget></marimo-ui-element><div style='display: flex;flex: 1;flex-direction: row;justify-content: space-between;align-items: normal;flex-wrap: nowrap;gap: 0.5rem'><div style='flex: 1'><span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"float-displayers\">Float displayers</h2>\n<span class=\"paragraph\">the <code>float</code> displayer allows you to control the number of digits displayed after the decimal point.</span>\n<div class=\"language-typescript codehilite\"><pre><span></span><code><span class=\"kd\">interface</span><span class=\"w\"> </span><span class=\"nx\">FloatDisplayerA</span><span class=\"w\"> </span><span class=\"p\">{</span>\n<span class=\"w\">    </span><span class=\"nx\">displayer</span><span class=\"o\">:</span><span class=\"w\"> </span><span class=\"s1\">&#39;float&#39;</span><span class=\"p\">;</span>\n<span class=\"w\">    </span><span class=\"nx\">min_fraction_digits</span><span class=\"o\">:</span><span class=\"w\"> </span><span class=\"kt\">number</span><span class=\"p\">;</span>\n<span class=\"w\">    </span><span class=\"nx\">max_fraction_digits</span><span class=\"o\">:</span><span class=\"w\"> </span><span class=\"kt\">number</span><span class=\"p\">;}</span>\n</code></pre></div></span></div><div style='flex: 1'><marimo-ui-element object-id='MJUe-0' random-id='3228a912-ab75-d8cb-4c8b-663caca30a8e'><marimo-text-area data-initial-value='&quot;{&#92;n    &#92;&quot;float_obj_displayer&#92;&quot;: {&#92;n        &#92;&quot;displayer_args&#92;&quot;: {&#92;n            &#92;&quot;displayer&#92;&quot;: &#92;&quot;obj&#92;&quot;}},&#92;n    &#92;&quot;float_float_displayer_1__3&#92;&quot;: {&#92;n        &#92;&quot;displayer_args&#92;&quot;: {&#92;n            &#92;&quot;displayer&#92;&quot;: &#92;&quot;float&#92;&quot;,&#92;n            &#92;&quot;min_fraction_digits&#92;&quot;: 1,&#92;n            &#92;&quot;max_fraction_digits&#92;&quot;: 3}},&#92;n    &#92;&quot;float_float_displayer_0__3&#92;&quot;: {&#92;n        &#92;&quot;displayer_args&#92;&quot;: {&#92;n            &#92;&quot;displayer&#92;&quot;: &#92;&quot;float&#92;&quot;,&#92;n            &#92;&quot;min_fraction_digits&#92;&quot;: 0,&#92;n            &#92;&quot;max_fraction_digits&#92;&quot;: 3}},&#92;n    &#92;&quot;float_float_displayer_3__3&#92;&quot;: {&#92;n        &#92;&quot;displayer_args&#92;&quot;: {&#92;n            &#92;&quot;displayer&#92;&quot;: &#92;&quot;float&#92;&quot;,&#92;n            &#92;&quot;min_fraction_digits&#92;&quot;: 3,&#92;n            &#92;&quot;max_fraction_digits&#92;&quot;: 3}},&#92;n    &#92;&quot;float_float_displayer_3_13&#92;&quot;: {&#92;n        &#92;&quot;displayer_args&#92;&quot;: {&#92;n            &#92;&quot;displayer&#92;&quot;: &#92;&quot;float&#92;&quot;,&#92;n            &#92;&quot;min_fraction_digits&#92;&quot;: 3,&#92;n            &#92;&quot;max_fraction_digits&#92;&quot;: 13}}}&quot;' data-label='null' data-placeholder='&quot;&quot;' data-max-length='500' data-disabled='true' data-debounce='true' data-full-width='true' data-rows='15'></marimo-text-area></marimo-ui-element></div></div></div>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "vblA",
+      "code_hash": "c3d018edf2fd7f8f8883f36c478d0b1e",
+      "outputs": [],
+      "console": []
+    },
+    {
+      "id": "bkHC",
+      "code_hash": "659b0dd5889f11c612d813ee3060ba0b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "lEQa",
+      "code_hash": "9440bf6654aea78c6be97066c9224ff0",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "PKri",
+      "code_hash": "ab4e10eaa21a7f274aca64787871046f",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Xref",
+      "code_hash": "0914cc1d7f6932aa7d6556d7e03232cf",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "SFPL",
+      "code_hash": "78a42b9839fd75bc0833969a1f44258d",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "BYtC",
+      "code_hash": "ae168a403a48be737e5cd042c3b9bab7",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "RGSE",
+      "code_hash": "0ebf1abbb106fb008982173c0fe520a4",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Kclp",
+      "code_hash": "df954b971811eafd5cef6cead24c30cc",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "emfo",
+      "code_hash": "56680cfb10f4f13c02101f83d1f3b471",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Hstk",
+      "code_hash": "bf477fe069421058a46fdc813fc258f9",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "nWHF",
+      "code_hash": "67f8801cb6ea572f1dcda6765a7c87d0",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "iLit",
+      "code_hash": "2831229e4d36be890479926808185030",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ZHCJ",
+      "code_hash": "e2ab05b62aafc24e58b78e0f984dbd60",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "Buckaroo has been enabled as the default DataFrame viewer.  To return to default dataframe visualization use `from buckaroo.marimo_utils import marimo_unmonkeypatch; marimo_unmonkeypatch()`\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+diff --git a/packages/buckaroo-js-core/src/components/DFViewerParts/SmartRowCache.test.ts b/packages/buckaroo-js-core/src/components/DFViewerParts/SmartRowCache.test.ts
+index 325c942..d26490c 100644
+--- a/packages/buckaroo-js-core/src/components/DFViewerParts/SmartRowCache.test.ts
++++ b/packages/buckaroo-js-core/src/components/DFViewerParts/SmartRowCache.test.ts
+@@ -643,6 +643,109 @@ describe('KeyAwareSmartRowCache tests', () => {
+ 	expect(sentLength2).toStrictEqual(800)
+     })
+ 
++    test('KeyAwareSmartRowCache small DataFrame scroll does not return extra rows', () => {
++	// Regression test: 200-row DataFrame, AG-Grid requests [0,55] with overshoot end=1000.
++	// Before fix, getRows() returned [0,200] instead of [0,55], causing blank rows.
++	let src:KeyAwareSmartRowCache;
++	const mockRequestFn = jest.fn((pa:PayloadArgs) => {
++	    // Server returns all 200 rows for any request starting at 0
++	    const dataEnd = Math.min(pa.end, 200);
++	    const resp:PayloadResponse = {
++		key:pa,
++		data:genRows(pa.start, dataEnd, pa.sourceName)[1],
++		length:200
++	    }
++	    src.addPayloadResponse(resp)
++	})
++
++	src = new KeyAwareSmartRowCache(mockRequestFn);
++
++	// AG-Grid asks for [0,55] but getDs() sets end=1000
++	const pa1: PayloadArgs = {
++	    sourceName:"foo", start:0, end:1000, origEnd:55}
++
++	const mockCbFn = jest.fn((_df:DFData, _length:number) => {})
++	src.getRequestRows(pa1, mockCbFn, failNOP)
++
++	expect(mockCbFn.mock.calls).toHaveLength(1);
++	const [respData, sentLength] = mockCbFn.mock.calls[0];
++	// Must return exactly 55 rows (origEnd), NOT 200 (sentLength)
++	expect(respData.length).toStrictEqual(55);
++	expect(sentLength).toStrictEqual(200);
++    })
++
++    test('KeyAwareSmartRowCache small DataFrame mid-scroll does not return extra rows', () => {
++	// Regression: scrolling down in a 200-row DataFrame, AG-Grid requests [50,105]
++	// with overshoot end=1050. Should return exactly 55 rows, not up to sentLength.
++	let src:KeyAwareSmartRowCache;
++	const mockRequestFn = jest.fn((pa:PayloadArgs) => {
++	    const dataEnd = Math.min(pa.end, 200);
++	    if (dataEnd <= pa.start) return; // no data to send
++	    const resp:PayloadResponse = {
++		key:pa,
++		data:genRows(pa.start, dataEnd, pa.sourceName)[1],
++		length:200
++	    }
++	    src.addPayloadResponse(resp)
++	})
++
++	src = new KeyAwareSmartRowCache(mockRequestFn);
++
++	// First request primes cache with [0,200]
++	const pa0: PayloadArgs = {
++	    sourceName:"foo", start:0, end:1000, origEnd:55}
++	const mockCb0 = jest.fn((_df:DFData, _length:number) => {})
++	src.getRequestRows(pa0, mockCb0, failNOP)
++
++	// Now scroll down: AG-Grid asks [50,105], overshoot end=1050
++	const pa1: PayloadArgs = {
++	    sourceName:"foo", start:50, end:1050, origEnd:105}
++	const mockCbFn = jest.fn((_df:DFData, _length:number) => {})
++	src.getRequestRows(pa1, mockCbFn, failNOP)
++
++	expect(mockCbFn.mock.calls).toHaveLength(1);
++	const [respData, sentLength] = mockCbFn.mock.calls[0];
++	// Must return exactly 55 rows ([50,105]), NOT [50,200]
++	expect(respData.length).toStrictEqual(55);
++	expect(sentLength).toStrictEqual(200);
++    })
++
++    test('KeyAwareSmartRowCache small DataFrame scroll near end clamps to sentLength', () => {
++	// When scrolling near the end: AG-Grid asks [170,225] with overshoot end=1170,
++	// but only 200 rows exist. Should return [170,200] = 30 rows.
++	let src:KeyAwareSmartRowCache;
++	const mockRequestFn = jest.fn((pa:PayloadArgs) => {
++	    const dataEnd = Math.min(pa.end, 200);
++	    if (dataEnd <= pa.start) return;
++	    const resp:PayloadResponse = {
++		key:pa,
++		data:genRows(pa.start, dataEnd, pa.sourceName)[1],
++		length:200
++	    }
++	    src.addPayloadResponse(resp)
++	})
++
++	src = new KeyAwareSmartRowCache(mockRequestFn);
++
++	// Prime cache
++	const pa0: PayloadArgs = {
++	    sourceName:"foo", start:0, end:1000, origEnd:55}
++	const mockCb0 = jest.fn((_df:DFData, _length:number) => {})
++	src.getRequestRows(pa0, mockCb0, failNOP)
++
++	// Scroll near end: origEnd=225 exceeds sentLength=200
++	const pa1: PayloadArgs = {
++	    sourceName:"foo", start:170, end:1170, origEnd:225}
++	const mockCbFn = jest.fn((_df:DFData, _length:number) => {})
++	src.getRequestRows(pa1, mockCbFn, failNOP)
++
++	expect(mockCbFn.mock.calls).toHaveLength(1);
++	const [respData, sentLength] = mockCbFn.mock.calls[0];
++	// Clamped to sentLength: [170, min(225, 200)] = [170, 200] = 30 rows
++	expect(respData.length).toStrictEqual(30);
++	expect(sentLength).toStrictEqual(200);
++    })
++
+         test('test trim functionality', () => {
+ 	//these tests aren't perfect, basically I'm trying to verify that trim got called at all.  But it depends heavily on internal settings inside of KeyAwareSmartRowCache and SmartRowCache, because it is checking for exact numbers of rows returned.
+ 

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Buckaroo Theme Comparison</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; height: 100vh; background: #1a1a2e; color: #e0e0e0; }
+
+  /* Sidebar */
+  #sidebar {
+    width: 280px; min-width: 280px; background: #16213e; overflow-y: auto;
+    border-right: 1px solid #0f3460; display: flex; flex-direction: column;
+  }
+  #sidebar h2 { padding: 16px; font-size: 15px; color: #e94560; border-bottom: 1px solid #0f3460; }
+  #sidebar .section-label {
+    padding: 10px 16px 4px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1px; color: #888;
+  }
+  #sidebar .section-label.highlight { color: #e94560; }
+  #sidebar a {
+    display: block; padding: 6px 16px; font-size: 13px; color: #b0b0b0;
+    text-decoration: none; border-left: 3px solid transparent; transition: all 0.15s;
+  }
+  #sidebar a:hover { background: #1a1a40; color: #fff; }
+  #sidebar a.active { background: #1a1a40; color: #e94560; border-left-color: #e94560; font-weight: 600; }
+  #sidebar a .scheme { font-size: 11px; opacity: 0.6; margin-left: 4px; }
+  #sidebar .divider { height: 1px; background: #0f3460; margin: 8px 0; }
+
+  /* Main content */
+  #main { flex: 1; overflow-y: auto; padding: 8px; }
+  #case-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; color: #fff; }
+  .comparison { display: flex; flex-direction: column; gap: 6px; }
+  .panel { background: none; border-radius: 0; overflow: hidden; }
+  .panel-header {
+    padding: 3px 8px; font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .panel-header.before { color: #ff6b6b; }
+  .panel-header.after  { color: #6bff6b; }
+  .panel-header .tag {
+    font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 700;
+  }
+  .panel-header.before .tag { background: #ff6b6b22; }
+  .panel-header.after  .tag { background: #6bff6b22; }
+  .panel .img-clip { overflow: hidden; border: 4px solid orange; }
+  .panel img { display: block; max-width: 100%; }
+  .panel .no-img { padding: 20px; text-align: center; color: #555; font-style: italic; }
+  #crop-control { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  #crop-control label { font-size: 12px; color: #aaa; }
+  #crop-control input {
+    width: 70px; padding: 2px 4px; background: #222; color: #fff;
+    border: 1px solid #555; border-radius: 3px; font-size: 12px; font-family: monospace;
+  }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>Theme Comparison</h2>
+  <div class="section-label highlight">Key Comparisons</div>
+  <div id="highlights"></div>
+  <div class="divider"></div>
+  <div class="section-label">Storybook</div>
+  <div id="nav-storybook"></div>
+  <div class="divider"></div>
+  <div class="section-label">Server</div>
+  <div id="nav-server"></div>
+  <div class="divider"></div>
+  <div class="section-label">Marimo</div>
+  <div id="nav-marimo"></div>
+</div>
+
+<div id="main">
+  <div id="case-title">Select a test case</div>
+  <div id="crop-control">
+    <label>Crop bottom (px):</label>
+    <input id="crop-input" type="number" value="400" min="0" step="50" />
+  </div>
+  <div class="comparison" id="comparison"></div>
+</div>
+
+<script>
+const BEFORE_DIR = 'theme-screenshots-artifact';
+const AFTER_DIR  = 'theme-screenshots-with-light-mode';
+
+const ALL_FILES = [
+  "BuckarooWidget-Primary--dark.png",
+  "BuckarooWidget-Primary--light.png",
+  "ChartCell-Composed--dark.png",
+  "ChartCell-Composed--light.png",
+  "ChartCell-Primary--dark.png",
+  "ChartCell-Primary--light.png",
+  "ColumnsEditor-Default--dark.png",
+  "ColumnsEditor-Default--light.png",
+  "DFViewer-Chart--dark.png",
+  "DFViewer-Chart--light.png",
+  "DFViewer-ColorFromCol--dark.png",
+  "DFViewer-ColorFromCol--light.png",
+  "DFViewer-Primary--dark.png",
+  "DFViewer-Primary--light.png",
+  "Histogram-Primary--dark.png",
+  "Histogram-Primary--light.png",
+  "InfiniteRaw-Primary--dark.png",
+  "InfiniteRaw-Primary--light.png",
+  "InfiniteShadow-ColorMap--dark.png",
+  "InfiniteShadow-ColorMap--light.png",
+  "InfiniteShadow-Large--dark.png",
+  "InfiniteShadow-Large--light.png",
+  "InfiniteShadow-MultiIndex--dark.png",
+  "InfiniteShadow-MultiIndex--light.png",
+  "InfiniteShadow-PinnedRows--dark.png",
+  "InfiniteShadow-PinnedRows--light.png",
+  "InfiniteShadow-Primary--dark.png",
+  "InfiniteShadow-Primary--light.png",
+  "InfiniteShadow-ThreeLevelCol--dark.png",
+  "InfiniteShadow-ThreeLevelCol--light.png",
+  "marimo-full-page--dark.png",
+  "marimo-full-page--light.png",
+  "marimo-lowcode-widget--dark.png",
+  "marimo-lowcode-widget--light.png",
+  "marimo-small-widget-context--dark.png",
+  "marimo-small-widget-context--light.png",
+  "MessageBox-Mixed--dark.png",
+  "MessageBox-Mixed--light.png",
+  "OperationViewer-Default--dark.png",
+  "OperationViewer-Default--light.png",
+  "server-buckaroo-5rows--dark.png",
+  "server-buckaroo-5rows--light.png",
+  "server-buckaroo-lowcode--dark.png",
+  "server-buckaroo-lowcode--light.png",
+  "server-default-5rows--dark.png",
+  "server-default-5rows--light.png",
+  "server-large-100rows--dark.png",
+  "server-large-100rows--light.png",
+  "StatusBar-Primary--dark.png",
+  "StatusBar-Primary--light.png",
+];
+
+const HIGHLIGHTS = [
+  "InfiniteShadow-Primary--light.png",
+  "InfiniteShadow-Primary--dark.png",
+  "marimo-full-page--light.png",
+  "server-buckaroo-5rows--light.png",
+  "BuckarooWidget-Primary--light.png",
+];
+
+function caseName(file) {
+  return file.replace('.png', '');
+}
+
+function schemeTag(file) {
+  if (file.includes('--light')) return 'light';
+  if (file.includes('--dark'))  return 'dark';
+  return '';
+}
+
+function displayName(file) {
+  return caseName(file).replace('--light', '').replace('--dark', '');
+}
+
+function makeLink(file, container) {
+  const a = document.createElement('a');
+  const scheme = schemeTag(file);
+  a.href = '#';
+  a.dataset.file = file;
+  a.innerHTML = `${displayName(file)}<span class="scheme">${scheme}</span>`;
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    selectCase(file);
+  });
+  container.appendChild(a);
+  return a;
+}
+
+let currentFile = null;
+
+function getCrop() {
+  return parseInt(document.getElementById('crop-input').value, 10) || 0;
+}
+
+function applyClip() {
+  const crop = getCrop();
+  document.querySelectorAll('.panel .img-clip').forEach(div => {
+    const img = div.querySelector('img');
+    if (!img || !img.naturalHeight) return;
+    const clipped = Math.max(0, img.naturalHeight - crop);
+    div.style.maxHeight = clipped + 'px';
+  });
+}
+
+function selectCase(file) {
+  currentFile = file;
+  // Update active link
+  document.querySelectorAll('#sidebar a').forEach(a => a.classList.remove('active'));
+  document.querySelectorAll(`#sidebar a[data-file="${file}"]`).forEach(a => a.classList.add('active'));
+
+  // Update title
+  document.getElementById('case-title').textContent = caseName(file);
+
+  // Update comparison panels
+  const comp = document.getElementById('comparison');
+  comp.innerHTML = `
+    <div class="panel">
+      <div class="panel-header before"><span class="tag">BEFORE</span> Original (dark-only)</div>
+      <div class="img-clip"><img src="${BEFORE_DIR}/${file}" onload="applyClip()" onerror="this.parentElement.outerHTML='<div class=no-img>Image not found</div>'" /></div>
+    </div>
+    <div class="panel">
+      <div class="panel-header after"><span class="tag">AFTER</span> With light mode support</div>
+      <div class="img-clip"><img src="${AFTER_DIR}/${file}" onload="applyClip()" onerror="this.parentElement.outerHTML='<div class=no-img>Image not found</div>'" /></div>
+    </div>
+  `;
+
+  // Update URL hash
+  history.replaceState(null, '', '#' + caseName(file));
+}
+
+document.getElementById('crop-input').addEventListener('input', applyClip);
+
+// Build sidebar
+const hlContainer = document.getElementById('highlights');
+HIGHLIGHTS.forEach(f => makeLink(f, hlContainer));
+
+const storybook = ALL_FILES.filter(f => !f.startsWith('server-') && !f.startsWith('marimo-'));
+const server    = ALL_FILES.filter(f => f.startsWith('server-'));
+const marimo    = ALL_FILES.filter(f => f.startsWith('marimo-'));
+
+storybook.forEach(f => makeLink(f, document.getElementById('nav-storybook')));
+server.forEach(f    => makeLink(f, document.getElementById('nav-server')));
+marimo.forEach(f    => makeLink(f, document.getElementById('nav-marimo')));
+
+// Load from hash or default to first highlight
+const hash = location.hash.slice(1);
+const initial = hash ? ALL_FILES.find(f => caseName(f) === hash) || HIGHLIGHTS[0] : HIGHLIGHTS[0];
+selectCase(initial);
+</script>
+</body>
+</html>
