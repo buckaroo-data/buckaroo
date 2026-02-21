@@ -19,6 +19,7 @@ def _(BuckarooWidget, pd):
         'score': [88.5, 92.3, 76.1, 95.0, 81.7],
     })
     BuckarooWidget(small_df)
+    return (small_df,)
 
 
 @app.cell
@@ -28,6 +29,7 @@ def _(BuckarooInfiniteWidget, pd):
         rows.append({'id': i, 'value': i * 10, 'label': f'row_{i}'})
     large_df = pd.DataFrame(rows)
     BuckarooInfiniteWidget(large_df)
+    return large_df, rows
 
 
 if __name__ == "__main__":
