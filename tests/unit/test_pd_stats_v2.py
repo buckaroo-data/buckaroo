@@ -1,9 +1,11 @@
 """Tests for v2 @stat function equivalents of v1 ColAnalysis classes.
 
-Tests for: typing_stats, _type, default_summary_stats,
+Tests for: typing_stats, _type, base_summary_stats, numeric_stats,
 computed_default_summary_stats, histogram, pd_cleaning_stats,
 heuristic_fracs, and full pipeline integration.
 """
+import math
+
 import numpy as np
 import pandas as pd
 
@@ -12,7 +14,8 @@ from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 
 from buckaroo.customizations.pd_stats_v2 import (
     typing_stats, _type,
-    default_summary_stats, computed_default_summary_stats,
+    base_summary_stats, numeric_stats,
+    computed_default_summary_stats,
     histogram_series, histogram,
     pd_cleaning_stats, heuristic_fracs,
     orig_col_name,
@@ -96,50 +99,102 @@ class TestTypeComputed:
 
 
 # ============================================================================
-# Tests: default_summary_stats
+# Tests: base_summary_stats
 # ============================================================================
 
-class TestDefaultSummaryStats:
+class TestBaseSummaryStats:
     def test_numeric_basics(self):
-        pipeline = StatPipeline([default_summary_stats], unit_test=False)
+        pipeline = StatPipeline([base_summary_stats], unit_test=False)
         ser = pd.Series([1, 2, 3, 4, 5])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert errors == []
         assert result['length'] == 5
         assert result['null_count'] == 0
-        assert result['mean'] == 3.0
         assert result['min'] == 1
         assert result['max'] == 5
+        # mean/std/median are NOT provided by base_summary_stats
+        assert 'mean' not in result
 
     def test_with_nulls(self):
-        pipeline = StatPipeline([default_summary_stats], unit_test=False)
+        pipeline = StatPipeline([base_summary_stats], unit_test=False)
         ser = pd.Series([1, None, 3, None, 5])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['null_count'] == 2
         assert result['length'] == 5
 
     def test_string_column(self):
-        pipeline = StatPipeline([default_summary_stats], unit_test=False)
+        pipeline = StatPipeline([base_summary_stats], unit_test=False)
         ser = pd.Series(['a', 'b', 'c'])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 3
-        assert result['mean'] == 0  # Default for non-numeric
-        assert result['std'] == 0
+        # mean/std/median are absent (not baked in as 0)
+        assert 'mean' not in result
+        assert 'std' not in result
+        assert math.isnan(result['min'])
+        assert math.isnan(result['max'])
 
     def test_bool_column(self):
-        """Bool columns should NOT get numeric stats."""
-        pipeline = StatPipeline([default_summary_stats], unit_test=False)
+        """Bool columns should NOT get numeric min/max."""
+        pipeline = StatPipeline([base_summary_stats], unit_test=False)
         ser = pd.Series([True, False, True])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 3
-        assert result['mean'] == 0  # Bools treated as non-numeric for stats
+        assert 'mean' not in result
+        assert math.isnan(result['min'])
 
     def test_value_counts_present(self):
-        pipeline = StatPipeline([default_summary_stats], unit_test=False)
+        pipeline = StatPipeline([base_summary_stats], unit_test=False)
         ser = pd.Series([1, 1, 2, 3])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert isinstance(result['value_counts'], pd.Series)
         assert result['value_counts'].iloc[0] == 2  # '1' is most frequent
+
+
+# ============================================================================
+# Tests: numeric_stats
+# ============================================================================
+
+class TestNumericStats:
+    def test_int_column(self):
+        pipeline = StatPipeline([numeric_stats], unit_test=False)
+        ser = pd.Series([1, 2, 3, 4, 5])
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['mean'] == 3.0
+        assert result['median'] == 3.0
+        assert isinstance(result['std'], float)
+
+    def test_float_column(self):
+        pipeline = StatPipeline([numeric_stats], unit_test=False)
+        ser = pd.Series([1.0, 2.0, 3.0])
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert result['mean'] == 2.0
+        assert result['std'] == 1.0
+
+    def test_bool_column_excluded(self):
+        """Bool columns are excluded by column_filter — keys absent."""
+        pipeline = StatPipeline([numeric_stats], unit_test=False)
+        ser = pd.Series([True, False, True])
+        result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert 'mean' not in result
+        assert 'std' not in result
+        assert 'median' not in result
+
+    def test_string_column_excluded(self):
+        """String columns are excluded by column_filter — keys absent."""
+        pipeline = StatPipeline([numeric_stats], unit_test=False)
+        ser = pd.Series(['a', 'b', 'c'])
+        result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert 'mean' not in result
+
+    def test_all_null_numeric(self):
+        """All-null numeric column returns nan, not 0."""
+        pipeline = StatPipeline([numeric_stats], unit_test=False)
+        ser = pd.Series([None, None, None], dtype='float64')
+        result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert math.isnan(result['mean'])
+        assert math.isnan(result['std'])
+        assert math.isnan(result['median'])
 
 
 # ============================================================================
@@ -149,7 +204,7 @@ class TestDefaultSummaryStats:
 class TestComputedDefaultSummaryStats:
     def test_basic_computed(self):
         pipeline = StatPipeline(
-            [default_summary_stats, computed_default_summary_stats],
+            [base_summary_stats, computed_default_summary_stats],
             unit_test=False,
         )
         ser = pd.Series([1, 2, 3, 1, 2])
@@ -163,7 +218,7 @@ class TestComputedDefaultSummaryStats:
 
     def test_with_nulls(self):
         pipeline = StatPipeline(
-            [default_summary_stats, computed_default_summary_stats],
+            [base_summary_stats, computed_default_summary_stats],
             unit_test=False,
         )
         ser = pd.Series([1, None, 2, None, 1])
@@ -173,7 +228,7 @@ class TestComputedDefaultSummaryStats:
 
     def test_freq_values(self):
         pipeline = StatPipeline(
-            [default_summary_stats, computed_default_summary_stats],
+            [base_summary_stats, computed_default_summary_stats],
             unit_test=False,
         )
         ser = pd.Series(['a', 'b', 'c', 'd', 'e', 'f'])
@@ -191,7 +246,7 @@ class TestComputedDefaultSummaryStats:
 class TestHistogram:
     def _make_pipeline(self):
         return StatPipeline(
-            [typing_stats, default_summary_stats,
+            [typing_stats, base_summary_stats, numeric_stats,
              computed_default_summary_stats,
              histogram_series, histogram],
             unit_test=False,
@@ -235,7 +290,7 @@ class TestHistogram:
 class TestPdCleaningStats:
     def test_numeric_column(self):
         pipeline = StatPipeline(
-            [default_summary_stats, pd_cleaning_stats],
+            [base_summary_stats, pd_cleaning_stats],
             unit_test=False,
         )
         ser = pd.Series([1, 2, 3, 4, 5])
@@ -246,7 +301,7 @@ class TestPdCleaningStats:
 
     def test_string_column(self):
         pipeline = StatPipeline(
-            [default_summary_stats, pd_cleaning_stats],
+            [base_summary_stats, pd_cleaning_stats],
             unit_test=False,
         )
         ser = pd.Series(['abc', 'def', '123', '456'])
@@ -323,15 +378,23 @@ class TestFullPipeline:
         result, errors = pipeline.process_df(df)
         assert len(result) == 4
 
-        # Check type classification
-        type_map = {
-            col_stats['orig_col_name']: col_stats['_type']
+        # Build orig_col_name -> stats lookup (keys are rewritten a,b,c,...)
+        by_orig = {
+            col_stats['orig_col_name']: col_stats
             for col_stats in result.values()
         }
-        assert type_map['ints'] == 'integer'
-        assert type_map['floats'] == 'float'
-        assert type_map['strs'] == 'string'
-        assert type_map['bools'] == 'boolean'
+
+        # Check type classification
+        assert by_orig['ints']['_type'] == 'integer'
+        assert by_orig['floats']['_type'] == 'float'
+        assert by_orig['strs']['_type'] == 'string'
+        assert by_orig['bools']['_type'] == 'boolean'
+
+        # Numeric columns have mean; non-numeric don't
+        assert 'mean' in by_orig['ints']
+        assert 'mean' in by_orig['floats']
+        assert 'mean' not in by_orig['strs']
+        assert 'mean' not in by_orig['bools']
 
     def test_no_errors_on_simple_df(self):
         """Simple DataFrame should produce zero errors."""
@@ -379,11 +442,11 @@ class TestBackwardCompat:
         assert 'memory_usage' in v2_result
 
     def test_summary_stats_keys(self):
-        """v2 default_summary_stats produces all keys from v1 DefaultSummaryStats."""
+        """v2 base_summary_stats + numeric_stats produce all keys from v1 DefaultSummaryStats on numeric."""
         from buckaroo.customizations.analysis import DefaultSummaryStats
 
         v1_keys = set(DefaultSummaryStats.provides_defaults.keys())
-        v2_pipeline = StatPipeline([default_summary_stats], unit_test=False)
+        v2_pipeline = StatPipeline([base_summary_stats, numeric_stats], unit_test=False)
 
         ser = pd.Series([1, 2, 3, 4, 5])
         v2_result, _ = v2_pipeline.process_column('test', ser.dtype, raw_series=ser)
@@ -397,7 +460,7 @@ class TestBackwardCompat:
 
         v1_keys = set(ComputedDefaultSummaryStats.provides_defaults.keys())
         v2_pipeline = StatPipeline(
-            [default_summary_stats, computed_default_summary_stats],
+            [base_summary_stats, computed_default_summary_stats],
             unit_test=False,
         )
 
@@ -410,7 +473,7 @@ class TestBackwardCompat:
     def test_histogram_keys(self):
         """v2 histogram functions produce the histogram key."""
         v2_pipeline = StatPipeline(
-            [typing_stats, default_summary_stats,
+            [typing_stats, base_summary_stats,
              computed_default_summary_stats,
              histogram_series, histogram],
             unit_test=False,
@@ -449,11 +512,11 @@ class TestBackwardCompat:
                     f"v1={v1_result.get(key)} v2={v2_result.get(key)}"
 
     def test_summary_values_match_v1(self):
-        """v2 default_summary_stats produces same values as v1."""
+        """v2 base_summary_stats produces same values as v1 for shared keys."""
         from buckaroo.customizations.analysis import DefaultSummaryStats
 
         v1_pipeline = StatPipeline([DefaultSummaryStats], unit_test=False)
-        v2_pipeline = StatPipeline([default_summary_stats], unit_test=False)
+        v2_pipeline = StatPipeline([base_summary_stats], unit_test=False)
 
         ser = pd.Series([1, 2, 3, 4, 5])
         v1_result, _ = v1_pipeline.process_column('test', ser.dtype, raw_series=ser)
