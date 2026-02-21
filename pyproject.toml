@@ -99,6 +99,10 @@ test = [
     "codecov"
 ]
 
+xorq = [
+    "ibis-framework[duckdb]>=9.0.0",
+    "xorq>=0.1.0",
+]
 mcp = ["mcp", "tornado>=6.0", "polars"]
 jupyterlab = ["jupyterlab>=3.6.0"]
 notebook = ["notebook>=7.0.0"]
