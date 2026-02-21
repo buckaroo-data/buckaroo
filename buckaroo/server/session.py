@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Optional
 import pandas as pd
+# polars is optional — only used in lazy mode
 
 
 @dataclass
@@ -13,8 +14,12 @@ class SessionState:
     df_display_args: dict = field(default_factory=dict)
     df_data_dict: dict = field(default_factory=dict)
     df_meta: dict = field(default_factory=dict)
+    # Lazy polars mode fields
+    ldf: Optional[Any] = None  # polars LazyFrame (mode="lazy")
+    orig_to_rw: dict = field(default_factory=dict)
+    rw_to_orig: dict = field(default_factory=dict)
     # Buckaroo mode fields
-    mode: str = "viewer"  # "viewer" or "buckaroo"
+    mode: str = "viewer"  # "viewer", "buckaroo", or "lazy"
     dataflow: Any = None  # ServerDataflow instance when mode="buckaroo"
     buckaroo_state: dict = field(default_factory=dict)
     buckaroo_options: dict = field(default_factory=dict)

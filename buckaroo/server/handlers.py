@@ -11,6 +11,7 @@ import tornado.web
 from buckaroo.server.data_loading import (
     load_file, get_metadata, get_display_state,
     create_dataflow, get_buckaroo_display_state,
+    load_file_lazy, get_metadata_lazy, get_display_state_lazy,
 )
 from buckaroo.server.focus import find_or_create_session_window
 
@@ -129,49 +130,77 @@ class LoadHandler(tornado.web.RequestHandler):
             self.write({"error": "Missing 'session' or 'path'"})
             return
 
-        try:
-            df = load_file(path)
-        except FileNotFoundError:
-            self.set_status(404)
-            self.write({"error": f"File not found: {path}"})
-            return
-        except ValueError as e:
-            self.set_status(400)
-            self.write({"error": str(e)})
-            return
-        except Exception:
-            self.set_status(500)
-            self.write({"error": traceback.format_exc()})
-            return
-
         mode = body.get("mode", "viewer")
-
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
-        session.df = df
         session.mode = mode
-        metadata = get_metadata(df, path)
-        session.metadata = metadata
 
-        if mode == "buckaroo":
-            # Run the full Buckaroo analysis pipeline
-            dataflow = create_dataflow(df)
-            session.dataflow = dataflow
-            buckaroo_state = get_buckaroo_display_state(dataflow)
-            session.df_display_args = buckaroo_state["df_display_args"]
-            session.df_data_dict = buckaroo_state["df_data_dict"]
-            session.df_meta = buckaroo_state["df_meta"]
-            session.buckaroo_state = buckaroo_state["buckaroo_state"]
-            session.buckaroo_options = buckaroo_state["buckaroo_options"]
-            session.command_config = buckaroo_state["command_config"]
-            session.operation_results = buckaroo_state["operation_results"]
-            session.operations = buckaroo_state["operations"]
-        else:
-            # Compute minimal display state for the JS client
-            display_state = get_display_state(df, path)
+        if mode == "lazy":
+            # Polars lazy mode — never loads the full file into memory
+            try:
+                ldf = load_file_lazy(path)
+            except FileNotFoundError:
+                self.set_status(404)
+                self.write({"error": f"File not found: {path}"})
+                return
+            except ValueError as e:
+                self.set_status(400)
+                self.write({"error": str(e)})
+                return
+            except Exception:
+                self.set_status(500)
+                self.write({"error": traceback.format_exc()})
+                return
+
+            metadata = get_metadata_lazy(ldf, path)
+            display_state, orig_to_rw, rw_to_orig = get_display_state_lazy(ldf)
+            display_state["df_meta"]["total_rows"] = metadata["rows"]
+
+            session.ldf = ldf
+            session.orig_to_rw = orig_to_rw
+            session.rw_to_orig = rw_to_orig
+            session.metadata = metadata
             session.df_display_args = display_state["df_display_args"]
             session.df_data_dict = display_state["df_data_dict"]
             session.df_meta = display_state["df_meta"]
+        else:
+            # Pandas eager modes ("viewer" / "buckaroo")
+            try:
+                df = load_file(path)
+            except FileNotFoundError:
+                self.set_status(404)
+                self.write({"error": f"File not found: {path}"})
+                return
+            except ValueError as e:
+                self.set_status(400)
+                self.write({"error": str(e)})
+                return
+            except Exception:
+                self.set_status(500)
+                self.write({"error": traceback.format_exc()})
+                return
+
+            session.df = df
+            metadata = get_metadata(df, path)
+            session.metadata = metadata
+
+            if mode == "buckaroo":
+                dataflow = create_dataflow(df)
+                session.dataflow = dataflow
+                buckaroo_state = get_buckaroo_display_state(dataflow)
+                session.df_display_args = buckaroo_state["df_display_args"]
+                session.df_data_dict = buckaroo_state["df_data_dict"]
+                session.df_meta = buckaroo_state["df_meta"]
+                session.buckaroo_state = buckaroo_state["buckaroo_state"]
+                session.buckaroo_options = buckaroo_state["buckaroo_options"]
+                session.command_config = buckaroo_state["command_config"]
+                session.operation_results = buckaroo_state["operation_results"]
+                session.operations = buckaroo_state["operations"]
+            else:
+                display_state = get_display_state(df, path)
+                session.df_display_args = display_state["df_display_args"]
+                session.df_data_dict = display_state["df_data_dict"]
+                session.df_meta = display_state["df_meta"]
 
         # Push full state to connected WebSocket clients so they pick up
         # the new dataset without a page reload.  This mirrors the

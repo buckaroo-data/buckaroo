@@ -1,8 +1,10 @@
 import os
 import traceback
+from io import BytesIO
 import pandas as pd
+import polars as pl
 from buckaroo.serialization_utils import to_parquet, pd_to_obj, check_and_fix_df
-from buckaroo.df_util import old_col_new_col
+from buckaroo.df_util import old_col_new_col, to_chars
 
 from buckaroo.dataflow.dataflow import CustomizableDataflow
 from buckaroo.dataflow.dataflow_extras import Sampling
@@ -129,6 +131,100 @@ def handle_infinite_request_buckaroo(
             },
             b"",
         )
+
+
+def load_file_lazy(path: str) -> pl.LazyFrame:
+    """Open a file as a Polars LazyFrame — no data read until sliced."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".parquet", ".parq"):
+        return pl.scan_parquet(path)
+    elif ext == ".csv":
+        return pl.scan_csv(path)
+    elif ext == ".tsv":
+        return pl.scan_csv(path, separator="\t")
+    elif ext == ".json":
+        return pl.scan_ndjson(path)
+    else:
+        raise ValueError(f"Unsupported file format for lazy loading: {ext}")
+
+
+def get_metadata_lazy(ldf: pl.LazyFrame, path: str) -> dict:
+    schema = ldf.collect_schema()
+    col_names = schema.names()
+    col_dtypes = schema.dtypes()
+    total_rows = int(ldf.select(pl.len()).collect().item())
+    columns = [{"name": n, "dtype": str(d)} for n, d in zip(col_names, col_dtypes)]
+    return {"path": path, "rows": total_rows, "columns": columns}
+
+
+def get_display_state_lazy(ldf: pl.LazyFrame) -> tuple[dict, dict, dict]:
+    """Return (display_state, orig_to_rw, rw_to_orig) for a lazy frame."""
+    schema = ldf.collect_schema()
+    col_names = schema.names()
+    orig_to_rw = {name: to_chars(i) for i, name in enumerate(col_names)}
+    rw_to_orig = {v: k for k, v in orig_to_rw.items()}
+
+    column_config = [
+        {"col_name": rw, "header_name": orig, "displayer_args": {"displayer": "obj"}}
+        for orig, rw in orig_to_rw.items()
+    ]
+    df_viewer_config = {
+        "pinned_rows": [],
+        "column_config": column_config,
+        "left_col_configs": [{"col_name": "index", "header_name": "", "displayer_args": {"displayer": "obj"}}],
+    }
+    display_state = {
+        "df_meta": {"total_rows": 0},  # filled in after row count
+        "df_data_dict": {"main": [], "all_stats": [], "empty": []},
+        "df_display_args": {
+            "main": {
+                "data_key": "main",
+                "df_viewer_config": df_viewer_config,
+                "summary_stats_key": "all_stats",
+            }
+        },
+    }
+    return display_state, orig_to_rw, rw_to_orig
+
+
+def handle_infinite_request_lazy(
+    ldf: pl.LazyFrame,
+    orig_to_rw: dict,
+    rw_to_orig: dict,
+    total_rows: int,
+    payload_args: dict,
+) -> tuple[dict, bytes]:
+    """Serve an infinite-scroll slice from a Polars LazyFrame."""
+    start = int(payload_args.get("start", 0))
+    end = int(payload_args.get("end", 0))
+
+    base = ldf.select(pl.all())
+    sort_col = payload_args.get("sort")
+    if sort_col:
+        orig_sort = rw_to_orig.get(sort_col, sort_col)
+        ascending = payload_args.get("sort_direction") == "asc"
+        base = base.sort(orig_sort, descending=not ascending)
+
+    slice_len = max(end - start, 0)
+    slice_df = (
+        base.slice(start, slice_len)
+        .with_row_index(name="index", offset=start)
+        .collect()
+    )
+
+    # Rename data columns to rewritten names (matching widget behaviour)
+    select_exprs = [pl.col("index")]
+    for orig, rw in orig_to_rw.items():
+        if orig in slice_df.columns:
+            select_exprs.append(pl.col(orig).alias(rw))
+    slice_df = slice_df.select(select_exprs)
+
+    out = BytesIO()
+    slice_df.write_parquet(out, compression="uncompressed")
+    parquet_bytes = out.getvalue()
+
+    msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": total_rows}
+    return msg, parquet_bytes
 
 
 def load_file(path: str) -> pd.DataFrame:
