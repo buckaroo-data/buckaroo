@@ -19,8 +19,8 @@ export default defineConfig({
     trace: 'on-first-retry',
     ...devices['Desktop Chrome'],
   },
-  // Longer timeout for WASM: Pyodide initialization can be slow (15-30s)
-  timeout: 60_000,
+  // Longer timeout for WASM: Pyodide init + fastparquet WASM compilation can be slow
+  timeout: 180_000,
 
   projects: [
     {
