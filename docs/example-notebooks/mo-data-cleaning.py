@@ -373,7 +373,7 @@ def _(mo):
         ```
 
         ### A quick note about JLisp
-        Buckaroo represents lowcode programs as [JLisp](https://github.com/paddymul/buckaroo/blob/main/buckaroo/jlisp/lispy.py) which is a port of Peter Norvig's Lispy.py, that can interpret JSON Flavored lisp instead of paren lisp.
+        Buckaroo represents lowcode programs as [JLisp](https://github.com/buckaroo-data/buckaroo/blob/main/buckaroo/jlisp/lispy.py) which is a port of Peter Norvig's Lispy.py, that can interpret JSON Flavored lisp instead of paren lisp.
         ```lisp
         (fillna df "col_with_nas" 8)
         ```

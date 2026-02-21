@@ -19,4 +19,4 @@ Articles about Buckaroo can be found here.  It was more expedient to use Read Th
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
-* `Buckaroo on github <https://github.com/paddymul/buckaroo>`_
+* `Buckaroo on github <https://github.com/buckaroo-data/buckaroo>`_
