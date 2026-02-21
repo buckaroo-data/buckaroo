@@ -5,15 +5,8 @@ import pandas as pd
 from typing import Dict, Any, List, Tuple
 from pandas._libs.tslibs import timezones
 from pandas.core.dtypes.dtypes import DatetimeTZDtype
+from fastparquet import json as fp_json
 import logging
-
-# fastparquet is optional - try to import, but fall back gracefully
-try:
-    from fastparquet import json as fp_json
-    HAS_FASTPARQUET = True
-except ImportError:
-    HAS_FASTPARQUET = False
-    fp_json = None
 
 from buckaroo.df_util import old_col_new_col, to_chars
 logger = logging.getLogger()
@@ -135,20 +128,19 @@ def pd_to_obj(df:pd.DataFrame) -> Dict[str, Any]:
         pass
 
 
-if HAS_FASTPARQUET:
-    class MyJsonImpl(fp_json.BaseImpl):
-        def __init__(self):
-            pass
-            #for some reason the following line causes errors, so I have to reimport ujson_dumps
-            # from pandas._libs.json import ujson_dumps
-            # self.dumps = ujson_dumps
+class MyJsonImpl(fp_json.BaseImpl):
+    def __init__(self):
+        pass
+        #for some reason the following line causes errors, so I have to reimport ujson_dumps
+        # from pandas._libs.json import ujson_dumps
+        # self.dumps = ujson_dumps
 
-        def dumps(self, data):
-            from pandas._libs.json import ujson_dumps
-            return ujson_dumps(data, default_handler=str).encode("utf-8")
+    def dumps(self, data):
+        from pandas._libs.json import ujson_dumps
+        return ujson_dumps(data, default_handler=str).encode("utf-8")
 
-        def loads(self, s):
-            return self.api.loads(s)
+    def loads(self, s):
+        return self.api.loads(s)
 
 def get_multiindex_to_cols_sers(index) -> List[Tuple[str, Any]]: #pd.Series[Any]
     if not isinstance(index, pd.MultiIndex):
@@ -184,35 +176,28 @@ def to_parquet(df):
     # I don't like this copy.  modify to keep the same data with different names
     df2 = prepare_df_for_serialization(df)
 
-    # Convert PyArrow-backed string columns to object dtype
-    # pandas 3.0+ uses PyArrow strings by default, which can cause issues with some engines
+    # Convert PyArrow-backed string columns to object dtype for fastparquet compatibility
+    # pandas 3.0+ uses PyArrow strings by default, which fastparquet can't handle directly
     for col in df2.columns:
         if pd.api.types.is_string_dtype(df2[col].dtype) and not pd.api.types.is_object_dtype(df2[col].dtype):
             df2[col] = df2[col].astype('object')
 
+    obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
+    encodings = {k:'json' for k in obj_columns}
+
+    orig_get_cached_codec = fp_json._get_cached_codec
+    def fake_get_cached_codec():
+        return MyJsonImpl()
+
+    fp_json._get_cached_codec = fake_get_cached_codec
     try:
-        if HAS_FASTPARQUET:
-            # Use fastparquet with custom JSON encoding
-            obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
-            encodings = {k:'json' for k in obj_columns}
-
-            orig_get_cached_codec = fp_json._get_cached_codec
-            def fake_get_cached_codec():
-                return MyJsonImpl()
-
-            fp_json._get_cached_codec = fake_get_cached_codec
-            try:
-                df2.to_parquet(data, engine='fastparquet', object_encoding=encodings)
-            finally:
-                fp_json._get_cached_codec = orig_get_cached_codec
-        else:
-            # Fall back to pyarrow if fastparquet not available
-            df2.to_parquet(data, engine='pyarrow')
+        df2.to_parquet(data, engine='fastparquet', object_encoding=encodings)
     except Exception as e:
         logger.error("error serializing to parquet %r", e)
         raise
     finally:
         data.close = orig_close
+        fp_json._get_cached_codec = orig_get_cached_codec
 
     data.seek(0)
     return data.read()
