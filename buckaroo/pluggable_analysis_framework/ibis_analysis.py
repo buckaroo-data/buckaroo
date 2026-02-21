@@ -51,10 +51,11 @@ class IbisAnalysis(ColAnalysis):
     that produces a named scalar expression.
     """
     ibis_expressions: List[Any] = []
+    histogram_query_fns: List[Any] = []
 
 
 class IbisAnalysisPipeline:
-    """Pipeline for executing Ibis-based analysis via xorq.
+    """Pipeline for executing Ibis-based analysis.
 
     Collects all ``ibis_expressions`` from IbisAnalysis subclasses,
     builds a single Ibis query, and executes it against the configured
@@ -70,9 +71,9 @@ class IbisAnalysisPipeline:
             analysis_objects: list of IbisAnalysis subclasses
             backend: xorq/ibis backend connection (e.g., xorq.connect())
         """
-        if not HAS_XORQ:
+        if not HAS_IBIS:
             raise ImportError(
-                "xorq is required for IbisAnalysisPipeline. "
+                "ibis-framework is required for IbisAnalysisPipeline. "
                 "Install with: pip install buckaroo[xorq]"
             )
 
@@ -93,14 +94,15 @@ class IbisAnalysisPipeline:
             columns: list of column names to analyze
 
         Returns:
-            ibis expression that computes all stats
+            ibis expression that computes all stats, or None if no expressions
         """
         agg_exprs = []
         for col in columns:
             for expr_fn in self._expressions:
                 try:
                     expr = expr_fn(table, col)
-                    agg_exprs.append(expr)
+                    if expr is not None:
+                        agg_exprs.append(expr)
                 except Exception:
                     continue
 
@@ -119,34 +121,55 @@ class IbisAnalysisPipeline:
         Returns:
             SDType dict mapping column names to their stats
         """
+        schema = table.schema()
+        # Pre-seed with schema metadata so computed_summary can access dtype
+        stats: SDType = {
+            col: {'dtype': str(schema[col]), 'orig_col_name': col}
+            for col in columns
+        }
+
         query = self.build_query(table, columns)
-        if query is None:
-            return {}
+        if query is not None:
+            # Execute via backend or directly
+            if self.backend is not None:
+                result_df = self.backend.execute(query)
+            else:
+                result_df = query.execute()
 
-        # Execute via xorq backend
-        if self.backend is not None:
-            result_df = self.backend.execute(query)
-        else:
-            result_df = query.execute()
-
-        # Parse results into SDType format
-        # Expression names follow the "column|stat" convention
-        stats: SDType = {}
-        for col_stat_name in result_df.columns:
-            if '|' in col_stat_name:
-                col_name, stat_name = col_stat_name.split('|', 1)
-                if col_name not in stats:
-                    stats[col_name] = {}
-                stats[col_name][stat_name] = result_df[col_stat_name].iloc[0]
+            # Parse results into SDType format
+            # Expression names follow the "column|stat" convention
+            for col_stat_name in result_df.columns:
+                if '|' in col_stat_name:
+                    col_name, stat_name = col_stat_name.split('|', 1)
+                    if col_name in stats:
+                        stats[col_name][stat_name] = result_df[col_stat_name].iloc[0]
 
         # Run computed_summary phase
         for obj in self.analysis_objects:
             for col_name in stats:
                 try:
                     computed = obj.computed_summary(stats[col_name])
-                    stats[col_name].update(computed)
+                    if computed:
+                        stats[col_name].update(computed)
                 except Exception:
                     continue
+
+        # Run histogram queries (need computed stats like is_numeric, min, max)
+        for obj in self.analysis_objects:
+            for fn in getattr(obj, 'histogram_query_fns', []):
+                for col_name in stats:
+                    try:
+                        query = fn(table, col_name, stats[col_name])
+                        if query is None:
+                            continue
+                        if self.backend is not None:
+                            result = self.backend.execute(query)
+                        else:
+                            result = query.execute()
+                        stats[col_name]['histogram'] = _parse_histogram(
+                            result, col_name, stats[col_name])
+                    except Exception:
+                        continue
 
         return stats
 
@@ -168,3 +191,44 @@ class IbisAnalysisPipeline:
             return stats, {}
         except Exception as e:
             return {}, {("__ibis__", "execute"): (e, IbisAnalysis)}
+
+
+def _parse_histogram(result_df, col_name, col_stats):
+    """Convert a GROUP BY result DataFrame into buckaroo's histogram format.
+
+    For numeric columns (bucketed): list of {'name': bucket_label, 'cat_pop': pct}
+    For categorical columns (topk):  list of {'name': value, 'cat_pop': pct}
+    """
+    if result_df is None or len(result_df) == 0:
+        return []
+
+    total = result_df['count'].sum()
+    if total == 0:
+        return []
+
+    histogram = []
+    is_numeric = col_stats.get('is_numeric', False)
+    is_bool = col_stats.get('is_bool', False)
+
+    if is_numeric and not is_bool and 'bucket' in result_df.columns:
+        # Numeric bucketed histogram
+        min_val = col_stats.get('min', 0)
+        max_val = col_stats.get('max', 1)
+        bucket_width = (max_val - min_val) / 10
+        for _, row in result_df.iterrows():
+            bucket_idx = int(row['bucket'])
+            low = min_val + bucket_idx * bucket_width
+            high = low + bucket_width
+            histogram.append({
+                'name': f"{low:.2g}-{high:.2g}",
+                'cat_pop': row['count'] / total,
+            })
+    else:
+        # Categorical histogram
+        for _, row in result_df.iterrows():
+            histogram.append({
+                'name': str(row[col_name]) if col_name in result_df.columns else str(row.iloc[0]),
+                'cat_pop': row['count'] / total,
+            })
+
+    return histogram
