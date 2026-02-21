@@ -332,7 +332,9 @@ async def _():
     if "pyodide" in sys.modules:  # a hacky way to figure out if we're running in pyodide
         import micropip
 
-        await micropip.install("buckaroo")
+        # keep_going=True allows micropip to skip packages without pure-Python wheels (e.g., fastparquet)
+        # and install what it can. Buckaroo will work without fastparquet in WASM.
+        await micropip.install("buckaroo", keep_going=True)
 
     import buckaroo
     from buckaroo import BuckarooInfiniteWidget
