@@ -30,7 +30,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `bash ../../scripts/serve-wasm-marimo.sh ${PORT} ${WASM_DIR}`,
+    command: `npx --yes serve -l ${PORT} -s ${WASM_DIR} --no-clipboard`,
     port: PORT,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
