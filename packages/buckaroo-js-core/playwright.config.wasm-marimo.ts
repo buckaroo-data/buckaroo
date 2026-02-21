@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = 8765;
-const WASM_DIR = path.resolve(__dirname, '../../docs/extra-html/example_notebooks/buckaroo_ddd_tour');
+const WASM_DIR = path.resolve(__dirname, '../../docs/extra-html/example_notebooks/buckaroo_simple');
 
 export default defineConfig({
   testDir: './pw-tests',

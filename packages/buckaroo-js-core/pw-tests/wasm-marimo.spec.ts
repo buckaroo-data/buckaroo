@@ -100,8 +100,12 @@ test.describe('Buckaroo in Marimo WASM (Pyodide)', () => {
     console.log(`   Has div[class*="widget"]: ${allDivs}`);
     console.log(`   Has div[class*="marimo"]: ${allDivsMario}`);
     console.log(`   Body contains 'error': ${hasError}`);
-    console.log(`   Console logs (last 10):`);
-    consoleLogs.slice(-10).forEach(log => console.log(`     ${log}`));
+    console.log(`\n📜 ALL CONSOLE LOGS (${consoleLogs.length} total):`);
+    consoleLogs.forEach((log, i) => {
+      if (log.includes('exception') || log.includes('Error') || log.includes('STDERR')) {
+        console.log(`     [${i}] 🔴 ${log.substring(0, 200)}`);
+      }
+    });
 
     // Get list of all visible divs with classes
     const visibleDivs = await page.locator('div[class]').evaluateAll((elements: any[]) =>
