@@ -31,8 +31,8 @@ def _(BuckarooWidget, pd):
         'age': [30, 25, 35, 28, 32],
         'score': [88.5, 92.3, 76.1, 95.0, 81.7],
     })
-    _widget = BuckarooWidget(small_df)
-    return small_df, _widget
+    small_widget = BuckarooWidget(small_df)
+    return small_df, small_widget
 
 
 @app.cell
@@ -47,8 +47,8 @@ def _(BuckarooInfiniteWidget, pd):
     for i in range(200):
         rows.append({'id': i, 'value': i * 10, 'label': f'row_{i}'})
     large_df = pd.DataFrame(rows)
-    _widget = BuckarooInfiniteWidget(large_df)
-    return large_df, rows, _widget
+    large_widget = BuckarooInfiniteWidget(large_df)
+    return large_df, rows, large_widget
 
 
 @app.cell
