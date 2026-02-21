@@ -1,0 +1,26 @@
+{
+  "name": "temporal_overlap",
+  "description": "Employee history with overlapping date ranges, gaps, and multiple active records",
+  "category": "cross_field",
+  "tags": [
+    "temporal",
+    "SCD",
+    "overlap",
+    "history",
+    "deduplication"
+  ],
+  "affected_columns": [
+    "start_date",
+    "end_date"
+  ],
+  "row_count": 11,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Overlapping date ranges for same employee (emp 105)",
+    "None/null end_date meaning 'current' (multiple active records)",
+    "Employee bouncing back to previous department (emp 101, 103)",
+    "Potential gap between end_date and next start_date",
+    "Multiple open-ended records for same employee"
+  ],
+  "notes": ""
+}

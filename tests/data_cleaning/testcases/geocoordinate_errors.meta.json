@@ -1,0 +1,28 @@
+{
+  "name": "geocoordinate_errors",
+  "description": "Geographic coordinates with swapped lat/lon, impossible values, and Null Island artifacts",
+  "category": "domain_specific",
+  "tags": [
+    "geospatial",
+    "coordinates",
+    "validation",
+    "geocoding"
+  ],
+  "affected_columns": [
+    "latitude",
+    "longitude"
+  ],
+  "row_count": 15,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Latitude outside valid range (-90 to 90)",
+    "Swapped latitude and longitude",
+    "Null Island (0,0) \u2014 common geocoding failure",
+    "Exact zero coordinates (suspicious)",
+    "Excess floating point precision",
+    "Truncated coordinates (low precision)",
+    "String coordinates with degree symbols",
+    "Boundary values (poles, date line)"
+  ],
+  "notes": ""
+}

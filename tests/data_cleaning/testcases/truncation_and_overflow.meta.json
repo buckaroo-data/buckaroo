@@ -1,0 +1,28 @@
+{
+  "name": "truncation_and_overflow",
+  "description": "Text fields truncated at various lengths, with overflow and placeholder artifacts",
+  "category": "source_artifacts",
+  "tags": [
+    "truncation",
+    "overflow",
+    "placeholders",
+    "data_quality"
+  ],
+  "affected_columns": [
+    "name",
+    "description"
+  ],
+  "row_count": 15,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Truncation at fixed character limits (40, 255)",
+    "Truncation with ellipsis vs without",
+    "Multiple values crammed into single field",
+    "Placeholder/test data (Lorem ipsum, asdfghjkl, test)",
+    "References to external data (See attachment)",
+    "Redacted/filtered markers",
+    "Just ellipsis as entire value",
+    "String NULL/N/A"
+  ],
+  "notes": ""
+}

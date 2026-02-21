@@ -1,0 +1,26 @@
+{
+  "name": "timezone_chaos",
+  "description": "Timestamps with mixed timezone representations, ambiguous abbreviations, and naive datetimes",
+  "category": "date_chaos",
+  "tags": [
+    "timezone",
+    "datetime",
+    "ambiguous",
+    "UTC"
+  ],
+  "affected_columns": [
+    "timestamp"
+  ],
+  "row_count": 15,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Naive datetime (no timezone info)",
+    "Multiple timezone representation formats",
+    "Ambiguous abbreviations (CST, IST have multiple meanings)",
+    "Unix timestamp in seconds vs milliseconds",
+    "12-hour clock with ambiguous timezone abbreviation",
+    "Mixed precision (seconds, millis, microseconds)",
+    "Z vs +00:00 vs UTC for same timezone"
+  ],
+  "notes": ""
+}

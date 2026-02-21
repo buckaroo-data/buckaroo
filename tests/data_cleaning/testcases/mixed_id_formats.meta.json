@@ -1,0 +1,28 @@
+{
+  "name": "mixed_id_formats",
+  "description": "Identifier column with wildly inconsistent formats from system migrations",
+  "category": "schema_issues",
+  "tags": [
+    "identifiers",
+    "migration",
+    "normalization",
+    "UUID"
+  ],
+  "affected_columns": [
+    "user_id"
+  ],
+  "row_count": 15,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Plain number vs prefixed IDs",
+    "Float-ified IDs (12345.0 from Excel)",
+    "Scientific notation (1.2345E+04)",
+    "UUID mixed with numeric IDs",
+    "Email used as ID",
+    "Leading zeros (may be significant)",
+    "Whitespace contamination",
+    "Hash prefix, comma in ID",
+    "Legacy system prefix"
+  ],
+  "notes": ""
+}

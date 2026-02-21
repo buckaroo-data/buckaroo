@@ -1,0 +1,24 @@
+{
+  "name": "mojibake",
+  "description": "UTF-8 text that was read with wrong encoding, producing mojibake artifacts",
+  "category": "encoding_whitespace",
+  "tags": [
+    "encoding",
+    "mojibake",
+    "utf8",
+    "latin1",
+    "unicode"
+  ],
+  "affected_columns": [
+    "city"
+  ],
+  "row_count": 15,
+  "difficulty": "hard",
+  "expected_issues": [
+    "UTF-8 bytes interpreted as Latin-1 producing \u00c3 sequences",
+    "Mixed clean and corrupted entries for same cities",
+    "Double-byte mojibake (\u00c3\u00a9 instead of \u00e9)",
+    "Some entries correct, some corrupted"
+  ],
+  "notes": "Classic symptom: UTF-8 file opened as Latin-1/Windows-1252. Fix: re-encode corrupted strings from latin-1 back to UTF-8."
+}

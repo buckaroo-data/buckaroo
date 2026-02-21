@@ -1,0 +1,462 @@
+[
+  {
+    "name": "phone_in_address",
+    "parquet": "phone_in_address.parquet",
+    "metadata": "phone_in_address.meta.json",
+    "category": "field_contamination",
+    "difficulty": "medium",
+    "tags": [
+      "phone",
+      "address",
+      "wrong_field",
+      "PII"
+    ]
+  },
+  {
+    "name": "mixed_date_formats",
+    "parquet": "mixed_date_formats.parquet",
+    "metadata": "mixed_date_formats.meta.json",
+    "category": "date_chaos",
+    "difficulty": "hard",
+    "tags": [
+      "dates",
+      "mixed_formats",
+      "parsing"
+    ]
+  },
+  {
+    "name": "impossible_dates",
+    "parquet": "impossible_dates.parquet",
+    "metadata": "impossible_dates.meta.json",
+    "category": "date_chaos",
+    "difficulty": "medium",
+    "tags": [
+      "dates",
+      "validation",
+      "impossible_values",
+      "edge_cases"
+    ]
+  },
+  {
+    "name": "mostly_int_with_strings",
+    "parquet": "mostly_int_with_strings.parquet",
+    "metadata": "mostly_int_with_strings.meta.json",
+    "category": "mixed_types",
+    "difficulty": "easy",
+    "tags": [
+      "integers",
+      "strings",
+      "mixed_types",
+      "null_representations"
+    ]
+  },
+  {
+    "name": "missing_value_zoo",
+    "parquet": "missing_value_zoo.parquet",
+    "metadata": "missing_value_zoo.meta.json",
+    "category": "missing_data",
+    "difficulty": "medium",
+    "tags": [
+      "null",
+      "missing",
+      "sentinel_values",
+      "NaN"
+    ]
+  },
+  {
+    "name": "formatted_numbers",
+    "parquet": "formatted_numbers.parquet",
+    "metadata": "formatted_numbers.meta.json",
+    "category": "numeric_formats",
+    "difficulty": "hard",
+    "tags": [
+      "numbers",
+      "currency",
+      "locale",
+      "formatting"
+    ]
+  },
+  {
+    "name": "whitespace_chaos",
+    "parquet": "whitespace_chaos.parquet",
+    "metadata": "whitespace_chaos.meta.json",
+    "category": "encoding_whitespace",
+    "difficulty": "hard",
+    "tags": [
+      "whitespace",
+      "invisible_chars",
+      "unicode",
+      "encoding"
+    ]
+  },
+  {
+    "name": "mojibake",
+    "parquet": "mojibake.parquet",
+    "metadata": "mojibake.meta.json",
+    "category": "encoding_whitespace",
+    "difficulty": "hard",
+    "tags": [
+      "encoding",
+      "mojibake",
+      "utf8",
+      "latin1",
+      "unicode"
+    ]
+  },
+  {
+    "name": "field_swap_name_email",
+    "parquet": "field_swap_name_email.parquet",
+    "metadata": "field_swap_name_email.meta.json",
+    "category": "field_contamination",
+    "difficulty": "medium",
+    "tags": [
+      "PII",
+      "email",
+      "name",
+      "wrong_field",
+      "SSN"
+    ]
+  },
+  {
+    "name": "address_field_chaos",
+    "parquet": "address_field_chaos.parquet",
+    "metadata": "address_field_chaos.meta.json",
+    "category": "field_contamination",
+    "difficulty": "hard",
+    "tags": [
+      "address",
+      "partial_data",
+      "wrong_field",
+      "geocoding"
+    ]
+  },
+  {
+    "name": "boolean_chaos",
+    "parquet": "boolean_chaos.parquet",
+    "metadata": "boolean_chaos.meta.json",
+    "category": "categorical_inconsistency",
+    "difficulty": "easy",
+    "tags": [
+      "boolean",
+      "mixed_types",
+      "inconsistent_coding"
+    ]
+  },
+  {
+    "name": "categorical_inconsistency",
+    "parquet": "categorical_inconsistency.parquet",
+    "metadata": "categorical_inconsistency.meta.json",
+    "category": "categorical_inconsistency",
+    "difficulty": "medium",
+    "tags": [
+      "categorical",
+      "normalization",
+      "typos",
+      "abbreviations",
+      "i18n"
+    ]
+  },
+  {
+    "name": "excel_artifacts",
+    "parquet": "excel_artifacts.parquet",
+    "metadata": "excel_artifacts.meta.json",
+    "category": "source_artifacts",
+    "difficulty": "medium",
+    "tags": [
+      "excel",
+      "formulas",
+      "errors",
+      "formatting"
+    ]
+  },
+  {
+    "name": "mixed_units",
+    "parquet": "mixed_units.parquet",
+    "metadata": "mixed_units.meta.json",
+    "category": "unit_inconsistency",
+    "difficulty": "hard",
+    "tags": [
+      "units",
+      "measurement",
+      "conversion",
+      "formatting"
+    ]
+  },
+  {
+    "name": "copy_paste_artifacts",
+    "parquet": "copy_paste_artifacts.parquet",
+    "metadata": "copy_paste_artifacts.meta.json",
+    "category": "source_artifacts",
+    "difficulty": "medium",
+    "tags": [
+      "html",
+      "markdown",
+      "csv",
+      "injection",
+      "encoding"
+    ]
+  },
+  {
+    "name": "near_duplicates",
+    "parquet": "near_duplicates.parquet",
+    "metadata": "near_duplicates.meta.json",
+    "category": "duplicates",
+    "difficulty": "hard",
+    "tags": [
+      "deduplication",
+      "fuzzy_matching",
+      "entity_resolution"
+    ]
+  },
+  {
+    "name": "floating_point_issues",
+    "parquet": "floating_point_issues.parquet",
+    "metadata": "floating_point_issues.meta.json",
+    "category": "numeric_edge_cases",
+    "difficulty": "hard",
+    "tags": [
+      "float",
+      "precision",
+      "NaN",
+      "infinity",
+      "ieee754"
+    ]
+  },
+  {
+    "name": "jagged_schema",
+    "parquet": "jagged_schema.parquet",
+    "metadata": "jagged_schema.meta.json",
+    "category": "schema_issues",
+    "difficulty": "medium",
+    "tags": [
+      "schema",
+      "merged_data",
+      "mixed_types",
+      "missing"
+    ]
+  },
+  {
+    "name": "cross_field_inconsistencies",
+    "parquet": "cross_field_inconsistencies.parquet",
+    "metadata": "cross_field_inconsistencies.meta.json",
+    "category": "cross_field",
+    "difficulty": "hard",
+    "tags": [
+      "validation",
+      "consistency",
+      "business_rules",
+      "contradictions"
+    ]
+  },
+  {
+    "name": "mixed_numeric_scales",
+    "parquet": "mixed_numeric_scales.parquet",
+    "metadata": "mixed_numeric_scales.meta.json",
+    "category": "unit_inconsistency",
+    "difficulty": "hard",
+    "tags": [
+      "scale",
+      "units",
+      "aggregation_error",
+      "reporting"
+    ]
+  },
+  {
+    "name": "timezone_chaos",
+    "parquet": "timezone_chaos.parquet",
+    "metadata": "timezone_chaos.meta.json",
+    "category": "date_chaos",
+    "difficulty": "hard",
+    "tags": [
+      "timezone",
+      "datetime",
+      "ambiguous",
+      "UTC"
+    ]
+  },
+  {
+    "name": "column_name_chaos",
+    "parquet": "column_name_chaos.parquet",
+    "metadata": "column_name_chaos.meta.json",
+    "category": "schema_issues",
+    "difficulty": "medium",
+    "tags": [
+      "column_names",
+      "schema",
+      "normalization"
+    ]
+  },
+  {
+    "name": "survey_freetext_in_structured",
+    "parquet": "survey_freetext_in_structured.parquet",
+    "metadata": "survey_freetext_in_structured.meta.json",
+    "category": "mixed_types",
+    "difficulty": "hard",
+    "tags": [
+      "survey",
+      "freetext",
+      "numeric",
+      "categorical",
+      "human_input"
+    ]
+  },
+  {
+    "name": "log_data_in_table",
+    "parquet": "log_data_in_table.parquet",
+    "metadata": "log_data_in_table.meta.json",
+    "category": "source_artifacts",
+    "difficulty": "medium",
+    "tags": [
+      "logs",
+      "time_series",
+      "operational",
+      "unstructured"
+    ]
+  },
+  {
+    "name": "financial_data_edge_cases",
+    "parquet": "financial_data_edge_cases.parquet",
+    "metadata": "financial_data_edge_cases.meta.json",
+    "category": "numeric_edge_cases",
+    "difficulty": "hard",
+    "tags": [
+      "financial",
+      "precision",
+      "currency",
+      "rounding"
+    ]
+  },
+  {
+    "name": "structured_data_in_cells",
+    "parquet": "structured_data_in_cells.parquet",
+    "metadata": "structured_data_in_cells.meta.json",
+    "category": "schema_issues",
+    "difficulty": "medium",
+    "tags": [
+      "nested_data",
+      "json",
+      "xml",
+      "denormalization"
+    ]
+  },
+  {
+    "name": "truncation_and_overflow",
+    "parquet": "truncation_and_overflow.parquet",
+    "metadata": "truncation_and_overflow.meta.json",
+    "category": "source_artifacts",
+    "difficulty": "medium",
+    "tags": [
+      "truncation",
+      "overflow",
+      "placeholders",
+      "data_quality"
+    ]
+  },
+  {
+    "name": "mixed_id_formats",
+    "parquet": "mixed_id_formats.parquet",
+    "metadata": "mixed_id_formats.meta.json",
+    "category": "schema_issues",
+    "difficulty": "medium",
+    "tags": [
+      "identifiers",
+      "migration",
+      "normalization",
+      "UUID"
+    ]
+  },
+  {
+    "name": "timeseries_anomalies",
+    "parquet": "timeseries_anomalies.parquet",
+    "metadata": "timeseries_anomalies.meta.json",
+    "category": "timeseries",
+    "difficulty": "hard",
+    "tags": [
+      "time_series",
+      "anomaly_detection",
+      "outliers",
+      "seasonality"
+    ]
+  },
+  {
+    "name": "medical_data_entry",
+    "parquet": "medical_data_entry.parquet",
+    "metadata": "medical_data_entry.meta.json",
+    "category": "domain_specific",
+    "difficulty": "hard",
+    "tags": [
+      "medical",
+      "clinical",
+      "units",
+      "data_entry",
+      "patient_safety"
+    ]
+  },
+  {
+    "name": "geocoordinate_errors",
+    "parquet": "geocoordinate_errors.parquet",
+    "metadata": "geocoordinate_errors.meta.json",
+    "category": "domain_specific",
+    "difficulty": "medium",
+    "tags": [
+      "geospatial",
+      "coordinates",
+      "validation",
+      "geocoding"
+    ]
+  },
+  {
+    "name": "multilingual_mixing",
+    "parquet": "multilingual_mixing.parquet",
+    "metadata": "multilingual_mixing.meta.json",
+    "category": "encoding_whitespace",
+    "difficulty": "hard",
+    "tags": [
+      "unicode",
+      "homoglyphs",
+      "deduplication",
+      "security"
+    ]
+  },
+  {
+    "name": "ocr_artifacts",
+    "parquet": "ocr_artifacts.parquet",
+    "metadata": "ocr_artifacts.meta.json",
+    "category": "source_artifacts",
+    "difficulty": "medium",
+    "tags": [
+      "OCR",
+      "PDF",
+      "character_confusion",
+      "scanning"
+    ]
+  },
+  {
+    "name": "temporal_overlap",
+    "parquet": "temporal_overlap.parquet",
+    "metadata": "temporal_overlap.meta.json",
+    "category": "cross_field",
+    "difficulty": "hard",
+    "tags": [
+      "temporal",
+      "SCD",
+      "overlap",
+      "history",
+      "deduplication"
+    ]
+  },
+  {
+    "name": "large_integer_precision",
+    "parquet": "large_integer_precision.parquet",
+    "metadata": "large_integer_precision.meta.json",
+    "category": "numeric_edge_cases",
+    "difficulty": "medium",
+    "tags": [
+      "precision",
+      "int64",
+      "float64",
+      "JSON",
+      "JavaScript"
+    ]
+  }
+]

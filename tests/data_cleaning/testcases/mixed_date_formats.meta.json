@@ -1,0 +1,26 @@
+{
+  "name": "mixed_date_formats",
+  "description": "Single date column with 15+ different date formats intermixed",
+  "category": "date_chaos",
+  "tags": [
+    "dates",
+    "mixed_formats",
+    "parsing"
+  ],
+  "affected_columns": [
+    "date"
+  ],
+  "row_count": 20,
+  "difficulty": "hard",
+  "expected_issues": [
+    "ISO vs US vs European date ambiguity (01/02 = Jan 2 or Feb 1?)",
+    "Unix timestamp as string",
+    "Excel serial date number",
+    "Ordinal suffix (15th)",
+    "Two-digit year ambiguity",
+    "Quarterly and weekly references (not actual dates)",
+    "Empty string instead of null",
+    "Mixed delimiters (-, /, .)"
+  ],
+  "notes": ""
+}

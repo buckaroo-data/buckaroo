@@ -1,0 +1,37 @@
+{
+  "name": "column_name_chaos",
+  "description": "DataFrame with problematic column names: duplicates, special chars, spaces, empty names",
+  "category": "schema_issues",
+  "tags": [
+    "column_names",
+    "schema",
+    "normalization"
+  ],
+  "affected_columns": [
+    "First Name",
+    "first_name",
+    "firstName",
+    "FIRST_NAME",
+    " Last Name ",
+    "Unnamed: 5",
+    "",
+    "col with\nnewline",
+    "amount ($)",
+    "created_at (UTC)",
+    "field.with.dots",
+    "__dunder__"
+  ],
+  "row_count": 3,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Semantically duplicate columns (First Name, first_name, firstName, FIRST_NAME)",
+    "Leading/trailing spaces in column names",
+    "Empty column name",
+    "Newline in column name",
+    "Special characters ($, parentheses) in column names",
+    "Unnamed: N artifact from pandas CSV reading",
+    "Dots in column names (conflicts with JSON paths, SQL)",
+    "Python dunder-style name"
+  ],
+  "notes": ""
+}

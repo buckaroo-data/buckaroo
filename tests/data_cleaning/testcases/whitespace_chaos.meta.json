@@ -1,0 +1,27 @@
+{
+  "name": "whitespace_chaos",
+  "description": "Strings contaminated with various invisible and whitespace characters",
+  "category": "encoding_whitespace",
+  "tags": [
+    "whitespace",
+    "invisible_chars",
+    "unicode",
+    "encoding"
+  ],
+  "affected_columns": [
+    "name"
+  ],
+  "row_count": 15,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Leading/trailing whitespace",
+    "Tab characters inside strings",
+    "Newline/CRLF inside single field values",
+    "Non-breaking space (looks like space, isn't)",
+    "Zero-width characters (completely invisible)",
+    "BOM character inside string",
+    "Multiple consecutive spaces",
+    "Vertical tab"
+  ],
+  "notes": ""
+}

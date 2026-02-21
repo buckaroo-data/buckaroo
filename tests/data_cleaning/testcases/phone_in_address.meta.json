@@ -1,0 +1,24 @@
+{
+  "name": "phone_in_address",
+  "description": "Phone numbers stored in address fields instead of phone column",
+  "category": "field_contamination",
+  "tags": [
+    "phone",
+    "address",
+    "wrong_field",
+    "PII"
+  ],
+  "affected_columns": [
+    "address"
+  ],
+  "row_count": 10,
+  "difficulty": "medium",
+  "expected_issues": [
+    "Phone number as entire address value",
+    "Phone number appended to valid address",
+    "Vanity phone number in address",
+    "International phone format in address",
+    "Phone embedded in natural language directions"
+  ],
+  "notes": ""
+}

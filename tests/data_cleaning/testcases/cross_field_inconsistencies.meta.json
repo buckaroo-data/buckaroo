@@ -1,0 +1,31 @@
+{
+  "name": "cross_field_inconsistencies",
+  "description": "Records where fields contradict each other (age vs birth_date, state vs zip, order vs ship)",
+  "category": "cross_field",
+  "tags": [
+    "validation",
+    "consistency",
+    "business_rules",
+    "contradictions"
+  ],
+  "affected_columns": [
+    "age",
+    "birth_date",
+    "state",
+    "zip",
+    "order_date",
+    "ship_date"
+  ],
+  "row_count": 10,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Age doesn't match birth_date (off by years)",
+    "Negative age",
+    "Impossibly high age for given birth_date",
+    "State doesn't match zip code (CA zip with IL state)",
+    "Invalid state code (ZZ)",
+    "Invalid zip code (00000)",
+    "Ship date before order date"
+  ],
+  "notes": ""
+}

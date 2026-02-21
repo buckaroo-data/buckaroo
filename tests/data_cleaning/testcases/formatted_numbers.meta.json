@@ -1,0 +1,29 @@
+{
+  "name": "formatted_numbers",
+  "description": "Numeric values with every kind of formatting from different locales",
+  "category": "numeric_formats",
+  "tags": [
+    "numbers",
+    "currency",
+    "locale",
+    "formatting"
+  ],
+  "affected_columns": [
+    "price"
+  ],
+  "row_count": 20,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Currency symbols ($ \u20ac \u00a3 \u00a5) mixed in",
+    "Thousands separators: comma, period, space, apostrophe",
+    "Decimal separators: period vs comma (locale-dependent)",
+    "Accounting-style negatives with parentheses",
+    "Trailing negative sign",
+    "Scientific notation",
+    "Indian numbering system (1,23,456)",
+    "Percentage as string",
+    "Fraction as string",
+    "Approximate/comparison operators in value"
+  ],
+  "notes": ""
+}

@@ -1,0 +1,25 @@
+{
+  "name": "mixed_numeric_scales",
+  "description": "Same metrics reported at different scales by different teams (units vs K vs M, decimal vs percent)",
+  "category": "unit_inconsistency",
+  "tags": [
+    "scale",
+    "units",
+    "aggregation_error",
+    "reporting"
+  ],
+  "affected_columns": [
+    "value"
+  ],
+  "row_count": 15,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Revenue: dollars vs thousands vs millions",
+    "Conversion rate: decimal (0.034) vs percentage (3.4) vs basis points (34)",
+    "User counts: actual vs thousands vs millions",
+    "Latency: milliseconds vs seconds vs microseconds",
+    "Disk usage: percentage vs decimal fraction vs absolute (unclear unit)",
+    "No unit column \u2014 must infer from magnitude + metric name"
+  ],
+  "notes": ""
+}

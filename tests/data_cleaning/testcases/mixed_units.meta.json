@@ -1,0 +1,30 @@
+{
+  "name": "mixed_units",
+  "description": "Measurements with inconsistent units, formats, and qualifiers",
+  "category": "unit_inconsistency",
+  "tags": [
+    "units",
+    "measurement",
+    "conversion",
+    "formatting"
+  ],
+  "affected_columns": [
+    "weight",
+    "height"
+  ],
+  "row_count": 20,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Mixed metric and imperial units",
+    "Units sometimes attached, sometimes separated",
+    "Case variations (kg, KG, Kg)",
+    "Abbreviated vs full unit names",
+    "Compound units (5 ft 11 in, 11 lbs 8 oz)",
+    "Range values (5-6 kg)",
+    "Comparison operators (< 10 kg)",
+    "Qualifiers (approx, barefoot)",
+    "No unit specified (bare numbers)",
+    "Spelled-out numbers (five eleven)"
+  ],
+  "notes": ""
+}

@@ -1,0 +1,26 @@
+{
+  "name": "missing_value_zoo",
+  "description": "Every known representation of missing/null data in one column",
+  "category": "missing_data",
+  "tags": [
+    "null",
+    "missing",
+    "sentinel_values",
+    "NaN"
+  ],
+  "affected_columns": [
+    "value"
+  ],
+  "row_count": 31,
+  "difficulty": "medium",
+  "expected_issues": [
+    "30 different missing value representations",
+    "Python None vs numpy NaN vs string 'None'",
+    "Empty string vs whitespace-only strings",
+    "Excel error codes as strings",
+    "Placeholder strings (TBD, TBA)",
+    "Punctuation as missing indicators (-, ., ?)",
+    "Case variations of null/none/na"
+  ],
+  "notes": ""
+}

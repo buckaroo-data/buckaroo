@@ -1,0 +1,29 @@
+{
+  "name": "near_duplicates",
+  "description": "Records that are duplicates or near-duplicates with variations in formatting, nicknames, and typos",
+  "category": "duplicates",
+  "tags": [
+    "deduplication",
+    "fuzzy_matching",
+    "entity_resolution"
+  ],
+  "affected_columns": [
+    "customer_id",
+    "name",
+    "email",
+    "phone"
+  ],
+  "row_count": 15,
+  "difficulty": "hard",
+  "expected_issues": [
+    "Exact duplicate records",
+    "Same person with different email addresses",
+    "Name variations: full name vs nickname (Robert/Rob)",
+    "Name with added middle initial",
+    "Case variations (John Smith / JOHN SMITH)",
+    "Typo in name (Sarah/Sara)",
+    "Phone number formatting differences for same number",
+    "Same customer_id appearing with different data"
+  ],
+  "notes": ""
+}

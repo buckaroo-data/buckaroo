@@ -1,0 +1,27 @@
+{
+  "name": "ocr_artifacts",
+  "description": "Data from OCR/PDF extraction with character confusion: O/0, l/1/I, Z/2, B/8",
+  "category": "source_artifacts",
+  "tags": [
+    "OCR",
+    "PDF",
+    "character_confusion",
+    "scanning"
+  ],
+  "affected_columns": [
+    "invoice_no",
+    "amount",
+    "date"
+  ],
+  "row_count": 10,
+  "difficulty": "medium",
+  "expected_issues": [
+    "O (letter) vs 0 (zero) confusion",
+    "l (lowercase L) vs 1 (one) vs I (uppercase i)",
+    "Z vs 2 confusion",
+    "B vs 8 confusion",
+    "Em-dash vs hyphen from PDF extraction",
+    "European number format confusion (3.456,78 vs 3,456.78)"
+  ],
+  "notes": "OCR errors are systematic \u2014 the same document will have consistent O/0 confusion throughout. Character-level confidence scores from OCR engines can help identify these."
+}
