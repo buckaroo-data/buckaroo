@@ -14,12 +14,18 @@ import { test, expect, Page } from '@playwright/test';
  */
 
 let sharedPage: Page;
+const consoleLogs: string[] = [];
 
 test.describe('Buckaroo in Marimo WASM (Pyodide)', () => {
   test.describe.configure({ mode: 'serial' });
 
   test.beforeAll(async ({ browser }) => {
     sharedPage = await browser.newPage();
+
+    // Capture all browser console output for CI debugging
+    sharedPage.on('console', msg => consoleLogs.push(`[${msg.type()}] ${msg.text()}`));
+    sharedPage.on('pageerror', err => consoleLogs.push(`[PAGE ERROR] ${err.message}`));
+
     await sharedPage.goto('/');
 
     // Wait for the marimo React app to mount (the #root div gets content)
@@ -37,6 +43,12 @@ test.describe('Buckaroo in Marimo WASM (Pyodide)', () => {
   });
 
   test.afterAll(async () => {
+    // Print captured browser console output for CI debugging
+    if (consoleLogs.length > 0) {
+      console.log('--- Browser Console Output ---');
+      consoleLogs.forEach(l => console.log(l));
+      console.log('--- End Console Output ---');
+    }
     await sharedPage?.close();
   });
 
