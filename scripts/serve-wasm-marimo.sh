@@ -1,5 +1,6 @@
 #!/bin/bash
-# Simple HTTP server for WASM marimo HTML files
+# Fast HTTP server for WASM marimo HTML files
+# Uses npx serve for concurrent request handling (Python http.server is too slow)
 # Usage: serve-wasm-marimo.sh [port] [directory]
 
 PORT=${1:-8765}
@@ -13,4 +14,4 @@ fi
 cd "$(dirname "$0")/.."
 echo "Starting HTTP server on http://localhost:$PORT"
 echo "Serving: $(pwd)/$DIR"
-python3 -m http.server "$PORT" --directory "$DIR"
+npx --yes serve -l "$PORT" -s "$DIR" --no-clipboard
