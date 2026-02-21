@@ -1,0 +1,18 @@
+{
+  "LiteBuildConfig": {
+    "apps": ["lab", "repl"],
+    "contents": ["files", "wheels"],
+    "ignore_contents": [".*\\.pyc$", "__pycache__", "\\.git"],
+    "output_dir": "build"
+  },
+  "jupyter-lite.json": {
+    "jupyter-config-data": {
+      "litePluginSettings": {
+        "@jupyterlite/pyodide-kernel-extension:kernel": {
+          "disablePyPIFallback": false,
+          "pyodideUrl": "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/"
+        }
+      }
+    }
+  }
+}

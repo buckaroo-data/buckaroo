@@ -1,0 +1,11 @@
+{
+  "build": {
+    "python_version": "3.12",
+    "venv_name": ".venv-jupyterlite",
+    "packages": [
+      "jupyterlite",
+      "jupyterlite-pyodide-kernel<0.7.0",
+      "jupyter-server"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+[project]
+name = "hello-world-jupyterlite"
+version = "0.1.0"
+description = "JupyterLite environment for hello world notebook"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas",
+    "buckaroo==0.12.5",
+]

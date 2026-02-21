@@ -1,0 +1,2 @@
+pandas
+../../../../dist/buckaroo-0.12.5-py3-none-any.whl

@@ -1,0 +1,13 @@
+{
+  "jupyter-config-data": {
+    "litePluginSettings": {
+      "@jupyterlite/pyodide-kernel-extension:kernel": {
+        "disablePyPIFallback": false,
+        "pyodideUrl": "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js",
+        "loadPyodideOptions": {
+          "packages": ["pyarrow", "fastparquet"]
+        }
+      }
+    }
+  }
+}
