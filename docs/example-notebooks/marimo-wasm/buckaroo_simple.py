@@ -9,10 +9,35 @@ async def _():
     import marimo as mo
     import pandas as pd
     import sys
+    import types
 
     if "pyodide" in sys.modules:
         import micropip
-        await micropip.install("buckaroo", keep_going=True)
+
+        # Install buckaroo's dependencies that work in Pyodide first,
+        # explicitly skipping fastparquet (C extension, not available in WASM).
+        # Then install buckaroo itself with deps=False.
+        await micropip.install(
+            ["anywidget", "graphlib_backport", "cloudpickle"],
+            keep_going=True,
+        )
+        await micropip.install("buckaroo", deps=False)
+
+        # Create a minimal fastparquet stub so buckaroo can import.
+        # buckaroo.serialization_utils imports fastparquet.json at module level;
+        # the parquet serialization path won't work in WASM, but JSON fallback does.
+        if "fastparquet" not in sys.modules:
+            _fp = types.ModuleType("fastparquet")
+            _fp_json = types.ModuleType("fastparquet.json")
+
+            class _StubBaseImpl:
+                pass
+
+            _fp_json.BaseImpl = _StubBaseImpl
+            _fp_json._get_cached_codec = lambda: None
+            _fp.json = _fp_json
+            sys.modules["fastparquet"] = _fp
+            sys.modules["fastparquet.json"] = _fp_json
 
     import buckaroo
     from buckaroo import BuckarooWidget, BuckarooInfiniteWidget

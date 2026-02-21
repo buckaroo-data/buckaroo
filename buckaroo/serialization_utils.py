@@ -5,8 +5,12 @@ import pandas as pd
 from typing import Dict, Any, List, Tuple
 from pandas._libs.tslibs import timezones
 from pandas.core.dtypes.dtypes import DatetimeTZDtype
-from fastparquet import json as fp_json
 import logging
+
+try:
+    from fastparquet import json as fp_json
+except ImportError:
+    fp_json = None  # fastparquet not available (e.g. Pyodide/WASM)
 
 from buckaroo.df_util import old_col_new_col, to_chars
 logger = logging.getLogger()
@@ -128,19 +132,22 @@ def pd_to_obj(df:pd.DataFrame) -> Dict[str, Any]:
         pass
 
 
-class MyJsonImpl(fp_json.BaseImpl):
-    def __init__(self):
-        pass
-        #for some reason the following line causes errors, so I have to reimport ujson_dumps
-        # from pandas._libs.json import ujson_dumps
-        # self.dumps = ujson_dumps
+if fp_json is not None:
+    class MyJsonImpl(fp_json.BaseImpl):
+        def __init__(self):
+            pass
+            #for some reason the following line causes errors, so I have to reimport ujson_dumps
+            # from pandas._libs.json import ujson_dumps
+            # self.dumps = ujson_dumps
 
-    def dumps(self, data):
-        from pandas._libs.json import ujson_dumps
-        return ujson_dumps(data, default_handler=str).encode("utf-8")
+        def dumps(self, data):
+            from pandas._libs.json import ujson_dumps
+            return ujson_dumps(data, default_handler=str).encode("utf-8")
 
-    def loads(self, s):
-        return self.api.loads(s)
+        def loads(self, s):
+            return self.api.loads(s)
+else:
+    MyJsonImpl = None  # type: ignore[assignment,misc]
 
 def get_multiindex_to_cols_sers(index) -> List[Tuple[str, Any]]: #pd.Series[Any]
     if not isinstance(index, pd.MultiIndex):
@@ -168,6 +175,12 @@ def prepare_df_for_serialization(df:pd.DataFrame) -> pd.DataFrame:
     return df2
 
 def to_parquet(df):
+    if fp_json is None:
+        raise ImportError(
+            "fastparquet is required for parquet serialization but is not installed. "
+            "This is expected in Pyodide/WASM environments."
+        )
+
     data: BytesIO = BytesIO()
 
     # data.close doesn't work in pyodide, so we make close a no-op
