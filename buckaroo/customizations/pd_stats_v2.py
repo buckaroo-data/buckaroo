@@ -14,7 +14,8 @@ Individual stat groups can also be composed:
 
     pipeline = StatPipeline([
         typing_stats, _type,
-        default_summary_stats,
+        base_summary_stats,
+        numeric_stats,
         computed_default_summary_stats,
         histogram_series, histogram,
     ])
@@ -27,6 +28,7 @@ import pandas as pd
 from buckaroo.pluggable_analysis_framework.stat_func import (
     StatFunc, StatKey, stat, RawSeries,
 )
+from buckaroo.pluggable_analysis_framework.column_filters import is_numeric_not_bool
 
 # Helper functions from v1 modules (not rewritten - pure utilities)
 from buckaroo.customizations.analysis import get_mode
@@ -83,8 +85,8 @@ def typing_stats(ser: RawSeries) -> TypingResult:
 
 
 @stat()
-def _type(is_bool: Any, is_numeric: Any, is_float: Any,
-          is_datetime: Any, is_string: Any) -> str:
+def _type(is_bool: bool, is_numeric: bool, is_float: bool,
+          is_datetime: bool, is_string: bool) -> str:
     """Derive the human-readable column type string."""
     if is_bool:
         return "boolean"
@@ -100,50 +102,61 @@ def _type(is_bool: Any, is_numeric: Any, is_float: Any,
 
 
 # ============================================================
-# Default Summary Stats (replaces DefaultSummaryStats ColAnalysis)
+# Base Summary Stats (replaces DefaultSummaryStats ColAnalysis)
 # ============================================================
 
-DefaultSummaryResult = TypedDict('DefaultSummaryResult', {
+BaseSummaryResult = TypedDict('BaseSummaryResult', {
     'length': int,
     'null_count': int,
-    'value_counts': Any,
+    'value_counts': pd.Series,
     'mode': Any,
     'min': Any,
     'max': Any,
-    'mean': Any,
-    'std': Any,
-    'median': Any,
 })
 
 
 @stat()
-def default_summary_stats(ser: RawSeries) -> DefaultSummaryResult:
+def base_summary_stats(ser: RawSeries) -> BaseSummaryResult:
     """Compute basic summary stats for a column."""
     length = len(ser)
-    value_counts = ser.value_counts()
     is_numeric = pd.api.types.is_numeric_dtype(ser)
     is_bool = pd.api.types.is_bool_dtype(ser)
 
-    result = {
+    base = {
         'length': length,
-        'null_count': ser.isna().sum(),
-        'value_counts': value_counts,
+        'null_count': int(ser.isna().sum()),
+        'value_counts': ser.value_counts(),
         'mode': get_mode(ser),
         'min': np.nan,
         'max': np.nan,
-        'mean': 0,
-        'std': 0,
-        'median': 0,
     }
 
-    if is_numeric and not is_bool and result['null_count'] < length:
-        result['std'] = ser.std()
-        result['mean'] = ser.mean()
-        result['median'] = ser.median()
-        result['min'] = ser.dropna().min()
-        result['max'] = ser.dropna().max()
+    if is_numeric and not is_bool and base['null_count'] < length:
+        base['min'] = ser.dropna().min()
+        base['max'] = ser.dropna().max()
 
-    return result
+    return base
+
+
+# ============================================================
+# Numeric Stats (mean/std/median — numeric non-bool only)
+# ============================================================
+
+NumericStatsResult = TypedDict('NumericStatsResult', {
+    'mean': float,
+    'std': float,
+    'median': float,
+})
+
+
+@stat(column_filter=is_numeric_not_bool)
+def numeric_stats(ser: RawSeries) -> NumericStatsResult:
+    """Compute mean/std/median for numeric non-bool columns."""
+    return {
+        'mean': float(ser.mean()),
+        'std': float(ser.std()),
+        'median': float(ser.median()),
+    }
 
 
 # ============================================================
@@ -170,7 +183,7 @@ ComputedSummaryResult = TypedDict('ComputedSummaryResult', {
 
 @stat()
 def computed_default_summary_stats(
-    length: Any, value_counts: Any, null_count: Any,
+    length: int, value_counts: pd.Series, null_count: int,
 ) -> ComputedSummaryResult:
     """Compute derived stats from basic summary stats."""
     try:
@@ -207,8 +220,8 @@ def computed_default_summary_stats(
 # ============================================================
 
 HistogramSeriesResult = TypedDict('HistogramSeriesResult', {
-    'histogram_args': Any,
-    'histogram_bins': Any,
+    'histogram_args': dict,
+    'histogram_bins': list,
 })
 
 
@@ -236,7 +249,7 @@ def histogram_series(ser: RawSeries) -> HistogramSeriesResult:
     meat_histogram = np.histogram(meat, 10)
     populations, _ = meat_histogram
     return {
-        'histogram_bins': meat_histogram[1],
+        'histogram_bins': meat_histogram[1].tolist(),
         'histogram_args': dict(
             meat_histogram=meat_histogram,
             normalized_populations=(populations / populations.sum()).tolist(),
@@ -248,9 +261,9 @@ def histogram_series(ser: RawSeries) -> HistogramSeriesResult:
 
 @stat()
 def histogram(
-    value_counts: Any, nan_per: Any, is_numeric: Any,
-    length: Any, min: Any, max: Any,
-    histogram_args: Any,
+    value_counts: pd.Series, nan_per: float, is_numeric: bool,
+    length: int, min: Any, max: Any,
+    histogram_args: dict,
 ) -> list:
     """Compute histogram from summary stats and histogram args."""
     if is_numeric and len(value_counts) > 5 and histogram_args:
@@ -272,7 +285,7 @@ PdCleaningResult = TypedDict('PdCleaningResult', {
 
 
 @stat()
-def pd_cleaning_stats(value_counts: Any, length: Any) -> PdCleaningResult:
+def pd_cleaning_stats(value_counts: pd.Series, length: int) -> PdCleaningResult:
     """Compute int parsing stats for cleaning."""
     vc = value_counts
     coerced_ser = pd.to_numeric(
@@ -373,10 +386,10 @@ try:
             name=class_name,
             func=cleaning_func,
             requires=[
-                StatKey('str_bool_frac', Any),
-                StatKey('regular_int_parse_frac', Any),
-                StatKey('strip_int_parse_frac', Any),
-                StatKey('us_dates_frac', Any),
+                StatKey('str_bool_frac', float),
+                StatKey('regular_int_parse_frac', float),
+                StatKey('strip_int_parse_frac', float),
+                StatKey('us_dates_frac', float),
                 StatKey('orig_col_name', Any),
             ],
             provides=[
@@ -430,7 +443,8 @@ except ImportError:
 # Core analysis (equivalent to default analysis_klasses)
 PD_ANALYSIS_V2 = [
     typing_stats, _type,
-    default_summary_stats,
+    base_summary_stats,
+    numeric_stats,
     computed_default_summary_stats,
     histogram_series, histogram,
 ]
