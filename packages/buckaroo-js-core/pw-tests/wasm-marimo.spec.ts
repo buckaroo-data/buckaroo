@@ -16,8 +16,8 @@ test.describe('Buckaroo in Marimo WASM (Pyodide)', () => {
     sharedPage = await browser.newPage();
     await sharedPage.goto('/');
     // Wait for Pyodide init + buckaroo widget + AG-Grid render
-    await sharedPage.locator('.buckaroo_anywidget').first().waitFor({ state: 'visible', timeout: 90_000 });
-    await sharedPage.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await sharedPage.locator('.buckaroo_anywidget').first().waitFor({ state: 'visible', timeout: 60_000 });
+    await sharedPage.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 15_000 });
   });
 
   test.afterAll(async () => {
