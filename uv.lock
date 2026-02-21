@@ -195,7 +195,6 @@ source = { editable = "." }
 dependencies = [
     { name = "anywidget" },
     { name = "cloudpickle" },
-    { name = "fastparquet", marker = "platform_machine != 'wasm'" },
     { name = "graphlib-backport" },
     { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "pyarrow", version = "21.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
@@ -242,6 +241,9 @@ notebook = [
 packaging-tools = [
     { name = "build" },
     { name = "twine" },
+]
+parquet = [
+    { name = "fastparquet" },
 ]
 polars = [
     { name = "pl-series-hash" },
@@ -296,7 +298,7 @@ requires-dist = [
     { name = "build", marker = "extra == 'packaging-tools'" },
     { name = "cloudpickle", specifier = ">=3.1.1" },
     { name = "codecov", marker = "extra == 'test'" },
-    { name = "fastparquet", marker = "platform_machine != 'wasm'", specifier = ">=2025.12.0" },
+    { name = "fastparquet", marker = "extra == 'parquet'", specifier = ">=2025.12.0" },
     { name = "graphlib-backport", specifier = ">=1.0.0" },
     { name = "graphviz", marker = "extra == 'dev'", specifier = ">=0.20.1" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.88.1" },
@@ -344,7 +346,7 @@ requires-dist = [
     { name = "twine", marker = "extra == 'packaging-tools'" },
     { name = "watchfiles", marker = "extra == 'dev'" },
 ]
-provides-extras = ["dev", "polars", "test", "mcp", "jupyterlab", "notebook", "packaging-tools"]
+provides-extras = ["parquet", "dev", "polars", "test", "mcp", "jupyterlab", "notebook", "packaging-tools"]
 
 [package.metadata.requires-dev]
 datacompy = [{ name = "datacompy", specifier = ">=0.15.0" }]
