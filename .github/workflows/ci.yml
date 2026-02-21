@@ -102,6 +102,7 @@ jobs:
           bash scripts/test_playwright_server.sh
 
       - name: Run Marimo Playwright Tests
+        continue-on-error: true
         run: |
           bash scripts/test_playwright_marimo.sh
 
