@@ -6,9 +6,9 @@ from traitlets import Unicode
 
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, RawDFViewerWidget
 from buckaroo.df_util import old_col_new_col
-from .customizations.polars_analysis import PL_Analysis_Klasses
-from .pluggable_analysis_framework.polars_analysis_management import (
-    PlDfStats)
+from .pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+from .pluggable_analysis_framework.polars_analysis_management import PlDfStats
+from .customizations.pl_stats_v2 import PL_ANALYSIS_V2
 from .serialization_utils import pd_to_obj, sd_to_parquet_b64
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .customizations.pl_autocleaning_conf import NoCleaningConfPl
@@ -19,15 +19,15 @@ from .dataflow.widget_extension_utils import configure_buckaroo
 class PLSampling(Sampling):
     pre_limit = False
 
-local_analysis_klasses = PL_Analysis_Klasses.copy()
-local_analysis_klasses.extend(
-    [DefaultSummaryStatsStyling,
-     DefaultMainStyling
-
-     ])
+local_analysis_klasses = list(PL_ANALYSIS_V2) + [
+    DefaultSummaryStatsStyling,
+    DefaultMainStyling,
+]
 
 
 class PolarsAutocleaning(PandasAutocleaning):
+    # Autocleaning still uses v1 PolarsAnalysis classes (select_clauses),
+    # so it needs the v1 PlDfStats executor.
     DFStatsKlass = PlDfStats
     
     @staticmethod
@@ -53,7 +53,7 @@ class PolarsBuckarooWidget(BuckarooWidget):
     analysis_klasses = local_analysis_klasses
     autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
     autoclean_conf = tuple([NoCleaningConfPl]) #override the base CustomizableDataFlow conf
-    DFStatsClass = PlDfStats
+    DFStatsClass = PlDfStatsV2
     sampling_klass = PLSampling
 
     def _sd_to_jsondf(self, sd):

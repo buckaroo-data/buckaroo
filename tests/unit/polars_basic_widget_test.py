@@ -13,6 +13,7 @@ from buckaroo.pluggable_analysis_framework.col_analysis import (
 
 from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget, to_parquet
+from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from buckaroo.dataflow.dataflow import StylingAnalysis
 from buckaroo.jlisp.lisp_utils import (s, sQ)
 
@@ -84,6 +85,7 @@ def test_polars_all_stats():
         'a':  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0, 'rewritten_col_name':'a', 'orig_col_name':'normal_int_series'}}
     #dsdf = replace_in_dict(sdf, [(np.nan, None)])
     class SimplePolarsBuckaroo(PolarsBuckarooWidget):
+        DFStatsClass = PlDfStats  # v1 PolarsAnalysis classes need PlDfStats
         analysis_klasses= [SelectOnlyAnalysis, StylingAnalysis]
 
     spbw = SimplePolarsBuckaroo(test_df)
@@ -100,9 +102,8 @@ def test_polars_all_stats():
 
 def test_polars_boolean():
     bool_df = pl.DataFrame({'bools':[True, True, False, False, True, None]})
-    sdf, errs = polars_produce_series_df(
-        bool_df, PolarsBuckarooWidget.analysis_klasses, 'test_df', debug=True)
-    assert errs == {}
+    bw = PolarsBuckarooWidget(bool_df)
+    assert bw.dataflow.merged_sd is not None
 
 def test_polars_infinite():
     bool_df = pl.DataFrame({'bools':[True, True, False, False, True, None]})
