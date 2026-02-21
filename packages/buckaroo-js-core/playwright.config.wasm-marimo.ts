@@ -30,7 +30,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `python3 -m http.server ${PORT} --directory ${WASM_DIR}`,
+    command: `bash ../../scripts/serve-wasm-marimo.sh ${PORT} ${WASM_DIR}`,
     port: PORT,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
