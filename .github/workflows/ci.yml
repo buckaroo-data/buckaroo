@@ -281,8 +281,6 @@ jobs:
           key: buckaroo-build-${{ github.sha }}
       - name: Install the project
         run: uv sync --all-extras --dev
-      - name: Install built wheel
-        run: uv pip install --force-reinstall dist/*.whl
       - name: Run Marimo Playwright Tests
         run: |
           bash scripts/test_playwright_marimo.sh
@@ -323,8 +321,6 @@ jobs:
           key: buckaroo-build-${{ github.sha }}
       - name: Install the project
         run: uv sync --all-extras --dev
-      - name: Install built wheel
-        run: uv pip install --force-reinstall dist/*.whl
       - name: Run WASM Marimo Playwright Tests
         run: |
           bash scripts/test_playwright_wasm_marimo.sh
