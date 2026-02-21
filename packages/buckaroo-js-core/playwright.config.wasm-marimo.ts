@@ -20,7 +20,7 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
   },
   // Longer timeout for WASM: Pyodide initialization can be slow (15-30s)
-  timeout: 120_000,
+  timeout: 90_000,
 
   projects: [
     {
