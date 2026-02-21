@@ -161,6 +161,7 @@ jobs:
     name: Marimo Playwright Tests
     needs: [BuildWheel]
     runs-on: depot-ubuntu-latest
+    timeout-minutes: 4
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -195,6 +196,7 @@ jobs:
     name: WASM Marimo Playwright Tests
     needs: [BuildWheel]
     runs-on: depot-ubuntu-latest
+    timeout-minutes: 4
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
