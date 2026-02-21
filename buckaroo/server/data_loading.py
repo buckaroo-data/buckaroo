@@ -15,7 +15,7 @@ from buckaroo.customizations.analysis import (
 from buckaroo.customizations.histogram import Histogram
 from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from buckaroo.customizations.pd_autoclean_conf import CleaningConf, NoCleaningConf
-from buckaroo.pluggable_analysis_framework.analysis_management import DfStats
+from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 
 
 class ServerSampling(Sampling):
@@ -40,7 +40,7 @@ class ServerDataflow(CustomizableDataflow):
     """Headless dataflow matching BuckarooInfiniteWidget's pipeline."""
     sampling_klass = ServerSampling
     autocleaning_klass = PandasAutocleaning
-    DFStatsClass = DfStats
+    DFStatsClass = DfStatsV2
     autoclean_conf = tuple([CleaningConf, NoCleaningConf])
     analysis_klasses = [
         TypingStats, DefaultSummaryStats,
