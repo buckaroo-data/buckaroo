@@ -1,7 +1,0 @@
-paddy            65869   0.2  0.1 435748992  44160   ??  Ss    2:26PM   2:01.16 /Users/paddy/buckaroo/.venv/bin/python3 -c from multiprocessing.spawn import spawn_main; spawn_main(tracker_fd=22, pipe_handle=42) --multiprocessing-fork
-paddy            65864   0.1  0.0 435570256  23904 s018  S+    2:26PM   3:01.88 /Users/paddy/buckaroo/.venv/bin/python3 /Users/paddy/buckaroo/.venv/bin/marimo edit
-paddy            66691   0.1  0.1 436772992  45792   ??  Ss    2:34PM   2:00.77 /Users/paddy/buckaroo/.venv/bin/python3 -c from multiprocessing.spawn import spawn_main; spawn_main(tracker_fd=22, pipe_handle=61) --multiprocessing-fork
-paddy            93778   0.0  0.1 436868464  58336   ??  Ss    5:59PM   0:03.71 /Users/paddy/buckaroo2/.venv/bin/python3 -m ipykernel_launcher -f /Users/paddy/Library/Jupyter/runtime/kernel-2d14188f-3bf0-4d0e-934e-a69bd32e1ea0.json
-paddy            93728   0.0  0.1 435472064  54016 s017  S+    5:59PM   2:00.03 /Users/paddy/buckaroo2/.venv/bin/python3 /Users/paddy/buckaroo2/.venv/bin/jupyter-lab
-paddy            77325   0.0  0.0 435299600   1408 s005  S+   11:57AM   0:00.00 grep buckaroo
-paddy            76811   0.0  0.0 435326384   9072   ??  S    11:54AM   0:00.01 /Users/paddy/buckaroo/.venv/bin/python3 -c import time; time.sleep(600)
