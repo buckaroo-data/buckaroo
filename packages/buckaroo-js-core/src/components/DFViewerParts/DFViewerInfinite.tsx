@@ -261,8 +261,8 @@ export function DFViewerInfiniteInner({
                 return { background: "inherit" }
             },
             enableCellChangeFlash: false,
-            cellRendererSelector: getCellRendererSelector(df_viewer_config.pinned_rows)};
-    }, [df_viewer_config.pinned_rows]);
+            cellRendererSelector: getCellRendererSelector(df_viewer_config.pinned_rows, df_viewer_config.column_config)};
+    }, [df_viewer_config.pinned_rows, df_viewer_config.column_config]);
     const histogram_stats:SDFT = extractSDFT(summary_stats_data);
 
     const extra_context = {

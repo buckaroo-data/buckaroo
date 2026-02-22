@@ -278,14 +278,25 @@ export function dfToAgrid(
 }
 
 // this is very similar to the colDef parts of dfToAgrid
-export function getCellRendererSelector(pinned_rows: PinnedRowConfig[]) {
+export function getCellRendererSelector(pinned_rows: PinnedRowConfig[], column_config: ColumnConfig[]) {
     const anyRenderer: CellRendererSelectorResult = {
         component: getTextCellRenderer(objFormatter),
       //params: {colDef: {cellClass:"pinned_row_cell_class"}}
     };
+
+    // Pre-build a lookup from col_name → formatter for "inherit" pinned rows
+    const colFormatterMap: Record<string, ReturnType<typeof getFormatter>> = {};
+    for (const cc of column_config) {
+        const colName = getFieldVal(cc);
+        const formatter = getFormatterFromArgs(cc.displayer_args);
+        if (formatter) {
+            colFormatterMap[colName] = formatter;
+        }
+    }
+
     return (params: ICellRendererParams<any, any, any>): CellRendererSelectorResult | undefined => {
         if (params.node.rowPinned) {
-            
+
             const pk = _.get(params.node.data, "index");
             if (pk === undefined) {
                 return anyRenderer; // default renderer
@@ -305,10 +316,8 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[]) {
                 return anyRenderer;
             }
             if (prc.displayer_args.displayer === "inherit") {
-                // Use the column's own valueFormatter wrapped in a text cell renderer
-                const colDef = params.column?.getColDef();
-                const colFormatter = colDef?.valueFormatter;
-                if (colFormatter && typeof colFormatter === 'function') {
+                const colFormatter = currentCol ? colFormatterMap[currentCol] : undefined;
+                if (colFormatter) {
                     return {
                         component: getTextCellRenderer(colFormatter),
                     };
