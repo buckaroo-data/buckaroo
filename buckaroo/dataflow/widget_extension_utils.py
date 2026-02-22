@@ -13,7 +13,7 @@ def find_most_specific_styling(klasses, df_display_name='main'):
 
     https://stackoverflow.com/questions/23660447/how-can-i-sort-a-list-of-python-classes-by-inheritance-depth
     """
-    styling_klasses = filter(lambda x: issubclass(x, DefaultMainStyling), klasses)
+    styling_klasses = filter(lambda x: isinstance(x, type) and issubclass(x, DefaultMainStyling), klasses)
     klasses_by_depth = sorted(styling_klasses, key=lambda x: len(x.__mro__))
     return klasses_by_depth[-1]
 
