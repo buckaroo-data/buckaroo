@@ -94,3 +94,45 @@ test.describe("Inherit pinned row displayer", () => {
     expect(maxText).toBe("99.900");
   });
 });
+
+/**
+ * Tests for the SummaryView story — mimics the real summary stats tab
+ * where column_config uses "obj" displayers (DefaultSummaryStatsStyling
+ * doesn't override style_column). Inherit pinned rows should still
+ * format numbers properly, not show raw floats.
+ *
+ * These tests are EXPECTED TO FAIL until the fix is implemented:
+ * either DefaultSummaryStatsStyling overrides style_column() in Python,
+ * or the JS inherit resolver gets the main view's column_config.
+ */
+const SUMMARY_VIEW_URL =
+  "http://localhost:6006/iframe.html?viewMode=story&id=buckaroo-dfviewer-inheritpinnedrows--summary-view&globals=&args=";
+
+test.describe("Inherit pinned rows — summary view (obj column_config)", () => {
+  test("integer column: mean should NOT show raw float", async ({ page }) => {
+    await page.goto(SUMMARY_VIEW_URL);
+    await waitForCells(page);
+
+    // mean=894.8674 — should show "895" not "894.8674"
+    const meanText = await getPinnedCellText(page, "mean", "station_id");
+    expect(meanText).toBe("895");
+  });
+
+  test("integer column: std should NOT show raw float", async ({ page }) => {
+    await page.goto(SUMMARY_VIEW_URL);
+    await waitForCells(page);
+
+    // std=1052.051 — should show "1,052" not "1052.051"
+    const stdText = await getPinnedCellText(page, "std", "station_id");
+    expect(stdText).toBe("1,052");
+  });
+
+  test("float column: mean should be formatted", async ({ page }) => {
+    await page.goto(SUMMARY_VIEW_URL);
+    await waitForCells(page);
+
+    // mean=3.14159 — should show "3.142" not "3.14159"
+    const meanText = await getPinnedCellText(page, "mean", "temperature");
+    expect(meanText).toBe("3.142");
+  });
+});
