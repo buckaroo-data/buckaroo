@@ -34,10 +34,11 @@ class DefaultMainStyling(StylingAnalysis):
         return base_config
 
 
-class DefaultSummaryStatsStyling(StylingAnalysis):
+class DefaultSummaryStatsStyling(DefaultMainStyling):
     requires_summary = [
+        "_type",
         "dtype", "non_null_count", "null_count", "unique_count", "distinct_count",
-        "mean", "std", "min", 
+        "mean", "std", "min",
         "median",
         "max",
         "most_freq", "2nd_freq", "3rd_freq", "4th_freq", "5th_freq"]
