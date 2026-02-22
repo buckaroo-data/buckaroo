@@ -305,7 +305,17 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[]) {
                 return anyRenderer;
             }
             if (prc.displayer_args.displayer === "inherit") {
-                return undefined; // use the column's own formatter
+                const val = params.value;
+                if (val === null || val === undefined || Number.isInteger(val)) {
+                    return undefined; // use the column's own formatter
+                }
+                // float value in an integer column (e.g. mean of int col) — use float formatter
+                const floatRenderer: CellRendererSelectorResult = {
+                    component: getTextCellRenderer(
+                        getFormatter({displayer: 'float', min_fraction_digits: 3, max_fraction_digits: 3} as FormatterArgs),
+                    ),
+                };
+                return floatRenderer;
             }
             const possibCellRenderer = getCellRenderer(prc.displayer_args as CellRendererArgs);
 
