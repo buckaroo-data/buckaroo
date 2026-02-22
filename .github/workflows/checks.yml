@@ -241,7 +241,6 @@ jobs:
     needs: [BuildWheel]
     runs-on: depot-ubuntu-latest
     timeout-minutes: 4
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -281,7 +280,6 @@ jobs:
     needs: [BuildWheel]
     runs-on: depot-ubuntu-latest
     timeout-minutes: 4
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
