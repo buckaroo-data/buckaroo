@@ -305,7 +305,15 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[]) {
                 return anyRenderer;
             }
             if (prc.displayer_args.displayer === "inherit") {
-                return undefined; // use the column's own formatter
+                // Use the column's own valueFormatter wrapped in a text cell renderer
+                const colDef = params.column?.getColDef();
+                const colFormatter = colDef?.valueFormatter;
+                if (colFormatter && typeof colFormatter === 'function') {
+                    return {
+                        component: getTextCellRenderer(colFormatter),
+                    };
+                }
+                return anyRenderer;
             }
             const possibCellRenderer = getCellRenderer(prc.displayer_args as CellRendererArgs);
 
