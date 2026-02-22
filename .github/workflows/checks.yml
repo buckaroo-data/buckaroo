@@ -6,6 +6,12 @@ on:
     branches: "*"
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  pull-requests: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -76,6 +82,13 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install the project
         run: uv sync --all-extras --dev
+      - name: Patch version for TestPyPI
+        if: github.event_name == 'pull_request'
+        run: |
+          BASE=$(grep -Po '^version = "\K[^"]+' pyproject.toml)
+          DEV="${BASE}.dev${{ github.run_id }}"
+          sed -i "s/^version = \".*\"/version = \"${DEV}\"/" pyproject.toml
+          echo "Published version: ${DEV}"
       - name: Build JS extension + Python wheel
         run: ./scripts/full_build.sh
       - name: Upload build artifacts
@@ -87,6 +100,74 @@ jobs:
             ./buckaroo/static/
             ./packages/buckaroo-js-core/dist/
             ./packages/buckaroo-widget/dist/
+
+  PublishTestPyPI:
+    name: Publish to TestPyPI
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 5
+    environment: testpypi
+    permissions:
+      id-token: write
+      pull-requests: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+          path: artifacts
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: artifacts/dist/
+      - name: Comment on PR with install command
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const distFiles = fs.readdirSync('artifacts/dist');
+            const wheel = distFiles.find(f => f.endsWith('.whl'));
+            const version = wheel.match(/buckaroo-(.+?)-/)[1];
+            const body = [
+              '## :package: TestPyPI package published',
+              '',
+              '```bash',
+              `pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ buckaroo==${version}`,
+              '```',
+              '',
+              'or with uv:',
+              '',
+              '```bash',
+              `uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ buckaroo==${version}`,
+              '```',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const marker = '## :package: TestPyPI package published';
+            const existing = comments.find(c => c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
 
   # ---------------------------------------------------------------------------
   # Source-level tests — operate on the codebase, no wheel needed
@@ -315,6 +396,44 @@ jobs:
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run WASM Marimo Playwright Tests
         run: bash scripts/test_playwright_wasm_marimo.sh
+
+  # ---------------------------------------------------------------------------
+  # Deploy Storybook to GitHub Pages (main only)
+  # ---------------------------------------------------------------------------
+
+  DeployStorybook:
+    name: Deploy Storybook
+    if: github.ref == 'refs/heads/main'
+    needs: [TestStorybook]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v4
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Build Storybook
+        working-directory: packages/buckaroo-js-core
+        run: pnpm build-storybook
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./packages/buckaroo-js-core/dist/storybook
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
   # ---------------------------------------------------------------------------
   # Docs — build documentation and check links
