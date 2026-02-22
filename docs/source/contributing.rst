@@ -104,7 +104,7 @@ After making changes to the MCP server code (``buckaroo_mcp_tool.py``,
 
 .. code-block:: bash
 
-   ./scripts/full_build.sh && uv pip install --force-reinstall "dist/buckaroo-*.whl[mcp]"
+   ./scripts/full_build.sh && uv pip install --force-reinstall "$(ls dist/buckaroo-*.whl)[mcp]"
 
 Then inside your Claude Code session, type ``/mcp`` and reconnect
 ``buckaroo-table``. This restarts the server process with the newly installed
