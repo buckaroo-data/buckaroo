@@ -6,8 +6,8 @@
  * displayer_args: { displayer: "inherit" } for mean, std, min, median, max.
  *
  * Expected: pinned rows use the column's own formatter.
- *   - Integer column: mean=894.8674 renders as "895" (0 decimals)
- *   - Float column:   mean=3.14159  renders as "3.142" (3 decimals)
+ *   - Integer column: mean=429.2 renders as "429" (0 decimals)
+ *   - Float column:   mean=21.34  renders as "21.340" (3 decimals)
  */
 import type { Meta, StoryObj } from "@storybook/react";
 import { useMemo } from "react";
@@ -35,11 +35,13 @@ const floatCol: NormalColumnConfig = {
   displayer_args: { displayer: "float", min_fraction_digits: 3, max_fraction_digits: 3 },
 };
 
+/** Primary story: data rows + pinned rows with inherit */
 const viewerConfig: DFViewerConfig = {
   column_config: [intCol, floatCol],
   left_col_configs: [idxCol],
   pinned_rows: [
     { primary_key_val: "dtype", displayer_args: { displayer: "obj" } },
+    { primary_key_val: "non_null_count", displayer_args: { displayer: "inherit" } },
     { primary_key_val: "mean", displayer_args: { displayer: "inherit" } },
     { primary_key_val: "std", displayer_args: { displayer: "inherit" } },
     { primary_key_val: "min", displayer_args: { displayer: "inherit" } },
@@ -58,11 +60,20 @@ const mainData: DFRow[] = [
 
 const summaryStats: DFRow[] = [
   { index: "dtype", station_id: "int64", temperature: "float64" },
-  { index: "mean", station_id: 894.8674, temperature: 3.14159 },
-  { index: "std", station_id: 1052.051, temperature: 1.7321 },
-  { index: "min", station_id: 0, temperature: 0.5 },
-  { index: "median", station_id: 72, temperature: 2.718 },
-  { index: "max", station_id: 3249, temperature: 99.9 },
+  { index: "non_null_count", station_id: 5, temperature: 5 },
+  { index: "null_count", station_id: 0, temperature: 0 },
+  { index: "unique_count", station_id: 5, temperature: 5 },
+  { index: "distinct_count", station_id: 5, temperature: 5 },
+  { index: "mean", station_id: 429.2, temperature: 21.34 },
+  { index: "std", station_id: 86.967, temperature: 2.597 },
+  { index: "min", station_id: 293, temperature: 18.3 },
+  { index: "median", station_id: 435, temperature: 21.0 },
+  { index: "max", station_id: 519, temperature: 25.1 },
+  { index: "most_freq", station_id: 519, temperature: 22.5 },
+  { index: "2nd_freq", station_id: 497, temperature: 18.3 },
+  { index: "3rd_freq", station_id: 402, temperature: 25.1 },
+  { index: "4th_freq", station_id: 435, temperature: 19.8 },
+  { index: "5th_freq", station_id: 293, temperature: 21.0 },
 ];
 
 const InheritPinnedRowsInner = () => {
@@ -106,37 +117,33 @@ export const Primary: Story = {
 
 /**
  * "SummaryView" mimics the real summary-stats tab where
- * DefaultSummaryStatsStyling does NOT override style_column(),
- * so every column gets displayer: "obj" in column_config.
- * Pinned rows still use inherit — but inherit resolves against the
- * column_config which is all "obj", so formatting is lost.
+ * DefaultSummaryStatsStyling now inherits style_column() from
+ * DefaultMainStyling, producing proper float/string column_config.
+ * Pinned rows use inherit and resolve against the column's formatter.
  *
- * This story should expose the bug: mean/std show raw floats
- * instead of formatted integers/floats.
+ * Also includes freq rows with inherit to verify they format correctly.
  */
 
-const objIntCol: NormalColumnConfig = {
-  col_name: "station_id",
-  header_name: "station_id",
-  displayer_args: { displayer: "obj" },  // <-- summary view uses obj, not float
-};
-
-const objFloatCol: NormalColumnConfig = {
-  col_name: "temperature",
-  header_name: "temperature",
-  displayer_args: { displayer: "obj" },  // <-- summary view uses obj, not float
-};
-
+/** Matches exact output of DefaultSummaryStatsStyling.get_dfviewer_config() */
 const summaryViewConfig: DFViewerConfig = {
-  column_config: [objIntCol, objFloatCol],
+  column_config: [intCol, floatCol],
   left_col_configs: [idxCol],
   pinned_rows: [
     { primary_key_val: "dtype", displayer_args: { displayer: "obj" } },
+    { primary_key_val: "non_null_count", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "null_count", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "unique_count", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "distinct_count", displayer_args: { displayer: "inherit" } },
     { primary_key_val: "mean", displayer_args: { displayer: "inherit" } },
     { primary_key_val: "std", displayer_args: { displayer: "inherit" } },
     { primary_key_val: "min", displayer_args: { displayer: "inherit" } },
     { primary_key_val: "median", displayer_args: { displayer: "inherit" } },
     { primary_key_val: "max", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "most_freq", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "2nd_freq", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "3rd_freq", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "4th_freq", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "5th_freq", displayer_args: { displayer: "inherit" } },
   ],
 };
 

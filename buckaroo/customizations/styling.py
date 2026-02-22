@@ -44,20 +44,20 @@ class DefaultSummaryStatsStyling(DefaultMainStyling):
         "most_freq", "2nd_freq", "3rd_freq", "4th_freq", "5th_freq"]
     pinned_rows = [
         obj_('dtype'),
-        float_('non_null_count', 0),
-        float_('null_count', 0),
-        float_('unique_count', 0),
-        float_('distinct_count', 0),
+        inherit_('non_null_count'),
+        inherit_('null_count'),
+        inherit_('unique_count'),
+        inherit_('distinct_count'),
         inherit_('mean'),
         inherit_('std'),
         inherit_('min'),
         inherit_('median'),
         inherit_('max'),
-        obj_('most_freq'),
-        obj_('2nd_freq'),
-        obj_('3rd_freq'),
-        obj_('4th_freq'),
-        obj_('5th_freq')
+        inherit_('most_freq'),
+        inherit_('2nd_freq'),
+        inherit_('3rd_freq'),
+        inherit_('4th_freq'),
+        inherit_('5th_freq')
     ]
 
     df_display_name = "summary"
