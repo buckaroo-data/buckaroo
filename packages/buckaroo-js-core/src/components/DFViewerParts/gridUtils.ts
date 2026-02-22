@@ -265,14 +265,13 @@ export function dfToAgrid(
     pinned:'left'}
   }
   const lcc3 = lcc2.map(addPinned)
-  console.log("lcc3", lcc3);
 
   const columnConfigs: ColumnConfig[] =  dfviewer_config.column_config;
   const groupedColumnConfigs = getSubChildren(columnConfigs, 0);
   const flattenedColumnConfigs = groupedColumnConfigs.map(switchToColDef)
 
   const retMultiColumns:(ColDef|ColGroupDef)[] = [
-    ...lcc2,
+    ...lcc3,
     ...flattenedColumnConfigs]
   return retMultiColumns
 }

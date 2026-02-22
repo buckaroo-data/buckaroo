@@ -109,8 +109,8 @@ class TypingStats(ColAnalysis):
 
 class DefaultSummaryStats(ColAnalysis):
     provides_defaults = {
-        'length':0, 'min':0, 'max':0, 'mean':0, 'null_count':0,
-        'value_counts':0, 'mode':0, "std":0, "median":0}
+        'length':0, 'min':np.nan, 'max':np.nan, 'mean':np.nan, 'null_count':0,
+        'value_counts':0, 'mode':0, "std":np.nan, "median":np.nan}
     @staticmethod
     def series_summary(sampled_ser, ser):
         l = len(ser)
