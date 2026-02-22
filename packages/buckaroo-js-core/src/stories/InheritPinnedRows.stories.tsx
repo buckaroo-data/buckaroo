@@ -103,3 +103,68 @@ type Story = StoryObj<typeof meta>;
 export const Primary: Story = {
   args: {},
 };
+
+/**
+ * "SummaryView" mimics the real summary-stats tab where
+ * DefaultSummaryStatsStyling does NOT override style_column(),
+ * so every column gets displayer: "obj" in column_config.
+ * Pinned rows still use inherit — but inherit resolves against the
+ * column_config which is all "obj", so formatting is lost.
+ *
+ * This story should expose the bug: mean/std show raw floats
+ * instead of formatted integers/floats.
+ */
+
+const objIntCol: NormalColumnConfig = {
+  col_name: "station_id",
+  header_name: "station_id",
+  displayer_args: { displayer: "obj" },  // <-- summary view uses obj, not float
+};
+
+const objFloatCol: NormalColumnConfig = {
+  col_name: "temperature",
+  header_name: "temperature",
+  displayer_args: { displayer: "obj" },  // <-- summary view uses obj, not float
+};
+
+const summaryViewConfig: DFViewerConfig = {
+  column_config: [objIntCol, objFloatCol],
+  left_col_configs: [idxCol],
+  pinned_rows: [
+    { primary_key_val: "dtype", displayer_args: { displayer: "obj" } },
+    { primary_key_val: "mean", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "std", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "min", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "median", displayer_args: { displayer: "inherit" } },
+    { primary_key_val: "max", displayer_args: { displayer: "inherit" } },
+  ],
+};
+
+const SummaryViewInner = () => {
+  const data_wrapper = useMemo(
+    () => ({
+      data_type: "Raw" as const,
+      data: [],        // summary view has no main data rows
+      length: 0,
+    }),
+    [],
+  );
+  return (
+    <ShadowDomWrapper>
+      <div style={{ height: 500, width: 640 }}>
+        <DFViewerInfinite
+          data_wrapper={data_wrapper}
+          df_viewer_config={summaryViewConfig}
+          summary_stats_data={summaryStats}
+          activeCol={["station_id", "station_id"]}
+          setActiveCol={() => {}}
+          outside_df_params={{}}
+        />
+      </div>
+    </ShadowDomWrapper>
+  );
+};
+
+export const SummaryView: Story = {
+  render: () => <SummaryViewInner />,
+};
