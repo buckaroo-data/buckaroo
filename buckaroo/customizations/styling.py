@@ -1,6 +1,6 @@
 from buckaroo.dataflow.dataflow import StylingAnalysis
 from typing import Any
-from buckaroo.styling_helpers import obj_, float_, pinned_histogram
+from buckaroo.styling_helpers import obj_, float_, inherit_, pinned_histogram
 
 
 class DefaultMainStyling(StylingAnalysis):
@@ -47,11 +47,11 @@ class DefaultSummaryStatsStyling(StylingAnalysis):
         float_('null_count', 0),
         float_('unique_count', 0),
         float_('distinct_count', 0),
-        float_('mean'),
-        float_('std'),
-        float_('min'),
-        float_('median'),
-        float_('max'),
+        inherit_('mean'),
+        inherit_('std'),
+        inherit_('min'),
+        inherit_('median'),
+        inherit_('max'),
         obj_('most_freq'),
         obj_('2nd_freq'),
         obj_('3rd_freq'),

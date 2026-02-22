@@ -32,6 +32,10 @@ export interface IntegerDisplayerA {
     max_digits: number;
 }
 
+export interface InheritDisplayerA {
+    displayer: "inherit";
+}
+
 export interface DatetimeLocaleDisplayerA {
     displayer: "datetimeLocaleString";
     locale: "en-US" | "en-GB" | "en-CA" | "fr-FR" | "es-ES" | "de-DE" | "ja-JP";
@@ -85,7 +89,7 @@ export type CellRendererArgs =
     | Base64PNGImageDisplayerA
     | SVGDisplayerA;
 
-export type DisplayerArgs = FormatterArgs | CellRendererArgs;
+export type DisplayerArgs = FormatterArgs | CellRendererArgs | InheritDisplayerA;
 
 export const cellRendererDisplayers = [
     "chart",

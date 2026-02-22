@@ -304,6 +304,9 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[]) {
             ) {
                 return anyRenderer;
             }
+            if (prc.displayer_args.displayer === "inherit") {
+                return undefined; // use the column's own formatter
+            }
             const possibCellRenderer = getCellRenderer(prc.displayer_args as CellRendererArgs);
 
             if (possibCellRenderer === undefined) {
