@@ -30,8 +30,8 @@
     "/dist"
   ],
   "dependencies": {
-    "ag-grid-community": "^34.3.1",
-    "ag-grid-react": "^34.3.1",
+    "ag-grid-community": "^35.1.0",
+    "ag-grid-react": "^35.1.0",
     "hyparquet": "^1.8.2",
     "lodash-es": "^4.17.21",
     "recharts": "^2.13.1"
