@@ -58,7 +58,7 @@ const CustomTooltip = ({ active, payload, screenCoords }: any) => {
                     left: screenCoords.x + 10,
                 }}
             >
-                <p className="label">{`${name} : ${payload[0].value}`}</p>
+                <p className="label">{`${name} : ${payload[0].value}%`}</p>
             </div>,
             document.body,
         );
