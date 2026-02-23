@@ -28,16 +28,65 @@ function getWsUrl(sessionId: string): string {
     return `${proto}//${window.location.host}/ws/${sessionId}`;
 }
 
+/** Compute available height for the grid and inject into df_display_args.
+ *  This overrides heightStyle()'s default window.innerHeight/2 with the
+ *  actual available space (viewport minus bars minus bottom gap). */
+function patchDisplayArgsHeight(displayArgs: any): any {
+    if (!displayArgs) return displayArgs;
+    const fb = document.getElementById("filename-bar");
+    const pb = document.getElementById("prompt-bar");
+    const barsHeight = (fb?.offsetHeight || 0) + (pb?.offsetHeight || 0);
+    // 20px bottom gap — CSS flex: 1 on .theme-hanger handles the actual fill,
+    // but dfvHeight tells heightStyle() to use domLayout: "normal" (not autoHeight)
+    const available = window.innerHeight - barsHeight - 20;
+    const patched = { ...displayArgs };
+    for (const key of Object.keys(patched)) {
+        const view = patched[key];
+        if (view && typeof view === "object" && "df_viewer_config" in view) {
+            patched[key] = {
+                ...view,
+                df_viewer_config: {
+                    ...view.df_viewer_config,
+                    component_config: {
+                        ...view.df_viewer_config?.component_config,
+                        dfvHeight: available,
+                    },
+                },
+            };
+        }
+    }
+    return patched;
+}
+
+function updateFilenameDisplay(metadata: any, prompt?: string) {
+    if (metadata?.path) {
+        const filename = metadata.path.split("/").pop() || metadata.path;
+        document.title = `Buckaroo \u2014 ${filename}`;
+        const bar = document.getElementById("filename-bar");
+        if (bar) {
+            bar.textContent = filename;
+            bar.title = metadata.path;
+        }
+    }
+    if (prompt) {
+        const promptBar = document.getElementById("prompt-bar");
+        if (promptBar) {
+            promptBar.textContent = prompt;
+        }
+    }
+}
+
 function ViewerApp({ model, src }: { model: WebSocketModel; src: any }) {
     const [dfMeta, setDfMeta] = React.useState(model.get("df_meta") || { total_rows: 0 });
     const [dfDataDict, setDfDataDict] = React.useState(model.get("df_data_dict") || {});
-    const [dfDisplayArgs, setDfDisplayArgs] = React.useState(model.get("df_display_args") || {});
+    const [dfDisplayArgs, setDfDisplayArgs] = React.useState(patchDisplayArgsHeight(model.get("df_display_args") || {}));
 
     React.useEffect(() => {
-        const onMeta = (msg: any) => {
-            setDfMeta(model.get("df_meta") || { total_rows: msg.rows || 0 });
+        const onMeta = (metadata: any, prompt?: string) => {
+            updateFilenameDisplay(metadata, prompt);
+            setDfMeta(model.get("df_meta") || { total_rows: metadata.rows || 0 });
             srt.preResolveDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
-            setDfDisplayArgs(model.get("df_display_args") || {});
+            setDfDisplayArgs(patchDisplayArgsHeight(model.get("df_display_args") || {}));
         };
         model.on("metadata", onMeta);
 
@@ -45,7 +94,7 @@ function ViewerApp({ model, src }: { model: WebSocketModel; src: any }) {
         const onDfDataDict = (v: any) => {
             srt.preResolveDFDataDict(v).then(setDfDataDict);
         };
-        const onDfDisplayArgs = (v: any) => setDfDisplayArgs(v);
+        const onDfDisplayArgs = (v: any) => setDfDisplayArgs(patchDisplayArgsHeight(v));
         model.on("change:df_meta", onDfMeta);
         model.on("change:df_data_dict", onDfDataDict);
         model.on("change:df_display_args", onDfDisplayArgs);
@@ -65,14 +114,14 @@ function ViewerApp({ model, src }: { model: WebSocketModel; src: any }) {
     }
 
     return (
-        <div className="buckaroo_anywidget" style={{ width: "100%", height: "100vh" }}>
+        <div className="buckaroo_anywidget" style={{ width: "100%", height: "100%" }}>
             <srt.DFViewerInfiniteDS
-                df_meta={dfMeta}
-                df_data_dict={dfDataDict}
-                df_display_args={dfDisplayArgs}
-                src={src}
-                df_id={"standalone"}
-            />
+                    df_meta={dfMeta}
+                    df_data_dict={dfDataDict}
+                    df_display_args={dfDisplayArgs}
+                    src={src}
+                    df_id={"standalone"}
+                />
         </div>
     );
 }
@@ -80,7 +129,7 @@ function ViewerApp({ model, src }: { model: WebSocketModel; src: any }) {
 function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
     const [dfMeta, setDfMeta] = React.useState(model.get("df_meta") || { total_rows: 0 });
     const [dfDataDict, setDfDataDict] = React.useState(model.get("df_data_dict") || {});
-    const [dfDisplayArgs, setDfDisplayArgs] = React.useState(model.get("df_display_args") || {});
+    const [dfDisplayArgs, setDfDisplayArgs] = React.useState(patchDisplayArgsHeight(model.get("df_display_args") || {}));
     const [buckarooState, setBuckarooState] = React.useState(model.get("buckaroo_state") || {});
     const [buckarooOptions, setBuckarooOptions] = React.useState(model.get("buckaroo_options") || {});
     const [commandConfig, setCommandConfig] = React.useState(model.get("command_config") || {});
@@ -88,10 +137,11 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
     const [operations, setOperations] = React.useState(model.get("operations") || []);
 
     React.useEffect(() => {
-        const onMeta = () => {
+        const onMeta = (metadata: any, prompt?: string) => {
+            updateFilenameDisplay(metadata, prompt);
             setDfMeta(model.get("df_meta") || { total_rows: 0 });
             srt.preResolveDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
-            setDfDisplayArgs(model.get("df_display_args") || {});
+            setDfDisplayArgs(patchDisplayArgsHeight(model.get("df_display_args") || {}));
             setBuckarooState(model.get("buckaroo_state") || {});
             setBuckarooOptions(model.get("buckaroo_options") || {});
             setCommandConfig(model.get("command_config") || {});
@@ -112,9 +162,12 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
         };
         model.on("change:df_data_dict", onDfDataDict);
 
+        const onDfDisplayArgs = (v: any) => setDfDisplayArgs(patchDisplayArgsHeight(v));
+        model.on("change:df_display_args", onDfDisplayArgs);
+
         const handlers: [string, Function][] = [
             ["df_meta", onChange("df_meta", setDfMeta)],
-            ["df_display_args", onChange("df_display_args", setDfDisplayArgs)],
+            ["df_display_args", onDfDisplayArgs],
             ["buckaroo_state", onChange("buckaroo_state", setBuckarooState)],
             ["buckaroo_options", onChange("buckaroo_options", setBuckarooOptions)],
             ["command_config", onChange("command_config", setCommandConfig)],
@@ -150,7 +203,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
     }
 
     return (
-        <div className="buckaroo_anywidget" style={{ width: "100%", height: "100vh" }}>
+        <div className="buckaroo_anywidget" style={{ width: "100%", height: "100%" }}>
             <srt.BuckarooInfiniteWidget
                 df_meta={dfMeta}
                 df_data_dict={dfDataDict}
@@ -213,6 +266,11 @@ async function main() {
     // ensures components receive plain DFData arrays.
     if (initialState.df_data_dict) {
         initialState.df_data_dict = await srt.preResolveDFDataDict(initialState.df_data_dict);
+    }
+
+    // Update page title, filename bar, and prompt bar from initial state
+    if (initialState.metadata || initialState.prompt) {
+        updateFilenameDisplay(initialState.metadata, initialState.prompt);
     }
 
     const model = new WebSocketModel(ws, initialState);

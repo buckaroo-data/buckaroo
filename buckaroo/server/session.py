@@ -26,6 +26,7 @@ class SessionState:
     command_config: dict = field(default_factory=dict)
     operation_results: dict = field(default_factory=dict)
     operations: list = field(default_factory=list)
+    prompt: str = ""
 
 
 class SessionManager:

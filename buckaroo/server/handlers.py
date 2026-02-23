@@ -126,17 +126,18 @@ class LoadHandler(tornado.web.RequestHandler):
         return body
 
     def _validate_request(self, body: dict) -> tuple:
-        """Validate and extract session_id, path, and mode from request."""
+        """Validate and extract session_id, path, mode, and prompt from request."""
         session_id = body.get("session")
         path = body.get("path")
 
         if not session_id or not path:
             self.set_status(400)
             self.write({"error": "Missing 'session' or 'path'"})
-            return None, None, None
+            return None, None, None, None
 
         mode = body.get("mode", "viewer")
-        return session_id, path, mode
+        prompt = body.get("prompt", "")
+        return session_id, path, mode, prompt
 
     def _load_lazy_polars(self, session, path: str, ldf, metadata: dict):
         """Set up lazy polars session state."""
@@ -160,6 +161,7 @@ class LoadHandler(tornado.web.RequestHandler):
         state_msg = {
             "type": "initial_state",
             "metadata": metadata,
+            "prompt": session.prompt,
             "df_display_args": session.df_display_args,
             "df_data_dict": session.df_data_dict,
             "df_meta": session.df_meta,
@@ -216,13 +218,14 @@ class LoadHandler(tornado.web.RequestHandler):
         if body is None:
             return
 
-        session_id, path, mode = self._validate_request(body)
+        session_id, path, mode, prompt = self._validate_request(body)
         if session_id is None:
             return
 
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
+        session.prompt = prompt
 
         # Load data in appropriate mode
         file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
@@ -281,7 +284,22 @@ SESSION_HTML = """\
     <link rel="stylesheet" href="/static/compiled.css">
     <link rel="stylesheet" href="/static/standalone.css">
     <style>
-        html, body, #root { margin: 0; padding: 0; width: 100%; height: 100vh; background: #181D1F; }
+        html, body { margin: 0; padding: 0; width: 100%; height: 100vh; background: #181d1f; }
+        @media (prefers-color-scheme: light) { html, body { background: #fff; } }
+        /* MCP standalone: fill the viewport */
+        body { display: flex; flex-direction: column; }
+        #filename-bar { padding: 4px 10px; font-family: sans-serif; font-size: 13px; color: #ccc; background: #222; border-bottom: 1px solid #333; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #filename-bar:empty { display: none; }
+        #prompt-bar { padding: 4px 10px; font-family: sans-serif; font-size: 12px; color: #999; background: #222; border-bottom: 1px solid #333; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #prompt-bar:empty { display: none; }
+        #root { flex: 1; display: flex; flex-direction: column; min-height: 0; margin-bottom: 20px; }
+        .buckaroo_anywidget { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+        .dcf-root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+        .orig-df { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+        .df-viewer { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+        /* Override inline height from heightStyle() — flex: 1 lets the grid fill
+           the available space instead of using a fixed pixel height. */
+        .df-viewer .theme-hanger { flex: 1 !important; overflow: hidden; }
         /* Flex utility classes used by components */
         .flex { display: flex; }
         .flex-col { flex-direction: column; }
@@ -290,10 +308,12 @@ SESSION_HTML = """\
         /* Match Jupyter's .cell-output-ipywidget-background gap removal */
         .status-bar { margin-bottom: 0; }
         .df-viewer { margin-top: 0; }
-        .df-viewer .theme-hanger { margin-top: -12px; }
+        .df-viewer .theme-hanger { margin-top: 0; }
     </style>
 </head>
 <body>
+    <div id="filename-bar"></div>
+    <div id="prompt-bar"></div>
     <div id="root"></div>
     <script type="module" src="/static/standalone.js"></script>
 </body>
