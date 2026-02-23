@@ -169,6 +169,63 @@ jobs:
             }
 
   # ---------------------------------------------------------------------------
+  # Smoke tests — install the wheel with each optional extra in an isolated venv
+  # ---------------------------------------------------------------------------
+
+  SmokeTestExtras:
+    name: Smoke / Optional Extras
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Smoke test — base install
+        run: |
+          uv venv /tmp/smoke-base
+          uv pip install --python /tmp/smoke-base dist/*.whl
+          /tmp/smoke-base/bin/python scripts/smoke_test.py base
+      - name: Smoke test — polars
+        run: |
+          uv venv /tmp/smoke-polars
+          WHEEL=$(ls dist/*.whl)
+          uv pip install --python /tmp/smoke-polars "${WHEEL}[polars]"
+          /tmp/smoke-polars/bin/python scripts/smoke_test.py polars
+      - name: Smoke test — mcp
+        run: |
+          uv venv /tmp/smoke-mcp
+          WHEEL=$(ls dist/*.whl)
+          uv pip install --python /tmp/smoke-mcp "${WHEEL}[mcp]"
+          /tmp/smoke-mcp/bin/python scripts/smoke_test.py mcp
+      - name: Smoke test — marimo
+        run: |
+          uv venv /tmp/smoke-marimo
+          WHEEL=$(ls dist/*.whl)
+          uv pip install --python /tmp/smoke-marimo "${WHEEL}[marimo]"
+          /tmp/smoke-marimo/bin/python scripts/smoke_test.py marimo
+      - name: Smoke test — jupyterlab
+        run: |
+          uv venv /tmp/smoke-jupyterlab
+          WHEEL=$(ls dist/*.whl)
+          uv pip install --python /tmp/smoke-jupyterlab "${WHEEL}[jupyterlab]"
+          /tmp/smoke-jupyterlab/bin/python scripts/smoke_test.py jupyterlab
+      - name: Smoke test — notebook
+        run: |
+          uv venv /tmp/smoke-notebook
+          WHEEL=$(ls dist/*.whl)
+          uv pip install --python /tmp/smoke-notebook "${WHEEL}[notebook]"
+          /tmp/smoke-notebook/bin/python scripts/smoke_test.py notebook
+
+  # ---------------------------------------------------------------------------
   # Source-level tests — operate on the codebase, no wheel needed
   # ---------------------------------------------------------------------------
 
