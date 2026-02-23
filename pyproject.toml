@@ -129,6 +129,11 @@ path = "scripts/hatch_build.py"
 [tool.hatch.envs.default]
 installer = "uv"
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (hit the network, e.g. uvx integration tests)",
+]
+
 [tool.basedpyright]
 # include = ["src"]
 

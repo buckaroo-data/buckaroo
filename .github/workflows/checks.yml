@@ -148,7 +148,7 @@ jobs:
               '### MCP server for Claude Code',
               '',
               '```bash',
-              `claude mcp add buckaroo-table -- uvx ${idx} "buckaroo[mcp]==${version}" buckaroo-table`,
+              `claude mcp add buckaroo-table -- uvx --from "buckaroo[mcp]==${version}" ${idx} buckaroo-table`,
               '```',
             ].join('\n');
 
