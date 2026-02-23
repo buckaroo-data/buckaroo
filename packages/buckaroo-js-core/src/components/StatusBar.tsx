@@ -1,6 +1,6 @@
 // https://plnkr.co/edit/QTNwBb2VEn81lf4t?open=index.tsx
 import React, { useRef, useCallback, useState, memo, useEffect, useMemo } from "react";
-import * as _ from "lodash-es";
+import { clone, fromPairs, includes, indexOf, keys, map } from "lodash-es";
 import { AgGridReact } from "@ag-grid-community/react"; // the AG Grid React Component
 import { ColDef, GridApi, GridOptions, ModuleRegistry } from "@ag-grid-community/core";
 import { basicIntFormatter } from "./DFViewerParts/Displayer";
@@ -32,7 +32,7 @@ const dfDisplayCell = function (params: any) {
     const options = params.context.buckarooOptions.df_display;
     
     const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-        const newState = _.clone(params.context.buckarooState);
+        const newState = clone(params.context.buckarooState);
         newState.df_display = event.target.value;
         params.context.setBuckarooState(newState);
     };
@@ -57,7 +57,7 @@ const cleaningMethodCell = function (params: any) {
     const options = params.context.buckarooOptions.cleaning_method;
     
     const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-        const newState = _.clone(params.context.buckarooState);
+        const newState = clone(params.context.buckarooState);
         newState.cleaning_method = event.target.value;
         params.context.setBuckarooState(newState);
     };
@@ -82,7 +82,7 @@ const postProcessingCell = function (params: any) {
     const options = params.context.buckarooOptions.post_processing;
     
     const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-        const newState = _.clone(params.context.buckarooState);
+        const newState = clone(params.context.buckarooState);
         newState.post_processing = event.target.value;
         params.context.setBuckarooState(newState);
     };
@@ -106,7 +106,7 @@ const showCommandsCell = function (params: any) {
     const value = params.value === "1";
     
     const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const newState = _.clone(params.context.buckarooState);
+        const newState = clone(params.context.buckarooState);
         newState.show_commands = event.target.checked ? "1" : "0";
         params.context.setBuckarooState(newState);
     };
@@ -214,10 +214,10 @@ export function StatusBar({
 	console.log("heightOverride", heightOverride);
     }
     const optionCycles = buckarooOptions;
-    const idxs = _.fromPairs(
-        _.map(_.keys(optionCycles), (k) => [
+    const idxs = fromPairs(
+        map(keys(optionCycles), (k) => [
             k,
-            _.indexOf(optionCycles[k as BKeys], buckarooState[k as BKeys]),
+            indexOf(optionCycles[k as BKeys], buckarooState[k as BKeys]),
         ]),
     );
 
@@ -233,7 +233,7 @@ export function StatusBar({
         const curIdx = idxs[k];
         const nextIdx = nextIndex(curIdx, arr);
         const newVal = arr[nextIdx];
-        const newState = _.clone(buckarooState);
+        const newState = clone(buckarooState);
         newState[k] = newVal;
         return newState;
     };
@@ -242,10 +242,10 @@ export function StatusBar({
     const updateDict = (event: any) => {
         console.log("event.column", event.column, event.column.getColId());
         const colName = event.column.getColId();
-        if (_.includes(excludeKeys, colName)) {
+        if (includes(excludeKeys, colName)) {
             return;
         }
-        if (_.includes(_.keys(buckarooState), colName)) {
+        if (includes(keys(buckarooState), colName)) {
             const nbstate = newBuckarooState(colName as BKeys);
             setBuckarooState(nbstate);
         }

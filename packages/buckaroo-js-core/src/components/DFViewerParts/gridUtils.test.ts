@@ -11,7 +11,7 @@ import {
     multiIndexColToColDef,
 
 } from './gridUtils';
-import * as _ from "lodash-es";
+import { omit } from "lodash-es";
 import { DFData, DFViewerConfig, NormalColumnConfig, MultiIndexColumnConfig, PinnedRowConfig, ColumnConfig } from "./DFWhole";
 import { getFloatFormatter } from './Displayer';
 import { ColDef, ValueFormatterParams } from '@ag-grid-community/core';
@@ -309,14 +309,14 @@ describe("testing multi index organiztion  ", () => {
 
 
   it("childColDef should return proper subset", () => {
-    expect(_.omit(childColDef(SUPER__SUB_A, 1), "valueFormatter")).toStrictEqual({
+    expect(omit(childColDef(SUPER__SUB_A, 1), "valueFormatter")).toStrictEqual({
       "cellDataType": false,
       "cellStyle": undefined,
       "field": "a",
       "headerName": "sub_a",
     });
 
-    expect(_.omit(childColDef(SUPER__SUB_A2, 1), "valueFormatter")).toStrictEqual({
+    expect(omit(childColDef(SUPER__SUB_A2, 1), "valueFormatter")).toStrictEqual({
       "cellDataType": false,
       "cellStyle": undefined,
       "field": "a",

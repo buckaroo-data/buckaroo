@@ -8,7 +8,7 @@ import {
     StringDisplayerA,
     ObjDisplayerA,
 } from "./DFWhole";
-import * as _ from "lodash-es";
+import { includes, isArray, isBoolean, isDate, isObject, map } from "lodash-es";
 
 import { HistogramCell } from "./HistogramCell";
 import { Base64PNGDisplayer, LinkCellRenderer, SVGDisplayer } from "./OtherRenderers";
@@ -43,12 +43,12 @@ export const getStringFormatter = (args: StringDisplayerA) => {
 };
 
 const dictDisplayer = (val: Record<string, any>): string => {
-    const objBody = _.map(val, (value, key) => `'${key}': ${objDisplayer(value)}`).join(",");
+    const objBody = map(val, (value, key) => `'${key}': ${objDisplayer(value)}`).join(",");
     return `{ ${objBody} }`;
 };
 
 export const isValidDate = (possibleDate: any): boolean => {
-    if (_.isDate(possibleDate) && isFinite(possibleDate.getTime())) {
+    if (isDate(possibleDate) && isFinite(possibleDate.getTime())) {
         return true;
     }
     return false;
@@ -72,11 +72,11 @@ export const dateDisplayerDefault = (d: Date): string => {
 const objDisplayer = (val: any | any[]): string => {
     if (val === undefined || val === null) {
         return "None";
-    } else if (_.isArray(val)) {
+    } else if (isArray(val)) {
         return `[ ${val.map(objDisplayer).join(", ")}]`;
-    } else if (_.isBoolean(val)) {
+    } else if (isBoolean(val)) {
         return boolDisplayer(val);
-    } else if (_.isObject(val)) {
+    } else if (isObject(val)) {
         return dictDisplayer(val);
     } else {
         return val.toString();
@@ -138,7 +138,7 @@ export const getFloatFormatter = (hint: FloatDisplayerA) => {
         }
 
         const res: string = floatFormatter.format(params.value);
-        if (!_.includes(res, ".")) {
+        if (!includes(res, ".")) {
             const padLength = res.length + hint.max_fraction_digits + 1;
             return res.padEnd(padLength);
         } else {
@@ -220,7 +220,7 @@ export function getCellRenderer(crArgs: CellRendererArgs) {
 }
 
 export function getFormatterFromArgs(dispArgs: DisplayerArgs) {
-    if (_.includes(cellRendererDisplayers, dispArgs.displayer)) {
+    if (includes(cellRendererDisplayers, dispArgs.displayer)) {
         return undefined;
     }
     const fArgs = dispArgs as FormatterArgs;
