@@ -25,6 +25,9 @@ export interface IntegerDisplayerA {
     min_digits: number;
     max_digits: number;
 }
+export interface InheritDisplayerA {
+    displayer: "inherit";
+}
 export interface DatetimeLocaleDisplayerA {
     displayer: "datetimeLocaleString";
     locale: "en-US" | "en-GB" | "en-CA" | "fr-FR" | "es-ES" | "de-DE" | "ja-JP";
@@ -55,7 +58,7 @@ export interface SVGDisplayerA {
     displayer: "SVGDisplayer";
 }
 export type CellRendererArgs = HistogramDisplayerA | ChartDisplayerA | LinkifyDisplayerA | BooleanCheckboxDisplayerA | Base64PNGImageDisplayerA | SVGDisplayerA;
-export type DisplayerArgs = FormatterArgs | CellRendererArgs;
+export type DisplayerArgs = FormatterArgs | CellRendererArgs | InheritDisplayerA;
 export declare const cellRendererDisplayers: string[];
 export type ColorMap = "BLUE_TO_YELLOW" | "DIVERGING_RED_WHITE_BLUE" | string[];
 export interface ColorMapRules {
@@ -106,9 +109,7 @@ export type PinnedRowConfig = {
     displayer_args: DisplayerArgs;
     default_renderer_columns?: string[];
 };
-export type HeightMode = "fraction" | "fixed" | "fill";
 export type ComponentConfig = {
-    heightMode?: HeightMode;
     height_fraction?: number;
     dfvHeight?: number;
     layoutType?: "autoHeight" | "normal";
