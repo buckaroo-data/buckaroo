@@ -1,0 +1,110 @@
+name: Dependency Compatibility Check
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"  # Weekly, Monday 07:00 UTC
+  workflow_dispatch:
+  # TEMPORARY: trigger on push to test branch — remove before merging to main
+  push:
+    branches: ["ci/dependency-check"]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  TestLatestDeps:
+    name: Test Latest Deps / Python ${{ matrix.python-version }}
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+          prune-cache: false
+      - name: Setup js files
+        run: |
+          mkdir buckaroo/static || true
+          touch buckaroo/static/compiled.css
+          touch buckaroo/static/widget.js
+          touch buckaroo/static/widget.css
+      - name: Install with maximum versions
+        run: |
+          rm -f uv.lock
+          cat >> pyproject.toml << 'PYEOF'
+
+          [tool.uv]
+          override-dependencies = ["pandas"]
+          PYEOF
+          uv sync --resolution=highest --all-extras --dev --no-group datacompy
+      - name: Log resolved versions
+        run: |
+          {
+            echo "### Key dependency versions"
+            echo '```'
+            uv pip list | grep -iE 'pandas|pyarrow|numpy|anywidget'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Run tests
+        run: .venv/bin/python -m pytest ./tests/unit --color=yes
+
+  notify-on-failure:
+    name: Create Issue on Failure
+    needs: [TestLatestDeps]
+    if: failure()
+    runs-on: depot-ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `CI: Latest dependency test failed (${new Date().toISOString().slice(0, 10)})`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              '## Scheduled dependency compatibility check failed',
+              '',
+              `The \`TestLatestDeps\` job failed when testing against the latest versions of all dependencies.`,
+              '',
+              `**Workflow run:** ${runUrl}`,
+              '',
+              'This likely means a new release of a dependency introduced a breaking change.',
+              '',
+              '### Next steps',
+              '1. Check the workflow run logs to identify which dependency version caused the failure',
+              '2. Determine if this is a bug in buckaroo or the upstream dependency',
+              '3. If buckaroo needs a fix, create a branch and fix it',
+              '4. If upstream, consider pinning an upper bound temporarily in `pyproject.toml`',
+            ].join('\n');
+
+            // Avoid duplicate issues — comment on existing one instead
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'dependency-check',
+              per_page: 10,
+            });
+            const existing = issues.find(i => i.title.startsWith('CI: Latest dependency test failed'));
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Still failing as of ${new Date().toISOString().slice(0, 10)}.\n\n**Run:** ${runUrl}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['dependency-check'],
+              });
+            }
