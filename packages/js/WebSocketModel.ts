@@ -43,6 +43,10 @@ export class WebSocketModel {
                         this.state[k] = v;
                         this.emit(`change:${k}`, v);
                     }
+                    // Also emit "metadata" so components update filename/title/prompt
+                    if (msg.metadata) {
+                        this.emit("metadata", msg.metadata, msg.prompt);
+                    }
                 }
             } else {
                 // Binary frame — pair with pending JSON message

@@ -26,6 +26,7 @@ class SessionState:
     command_config: dict = field(default_factory=dict)
     operation_results: dict = field(default_factory=dict)
     operations: list = field(default_factory=list)
+    prompt: str = ""
 
 
 class SessionManager:
@@ -49,8 +50,9 @@ class SessionManager:
 
     def add_ws_client(self, session_id: str, client):
         session = self.get(session_id)
-        if session:
-            session.ws_clients.add(client)
+        if not session:
+            session = self.create(session_id, "")
+        session.ws_clients.add(client)
 
     def remove_ws_client(self, session_id: str, client):
         session = self.get(session_id)

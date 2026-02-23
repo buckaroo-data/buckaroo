@@ -263,7 +263,8 @@ def _view_impl(path: str) -> str:
         log.error("ensure_server failed:\n%s", traceback.format_exc())
         raise
 
-    payload = json.dumps({"session": SESSION_ID, "path": path, "mode": "buckaroo"}).encode()
+    prompt = f"Viewing {os.path.basename(path)}"
+    payload = json.dumps({"session": SESSION_ID, "path": path, "mode": "buckaroo", "prompt": prompt}).encode()
     log.debug("POST %s/load payload=%s", SERVER_URL, payload.decode())
 
     try:
