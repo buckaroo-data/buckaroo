@@ -299,7 +299,7 @@ jobs:
         with:
           name: buckaroo-build
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
@@ -345,7 +345,7 @@ jobs:
         with:
           name: buckaroo-build
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
@@ -384,7 +384,7 @@ jobs:
       - name: Install the project
         run: uv sync --all-extras --dev
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
@@ -423,7 +423,7 @@ jobs:
       - name: Install the project
         run: uv sync --all-extras --dev
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
@@ -499,7 +499,7 @@ jobs:
           uv pip install --force-reinstall dist/*.whl
           uv pip install polars jupyterlab
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
