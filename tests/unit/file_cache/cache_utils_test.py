@@ -29,7 +29,10 @@ def test_ensure_executor_sqlite():
         cache_utils_module._executor_log = None
         
         original_home = os.environ.get('HOME')
+        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
+        if os.name == 'nt':
+            os.environ['USERPROFILE'] = tmpdir
         
         try:
             file_cache, executor_log = ensure_executor_sqlite()
@@ -49,6 +52,8 @@ def test_ensure_executor_sqlite():
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
+            if os.name == 'nt' and original_userprofile:
+                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_get_global_file_cache():
@@ -61,7 +66,10 @@ def test_get_global_file_cache():
         cache_utils_module._executor_log = None
         
         original_home = os.environ.get('HOME')
+        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
+        if os.name == 'nt':
+            os.environ['USERPROFILE'] = tmpdir
         
         try:
             fc = get_global_file_cache()
@@ -76,6 +84,8 @@ def test_get_global_file_cache():
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
+            if os.name == 'nt' and original_userprofile:
+                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_get_global_executor_log():
@@ -88,7 +98,10 @@ def test_get_global_executor_log():
         cache_utils_module._executor_log = None
         
         original_home = os.environ.get('HOME')
+        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
+        if os.name == 'nt':
+            os.environ['USERPROFILE'] = tmpdir
         
         try:
             log = get_global_executor_log()
@@ -103,6 +116,8 @@ def test_get_global_executor_log():
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
+            if os.name == 'nt' and original_userprofile:
+                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_get_cache_size(tmp_path):
@@ -115,7 +130,10 @@ def test_get_cache_size(tmp_path):
         cache_utils_module._executor_log = None
         
         original_home = os.environ.get('HOME')
+        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
+        if os.name == 'nt':
+            os.environ['USERPROFILE'] = tmpdir
         
         try:
             # Initialize caches
@@ -134,6 +152,8 @@ def test_get_cache_size(tmp_path):
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
+            if os.name == 'nt' and original_userprofile:
+                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_clear_file_cache(tmp_path):
@@ -146,7 +166,10 @@ def test_clear_file_cache(tmp_path):
         cache_utils_module._executor_log = None
         
         original_home = os.environ.get('HOME')
+        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
+        if os.name == 'nt':
+            os.environ['USERPROFILE'] = tmpdir
         
         try:
             fc = get_global_file_cache()
@@ -174,6 +197,8 @@ def test_clear_file_cache(tmp_path):
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
+            if os.name == 'nt' and original_userprofile:
+                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_clear_executor_log(tmp_path):
@@ -186,7 +211,10 @@ def test_clear_executor_log(tmp_path):
         cache_utils_module._executor_log = None
         
         original_home = os.environ.get('HOME')
+        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
+        if os.name == 'nt':
+            os.environ['USERPROFILE'] = tmpdir
         
         try:
             log = get_global_executor_log()
@@ -206,6 +234,8 @@ def test_clear_executor_log(tmp_path):
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
+            if os.name == 'nt' and original_userprofile:
+                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_clear_oldest_cache_entries(tmp_path):
@@ -218,7 +248,10 @@ def test_clear_oldest_cache_entries(tmp_path):
         cache_utils_module._executor_log = None
         
         original_home = os.environ.get('HOME')
+        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
+        if os.name == 'nt':
+            os.environ['USERPROFILE'] = tmpdir
         
         try:
             fc = get_global_file_cache()
@@ -263,6 +296,8 @@ def test_clear_oldest_cache_entries(tmp_path):
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
+            if os.name == 'nt' and original_userprofile:
+                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_format_cache_size():
