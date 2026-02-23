@@ -99,6 +99,12 @@ function ViewerApp({ model, src }: { model: WebSocketModel; src: any }) {
         model.on("change:df_data_dict", onDfDataDict);
         model.on("change:df_display_args", onDfDisplayArgs);
 
+        // Catch up on metadata that arrived before useEffect registered listeners
+        const existingMeta = model.get("metadata");
+        if (existingMeta) {
+            updateFilenameDisplay(existingMeta, model.get("prompt"));
+        }
+
         return () => {
             model.off("metadata", onMeta);
             model.off("change:df_meta", onDfMeta);
@@ -149,6 +155,12 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
             setOperations(model.get("operations") || []);
         };
         model.on("metadata", onMeta);
+
+        // Catch up on metadata that arrived before useEffect registered listeners
+        const existingMeta = model.get("metadata");
+        if (existingMeta) {
+            updateFilenameDisplay(existingMeta, model.get("prompt"));
+        }
 
         const onChange = (key: string, setter: (v: any) => void) => {
             const handler = (v: any) => setter(v);
@@ -240,7 +252,8 @@ async function main() {
         ws.onerror = (e) => reject(e);
     });
 
-    // Wait for initial_state message
+    // Wait for initial_state message (no timeout — server sends it on WS open,
+    // and React components show "Waiting for data..." until state arrives)
     const initialState = await new Promise<Record<string, any>>((resolve) => {
         const handler = (event: MessageEvent) => {
             if (typeof event.data === "string") {
@@ -252,12 +265,6 @@ async function main() {
             }
         };
         ws.addEventListener("message", handler);
-
-        // If no data is loaded yet, render with empty state after a short timeout
-        setTimeout(() => {
-            ws.removeEventListener("message", handler);
-            resolve({});
-        }, 500);
     });
 
     // Pre-resolve parquet_b64 values in df_data_dict before creating the model.

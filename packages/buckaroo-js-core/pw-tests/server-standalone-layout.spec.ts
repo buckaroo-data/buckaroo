@@ -17,6 +17,7 @@ test.beforeAll(() => {
 
 // ---------- test data --------------------------------------------------------
 
+let _csvCounter = 0;
 function writeTempCsv(rowCount: number): string {
   const header = 'name,age,score';
   const rows = [];
@@ -24,7 +25,7 @@ function writeTempCsv(rowCount: number): string {
     rows.push(`row${i},${20 + (i % 50)},${(i * 1.7).toFixed(1)}`);
   }
   const content = [header, ...rows].join('\n') + '\n';
-  const tmpPath = path.join(os.tmpdir(), `buckaroo_layout_test_${Date.now()}.csv`);
+  const tmpPath = path.join(os.tmpdir(), `buckaroo_layout_test_${Date.now()}_${_csvCounter++}.csv`);
   fs.writeFileSync(tmpPath, content);
   return tmpPath;
 }
@@ -194,5 +195,98 @@ test.describe('Standalone layout: filename, prompt, fill, bottom gap', () => {
       expect(m.bottomGapFromGrid).toBeGreaterThanOrEqual(15);
       expect(m.bottomGapFromGrid).toBeLessThanOrEqual(35);
     }
+  });
+});
+
+// ---------- MCP-flow race condition tests ------------------------------------
+// These reproduce the real MCP tool flow where data may arrive after the page
+// is already open, exercising the WebSocketModel → React event path.
+
+test.describe('MCP flow: late-arriving data and reload', () => {
+  let csvPathA: string;
+  let csvPathB: string;
+
+  test.beforeAll(() => {
+    // Small files matching the real MCP failure case (5 rows)
+    csvPathA = writeTempCsv(5);
+    csvPathB = writeTempCsv(8);
+  });
+
+  test.afterAll(() => {
+    cleanupFile(csvPathA);
+    cleanupFile(csvPathB);
+  });
+
+  test('page open BEFORE data loads — bars appear when data arrives', async ({ page, request }) => {
+    const session = `mcp-late-${Date.now()}`;
+    const PROMPT = `Viewing ${path.basename(csvPathA)}`;
+
+    // 1. Navigate FIRST — no data loaded yet.  The page connects WS and
+    //    renders "Waiting for data...".
+    await page.goto(`${BASE}/s/${session}`);
+    await page.waitForTimeout(500); // let WS connect + old timeout expire
+
+    // 2. NOW load data — server pushes initial_state to connected client
+    await loadBuckaroo(request, session, csvPathA, PROMPT);
+
+    // 3. Wait for grid to appear (proves data arrived via WS push)
+    await waitForBuckarooGrid(page);
+
+    await page.screenshot({
+      path: path.join(screenshotsDir, 'mcp-late-data.png'),
+    });
+
+    // 4. Assert filename bar
+    const filenameBar = page.locator('#filename-bar');
+    await expect(filenameBar).toBeVisible();
+    const filenameText = await filenameBar.textContent();
+    expect(filenameText).toContain('buckaroo_layout_test_');
+    expect(filenameText).toContain('.csv');
+
+    // 5. Assert prompt bar
+    const promptBar = page.locator('#prompt-bar');
+    await expect(promptBar).toBeVisible();
+    const promptText = await promptBar.textContent();
+    expect(promptText).toBe(PROMPT);
+
+    // 6. Document title updated
+    const title = await page.title();
+    expect(title).toContain('buckaroo_layout_test_');
+  });
+
+  test('reload: second POST /load updates bars to new file', async ({ page, request }) => {
+    const session = `mcp-reload-${Date.now()}`;
+    const PROMPT_A = `Viewing ${path.basename(csvPathA)}`;
+    const PROMPT_B = `Viewing ${path.basename(csvPathB)}`;
+
+    // 1. Load file A, navigate, wait for grid
+    await loadBuckaroo(request, session, csvPathA, PROMPT_A);
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForBuckarooGrid(page);
+
+    // Verify file A is shown
+    const filenameBar = page.locator('#filename-bar');
+    await expect(filenameBar).toBeVisible();
+    const textA = await filenameBar.textContent();
+    expect(textA).toContain('.csv');
+
+    // 2. Load file B into the SAME session — server pushes to existing WS
+    await loadBuckaroo(request, session, csvPathB, PROMPT_B);
+
+    // 3. Wait for the new data to arrive and bars to update
+    await expect(page.locator('#prompt-bar')).toHaveText(PROMPT_B, { timeout: 10_000 });
+
+    await page.screenshot({
+      path: path.join(screenshotsDir, 'mcp-reload.png'),
+    });
+
+    // 4. Filename bar should show file B
+    const textB = await filenameBar.textContent();
+    expect(textB).not.toBe(textA);
+    expect(textB).toContain('.csv');
+
+    // 5. Title should update
+    const title = await page.title();
+    expect(title).toContain('buckaroo_layout_test_');
   });
 });
