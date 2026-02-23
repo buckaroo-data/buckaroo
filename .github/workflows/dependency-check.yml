@@ -59,7 +59,7 @@ jobs:
     permissions:
       issues: write
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v8
         with:
           script: |
             const title = `CI: Latest dependency test failed (${new Date().toISOString().slice(0, 10)})`;
