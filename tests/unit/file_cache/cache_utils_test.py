@@ -3,9 +3,17 @@ Tests for cache management utilities.
 """
 # state:READONLY
 
+import sys
 from pathlib import Path
 import tempfile
 import polars as pl
+import pytest
+
+# TemporaryDirectory cleanup fails on Windows because SQLite keeps files open
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="SQLite file locking prevents tmpdir cleanup on Windows",
+)
 
 from buckaroo.file_cache.cache_utils import (
     ensure_executor_sqlite,
