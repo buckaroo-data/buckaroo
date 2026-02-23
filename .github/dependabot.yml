@@ -1,0 +1,24 @@
+version: 2
+
+updates:
+  # Python (uv) dependencies — the main goal
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      # Group minor/patch bumps into one PR to reduce noise
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "python"]
+
+  # Keep GitHub Actions versions current too (free to add)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "ci"]
