@@ -309,10 +309,13 @@ SESSION_HTML = """\
         .flex-col { flex-direction: column; }
         /* orig-df uses "flex flex-row" but layout must be column (status bar on top, table below) */
         .orig-df.flex-row { flex-direction: column; }
-        /* Match Jupyter's .cell-output-ipywidget-background gap removal */
+        /* Eliminate gap between status bar and main grid */
         .status-bar { margin-bottom: 0; }
+        .status-bar .theme-hanger { margin-bottom: 0; }
+        .status-bar .ag-root-wrapper { border-bottom: none !important; margin-bottom: 0; }
         .df-viewer { margin-top: 0; }
         .df-viewer .theme-hanger { margin-top: 0; }
+        .df-viewer .ag-root-wrapper { margin-top: 0; }
     </style>
 </head>
 <body>

@@ -161,7 +161,7 @@ export function DFViewerInfinite({
     const divClass = df_viewer_config?.component_config?.className || defaultThemeClass;
     return (
         <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
-            <pre>{error_info ? error_info : ""}</pre>
+            {error_info ? <pre>{error_info}</pre> : null}
             <div style={hs.applicableStyle}
                 className={`theme-hanger ${divClass}`}>
                 <DFViewerInfiniteInner
