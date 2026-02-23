@@ -198,6 +198,33 @@ test.describe('Standalone layout: filename, prompt, fill, bottom gap', () => {
   });
 });
 
+// ---------- browser_action response field ------------------------------------
+
+test.describe('POST /load response fields', () => {
+  let csvPath: string;
+  const session = `resp-fields-${Date.now()}`;
+
+  test.beforeAll(() => {
+    csvPath = writeTempCsv(5);
+  });
+
+  test.afterAll(() => {
+    cleanupFile(csvPath);
+  });
+
+  test('POST /load returns browser_action field', async ({ request }) => {
+    const resp = await request.post(`${BASE}/load`, {
+      data: { session, path: csvPath, mode: 'viewer', prompt: 'test' },
+    });
+    expect(resp.ok()).toBe(true);
+    const body = await resp.json();
+    expect(body.browser_action).toBeDefined();
+    // Test server uses --no-browser, so browser_action is "disabled".
+    // In production (without --no-browser), this would be "opened" or "reloaded".
+    expect(body.browser_action).toBe('disabled');
+  });
+});
+
 // ---------- MCP-flow race condition tests ------------------------------------
 // These reproduce the real MCP tool flow where data may arrive after the page
 // is already open, exercising the WebSocketModel → React event path.

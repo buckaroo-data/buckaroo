@@ -155,6 +155,7 @@ class LoadHandler(tornado.web.RequestHandler):
 
     def _push_state_to_clients(self, session, metadata: dict):
         """Push updated state to all connected WebSocket clients."""
+        log.info("push_state path=%s ws_clients=%d", metadata.get("filename", "?"), len(session.ws_clients))
         if not session.ws_clients:
             return
 
