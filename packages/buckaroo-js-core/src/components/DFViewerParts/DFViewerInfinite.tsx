@@ -20,6 +20,11 @@ import {
     RefreshCellsParams,
     ClientSideRowModelModule,
     InfiniteRowModelModule,
+    CellStyleModule,
+    ColumnAutoSizeModule,
+    PinnedRowModule,
+    RowSelectionModule,
+    TooltipModule,
 } from "ag-grid-community";
 
 import {
@@ -31,8 +36,15 @@ import {
 import { getThemeForScheme } from './gridUtils';
 import { useColorScheme } from '../useColorScheme';
 
-ModuleRegistry.registerModules([ClientSideRowModelModule]);
-ModuleRegistry.registerModules([InfiniteRowModelModule]);
+ModuleRegistry.registerModules([
+    ClientSideRowModelModule,
+    InfiniteRowModelModule,
+    CellStyleModule,
+    ColumnAutoSizeModule,
+    PinnedRowModule,
+    RowSelectionModule,
+    TooltipModule,
+]);
 
 
 const AccentColor = "#2196F3"
