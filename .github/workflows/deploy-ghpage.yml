@@ -20,7 +20,7 @@ jobs:
         with:
           run_install: true
           package_json_file: packages/package.json
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - name: Run tests
         working-directory: ./packages/buckaroo-js-core
         run: |
