@@ -35,14 +35,10 @@ def test_ensure_executor_sqlite():
         import buckaroo.file_cache.cache_utils as cache_utils_module
         cache_utils_module._file_cache = None
         cache_utils_module._executor_log = None
-        
+
         original_home = os.environ.get('HOME')
-        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
-        if os.name == 'nt':
-            os.environ['USERPROFILE'] = tmpdir
-        
-        file_cache = executor_log = None
+
         try:
             file_cache, executor_log = ensure_executor_sqlite()
 
@@ -56,23 +52,11 @@ def test_ensure_executor_sqlite():
             assert file_cache is not None
             assert executor_log is not None
         finally:
-            # Close local instances returned by ensure_executor_sqlite
-            if file_cache is not None:
-                file_cache._conn.close()
-            if executor_log is not None:
-                executor_log._conn.close()
-            # Close SQLite connections before tmpdir cleanup (Windows can't
-            # delete open files)
-            if cache_utils_module._file_cache is not None:
-                cache_utils_module._file_cache._conn.close()
-            if cache_utils_module._executor_log is not None:
-                cache_utils_module._executor_log._conn.close()
+            # Reset global instances
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
-            if os.name == 'nt' and original_userprofile:
-                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_get_global_file_cache():
@@ -83,33 +67,23 @@ def test_get_global_file_cache():
         import buckaroo.file_cache.cache_utils as cache_utils_module
         cache_utils_module._file_cache = None
         cache_utils_module._executor_log = None
-        
+
         original_home = os.environ.get('HOME')
-        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
-        if os.name == 'nt':
-            os.environ['USERPROFILE'] = tmpdir
-        
+
         try:
             fc = get_global_file_cache()
             assert fc is not None
-            
+
             # Second call should return same instance (or at least work)
             fc2 = get_global_file_cache()
             assert fc2 is not None
         finally:
-            # Close SQLite connections before tmpdir cleanup (Windows can't
-            # delete open files)
-            if cache_utils_module._file_cache is not None:
-                cache_utils_module._file_cache._conn.close()
-            if cache_utils_module._executor_log is not None:
-                cache_utils_module._executor_log._conn.close()
+            # Reset global instances
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
-            if os.name == 'nt' and original_userprofile:
-                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_get_global_executor_log():
@@ -120,33 +94,23 @@ def test_get_global_executor_log():
         import buckaroo.file_cache.cache_utils as cache_utils_module
         cache_utils_module._file_cache = None
         cache_utils_module._executor_log = None
-        
+
         original_home = os.environ.get('HOME')
-        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
-        if os.name == 'nt':
-            os.environ['USERPROFILE'] = tmpdir
-        
+
         try:
             log = get_global_executor_log()
             assert log is not None
-            
+
             # Second call should return same instance (or at least work)
             log2 = get_global_executor_log()
             assert log2 is not None
         finally:
-            # Close SQLite connections before tmpdir cleanup (Windows can't
-            # delete open files)
-            if cache_utils_module._file_cache is not None:
-                cache_utils_module._file_cache._conn.close()
-            if cache_utils_module._executor_log is not None:
-                cache_utils_module._executor_log._conn.close()
+            # Reset global instances
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
-            if os.name == 'nt' and original_userprofile:
-                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_get_cache_size(tmp_path):
@@ -157,17 +121,14 @@ def test_get_cache_size(tmp_path):
         import buckaroo.file_cache.cache_utils as cache_utils_module
         cache_utils_module._file_cache = None
         cache_utils_module._executor_log = None
-        
+
         original_home = os.environ.get('HOME')
-        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
-        if os.name == 'nt':
-            os.environ['USERPROFILE'] = tmpdir
-        
+
         try:
             # Initialize caches
             ensure_executor_sqlite()
-            
+
             sizes = get_cache_size()
             assert 'file_cache' in sizes
             assert 'executor_log' in sizes
@@ -176,18 +137,11 @@ def test_get_cache_size(tmp_path):
             assert sizes['file_cache'] >= 0
             assert sizes['executor_log'] >= 0
         finally:
-            # Close SQLite connections before tmpdir cleanup (Windows can't
-            # delete open files)
-            if cache_utils_module._file_cache is not None:
-                cache_utils_module._file_cache._conn.close()
-            if cache_utils_module._executor_log is not None:
-                cache_utils_module._executor_log._conn.close()
+            # Reset global instances
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
-            if os.name == 'nt' and original_userprofile:
-                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_clear_file_cache(tmp_path):
@@ -198,46 +152,36 @@ def test_clear_file_cache(tmp_path):
         import buckaroo.file_cache.cache_utils as cache_utils_module
         cache_utils_module._file_cache = None
         cache_utils_module._executor_log = None
-        
+
         original_home = os.environ.get('HOME')
-        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
-        if os.name == 'nt':
-            os.environ['USERPROFILE'] = tmpdir
-        
+
         try:
             fc = get_global_file_cache()
             test_file = Path(tmpdir) / "test.csv"
             test_df = pl.DataFrame({'a': [1, 2, 3]})
             test_df.write_csv(test_file)
-            
+
             # Add file to cache
             fc.add_file(test_file, {'test': 'metadata'})
-            
+
             # Verify it's in cache
             md = fc.get_file_metadata(test_file)
             assert md is not None
             assert md['test'] == 'metadata'
-            
+
             # Clear cache
             clear_file_cache()
-            
+
             # Verify it's gone
             md = fc.get_file_metadata(test_file)
             assert md is None
         finally:
-            # Close SQLite connections before tmpdir cleanup (Windows can't
-            # delete open files)
-            if cache_utils_module._file_cache is not None:
-                cache_utils_module._file_cache._conn.close()
-            if cache_utils_module._executor_log is not None:
-                cache_utils_module._executor_log._conn.close()
+            # Reset global instances
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
-            if os.name == 'nt' and original_userprofile:
-                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_clear_executor_log(tmp_path):
@@ -248,38 +192,28 @@ def test_clear_executor_log(tmp_path):
         import buckaroo.file_cache.cache_utils as cache_utils_module
         cache_utils_module._file_cache = None
         cache_utils_module._executor_log = None
-        
+
         original_home = os.environ.get('HOME')
-        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
-        if os.name == 'nt':
-            os.environ['USERPROFILE'] = tmpdir
-        
+
         try:
             log = get_global_executor_log()
-            
+
             # Log should be empty initially
             events = log.get_log_events()
-            
+
             # Clear log (should not error even if empty)
             clear_executor_log()
-            
+
             # Log should still be empty
             events = log.get_log_events()
             assert len(events) == 0
         finally:
-            # Close SQLite connections before tmpdir cleanup (Windows can't
-            # delete open files)
-            if cache_utils_module._file_cache is not None:
-                cache_utils_module._file_cache._conn.close()
-            if cache_utils_module._executor_log is not None:
-                cache_utils_module._executor_log._conn.close()
+            # Reset global instances
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
-            if os.name == 'nt' and original_userprofile:
-                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_clear_oldest_cache_entries(tmp_path):
@@ -290,25 +224,22 @@ def test_clear_oldest_cache_entries(tmp_path):
         import buckaroo.file_cache.cache_utils as cache_utils_module
         cache_utils_module._file_cache = None
         cache_utils_module._executor_log = None
-        
+
         original_home = os.environ.get('HOME')
-        original_userprofile = os.environ.get('USERPROFILE')
         os.environ['HOME'] = tmpdir
-        if os.name == 'nt':
-            os.environ['USERPROFILE'] = tmpdir
-        
+
         try:
             fc = get_global_file_cache()
-            
+
             # Create test files
             file1 = Path(tmpdir) / "file1.csv"
             file2 = Path(tmpdir) / "file2.csv"
             pl.DataFrame({'a': [1]}).write_csv(file1)
             pl.DataFrame({'a': [2]}).write_csv(file2)
-            
+
             # Add files to cache with different times
             fc.add_file(file1, {'test': 'old'})
-            
+
             # Manually set old mtime for file1
             import time
             old_time = time.time() - (60 * 60 * 24 * 31)  # 31 days ago
@@ -317,36 +248,29 @@ def test_clear_oldest_cache_entries(tmp_path):
                 (old_time, str(file1))
             )
             fc._conn.commit()
-            
+
             # Add newer file
             fc.add_file(file2, {'test': 'new'})
-            
+
             # Clear entries older than 30 days
             deleted = clear_oldest_cache_entries(max_age_days=30)
-            
+
             # Should have deleted at least file1
             assert deleted >= 1
-            
+
             # file1 should be gone
             md = fc.get_file_metadata(file1)
             assert md is None
-            
+
             # file2 should still be there
             md = fc.get_file_metadata(file2)
             assert md is not None
         finally:
-            # Close SQLite connections before tmpdir cleanup (Windows can't
-            # delete open files)
-            if cache_utils_module._file_cache is not None:
-                cache_utils_module._file_cache._conn.close()
-            if cache_utils_module._executor_log is not None:
-                cache_utils_module._executor_log._conn.close()
+            # Reset global instances
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
                 os.environ['HOME'] = original_home
-            if os.name == 'nt' and original_userprofile:
-                os.environ['USERPROFILE'] = original_userprofile
 
 
 def test_format_cache_size():
