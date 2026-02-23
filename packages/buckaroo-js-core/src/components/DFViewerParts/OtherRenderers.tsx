@@ -1,4 +1,4 @@
-import { ValueFormatterFunc } from "@ag-grid-community/core";
+import { ValueFormatterFunc } from "ag-grid-community";
 
 export const getTextCellRenderer = (formatter: ValueFormatterFunc<any>) => {
     const TextCellRenderer = (props: any) => {
