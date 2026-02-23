@@ -271,6 +271,31 @@ jobs:
       - name: Run tests
         run: .venv/bin/python -m pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
 
+  TestPythonWindows:
+    name: Python / Test (Windows)
+    runs-on: depot-windows-2025
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: setup js files
+        shell: bash
+        run: |
+          mkdir -p buckaroo/static
+          touch buckaroo/static/compiled.css
+          touch buckaroo/static/widget.js
+          touch buckaroo/static/widget.css
+      - name: Install the project
+        run: uv sync --all-extras --dev
+      - name: Run tests
+        run: uv run pytest ./tests/unit -m "not slow" --color=yes
+
   # ---------------------------------------------------------------------------
   # Integration tests — install the pre-built wheel, simulate end-user install
   # ---------------------------------------------------------------------------

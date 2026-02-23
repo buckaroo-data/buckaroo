@@ -1,4 +1,7 @@
+import sys
+
 import polars as pl
+import pytest
 import time
 
 from buckaroo.file_cache.base import FileCache, ProgressNotification
@@ -160,6 +163,7 @@ def test_multiprocessing_executor_timeout():
     )
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="multiprocessing spawn + SQLite file locking unreliable on Windows")
 def test_multiprocessing_executor_skips_cached_columns(tmp_path):
     """
     Test that MultiprocessingExecutor skips already-computed columns on re-execution.
