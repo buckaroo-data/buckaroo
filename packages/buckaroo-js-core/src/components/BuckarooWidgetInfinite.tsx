@@ -169,13 +169,14 @@ export function BuckarooInfiniteWidget({
         //evantually spliced back into the request args from scrolling/
         //the data source
         const outsideDFParams = [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display];
+        const isFillMode = cDisp.df_viewer_config?.component_config?.heightMode === "fill";
+        const fillClass = isFillMode ? "fill-mode" : "";
         return (
-            <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
+            <div className={`dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget ${fillClass}`}
              style={{ width: "100%", height: "100%" }}>
                 <div
-                    className="orig-df flex flex-row"
+                    className={`orig-df flex flex-row ${fillClass}`}
                     style={{
-                        // height: '450px',
                         overflow: "hidden",
                     }}
                 >
@@ -288,13 +289,14 @@ export function DFViewerInfiniteDS({
             });
         }, [messages, messagesEnabled, message_log]);
 
+        const isFillMode = cDisp.df_viewer_config?.component_config?.heightMode === "fill";
+        const fillClass = isFillMode ? "fill-mode" : "";
         return (
-            <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
+            <div className={`dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget ${fillClass}`}
              style={{ width: "100%", height: "100%" }}>
                 <div
-                    className="orig-df flex flex-row"
+                    className={`orig-df flex flex-row ${fillClass}`}
                     style={{
-                        // height: '450px',
                         overflow: "hidden",
                     }}
                 >

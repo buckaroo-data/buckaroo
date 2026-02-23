@@ -156,6 +156,7 @@ PinnedRowConfig = TypedDict('PinnedRowConfig', {
 })
 
 ComponentConfig = TypedDict('ComponentConfig', {
+    'heightMode': NotRequired[Literal["fraction", "fixed", "fill"]],
     'height_fraction': NotRequired[float],
     'dfvHeight': NotRequired[int],  # temporary debugging prop
     'layoutType': NotRequired[Literal["autoHeight", "normal"]],

@@ -162,6 +162,84 @@ describe("testing utility functions in gridUtils ", () => {
     });
   });
 
+  describe("getHeightStyle with heightMode", () => {
+    // --- "fraction" mode (Jupyter, Marimo) ---
+    it("heightMode 'fraction' with many rows → regular mode, pixel height", () => {
+      const result = getHeightStyle2(100, 0, { heightMode: "fraction", height_fraction: 2 });
+      expect(result.classMode).toBe("regular-mode");
+      expect(result.domLayout).toBe("normal");
+      // applicableStyle should have a numeric height (pixels)
+      expect(typeof result.applicableStyle.height).toBe("number");
+      expect((result.applicableStyle.height as number)).toBeGreaterThan(0);
+    });
+
+    it("heightMode 'fraction' with few rows → short mode", () => {
+      const result = getHeightStyle2(3, 0, { heightMode: "fraction", height_fraction: 2 });
+      expect(result.classMode).toBe("short-mode");
+      expect(result.domLayout).toBe("autoHeight");
+    });
+
+    // --- "fixed" mode (Colab, VSCode) ---
+    it("heightMode 'fixed' with dfvHeight → fixed pixel height", () => {
+      const result = getHeightStyle2(100, 0, { heightMode: "fixed", dfvHeight: 500 });
+      expect(result.classMode).toBe("regular-mode");
+      expect(result.domLayout).toBe("normal");
+      expect(result.applicableStyle.height).toBe(500);
+    });
+
+    it("heightMode 'fixed' defaults to 500px when dfvHeight not set", () => {
+      const result = getHeightStyle2(100, 0, { heightMode: "fixed" });
+      expect(result.domLayout).toBe("normal");
+      expect(result.applicableStyle.height).toBe(500);
+    });
+
+    it("heightMode 'fixed' with few rows still uses fixed height (no short mode override)", () => {
+      const result = getHeightStyle2(3, 0, { heightMode: "fixed", dfvHeight: 500 });
+      expect(result.classMode).toBe("regular-mode");
+      expect(result.domLayout).toBe("normal");
+      expect(result.applicableStyle.height).toBe(500);
+    });
+
+    // --- "fill" mode (MCP standalone) ---
+    it("heightMode 'fill' with many rows → flex style, normal domLayout", () => {
+      const result = getHeightStyle2(100, 0, { heightMode: "fill" });
+      expect(result.classMode).toBe("regular-mode");
+      expect(result.domLayout).toBe("normal");
+      // fill mode uses flex: 1 instead of a pixel height
+      expect(result.applicableStyle.flex).toBe(1);
+      expect(result.applicableStyle.minHeight).toBe(0);
+      expect(result.applicableStyle.overflow).toBe("hidden");
+      // should NOT have a pixel height
+      expect(result.applicableStyle.height).toBeUndefined();
+    });
+
+    it("heightMode 'fill' with few rows → short mode overrides fill", () => {
+      const result = getHeightStyle2(3, 0, { heightMode: "fill" });
+      expect(result.classMode).toBe("short-mode");
+      expect(result.domLayout).toBe("autoHeight");
+    });
+
+    // --- backward compat: no heightMode set ---
+    it("no heightMode with many rows → defaults to fraction behavior", () => {
+      const result = getHeightStyle2(100, 0, { height_fraction: 2 });
+      expect(result.classMode).toBe("regular-mode");
+      expect(result.domLayout).toBe("normal");
+      expect(typeof result.applicableStyle.height).toBe("number");
+    });
+
+    it("no heightMode with few rows → defaults to short mode", () => {
+      const result = getHeightStyle2(3, 0, {});
+      expect(result.classMode).toBe("short-mode");
+      expect(result.domLayout).toBe("autoHeight");
+    });
+
+    it("no heightMode, no component_config at all → defaults to fraction", () => {
+      const result = getHeightStyle2(100, 0);
+      expect(result.classMode).toBe("regular-mode");
+      expect(result.domLayout).toBe("normal");
+    });
+  });
+
   describe("getAutoSize", () => {
     it("should return fitProvidedWidth for 0 columns", () => {
 

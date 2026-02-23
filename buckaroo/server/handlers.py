@@ -281,12 +281,18 @@ SESSION_HTML = """\
     <link rel="stylesheet" href="/static/compiled.css">
     <link rel="stylesheet" href="/static/standalone.css">
     <style>
-        html, body, #root { margin: 0; padding: 0; width: 100%; height: 100vh; background: #181D1F; }
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #181D1F; }
+        #root { width: 100%; height: 100%; }
         /* Flex utility classes used by components */
         .flex { display: flex; }
         .flex-col { flex-direction: column; }
         /* orig-df uses "flex flex-row" but layout must be column (status bar on top, table below) */
         .orig-df.flex-row { flex-direction: column; }
+        /* Standalone fill-mode: unbroken flex chain from viewport to AG Grid */
+        .buckaroo_anywidget {
+            display: flex;
+            flex-direction: column;
+        }
         /* Match Jupyter's .cell-output-ipywidget-background gap removal */
         .status-bar { margin-bottom: 0; }
         .df-viewer { margin-top: 0; }

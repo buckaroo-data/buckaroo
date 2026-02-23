@@ -15,6 +15,32 @@ import "../buckaroo-js-core/dist/style.css";
  * 5. Renders BuckarooInfiniteWidget (buckaroo mode) or DFViewerInfiniteDS (viewer mode)
  */
 
+/**
+ * Inject heightMode: "fill" into every display config's component_config.
+ * The standalone server page should fill the viewport, not use the Jupyter
+ * "half screen" heuristic.
+ */
+function injectFillMode(dfDisplayArgs: Record<string, any>): Record<string, any> {
+    const patched: Record<string, any> = {};
+    for (const [key, val] of Object.entries(dfDisplayArgs)) {
+        if (val && val.df_viewer_config) {
+            patched[key] = {
+                ...val,
+                df_viewer_config: {
+                    ...val.df_viewer_config,
+                    component_config: {
+                        ...val.df_viewer_config.component_config,
+                        heightMode: "fill",
+                    },
+                },
+            };
+        } else {
+            patched[key] = val;
+        }
+    }
+    return patched;
+}
+
 function getSessionId(): string {
     const match = window.location.pathname.match(/\/s\/([^/]+)/);
     if (!match) {
@@ -69,7 +95,7 @@ function ViewerApp({ model, src }: { model: WebSocketModel; src: any }) {
             <srt.DFViewerInfiniteDS
                 df_meta={dfMeta}
                 df_data_dict={dfDataDict}
-                df_display_args={dfDisplayArgs}
+                df_display_args={injectFillMode(dfDisplayArgs)}
                 src={src}
                 df_id={"standalone"}
             />
@@ -154,7 +180,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
             <srt.BuckarooInfiniteWidget
                 df_meta={dfMeta}
                 df_data_dict={dfDataDict}
-                df_display_args={dfDisplayArgs}
+                df_display_args={injectFillMode(dfDisplayArgs)}
                 operations={operations}
                 on_operations={onOperations}
                 operation_results={operationResults}

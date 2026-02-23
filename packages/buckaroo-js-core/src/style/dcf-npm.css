@@ -495,6 +495,34 @@ div.dependent-tabs ul.tabs li.active {
 .df-viewer {
     width:100%;
 }
+
+/* fill-mode: unbroken flex column so AG Grid fills available space */
+.dcf-root.fill-mode {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.orig-df.fill-mode {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+.orig-df.fill-mode .status-bar {
+    flex-shrink: 0;
+}
+.df-viewer.fill-mode {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.df-viewer.fill-mode .theme-hanger {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
 .df-viewer.short-mode .ag-center-cols-viewport {
 /*  min-height: unset !important;  */
     min-height: 50px;

@@ -449,63 +449,75 @@ const inVSCcode = () => {
 
 }
 export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
-    /*
-      This function is intended to consolidate all of the calculations for the vertical styling of the viewer
-
-      
-      */
     const { numRows, pinnedRowLen, location, rowHeight, compC } = hArgs;
-    const isGoogleColab = location.host.indexOf("colab.googleusercontent.com") !== -1;
     const inIframe = window.parent !== window;
-    const regularCompHeight = window.innerHeight / (compC?.height_fraction || 2);
-    const dfvHeight = compC?.dfvHeight || regularCompHeight;
-    console.log("314, ", regularCompHeight, window.innerHeight, (compC?.height_fraction || 2), compC?.dfvHeight, regularCompHeight, dfvHeight);
-    //314,  175.5 351 2 200 175.5 200
-    //314,  175.5 351 2 undefined 175.5 175.5
-    const regularDivStyle = { height: dfvHeight, overflow:"hidden" };
-    const shortDivStyle = { minHeight: 50, maxHeight: dfvHeight, overflow:"hidden" };
-
-    // scrollSlop controls the tolerance for maxRowsWithoutScrolling
-    // to enable scrolling anyway. scroll slop includes room for other
-    // parts of the widget, notably the status bar
-    // This still allows for scrolling of a single row. I'd rather
-    // have the min scroll amount... if rows are hidden, at least 5
-    // should be hidden... That would require sizing the whole widget
-    // smaller in that case which is also messy and inconsistent. I
-    // wish there were persistent side scrollbars a UI affordance we
-    // have lost
-    const scrollSlop = 3;
-
-    // figured out default row height of 21.  Want to plumb back in to what is actually rendered.
-    const maxRowsWithoutScrolling = Math.floor((dfvHeight / (rowHeight || 21)) - scrollSlop);
-    
-
-
-    const belowMinRows = (numRows + pinnedRowLen) < maxRowsWithoutScrolling;
-    console.log("belowMinRows", belowMinRows, numRows, pinnedRowLen, maxRowsWithoutScrolling)
-    //belowMinRows true 5 2 9
-    //console.log("maxRowsWithoutScrolling", maxRowsWithoutScrolling, belowMinRows, numRows, dfvHeight, rowHeight);
-    const shortMode = compC?.shortMode || (belowMinRows && rowHeight === undefined);
-    console.log("shortMode", shortMode, compC?.shortMode, belowMinRows, rowHeight);
     const inIframeClass = inIframe ? "inIframe" : "";
-    //console.log("gridUtils 350 heightstyle", dfvHeight)
-    if (isGoogleColab || inVSCcode() ) {
+
+    // Resolve the effective heightMode.
+    // When explicitly set, trust it. Otherwise fall back to environment sniffing.
+    let effectiveMode = compC?.heightMode;
+    if (!effectiveMode) {
+        const isGoogleColab = location.host.indexOf("colab.googleusercontent.com") !== -1;
+        if (isGoogleColab || inVSCcode()) {
+            effectiveMode = "fixed";
+        } else {
+            effectiveMode = "fraction";
+        }
+    }
+
+    // --- "fixed" mode: explicit pixel height, no short mode ---
+    if (effectiveMode === "fixed") {
+        const fixedHeight = compC?.dfvHeight || 500;
+        const maxRowsWithoutScrolling = Math.floor((fixedHeight / (rowHeight || 21)) - 3);
         return {
             classMode: "regular-mode",
             domLayout: "normal",
-            applicableStyle: { height: 500 },
+            applicableStyle: { height: fixedHeight, overflow: "hidden" },
             inIframe: inIframeClass,
             maxRowsWithoutScrolling
         };
     }
-    const domLayout: DomLayoutType = compC?.layoutType || (shortMode ? "autoHeight" : "normal");
-    const applicableStyle = shortMode ? shortDivStyle : regularDivStyle;
-    console.log("351 gridUtils", shortMode, shortDivStyle, regularDivStyle)
-    const classMode = shortMode ? "short-mode" : "regular-mode";
+
+    // --- Shared: compute dfvHeight and short mode detection ---
+    // Used by both "fraction" and "fill" for short mode detection.
+    const fractionHeight = window.innerHeight / (compC?.height_fraction || 2);
+    const scrollSlop = 3;
+    const maxRowsWithoutScrolling = Math.floor((fractionHeight / (rowHeight || 21)) - scrollSlop);
+    const belowMinRows = (numRows + pinnedRowLen) < maxRowsWithoutScrolling;
+    const shortMode = compC?.shortMode || (belowMinRows && rowHeight === undefined);
+
+    // Short mode is the same for both "fraction" and "fill":
+    // auto-height so small tables don't get stretched
+    if (shortMode) {
+        const shortDivStyle = { minHeight: 50, maxHeight: fractionHeight, overflow: "hidden" };
+        const domLayout: DomLayoutType = compC?.layoutType || "autoHeight";
+        return {
+            classMode: "short-mode",
+            domLayout,
+            applicableStyle: shortDivStyle,
+            inIframe: inIframeClass,
+            maxRowsWithoutScrolling
+        };
+    }
+
+    // --- "fill" mode: CSS flex fills available space ---
+    if (effectiveMode === "fill") {
+        return {
+            classMode: "regular-mode",
+            domLayout: "normal",
+            applicableStyle: { flex: 1, minHeight: 0, overflow: "hidden" },
+            inIframe: inIframeClass,
+            maxRowsWithoutScrolling
+        };
+    }
+
+    // --- "fraction" mode (default): pixel height from window.innerHeight / fraction ---
+    const dfvHeight = compC?.dfvHeight || fractionHeight;
+    const domLayout: DomLayoutType = compC?.layoutType || "normal";
     return {
-        classMode,
+        classMode: "regular-mode",
         domLayout,
-        applicableStyle,
+        applicableStyle: { height: dfvHeight, overflow: "hidden" },
         inIframe: inIframeClass,
         maxRowsWithoutScrolling
     };

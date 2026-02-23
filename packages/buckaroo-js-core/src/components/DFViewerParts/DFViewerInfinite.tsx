@@ -159,8 +159,10 @@ export function DFViewerInfinite({
     const colorScheme = useColorScheme();
     const defaultThemeClass = colorScheme === 'light' ? 'ag-theme-alpine' : 'ag-theme-alpine-dark';
     const divClass = df_viewer_config?.component_config?.className || defaultThemeClass;
+    const isFillMode = df_viewer_config?.component_config?.heightMode === "fill";
+    const fillClass = (isFillMode && hs.classMode !== "short-mode") ? "fill-mode" : "";
     return (
-        <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
+        <div className={`df-viewer ${hs.classMode} ${hs.inIframe} ${fillClass}`}>
             <pre>{error_info ? error_info : ""}</pre>
             <div style={hs.applicableStyle}
                 className={`theme-hanger ${divClass}`}>
