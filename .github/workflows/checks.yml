@@ -193,13 +193,15 @@ jobs:
         with:
           name: buckaroo-build
       - name: Install wheel with MCP extras
-        run: uv pip install --system "dist/buckaroo-*.whl[mcp]"
+        run: |
+          uv venv .venv-wheel
+          uv pip install --python .venv-wheel/bin/python "dist/buckaroo-*.whl[mcp]" pytest
       - name: Verify entry point
-        run: which buckaroo-table && buckaroo-table --help || true
+        run: .venv-wheel/bin/buckaroo-table --help || true
       - name: Run MCP integration tests
         env:
-          BUCKAROO_MCP_CMD: buckaroo-table
-        run: uv run --with pytest pytest tests/unit/server/test_mcp_uvx_install.py -v --color=yes -m slow
+          BUCKAROO_MCP_CMD: .venv-wheel/bin/buckaroo-table
+        run: .venv-wheel/bin/pytest tests/unit/server/test_mcp_uvx_install.py -v --color=yes -m slow
 
   # ---------------------------------------------------------------------------
   # Source-level tests — operate on the codebase, no wheel needed
