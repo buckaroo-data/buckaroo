@@ -126,18 +126,22 @@ class LoadHandler(tornado.web.RequestHandler):
         return body
 
     def _validate_request(self, body: dict) -> tuple:
-        """Validate and extract session_id, path, mode, and prompt from request."""
+        """Validate and extract session_id, path, mode, prompt, and no_browser from request.
+
+        Returns (session_id, path, mode, prompt, no_browser) or a tuple of Nones on error.
+        """
         session_id = body.get("session")
         path = body.get("path")
 
         if not session_id or not path:
             self.set_status(400)
             self.write({"error": "Missing 'session' or 'path'"})
-            return None, None, None, None
+            return None, None, None, None, None
 
         mode = body.get("mode", "viewer")
         prompt = body.get("prompt", "")
-        return session_id, path, mode, prompt
+        no_browser = bool(body.get("no_browser", False))
+        return session_id, path, mode, prompt, no_browser
 
     def _load_lazy_polars(self, session, path: str, ldf, metadata: dict):
         """Set up lazy polars session state."""
@@ -219,7 +223,7 @@ class LoadHandler(tornado.web.RequestHandler):
         if body is None:
             return
 
-        session_id, path, mode, prompt = self._validate_request(body)
+        session_id, path, mode, prompt, no_browser = self._validate_request(body)
         if session_id is None:
             return
 
@@ -258,7 +262,7 @@ class LoadHandler(tornado.web.RequestHandler):
 
         # Notify connected clients and open browser
         self._push_state_to_clients(session, metadata)
-        browser_action = self._handle_browser_window(session_id)
+        browser_action = "skipped" if no_browser else self._handle_browser_window(session_id)
 
         log.info("load session=%s path=%s rows=%d browser=%s", session_id, path, metadata["rows"], browser_action)
 
