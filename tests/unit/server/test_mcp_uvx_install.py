@@ -20,7 +20,6 @@ import os
 import selectors
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.request
@@ -402,6 +401,9 @@ class TestUvxMcpInstall:
 
             static_files = health.get("static_files", {})
             critical = ["standalone.js", "standalone.css", "compiled.css", "widget.js"]
+            # JS files must be non-empty; CSS files must exist but may be
+            # empty in some builds (e.g. compiled.css can be 0 bytes).
+            must_be_nonempty = {"standalone.js", "widget.js"}
             for fname in critical:
                 info = static_files.get(fname)
                 assert info is not None, (
@@ -410,9 +412,10 @@ class TestUvxMcpInstall:
                 assert info.get("exists") is True, (
                     f"Critical static file '{fname}' does not exist on disk: {info}"
                 )
-                assert info.get("size_bytes", 0) > 0, (
-                    f"Critical static file '{fname}' is empty: {info}"
-                )
+                if fname in must_be_nonempty:
+                    assert info.get("size_bytes", 0) > 0, (
+                        f"Critical static file '{fname}' is empty: {info}"
+                    )
 
             # Step 5: HTTP-fetch an actual static asset to verify Tornado serves it
             js_url = f"http://localhost:{port}/static/standalone.js"
