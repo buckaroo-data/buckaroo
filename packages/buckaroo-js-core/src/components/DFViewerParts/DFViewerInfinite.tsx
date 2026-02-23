@@ -161,7 +161,7 @@ export function DFViewerInfinite({
     const divClass = df_viewer_config?.component_config?.className || defaultThemeClass;
     return (
         <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
-            <pre>{error_info ? error_info : ""}</pre>
+            {error_info ? <pre>{error_info}</pre> : null}
             <div style={hs.applicableStyle}
                 className={`theme-hanger ${divClass}`}>
                 <DFViewerInfiniteInner
@@ -261,8 +261,8 @@ export function DFViewerInfiniteInner({
                 return { background: "inherit" }
             },
             enableCellChangeFlash: false,
-            cellRendererSelector: getCellRendererSelector(df_viewer_config.pinned_rows)};
-    }, [df_viewer_config.pinned_rows]);
+            cellRendererSelector: getCellRendererSelector(df_viewer_config.pinned_rows, df_viewer_config.column_config)};
+    }, [df_viewer_config.pinned_rows, df_viewer_config.column_config]);
     const histogram_stats:SDFT = extractSDFT(summary_stats_data);
 
     const extra_context = {

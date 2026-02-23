@@ -481,3 +481,48 @@ sys.stdin.buffer.read()
                     os.kill(server_pid, signal.SIGKILL)
                 except OSError:
                     pass
+
+
+# ---------------------------------------------------------------------------
+# Tests — stdout safety (no pollution during import)
+# ---------------------------------------------------------------------------
+
+class TestStdoutSafety:
+    """Verify that importing buckaroo_mcp_tool does not write to stdout.
+
+    Any stdout output during module initialization would corrupt the MCP
+    JSON-RPC protocol, since the MCP client reads stdout for framed messages.
+    This catches accidental print() statements or import-time warnings.
+    """
+
+    def test_no_stdout_during_import(self):
+        """Import buckaroo_mcp_tool in a subprocess and verify nothing
+        was written to stdout during module initialization."""
+        script = (
+            "import sys, types\n"
+            "from unittest.mock import MagicMock\n"
+            "# Mock mcp so we can import without it installed\n"
+            "mcp_mod = types.ModuleType('mcp')\n"
+            "mcp_server = types.ModuleType('mcp.server')\n"
+            "mcp_fastmcp = types.ModuleType('mcp.server.fastmcp')\n"
+            "fake = MagicMock()\n"
+            "fake.tool.return_value = lambda fn: fn\n"
+            "fake.prompt.return_value = lambda fn: fn\n"
+            "mcp_fastmcp.FastMCP = MagicMock(return_value=fake)\n"
+            "sys.modules['mcp'] = mcp_mod\n"
+            "sys.modules['mcp.server'] = mcp_server\n"
+            "sys.modules['mcp.server.fastmcp'] = mcp_fastmcp\n"
+            "import buckaroo_mcp_tool\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            cwd=REPO_ROOT,
+            timeout=10,
+        )
+        assert result.stdout == b"", (
+            f"buckaroo_mcp_tool wrote to stdout during import "
+            f"({len(result.stdout)} bytes):\n"
+            f"{result.stdout.decode(errors='replace')[:300]}\n"
+            f"This would corrupt the MCP JSON-RPC protocol."
+        )

@@ -131,17 +131,24 @@ jobs:
             const distFiles = fs.readdirSync('artifacts/dist');
             const wheel = distFiles.find(f => f.endsWith('.whl'));
             const version = wheel.match(/buckaroo-(.+?)-/)[1];
+            const idx = `--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/`;
             const body = [
               '## :package: TestPyPI package published',
               '',
               '```bash',
-              `pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ buckaroo==${version}`,
+              `pip install ${idx} buckaroo==${version}`,
               '```',
               '',
               'or with uv:',
               '',
               '```bash',
-              `uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ buckaroo==${version}`,
+              `uv pip install ${idx} buckaroo==${version}`,
+              '```',
+              '',
+              '### MCP server for Claude Code',
+              '',
+              '```bash',
+              `claude mcp add buckaroo-table -- uvx --from "buckaroo[mcp]==${version}" ${idx} buckaroo-table`,
               '```',
             ].join('\n');
 
@@ -167,6 +174,35 @@ jobs:
                 body,
               });
             }
+
+  TestMCPWheel:
+    name: MCP / Integration (wheel)
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Install wheel with MCP extras
+        run: |
+          uv venv .venv-wheel
+          WHEEL=$(ls dist/buckaroo-*.whl)
+          uv pip install --python .venv-wheel/bin/python "${WHEEL}[mcp]" pytest
+      - name: Verify entry point
+        run: .venv-wheel/bin/buckaroo-table --help || true
+      - name: Run MCP integration tests
+        env:
+          BUCKAROO_MCP_CMD: .venv-wheel/bin/buckaroo-table
+        run: .venv-wheel/bin/pytest tests/unit/server/test_mcp_uvx_install.py -v --color=yes -m slow
 
   # ---------------------------------------------------------------------------
   # Source-level tests — operate on the codebase, no wheel needed
@@ -197,7 +233,7 @@ jobs:
       - name: Install the project
         run: uv sync --all-extras --dev
       - name: Run tests
-        run: uv run --with pytest-cov pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
+        run: uv run --with pytest-cov pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
       - uses: codecov/codecov-action@v5
 
   TestPythonMaxVersions:
@@ -233,7 +269,7 @@ jobs:
           uv sync --resolution=highest --all-extras --dev --no-group datacompy
           uv pip list | grep -i pandas
       - name: Run tests
-        run: .venv/bin/python -m pytest ./tests/unit --color=yes --cov anywidget --cov-report xml
+        run: .venv/bin/python -m pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
 
   # ---------------------------------------------------------------------------
   # Integration tests — install the pre-built wheel, simulate end-user install
