@@ -269,6 +269,18 @@ jobs:
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run Storybook Playwright Tests
         run: bash scripts/test_playwright_storybook.sh
+      - name: List screenshot files (debug)
+        if: always()
+        run: ls -laR packages/buckaroo-js-core/screenshots/ 2>/dev/null || echo "No screenshots dir"
+      - name: Upload Height Mode Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: height-mode-screenshots
+          path: |
+            packages/buckaroo-js-core/screenshots/height-mode/
+            packages/buckaroo-js-core/pw-tests/screenshot-compare.html
+          if-no-files-found: warn
       - name: Capture Theme Screenshots
         run: bash scripts/test_playwright_screenshots.sh
       - name: Upload Theme Screenshots
@@ -276,7 +288,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: theme-screenshots
-          path: packages/buckaroo-js-core/screenshots/
+          path: |
+            packages/buckaroo-js-core/screenshots/
+            packages/buckaroo-js-core/pw-tests/screenshot-compare.html
           if-no-files-found: ignore
 
   TestServer:
@@ -315,6 +329,13 @@ jobs:
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run Server Playwright Tests
         run: bash scripts/test_playwright_server.sh
+      - name: Upload server test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-screenshots
+          path: packages/buckaroo-js-core/screenshots/
+          if-no-files-found: ignore
 
   TestMarimo:
     name: Marimo Playwright Tests

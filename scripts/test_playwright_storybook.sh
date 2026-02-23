@@ -94,6 +94,7 @@ FAILED_TESTS=()
 STORYBOOK_TESTS=(
     "pw-tests/transcript-replayer.spec.ts"
     "pw-tests/outside-params.spec.ts"
+    "pw-tests/height-mode.spec.ts"
     # "pw-tests/example.spec.ts"  # Has pre-existing failures, excluded for now
 )
 

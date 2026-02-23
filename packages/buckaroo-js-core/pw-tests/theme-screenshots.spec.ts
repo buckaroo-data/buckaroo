@@ -40,6 +40,11 @@ const STORIES = [
 
   // MessageBox
   { id: 'buckaroo-messagebox--mixed-messages', name: 'MessageBox-Mixed' },
+
+  // Height mode
+  { id: 'buckaroo-dfviewer-heightmode--fill-mode', name: 'HeightMode-Fill' },
+  { id: 'buckaroo-dfviewer-heightmode--fraction-mode', name: 'HeightMode-Fraction' },
+  { id: 'buckaroo-dfviewer-heightmode--fixed-mode', name: 'HeightMode-Fixed' },
 ];
 
 const SCHEMES = ['light', 'dark'] as const;

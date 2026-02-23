@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Buckaroo Screenshot Comparison</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; }
+  h1 { padding: 16px 24px; font-size: 20px; background: #16213e; border-bottom: 1px solid #333; }
+  .controls { padding: 12px 24px; background: #16213e; border-bottom: 1px solid #333; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .controls label { font-size: 13px; }
+  .controls select, .controls input { background: #0f3460; color: #e0e0e0; border: 1px solid #555; padding: 4px 8px; border-radius: 4px; font-size: 13px; }
+  .controls button { background: #e94560; color: white; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .controls button:hover { background: #c73e54; }
+  .controls button.secondary { background: #0f3460; }
+  .controls button.secondary:hover { background: #1a5276; }
+
+  .pairs-container { padding: 16px 24px; }
+  .pair { margin-bottom: 32px; border: 1px solid #333; border-radius: 8px; overflow: hidden; background: #16213e; }
+  .pair-header { padding: 10px 16px; background: #0f3460; font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+  .pair-header .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #e94560; }
+  .pair-body { display: flex; }
+  .pair-body.stacked { flex-direction: column; }
+  .pair-side { flex: 1; min-width: 0; position: relative; }
+  .pair-side img { width: 100%; display: block; }
+  .side-label { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.7); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; z-index: 2; }
+  .side-label.before { color: #ff6b6b; }
+  .side-label.after { color: #51cf66; }
+  .divider { width: 2px; background: #e94560; flex-shrink: 0; }
+
+  /* Slider overlay mode */
+  .slider-container { position: relative; overflow: hidden; }
+  .slider-container img { display: block; width: 100%; }
+  .slider-container .overlay { position: absolute; top: 0; left: 0; height: 100%; overflow: hidden; border-right: 2px solid #e94560; }
+  .slider-container .overlay img { display: block; height: 100%; width: auto; min-width: 100%; }
+  .slider-container input[type=range] { position: absolute; bottom: 8px; left: 10%; width: 80%; z-index: 3; }
+
+  /* Toggle mode */
+  .toggle-container { position: relative; cursor: pointer; }
+  .toggle-container img { display: block; width: 100%; }
+  .toggle-container .toggle-hint { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.7); padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+
+  .no-pairs { padding: 40px; text-align: center; color: #888; }
+  .no-pairs code { background: #0f3460; padding: 2px 6px; border-radius: 3px; }
+
+  .drop-zone { border: 2px dashed #555; border-radius: 8px; padding: 40px; text-align: center; margin: 16px 24px; color: #888; }
+  .drop-zone.active { border-color: #e94560; color: #e94560; }
+
+  #file-input { display: none; }
+</style>
+</head>
+<body>
+
+<h1>Buckaroo Screenshot Comparison</h1>
+
+<div class="controls">
+  <label>View:
+    <select id="view-mode">
+      <option value="side-by-side">Side by Side</option>
+      <option value="stacked">Stacked</option>
+      <option value="slider">Slider Overlay</option>
+      <option value="toggle">Click to Toggle</option>
+    </select>
+  </label>
+  <label>Filter:
+    <input type="text" id="filter" placeholder="filter by name..." />
+  </label>
+  <button class="secondary" onclick="document.getElementById('file-input').click()">Load Screenshots Folder</button>
+  <input type="file" id="file-input" webkitdirectory multiple />
+  <button class="secondary" onclick="loadFromManifest()">Load from manifest.json</button>
+  <span id="status" style="font-size:12px; color:#888;"></span>
+</div>
+
+<div id="content">
+  <div class="drop-zone" id="drop-zone">
+    <p>Drop a screenshots folder here, or use the controls above.</p>
+    <p style="margin-top:8px; font-size:13px;">
+      Expected structure: pairs of files like <code>name--before.png</code> / <code>name--after.png</code>,<br>
+      or any two images to compare side by side.
+    </p>
+  </div>
+</div>
+
+<script>
+// State
+let pairs = [];
+let viewMode = 'side-by-side';
+
+const contentEl = document.getElementById('content');
+const statusEl = document.getElementById('status');
+const filterEl = document.getElementById('filter');
+const viewModeEl = document.getElementById('view-mode');
+
+viewModeEl.addEventListener('change', () => { viewMode = viewModeEl.value; render(); });
+filterEl.addEventListener('input', render);
+
+// --- File loading ---
+
+document.getElementById('file-input').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files);
+  processFiles(files);
+});
+
+// Drag and drop
+const dropZone = document.getElementById('drop-zone');
+document.addEventListener('dragover', (e) => { e.preventDefault(); dropZone?.classList.add('active'); });
+document.addEventListener('dragleave', () => { dropZone?.classList.remove('active'); });
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone?.classList.remove('active');
+  if (e.dataTransfer.items) {
+    const items = Array.from(e.dataTransfer.items);
+    const filePromises = items
+      .filter(item => item.kind === 'file')
+      .map(item => item.getAsFile());
+    processFiles(filePromises.filter(Boolean));
+  }
+});
+
+function processFiles(files) {
+  const imageFiles = files.filter(f => f && /\.(png|jpg|jpeg|gif|webp)$/i.test(f.name));
+  if (imageFiles.length === 0) {
+    statusEl.textContent = 'No image files found';
+    return;
+  }
+
+  // Group into pairs by name pattern
+  const byBase = {};
+  for (const f of imageFiles) {
+    // Try to match patterns: name--before.png / name--after.png
+    // or: before/name.png / after/name.png
+    // or just group alphabetically in pairs
+    const name = f.name;
+    const match = name.match(/^(.+?)--(before|after|light|dark)\.(png|jpg|jpeg|gif|webp)$/i);
+    if (match) {
+      const base = match[1];
+      const tag = match[2].toLowerCase();
+      if (!byBase[base]) byBase[base] = {};
+      byBase[base][tag] = f;
+    } else {
+      // Check for path-based grouping: .../before/name.png vs .../after/name.png
+      const pathMatch = f.webkitRelativePath?.match(/\/(before|after)\/(.+)$/i);
+      if (pathMatch) {
+        const tag = pathMatch[1].toLowerCase();
+        const base = pathMatch[2].replace(/\.[^.]+$/, '');
+        if (!byBase[base]) byBase[base] = {};
+        byBase[base][tag] = f;
+      }
+    }
+  }
+
+  // Build pairs
+  pairs = [];
+  for (const [base, group] of Object.entries(byBase)) {
+    const before = group.before || group.light;
+    const after = group.after || group.dark;
+    if (before && after) {
+      pairs.push({
+        name: base,
+        beforeUrl: URL.createObjectURL(before),
+        afterUrl: URL.createObjectURL(after),
+        beforeLabel: group.before ? 'Before' : 'Light',
+        afterLabel: group.after ? 'After' : 'Dark',
+      });
+    }
+  }
+
+  // If no pairs found by naming convention, just pair them up sequentially
+  if (pairs.length === 0 && imageFiles.length >= 2) {
+    const sorted = imageFiles.sort((a, b) => a.name.localeCompare(b.name));
+    for (let i = 0; i < sorted.length - 1; i += 2) {
+      pairs.push({
+        name: `${sorted[i].name} vs ${sorted[i+1].name}`,
+        beforeUrl: URL.createObjectURL(sorted[i]),
+        afterUrl: URL.createObjectURL(sorted[i+1]),
+        beforeLabel: sorted[i].name,
+        afterLabel: sorted[i+1].name,
+      });
+    }
+  }
+
+  statusEl.textContent = `${pairs.length} pair(s) from ${imageFiles.length} images`;
+  render();
+}
+
+// --- Manifest loading ---
+
+async function loadFromManifest() {
+  const manifestPaths = [
+    '../screenshots/height-mode/manifest.json',
+    './screenshots/height-mode/manifest.json',
+    'screenshots/height-mode/manifest.json',
+  ];
+
+  statusEl.textContent = 'Loading manifest...';
+
+  let manifest = null;
+  let basePath = null;
+
+  for (const mpath of manifestPaths) {
+    try {
+      const resp = await fetch(mpath);
+      if (resp.ok) {
+        manifest = await resp.json();
+        basePath = mpath.replace('/manifest.json', '');
+        break;
+      }
+    } catch (_) { /* try next path */ }
+  }
+
+  if (!manifest) {
+    statusEl.textContent = 'No manifest.json found — run Playwright tests first, or check file paths';
+    return;
+  }
+
+  pairs = manifest.pairs.map(p => ({
+    name: p.name,
+    beforeUrl: `${basePath}/${p.before}`,
+    afterUrl: `${basePath}/${p.after}`,
+    beforeLabel: p.beforeLabel || 'Before',
+    afterLabel: p.afterLabel || 'After',
+  }));
+  statusEl.textContent = `${pairs.length} pair(s) from manifest (${basePath})`;
+  render();
+}
+
+// --- Rendering ---
+
+function render() {
+  const filter = filterEl.value.toLowerCase();
+  const filtered = filter ? pairs.filter(p => p.name.toLowerCase().includes(filter)) : pairs;
+
+  if (filtered.length === 0) {
+    contentEl.innerHTML = `<div class="no-pairs">No screenshot pairs to show. Load some images or run the Playwright tests.</div>`;
+    return;
+  }
+
+  contentEl.innerHTML = filtered.map((pair, i) => {
+    switch (viewMode) {
+      case 'side-by-side': return renderSideBySide(pair, i);
+      case 'stacked': return renderStacked(pair, i);
+      case 'slider': return renderSlider(pair, i);
+      case 'toggle': return renderToggle(pair, i);
+      default: return renderSideBySide(pair, i);
+    }
+  }).join('');
+
+  // Attach slider event handlers
+  if (viewMode === 'slider') {
+    document.querySelectorAll('.slider-range').forEach(el => {
+      el.addEventListener('input', (e) => {
+        const idx = e.target.dataset.idx;
+        const pct = e.target.value;
+        const overlay = document.getElementById(`overlay-${idx}`);
+        if (overlay) overlay.style.width = pct + '%';
+      });
+    });
+  }
+
+  // Attach toggle handlers
+  if (viewMode === 'toggle') {
+    document.querySelectorAll('.toggle-container').forEach(el => {
+      let showAfter = true;
+      el.addEventListener('click', () => {
+        showAfter = !showAfter;
+        const imgs = el.querySelectorAll('img');
+        const hint = el.querySelector('.toggle-hint');
+        imgs[0].style.display = showAfter ? 'block' : 'none';
+        imgs[1].style.display = showAfter ? 'none' : 'block';
+        if (hint) hint.textContent = showAfter ? 'Showing: After (click to toggle)' : 'Showing: Before (click to toggle)';
+      });
+    });
+  }
+}
+
+function renderSideBySide(pair, i) {
+  return `<div class="pair">
+    <div class="pair-header"><span>${pair.name}</span></div>
+    <div class="pair-body">
+      <div class="pair-side">
+        <span class="side-label before">${pair.beforeLabel}</span>
+        <img src="${pair.beforeUrl}" alt="${pair.beforeLabel}" />
+      </div>
+      <div class="divider"></div>
+      <div class="pair-side">
+        <span class="side-label after">${pair.afterLabel}</span>
+        <img src="${pair.afterUrl}" alt="${pair.afterLabel}" />
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderStacked(pair, i) {
+  return `<div class="pair">
+    <div class="pair-header"><span>${pair.name}</span></div>
+    <div class="pair-body stacked">
+      <div class="pair-side">
+        <span class="side-label before">${pair.beforeLabel}</span>
+        <img src="${pair.beforeUrl}" alt="${pair.beforeLabel}" />
+      </div>
+      <div class="pair-side">
+        <span class="side-label after">${pair.afterLabel}</span>
+        <img src="${pair.afterUrl}" alt="${pair.afterLabel}" />
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderSlider(pair, i) {
+  return `<div class="pair">
+    <div class="pair-header"><span>${pair.name}</span> <span class="badge">Drag slider</span></div>
+    <div class="slider-container">
+      <img src="${pair.afterUrl}" alt="${pair.afterLabel}" />
+      <div class="overlay" id="overlay-${i}" style="width:50%;">
+        <img src="${pair.beforeUrl}" alt="${pair.beforeLabel}" />
+      </div>
+      <input type="range" class="slider-range" data-idx="${i}" min="0" max="100" value="50" />
+    </div>
+  </div>`;
+}
+
+function renderToggle(pair, i) {
+  return `<div class="pair">
+    <div class="pair-header"><span>${pair.name}</span> <span class="badge">Click to toggle</span></div>
+    <div class="toggle-container">
+      <img src="${pair.afterUrl}" alt="${pair.afterLabel}" style="display:block;" />
+      <img src="${pair.beforeUrl}" alt="${pair.beforeLabel}" style="display:none;" />
+      <span class="toggle-hint">Showing: After (click to toggle)</span>
+    </div>
+  </div>`;
+}
+
+// Try to auto-load manifest on page load
+loadFromManifest();
+</script>
+</body>
+</html>
