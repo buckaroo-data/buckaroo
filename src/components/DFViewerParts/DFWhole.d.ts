@@ -106,9 +106,7 @@ export type PinnedRowConfig = {
     displayer_args: DisplayerArgs;
     default_renderer_columns?: string[];
 };
-export type HeightMode = "fraction" | "fixed" | "fill";
 export type ComponentConfig = {
-    heightMode?: HeightMode;
     height_fraction?: number;
     dfvHeight?: number;
     layoutType?: "autoHeight" | "normal";
