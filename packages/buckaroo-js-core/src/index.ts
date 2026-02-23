@@ -28,7 +28,7 @@ import { StatusBar } from "./components/StatusBar";
 
 import * as widgetUtils from "./widgetUtils";
 import { SampleButton, HeaderNoArgs, Counter } from "./SampleComponent";
-import _ from "lodash";
+import * as _ from "lodash-es";
 export default {
     
     ColumnsEditor,

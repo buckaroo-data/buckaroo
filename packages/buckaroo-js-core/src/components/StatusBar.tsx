@@ -1,6 +1,6 @@
 // https://plnkr.co/edit/QTNwBb2VEn81lf4t?open=index.tsx
 import React, { useRef, useCallback, useState, memo, useEffect, useMemo } from "react";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { AgGridReact } from "@ag-grid-community/react"; // the AG Grid React Component
 import { ColDef, GridApi, GridOptions, ModuleRegistry } from "@ag-grid-community/core";
 import { basicIntFormatter } from "./DFViewerParts/Displayer";

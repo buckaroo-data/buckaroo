@@ -11,7 +11,7 @@ import {
     multiIndexColToColDef,
 
 } from './gridUtils';
-import * as _ from "lodash";
+import * as _ from "lodash-es";
 import { DFData, DFViewerConfig, NormalColumnConfig, MultiIndexColumnConfig, PinnedRowConfig, ColumnConfig } from "./DFWhole";
 import { getFloatFormatter } from './Displayer';
 import { ColDef, ValueFormatterParams } from '@ag-grid-community/core';

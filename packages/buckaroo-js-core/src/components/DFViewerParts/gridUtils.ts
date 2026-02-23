@@ -23,7 +23,7 @@ import {
     ColDefOrGroup,
 } from "./DFWhole";
 
-import * as _ from "lodash";
+import * as _ from "lodash-es";
 import { getTextCellRenderer } from "./OtherRenderers";
 import { getStyler } from "./Styler";
 import { DFData, SDFMeasure, SDFT } from "./DFWhole";
