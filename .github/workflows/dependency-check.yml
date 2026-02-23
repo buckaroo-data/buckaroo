@@ -4,9 +4,6 @@ on:
   schedule:
     - cron: "0 7 * * 1"  # Weekly, Monday 07:00 UTC
   workflow_dispatch:
-  # TEMPORARY: trigger on push to test branch — remove before merging to main
-  push:
-    branches: ["ci/dependency-check"]
 
 permissions:
   contents: read
