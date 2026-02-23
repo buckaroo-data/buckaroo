@@ -2,14 +2,56 @@
 
 ## Install
 
-Add the Buckaroo MCP server to Claude Code with a single command:
+### Option 1: From PyPI (recommended for most users)
+
+Install the published package. Works from any directory:
 
 ```bash
 claude mcp add buckaroo-table -- uvx --reinstall "buckaroo[mcp]" buckaroo-table
 ```
 
-That's it. The `--reinstall` flag means Claude Code will always pick up the
-latest version from PyPI when it starts a new session.
+The `--reinstall` flag means Claude Code will always pick up the latest
+version from PyPI when it starts a new session.
+
+### Option 2: From a local git checkout (for development)
+
+If you're working on buckaroo itself and want the MCP tool to use your
+local code, point `uv run` at the repo directory:
+
+```bash
+claude mcp add buckaroo-table -- uv run --directory /path/to/buckaroo python -m buckaroo.mcp_tool
+```
+
+Replace `/path/to/buckaroo` with the absolute path to your clone.
+
+### Option 3: Global install (use from any directory)
+
+Add `--scope user` so the MCP server is available in every Claude Code
+session, not just the current project:
+
+```bash
+# From PyPI:
+claude mcp add --scope user buckaroo-table -- uvx --reinstall "buckaroo[mcp]" buckaroo-table
+
+# Or from a local checkout:
+claude mcp add --scope user buckaroo-table -- uv run --directory /path/to/buckaroo python -m buckaroo.mcp_tool
+```
+
+### Option 4: Project-level config (`.mcp.json`)
+
+Add a `.mcp.json` file to the root of any repo so that every contributor
+gets the MCP server automatically:
+
+```json
+{
+  "mcpServers": {
+    "buckaroo-table": {
+      "command": "uvx",
+      "args": ["--reinstall", "buckaroo[mcp]", "buckaroo-table"]
+    }
+  }
+}
+```
 
 ## Upgrade
 
