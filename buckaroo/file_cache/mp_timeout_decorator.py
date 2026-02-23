@@ -1,4 +1,5 @@
 import multiprocessing
+import sys
 from typing import Any
 import inspect
 import cloudpickle as _cloudpickle  # type: ignore
@@ -142,7 +143,6 @@ def _execute_and_report_fork(func, args, kwargs, queue) -> None:
         except Exception:
             pass
 
-import sys
 if sys.platform == "win32":
     ctx = multiprocessing.get_context("spawn")
 else:
