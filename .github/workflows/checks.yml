@@ -131,17 +131,24 @@ jobs:
             const distFiles = fs.readdirSync('artifacts/dist');
             const wheel = distFiles.find(f => f.endsWith('.whl'));
             const version = wheel.match(/buckaroo-(.+?)-/)[1];
+            const idx = `--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/`;
             const body = [
               '## :package: TestPyPI package published',
               '',
               '```bash',
-              `pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ buckaroo==${version}`,
+              `pip install ${idx} buckaroo==${version}`,
               '```',
               '',
               'or with uv:',
               '',
               '```bash',
-              `uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ buckaroo==${version}`,
+              `uv pip install ${idx} buckaroo==${version}`,
+              '```',
+              '',
+              '### MCP server for Claude Code',
+              '',
+              '```bash',
+              `claude mcp add buckaroo-table -- uvx ${idx} "buckaroo[mcp]==${version}" buckaroo-table`,
               '```',
             ].join('\n');
 
