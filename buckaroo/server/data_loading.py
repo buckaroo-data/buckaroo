@@ -1,9 +1,8 @@
 import os
 import traceback
-from io import BytesIO
 import pandas as pd
 import polars as pl
-from buckaroo.serialization_utils import to_parquet, pd_to_obj, check_and_fix_df
+from buckaroo.serialization_utils import to_arrow_ipc, pd_to_obj, check_and_fix_df
 from buckaroo.df_util import old_col_new_col, to_chars
 
 from buckaroo.dataflow.dataflow import CustomizableDataflow
@@ -112,7 +111,7 @@ def handle_infinite_request_buckaroo(
         else:
             slice_df = processed_df[start:end]
 
-        parquet_bytes = to_parquet(slice_df)
+        parquet_bytes = to_arrow_ipc(slice_df)
         msg = {
             "type": "infinite_resp",
             "key": payload_args,
@@ -219,9 +218,14 @@ def handle_infinite_request_lazy(
             select_exprs.append(pl.col(orig).alias(rw))
     slice_df = slice_df.select(select_exprs)
 
-    out = BytesIO()
-    slice_df.write_parquet(out, compression="uncompressed")
-    parquet_bytes = out.getvalue()
+    import pyarrow as pa
+    import pyarrow.ipc as ipc_mod
+    table = slice_df.to_arrow()
+    sink = pa.BufferOutputStream()
+    writer = ipc_mod.new_stream(sink, table.schema)
+    writer.write_table(table)
+    writer.close()
+    parquet_bytes = sink.getvalue().to_pybytes()
 
     msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": total_rows}
     return msg, parquet_bytes
@@ -335,7 +339,7 @@ def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[dict,
     else:
         slice_df = df[start:end]
 
-    parquet_bytes = to_parquet(slice_df)
+    parquet_bytes = to_arrow_ipc(slice_df)
     msg = {
         "type": "infinite_resp",
         "key": payload_args,

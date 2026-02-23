@@ -267,10 +267,8 @@ async function main() {
         ws.addEventListener("message", handler);
     });
 
-    // Pre-resolve parquet_b64 values in df_data_dict before creating the model.
-    // hyparquet's parquetRead is async in esbuild bundles, so synchronous
-    // resolveDFData() in React useMemo can't decode them. Pre-resolving here
-    // ensures components receive plain DFData arrays.
+    // Pre-resolve binary-b64 values in df_data_dict before creating the model.
+    // Pre-resolving ensures components receive plain DFData arrays.
     if (initialState.df_data_dict) {
         initialState.df_data_dict = await srt.preResolveDFDataDict(initialState.df_data_dict);
     }

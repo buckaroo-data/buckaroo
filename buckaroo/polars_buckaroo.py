@@ -1,4 +1,3 @@
-from io import BytesIO
 import traceback
 
 import polars as pl
@@ -9,7 +8,7 @@ from buckaroo.df_util import old_col_new_col
 from .pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
 from .pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from .customizations.pl_stats_v2 import PL_ANALYSIS_V2
-from .serialization_utils import pd_to_obj, sd_to_parquet_b64
+from .serialization_utils import pd_to_obj, sd_to_ipc_b64
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .customizations.pl_autocleaning_conf import NoCleaningConfPl
 from .dataflow.dataflow import Sampling
@@ -58,7 +57,7 @@ class PolarsBuckarooWidget(BuckarooWidget):
 
     def _sd_to_jsondf(self, sd):
         """Serialize summary stats dict as parquet-b64."""
-        return sd_to_parquet_b64(sd)
+        return sd_to_ipc_b64(sd)
 
     def _build_error_dataframe(self, e):
         return pl.DataFrame({'err': [str(e)]})
@@ -81,13 +80,18 @@ def prepare_df_for_serialization(df:pl.DataFrame) -> pl.DataFrame:
     return df.select(select_clauses)
 
 
-def to_parquet(df):
-    out = BytesIO()
+def to_arrow_ipc(df):
+    import pyarrow as pa
+    import pyarrow.ipc as ipc
+    table = prepare_df_for_serialization(df).to_arrow()
+    sink = pa.BufferOutputStream()
+    writer = ipc.new_stream(sink, table.schema)
+    writer.write_table(table)
+    writer.close()
+    return sink.getvalue().to_pybytes()
 
-    #engine='fastparquet', object_encoding=encodings)
-    prepare_df_for_serialization(df).write_parquet(out, compression='uncompressed')
-    out.seek(0)
-    return out.read()
+# Backward compatibility alias
+to_parquet = to_arrow_ipc
 
 
 class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget):
@@ -107,12 +111,12 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
                 sorted_df = processed_df.with_row_index().sort(converted_sort_column, descending=not ascending)
                 slice_df = sorted_df[start:end]
                 #slice_df['index'] = slice_df.index
-                self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)}, [to_parquet(slice_df)])
+                self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)}, [to_arrow_ipc(slice_df)])
             else:
                 slice_df = processed_df.with_row_index()[start:end]
                 #slice_df['index'] = slice_df.index
                 self.send({ "type": "infinite_resp", 'key':new_payload_args,
-                            'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
+                            'data': [], 'length':len(processed_df)}, [to_arrow_ipc(slice_df) ])
     
                 second_pa = new_payload_args.get('second_request')
                 if not second_pa:
@@ -123,7 +127,7 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
                 extra_df['index'] = extra_df.index
                 self.send(
                     {"type": "infinite_resp", 'key':second_pa, 'data':[], 'length':len(processed_df)},
-                    [to_parquet(extra_df)]
+                    [to_arrow_ipc(extra_df)]
                 )
         except Exception as e:
             print(e)

@@ -6,7 +6,7 @@ import pandas as pd
 from traitlets import Unicode, Any, observe, Dict
 
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, SDType
-from ..serialization_utils import pd_to_obj, sd_to_parquet_b64
+from ..serialization_utils import pd_to_obj, sd_to_ipc_b64
 from buckaroo.pluggable_analysis_framework.utils import (filter_analysis)
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from .autocleaning import SentinelAutocleaning
@@ -420,7 +420,7 @@ class CustomizableDataflow(DataFlow):
 
         Exists so this can be overridden for polars/geopandas.
         """
-        return sd_to_parquet_b64(sd)
+        return sd_to_ipc_b64(sd)
 
     def _df_to_obj(self, df:pd.DataFrame) -> TDict[str, TAny]:
         return pd_to_obj(self.sampling_klass.serialize_sample(df))

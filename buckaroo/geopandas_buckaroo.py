@@ -4,7 +4,7 @@ import buckaroo
 from buckaroo.customizations.styling import DefaultMainStyling, StylingAnalysis
 from buckaroo.pluggable_analysis_framework.pluggable_analysis_framework import ColAnalysis
 from .dataflow.dataflow_extras import (Sampling)
-from buckaroo.serialization_utils import pd_to_obj, sd_to_parquet_b64
+from buckaroo.serialization_utils import pd_to_obj, sd_to_ipc_b64
 from buckaroo.customizations.analysis import (TypingStats)
 import geopandas
 
@@ -65,7 +65,7 @@ class GeopandasBase(buckaroo.BuckarooWidget):
         temp_sd = sd.copy()
         if 'index' in temp_sd:
             del temp_sd['index']
-        return sd_to_parquet_b64(temp_sd)
+        return sd_to_ipc_b64(temp_sd)
 
 class GeopandasBuckarooWidget(GeopandasBase):
     pass

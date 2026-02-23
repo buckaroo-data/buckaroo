@@ -19,7 +19,7 @@ from buckaroo.file_cache.base import FileCache, ProgressNotification, ProgressLi
 from buckaroo.file_cache.multiprocessing_executor import MultiprocessingExecutor
 from buckaroo.file_cache.paf_column_executor import PAFColumnExecutor
 from .abc_dataflow import ABCDataflow
-from buckaroo.serialization_utils import sd_to_parquet_b64
+from buckaroo.serialization_utils import sd_to_ipc_b64
 
 logger = logging.getLogger("buckaroo.dataflow")
 
@@ -272,7 +272,7 @@ class ColumnExecutorDataflow(ABCDataflow):
                     current_summary = self.summary_sd.copy() if self.summary_sd else {}
                     current_summary.update(aggregated_summary)
                     self.summary_sd = current_summary
-                    self.df_data_dict = {'main': [], 'all_stats': sd_to_parquet_b64(current_summary), 'empty': []}
+                    self.df_data_dict = {'main': [], 'all_stats': sd_to_ipc_b64(current_summary), 'empty': []}
                     # Update merged_sd as stats come in (important for async executors)
                     # Merge with existing to preserve any cached columns
                     current_merged = self.merged_sd.copy() if self.merged_sd else {}

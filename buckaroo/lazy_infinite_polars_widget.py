@@ -9,7 +9,6 @@ import copy
 import datetime
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Type
-from io import BytesIO
 from pathlib import Path
 import os
 import traceback
@@ -29,7 +28,7 @@ from buckaroo.pluggable_analysis_framework.utils import json_postfix
 from buckaroo.styling_helpers import obj_, pinned_histogram
 from .pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
 from .df_util import old_col_new_col
-from .serialization_utils import sd_to_parquet_b64
+from .serialization_utils import sd_to_ipc_b64
 from buckaroo.file_cache.base import AbstractFileCache, Executor as _SyncExec, ExecutorLog  # type: ignore
 from buckaroo.file_cache.multiprocessing_executor import MultiprocessingExecutor as _ParExec
 from buckaroo.file_cache.cache_utils import get_global_file_cache, get_global_executor_log
@@ -718,8 +717,8 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         # Ensure summary is ready for initial display (checks if computation completed synchronously)
         summary_sd = self.ensure_initial_summary_for_display(initial_summary_sd)
         summary_rows = self._summary_to_rows(summary_sd)
-        if isinstance(summary_rows, dict) and summary_rows.get('format') == 'parquet_b64':
-            logger.info("Initial all_stats prepared as parquet_b64, b64_len=%s", len(summary_rows.get('data', '')))
+        if isinstance(summary_rows, dict) and summary_rows.get('format') in ('ipc_b64', 'parquet_b64'):
+            logger.info("Initial all_stats prepared as %s, b64_len=%s", summary_rows.get('format'), len(summary_rows.get('data', '')))
         else:
             logger.info(
                 "Initial all_stats prepared: len=%s sample=%s",
@@ -765,7 +764,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         """Convert summary dict to parquet-b64 tagged payload (or JSON fallback)."""
         if not summary:
             return []
-        return sd_to_parquet_b64(summary)
+        return sd_to_ipc_b64(summary)
 
     # selection and retry now delegated to dataflow
     def _build_column_config(self, summary: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -792,11 +791,15 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
                 select_clauses.append(pl.col(orig).alias(rw))
         return df.select(select_clauses)
 
-    def _to_parquet(self, df: pl.DataFrame) -> bytes:
-        out = BytesIO()
-        self._prepare_df_for_serialization(df).write_parquet(out, compression='uncompressed')
-        out.seek(0)
-        return out.read()
+    def _to_arrow_ipc(self, df: pl.DataFrame) -> bytes:
+        import pyarrow as pa
+        import pyarrow.ipc as ipc
+        table = self._prepare_df_for_serialization(df).to_arrow()
+        sink = pa.BufferOutputStream()
+        writer = ipc.new_stream(sink, table.schema)
+        writer.write_table(table)
+        writer.close()
+        return sink.getvalue().to_pybytes()
 
     def _handle_payload_args(self, new_payload_args: Dict[str, Any]) -> None:
         start, end = new_payload_args.get('start', 0), new_payload_args.get('end', 0)
@@ -831,7 +834,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
                 start, end, len(slice_df), self.df_meta['total_rows']
             )
             self.send({"type": "infinite_resp", 'key': new_payload_args, 'data': [], 'length': self.df_meta['total_rows']},
-                      [self._to_parquet(slice_df)])
+                      [self._to_arrow_ipc(slice_df)])
 
             second_pa = new_payload_args.get('second_request')
             if second_pa:
@@ -847,7 +850,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
                         s2, e2, len(slice2), self.df_meta['total_rows']
                     )
                     self.send({"type": "infinite_resp", 'key': second_pa, 'data': [], 'length': self.df_meta['total_rows']},
-                              [self._to_parquet(slice2)])
+                              [self._to_arrow_ipc(slice2)])
         except Exception as e:
             stack_trace = traceback.format_exc()
             self.send({"type": "infinite_resp", 'key': new_payload_args, 'data': [], 'error_info': stack_trace, 'length': 0}, [])

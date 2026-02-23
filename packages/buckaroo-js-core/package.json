@@ -36,7 +36,7 @@
     "@ag-grid-community/react": "^32.3.3",
     "@ag-grid-community/styles": "^32.3.3",
     "@ag-grid-community/theming": "^32.3.3",
-    "hyparquet": "^1.8.2",
+    "@uwdata/flechette": "^2.3.0",
     "lodash": "^4.17.21",
     "recharts": "^2.13.1"
   },

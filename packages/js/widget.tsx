@@ -60,38 +60,30 @@ function setupTranscriptRecording(model: any) {
 				buffers_len: buffers?.length || 0,
 			});
 			
-			// Parse parquet buffers from infinite_resp messages
+			// Parse Arrow IPC buffers from infinite_resp messages
 			if (msg && msg.type === "infinite_resp" && buffers && buffers.length > 0) {
 				const rawBuffer = extractArrayBuffer(buffers[0]);
 				if (rawBuffer) {
-					console.info("[Transcript] Parsing parquet buffer, size:", rawBuffer.byteLength);
-					
-					// Use parquetRead/parquetMetadata from srt (buckaroo-js-core)
-					const parquetMetadataFn = (srt as any).parquetMetadata;
-					const parquetReadFn = (srt as any).parquetRead;
-					
-					if (parquetMetadataFn && parquetReadFn) {
+					console.info("[Transcript] Parsing IPC buffer, size:", rawBuffer.byteLength);
+
+					const tableFromIPCFn = (srt as any).tableFromIPC;
+
+					if (tableFromIPCFn) {
 						try {
-							const metadata = parquetMetadataFn(rawBuffer);
-							parquetReadFn({
-								file: rawBuffer,
-								metadata,
-								rowFormat: "object",
-								onComplete: (rows: any[]) => {
-									console.info("[Transcript] Parquet parsed, rows:", rows?.length);
-									// @ts-ignore
-									window._buckarooTranscript.push({
-										ts: Date.now(),
-										event: "infinite_resp_parsed",
-										key: msg.key || null,
-										rows_len: Array.isArray(rows) ? rows.length : 0,
-										total_len: msg.length ?? null,
-										rows: toJsonSafe(rows || []),
-									});
-								},
+							const table = tableFromIPCFn(rawBuffer, { useProxy: false });
+							const rows = table.toArray();
+							console.info("[Transcript] IPC parsed, rows:", rows?.length);
+							// @ts-ignore
+							window._buckarooTranscript.push({
+								ts: Date.now(),
+								event: "infinite_resp_parsed",
+								key: msg.key || null,
+								rows_len: Array.isArray(rows) ? rows.length : 0,
+								total_len: msg.length ?? null,
+								rows: toJsonSafe(rows || []),
 							});
 						} catch (e) {
-							console.warn("[Transcript] Failed to parse parquet:", e);
+							console.warn("[Transcript] Failed to parse IPC:", e);
 							// @ts-ignore
 							window._buckarooTranscript.push({
 								ts: Date.now(),

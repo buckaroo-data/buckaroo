@@ -12,7 +12,7 @@ from buckaroo.pluggable_analysis_framework.col_analysis import (
     ColAnalysis)
 
 from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
-from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget, to_parquet
+from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget, to_arrow_ipc
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from buckaroo.dataflow.dataflow import StylingAnalysis
 from buckaroo.jlisp.lisp_utils import (s, sQ)
@@ -22,9 +22,12 @@ def _resolve_all_stats(all_stats):
     """Resolve all_stats to a list of row dicts, whether it's JSON or parquet_b64."""
     if isinstance(all_stats, list):
         return all_stats
-    if isinstance(all_stats, dict) and all_stats.get('format') == 'parquet_b64':
+    if isinstance(all_stats, dict) and all_stats.get('format') in ('ipc_b64', 'parquet_b64'):
         raw = base64.b64decode(all_stats['data'])
-        df = pd.read_parquet(BytesIO(raw), engine='pyarrow')
+        import pyarrow.ipc as ipc_mod
+        reader = ipc_mod.open_stream(BytesIO(raw))
+        table = reader.read_all()
+        df = pd.DataFrame(table.to_pydict())
         rows = json.loads(df.to_json(orient='records'))
         parsed_rows = []
         for row in rows:
@@ -333,10 +336,13 @@ def get_named_col_pldf():
 def test_serialize_regular_df():
     #this is a bit of a hack, but to_parquet expects the index to alread have an index column.  This is necessary for proper slicing in the infinite widget
     df = get_named_col_pldf().with_row_index()
-    output = to_parquet(df)
-    #second_df = pd.read_parquet(output)
+    output = to_arrow_ipc(df)
+    import pyarrow.ipc as ipc_mod
+    from io import BytesIO as BytesIO2
+    reader = ipc_mod.open_stream(BytesIO2(output))
+    table = reader.read_all()
     import polars as pl
-    second_df = pl.read_parquet(output)
+    second_df = pl.from_arrow(table)
     assert set(second_df.columns) ==  set(['index','a','b','c'])
 
 def test_citibike_df():

@@ -1,16 +1,11 @@
-from io import BytesIO
 import base64
 import json
 import pandas as pd
+import pyarrow as pa
+import pyarrow.ipc as ipc
 from typing import Dict, Any, List, Tuple
 from pandas._libs.tslibs import timezones
 from pandas.core.dtypes.dtypes import DatetimeTZDtype
-try:
-    from fastparquet import json as fp_json
-    HAS_FASTPARQUET = True
-except ImportError:
-    fp_json = None
-    HAS_FASTPARQUET = False
 import logging
 
 from buckaroo.df_util import old_col_new_col, to_chars
@@ -133,21 +128,6 @@ def pd_to_obj(df:pd.DataFrame) -> Dict[str, Any]:
         pass
 
 
-if HAS_FASTPARQUET:
-    class MyJsonImpl(fp_json.BaseImpl):
-        def __init__(self):
-            pass
-            #for some reason the following line causes errors, so I have to reimport ujson_dumps
-            # from pandas._libs.json import ujson_dumps
-            # self.dumps = ujson_dumps
-
-        def dumps(self, data):
-            from pandas._libs.json import ujson_dumps
-            return ujson_dumps(data, default_handler=str).encode("utf-8")
-
-        def loads(self, s):
-            return self.api.loads(s)
-
 def get_multiindex_to_cols_sers(index) -> List[Tuple[str, Any]]: #pd.Series[Any]
     if not isinstance(index, pd.MultiIndex):
         return []
@@ -173,56 +153,31 @@ def prepare_df_for_serialization(df:pd.DataFrame) -> pd.DataFrame:
         df2['index'] = df2.index
     return df2
 
-def to_parquet(df):
-    if not HAS_FASTPARQUET:
-        raise ImportError(
-            "fastparquet is required for parquet serialization but is not installed. "
-            "Install it with: pip install fastparquet"
-        )
-
-    data: BytesIO = BytesIO()
-
-    # data.close doesn't work in pyodide, so we make close a no-op
-    orig_close = data.close
-    data.close = lambda: None
-    # I don't like this copy.  modify to keep the same data with different names
+def to_arrow_ipc(df):
+    """Serialize a pandas DataFrame to Arrow IPC streaming format bytes."""
     df2 = prepare_df_for_serialization(df)
-
-    # Convert PyArrow-backed string columns to object dtype for fastparquet compatibility
-    # pandas 3.0+ uses PyArrow strings by default, which fastparquet can't handle directly
+    # Convert object columns to strings — pyarrow can't handle arbitrary Python types
     for col in df2.columns:
-        if pd.api.types.is_string_dtype(df2[col].dtype) and not pd.api.types.is_object_dtype(df2[col].dtype):
-            df2[col] = df2[col].astype('object')
+        if df2[col].dtype == object:
+            df2[col] = df2[col].apply(lambda x: str(x) if x is not None else None)
+    table = pa.Table.from_pandas(df2, preserve_index=False)
+    sink = pa.BufferOutputStream()
+    writer = ipc.new_stream(sink, table.schema)
+    writer.write_table(table)
+    writer.close()
+    return sink.getvalue().to_pybytes()
 
-    obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
-    encodings = {k:'json' for k in obj_columns}
-
-    orig_get_cached_codec = fp_json._get_cached_codec
-    def fake_get_cached_codec():
-        return MyJsonImpl()
-
-    fp_json._get_cached_codec = fake_get_cached_codec
-    try:
-        df2.to_parquet(data, engine='fastparquet', object_encoding=encodings)
-    except Exception as e:
-        logger.error("error serializing to parquet %r", e)
-        raise
-    finally:
-        data.close = orig_close
-        fp_json._get_cached_codec = orig_get_cached_codec
-
-    data.seek(0)
-    return data.read()
+# Backward compatibility alias
+to_parquet = to_arrow_ipc
 
 
-def to_parquet_b64(df: pd.DataFrame) -> str:
-    """Convert a DataFrame to a base64-encoded parquet string.
-
-    Note: to_parquet already calls prepare_df_for_serialization internally,
-    so the caller should pass a raw DataFrame (not pre-prepared).
-    """
-    raw_bytes = to_parquet(df)
+def to_arrow_ipc_b64(df: pd.DataFrame) -> str:
+    """Convert a DataFrame to a base64-encoded Arrow IPC string."""
+    raw_bytes = to_arrow_ipc(df)
     return base64.b64encode(raw_bytes).decode('ascii')
+
+# Backward compatibility alias
+to_parquet_b64 = to_arrow_ipc_b64
 
 
 def _make_json_safe(val):
@@ -239,18 +194,18 @@ def _json_encode_cell(val):
     return json.dumps(_make_json_safe(val), default=str)
 
 
-def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
-    """Convert a summary stats dict to a tagged parquet-b64 payload.
+def sd_to_ipc_b64(sd: Dict[str, Any]) -> Dict[str, str]:
+    """Convert a summary stats dict to a tagged IPC-b64 payload.
 
-    Summary stats DataFrames have mixed-type columns (strings, numbers, lists)
-    which fastparquet can't handle directly. We JSON-encode every cell value
-    first so each column becomes a pure string column, then use pyarrow for
-    parquet serialization. The JS side decodes parquet then JSON.parse's each cell.
+    Summary stats DataFrames have mixed-type columns (strings, numbers, lists).
+    We JSON-encode every cell value first so each column becomes a pure string
+    column, then use Arrow IPC for serialization. The JS side decodes IPC then
+    JSON.parse's each cell.
 
-    Returns {'format': 'parquet_b64', 'data': '<base64 string>'}
-    Falls back to JSON if parquet serialization fails.
+    Returns {'format': 'ipc_b64', 'data': '<base64 string>'}
+    Falls back to JSON if serialization fails.
     """
-    # JSON-encode every value so parquet sees only string columns
+    # JSON-encode every value so Arrow sees only string columns
     json_sd: Dict[str, Any] = {}
     for col, stats in sd.items():
         if isinstance(stats, dict):
@@ -265,13 +220,18 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
         df2['level_0'] = df2['index']
 
     try:
-        data = BytesIO()
-        df2.to_parquet(data, engine='pyarrow')
-        data.seek(0)
-        raw_bytes = data.read()
+        table = pa.Table.from_pandas(df2, preserve_index=False)
+        sink = pa.BufferOutputStream()
+        writer = ipc.new_stream(sink, table.schema)
+        writer.write_table(table)
+        writer.close()
+        raw_bytes = sink.getvalue().to_pybytes()
         b64 = base64.b64encode(raw_bytes).decode('ascii')
-        return {'format': 'parquet_b64', 'data': b64}
+        return {'format': 'ipc_b64', 'data': b64}
     except Exception as e:
-        logger.warning("Failed to serialize summary stats as parquet, falling back to JSON: %r", e)
+        logger.warning("Failed to serialize summary stats as IPC, falling back to JSON: %r", e)
         return pd_to_obj(pd.DataFrame(sd))
+
+# Backward compatibility alias
+sd_to_parquet_b64 = sd_to_ipc_b64
 

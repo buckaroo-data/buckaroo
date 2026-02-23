@@ -12,13 +12,25 @@ from buckaroo.file_cache.base import Executor as _Exec
 from tests.unit.file_cache.executor_test_utils import wait_for_nested_executor_finish
 
 
+def _read_ipc_buffer(buf):
+    """Read Arrow IPC bytes from an anywidget buffer into a polars DataFrame."""
+    import pyarrow.ipc as ipc_mod
+    from io import BytesIO
+    reader = ipc_mod.open_stream(BytesIO(buf))
+    table = reader.read_all()
+    return pl.from_arrow(table)
+
+
 def _resolve_all_stats(all_stats):
     """Resolve all_stats to a list of row dicts, whether it's JSON or parquet_b64."""
     if isinstance(all_stats, list):
         return all_stats
-    if isinstance(all_stats, dict) and all_stats.get('format') == 'parquet_b64':
+    if isinstance(all_stats, dict) and all_stats.get('format') in ('ipc_b64', 'parquet_b64'):
         raw = base64.b64decode(all_stats['data'])
-        df = pd.read_parquet(BytesIO(raw), engine='pyarrow')
+        import pyarrow.ipc as ipc_mod
+        reader = ipc_mod.open_stream(BytesIO(raw))
+        table = reader.read_all()
+        df = pd.DataFrame(table.to_pydict())
         rows = json.loads(df.to_json(orient='records'))
         # JSON-parse each cell (they were JSON-encoded on the Python side)
         parsed_rows = []
@@ -96,7 +108,7 @@ def test_payload_slice_returns_requested_rows():
     assert isinstance(buffers, list) and len(buffers) == 1
 
     # Decode parquet and verify row count equals requested slice length
-    out_df = pl.read_parquet(buffers[0])
+    out_df = _read_ipc_buffer(buffers[0])
     # rewritten columns include 'index' and 'a'
     assert set(out_df.columns) >= set(['index', 'a'])
     assert out_df.shape[0] == 3
@@ -119,7 +131,7 @@ def test_payload_sort_and_slice():
     w._handle_payload_args({'start': 0, 'end': 2, 'sort': rw, 'sort_direction': 'asc'})
     assert len(captured) == 1
     payload, buffers = captured[0]
-    out_df = pl.read_parquet(buffers[0])
+    out_df = _read_ipc_buffer(buffers[0])
     # The smallest two values should be returned
     vals = out_df[rw].to_list()
     assert vals == sorted(vals)[:2]
@@ -144,7 +156,7 @@ def test_multiple_payloads_large_df():
 
     # Validate first slice contents/size
     payload1, buffers1 = captured[0]
-    out1 = pl.read_parquet(buffers1[0])
+    out1 = _read_ipc_buffer(buffers1[0])
     assert out1.shape[0] == 100
     # rewritten col name for 'v' can be inferred from columns (exclude 'index')
     rw_cols1 = [c for c in out1.columns if c != 'index']
@@ -155,7 +167,7 @@ def test_multiple_payloads_large_df():
 
     # Validate second slice contents/size
     payload2, buffers2 = captured[1]
-    out2 = pl.read_parquet(buffers2[0])
+    out2 = _read_ipc_buffer(buffers2[0])
     assert out2.shape[0] == 150
     rw_cols2 = [c for c in out2.columns if c != 'index']
     assert len(rw_cols2) == 1
@@ -165,7 +177,7 @@ def test_multiple_payloads_large_df():
 
     # Validate third (primary) slice contents/size
     payload3a, buffers3a = captured[2]
-    out3a = pl.read_parquet(buffers3a[0])
+    out3a = _read_ipc_buffer(buffers3a[0])
     assert out3a.shape[0] == 20
     rw_cols3a = [c for c in out3a.columns if c != 'index']
     rw3a = rw_cols3a[0]
@@ -174,7 +186,7 @@ def test_multiple_payloads_large_df():
 
     # Validate third (second_request) slice contents/size
     payload3b, buffers3b = captured[3]
-    out3b = pl.read_parquet(buffers3b[0])
+    out3b = _read_ipc_buffer(buffers3b[0])
     assert out3b.shape[0] == 5
     rw_cols3b = [c for c in out3b.columns if c != 'index']
     rw3b = rw_cols3b[0]
@@ -206,7 +218,7 @@ def test_handle_payload_never_collects_base(monkeypatch):
     w._handle_payload_args({'start': 10, 'end': 20})
     assert len(captured) == 1
     payload, buffers = captured[0]
-    out_df = pl.read_parquet(buffers[0])
+    out_df = _read_ipc_buffer(buffers[0])
     assert out_df.shape[0] == 10
 
 
