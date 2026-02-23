@@ -369,14 +369,11 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 9.10.0
-      - name: Setup Node.js with pnpm cache
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -408,14 +405,11 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 9.10.0
-      - name: Setup Node.js with pnpm cache
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -481,14 +475,11 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 9.10.0
-      - name: Setup Node.js with pnpm cache
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
