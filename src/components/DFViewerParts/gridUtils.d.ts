@@ -15,7 +15,7 @@ export declare function childColDef(f: MultiIndexColumnConfig, level: number): C
 export declare function multiIndexColToColDef(f: MultiIndexColumnConfig[], level?: number): ColGroupDef;
 export declare function mergeCellClass(cOrig: ColDef | ColGroupDef, classSpec: "headerClass" | "cellClass", extraClass: string): ColDef | ColGroupDef;
 export declare function dfToAgrid(dfviewer_config: DFViewerConfig): (ColDef | ColGroupDef)[];
-export declare function getCellRendererSelector(pinned_rows: PinnedRowConfig[]): (params: ICellRendererParams<any, any, any>) => CellRendererSelectorResult | undefined;
+export declare function getCellRendererSelector(pinned_rows: PinnedRowConfig[], column_config: ColumnConfig[]): (params: ICellRendererParams<any, any, any>) => CellRendererSelectorResult | undefined;
 export declare function extractSDFT(summaryStatsDf: DFData): SDFT;
 export declare const getPayloadKey: (payloadArgs: PayloadArgs) => string;
 export type CommandConfigSetterT = (setter: Dispatch<SetStateAction<CommandConfigT>>) => void;
