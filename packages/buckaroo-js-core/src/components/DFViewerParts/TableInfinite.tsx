@@ -11,7 +11,7 @@ import {
 } from "./gridUtils";
 //import { InfiniteViewer } from "./InfiniteViewerImpl";
 import { Operation } from "../OperationUtils";
-import * as _ from "lodash-es";
+import { filter, map } from "lodash-es";
 import { PayloadResponse } from "./SmartRowCache";
 
 const data: [string, Operation[]][] = [
@@ -51,21 +51,21 @@ const MySelect = ({
 };
 
 function addSequentialIndex(list: Record<string, any>[]) {
-    return _.map(list, (item, index) => ({
+    return map(list, (item, index) => ({
         ...item,
         idx: index + 1, // Adding 1 to start the index from 1
     }));
 }
 
 function addUniqueIndex(list: Record<string, any>[]) {
-    return _.map(list, (item, _index) => ({
+    return map(list, (item, _index) => ({
         ...item,
         agIdx: `${item.idx}-${item.sport}`,
     }));
 }
 
 function filterBySport(list: any[], sport: string): any[] {
-    return _.filter(list, { sport: sport });
+    return filter(list, { sport: sport });
 }
 
 const getDataset = (sportName: string) => {

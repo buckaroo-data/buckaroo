@@ -1,4 +1,4 @@
-import * as _ from "lodash-es";
+import { get, isArray, isEqual, isString } from "lodash-es";
 import { Operation, SettableArg, OperationEventFunc } from "./OperationUtils";
 import { ActualArg, CommandArgSpec } from "./CommandUtils";
 import { objWithoutNull, replaceAtIdx, replaceAtKey } from "./utils";
@@ -20,10 +20,10 @@ export const OperationDetail = ({
     const commandName = command[0]["symbol"];
     const pattern = commandPatterns[commandName];
 
-    if (!_.isArray(pattern)) {
+    if (!isArray(pattern)) {
         //we shouldn't get here
         return <h2>unknown command {commandName}</h2>;
-    } else if (_.isEqual(pattern, [null])) {
+    } else if (isEqual(pattern, [null])) {
         return <div className="operation-detail"></div>;
     } else {
         const fullPattern = pattern as ActualArg[];
@@ -92,7 +92,7 @@ const ArgGetter = ({
     const [_argPos, label, argType, lastArg] = argProps;
 
     const defaultShim = (event: { target: { value: SettableArg } }) => setter(event.target.value);
-    if (argType === "enum" && _.isArray(lastArg)) {
+    if (argType === "enum" && isArray(lastArg)) {
         return (
             <fieldset key={renderKey}>
                 <label> {label} </label>
@@ -155,7 +155,7 @@ const ArgGetter = ({
         const widgetRow = columns.map((colName: string) => {
             const colSetter = (event: { target: { value: any } }) => {
                 const newColVal = event.target.value;
-                if (_.isString(newColVal)) {
+                if (isString(newColVal)) {
                     const updatedColDict = replaceAtKey(
                         val as Record<string, string>,
                         colName,
@@ -164,8 +164,8 @@ const ArgGetter = ({
                     setter(objWithoutNull(updatedColDict, ["null"]));
                 }
             };
-            const colVal = _.get(val, colName, "null");
-            if (!_.isArray(lastArg)) {
+            const colVal = get(val, colName, "null");
+            if (!isArray(lastArg)) {
                 return <h3> arg error</h3>;
             }
             return (

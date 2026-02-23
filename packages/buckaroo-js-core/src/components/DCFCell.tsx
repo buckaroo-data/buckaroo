@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import * as _ from "lodash-es";
 import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
 

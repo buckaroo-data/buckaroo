@@ -1,4 +1,4 @@
-import * as _ from "lodash-es";
+import { isArray } from "lodash-es";
 import React from "react";
 import { createPortal } from "react-dom";
 
@@ -125,7 +125,7 @@ export const getChartCell = (multiChartCellProps: ChartDisplayerA) => {
         const potentialHistogramArr = props.value;
         //for key "index", the value is "histogram"
         // this causes ReChart to blow up, so we check to see if it's an array
-        if (potentialHistogramArr === undefined || !_.isArray(potentialHistogramArr)) {
+        if (potentialHistogramArr === undefined || !isArray(potentialHistogramArr)) {
             return <span></span>;
         }
         const histogramArr = potentialHistogramArr as LineObservation[];

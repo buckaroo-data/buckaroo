@@ -1,4 +1,3 @@
-import * as _ from "lodash-es";
 import { ValueFormatterFunc } from "@ag-grid-community/core";
 
 export const getTextCellRenderer = (formatter: ValueFormatterFunc<any>) => {
