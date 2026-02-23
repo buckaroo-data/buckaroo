@@ -34,19 +34,25 @@ def test_ensure_executor_sqlite():
         if os.name == 'nt':
             os.environ['USERPROFILE'] = tmpdir
         
+        file_cache = executor_log = None
         try:
             file_cache, executor_log = ensure_executor_sqlite()
-            
+
             # Check that files exist
             buckaroo_dir = Path(tmpdir) / ".buckaroo"
             assert buckaroo_dir.exists()
             assert (buckaroo_dir / "file_cache.sqlite").exists()
             assert (buckaroo_dir / "executor_log.sqlite").exists()
-            
+
             # Check that instances are created
             assert file_cache is not None
             assert executor_log is not None
         finally:
+            # Close local instances returned by ensure_executor_sqlite
+            if file_cache is not None:
+                file_cache._conn.close()
+            if executor_log is not None:
+                executor_log._conn.close()
             # Close SQLite connections before tmpdir cleanup (Windows can't
             # delete open files)
             if cache_utils_module._file_cache is not None:
