@@ -8,7 +8,7 @@ import { DFData, DFDataRow, DFViewerConfig, SDFT } from "./DFWhole";
 
 import { getCellRendererSelector, dfToAgrid, extractPinnedRows, extractSDFT } from "./gridUtils";
 
-import { AgGridReact } from "@ag-grid-community/react"; // the AG Grid React Component
+import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
 import {
     GetRowIdParams,
     GridApi,
@@ -18,10 +18,9 @@ import {
     SortChangedEvent,
     CellClassParams,
     RefreshCellsParams,
-    //ColDef,
-} from "@ag-grid-community/core";
-import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-model";
-import { InfiniteRowModelModule } from "@ag-grid-community/infinite-row-model";
+    ClientSideRowModelModule,
+    InfiniteRowModelModule,
+} from "ag-grid-community";
 
 import {
     getAutoSize,

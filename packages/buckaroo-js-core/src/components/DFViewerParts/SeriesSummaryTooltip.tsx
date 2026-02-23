@@ -1,6 +1,6 @@
 import { DFViewer } from "./DFViewerInfinite";
 import { DFWhole, TooltipConfig } from "./DFWhole";
-import { ITooltipParams } from "@ag-grid-community/core";
+import { ITooltipParams } from "ag-grid-community";
 
 export function getBakedDFViewer(seriesDf: DFWhole) {
     const retFunc = (_props: ITooltipParams) => {

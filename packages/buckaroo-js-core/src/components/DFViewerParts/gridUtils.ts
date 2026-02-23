@@ -8,7 +8,11 @@ import {
     IGetRowsParams,
     SizeColumnsToContentStrategy,
     SizeColumnsToFitProvidedWidthStrategy,
-} from "@ag-grid-community/core";
+    colorSchemeDark,
+    colorSchemeLight,
+    themeAlpine,
+    Theme,
+} from "ag-grid-community";
 
 import {
     DFWhole,
@@ -34,7 +38,7 @@ import { getFormatterFromArgs, getCellRenderer, objFormatter, getFormatter } fro
 import { CSSProperties, Dispatch, SetStateAction } from "react";
 import { CommandConfigT } from "../CommandUtils";
 import { KeyAwareSmartRowCache, PayloadArgs } from "./SmartRowCache";
-import { colorSchemeDark, colorSchemeLight, themeAlpine, Theme } from "@ag-grid-community/theming";
+
 
 
 // for now colDef stuff with less than 3 implementantions should stay in this file

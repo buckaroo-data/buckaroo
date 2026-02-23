@@ -12,7 +12,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import React, { useMemo, useState } from "react";
 import { DFViewerInfinite } from "../components/DFViewerParts/DFViewerInfinite";
 import { DFViewerConfig } from "../components/DFViewerParts/DFWhole";
-import { IDatasource, IGetRowsParams } from "@ag-grid-community/core";
+import { IDatasource, IGetRowsParams } from "ag-grid-community";
 
 const makeContextualDatasource = (dataA: any[], dataB: any[], delayMs = 0): IDatasource => {
   const total = Math.max(dataA.length, dataB.length);

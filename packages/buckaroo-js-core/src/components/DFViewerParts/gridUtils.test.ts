@@ -14,7 +14,7 @@ import {
 import { omit } from "lodash-es";
 import { DFData, DFViewerConfig, NormalColumnConfig, MultiIndexColumnConfig, PinnedRowConfig, ColumnConfig } from "./DFWhole";
 import { getFloatFormatter } from './Displayer';
-import { ColDef, ValueFormatterParams } from '@ag-grid-community/core';
+import { ColDef, ValueFormatterParams } from 'ag-grid-community';
 
 describe("testing utility functions in gridUtils ", () => {
   // mostly sanity checks to help develop gridUtils

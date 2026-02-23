@@ -58,8 +58,8 @@
   font-size: 0.95em;
 }
 .dependent-tabs ul.tabs li.active {
-  background: var(--ag-range-selection-background-color-3);
-  color: var(--ag-alpine-active-color);
+  background: var(--ag-range-selection-background-color);
+  color: var(--ag-accent-color);
 }
 .dependent-tabs .output-area {
   clear: both;
@@ -366,7 +366,7 @@
 }
 
 .ag-theme-alpine-dark, .ag-theme-alpine  {
-    --ag-grid-size:3px;
+    --ag-spacing:3px;
     --ag-list-item-height: 20px;
  }
 
