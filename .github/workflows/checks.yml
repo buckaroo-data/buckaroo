@@ -262,7 +262,7 @@ jobs:
       - name: Install the project
         run: uv sync --all-extras --dev
       - name: Run tests
-        run: uv run pytest ./tests/unit --color=yes -x
+        run: uv run pytest ./tests/unit --color=yes
 
   # NOTE: Playwright integration tests (TestStorybook, TestServer, TestMarimo,
   # TestWASMMarimo) temporarily removed while iterating on Windows CI.
