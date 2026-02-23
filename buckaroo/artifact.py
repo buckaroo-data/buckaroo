@@ -15,7 +15,6 @@ import pandas as pd
 
 from buckaroo.serialization_utils import (
     prepare_df_for_serialization,
-    sd_to_parquet_b64,
     _json_encode_cell,
 )
 from buckaroo.dataflow.widget_extension_utils import configure_buckaroo

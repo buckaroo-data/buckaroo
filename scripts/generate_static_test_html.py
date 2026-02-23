@@ -7,7 +7,6 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pandas as pd
-import numpy as np
 from buckaroo.artifact import to_html
 
 # Create a DataFrame with enough variety to exercise rendering
