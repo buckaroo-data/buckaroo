@@ -1,6 +1,6 @@
 from buckaroo.dataflow.dataflow import StylingAnalysis
 from typing import Any
-from buckaroo.styling_helpers import obj_, float_, pinned_histogram
+from buckaroo.styling_helpers import obj_, float_, inherit_, pinned_histogram
 
 
 class DefaultMainStyling(StylingAnalysis):
@@ -34,29 +34,30 @@ class DefaultMainStyling(StylingAnalysis):
         return base_config
 
 
-class DefaultSummaryStatsStyling(StylingAnalysis):
+class DefaultSummaryStatsStyling(DefaultMainStyling):
     requires_summary = [
+        "_type",
         "dtype", "non_null_count", "null_count", "unique_count", "distinct_count",
-        "mean", "std", "min", 
+        "mean", "std", "min",
         "median",
         "max",
         "most_freq", "2nd_freq", "3rd_freq", "4th_freq", "5th_freq"]
     pinned_rows = [
         obj_('dtype'),
-        float_('non_null_count', 0),
-        float_('null_count', 0),
-        float_('unique_count', 0),
-        float_('distinct_count', 0),
-        float_('mean'),
-        float_('std'),
-        float_('min'),
-        float_('median'),
-        float_('max'),
-        obj_('most_freq'),
-        obj_('2nd_freq'),
-        obj_('3rd_freq'),
-        obj_('4th_freq'),
-        obj_('5th_freq')
+        inherit_('non_null_count'),
+        inherit_('null_count'),
+        inherit_('unique_count'),
+        inherit_('distinct_count'),
+        inherit_('mean'),
+        inherit_('std'),
+        inherit_('min'),
+        inherit_('median'),
+        inherit_('max'),
+        inherit_('most_freq'),
+        inherit_('2nd_freq'),
+        inherit_('3rd_freq'),
+        inherit_('4th_freq'),
+        inherit_('5th_freq')
     ]
 
     df_display_name = "summary"

@@ -23,6 +23,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             msg = {
                 "type": "initial_state",
                 "metadata": session.metadata,
+                "prompt": session.prompt,
                 "df_display_args": session.df_display_args,
                 "df_data_dict": session.df_data_dict,
                 "df_meta": session.df_meta,
