@@ -195,7 +195,8 @@ jobs:
       - name: Install wheel with MCP extras
         run: |
           uv venv .venv-wheel
-          uv pip install --python .venv-wheel/bin/python "dist/buckaroo-*.whl[mcp]" pytest
+          WHEEL=$(ls dist/buckaroo-*.whl)
+          uv pip install --python .venv-wheel/bin/python "${WHEEL}[mcp]" pytest
       - name: Verify entry point
         run: .venv-wheel/bin/buckaroo-table --help || true
       - name: Run MCP integration tests
