@@ -67,7 +67,8 @@ def test_configure_buckaroo_extra():
         BuckarooWidget, extra_pinned_rows=[foo_row], extra_analysis_klasses=[Custom_1])
     SyntheticStyling = [kls for kls in ExtraBuckaroo.analysis_klasses if kls.__name__ == 'SyntheticStyling'][0]
 
-    base_pinned_row_len = len(DefaultMainStyling.pinned_rows)
+    BaseStylingKls = find_most_specific_styling(BuckarooWidget.analysis_klasses)
+    base_pinned_row_len = len(BaseStylingKls.pinned_rows)
 
     assert foo_row in SyntheticStyling.pinned_rows
     assert len(SyntheticStyling.pinned_rows) == (base_pinned_row_len + 1)

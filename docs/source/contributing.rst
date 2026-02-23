@@ -82,6 +82,36 @@ First, you need to fork the project. Then setup your environment:
    Getting typescript updates from the widget into a jupyter lab notebook is a little tricky.  The following steps ensure that typescript code changes are picked up.
 
 
+Developing the MCP server
+=========================
+
+One-time setup
+--------------
+
+Register the MCP server with Claude Code, pointing at the venv binary:
+
+.. code-block:: bash
+
+   claude mcp add -s user buckaroo-table -- /path/to/buckaroo/.venv/bin/buckaroo-table
+
+You only need to run this once. The registration persists across sessions.
+
+Edit / rebuild / test cycle
+----------------------------
+
+After making changes to the MCP server code (``buckaroo_mcp_tool.py``,
+``buckaroo/server.py``, etc.), rebuild and reinstall the wheel:
+
+.. code-block:: bash
+
+   ./scripts/full_build.sh && uv pip install --force-reinstall "$(ls dist/buckaroo-*.whl)[mcp]"
+
+Then inside your Claude Code session, type ``/mcp`` and reconnect
+``buckaroo-table``. This restarts the server process with the newly installed
+code. No need to exit the session, run ``pkill``, or re-run ``claude mcp add``.
+
+You do **not** need to bump the version number between iterations.
+
 
 Loading typescript changes
 ==========================
