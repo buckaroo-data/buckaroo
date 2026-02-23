@@ -142,9 +142,11 @@ def _execute_and_report_fork(func, args, kwargs, queue) -> None:
         except Exception:
             pass
 
-ctx = multiprocessing.get_context("forkserver")
-#ctx = multiprocessing.get_context("fork")
-#ctx = multiprocessing.get_context("spawn")
+import sys
+if sys.platform == "win32":
+    ctx = multiprocessing.get_context("spawn")
+else:
+    ctx = multiprocessing.get_context("forkserver")
 def mp_timeout(timeout_secs: float):
 
     def inner_timeout(f):
