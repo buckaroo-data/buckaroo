@@ -272,7 +272,11 @@ class LoadHandler(tornado.web.RequestHandler):
 class SessionPageHandler(tornado.web.RequestHandler):
     def get(self, session_id):
         self.set_header("Content-Type", "text/html")
-        self.write(SESSION_HTML.replace("__SESSION_ID__", session_id))
+        self.set_header("Cache-Control", "no-cache")
+        import buckaroo
+        ver = getattr(buckaroo, "__version__", "0")
+        html = SESSION_HTML.replace("__SESSION_ID__", session_id).replace("__VERSION__", ver)
+        self.write(html)
 
 
 SESSION_HTML = """\
@@ -281,8 +285,8 @@ SESSION_HTML = """\
 <head>
     <meta charset="utf-8">
     <title>Buckaroo — __SESSION_ID__</title>
-    <link rel="stylesheet" href="/static/compiled.css">
-    <link rel="stylesheet" href="/static/standalone.css">
+    <link rel="stylesheet" href="/static/compiled.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/standalone.css?v=__VERSION__">
     <style>
         html, body { margin: 0; padding: 0; width: 100%; height: 100vh; background: #181d1f; }
         @media (prefers-color-scheme: light) { html, body { background: #fff; } }
@@ -315,7 +319,7 @@ SESSION_HTML = """\
     <div id="filename-bar"></div>
     <div id="prompt-bar"></div>
     <div id="root"></div>
-    <script type="module" src="/static/standalone.js"></script>
+    <script type="module" src="/static/standalone.js?v=__VERSION__"></script>
 </body>
 </html>
 """
