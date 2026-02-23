@@ -1,17 +1,25 @@
-"""Integration tests for the uvx-based MCP install path.
+"""Integration tests for the MCP install path.
 
-These tests exercise the REAL ``uvx`` install — the path that actual users hit
-when Claude Code runs ``uvx --from "buckaroo[mcp]" buckaroo-table``.  The
-existing ``test_mcp_tool_cleanup.py`` tests use ``sys.executable`` directly,
-which bypasses uvx entirely and misses startup/protocol issues.
+These tests exercise the MCP tool entry point (``buckaroo-table``).  They can
+run in two modes:
 
-All tests are marked ``@pytest.mark.slow`` — they hit the network.
+1. **Wheel mode** (CI default): Set ``BUCKAROO_MCP_CMD=buckaroo-table`` after
+   pip-installing the built wheel.  The tests run against the just-built
+   artifact — no network needed.
+
+2. **uvx mode** (for manual testing against TestPyPI):  Leave
+   ``BUCKAROO_MCP_CMD`` unset and the tests will use ``uvx`` to install from
+   TestPyPI.
+
+All tests are marked ``@pytest.mark.slow``.
 Skip them with:  pytest -m "not slow"
 
 Configuration via environment variables:
-    BUCKAROO_MCP_PACKAGE   default: "buckaroo[mcp]"
-    BUCKAROO_INDEX_URL     default: "https://test.pypi.org/simple/"
-    BUCKAROO_EXTRA_INDEX   default: "https://pypi.org/simple/"
+    BUCKAROO_MCP_CMD       If set, split into the command list (e.g. "buckaroo-table").
+                           Overrides the uvx command entirely.
+    BUCKAROO_MCP_PACKAGE   default: "buckaroo[mcp]"  (uvx mode only)
+    BUCKAROO_INDEX_URL     default: "https://test.pypi.org/simple/"  (uvx mode only)
+    BUCKAROO_EXTRA_INDEX   default: "https://pypi.org/simple/"  (uvx mode only)
 """
 
 import csv
@@ -30,22 +38,31 @@ import pytest
 # Configuration
 # ---------------------------------------------------------------------------
 
-UVX_PACKAGE = os.environ.get("BUCKAROO_MCP_PACKAGE", "buckaroo[mcp]")
-UVX_INDEX_URL = os.environ.get("BUCKAROO_INDEX_URL", "https://test.pypi.org/simple/")
-UVX_EXTRA_INDEX = os.environ.get("BUCKAROO_EXTRA_INDEX", "https://pypi.org/simple/")
+_MCP_CMD_OVERRIDE = os.environ.get("BUCKAROO_MCP_CMD", "")
 
-# The command that ``claude mcp add`` would run
-UVX_CMD = [
-    "uvx",
-    "--index-url", UVX_INDEX_URL,
-    "--extra-index-url", UVX_EXTRA_INDEX,
-    "--from", UVX_PACKAGE,
-    "buckaroo-table",
-]
+if _MCP_CMD_OVERRIDE:
+    # Wheel mode: command is already installed (e.g. "buckaroo-table")
+    MCP_CMD = _MCP_CMD_OVERRIDE.split()
+    _can_run = shutil.which(MCP_CMD[0]) is not None
+    skip_no_cmd = pytest.mark.skipif(
+        not _can_run,
+        reason=f"{MCP_CMD[0]!r} not on PATH (set by BUCKAROO_MCP_CMD)",
+    )
+else:
+    # uvx mode: build the full uvx command
+    UVX_PACKAGE = os.environ.get("BUCKAROO_MCP_PACKAGE", "buckaroo[mcp]")
+    UVX_INDEX_URL = os.environ.get("BUCKAROO_INDEX_URL", "https://test.pypi.org/simple/")
+    UVX_EXTRA_INDEX = os.environ.get("BUCKAROO_EXTRA_INDEX", "https://pypi.org/simple/")
+    MCP_CMD = [
+        "uvx",
+        "--index-url", UVX_INDEX_URL,
+        "--extra-index-url", UVX_EXTRA_INDEX,
+        "--from", UVX_PACKAGE,
+        "buckaroo-table",
+    ]
+    _can_run = shutil.which("uvx") is not None
+    skip_no_cmd = pytest.mark.skipif(not _can_run, reason="uvx not on PATH")
 
-HAS_UVX = shutil.which("uvx") is not None
-
-skip_no_uvx = pytest.mark.skipif(not HAS_UVX, reason="uvx not on PATH")
 slow = pytest.mark.slow
 
 
@@ -165,23 +182,22 @@ def _write_test_csv(path: str):
 # ---------------------------------------------------------------------------
 
 @slow
-@skip_no_uvx
-class TestUvxMcpInstall:
+@skip_no_cmd
+class TestMcpInstall:
 
+    @pytest.mark.skipif(bool(_MCP_CMD_OVERRIDE), reason="not applicable in wheel mode")
     def test_uvx_resolves_package(self):
         """uvx can resolve and fetch buckaroo[mcp] without errors."""
-        # Use python -c '' as a quick "did it install and launch?" check.
         cmd = [
             "uvx",
-            "--index-url", UVX_INDEX_URL,
-            "--extra-index-url", UVX_EXTRA_INDEX,
-            "--from", UVX_PACKAGE,
+            "--index-url", os.environ.get("BUCKAROO_INDEX_URL", "https://test.pypi.org/simple/"),
+            "--extra-index-url", os.environ.get("BUCKAROO_EXTRA_INDEX", "https://pypi.org/simple/"),
+            "--from", os.environ.get("BUCKAROO_MCP_PACKAGE", "buckaroo[mcp]"),
             "python", "-c", "import buckaroo_mcp_tool; print('ok')",
         ]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         assert r.returncode == 0, (
-            f"uvx failed to resolve {UVX_PACKAGE}:\n"
-            f"stdout: {r.stdout[:500]}\nstderr: {r.stderr[:500]}"
+            f"uvx resolve failed:\nstdout: {r.stdout[:500]}\nstderr: {r.stderr[:500]}"
         )
         assert "ok" in r.stdout
 
@@ -190,7 +206,7 @@ class TestUvxMcpInstall:
         when stdin is immediately closed, OR only valid JSON-RPC lines.
         Any non-JSON stdout would corrupt the MCP protocol."""
         proc = subprocess.Popen(
-            UVX_CMD,
+            MCP_CMD,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -222,7 +238,7 @@ class TestUvxMcpInstall:
         """Pipe an MCP initialize message and verify we get a valid response
         with serverInfo.name == 'buckaroo-table'."""
         proc = subprocess.Popen(
-            UVX_CMD,
+            MCP_CMD,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -260,7 +276,7 @@ class TestUvxMcpInstall:
     def test_uvx_startup_timing(self):
         """Time from process spawn to first JSON-RPC response must be < 15s."""
         proc = subprocess.Popen(
-            UVX_CMD,
+            MCP_CMD,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -287,7 +303,7 @@ class TestUvxMcpInstall:
         Uses newline-delimited JSON (the MCP Python SDK stdio transport format).
         """
         proc = subprocess.Popen(
-            UVX_CMD,
+            MCP_CMD,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -335,7 +351,7 @@ class TestUvxMcpInstall:
         port = 8700
 
         proc = subprocess.Popen(
-            UVX_CMD,
+            MCP_CMD,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
