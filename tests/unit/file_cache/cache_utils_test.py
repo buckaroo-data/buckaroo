@@ -47,7 +47,12 @@ def test_ensure_executor_sqlite():
             assert file_cache is not None
             assert executor_log is not None
         finally:
-            # Reset global instances
+            # Close SQLite connections before tmpdir cleanup (Windows can't
+            # delete open files)
+            if cache_utils_module._file_cache is not None:
+                cache_utils_module._file_cache._conn.close()
+            if cache_utils_module._executor_log is not None:
+                cache_utils_module._executor_log._conn.close()
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
@@ -79,7 +84,12 @@ def test_get_global_file_cache():
             fc2 = get_global_file_cache()
             assert fc2 is not None
         finally:
-            # Reset global instances
+            # Close SQLite connections before tmpdir cleanup (Windows can't
+            # delete open files)
+            if cache_utils_module._file_cache is not None:
+                cache_utils_module._file_cache._conn.close()
+            if cache_utils_module._executor_log is not None:
+                cache_utils_module._executor_log._conn.close()
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
@@ -111,7 +121,12 @@ def test_get_global_executor_log():
             log2 = get_global_executor_log()
             assert log2 is not None
         finally:
-            # Reset global instances
+            # Close SQLite connections before tmpdir cleanup (Windows can't
+            # delete open files)
+            if cache_utils_module._file_cache is not None:
+                cache_utils_module._file_cache._conn.close()
+            if cache_utils_module._executor_log is not None:
+                cache_utils_module._executor_log._conn.close()
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
@@ -147,7 +162,12 @@ def test_get_cache_size(tmp_path):
             assert sizes['file_cache'] >= 0
             assert sizes['executor_log'] >= 0
         finally:
-            # Reset global instances
+            # Close SQLite connections before tmpdir cleanup (Windows can't
+            # delete open files)
+            if cache_utils_module._file_cache is not None:
+                cache_utils_module._file_cache._conn.close()
+            if cache_utils_module._executor_log is not None:
+                cache_utils_module._executor_log._conn.close()
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
@@ -192,7 +212,12 @@ def test_clear_file_cache(tmp_path):
             md = fc.get_file_metadata(test_file)
             assert md is None
         finally:
-            # Reset global instances
+            # Close SQLite connections before tmpdir cleanup (Windows can't
+            # delete open files)
+            if cache_utils_module._file_cache is not None:
+                cache_utils_module._file_cache._conn.close()
+            if cache_utils_module._executor_log is not None:
+                cache_utils_module._executor_log._conn.close()
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
@@ -229,7 +254,12 @@ def test_clear_executor_log(tmp_path):
             events = log.get_log_events()
             assert len(events) == 0
         finally:
-            # Reset global instances
+            # Close SQLite connections before tmpdir cleanup (Windows can't
+            # delete open files)
+            if cache_utils_module._file_cache is not None:
+                cache_utils_module._file_cache._conn.close()
+            if cache_utils_module._executor_log is not None:
+                cache_utils_module._executor_log._conn.close()
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
@@ -291,7 +321,12 @@ def test_clear_oldest_cache_entries(tmp_path):
             md = fc.get_file_metadata(file2)
             assert md is not None
         finally:
-            # Reset global instances
+            # Close SQLite connections before tmpdir cleanup (Windows can't
+            # delete open files)
+            if cache_utils_module._file_cache is not None:
+                cache_utils_module._file_cache._conn.close()
+            if cache_utils_module._executor_log is not None:
+                cache_utils_module._executor_log._conn.close()
             cache_utils_module._file_cache = None
             cache_utils_module._executor_log = None
             if original_home:
