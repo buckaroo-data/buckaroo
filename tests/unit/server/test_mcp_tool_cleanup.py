@@ -20,6 +20,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# These tests use SIGKILL/SIGTERM extensively — Unix-only
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Unix signal-based process lifecycle tests",
+)
+
 
 # ---------------------------------------------------------------------------
 # Mock away the ``mcp`` dependency so buckaroo_mcp_tool can be imported
@@ -132,7 +138,6 @@ class TestServerProcessCleanup:
                             pass
                     m._server_monitor = old_monitor
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM cleanup differs on Windows")
     def test_cleanup_terminates_running_process(self):
         """_cleanup_server() must actually terminate a running subprocess."""
         m = buckaroo_mcp_tool
