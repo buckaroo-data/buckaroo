@@ -4,7 +4,7 @@ import {
     useEffect,
     useRef,
 } from "react";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { DFData, DFDataRow, DFViewerConfig, SDFT } from "./DFWhole";
 
 import { getCellRendererSelector, dfToAgrid, extractPinnedRows, extractSDFT } from "./gridUtils";

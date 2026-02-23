@@ -37,7 +37,7 @@
     "@ag-grid-community/styles": "^32.3.9",
     "@ag-grid-community/theming": "^32.3.9",
     "hyparquet": "^1.8.2",
-    "lodash": "^4.17.21",
+    "lodash-es": "^4.17.21",
     "recharts": "^2.13.1"
   },
   "devDependencies": {
@@ -55,7 +55,8 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/jest": "^29.5.14",
-    "@types/lodash": "^4.17.13",
+    "@types/lodash-es": "^4.17.12",
+    "lodash": "^4.17.21",
     "@types/node": "^22.15.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
