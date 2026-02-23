@@ -13,6 +13,8 @@ multiprocessing  an behave differently when a function is defined in an imported
 
 LOCAL_TIMEOUT = 0.8
 CI_TIMEOUT = 1.0
+# spawn context on Windows is much slower than forkserver (full process startup)
+WINDOWS_CI_TIMEOUT = 10.0
 
 # Speed up factor for test sleeps - makes tests run much faster
 # Speeds up actual sleep calls while ensuring timeout tests still timeout correctly
@@ -24,7 +26,12 @@ def fast_sleep(seconds):
     time.sleep(actual_sleep)
 
 IS_RUNNING_LOCAL = "Paddy" in socket.gethostname()
-TIMEOUT = LOCAL_TIMEOUT if IS_RUNNING_LOCAL else CI_TIMEOUT
+if IS_RUNNING_LOCAL:
+    TIMEOUT = LOCAL_TIMEOUT
+elif sys.platform == "win32":
+    TIMEOUT = WINDOWS_CI_TIMEOUT
+else:
+    TIMEOUT = CI_TIMEOUT
 
 
 
