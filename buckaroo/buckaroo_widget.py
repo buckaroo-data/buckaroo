@@ -27,7 +27,7 @@ from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.extension_utils import copy_extend
 
 from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, sd_to_parquet_b64
-from .dataflow.dataflow import CustomizableDataflow
+from .dataflow.pandas_dataflow import PandasCustomizableDataflow
 from .dataflow.dataflow_extras import (Sampling, exception_protect)
 from .dataflow.styling_core import (ComponentConfig, DFViewerConfig, DisplayArgs, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
 from .dataflow.autocleaning import PandasAutocleaning
@@ -124,15 +124,12 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         self.record_transcript = record_transcript
         self.exception = None
         kls = self.__class__
-        class InnerDataFlow(CustomizableDataflow):
+        class InnerDataFlow(kls.dataflow_klass):
             sampling_klass = kls.sampling_klass
             autocleaning_klass = kls.autocleaning_klass
             DFStatsClass = kls.DFStatsClass
             autoclean_conf= kls.autoclean_conf
             analysis_klasses = kls.analysis_klasses
-
-            def _df_to_obj(idfself, df:pd.DataFrame):
-                return self._df_to_obj(df)
 
         self.dataflow = InnerDataFlow(
             orig_df,
@@ -162,6 +159,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     render_func_name = Unicode("baked").tag(sync=True)
 
 
+    dataflow_klass = PandasCustomizableDataflow
     sampling_klass = PdSampling
     autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
     DFStatsClass = DfStatsV2 # Pandas Specific

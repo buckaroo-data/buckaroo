@@ -15,7 +15,7 @@ import sys
 def test_base():
     """Bare `pip install buckaroo` — pandas comes via fastparquet."""
     import pandas as pd
-    from buckaroo.dataflow.dataflow import CustomizableDataflow
+    from buckaroo.dataflow.pandas_dataflow import PandasCustomizableDataflow
     from buckaroo.dataflow.autocleaning import PandasAutocleaning
     from buckaroo.customizations.pd_autoclean_conf import NoCleaningConf
     from buckaroo.serialization_utils import pd_to_obj, to_parquet
@@ -23,7 +23,7 @@ def test_base():
     df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
 
     # Verify the full dataflow pipeline runs
-    class TestDataflow(CustomizableDataflow):
+    class TestDataflow(PandasCustomizableDataflow):
         autocleaning_klass = PandasAutocleaning
         autoclean_conf = tuple([NoCleaningConf])
 

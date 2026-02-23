@@ -13,7 +13,7 @@ from buckaroo.customizations.pandas_commands import (
     SafeInt, DropCol, FillNA, GroupBy, NoOp, Search, OnlyOutliers
 )
 from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)
-from buckaroo.dataflow.dataflow import CustomizableDataflow
+from buckaroo.dataflow.pandas_dataflow import PandasCustomizableDataflow
 
 dirty_df = pd.DataFrame(
     {'a':[10,  20,  30,   40,  10, 20.3,   5, None, None, None],
@@ -500,7 +500,7 @@ def test_autoclean_dataflow():
     """
     verify that different autocleaning confs are actually called
     """
-    class SentinelDataflow(CustomizableDataflow):
+    class SentinelDataflow(PandasCustomizableDataflow):
         autocleaning_klass = PandasAutocleaning
         autoclean_conf = tuple([SentinelConfig, NoCleaningConf])
 

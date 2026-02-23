@@ -9,10 +9,11 @@ from buckaroo.df_util import old_col_new_col
 from .pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
 from .pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from .customizations.pl_stats_v2 import PL_ANALYSIS_V2
-from .serialization_utils import pd_to_obj, sd_to_parquet_b64
+from .serialization_utils import sd_to_parquet_b64
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .customizations.pl_autocleaning_conf import NoCleaningConfPl
 from .dataflow.dataflow import Sampling
+from .dataflow.polars_dataflow import PolarsCustomizableDataflow
 from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.widget_extension_utils import configure_buckaroo
 
@@ -50,6 +51,7 @@ class PolarsAutocleaning(PandasAutocleaning):
 class PolarsBuckarooWidget(BuckarooWidget):
     """TODO: Add docstring here
     """
+    dataflow_klass = PolarsCustomizableDataflow
     analysis_klasses = local_analysis_klasses
     autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
     autoclean_conf = tuple([NoCleaningConfPl]) #override the base CustomizableDataFlow conf
@@ -59,17 +61,6 @@ class PolarsBuckarooWidget(BuckarooWidget):
     def _sd_to_jsondf(self, sd):
         """Serialize summary stats dict as parquet-b64."""
         return sd_to_parquet_b64(sd)
-
-    def _build_error_dataframe(self, e):
-        return pl.DataFrame({'err': [str(e)]})
-
-    def _df_to_obj(self, df):
-        # I want to this, but then row numbers are lost
-        #return pd_to_obj(self.sampling_klass.serialize_sample(df).to_pandas())
-        import pandas as pd
-        if isinstance(df, pd.DataFrame):
-            return pd_to_obj(self.sampling_klass.serialize_sample(df))
-        return pd_to_obj(self.sampling_klass.serialize_sample(df.to_pandas()))
 
 
 def prepare_df_for_serialization(df:pl.DataFrame) -> pl.DataFrame:

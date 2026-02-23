@@ -2,7 +2,8 @@ import pandas as pd
 import pytest
 from ..fixtures import (DistinctCount)
 from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
-from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
+from buckaroo.dataflow.pandas_dataflow import PandasCustomizableDataflow
+from buckaroo.dataflow.dataflow import StylingAnalysis
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget
 from buckaroo.jlisp.lisp_utils import (s, sQ)
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
@@ -44,7 +45,7 @@ DFVIEWER_CONFIG_WITHOUT_B = {
     'extra_grid_config': {},
 }
 
-class ACDFC(CustomizableDataflow):
+class ACDFC(PandasCustomizableDataflow):
     autocleaning_klass = PandasAutocleaning
     autoclean_conf = tuple([NoCleaningConf])
 

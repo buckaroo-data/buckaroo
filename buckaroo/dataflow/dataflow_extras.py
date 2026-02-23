@@ -2,7 +2,6 @@ import sys
 import logging
 
 
-import pandas as pd
 
 logger = logging.getLogger()
 
@@ -13,8 +12,6 @@ EMPTY_DF_DISPLAY_ARG = {'data_key': 'empty', 'df_viewer_config': EMPTY_DFVIEWER_
                            'summary_stats_key': 'empty'}
 
 
-SENTINEL_DF_1 = pd.DataFrame({'foo'  :[10, 20], 'bar' : ["asdf", "iii"]})
-SENTINEL_DF_2 = pd.DataFrame({'col1' :[55, 55], 'col2': ["pppp", "333"]})
 
 SENTINEL_COLUMN_CONFIG_1 = "ASDF"
 SENTINEL_COLUMN_CONFIG_2 = "FOO-BAR"
@@ -65,10 +62,7 @@ class Sampling:
             print("Removing excess columns, found %d columns" %  len(df.columns))
             df = df[df.columns[:kls.max_columns]]
         if kls.pre_limit and len(df) > kls.pre_limit:
-            sampled = df.sample(kls.pre_limit)
-            if isinstance(sampled, pd.DataFrame):
-                return sampled.sort_index()
-            return sampled
+            return df.sample(kls.pre_limit)
         return df
 
 
@@ -76,7 +70,7 @@ class Sampling:
     def serialize_sample(kls, df):
         if kls.serialize_limit and len(df) > kls.serialize_limit:
             sampled = df.sample(kls.serialize_limit)
-            if isinstance(sampled, pd.DataFrame):
+            if hasattr(sampled, 'sort_index'):
                 return sampled.sort_index()
             return sampled
         return df
