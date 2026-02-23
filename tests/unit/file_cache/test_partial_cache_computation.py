@@ -4,7 +4,16 @@ continue computing missing columns in background.
 """
 # state:READONLY
 
+import sys
+import pytest
 import polars as pl
+
+# Timing assumptions and tmpdir cleanup don't work on Windows (spawn is slow,
+# SQLite file locking prevents cleanup)
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Timing-dependent tests incompatible with Windows spawn context",
+)
 from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget
 from buckaroo.file_cache.cache_utils import get_global_file_cache, clear_file_cache
 from buckaroo.read_utils import read_df
