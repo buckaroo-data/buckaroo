@@ -239,51 +239,11 @@ jobs:
   # Integration tests — install the pre-built wheel, simulate end-user install
   # ---------------------------------------------------------------------------
 
-  TestStorybook:
-    name: Storybook Playwright Tests
-    needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.10.0
-      - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v4
-        with:
-          cache: 'pnpm'
-          cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: buckaroo-build
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
-      - name: Run Storybook Playwright Tests
-        run: bash scripts/test_playwright_storybook.sh
-      - name: Capture Theme Screenshots
-        run: bash scripts/test_playwright_screenshots.sh
-      - name: Upload Theme Screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: theme-screenshots
-          path: packages/buckaroo-js-core/screenshots/
-          if-no-files-found: ignore
-
-  TestServer:
-    name: Server Playwright Tests
-    needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
-    timeout-minutes: 10
+  TestPythonWindows:
+    name: Python / Test (Windows)
+    runs-on: depot-windows-2025
+    timeout-minutes: 15
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -292,107 +252,21 @@ jobs:
           enable-cache: true
           python-version: "3.13"
           prune-cache: false
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.10.0
-      - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v4
-        with:
-          cache: 'pnpm'
-          cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: buckaroo-build
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
-      - name: Run Server Playwright Tests
-        run: bash scripts/test_playwright_server.sh
-
-  TestMarimo:
-    name: Marimo Playwright Tests
-    needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
-    timeout-minutes: 4
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          python-version: "3.13"
-          prune-cache: false
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.10.0
-      - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v4
-        with:
-          cache: 'pnpm'
-          cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: buckaroo-build
+      - name: setup js files
+        shell: bash
+        run: |
+          mkdir -p buckaroo/static
+          touch buckaroo/static/compiled.css
+          touch buckaroo/static/widget.js
+          touch buckaroo/static/widget.css
       - name: Install the project
         run: uv sync --all-extras --dev
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
-      - name: Run Marimo Playwright Tests
-        run: bash scripts/test_playwright_marimo.sh
+      - name: Run tests
+        run: uv run pytest ./tests/unit --color=yes -x
 
-  TestWASMMarimo:
-    name: WASM Marimo Playwright Tests
-    needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
-    timeout-minutes: 4
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          python-version: "3.13"
-          prune-cache: false
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.10.0
-      - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v4
-        with:
-          cache: 'pnpm'
-          cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: buckaroo-build
-      - name: Install the project
-        run: uv sync --all-extras --dev
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
-      - name: Run WASM Marimo Playwright Tests
-        run: bash scripts/test_playwright_wasm_marimo.sh
+  # NOTE: Playwright integration tests (TestStorybook, TestServer, TestMarimo,
+  # TestWASMMarimo) temporarily removed while iterating on Windows CI.
+  # Restore from main before merging.
 
   # ---------------------------------------------------------------------------
   # Docs — build documentation and check links
@@ -428,44 +302,5 @@ jobs:
   # JupyterLab integration tests
   # ---------------------------------------------------------------------------
 
-  TestJupyterLab:
-    name: JupyterLab Playwright Tests
-    needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          python-version: "3.13"
-          prune-cache: false
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.10.0
-      - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v4
-        with:
-          cache: 'pnpm'
-          cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: buckaroo-build
-      - name: Install the project
-        run: |
-          uv sync --all-extras --dev
-          uv pip install --force-reinstall dist/*.whl
-          uv pip install polars jupyterlab
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
-      - name: Run JupyterLab Playwright Tests
-        run: bash scripts/test_playwright_jupyter.sh --venv-location=".venv"
+  # NOTE: TestJupyterLab temporarily removed while iterating on Windows CI.
+  # Restore from main before merging.
