@@ -23,7 +23,7 @@ jobs:
       contents: write
     runs-on: depot-ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
         with:
           run_install: true
