@@ -55,6 +55,21 @@ uv pip install --python "$MCP_VENV/bin/python" "${WHEEL}[mcp]" pandas -q
     || { error "buckaroo.server failed to import from clean [mcp] venv"; exit 1; }
 success "Clean [mcp] venv ready"
 
+# Verify standalone.js uses flechette (not hyparquet)
+STATIC_DIR=$("$MCP_VENV/bin/python" -c "import buckaroo, os; print(os.path.join(os.path.dirname(buckaroo.__file__), 'static'))")
+log_message "Static dir: $STATIC_DIR"
+if [ -f "$STATIC_DIR/standalone.js" ]; then
+    log_message "standalone.js size: $(wc -c < "$STATIC_DIR/standalone.js") bytes"
+    HYPARQUET_COUNT=$(grep -c "parquetRead\|PAR1\|hyparquet" "$STATIC_DIR/standalone.js" 2>/dev/null || echo 0)
+    FLECHETTE_COUNT=$(grep -c "flechette\|tableFromIPC" "$STATIC_DIR/standalone.js" 2>/dev/null || echo 0)
+    log_message "standalone.js: hyparquet refs=$HYPARQUET_COUNT, flechette refs=$FLECHETTE_COUNT"
+    if [ "$HYPARQUET_COUNT" -gt 0 ] && [ "$FLECHETTE_COUNT" -eq 0 ]; then
+        error "WARNING: standalone.js still uses hyparquet instead of flechette!"
+    fi
+else
+    error "standalone.js NOT FOUND in $STATIC_DIR"
+fi
+
 # Export so playwright.config.server.ts picks it up
 export BUCKAROO_SERVER_PYTHON="$MCP_VENV/bin/python"
 
