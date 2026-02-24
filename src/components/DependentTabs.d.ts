@@ -1,4 +1,4 @@
-import { default as React, CSSProperties, Dispatch, SetStateAction } from '../../node_modules/.pnpm/react@18.3.1/node_modules/react';
+import { default as React, CSSProperties, Dispatch, SetStateAction } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { DFWhole } from './DFViewerParts/DFWhole';
 import { Operation } from './OperationUtils';
 export declare function OperationDisplayer({ filledOperations, style, }: {
