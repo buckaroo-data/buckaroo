@@ -49,8 +49,11 @@ function writeTempJson(): string {
 
 function writeTempParquet(): string {
   const parquetPath = path.join(os.tmpdir(), `buckaroo_e2e_${Date.now()}.parquet`);
+  // Use polars (available in [mcp] extras) instead of pandas to write the test parquet.
+  // Use BUCKAROO_SERVER_PYTHON if set (CI), otherwise fall back to uv run python.
+  const python = process.env.BUCKAROO_SERVER_PYTHON ?? 'uv run python';
   execSync(
-    `uv run python -c "import pandas as pd; pd.DataFrame({'x':[1,2,3],'y':[4,5,6]}).to_parquet('${parquetPath}')"`,
+    `${python} -c "import polars as pl; pl.DataFrame({'x':[1,2,3],'y':[4,5,6]}).write_parquet('${parquetPath}')"`,
     { cwd: PROJECT_ROOT },
   );
   return parquetPath;
