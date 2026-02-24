@@ -48,7 +48,7 @@ MCP_VENV="$ROOT_DIR/.venv-mcp-test"
 log_message "Creating clean venv at $MCP_VENV ..."
 rm -rf "$MCP_VENV"
 uv venv "$MCP_VENV" -q
-uv pip install --python "$MCP_VENV/bin/python" "${WHEEL}[mcp]" -q
+uv pip install --python "$MCP_VENV/bin/python" "${WHEEL}[mcp]" pandas -q
 
 # Sanity-check: server module must be importable
 "$MCP_VENV/bin/python" -c "from buckaroo.server.app import make_app" 2>&1 \

@@ -177,10 +177,11 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     expect(headerTexts).toContain('age');
     expect(headerTexts).toContain('score');
 
-    // Verify data appears in cells
-    const nameCell = page.locator('.ag-cell').filter({ hasText: 'Alice' });
-    const ageCell = page.locator('.ag-cell').filter({ hasText: '25' });
-    const scoreCell = page.locator('.ag-cell').filter({ hasText: '85.5' });
+    // Verify data appears in cells (use .first() because summary stats pinned
+    // rows may also contain matching values like most_freq)
+    const nameCell = page.locator('.ag-cell').filter({ hasText: 'Alice' }).first();
+    const ageCell = page.locator('.ag-cell').filter({ hasText: '25' }).first();
+    const scoreCell = page.locator('.ag-cell').filter({ hasText: '85.5' }).first();
 
     await expect(nameCell).toBeVisible();
     await expect(ageCell).toBeVisible();
