@@ -57,15 +57,19 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
 
         old_state = session.buckaroo_state
 
-        # Skip if no effective change to the fields that drive the dataflow.
-        if all(old_state.get(f) == new_state.get(f) for f in _DATAFLOW_FIELDS):
-            log.debug(
-                "buckaroo_state_change no-op session=%s — skipping rebroadcast",
-                self.session_id,
-            )
-            return
-
         try:
+            # Validate payload type before any attribute access.
+            if not isinstance(new_state, dict):
+                raise ValueError(f"new_state must be a dict, got {type(new_state).__name__}")
+
+            # Skip if no effective change to the fields that drive the dataflow.
+            if all(old_state.get(f) == new_state.get(f) for f in _DATAFLOW_FIELDS):
+                log.debug(
+                    "buckaroo_state_change no-op session=%s — skipping rebroadcast",
+                    self.session_id,
+                )
+                return
+
             # Propagate changes to the dataflow (mirrors BuckarooWidgetBase._buckaroo_state)
             if old_state.get("post_processing") != new_state.get("post_processing"):
                 session.dataflow.post_processing_method = new_state.get("post_processing", "")

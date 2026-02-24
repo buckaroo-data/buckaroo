@@ -232,7 +232,11 @@ def ensure_server() -> dict:
         server_log_fh.close()
     _start_server_monitor(_server_proc.pid)
 
-    startup_timeout_s = float(os.environ.get("BUCKAROO_STARTUP_TIMEOUT", "5.0"))
+    try:
+        startup_timeout_s = float(os.environ.get("BUCKAROO_STARTUP_TIMEOUT", "5.0"))
+    except ValueError:
+        log.warning("BUCKAROO_STARTUP_TIMEOUT is not a valid number; using default 5.0s")
+        startup_timeout_s = 5.0
     startup_retries = max(1, int(startup_timeout_s / 0.25))
     log.info(
         "Starting server: %s (startup_timeout=%.1fs retries=%d)",
