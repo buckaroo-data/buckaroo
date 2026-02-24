@@ -1,4 +1,4 @@
-import { IDatasource } from '@ag-grid-community/core';
+import { IDatasource } from 'ag-grid-community';
 export type RawDataWrapper = {
     data: any[];
     length: number;
