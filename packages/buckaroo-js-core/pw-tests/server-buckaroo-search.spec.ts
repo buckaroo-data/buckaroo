@@ -69,6 +69,41 @@ test.describe('Buckaroo mode: search filtering', () => {
     console.log('DIAG:python_executable:', diag.python_executable);
     console.log('DIAG:dependencies:', JSON.stringify(diag.dependencies));
 
+    // Connect WebSocket directly to capture initial_state
+    const wsUrl = `ws://localhost:${PORT}/ws/${session}`;
+    const initialState: any = await page.evaluate(async (url: string) => {
+      return new Promise((resolve, reject) => {
+        const ws = new WebSocket(url);
+        ws.binaryType = 'arraybuffer';
+        const timeout = setTimeout(() => { ws.close(); reject(new Error('WS timeout')); }, 5000);
+        ws.onmessage = (event: MessageEvent) => {
+          if (typeof event.data === 'string') {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'initial_state') {
+              clearTimeout(timeout);
+              ws.close();
+              // Extract key fields (avoid logging huge data)
+              resolve({
+                mode: msg.mode,
+                df_meta: msg.df_meta,
+                df_display_args_keys: Object.keys(msg.df_display_args || {}),
+                df_display_args_main_data_key: msg.df_display_args?.main?.data_key,
+                df_display_args_main_summary_key: msg.df_display_args?.main?.summary_stats_key,
+                df_display_args_main_has_column_config: !!(msg.df_display_args?.main?.df_viewer_config?.column_config?.length),
+                df_data_dict_keys: Object.keys(msg.df_data_dict || {}),
+                df_data_dict_main_length: msg.df_data_dict?.main?.length,
+                df_data_dict_all_stats_type: typeof msg.df_data_dict?.all_stats === 'object' ? (msg.df_data_dict?.all_stats?.format || 'array') : typeof msg.df_data_dict?.all_stats,
+                has_buckaroo_state: !!msg.buckaroo_state,
+                buckaroo_state_df_display: msg.buckaroo_state?.df_display,
+              });
+            }
+          }
+        };
+        ws.onerror = () => { clearTimeout(timeout); reject(new Error('WS error')); };
+      });
+    }, wsUrl);
+    console.log('DIAG:initial_state:', JSON.stringify(initialState));
+
     await page.goto(`${BASE}/s/${session}`);
 
     // Wait up to 10s, logging state every 2s
