@@ -19,4 +19,4 @@ export declare function getCellRenderer(crArgs: CellRendererArgs): "agCheckboxCe
     context: import('ag-grid-community').Context;
     value: any;
 }) => import("react/jsx-runtime").JSX.Element);
-export declare function getFormatterFromArgs(dispArgs: DisplayerArgs): ValueFormatterFunc<unknown, any, any> | undefined;
+export declare function getFormatterFromArgs(dispArgs: DisplayerArgs): ValueFormatterFunc<unknown> | undefined;
