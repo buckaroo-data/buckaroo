@@ -77,7 +77,6 @@ jobs:
 
       - name: Generate release notes
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ github.token }}
         run: |
           uv run python scripts/generate_release_notes.py \

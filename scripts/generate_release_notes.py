@@ -157,6 +157,30 @@ def call_claude(prompt: str) -> str:
     return message.content[0].text
 
 
+def generate_plain_notes(grouped_prs: dict[str, list[dict]], version: str, date: str) -> tuple[str, str]:
+    """Generate release notes and changelog entry directly from grouped PRs, no API needed."""
+    release_lines = []
+    changelog_lines = [f"## {version} — {date}", ""]
+
+    for key, display_name in CATEGORY_ORDER:
+        prs = grouped_prs.get(key, [])
+        if not prs:
+            continue
+        release_lines.append(f"## {display_name}")
+        changelog_lines.append(f"### {display_name}")
+        for pr in prs:
+            bullet = f"- {pr['title']} (#{pr['number']})"
+            release_lines.append(bullet)
+            changelog_lines.append(bullet)
+        release_lines.append("")
+        changelog_lines.append("")
+
+    release_lines.append("## Install")
+    release_lines.append(f"```bash\npip install buckaroo=={version}\n```")
+
+    return "\n".join(release_lines), "\n".join(changelog_lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate release notes with Claude")
     parser.add_argument("--tag-from", required=True, help="Previous release tag (e.g., 0.12.4)")
@@ -166,9 +190,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Print prompt without calling Claude")
     args = parser.parse_args()
 
-    if not os.environ.get("ANTHROPIC_API_KEY") and not args.dry_run:
-        print("Error: ANTHROPIC_API_KEY environment variable required", file=sys.stderr)
-        sys.exit(1)
+    use_claude = bool(os.environ.get("ANTHROPIC_API_KEY")) and not args.dry_run
 
     # Get date of the previous tag
     since_date = get_tag_date(args.tag_from)
@@ -195,20 +217,20 @@ def main():
         print(prompt)
         return
 
-    # Call Claude
-    print("Generating release notes with Claude...", file=sys.stderr)
-    response = call_claude(prompt)
-
-    # Split response into two outputs
-    if "---CHANGELOG---" not in response:
-        print("Warning: Claude response missing ---CHANGELOG--- separator", file=sys.stderr)
-        print("Full response written to release_notes.md", file=sys.stderr)
-        release_notes = response
-        changelog_entry = ""
+    if use_claude:
+        print("Generating release notes with Claude...", file=sys.stderr)
+        response = call_claude(prompt)
+        if "---CHANGELOG---" not in response:
+            print("Warning: Claude response missing ---CHANGELOG--- separator", file=sys.stderr)
+            release_notes = response
+            changelog_entry = ""
+        else:
+            parts = response.split("---CHANGELOG---", 1)
+            release_notes = parts[0].strip()
+            changelog_entry = parts[1].strip()
     else:
-        parts = response.split("---CHANGELOG---", 1)
-        release_notes = parts[0].strip()
-        changelog_entry = parts[1].strip()
+        print("No ANTHROPIC_API_KEY set — generating plain release notes from PR list.", file=sys.stderr)
+        release_notes, changelog_entry = generate_plain_notes(grouped, args.version, args.date)
 
     # Write output files
     release_path = os.path.join(args.output_dir, "release_notes.md")
