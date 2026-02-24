@@ -22,6 +22,14 @@ _BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
 
 LOG_DIR = os.path.join(os.path.expanduser("~"), ".buckaroo", "logs")
 
+
+def _parse_startup_timeout() -> float:
+    try:
+        return float(os.environ.get("BUCKAROO_STARTUP_TIMEOUT", "5.0"))
+    except ValueError:
+        log.warning("BUCKAROO_STARTUP_TIMEOUT is not a valid number; using default 5.0s")
+        return 5.0
+
 CRITICAL_STATIC_FILES = [
     "standalone.js",
     "standalone.css",
@@ -97,7 +105,7 @@ class DiagnosticsHandler(tornado.web.RequestHandler):
             "log_dir": LOG_DIR,
             "log_files": _list_log_files(),
             "sessions": session_info,
-            "startup_timeout_s": float(os.environ.get("BUCKAROO_STARTUP_TIMEOUT", "5.0")),
+            "startup_timeout_s": _parse_startup_timeout(),
             "dependencies": {
                 "tornado": _check_dependency("tornado"),
                 "pandas": _check_dependency("pandas"),

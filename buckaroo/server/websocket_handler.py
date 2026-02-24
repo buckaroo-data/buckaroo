@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import traceback
+from urllib.parse import urlparse
 
 import tornado.websocket
 
@@ -47,7 +48,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         if msg_type == "infinite_request":
             self._handle_infinite_request(msg.get("payload_args", {}))
         elif msg_type == "buckaroo_state_change":
-            self._handle_buckaroo_state_change(msg.get("new_state", {}))
+            self._handle_buckaroo_state_change(msg.get("new_state") or {})
 
     def _handle_buckaroo_state_change(self, new_state):
         sessions = self.application.settings["sessions"]
@@ -175,8 +176,9 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # and not intended for network exposure. Set BUCKAROO_STRICT_ORIGIN=1 to
         # restrict to localhost origins if needed.
         if os.environ.get("BUCKAROO_STRICT_ORIGIN", "").lower() in ("1", "true"):
-            return (
-                origin.startswith("http://localhost")
-                or origin.startswith("http://127.0.0.1")
-            )
+            try:
+                hostname = urlparse(origin).hostname
+            except Exception:
+                return False
+            return hostname in ("localhost", "127.0.0.1")
         return True
