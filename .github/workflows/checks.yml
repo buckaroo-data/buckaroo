@@ -132,7 +132,7 @@ jobs:
             const distFiles = fs.readdirSync('artifacts/dist');
             const wheel = distFiles.find(f => f.endsWith('.whl'));
             const version = wheel.match(/buckaroo-(.+?)-/)[1];
-            const idx = `--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/`;
+            const idx = `--index-strategy unsafe-best-match --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/`;
             const body = [
               '## :package: TestPyPI package published',
               '',

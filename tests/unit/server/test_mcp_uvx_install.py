@@ -55,6 +55,7 @@ else:
     UVX_EXTRA_INDEX = os.environ.get("BUCKAROO_EXTRA_INDEX", "https://pypi.org/simple/")
     MCP_CMD = [
         "uvx",
+        "--index-strategy", "unsafe-best-match",
         "--index-url", UVX_INDEX_URL,
         "--extra-index-url", UVX_EXTRA_INDEX,
         "--from", UVX_PACKAGE,
@@ -190,6 +191,7 @@ class TestMcpInstall:
         """uvx can resolve and fetch buckaroo[mcp] without errors."""
         cmd = [
             "uvx",
+            "--index-strategy", "unsafe-best-match",
             "--index-url", os.environ.get("BUCKAROO_INDEX_URL", "https://test.pypi.org/simple/"),
             "--extra-index-url", os.environ.get("BUCKAROO_EXTRA_INDEX", "https://pypi.org/simple/"),
             "--from", os.environ.get("BUCKAROO_MCP_PACKAGE", "buckaroo[mcp]"),
