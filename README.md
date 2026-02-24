@@ -1,4 +1,4 @@
-# Buckaroo - The Data Table for Jupyter
+# Buckaroo - The Data Table for Jupyter and MCP
 
 Buckaroo is a modern data table for Jupyter that expedites the most common exploratory data analysis tasks. The most basic data analysis task - looking at the raw data, is cumbersome with the existing pandas tooling.  Buckaroo starts with a modern performant data table, is sortable, has value formatting, and scrolls infinitely.  On top of the core table experience extra features like summary stats, histograms, smart sampling, auto-cleaning, and a low code UI are added.  All of the functionality has sensible defaults that can be overridden to customize the experience for your workflow.
 
