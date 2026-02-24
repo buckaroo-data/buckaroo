@@ -130,7 +130,7 @@ def _health_check() -> dict | None:
             data = json.loads(resp.read())
             log.debug("Health check OK: %s", data)
             return data
-    except (URLError, OSError) as exc:
+    except (URLError, OSError, ValueError) as exc:
         log.debug("Health check failed: %s", exc)
     return None
 

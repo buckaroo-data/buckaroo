@@ -456,3 +456,71 @@ class TestMcpInstall:
                 proc.wait()
             if tmp_csv and os.path.exists(tmp_csv):
                 os.unlink(tmp_csv)
+
+
+# ---------------------------------------------------------------------------
+# uvx failure mode tests
+# ---------------------------------------------------------------------------
+
+@slow
+@pytest.mark.skipif(not shutil.which("uvx"), reason="uvx not on PATH")
+@pytest.mark.skipif(bool(_MCP_CMD_OVERRIDE), reason="not applicable in wheel mode")
+class TestUvxFailureModes:
+    """Verify that uvx fails gracefully with bad inputs — no protocol
+    corruption, useful error messages on stderr."""
+
+    def test_uvx_bad_index_url_fails_gracefully(self):
+        """uvx with a nonexistent index URL should exit non-zero with a
+        useful error on stderr and no stdout pollution."""
+        cmd = [
+            "uvx",
+            "--index-strategy", "unsafe-best-match",
+            "--index-url", "https://nonexistent.example.com/simple/",
+            "--extra-index-url", "https://nonexistent.example.com/simple/",
+            "--from", "buckaroo[mcp]",
+            "buckaroo-table",
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        assert r.returncode != 0, (
+            f"Expected non-zero exit for bad index URL, got {r.returncode}"
+        )
+        # Stderr should contain something useful (not empty)
+        assert len(r.stderr) > 0, "stderr is empty — no diagnostic info"
+        # Stdout must not contain protocol-corrupting output
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                json.loads(line)
+            except json.JSONDecodeError:
+                pytest.fail(
+                    f"uvx wrote non-JSON to stdout on failure, "
+                    f"which would corrupt MCP protocol:\n{line[:200]}"
+                )
+
+    def test_uvx_nonexistent_package_fails_gracefully(self):
+        """uvx with a package that doesn't exist should exit non-zero
+        with a useful error on stderr."""
+        cmd = [
+            "uvx",
+            "--from", "nonexistent-pkg-zzz-does-not-exist[mcp]",
+            "buckaroo-table",
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        assert r.returncode != 0, (
+            f"Expected non-zero exit for nonexistent package, got {r.returncode}"
+        )
+        assert len(r.stderr) > 0, "stderr is empty — no diagnostic info"
+        # Stdout must be clean
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                json.loads(line)
+            except json.JSONDecodeError:
+                pytest.fail(
+                    f"uvx wrote non-JSON to stdout on failure, "
+                    f"which would corrupt MCP protocol:\n{line[:200]}"
+                )
