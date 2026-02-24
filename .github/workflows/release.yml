@@ -92,16 +92,7 @@ jobs:
       - name: Update CHANGELOG.md
         run: |
           if [ -f /tmp/changelog_entry.md ]; then
-            python3 - <<'PYEOF'
-          import sys
-          changelog = open('CHANGELOG.md').read()
-          entry = open('/tmp/changelog_entry.md').read()
-          lines = changelog.split('\n', 1)
-          header = lines[0]
-          rest = lines[1] if len(lines) > 1 else ''
-          with open('CHANGELOG.md', 'w') as f:
-              f.write(header + '\n\n' + entry + '\n' + rest)
-          PYEOF
+            python scripts/update_changelog.py /tmp/changelog_entry.md
           fi
 
       - name: Commit, tag, and push

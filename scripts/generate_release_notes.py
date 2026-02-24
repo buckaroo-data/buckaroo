@@ -53,7 +53,7 @@ def gather_prs(since_date: str) -> list[dict]:
         [
             "gh", "pr", "list",
             "--state", "merged",
-            "--search", f"merged:>{since_date}",
+            "--search", f"merged:>={since_date}",
             "--json", "number,title,body,labels,mergedAt",
             "--limit", "200",
         ],
@@ -162,16 +162,24 @@ def generate_plain_notes(grouped_prs: dict[str, list[dict]], version: str, date:
     release_lines = []
     changelog_lines = [f"## {version} — {date}", ""]
 
+    has_entries = False
     for key, display_name in CATEGORY_ORDER:
         prs = grouped_prs.get(key, [])
         if not prs:
             continue
+        has_entries = True
         release_lines.append(f"## {display_name}")
         changelog_lines.append(f"### {display_name}")
         for pr in prs:
             bullet = f"- {pr['title']} (#{pr['number']})"
             release_lines.append(bullet)
             changelog_lines.append(bullet)
+        release_lines.append("")
+        changelog_lines.append("")
+
+    if not has_entries:
+        release_lines.append("No notable changes since previous release.")
+        changelog_lines.append("No notable changes since previous release.")
         release_lines.append("")
         changelog_lines.append("")
 
@@ -199,8 +207,17 @@ def main():
     # Gather and group PRs
     prs = gather_prs(since_date)
     if not prs:
-        print("No merged PRs found since last release.", file=sys.stderr)
-        sys.exit(1)
+        print("Warning: No merged PRs found since last release — generating empty release notes.", file=sys.stderr)
+        release_notes, changelog_entry = generate_plain_notes({}, args.version, args.date)
+        release_path = os.path.join(args.output_dir, "release_notes.md")
+        changelog_path = os.path.join(args.output_dir, "changelog_entry.md")
+        with open(release_path, "w") as f:
+            f.write(release_notes)
+        with open(changelog_path, "w") as f:
+            f.write(changelog_entry)
+        print(f"GitHub release notes written to {release_path}", file=sys.stderr)
+        print(f"CHANGELOG entry written to {changelog_path}", file=sys.stderr)
+        return
     print(f"Found {len(prs)} merged PRs", file=sys.stderr)
 
     grouped = group_prs(prs)
