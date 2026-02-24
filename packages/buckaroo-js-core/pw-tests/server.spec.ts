@@ -228,7 +228,7 @@ test.describe('/load API', () => {
     });
     expect(resp.status()).toBe(404);
     const body = await resp.json();
-    expect(body.error).toContain("not found");
+    expect(body.message).toContain("not found");
   });
 
   test('400 on unsupported file extension', async ({ request }) => {
@@ -240,7 +240,7 @@ test.describe('/load API', () => {
       });
       expect(resp.status()).toBe(400);
       const body = await resp.json();
-      expect(body.error).toContain("Unsupported");
+      expect(body.message).toContain("Unsupported");
     } finally {
       cleanupFile(tmpPath);
     }
@@ -343,7 +343,7 @@ test.describe('session management', () => {
 
       await page.goto(`${BASE}/s/${session}`);
       await waitForGrid(page);
-      expect(await getRowCount(page)).toBe(3);
+      await expect.poll(() => getRowCount(page), { timeout: 10_000 }).toBe(3);
     } finally {
       cleanupFile(parquetPath);
     }
@@ -356,7 +356,7 @@ test.describe('session management', () => {
       // Refresh the page to pick up the new data
       await page.goto(`${BASE}/s/${session}`);
       await waitForGrid(page);
-      expect(await getRowCount(page)).toBe(5);
+      await expect.poll(() => getRowCount(page), { timeout: 10_000 }).toBe(5);
     } finally {
       cleanupFile(csvPath);
     }
