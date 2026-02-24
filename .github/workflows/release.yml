@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 20
+    environment: pypi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Python dependencies
+        run: uv sync --all-extras --dev --group release
+
+      - name: Determine versions
+        id: versions
+        run: |
+          CURRENT=$(grep -Po '^version = "\K[^"]+' pyproject.toml)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "${{ inputs.bump }}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEW="${MAJOR}.${MINOR}.${PATCH}"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "Bumping $CURRENT → $NEW (${{ inputs.bump }})"
+
+      - name: Find previous release tag
+        id: prev_tag
+        run: |
+          TAG=$(git tag --sort=-creatordate | head -1)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Previous release tag: $TAG"
+
+      - name: Generate release notes
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          uv run python scripts/generate_release_notes.py \
+            --tag-from "${{ steps.prev_tag.outputs.tag }}" \
+            --version "${{ steps.versions.outputs.new }}" \
+            --date "$(date +%Y-%m-%d)" \
+            --output-dir /tmp
+
+      - name: Bump version in pyproject.toml
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ steps.versions.outputs.new }}"/' pyproject.toml
+
+      - name: Update CHANGELOG.md
+        run: |
+          if [ -f /tmp/changelog_entry.md ]; then
+            # Prepend new entry after the "# Changelog" header
+            python3 -c "
+          import sys
+          changelog = open('CHANGELOG.md').read()
+          entry = open('/tmp/changelog_entry.md').read()
+          # Insert after first line (# Changelog header)
+          lines = changelog.split('\n', 1)
+          header = lines[0]
+          rest = lines[1] if len(lines) > 1 else ''
+          with open('CHANGELOG.md', 'w') as f:
+              f.write(header + '\n\n' + entry + '\n' + rest)
+          "
+          fi
+
+      - name: Commit, tag, and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml CHANGELOG.md
+          git commit -m "chore: release ${{ steps.versions.outputs.new }}"
+          git tag "${{ steps.versions.outputs.new }}"
+          git push origin HEAD --tags
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.versions.outputs.new }}" \
+            --title "${{ steps.versions.outputs.new }}" \
+            --notes-file /tmp/release_notes.md
+
+      - name: Build wheel + sdist
+        run: |
+          ./scripts/full_build.sh
+          uv build --sdist
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.versions.outputs.new }}" dist/*.whl dist/*.tar.gz
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
