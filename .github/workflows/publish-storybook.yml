@@ -7,14 +7,14 @@ on:
       - main
 
   pull_request:
-    branches: "*"
+    branches: "**"
 
 
 permissions:
   contents: read
   pages: write
   id-token: write
- 
+
 # List of jobs
 jobs:
   TestPython:
@@ -26,10 +26,15 @@ jobs:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
         with:
-          run_install: true
-          package_json_file: packages/package.json
-      - uses: astral-sh/setup-uv@v7
-      - name: Run tests
+          version: 9.10.0
+      - uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Build storybook
         working-directory: ./packages/buckaroo-js-core
         run: |
           pnpm build-storybook
