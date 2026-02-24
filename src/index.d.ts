@@ -25,10 +25,10 @@ declare const _default: {
     DFViewerInfiniteDS: typeof DFViewerInfiniteDS;
     StatusBar: typeof StatusBar;
     HistogramCell: (props: {
-        api: import('ag-grid-community').GridApi;
-        colDef: import('ag-grid-community').ColDef;
-        column: import('ag-grid-community').Column;
-        context: import('ag-grid-community').Context;
+        api: import('@ag-grid-community/core').GridApi;
+        colDef: import('@ag-grid-community/core').ColDef;
+        column: import('@ag-grid-community/core').Column;
+        context: import('@ag-grid-community/core').Context;
         value: any;
     }) => import("react/jsx-runtime").JSX.Element;
     CommandUtils: typeof CommandUtils;

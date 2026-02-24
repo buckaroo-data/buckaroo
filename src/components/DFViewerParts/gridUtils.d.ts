@@ -1,8 +1,9 @@
-import { CellRendererSelectorResult, ColDef, ColGroupDef, DomLayoutType, ICellRendererParams, IDatasource, SizeColumnsToContentStrategy, SizeColumnsToFitProvidedWidthStrategy, Theme } from 'ag-grid-community';
+import { CellRendererSelectorResult, ColDef, ColGroupDef, DomLayoutType, ICellRendererParams, IDatasource, SizeColumnsToContentStrategy, SizeColumnsToFitProvidedWidthStrategy } from '@ag-grid-community/core';
 import { DFWhole, DisplayerArgs, ColumnConfig, DFViewerConfig, ComponentConfig, NormalColumnConfig, MultiIndexColumnConfig, ColDefOrGroup, DFData, SDFT, PinnedRowConfig } from './DFWhole';
 import { CSSProperties, Dispatch, SetStateAction } from '../../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { CommandConfigT } from '../CommandUtils';
 import { KeyAwareSmartRowCache, PayloadArgs } from './SmartRowCache';
+import { Theme } from '@ag-grid-community/theming';
 export declare function getCellRendererorFormatter(dispArgs: DisplayerArgs): ColDef;
 export declare function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]): (import('./DFWhole').DFDataRow | undefined)[];
 export declare function extractSingleSeriesSummary(full_summary_stats_df: DFData, col_name: string): DFWhole;

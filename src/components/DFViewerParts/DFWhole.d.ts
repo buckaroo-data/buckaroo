@@ -1,4 +1,4 @@
-import { ColDef, ColGroupDef, GridOptions } from 'ag-grid-community';
+import { ColDef, ColGroupDef, GridOptions } from '@ag-grid-community/core';
 type AGGrid_ColDef = ColDef;
 export type ColDefOrGroup = ColDef | ColGroupDef;
 export interface ObjDisplayerA {
