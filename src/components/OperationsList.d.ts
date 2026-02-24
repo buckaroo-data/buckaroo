@@ -1,4 +1,4 @@
-import { default as React } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
+import { default as React } from '../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { Operation, SetOperationsFunc } from './OperationUtils';
 export interface OperationsListProps {
     operations: Operation[];

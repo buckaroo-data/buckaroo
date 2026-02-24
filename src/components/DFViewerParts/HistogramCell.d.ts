@@ -1,4 +1,4 @@
-import { default as React } from '../../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
+import { default as React } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { ColDef, Column, Context, GridApi } from '@ag-grid-community/core';
 export interface HistogramNode {
     name: string;

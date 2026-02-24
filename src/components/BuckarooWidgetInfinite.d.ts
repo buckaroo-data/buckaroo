@@ -1,4 +1,4 @@
-import { default as React } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
+import { default as React } from '../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { OperationResult } from './DependentTabs';
 import { DFDataOrPayload } from './DFViewerParts/DFWhole';
 import { BuckarooState, BuckarooOptions, DFMeta } from './WidgetTypes';

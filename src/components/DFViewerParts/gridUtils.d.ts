@@ -1,6 +1,6 @@
 import { CellRendererSelectorResult, ColDef, ColGroupDef, DomLayoutType, ICellRendererParams, IDatasource, SizeColumnsToContentStrategy, SizeColumnsToFitProvidedWidthStrategy } from '@ag-grid-community/core';
 import { DFWhole, DisplayerArgs, ColumnConfig, DFViewerConfig, ComponentConfig, NormalColumnConfig, MultiIndexColumnConfig, ColDefOrGroup, DFData, SDFT, PinnedRowConfig } from './DFWhole';
-import { CSSProperties, Dispatch, SetStateAction } from '../../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
+import { CSSProperties, Dispatch, SetStateAction } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { CommandConfigT } from '../CommandUtils';
 import { KeyAwareSmartRowCache, PayloadArgs } from './SmartRowCache';
 import { Theme } from '@ag-grid-community/theming';
