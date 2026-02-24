@@ -53,6 +53,45 @@ test.describe('Buckaroo mode: search filtering', () => {
     cleanupFile(csvPath);
   });
 
+  test('diagnostic: buckaroo mode renders grid', async ({ page, request }) => {
+    const consoleLogs: string[] = [];
+    page.on('console', (msg: any) => consoleLogs.push(`[${msg.type()}] ${msg.text()}`));
+    page.on('pageerror', (err: any) => consoleLogs.push(`[PAGE_ERROR] ${err.message}`));
+
+    const session = `diag-${Date.now()}`;
+    await loadBuckarooSession(request, session, csvPath);
+
+    // Check diagnostics endpoint
+    const diagResp = await request.get(`${BASE}/diagnostics`);
+    const diag = await diagResp.json();
+    console.log('DIAG:static_path:', diag.static_path);
+    console.log('DIAG:static_files:', JSON.stringify(diag.static_files));
+    console.log('DIAG:python_executable:', diag.python_executable);
+    console.log('DIAG:dependencies:', JSON.stringify(diag.dependencies));
+
+    await page.goto(`${BASE}/s/${session}`);
+
+    // Wait up to 10s, logging state every 2s
+    for (let i = 0; i < 5; i++) {
+      await page.waitForTimeout(2000);
+      const rootText = await page.locator('#root').textContent();
+      const agCellCount = await page.locator('.ag-cell').count();
+      const dfViewerCount = await page.locator('.df-viewer').count();
+      const agOverlayCount = await page.locator('.ag-overlay').count();
+      console.log(`DIAG:t=${(i+1)*2}s root_text_start="${rootText?.substring(0, 100)}" ag-cells=${agCellCount} df-viewers=${dfViewerCount} ag-overlays=${agOverlayCount}`);
+      if (agCellCount > 0) break;
+    }
+
+    // Log console messages from browser
+    for (const log of consoleLogs) {
+      console.log('DIAG:browser:', log);
+    }
+
+    // The grid should eventually render
+    const cellCount = await page.locator('.df-viewer .ag-cell').count();
+    expect(cellCount).toBeGreaterThan(0);
+  });
+
   test('searching filters the table data, not just the status bar count', async ({ page, request }) => {
     const session = `search-${Date.now()}`;
     await loadBuckarooSession(request, session, csvPath);

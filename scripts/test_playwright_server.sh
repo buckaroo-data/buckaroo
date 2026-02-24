@@ -56,7 +56,12 @@ uv pip install --python "$MCP_VENV/bin/python" "${WHEEL}[mcp]" pandas -q
 success "Clean [mcp] venv ready"
 
 # Verify standalone.js uses flechette (not hyparquet)
-STATIC_DIR=$("$MCP_VENV/bin/python" -c "import buckaroo, os; print(os.path.join(os.path.dirname(buckaroo.__file__), 'static'))")
+# Use -S to suppress site-packages side effects; redirect stderr to avoid noise
+STATIC_DIR=$("$MCP_VENV/bin/python" -c "
+import importlib, os
+spec = importlib.util.find_spec('buckaroo')
+print(os.path.join(os.path.dirname(spec.origin), 'static'))
+" 2>/dev/null | tail -1)
 log_message "Static dir: $STATIC_DIR"
 if [ -f "$STATIC_DIR/standalone.js" ]; then
     log_message "standalone.js size: $(wc -c < "$STATIC_DIR/standalone.js") bytes"
