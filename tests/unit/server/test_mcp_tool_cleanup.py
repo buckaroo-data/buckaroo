@@ -18,6 +18,14 @@ import time
 import types
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+# These tests use SIGKILL/SIGTERM extensively — Unix-only
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Unix signal-based process lifecycle tests",
+)
+
 
 # ---------------------------------------------------------------------------
 # Mock away the ``mcp`` dependency so buckaroo_mcp_tool can be imported

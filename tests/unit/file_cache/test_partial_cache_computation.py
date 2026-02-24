@@ -4,15 +4,26 @@ continue computing missing columns in background.
 """
 # state:READONLY
 
+import os
+import sys
+import threading
+import time
+
 import polars as pl
+import pytest
+
 from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget
 from buckaroo.file_cache.cache_utils import get_global_file_cache, clear_file_cache
 from buckaroo.read_utils import read_df
 from buckaroo.file_cache.base import Executor, ProgressNotification
 from tests.unit.file_cache.executor_test_utils import wait_for_nested_executor_finish
-import os
-import threading
-import time
+
+# Timing assumptions and tmpdir cleanup don't work on Windows (spawn is slow,
+# SQLite file locking prevents cleanup)
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Timing-dependent tests incompatible with Windows spawn context",
+)
 
 
 def test_partial_cache_loads_immediately_and_continues_computing(tmp_path):

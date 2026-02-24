@@ -1,13 +1,21 @@
 import json
 import os
+import sys
 import tempfile
 
 import pandas as pd
+import pytest
 import tornado.httpclient
 import tornado.testing
 import tornado.websocket
 
 from buckaroo.server.app import make_app as _make_app
+
+# Temp file cleanup fails on Windows due to file locking (WinError 32)
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Temp file locking prevents cleanup on Windows",
+)
 
 
 def make_app():
