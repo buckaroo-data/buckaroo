@@ -208,6 +208,11 @@ jobs:
           tests/unit/server/test_mcp_uvx_install.py
           tests/unit/server/test_mcp_server_integration.py
           -v --color=yes -m slow
+      - name: Run uvx failure mode tests
+        run: >-
+          .venv-wheel/bin/pytest
+          tests/unit/server/test_mcp_uvx_install.py::TestUvxFailureModes
+          -v --color=yes -m slow
 
   # ---------------------------------------------------------------------------
   # Smoke tests — install the wheel with each optional extra in an isolated venv

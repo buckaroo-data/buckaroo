@@ -3,11 +3,10 @@
 These tests exercise real subprocess launches of ``python -m buckaroo.server``
 and the ``ensure_server()`` function from ``buckaroo_mcp_tool``.
 
-Tests 1, 3, 4, 5 run against the source tree (no wheel needed).
-Test 2 (kill_stdio) requires the built wheel / ``BUCKAROO_MCP_CMD``.
-
-All tests are marked ``@pytest.mark.slow`` and are Unix-only (signal-based
-cleanup).  Skip with: ``pytest -m "not slow"``
+Tests 1, 3, 4, 5 run against the source tree (no wheel needed) and are NOT
+marked slow so they run across all Python versions in CI.
+Test 2 (kill_stdio) requires the built wheel / ``BUCKAROO_MCP_CMD`` and IS
+marked slow so it only runs in the wheel job.
 """
 
 import json
@@ -33,7 +32,6 @@ import pytest
 slow = pytest.mark.slow
 
 pytestmark = [
-    slow,
     pytest.mark.skipif(sys.platform == "win32", reason="Unix signal-based tests"),
 ]
 
@@ -205,6 +203,7 @@ _has_mcp_cmd = bool(_MCP_CMD_OVERRIDE) and all(
 )
 
 
+@slow
 class TestKillStdioKillsTornado:
     """When the MCP stdio process is killed, the tornado server must die too."""
 
