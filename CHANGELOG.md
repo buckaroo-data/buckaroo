@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.13 — 2026-02-24
+
+### Bug Fixes
+- fix: handle zero PRs in release notes; extract CHANGELOG updater to script (#580)
+- fix: plain release notes fallback + sync version to 0.12.11 (#579)
+- fix: MCP + server reliability, observability, and hardening (#578)
+
+### Other
+- for the PR (#577)
+
 ## 0.8.3 2025-01-23
 Fixes #299 Update height of ag-grid
 Fixes tooltips so they can display values from other columns
