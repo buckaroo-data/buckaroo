@@ -6,7 +6,7 @@ import polars as pl
 from buckaroo.serialization_utils import to_parquet, pd_to_obj, check_and_fix_df
 from buckaroo.df_util import old_col_new_col, to_chars
 
-from buckaroo.dataflow.dataflow import CustomizableDataflow
+from buckaroo.dataflow.pandas_dataflow import PandasCustomizableDataflow
 from buckaroo.dataflow.dataflow_extras import Sampling
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
 from buckaroo.dataflow.styling_core import StylingAnalysis
@@ -36,7 +36,7 @@ class ServerSampling(Sampling):
         return df
 
 
-class ServerDataflow(CustomizableDataflow):
+class ServerDataflow(PandasCustomizableDataflow):
     """Headless dataflow matching BuckarooInfiniteWidget's pipeline."""
     sampling_klass = ServerSampling
     autocleaning_klass = PandasAutocleaning
