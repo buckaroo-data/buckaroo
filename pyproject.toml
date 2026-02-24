@@ -41,7 +41,7 @@ dependencies = [
     "numpy >= 2.2.5; python_version >= '3.13'",
 ]
 
-version = "0.12.9"
+version = "0.12.12"
 
 
 [project.license]
@@ -269,6 +269,10 @@ line-ending = "auto"
 [dependency-groups]
 datacompy = [
     "datacompy>=0.15.0",
+]
+
+release = [
+    "anthropic>=0.40.0",
 ]
 
 dev = [
