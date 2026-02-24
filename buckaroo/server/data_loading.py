@@ -1,66 +1,83 @@
 import os
 import traceback
-import pandas as pd
 import polars as pl
-from buckaroo.serialization_utils import to_arrow_ipc, pd_to_obj, check_and_fix_df
-from buckaroo.df_util import old_col_new_col, to_chars
-
-from buckaroo.dataflow.dataflow import CustomizableDataflow
-from buckaroo.dataflow.dataflow_extras import Sampling
-from buckaroo.dataflow.autocleaning import PandasAutocleaning
-from buckaroo.dataflow.styling_core import StylingAnalysis
-from buckaroo.customizations.analysis import (
-    TypingStats, DefaultSummaryStats, ComputedDefaultSummaryStats)
-from buckaroo.customizations.histogram import Histogram
-from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
-from buckaroo.customizations.pd_autoclean_conf import CleaningConf, NoCleaningConf
-from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
+from buckaroo.df_util import to_chars
 
 
-class ServerSampling(Sampling):
-    """Sampling for headless server mode — matches InfinitePdSampling."""
-    serialize_limit = -1  # infinite mode
-    pre_limit = 1_000_000
+# --- Pandas-dependent classes and functions ---
+# These are only used in "viewer" and "buckaroo" modes.
+# pandas is imported lazily so the server module can be imported
+# in environments where only polars is available (e.g. [mcp] extras).
 
-    @classmethod
-    def pre_stats_sample(kls, df):
-        df = check_and_fix_df(df)
-        if len(df.columns) > kls.max_columns:
-            df = df[df.columns[:kls.max_columns]]
-        if kls.pre_limit and len(df) > kls.pre_limit:
-            sampled = df.sample(kls.pre_limit)
-            if isinstance(sampled, pd.DataFrame):
-                return sampled.sort_index()
-            return sampled
-        return df
+_ServerDataflow = None  # lazily created class
 
 
-class ServerDataflow(CustomizableDataflow):
-    """Headless dataflow matching BuckarooInfiniteWidget's pipeline."""
-    sampling_klass = ServerSampling
-    autocleaning_klass = PandasAutocleaning
-    DFStatsClass = DfStatsV2
-    autoclean_conf = tuple([CleaningConf, NoCleaningConf])
-    analysis_klasses = [
-        TypingStats, DefaultSummaryStats,
-        Histogram,
-        ComputedDefaultSummaryStats,
-        StylingAnalysis,
-        DefaultSummaryStats,
-        DefaultSummaryStatsStyling, DefaultMainStyling,
-    ]
+def _get_server_dataflow_class():
+    """Lazily create ServerDataflow class (requires pandas)."""
+    global _ServerDataflow
+    if _ServerDataflow is not None:
+        return _ServerDataflow
 
-    def _df_to_obj(self, df):
-        # No sampling — matches BuckarooInfiniteWidget._df_to_obj
-        return pd_to_obj(df)
+    import pandas as pd
+    from buckaroo.serialization_utils import check_and_fix_df, pd_to_obj
+    from buckaroo.dataflow.dataflow import CustomizableDataflow
+    from buckaroo.dataflow.dataflow_extras import Sampling
+    from buckaroo.dataflow.autocleaning import PandasAutocleaning
+    from buckaroo.dataflow.styling_core import StylingAnalysis
+    from buckaroo.customizations.analysis import (
+        TypingStats, DefaultSummaryStats, ComputedDefaultSummaryStats)
+    from buckaroo.customizations.histogram import Histogram
+    from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
+    from buckaroo.customizations.pd_autoclean_conf import CleaningConf, NoCleaningConf
+    from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
+
+    class ServerSampling(Sampling):
+        """Sampling for headless server mode — matches InfinitePdSampling."""
+        serialize_limit = -1  # infinite mode
+        pre_limit = 1_000_000
+
+        @classmethod
+        def pre_stats_sample(kls, df):
+            df = check_and_fix_df(df)
+            if len(df.columns) > kls.max_columns:
+                df = df[df.columns[:kls.max_columns]]
+            if kls.pre_limit and len(df) > kls.pre_limit:
+                sampled = df.sample(kls.pre_limit)
+                if isinstance(sampled, pd.DataFrame):
+                    return sampled.sort_index()
+                return sampled
+            return df
+
+    class ServerDataflow(CustomizableDataflow):
+        """Headless dataflow matching BuckarooInfiniteWidget's pipeline."""
+        sampling_klass = ServerSampling
+        autocleaning_klass = PandasAutocleaning
+        DFStatsClass = DfStatsV2
+        autoclean_conf = tuple([CleaningConf, NoCleaningConf])
+        analysis_klasses = [
+            TypingStats, DefaultSummaryStats,
+            Histogram,
+            ComputedDefaultSummaryStats,
+            StylingAnalysis,
+            DefaultSummaryStats,
+            DefaultSummaryStatsStyling, DefaultMainStyling,
+        ]
+
+        def _df_to_obj(self, df):
+            # No sampling — matches BuckarooInfiniteWidget._df_to_obj
+            return pd_to_obj(df)
+
+    _ServerDataflow = ServerDataflow
+    return _ServerDataflow
 
 
-def create_dataflow(df: pd.DataFrame) -> ServerDataflow:
+def create_dataflow(df):  # -> ServerDataflow
     """Instantiate the full Buckaroo analysis pipeline headlessly."""
+    ServerDataflow = _get_server_dataflow_class()
     return ServerDataflow(df, skip_main_serial=True)
 
 
-def get_buckaroo_display_state(dataflow: ServerDataflow) -> dict:
+def get_buckaroo_display_state(dataflow) -> dict:
     """Extract all state needed by the JS BuckarooInfiniteWidget."""
     return {
         "df_data_dict": dataflow.df_data_dict,
@@ -86,9 +103,11 @@ def get_buckaroo_display_state(dataflow: ServerDataflow) -> dict:
 
 
 def handle_infinite_request_buckaroo(
-    dataflow: ServerDataflow, payload_args: dict
+    dataflow, payload_args: dict
 ) -> tuple[dict, bytes]:
     """Infinite scroll handler using the dataflow's processed_df and merged_sd."""
+    from buckaroo.serialization_utils import to_arrow_ipc
+
     start = payload_args["start"]
     end = payload_args["end"]
     _unused, processed_df, merged_sd = dataflow.widget_args_tuple
@@ -131,6 +150,8 @@ def handle_infinite_request_buckaroo(
             b"",
         )
 
+
+# --- Polars-only functions (no pandas required) ---
 
 def load_file_lazy(path: str) -> pl.LazyFrame:
     """Open a file as a Polars LazyFrame — no data read until sliced."""
@@ -231,7 +252,11 @@ def handle_infinite_request_lazy(
     return msg, parquet_bytes
 
 
-def load_file(path: str) -> pd.DataFrame:
+# --- Pandas-dependent convenience functions ---
+
+def load_file(path: str):
+    """Load a file into a pandas DataFrame."""
+    import pandas as pd
     ext = os.path.splitext(path)[1].lower()
     if ext == ".csv":
         return pd.read_csv(path)
@@ -247,6 +272,7 @@ def load_file(path: str) -> pd.DataFrame:
 
 def _dtype_to_displayer(dtype) -> dict:
     """Map a pandas dtype to a Buckaroo displayer_args dict."""
+    import pandas as pd
     if pd.api.types.is_bool_dtype(dtype):
         return {"displayer": "boolean"}
     if pd.api.types.is_integer_dtype(dtype):
@@ -258,13 +284,14 @@ def _dtype_to_displayer(dtype) -> dict:
     return {"displayer": "obj", "max_length": 200}
 
 
-def get_df_viewer_config(df: pd.DataFrame) -> dict:
+def get_df_viewer_config(df) -> dict:
     """Generate a minimal DFViewerConfig from a DataFrame's schema.
 
     Column configs use the renamed column names (a, b, c, ...) that
     to_parquet/prepare_df_for_serialization produces, with the original
     column name as the header_name for display.
     """
+    from buckaroo.df_util import old_col_new_col
     col_rename_map = old_col_new_col(df)  # [(orig_name, "a"), (orig_name, "b"), ...]
     column_config = []
     for orig_name, renamed in col_rename_map:
@@ -288,7 +315,7 @@ def get_df_viewer_config(df: pd.DataFrame) -> dict:
     }
 
 
-def get_display_state(df: pd.DataFrame, path: str) -> dict:
+def get_display_state(df, path: str) -> dict:
     """Generate the initial state the JS client needs to render."""
     df_viewer_config = get_df_viewer_config(df)
     return {
@@ -304,7 +331,7 @@ def get_display_state(df: pd.DataFrame, path: str) -> dict:
     }
 
 
-def get_metadata(df: pd.DataFrame, path: str) -> dict:
+def get_metadata(df, path: str) -> dict:
     columns = []
     for col in df.columns:
         columns.append({
@@ -318,13 +345,16 @@ def get_metadata(df: pd.DataFrame, path: str) -> dict:
     }
 
 
-def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[dict, bytes]:
+def handle_infinite_request(df, payload_args: dict) -> tuple[dict, bytes]:
     """Extract of BuckarooInfiniteWidget._handle_payload_args — transport-agnostic.
 
     The sort column name from the JS client uses renamed column names
     (a, b, c, ...) since that's what the Parquet data uses. We need to
     map it back to the original column name for sorting.
     """
+    from buckaroo.serialization_utils import to_arrow_ipc
+    from buckaroo.df_util import old_col_new_col
+
     start = payload_args["start"]
     end = payload_args["end"]
 

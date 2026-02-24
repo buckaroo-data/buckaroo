@@ -4,7 +4,7 @@ import pandas as pd
 from buckaroo.ddd_library import get_multiindex_with_names_index_df, get_multiindex_cols_df, get_multiindex_index_df
 from buckaroo.serialization_utils import (
     is_ser_dt_safe, is_dataframe_datetime_safe, check_and_fix_df, pd_to_obj,
-    to_arrow_ipc, sd_to_ipc_b64, DuplicateColumnsException)
+    to_arrow_ipc, DuplicateColumnsException)
 import pyarrow.ipc as ipc
 from io import BytesIO
 

@@ -1,7 +1,9 @@
-import pandas as pd
-from typing import Iterable, Union, List, Tuple, Dict
+from __future__ import annotations
+from typing import Iterable, Union, List, Tuple, Dict, TYPE_CHECKING
 from typing_extensions import TypeAlias
 
+if TYPE_CHECKING:
+    import pandas as pd
 
 ColIdentifier:TypeAlias = Union[Iterable[str], str]
 
