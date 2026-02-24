@@ -41,7 +41,7 @@ dependencies = [
     "numpy >= 2.2.5; python_version >= '3.13'",
 ]
 
-version = "0.12.9"
+version = "0.12.10"
 
 
 [project.license]

@@ -1,5 +1,72 @@
 # Changelog
 
+# Output 2 — CHANGELOG.md Entry
+
+## 0.12.10 — 2026-02-24
+
+Light/dark theme support, pluggable analysis framework v2, lazy polars mode for large datasets, marimo widget integration, and major CI/CD automation improvements.
+
+### Features
+
+- Add light/dark theme support with automatic OS preference detection (#516)
+- Add pluggable analysis framework v2 with `@stat` decorator, typed DAG, and error propagation (#515)
+- Add lazy polars mode to headless server for streaming arbitrarily large datasets (#510)
+- Add marimo widget static assets and set marimo≥0.19.7 minimum version (#511)
+- Add per-request `no_browser` field to `/load` POST body (#568)
+- Add `version` field to `/health` endpoint and auto-kill stale servers (#496)
+- Wire polars widgets to DfStatsV2 with polars-native `@stat` functions (#517)
+
+### Fixes
+
+- Fix pandas 3.0+ compatibility: replace removed `is_numeric()` with `is_numeric_dtype()` (#570)
+- Add `pandas` to `[marimo]` extras — required at module level (#570)
+- Fix summary stats count/freq rows to inherit column alignment (#545)
+- Fix WASM marimo test with Pyodide-bundled fastparquet and pyarrow (#532)
+- Fix marimo Playwright tests by using bare widget expressions (#531)
+- Fix MCP app search not updating table data (#495)
+- Fix MCP app summary stats view showing no rows (#494)
+- Fix blank rows when scrolling small DataFrames (#483)
+- Add `GH_TOKEN` to automated release workflow (#576)
+- Fix TestPyPI installs with `--index-strategy unsafe-best-match` (#564)
+
+### Performance
+
+- Optimize CI by consolidating workflows and eliminating duplicate builds (#533, #523, #525)
+- Skip unnecessary dependencies in lint job (#527)
+- Add timeouts to all CI jobs (#525)
+
+### Testing
+
+- Add 61 new tests for pandas_commands.py (49% → 78% coverage) (#474)
+- Add pandas 3.0 compatibility regression tests (#473)
+- Add DFViewerInfinite unit tests with TSX Jest discovery (#573)
+- Add Playwright end-to-end tests for marimo notebooks (#497)
+- Add light/dark theme screenshot audit (#499)
+- Add MCP server integration tests (#572)
+
+### CI/CD
+
+- Add automated release workflow with version bumping and PyPI publishing (#574)
+- Consolidate ci.yml + build.yml into checks.yml (#533)
+- Add smoke tests for each optional extras group (#551)
+- Make marimo Playwright tests required — no longer soft-fail (#542)
+- Publish dev wheel to TestPyPI on every PR with PR comments (#537)
+- Extract JupyterLab Playwright tests to dedicated job (#534)
+- Extract JS build/Jest to separate job, run in parallel (#523)
+- Add non-blocking Windows Python 3.13 test job (#547)
+- Add Dependabot and weekly dependency compatibility checks (#550)
+- Add actionlint pre-commit hook for GitHub Actions validation (#498)
+- Fix dead if-conditions in build.yml (#528)
+- Skip unnecessary dependencies in lint job (#527)
+
+### Dependencies
+
+- Bump actions/github-script to 8 (#567)
+- Bump actions/checkout to 6 (#566)
+- Bump actions/cache to 5 (#565)
+- Bump actions/setup-node to 6 (#563)
+- Bump astral-sh/setup-uv to 7 (#562)
+
 ## 0.8.3 2025-01-23
 Fixes #299 Update height of ag-grid
 Fixes tooltips so they can display values from other columns
