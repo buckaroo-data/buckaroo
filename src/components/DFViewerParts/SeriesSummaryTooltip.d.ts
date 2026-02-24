@@ -1,5 +1,5 @@
 import { DFWhole, TooltipConfig } from './DFWhole';
-import { ITooltipParams } from 'ag-grid-community';
+import { ITooltipParams } from '@ag-grid-community/core';
 export declare function getBakedDFViewer(seriesDf: DFWhole): (_props: ITooltipParams) => import("react/jsx-runtime").JSX.Element;
 export declare const getSimpleTooltip: (tooltipField: string) => (props: ITooltipParams) => import("react/jsx-runtime").JSX.Element | undefined;
 interface RealTooltipParams {

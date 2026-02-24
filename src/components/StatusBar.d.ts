@@ -1,6 +1,6 @@
-import { default as React } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
-import { CustomCellEditorProps } from 'ag-grid-react';
+import { default as React } from '../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { DFMeta, BuckarooOptions, BuckarooState } from './WidgetTypes';
+import { CustomCellEditorProps } from '@ag-grid-community/react';
 export type setColumFunc = (newCol: string) => void;
 export declare const fakeSearchCell: (_params: any) => import("react/jsx-runtime").JSX.Element;
 export declare const SearchEditor: React.MemoExoticComponent<({ value, onValueChange, stopEditing }: CustomCellEditorProps) => import("react/jsx-runtime").JSX.Element>;

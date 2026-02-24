@@ -1,4 +1,4 @@
-import { ValueFormatterFunc, ValueFormatterParams } from 'ag-grid-community';
+import { ValueFormatterFunc, ValueFormatterParams } from '@ag-grid-community/core';
 import { DisplayerArgs, FloatDisplayerA, DatetimeLocaleDisplayerA, StringDisplayerA, ObjDisplayerA, CellRendererArgs, FormatterArgs } from './DFWhole';
 export declare const basicIntFormatter: Intl.NumberFormat;
 export declare const getStringFormatter: (args: StringDisplayerA) => (params: ValueFormatterParams) => string;
@@ -12,11 +12,11 @@ export declare const getFloatFormatter: (hint: FloatDisplayerA) => (params: Valu
 export declare const getDatetimeFormatter: (colHint: DatetimeLocaleDisplayerA) => (params: ValueFormatterParams) => string;
 export declare const defaultDatetimeFormatter: (params: ValueFormatterParams) => string;
 export declare function getFormatter(fArgs: FormatterArgs): ValueFormatterFunc<unknown>;
-export declare function getCellRenderer(crArgs: CellRendererArgs): "agCheckboxCellRenderer" | ((props: {
-    api: import('ag-grid-community').GridApi;
-    colDef: import('ag-grid-community').ColDef;
-    column: import('ag-grid-community').Column;
-    context: import('ag-grid-community').Context;
+export declare function getCellRenderer(crArgs: CellRendererArgs): ((props: {
+    api: import('@ag-grid-community/core').GridApi;
+    colDef: import('@ag-grid-community/core').ColDef;
+    column: import('@ag-grid-community/core').Column;
+    context: import('@ag-grid-community/core').Context;
     value: any;
-}) => import("react/jsx-runtime").JSX.Element);
-export declare function getFormatterFromArgs(dispArgs: DisplayerArgs): ValueFormatterFunc<unknown, any, any> | undefined;
+}) => import("react/jsx-runtime").JSX.Element) | "agCheckboxCellRenderer";
+export declare function getFormatterFromArgs(dispArgs: DisplayerArgs): ValueFormatterFunc<unknown, any> | undefined;

@@ -1,4 +1,4 @@
-import { default as React } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
+import { default as React } from '../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { OperationResult } from './DependentTabs';
 import { DFDataOrPayload } from './DFViewerParts/DFWhole';
 import { BuckarooState, BuckarooOptions, DFMeta } from './WidgetTypes';
@@ -6,7 +6,7 @@ import { CommandConfigT } from './CommandUtils';
 import { Operation } from './OperationUtils';
 import { IDisplayArgs } from './DFViewerParts/gridUtils';
 import { DatasourceOrRaw } from './DFViewerParts/DFViewerInfinite';
-import { IDatasource } from 'ag-grid-community';
+import { IDatasource } from '@ag-grid-community/core';
 import { KeyAwareSmartRowCache } from './DFViewerParts/SmartRowCache';
 export declare const getDataWrapper: (data_key: string, df_data_dict: Record<string, DFDataOrPayload>, ds: IDatasource, total_rows?: number) => DatasourceOrRaw;
 export declare const getKeySmartRowCache: (model: any, setRespError: any) => KeyAwareSmartRowCache;
