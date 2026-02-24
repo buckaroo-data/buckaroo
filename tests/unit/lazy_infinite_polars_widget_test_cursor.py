@@ -17,9 +17,12 @@ def _resolve_all_stats(all_stats):
     """Resolve all_stats to a list of row dicts, whether it's JSON or parquet_b64."""
     if isinstance(all_stats, list):
         return all_stats
-    if isinstance(all_stats, dict) and all_stats.get('format') == 'parquet_b64':
+    if isinstance(all_stats, dict) and all_stats.get('format') in ('ipc_b64', 'parquet_b64'):
         raw = base64.b64decode(all_stats['data'])
-        df = pd.read_parquet(BytesIO(raw), engine='pyarrow')
+        import pyarrow.ipc as ipc_mod
+        reader = ipc_mod.open_stream(BytesIO(raw))
+        table = reader.read_all()
+        df = pd.DataFrame(table.to_pydict())
         rows = json.loads(df.to_json(orient='records'))
         parsed_rows = []
         for row in rows:

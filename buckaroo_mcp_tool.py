@@ -264,7 +264,7 @@ def _view_impl(path: str) -> str:
         raise
 
     prompt = f"Viewing {os.path.basename(path)}"
-    payload = json.dumps({"session": SESSION_ID, "path": path, "mode": "buckaroo", "prompt": prompt}).encode()
+    payload = json.dumps({"session": SESSION_ID, "path": path, "mode": "lazy", "prompt": prompt}).encode()
     log.debug("POST %s/load payload=%s", SERVER_URL, payload.decode())
 
     try:

@@ -26,7 +26,7 @@ from .pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.extension_utils import copy_extend
 
-from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, sd_to_parquet_b64
+from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_arrow_ipc, sd_to_ipc_b64
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import (Sampling, exception_protect)
 from .dataflow.styling_core import (ComponentConfig, DFViewerConfig, DisplayArgs, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
@@ -242,7 +242,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
 
         Exists so this can be overridden for polars/geopandas.
         """
-        return sd_to_parquet_b64(sd)
+        return sd_to_ipc_b64(sd)
 
 
 
@@ -395,11 +395,11 @@ class BuckarooInfiniteWidget(BuckarooWidget):
                 converted_sort_column = processed_sd[sort]['orig_col_name']
                 sorted_df = processed_df.sort_values(by=[converted_sort_column], ascending=ascending)
                 slice_df = sorted_df[start:end]
-                self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)}, [to_parquet(slice_df)])
+                self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)}, [to_arrow_ipc(slice_df)])
             else:
                 slice_df = processed_df[start:end]
                 self.send({ "type": "infinite_resp", 'key':new_payload_args,
-                            'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
+                            'data': [], 'length':len(processed_df)}, [to_arrow_ipc(slice_df) ])
     
                 second_pa = new_payload_args.get('second_request')
                 if not second_pa:
@@ -409,7 +409,7 @@ class BuckarooInfiniteWidget(BuckarooWidget):
                 extra_df = processed_df[extra_start:extra_end]
                 self.send(
                     {"type": "infinite_resp", 'key':second_pa, 'data':[], 'length':len(processed_df)},
-                    [to_parquet(extra_df)]
+                    [to_arrow_ipc(extra_df)]
                 )
         except Exception as e:
             logger.error(e)

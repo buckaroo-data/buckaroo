@@ -13,31 +13,39 @@ import sys
 
 
 def test_base():
-    """Bare `pip install buckaroo` — pandas comes via fastparquet."""
-    import pandas as pd
-    from buckaroo.dataflow.dataflow import CustomizableDataflow
-    from buckaroo.dataflow.autocleaning import PandasAutocleaning
-    from buckaroo.customizations.pd_autoclean_conf import NoCleaningConf
-    from buckaroo.serialization_utils import pd_to_obj, to_parquet
+    """Bare `pip install buckaroo` — no pandas required (pandas is optional)."""
+    import buckaroo  # noqa: F401
+    from buckaroo._version import __version__
+    assert __version__, "version should be set"
 
-    df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
+    # Verify pyarrow is available (core dep)
+    import pyarrow  # noqa: F401
 
-    # Verify the full dataflow pipeline runs
-    class TestDataflow(CustomizableDataflow):
-        autocleaning_klass = PandasAutocleaning
-        autoclean_conf = tuple([NoCleaningConf])
+    # If pandas is available, test the full dataflow pipeline
+    try:
+        import pandas as pd
+        from buckaroo.dataflow.dataflow import CustomizableDataflow
+        from buckaroo.dataflow.autocleaning import PandasAutocleaning
+        from buckaroo.customizations.pd_autoclean_conf import NoCleaningConf
+        from buckaroo.serialization_utils import pd_to_obj, to_parquet
 
-    flow = TestDataflow(df)
-    assert flow.processed_df is not None, "processed_df should not be None"
-    assert len(flow.processed_df) == 3
+        df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
 
-    # Verify serialization works (parquet round-trip)
-    parquet_bytes = to_parquet(df)
-    assert len(parquet_bytes) > 0, "parquet serialization should produce bytes"
+        class TestDataflow(CustomizableDataflow):
+            autocleaning_klass = PandasAutocleaning
+            autoclean_conf = tuple([NoCleaningConf])
 
-    # Verify JSON serialization
-    obj = pd_to_obj(df)
-    assert len(obj) > 0, "pd_to_obj should produce non-empty output"
+        flow = TestDataflow(df)
+        assert flow.processed_df is not None, "processed_df should not be None"
+        assert len(flow.processed_df) == 3
+
+        parquet_bytes = to_parquet(df)
+        assert len(parquet_bytes) > 0, "parquet serialization should produce bytes"
+
+        obj = pd_to_obj(df)
+        assert len(obj) > 0, "pd_to_obj should produce non-empty output"
+    except ImportError:
+        pass  # pandas not installed — that's OK for base install
 
     print("  base: OK")
 

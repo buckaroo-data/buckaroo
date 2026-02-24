@@ -4,7 +4,17 @@ import pandas as pd
 from buckaroo.ddd_library import get_multiindex_with_names_index_df, get_multiindex_cols_df, get_multiindex_index_df
 from buckaroo.serialization_utils import (
     is_ser_dt_safe, is_dataframe_datetime_safe, check_and_fix_df, pd_to_obj,
-    to_parquet, DuplicateColumnsException)
+    to_arrow_ipc, DuplicateColumnsException)
+import pyarrow.ipc as ipc
+from io import BytesIO
+
+
+def _read_ipc_to_polars(ipc_bytes):
+    """Read Arrow IPC bytes into a polars DataFrame."""
+    import polars as pl
+    reader = ipc.open_stream(BytesIO(ipc_bytes))
+    table = reader.read_all()
+    return pl.from_arrow(table)
 
 
 
@@ -91,37 +101,29 @@ def test_serialize_multiindex_json():
 
 def test_serialize_multiindex_cols_parquet():
     df = get_multiindex_cols_df()
-    output = to_parquet(df)
-    #second_df = pd.read_parquet(output)
-    import polars as pl
-    second_df = pl.read_parquet(output)
+    output = to_arrow_ipc(df)
+    second_df = _read_ipc_to_polars(output)
     assert set(second_df.columns) ==  set(['index','a','b','c','d','e'])
 
 def test_serialize_multiindex_index_simple():
     
     df = get_multiindex_index_df()
-    output = to_parquet(df)
-    import polars as pl
-    second_df = pl.read_parquet(output)
+    output = to_arrow_ipc(df)
+    second_df = _read_ipc_to_polars(output)
     print("Actual columns:", second_df.columns)
     print("DataFrame contents:")
     print(second_df)
     assert set(second_df.columns) ==  set(['index_a', 'index_b', 'a', 'b'])
 
-    def decode_bytes_column(col):
-        return [v.decode('utf-8').strip('"') if v is not None else None for v in col]
-
-    assert decode_bytes_column(second_df['index_a']) == ['foo', 'foo', 'bar', 'bar', 'bar', 'baz']
-    assert decode_bytes_column(second_df['index_b']) == ['a', 'b', 'a', 'b', 'c', 'a']
+    assert list(second_df['index_a']) == ['foo', 'foo', 'bar', 'bar', 'bar', 'baz']
+    assert list(second_df['index_b']) == ['a', 'b', 'a', 'b', 'c', 'a']
     assert list(second_df['a']) == [10, 20, 30, 40, 50, 60]
-    assert decode_bytes_column(second_df['b']) == ['foo', 'bar', 'baz', 'quux', 'boff', None]
+    assert list(second_df['b']) == ['foo', 'bar', 'baz', 'quux', 'boff', None]
 
 def test_serialize_multiindex_index():
     df = get_multiindex_with_names_index_df()
-    output = to_parquet(df)
-    #second_df = pd.read_parquet(output)
-    import polars as pl
-    second_df = pl.read_parquet(output)
+    output = to_arrow_ipc(df)
+    second_df = _read_ipc_to_polars(output)
     assert set(second_df.columns) ==  set(['index_a', 'index_b', 'a', 'b'])
     
 def test_serialize_naive_json():
@@ -131,7 +133,7 @@ def test_serialize_naive_json():
                        'b': [d, d2, None]})
 
     #just make sure we don't throw an error
-    output = to_parquet(df)
+    output = to_arrow_ipc(df)
     #and make sure output isn't empty. I don't want to hardcode a
     #response here
     assert len(output) > 20

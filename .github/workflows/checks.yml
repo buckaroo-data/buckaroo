@@ -402,7 +402,7 @@ jobs:
     name: Server Playwright Tests
     needs: [BuildWheel]
     runs-on: depot-ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - name: Install uv

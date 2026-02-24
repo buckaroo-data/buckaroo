@@ -1,14 +1,13 @@
 from dataclasses import dataclass, field
 from typing import Any, Optional
-import pandas as pd
-# polars is optional — only used in lazy mode
+# pandas is optional — only used in viewer/buckaroo modes
 
 
 @dataclass
 class SessionState:
     session_id: str
     path: str
-    df: Optional[pd.DataFrame] = None
+    df: Optional[Any] = None  # pd.DataFrame when pandas is available
     metadata: dict = field(default_factory=dict)
     ws_clients: set = field(default_factory=set)
     df_display_args: dict = field(default_factory=dict)

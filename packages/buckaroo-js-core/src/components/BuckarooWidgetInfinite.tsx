@@ -18,7 +18,7 @@ import {
 import { DatasourceOrRaw, DFViewerInfinite } from "./DFViewerParts/DFViewerInfinite";
 import { IDatasource } from "@ag-grid-community/core";
 import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "./DFViewerParts/SmartRowCache";
-import { parquetRead, parquetMetadata } from 'hyparquet'
+import { tableFromIPC } from '@uwdata/flechette'
 import { MessageBox } from "./MessageBox";
 
 export const getDataWrapper = (
@@ -90,21 +90,14 @@ export const getKeySmartRowCache = (model: any, setRespError:any) => {
             const respTime = now - payload_response.key.request_time;
             console.log(`response before ${[payload_response.key.start, payload_response.key.origEnd, payload_response.key.end]} parse took ${respTime}`)
         }
-        console.log("about to read buffers[0]", buffers[0])            
+        console.log("about to read buffers[0]", buffers[0])
         const table_bytes = buffers[0]
-        const metadata = parquetMetadata(table_bytes.buffer)
-        console.log("metadata", metadata)
-        parquetRead({
-            file: table_bytes.buffer,
-            metadata:metadata,
-            rowFormat: 'object',
-            onComplete: data => {
-                //@ts-ignore
-                const parqData:DFData = data as DFData
-                payload_response.data = parqData
-                src.addPayloadResponse(payload_response);
-            }
-        })
+        const arrayBuf = table_bytes.buffer instanceof ArrayBuffer
+            ? table_bytes.buffer : table_bytes;
+        const table = tableFromIPC(arrayBuf, { useProxy: false });
+        const data: DFData = table.toArray() as DFData;
+        payload_response.data = data;
+        src.addPayloadResponse(payload_response);
     })
     return src;
 }
