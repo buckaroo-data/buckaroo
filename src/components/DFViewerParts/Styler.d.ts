@@ -1,4 +1,4 @@
-import { CellClassParams } from '@ag-grid-community/core';
+import { CellClassParams } from 'ag-grid-community';
 import { ColorMappingConfig, ColorMapRules, ColorCategoricalRules, ColorWhenNotNullRules, ColorFromColumn } from './DFWhole';
 export declare function getHistoIndex(val: number, histogram_edges: number[]): number;
 export declare function colorMap(cmr: ColorMapRules): {

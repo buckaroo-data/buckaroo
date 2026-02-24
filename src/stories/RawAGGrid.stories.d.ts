@@ -1,6 +1,6 @@
 import { StoryObj } from '@storybook/react';
 import { DFData } from '../components/DFViewerParts/DFWhole';
-import { ColDef } from '@ag-grid-community/core';
+import { ColDef } from 'ag-grid-community';
 declare const meta: {
     title: string;
     component: ({ colDefs, data }: {
