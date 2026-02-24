@@ -271,6 +271,10 @@ datacompy = [
     "datacompy>=0.15.0",
 ]
 
+release = [
+    "anthropic>=0.40.0",
+]
+
 dev = [
     "anywidget[dev]>=0.9.0",
     "jupyterlab>=4.2.5",
