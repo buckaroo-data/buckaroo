@@ -14,8 +14,11 @@ from buckaroo.server.data_loading import (
     load_file_lazy, get_metadata_lazy, get_display_state_lazy,
 )
 from buckaroo.server.focus import find_or_create_session_window
+from buckaroo.server.session import build_state_message
 
 log = logging.getLogger("buckaroo.server.handlers")
+
+_BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
 
 LOG_DIR = os.path.join(os.path.expanduser("~"), ".buckaroo", "logs")
 
@@ -69,6 +72,16 @@ class DiagnosticsHandler(tornado.web.RequestHandler):
 
         static_path = self.application.settings.get("static_path", "")
         start_time = self.application.settings.get("server_start_time", 0)
+        sessions = self.application.settings.get("sessions")
+
+        session_info: dict = {}
+        if sessions is not None:
+            session_info = {
+                "active": sessions.active_session_count,
+                "total_evicted": sessions.total_evicted_count,
+                "ttl_s": sessions._ttl_s,
+                "eviction_interval_s": sessions._eviction_interval_s,
+            }
 
         self.write({
             "status": "ok",
@@ -83,6 +96,8 @@ class DiagnosticsHandler(tornado.web.RequestHandler):
             "static_files": _get_static_file_info(static_path),
             "log_dir": LOG_DIR,
             "log_files": _list_log_files(),
+            "sessions": session_info,
+            "startup_timeout_s": float(os.environ.get("BUCKAROO_STARTUP_TIMEOUT", "5.0")),
             "dependencies": {
                 "tornado": _check_dependency("tornado"),
                 "pandas": _check_dependency("pandas"),
@@ -163,23 +178,7 @@ class LoadHandler(tornado.web.RequestHandler):
         if not session.ws_clients:
             return
 
-        state_msg = {
-            "type": "initial_state",
-            "metadata": metadata,
-            "prompt": session.prompt,
-            "df_display_args": session.df_display_args,
-            "df_data_dict": session.df_data_dict,
-            "df_meta": session.df_meta,
-            "mode": session.mode,
-        }
-        if session.mode == "buckaroo":
-            state_msg["buckaroo_state"] = session.buckaroo_state
-            state_msg["buckaroo_options"] = session.buckaroo_options
-            state_msg["command_config"] = session.command_config
-            state_msg["operation_results"] = session.operation_results
-            state_msg["operations"] = session.operations
-
-        push_msg = json.dumps(state_msg)
+        push_msg = json.dumps(build_state_message(session, metadata=metadata))
         for client in list(session.ws_clients):
             try:
                 client.write_message(push_msg)
@@ -207,15 +206,20 @@ class LoadHandler(tornado.web.RequestHandler):
                 return df, metadata
         except FileNotFoundError:
             self.set_status(404)
-            self.write({"error": f"File not found: {path}"})
+            self.write({"error_code": "file_not_found", "message": f"File not found: {path}"})
             return None, None
         except ValueError as e:
             self.set_status(400)
-            self.write({"error": str(e)})
+            self.write({"error_code": "invalid_file", "message": str(e)})
             return None, None
         except Exception:
+            tb = traceback.format_exc()
+            log.error("load error path=%s: %s", path, tb)
+            resp: dict = {"error_code": "load_error", "message": "Failed to load file"}
+            if _BUCKAROO_DEBUG:
+                resp["details"] = tb
             self.set_status(500)
-            self.write({"error": traceback.format_exc()})
+            self.write(resp)
             return None, None
 
     async def post(self):

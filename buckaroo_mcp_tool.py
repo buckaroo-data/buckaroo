@@ -222,14 +222,24 @@ def ensure_server() -> dict:
 
     global _server_proc
     cmd = [sys.executable, "-m", "buckaroo.server"]
-    log.info("Starting server: %s", " ".join(cmd))
 
     server_log = os.path.join(LOG_DIR, "server.log")
     server_log_fh = open(server_log, "a")
-    _server_proc = subprocess.Popen(cmd, stdout=server_log_fh, stderr=server_log_fh)
+    try:
+        _server_proc = subprocess.Popen(cmd, stdout=server_log_fh, stderr=server_log_fh)
+    finally:
+        # Close the parent-side handle; the child inherits its own copy.
+        server_log_fh.close()
     _start_server_monitor(_server_proc.pid)
 
-    for i in range(20):
+    startup_timeout_s = float(os.environ.get("BUCKAROO_STARTUP_TIMEOUT", "5.0"))
+    startup_retries = max(1, int(startup_timeout_s / 0.25))
+    log.info(
+        "Starting server: %s (startup_timeout=%.1fs retries=%d)",
+        " ".join(cmd), startup_timeout_s, startup_retries,
+    )
+
+    for i in range(startup_retries):
         time.sleep(0.25)
         health = _health_check()
         if health:

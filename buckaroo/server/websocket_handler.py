@@ -1,4 +1,6 @@
 import json
+import logging
+import os
 import traceback
 
 import tornado.websocket
@@ -9,6 +11,14 @@ from buckaroo.server.data_loading import (
     handle_infinite_request_lazy,
     get_buckaroo_display_state,
 )
+from buckaroo.server.session import build_state_message
+
+log = logging.getLogger("buckaroo.server.websocket")
+
+_BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
+
+# Fields in buckaroo_state that drive dataflow changes; others are ignored.
+_DATAFLOW_FIELDS = ("post_processing", "cleaning_method", "quick_command_args")
 
 
 class DataStreamHandler(tornado.websocket.WebSocketHandler):
@@ -20,28 +30,17 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # Send initial state if session already has data loaded
         session = sessions.get(session_id)
         if session and (session.df is not None or session.ldf is not None):
-            msg = {
-                "type": "initial_state",
-                "metadata": session.metadata,
-                "prompt": session.prompt,
-                "df_display_args": session.df_display_args,
-                "df_data_dict": session.df_data_dict,
-                "df_meta": session.df_meta,
-                "mode": session.mode,
-            }
-            if session.mode == "buckaroo":
-                msg["buckaroo_state"] = session.buckaroo_state
-                msg["buckaroo_options"] = session.buckaroo_options
-                msg["command_config"] = session.command_config
-                msg["operation_results"] = session.operation_results
-                msg["operations"] = session.operations
-            self.write_message(json.dumps(msg))
+            self.write_message(json.dumps(build_state_message(session)))
 
     def on_message(self, message):
         try:
             msg = json.loads(message)
         except (json.JSONDecodeError, TypeError):
-            self.write_message(json.dumps({"type": "error", "error": "Invalid JSON"}))
+            self.write_message(json.dumps({
+                "type": "error",
+                "error_code": "invalid_json",
+                "message": "Invalid JSON",
+            }))
             return
 
         msg_type = msg.get("type")
@@ -57,6 +56,15 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             return
 
         old_state = session.buckaroo_state
+
+        # Skip if no effective change to the fields that drive the dataflow.
+        if all(old_state.get(f) == new_state.get(f) for f in _DATAFLOW_FIELDS):
+            log.debug(
+                "buckaroo_state_change no-op session=%s — skipping rebroadcast",
+                self.session_id,
+            )
+            return
+
         try:
             # Propagate changes to the dataflow (mirrors BuckarooWidgetBase._buckaroo_state)
             if old_state.get("post_processing") != new_state.get("post_processing"):
@@ -76,28 +84,23 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             session.command_config = buckaroo_state["command_config"]
 
             # Broadcast updated state to all connected clients
-            update_msg = json.dumps({
-                "type": "initial_state",
-                "df_display_args": session.df_display_args,
-                "df_data_dict": session.df_data_dict,
-                "df_meta": session.df_meta,
-                "mode": session.mode,
-                "buckaroo_state": session.buckaroo_state,
-                "buckaroo_options": session.buckaroo_options,
-                "command_config": session.command_config,
-                "operation_results": session.operation_results,
-                "operations": session.operations,
-            })
+            update_payload = json.dumps(build_state_message(session))
             for client in list(session.ws_clients):
                 try:
-                    client.write_message(update_msg)
+                    client.write_message(update_payload)
                 except Exception:
                     session.ws_clients.discard(client)
         except Exception:
-            self.write_message(json.dumps({
+            tb = traceback.format_exc()
+            log.error("buckaroo_state_change error session=%s: %s", self.session_id, tb)
+            err: dict = {
                 "type": "error",
-                "error": traceback.format_exc(),
-            }))
+                "error_code": "state_change_error",
+                "message": "Failed to apply state change",
+            }
+            if _BUCKAROO_DEBUG:
+                err["details"] = tb
+            self.write_message(json.dumps(err))
 
     def _handle_infinite_request(self, payload_args):
         sessions = self.application.settings["sessions"]
@@ -149,12 +152,14 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 if parquet2:
                     self.write_message(parquet2, binary=True)
         except Exception:
+            tb = traceback.format_exc()
+            log.error("infinite_request error session=%s: %s", self.session_id, tb)
             self.write_message(json.dumps({
                 "type": "infinite_resp",
                 "key": payload_args,
                 "data": [],
                 "length": 0,
-                "error_info": traceback.format_exc(),
+                "error_info": tb if _BUCKAROO_DEBUG else "Request failed",
             }))
 
     def on_close(self):
@@ -162,5 +167,12 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         sessions.remove_ws_client(self.session_id, self)
 
     def check_origin(self, origin):
-        # Allow connections from any origin (local dev tool)
+        # Allow connections from any origin — this server is local-only by design
+        # and not intended for network exposure. Set BUCKAROO_STRICT_ORIGIN=1 to
+        # restrict to localhost origins if needed.
+        if os.environ.get("BUCKAROO_STRICT_ORIGIN", "").lower() in ("1", "true"):
+            return (
+                origin.startswith("http://localhost")
+                or origin.startswith("http://127.0.0.1")
+            )
         return True
