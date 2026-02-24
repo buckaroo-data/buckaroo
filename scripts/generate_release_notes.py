@@ -31,8 +31,13 @@ CATEGORY_ORDER = [
 CATEGORY_MAP = {label: display for label, display in CATEGORY_ORDER}
 
 
-def get_tag_date(tag: str) -> str:
-    """Get the ISO date a tag was created."""
+def get_tag_timestamp(tag: str) -> str:
+    """Get the full ISO-8601 timestamp a tag was created.
+
+    Returns the full timestamp (e.g. ``2026-02-01T14:30:00+00:00``) so that
+    the GitHub search boundary can be kept exclusive (``merged:>TIMESTAMP``)
+    without accidentally dropping same-day PRs that were merged after the tag.
+    """
     result = subprocess.run(
         ["git", "tag", "-l", tag, "--format=%(creatordate:iso-strict)"],
         capture_output=True,
@@ -43,17 +48,16 @@ def get_tag_date(tag: str) -> str:
     if not date_str:
         print(f"Error: tag '{tag}' not found", file=sys.stderr)
         sys.exit(1)
-    # gh search wants YYYY-MM-DD
-    return date_str[:10]
+    return date_str
 
 
-def gather_prs(since_date: str) -> list[dict]:
-    """Fetch merged PRs since a date using gh CLI."""
+def gather_prs(since_timestamp: str) -> list[dict]:
+    """Fetch merged PRs since a timestamp using gh CLI."""
     result = subprocess.run(
         [
             "gh", "pr", "list",
             "--state", "merged",
-            "--search", f"merged:>{since_date}",
+            "--search", f"merged:>{since_timestamp}",
             "--json", "number,title,body,labels,mergedAt",
             "--limit", "200",
         ],
@@ -162,16 +166,24 @@ def generate_plain_notes(grouped_prs: dict[str, list[dict]], version: str, date:
     release_lines = []
     changelog_lines = [f"## {version} — {date}", ""]
 
+    has_entries = False
     for key, display_name in CATEGORY_ORDER:
         prs = grouped_prs.get(key, [])
         if not prs:
             continue
+        has_entries = True
         release_lines.append(f"## {display_name}")
         changelog_lines.append(f"### {display_name}")
         for pr in prs:
             bullet = f"- {pr['title']} (#{pr['number']})"
             release_lines.append(bullet)
             changelog_lines.append(bullet)
+        release_lines.append("")
+        changelog_lines.append("")
+
+    if not has_entries:
+        release_lines.append("No notable changes since previous release.")
+        changelog_lines.append("No notable changes since previous release.")
         release_lines.append("")
         changelog_lines.append("")
 
@@ -192,15 +204,24 @@ def main():
 
     use_claude = bool(os.environ.get("ANTHROPIC_API_KEY")) and not args.dry_run
 
-    # Get date of the previous tag
-    since_date = get_tag_date(args.tag_from)
-    print(f"Gathering PRs merged since {since_date} (tag {args.tag_from})...", file=sys.stderr)
+    # Get timestamp of the previous tag (full ISO-8601, kept exclusive with >)
+    since_timestamp = get_tag_timestamp(args.tag_from)
+    print(f"Gathering PRs merged since {since_timestamp} (tag {args.tag_from})...", file=sys.stderr)
 
     # Gather and group PRs
-    prs = gather_prs(since_date)
+    prs = gather_prs(since_timestamp)
     if not prs:
-        print("No merged PRs found since last release.", file=sys.stderr)
-        sys.exit(1)
+        print("Warning: No merged PRs found since last release — generating empty release notes.", file=sys.stderr)
+        release_notes, changelog_entry = generate_plain_notes({}, args.version, args.date)
+        release_path = os.path.join(args.output_dir, "release_notes.md")
+        changelog_path = os.path.join(args.output_dir, "changelog_entry.md")
+        with open(release_path, "w") as f:
+            f.write(release_notes)
+        with open(changelog_path, "w") as f:
+            f.write(changelog_entry)
+        print(f"GitHub release notes written to {release_path}", file=sys.stderr)
+        print(f"CHANGELOG entry written to {changelog_path}", file=sys.stderr)
+        return
     print(f"Found {len(prs)} merged PRs", file=sys.stderr)
 
     grouped = group_prs(prs)
