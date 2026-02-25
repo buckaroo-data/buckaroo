@@ -51,5 +51,15 @@ export declare const myThemeDark: Theme;
 export declare const myThemeLight: Theme;
 /** @deprecated Use getThemeForScheme() instead */
 export declare const myTheme: Theme;
-export declare function getThemeForScheme(scheme: 'light' | 'dark'): Theme;
+export type ThemeConfig = {
+    colorScheme?: 'light' | 'dark' | 'auto';
+    accentColor?: string;
+    accentHoverColor?: string;
+    backgroundColor?: string;
+    foregroundColor?: string;
+    oddRowBackgroundColor?: string;
+    borderColor?: string;
+};
+export declare function resolveColorScheme(osScheme: 'light' | 'dark', themeConfig?: ThemeConfig): 'light' | 'dark';
+export declare function getThemeForScheme(scheme: 'light' | 'dark', themeConfig?: ThemeConfig): Theme;
 export {};

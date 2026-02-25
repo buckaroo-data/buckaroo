@@ -145,7 +145,7 @@ import{j as r}from"./jsx-runtime-DiklIkkE.js";import{r as d,R as s}from"./index-
 
 .operation-adder button {
   padding: 1px 2px;
-  background-color: #007bff;
+  background-color: var(--bk-accent-color, #007bff);
   color: white;
   border: none;
   border-radius: 0;
@@ -155,7 +155,7 @@ import{j as r}from"./jsx-runtime-DiklIkkE.js";import{r as d,R as s}from"./index-
 }
 
 .operation-adder button:hover {
-  background-color: #0056b3;
+  background-color: var(--bk-accent-hover-color, #0056b3);
 }
 
 .operations-list {
@@ -371,7 +371,7 @@ import{j as r}from"./jsx-runtime-DiklIkkE.js";import{r as d,R as s}from"./index-
  }
 
 div.dependent-tabs ul.tabs li.active {
-    background:rgba(33, 150, 243, 0.49);
+    background: var(--bk-accent-color, rgba(33, 150, 243, 0.49));
 /*    border:1px solid red; */
 }
 
@@ -431,11 +431,11 @@ div.dependent-tabs ul.tabs li.active {
 
 /* Ensure empty grid area below rows has proper background */
 .theme-hanger {
-    background-color: #181D1F;
+    background-color: var(--bk-bg-color, #181D1F);
 }
 @media (prefers-color-scheme: light) {
     .theme-hanger {
-        background-color: #ffffff;
+        background-color: var(--bk-bg-color, #ffffff);
     }
 }
 
