@@ -478,6 +478,8 @@ describe('failing SmartRowCache tests', () => {
 describe('KeyAwareSmartRowCache tests', () => {
 
     const failNOP = () => {}
+    const waitingKeys = (src: KeyAwareSmartRowCache): string[] =>
+        Object.keys((src as any).waitingCallbacks);
 
     test('basic KeyAwareSmartRowCache tests', () => {
 	let src:KeyAwareSmartRowCache;
@@ -595,6 +597,127 @@ describe('KeyAwareSmartRowCache tests', () => {
         expect(follow.start).toBe(70);
         expect(follow.end).toBe(270);
         expect(follow.origEnd).toBe(270);
+    })
+
+    test('KeyAwareSmartRowCache resolves out-of-order responses to matching waiters only', () => {
+        const mockRequestFn = jest.fn((_pa: PayloadArgs) => {});
+        const src = new KeyAwareSmartRowCache(mockRequestFn);
+        const pa1: PayloadArgs = { sourceName: "foo", start: 0, end: 20, origEnd: 20 };
+        const pa2: PayloadArgs = { sourceName: "foo", start: 20, end: 40, origEnd: 40 };
+
+        const cb1 = jest.fn((_df: DFData, _length: number) => {});
+        const cb2 = jest.fn((_df: DFData, _length: number) => {});
+        const fail1 = jest.fn();
+        const fail2 = jest.fn();
+
+        src.getRequestRows(pa1, cb1, fail1);
+        src.getRequestRows(pa2, cb2, fail2);
+        expect(waitingKeys(src)).toHaveLength(2);
+
+        src.addPayloadResponse({
+            key: pa2,
+            data: genRows(pa2.start, pa2.end, pa2.sourceName)[1],
+            length: 400,
+        });
+        expect(cb2).toHaveBeenCalledTimes(1);
+        expect(cb1).toHaveBeenCalledTimes(0);
+        expect(fail1).toHaveBeenCalledTimes(0);
+        expect(fail2).toHaveBeenCalledTimes(0);
+        expect(waitingKeys(src)).toHaveLength(1);
+
+        src.addPayloadResponse({
+            key: pa1,
+            data: genRows(pa1.start, pa1.end, pa1.sourceName)[1],
+            length: 400,
+        });
+        expect(cb1).toHaveBeenCalledTimes(1);
+        expect(waitingKeys(src)).toHaveLength(0);
+    })
+
+    test('KeyAwareSmartRowCache isolates waiters across source keys under late responses', () => {
+        const mockRequestFn = jest.fn((_pa: PayloadArgs) => {});
+        const src = new KeyAwareSmartRowCache(mockRequestFn);
+        const paA: PayloadArgs = { sourceName: "A", start: 0, end: 20, origEnd: 20 };
+        const paB: PayloadArgs = { sourceName: "B", start: 0, end: 20, origEnd: 20 };
+
+        const cbA = jest.fn((_df: DFData, _length: number) => {});
+        const cbB = jest.fn((_df: DFData, _length: number) => {});
+        const failA = jest.fn();
+        const failB = jest.fn();
+
+        src.getRequestRows(paA, cbA, failA);
+        src.getRequestRows(paB, cbB, failB);
+        expect(waitingKeys(src)).toHaveLength(2);
+
+        // old source response arrives first; it must not satisfy source B waiter
+        src.addPayloadResponse({
+            key: paA,
+            data: genRows(paA.start, paA.end, paA.sourceName)[1],
+            length: 200,
+        });
+        expect(cbA).toHaveBeenCalledTimes(1);
+        expect(cbB).toHaveBeenCalledTimes(0);
+        expect(failA).toHaveBeenCalledTimes(0);
+        expect(failB).toHaveBeenCalledTimes(0);
+        expect(waitingKeys(src)).toHaveLength(1);
+
+        src.addPayloadResponse({
+            key: paB,
+            data: genRows(paB.start, paB.end, paB.sourceName)[1],
+            length: 200,
+        });
+        expect(cbB).toHaveBeenCalledTimes(1);
+        expect(waitingKeys(src)).toHaveLength(0);
+    })
+
+    test('KeyAwareSmartRowCache addErrorResponse calls fail and clears waiter', () => {
+        const mockRequestFn = jest.fn((_pa: PayloadArgs) => {});
+        const src = new KeyAwareSmartRowCache(mockRequestFn);
+        const pa: PayloadArgs = { sourceName: "foo", start: 10, end: 30, origEnd: 30 };
+        const cb = jest.fn((_df: DFData, _length: number) => {});
+        const fail = jest.fn();
+
+        src.getRequestRows(pa, cb, fail);
+        expect(waitingKeys(src)).toHaveLength(1);
+
+        src.addErrorResponse({ key: pa, data: [], length: 0 });
+        expect(fail).toHaveBeenCalledTimes(1);
+        expect(cb).toHaveBeenCalledTimes(0);
+        expect(waitingKeys(src)).toHaveLength(0);
+    })
+
+    test('KeyAwareSmartRowCache replaces same-key waiter and leaves no stale callbacks', () => {
+        const mockRequestFn = jest.fn((_pa: PayloadArgs) => {});
+        const src = new KeyAwareSmartRowCache(mockRequestFn);
+        const pa: PayloadArgs = { sourceName: "foo", start: 0, end: 20, origEnd: 20 };
+        const cb1 = jest.fn((_df: DFData, _length: number) => {});
+        const cb2 = jest.fn((_df: DFData, _length: number) => {});
+        const fail1 = jest.fn();
+        const fail2 = jest.fn();
+
+        src.getRequestRows(pa, cb1, fail1);
+        src.getRequestRows(pa, cb2, fail2);
+        expect(waitingKeys(src)).toHaveLength(1);
+
+        src.addPayloadResponse({
+            key: pa,
+            data: genRows(pa.start, pa.end, pa.sourceName)[1],
+            length: 100,
+        });
+        expect(cb1).toHaveBeenCalledTimes(0);
+        expect(cb2).toHaveBeenCalledTimes(1);
+        expect(waitingKeys(src)).toHaveLength(0);
+
+        const paMissing: PayloadArgs = { sourceName: "foo", start: 20, end: 40, origEnd: 40 };
+        const cb3 = jest.fn((_df: DFData, _length: number) => {});
+        const fail3 = jest.fn();
+        src.getRequestRows(paMissing, cb3, fail3);
+        expect(waitingKeys(src)).toHaveLength(1);
+
+        src.addErrorResponse({ key: paMissing, data: [], length: 0 });
+        expect(fail3).toHaveBeenCalledTimes(1);
+        expect(cb3).toHaveBeenCalledTimes(0);
+        expect(waitingKeys(src)).toHaveLength(0);
     })
 
     test('KeyAwareSmartRowCache test last rows', () => {

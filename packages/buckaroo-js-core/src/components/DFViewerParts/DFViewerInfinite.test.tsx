@@ -4,17 +4,27 @@ import { DFViewerConfig } from "./DFWhole";
 
 const setGridOptionMock = jest.fn();
 let latestAgGridProps: any = null;
+let agGridRenderHistory: any[] = [];
+let agGridMountCount = 0;
+let agGridUnmountCount = 0;
 
 jest.mock("@ag-grid-community/react", () => {
   const React = require("react");
   return {
     AgGridReact: React.forwardRef((props: any, ref: any) => {
       latestAgGridProps = props;
+      agGridRenderHistory.push(props);
       React.useImperativeHandle(ref, () => ({
         api: {
           setGridOption: setGridOptionMock,
         },
       }));
+      React.useEffect(() => {
+        agGridMountCount += 1;
+        return () => {
+          agGridUnmountCount += 1;
+        };
+      }, []);
 
       React.useEffect(() => {
         props.onGridReady?.({
@@ -47,6 +57,9 @@ describe("DFViewerInfinite", () => {
   beforeEach(() => {
     setGridOptionMock.mockClear();
     latestAgGridProps = null;
+    agGridRenderHistory = [];
+    agGridMountCount = 0;
+    agGridUnmountCount = 0;
   });
 
   it("renders error_info and custom class name", () => {
@@ -129,5 +142,157 @@ describe("DFViewerInfinite", () => {
 
     expect(latestAgGridProps.gridOptions.rowModelType).toBe("infinite");
     expect(latestAgGridProps.datasource.rowCount).toBe(50);
+  });
+
+  it("remounts grid and refreshes context when outside_df_params changes", () => {
+    const { rerender } = render(
+      <DFViewerInfinite
+        data_wrapper={{
+          data_type: "DataSource",
+          length: 50,
+          datasource: { rowCount: 50, getRows: jest.fn() },
+        }}
+        df_viewer_config={baseConfig}
+        summary_stats_data={[]}
+        setActiveCol={jest.fn()}
+        outside_df_params={{ key: "A" }}
+      />,
+    );
+
+    expect(agGridMountCount).toBe(1);
+    expect(agGridUnmountCount).toBe(0);
+    expect(latestAgGridProps.context.outside_df_params).toEqual({ key: "A" });
+
+    rerender(
+      <DFViewerInfinite
+        data_wrapper={{
+          data_type: "DataSource",
+          length: 50,
+          datasource: { rowCount: 50, getRows: jest.fn() },
+        }}
+        df_viewer_config={baseConfig}
+        summary_stats_data={[]}
+        setActiveCol={jest.fn()}
+        outside_df_params={{ key: "B" }}
+      />,
+    );
+
+    expect(agGridMountCount).toBe(2);
+    expect(agGridUnmountCount).toBe(1);
+    expect(latestAgGridProps.context.outside_df_params).toEqual({ key: "B" });
+    expect(
+      agGridRenderHistory.some(
+        (p) => JSON.stringify(p?.context?.outside_df_params) === JSON.stringify({ key: "A" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("changes getRowId identity across outside_df_params changes", () => {
+    const { rerender } = render(
+      <DFViewerInfinite
+        data_wrapper={{
+          data_type: "DataSource",
+          length: 50,
+          datasource: { rowCount: 50, getRows: jest.fn() },
+        }}
+        df_viewer_config={baseConfig}
+        summary_stats_data={[]}
+        setActiveCol={jest.fn()}
+        outside_df_params={{ key: "A" }}
+      />,
+    );
+
+    const getRowIdA = latestAgGridProps.gridOptions.getRowId;
+    const idA = getRowIdA({
+      data: { index: 7 },
+      context: latestAgGridProps.context,
+    } as any);
+
+    rerender(
+      <DFViewerInfinite
+        data_wrapper={{
+          data_type: "DataSource",
+          length: 50,
+          datasource: { rowCount: 50, getRows: jest.fn() },
+        }}
+        df_viewer_config={baseConfig}
+        summary_stats_data={[]}
+        setActiveCol={jest.fn()}
+        outside_df_params={{ key: "B" }}
+      />,
+    );
+
+    const getRowIdB = latestAgGridProps.gridOptions.getRowId;
+    const idB = getRowIdB({
+      data: { index: 7 },
+      context: latestAgGridProps.context,
+    } as any);
+
+    expect(idA).not.toEqual(idB);
+    expect(idA).toContain('"key":"A"');
+    expect(idB).toContain('"key":"B"');
+  });
+
+  it("keeps infinite grid options and sort reset behavior after outside param changes", () => {
+    const { rerender } = render(
+      <DFViewerInfinite
+        data_wrapper={{
+          data_type: "DataSource",
+          length: 50,
+          datasource: { rowCount: 50, getRows: jest.fn() },
+        }}
+        df_viewer_config={baseConfig}
+        summary_stats_data={[]}
+        setActiveCol={jest.fn()}
+        outside_df_params={{ key: "A" }}
+      />,
+    );
+
+    expect(latestAgGridProps.gridOptions.rowModelType).toBe("infinite");
+    expect(latestAgGridProps.gridOptions.maxConcurrentDatasourceRequests).toBe(3);
+    expect(latestAgGridProps.gridOptions.rowBuffer).toBe(20);
+    expect(latestAgGridProps.gridOptions.maxBlocksInCache).toBe(0);
+    expect(latestAgGridProps.gridOptions.cacheOverflowSize).toBe(0);
+
+    const ensureIndexVisibleA = jest.fn();
+    latestAgGridProps.gridOptions.onSortChanged?.({
+      api: {
+        ensureIndexVisible: ensureIndexVisibleA,
+        getFirstDisplayedRowIndex: jest.fn(() => 1),
+        getLastDisplayedRowIndex: jest.fn(() => 20),
+      },
+    } as any);
+    expect(ensureIndexVisibleA).toHaveBeenCalledWith(0);
+
+    rerender(
+      <DFViewerInfinite
+        data_wrapper={{
+          data_type: "DataSource",
+          length: 50,
+          datasource: { rowCount: 50, getRows: jest.fn() },
+        }}
+        df_viewer_config={baseConfig}
+        summary_stats_data={[]}
+        setActiveCol={jest.fn()}
+        outside_df_params={{ key: "B" }}
+      />,
+    );
+
+    expect(latestAgGridProps.gridOptions.rowModelType).toBe("infinite");
+    expect(latestAgGridProps.gridOptions.maxConcurrentDatasourceRequests).toBe(3);
+    expect(latestAgGridProps.gridOptions.rowBuffer).toBe(20);
+    expect(latestAgGridProps.gridOptions.maxBlocksInCache).toBe(0);
+    expect(latestAgGridProps.gridOptions.cacheOverflowSize).toBe(0);
+    expect(latestAgGridProps.datasource.rowCount).toBe(50);
+
+    const ensureIndexVisibleB = jest.fn();
+    latestAgGridProps.gridOptions.onSortChanged?.({
+      api: {
+        ensureIndexVisible: ensureIndexVisibleB,
+        getFirstDisplayedRowIndex: jest.fn(() => 2),
+        getLastDisplayedRowIndex: jest.fn(() => 30),
+      },
+    } as any);
+    expect(ensureIndexVisibleB).toHaveBeenCalledWith(0);
   });
 });
