@@ -36,7 +36,7 @@ async function getRowCount(container: import('@playwright/test').Locator): Promi
   const grid = dfViewer.getByRole('treegrid').or(dfViewer.getByRole('grid'));
   const total = await grid.first().getAttribute('aria-rowcount');
   const headers = await dfViewer
-    .locator('.ag-header .ag-header-row')
+    .locator('.ag-header-viewport .ag-header-row')
     .all();
   return Number(total) - headers.length;
 }
