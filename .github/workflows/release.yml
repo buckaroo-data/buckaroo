@@ -55,8 +55,30 @@ jobs:
 
       - name: Determine versions
         id: versions
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          CURRENT=$(grep -Po '^version = "\K[^"]+' pyproject.toml)
+          # Derive current version from the latest semver git tag so this
+          # stays correct even when the pyproject.toml version-bump commit
+          # hasn't been merged to main yet (e.g. partial previous run).
+          # `|| true` prevents pipefail exit when no tags match the pattern.
+          LATEST_TAG=$(git tag --sort=-creatordate | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+          if [ -z "$LATEST_TAG" ]; then
+            CURRENT=$(grep -Po '^version = "\K[^"]+' pyproject.toml)
+            echo "No semver tags found; falling back to pyproject.toml: $CURRENT"
+          else
+            # If the latest tag has no GitHub release, a prior run failed
+            # after tagging. Retry that version instead of bumping again.
+            if ! gh release view "$LATEST_TAG" &>/dev/null; then
+              PREV_TAG=$(git tag --sort=-creatordate | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p' || true)
+              echo "::warning::Tag $LATEST_TAG exists without a release — retrying incomplete release."
+              echo "new=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+              echo "prev_tag=${PREV_TAG:-$LATEST_TAG}" >> "$GITHUB_OUTPUT"
+              echo "retry=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            CURRENT="$LATEST_TAG"
+          fi
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
           case "${{ inputs.bump }}" in
             major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
@@ -64,45 +86,41 @@ jobs:
             patch) PATCH=$((PATCH + 1)) ;;
           esac
           NEW="${MAJOR}.${MINOR}.${PATCH}"
-          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          # Guard: abort if this tag already exists with a completed release
+          if git tag -l "$NEW" | grep -q "^${NEW}$"; then
+            echo "::error::Tag $NEW already exists — this release may have already run. Aborting."
+            exit 1
+          fi
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "prev_tag=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "retry=false" >> "$GITHUB_OUTPUT"
           echo "Bumping $CURRENT → $NEW (${{ inputs.bump }})"
-
-      - name: Find previous release tag
-        id: prev_tag
-        run: |
-          TAG=$(git tag --sort=-creatordate | head -1)
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Previous release tag: $TAG"
 
       - name: Generate release notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           uv run python scripts/generate_release_notes.py \
-            --tag-from "${{ steps.prev_tag.outputs.tag }}" \
+            --tag-from "${{ steps.versions.outputs.prev_tag }}" \
             --version "${{ steps.versions.outputs.new }}" \
             --date "$(date +%Y-%m-%d)" \
             --output-dir /tmp
 
-      - name: Bump version in pyproject.toml
+      - name: Bump version, commit, tag, and push
         run: |
           sed -i 's/^version = ".*"/version = "${{ steps.versions.outputs.new }}"/' pyproject.toml
-
-      - name: Update CHANGELOG.md
-        run: |
-          if [ -f /tmp/changelog_entry.md ]; then
-            python scripts/update_changelog.py /tmp/changelog_entry.md
+          if [ "${{ steps.versions.outputs.retry }}" = "true" ]; then
+            echo "Retry mode — tag ${{ steps.versions.outputs.new }} already exists, skipping."
+          else
+            # Commit the version bump so the tag points to correct source.
+            # Only the tag is pushed — not the branch (branch protection).
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add pyproject.toml
+            git commit -m "chore: release ${{ steps.versions.outputs.new }}"
+            git tag "${{ steps.versions.outputs.new }}"
+            git push origin "${{ steps.versions.outputs.new }}"
           fi
-
-      - name: Commit, tag, and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml CHANGELOG.md
-          git commit -m "chore: release ${{ steps.versions.outputs.new }}"
-          git tag "${{ steps.versions.outputs.new }}"
-          git push origin HEAD --tags
 
       - name: Create GitHub release
         env:
@@ -125,3 +143,14 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Upload changelog entry artifact
+        # Download this artifact and apply it in your next dev PR:
+        #   python scripts/update_changelog.py changelog_entry.md
+        #   sed -i 's/^version = ".*"/version = "NEW"/' pyproject.toml
+        #   uv lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog-${{ steps.versions.outputs.new }}
+          path: /tmp/changelog_entry.md
+          if-no-files-found: ignore
