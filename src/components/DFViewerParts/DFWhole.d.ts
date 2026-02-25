@@ -80,7 +80,11 @@ export interface ColorFromColumn {
     color_rule: "color_from_column";
     val_column: string;
 }
-export type ColorMappingConfig = ColorMapRules | ColorWhenNotNullRules | ColorFromColumn | ColorCategoricalRules;
+export interface ColorStaticRules {
+    color_rule: "color_static";
+    color: string;
+}
+export type ColorMappingConfig = ColorMapRules | ColorWhenNotNullRules | ColorFromColumn | ColorCategoricalRules | ColorStaticRules;
 export interface SimpleTooltip {
     tooltip_type: "simple";
     val_column: string;

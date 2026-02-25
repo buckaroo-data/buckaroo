@@ -1,5 +1,5 @@
 import { CellClassParams } from '@ag-grid-community/core';
-import { ColorMappingConfig, ColorMapRules, ColorCategoricalRules, ColorWhenNotNullRules, ColorFromColumn } from './DFWhole';
+import { ColorMappingConfig, ColorMapRules, ColorCategoricalRules, ColorWhenNotNullRules, ColorFromColumn, ColorStaticRules } from './DFWhole';
 export declare function getHistoIndex(val: number, histogram_edges: number[]): number;
 export declare function colorMap(cmr: ColorMapRules): {
     cellStyle: (params: CellClassParams) => {
@@ -19,6 +19,11 @@ export declare function colorNotNull(cmr: ColorWhenNotNullRules): {
 export declare function colorFromColumn(cmr: ColorFromColumn): {
     cellStyle: (params: CellClassParams) => {
         backgroundColor: any;
+    };
+};
+export declare function colorStatic(cmr: ColorStaticRules): {
+    cellStyle: (params: CellClassParams) => {
+        backgroundColor: string;
     };
 };
 export declare function getStyler(cmr: ColorMappingConfig): {
