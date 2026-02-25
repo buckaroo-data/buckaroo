@@ -123,3 +123,38 @@ def test_null_values_in_data():
     assert (m_df["membership"] == 3).all()
     # At least some diffs expected (rows 2 and 3 differ)
     assert eqs["val"]["diff_count"] >= 2
+
+
+def test_non_string_column_labels():
+    """Non-string column labels (e.g. integers) don't crash sentinel check."""
+    df1 = pd.DataFrame({0: [1, 2], 1: [10, 20]})
+    df2 = pd.DataFrame({0: [1, 2], 1: [10, 25]})
+
+    m_df, overrides, eqs = col_join_dfs(df1, df2, join_columns=[0], how="outer")
+
+    assert (m_df["membership"] == 3).all()
+
+
+def test_duplicate_join_keys_rejected():
+    """Duplicate join keys in either dataframe raise ValueError."""
+    df1 = pd.DataFrame({"id": [1, 1, 2], "val": [10, 20, 30]})
+    df2 = pd.DataFrame({"id": [1, 2, 3], "val": [10, 20, 30]})
+
+    with pytest.raises(ValueError, match="Duplicate join keys"):
+        col_join_dfs(df1, df2, join_columns=["id"], how="outer")
+
+    # Also reject duplicates in df2
+    df1_ok = pd.DataFrame({"id": [1, 2, 3], "val": [10, 20, 30]})
+    df2_dup = pd.DataFrame({"id": [1, 1, 2], "val": [10, 20, 30]})
+
+    with pytest.raises(ValueError, match="Duplicate join keys"):
+        col_join_dfs(df1_ok, df2_dup, join_columns=["id"], how="outer")
+
+
+def test_merge_column_in_input_rejected():
+    """A column named __buckaroo_merge in the input is rejected."""
+    df1 = pd.DataFrame({"id": [1], "__buckaroo_merge": [10]})
+    df2 = pd.DataFrame({"id": [1], "val": [20]})
+
+    with pytest.raises(ValueError, match="__buckaroo_merge"):
+        col_join_dfs(df1, df2, join_columns=["id"], how="outer")
