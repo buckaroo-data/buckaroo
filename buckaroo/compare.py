@@ -118,12 +118,17 @@ def col_join_dfs(df1, df2, join_columns, how):
 
     # Join key columns get a distinct static colour so they stand out clearly
     # from the data-diff columns (which use membership-based categorical colours).
+    # Use color_categorical with a constant-color map so it works with the
+    # compiled JS without requiring a rebuild.  color_static is the cleaner
+    # long-term solution once the JS is rebuilt.
     pk_color = "#6c5fc7"
+    pk_map = [pk_color, pk_color, pk_color, pk_color]
     for jc in join_columns:
         column_config_overrides[jc] = {
             "color_map_config": {
-                "color_rule": "color_static",
-                "color": pk_color,
+                "color_rule": "color_categorical",
+                "map_name": pk_map,
+                "val_column": "membership",
             }
         }
 
