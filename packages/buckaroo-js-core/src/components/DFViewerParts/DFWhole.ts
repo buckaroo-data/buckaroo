@@ -169,6 +169,16 @@ export type PinnedRowConfig = {
     default_renderer_columns?: string[];
 };
 
+export type ThemeConfig = {
+    colorScheme?: 'light' | 'dark' | 'auto';
+    accentColor?: string;
+    accentHoverColor?: string;
+    backgroundColor?: string;
+    foregroundColor?: string;
+    oddRowBackgroundColor?: string;
+    borderColor?: string;
+};
+
 export type ComponentConfig = {
     height_fraction?: number;
     // temporary debugging props
@@ -177,6 +187,7 @@ export type ComponentConfig = {
     shortMode?: boolean;
     selectionBackground?: string;
     className?: string;
+    theme?: ThemeConfig;
 };
 
 export interface DFViewerConfig {

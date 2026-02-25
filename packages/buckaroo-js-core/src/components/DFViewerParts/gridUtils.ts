@@ -578,6 +578,37 @@ export const myThemeLight: Theme = themeAlpine.withPart(colorSchemeLight).withPa
 /** @deprecated Use getThemeForScheme() instead */
 export const myTheme: Theme = myThemeDark;
 
-export function getThemeForScheme(scheme: 'light' | 'dark'): Theme {
-    return scheme === 'light' ? myThemeLight : myThemeDark;
+export type ThemeConfig = {
+    colorScheme?: 'light' | 'dark' | 'auto';
+    accentColor?: string;
+    accentHoverColor?: string;
+    backgroundColor?: string;
+    foregroundColor?: string;
+    oddRowBackgroundColor?: string;
+    borderColor?: string;
+};
+
+export function resolveColorScheme(
+    osScheme: 'light' | 'dark',
+    themeConfig?: ThemeConfig
+): 'light' | 'dark' {
+    const override = themeConfig?.colorScheme;
+    if (override && override !== 'auto') {
+        return override;
+    }
+    return osScheme;
+}
+
+export function getThemeForScheme(scheme: 'light' | 'dark', themeConfig?: ThemeConfig): Theme {
+    const base = scheme === 'light' ? myThemeLight : myThemeDark;
+    if (!themeConfig) return base;
+
+    const overrides: Record<string, any> = {};
+    if (themeConfig.backgroundColor) overrides.backgroundColor = themeConfig.backgroundColor;
+    if (themeConfig.foregroundColor) overrides.foregroundColor = themeConfig.foregroundColor;
+    if (themeConfig.oddRowBackgroundColor) overrides.oddRowBackgroundColor = themeConfig.oddRowBackgroundColor;
+    if (themeConfig.borderColor) overrides.borderColor = themeConfig.borderColor;
+
+    if (Object.keys(overrides).length === 0) return base;
+    return base.withParams(overrides);
 }

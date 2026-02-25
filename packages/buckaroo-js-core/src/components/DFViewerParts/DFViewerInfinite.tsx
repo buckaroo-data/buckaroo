@@ -30,8 +30,9 @@ import {
     HeightStyleI,
     SetColumnFunc
 } from "./gridUtils";
-import { getThemeForScheme } from './gridUtils';
+import { getThemeForScheme, resolveColorScheme } from './gridUtils';
 import { useColorScheme } from '../useColorScheme';
+import type { ThemeConfig } from './gridUtils';
 
 ModuleRegistry.registerModules([ClientSideRowModelModule]);
 ModuleRegistry.registerModules([InfiniteRowModelModule]);
@@ -156,13 +157,24 @@ export function DFViewerInfinite({
         )}, [hsCacheKey]
     );
   const defaultActiveCol:[string, string] = ["", ""];
-    const colorScheme = useColorScheme();
-    const defaultThemeClass = colorScheme === 'light' ? 'ag-theme-alpine' : 'ag-theme-alpine-dark';
-    const divClass = df_viewer_config?.component_config?.className || defaultThemeClass;
+    const osColorScheme = useColorScheme();
+    const themeConfig = compConfig?.theme;
+    const effectiveScheme = resolveColorScheme(osColorScheme, themeConfig);
+    const defaultThemeClass = effectiveScheme === 'light' ? 'ag-theme-alpine' : 'ag-theme-alpine-dark';
+    const divClass = `${defaultThemeClass} ${compConfig?.className || ''}`.trim();
+
+    const themeStyle: React.CSSProperties = {
+        ...hs.applicableStyle,
+        ...(themeConfig?.accentColor ? { '--bk-accent-color': themeConfig.accentColor } as any : {}),
+        ...(themeConfig?.accentHoverColor ? { '--bk-accent-hover-color': themeConfig.accentHoverColor } as any : {}),
+        ...(themeConfig?.backgroundColor ? { '--bk-bg-color': themeConfig.backgroundColor } as any : {}),
+        ...(themeConfig?.foregroundColor ? { '--bk-fg-color': themeConfig.foregroundColor } as any : {}),
+    };
+
     return (
         <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
             {error_info ? <pre>{error_info}</pre> : null}
-            <div style={hs.applicableStyle}
+            <div style={themeStyle}
                 className={`theme-hanger ${divClass}`}>
                 <DFViewerInfiniteInner
                     data_wrapper={data_wrapper}
@@ -173,6 +185,8 @@ export function DFViewerInfinite({
                     outside_df_params={outside_df_params}
                     renderStartTime={renderStartTime}
                     hs={hs}
+                    themeConfig={themeConfig}
+                    effectiveScheme={effectiveScheme}
                 />
             </div>
         </div>)
@@ -185,7 +199,9 @@ export function DFViewerInfiniteInner({
     setActiveCol,
     outside_df_params,
     renderStartTime: _renderStartTime,
-    hs
+    hs,
+    themeConfig,
+    effectiveScheme
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -197,7 +213,9 @@ export function DFViewerInfiniteInner({
     // them as keys to get updated data
     outside_df_params?: any;
     renderStartTime:any;
-    hs:HeightStyleI
+    hs:HeightStyleI;
+    themeConfig?: ThemeConfig;
+    effectiveScheme?: 'light' | 'dark';
 }) {
 
 
@@ -255,7 +273,7 @@ export function DFViewerInfiniteInner({
                 }
                 if (activeCol === field) {
                     //return {background:selectBackground}
-                    return { background: AccentColor }
+                    return { background: themeConfig?.accentColor || AccentColor }
 
                 }
                 return { background: "inherit" }
@@ -290,15 +308,15 @@ export function DFViewerInfiniteInner({
         [outside_df_params],
     );
 
-    const colorScheme = useColorScheme();
-    const myTheme = useMemo(() => getThemeForScheme(colorScheme).withParams({
+    const resolvedScheme = effectiveScheme || 'dark';
+    const myTheme = useMemo(() => getThemeForScheme(resolvedScheme, themeConfig).withParams({
         headerRowBorder: true,
         headerColumnBorder: true,
         headerColumnResizeHandleWidth: 0,
-        ...(colorScheme === 'dark'
-            ? { backgroundColor: "#121212", oddRowBackgroundColor: '#3f3f3f' }
-            : { backgroundColor: "#ffffff", oddRowBackgroundColor: '#f0f0f0' }),
-    }), [colorScheme]);
+        ...(resolvedScheme === 'dark'
+            ? { backgroundColor: themeConfig?.backgroundColor || "#121212", oddRowBackgroundColor: themeConfig?.oddRowBackgroundColor || '#3f3f3f' }
+            : { backgroundColor: themeConfig?.backgroundColor || "#ffffff", oddRowBackgroundColor: themeConfig?.oddRowBackgroundColor || '#f0f0f0' }),
+    }), [resolvedScheme, themeConfig]);
     const gridOptions: GridOptions = useMemo( () => {
         return {
         ...outerGridOptions(setActiveCol, df_viewer_config.extra_grid_config),

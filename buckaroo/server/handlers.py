@@ -149,9 +149,9 @@ class LoadHandler(tornado.web.RequestHandler):
         return body
 
     def _validate_request(self, body: dict) -> tuple:
-        """Validate and extract session_id, path, mode, prompt, and no_browser from request.
+        """Validate and extract session_id, path, mode, prompt, no_browser, and component_config from request.
 
-        Returns (session_id, path, mode, prompt, no_browser) or a tuple of Nones on error.
+        Returns (session_id, path, mode, prompt, no_browser, component_config) or a tuple of Nones on error.
         """
         session_id = body.get("session")
         path = body.get("path")
@@ -159,12 +159,13 @@ class LoadHandler(tornado.web.RequestHandler):
         if not session_id or not path:
             self.set_status(400)
             self.write({"error": "Missing 'session' or 'path'"})
-            return None, None, None, None, None
+            return None, None, None, None, None, None
 
         mode = body.get("mode", "viewer")
         prompt = body.get("prompt", "")
         no_browser = bool(body.get("no_browser", False))
-        return session_id, path, mode, prompt, no_browser
+        component_config = body.get("component_config")
+        return session_id, path, mode, prompt, no_browser, component_config
 
     def _load_lazy_polars(self, session, path: str, ldf, metadata: dict):
         """Set up lazy polars session state."""
@@ -235,7 +236,7 @@ class LoadHandler(tornado.web.RequestHandler):
         if body is None:
             return
 
-        session_id, path, mode, prompt, no_browser = self._validate_request(body)
+        session_id, path, mode, prompt, no_browser, component_config = self._validate_request(body)
         if session_id is None:
             return
 
@@ -243,6 +244,8 @@ class LoadHandler(tornado.web.RequestHandler):
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
         session.prompt = prompt
+        if component_config:
+            session.component_config = component_config
 
         # Load data in appropriate mode
         file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
@@ -271,6 +274,16 @@ class LoadHandler(tornado.web.RequestHandler):
                 session.df_display_args = display_state["df_display_args"]
                 session.df_data_dict = display_state["df_data_dict"]
                 session.df_meta = display_state["df_meta"]
+
+        # Merge component_config into df_display_args if provided
+        if component_config and session.df_display_args:
+            for key in session.df_display_args:
+                dvc = session.df_display_args[key].get("df_viewer_config")
+                if dvc is not None:
+                    dvc["component_config"] = {
+                        **dvc.get("component_config", {}),
+                        **component_config,
+                    }
 
         # Notify connected clients and open browser
         self._push_state_to_clients(session, metadata)
