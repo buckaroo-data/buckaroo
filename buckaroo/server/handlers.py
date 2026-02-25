@@ -12,7 +12,6 @@ from buckaroo.server.data_loading import (
     load_file, get_metadata, get_display_state,
     create_dataflow, get_buckaroo_display_state,
     load_file_lazy, get_metadata_lazy, get_display_state_lazy,
-    get_df_viewer_config,
 )
 from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
