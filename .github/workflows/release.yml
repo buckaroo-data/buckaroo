@@ -55,14 +55,29 @@ jobs:
 
       - name: Determine versions
         id: versions
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Derive current version from the latest semver git tag so this
           # stays correct even when the pyproject.toml version-bump commit
           # hasn't been merged to main yet (e.g. partial previous run).
-          CURRENT=$(git tag --sort=-creatordate | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-          if [ -z "$CURRENT" ]; then
+          # `|| true` prevents pipefail exit when no tags match the pattern.
+          LATEST_TAG=$(git tag --sort=-creatordate | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+          if [ -z "$LATEST_TAG" ]; then
             CURRENT=$(grep -Po '^version = "\K[^"]+' pyproject.toml)
             echo "No semver tags found; falling back to pyproject.toml: $CURRENT"
+          else
+            # If the latest tag has no GitHub release, a prior run failed
+            # after tagging. Retry that version instead of bumping again.
+            if ! gh release view "$LATEST_TAG" &>/dev/null; then
+              PREV_TAG=$(git tag --sort=-creatordate | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p' || true)
+              echo "::warning::Tag $LATEST_TAG exists without a release — retrying incomplete release."
+              echo "new=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+              echo "prev_tag=${PREV_TAG:-$LATEST_TAG}" >> "$GITHUB_OUTPUT"
+              echo "retry=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            CURRENT="$LATEST_TAG"
           fi
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
           case "${{ inputs.bump }}" in
@@ -71,44 +86,41 @@ jobs:
             patch) PATCH=$((PATCH + 1)) ;;
           esac
           NEW="${MAJOR}.${MINOR}.${PATCH}"
-          # Guard: abort early if this tag already exists (idempotency check)
+          # Guard: abort if this tag already exists with a completed release
           if git tag -l "$NEW" | grep -q "^${NEW}$"; then
             echo "::error::Tag $NEW already exists — this release may have already run. Aborting."
             exit 1
           fi
-          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "prev_tag=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "retry=false" >> "$GITHUB_OUTPUT"
           echo "Bumping $CURRENT → $NEW (${{ inputs.bump }})"
-
-      - name: Find previous release tag
-        id: prev_tag
-        run: |
-          # The previous tag is the current version (before this bump)
-          TAG="${{ steps.versions.outputs.current }}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Previous release tag: $TAG"
 
       - name: Generate release notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           uv run python scripts/generate_release_notes.py \
-            --tag-from "${{ steps.prev_tag.outputs.tag }}" \
+            --tag-from "${{ steps.versions.outputs.prev_tag }}" \
             --version "${{ steps.versions.outputs.new }}" \
             --date "$(date +%Y-%m-%d)" \
             --output-dir /tmp
 
-      - name: Bump version in pyproject.toml
-        # Local-only: updates pyproject.toml so the built wheel has the right
-        # version. Not committed here — add to your next dev PR via the
-        # changelog artifact uploaded at the end of this job.
+      - name: Bump version, commit, tag, and push
         run: |
           sed -i 's/^version = ".*"/version = "${{ steps.versions.outputs.new }}"/' pyproject.toml
-
-      - name: Tag and push
-        run: |
-          git tag "${{ steps.versions.outputs.new }}"
-          git push origin "${{ steps.versions.outputs.new }}"
+          if [ "${{ steps.versions.outputs.retry }}" = "true" ]; then
+            echo "Retry mode — tag ${{ steps.versions.outputs.new }} already exists, skipping."
+          else
+            # Commit the version bump so the tag points to correct source.
+            # Only the tag is pushed — not the branch (branch protection).
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add pyproject.toml
+            git commit -m "chore: release ${{ steps.versions.outputs.new }}"
+            git tag "${{ steps.versions.outputs.new }}"
+            git push origin "${{ steps.versions.outputs.new }}"
+          fi
 
       - name: Create GitHub release
         env:
