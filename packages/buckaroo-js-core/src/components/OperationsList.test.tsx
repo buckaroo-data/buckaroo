@@ -7,6 +7,8 @@ import { symDf } from './CommandUtils';
 import { Operation } from './OperationUtils';
 
 type Meta = Record<string, any>;
+const renderLegacy = (ui: any) => render(ui, { legacyRoot: true });
+
 const makeOp = (symbol: string, arg: string, meta: Meta = {}): Operation => [
   { symbol, meta },
   symDf,
@@ -28,7 +30,7 @@ describe('OperationsList2', () => {
   });
 
   it('renders all operations', () => {
-    render(
+    renderLegacy(
       <OperationsList2
         operations={getTestOperations()}
         setOperations={setOperations}
@@ -42,7 +44,7 @@ describe('OperationsList2', () => {
   });
 
   it('displays clean_strategy if present', () => {
-    render(
+    renderLegacy(
       <OperationsList2
         operations={getTestOperations()}
         setOperations={setOperations}
@@ -55,7 +57,7 @@ describe('OperationsList2', () => {
   });
 
   it('applies auto_clean and active classes', () => {
-    render(
+    renderLegacy(
       <OperationsList2
         operations={getTestOperations()}
         setOperations={setOperations}
@@ -71,7 +73,7 @@ describe('OperationsList2', () => {
   });
 
   it('calls setActiveKey when an item is clicked', () => {
-    const { rerender } = render(
+    const { rerender } = renderLegacy(
       <OperationsList2
         operations={getTestOperations()}
         setOperations={setOperations}
@@ -104,7 +106,7 @@ describe('OperationsList2', () => {
 
   it('calls setOperations when delete is clicked', () => {
     const testOperations = getTestOperations();
-    render(
+    renderLegacy(
       <OperationsList2
         operations={testOperations}
         setOperations={setOperations}
@@ -124,7 +126,7 @@ describe('OperationsList2', () => {
   });
 
   it('calls setOperations when preserve is clicked', () => {
-    render(
+    renderLegacy(
       <OperationsList2
         operations={getTestOperations()}
         setOperations={setOperations}
@@ -143,7 +145,7 @@ describe('OperationsList2', () => {
   });
 
   it('only shows preserve button for operations with auto_clean: true', () => {
-    render(
+    renderLegacy(
       <OperationsList2
         operations={getTestOperations()}
         setOperations={setOperations}

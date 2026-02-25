@@ -53,6 +53,8 @@ const baseConfig: DFViewerConfig = {
   component_config: { className: "my-custom-theme" },
 };
 
+const renderLegacy = (ui: any) => render(ui, { legacyRoot: true });
+
 describe("DFViewerInfinite", () => {
   beforeEach(() => {
     setGridOptionMock.mockClear();
@@ -63,7 +65,7 @@ describe("DFViewerInfinite", () => {
   });
 
   it("renders error_info and custom class name", () => {
-    const { getByText, container } = render(
+    const { getByText, container } = renderLegacy(
       <DFViewerInfinite
         data_wrapper={{ data_type: "Raw", data: [{ index: 0, a: 1 }], length: 1 }}
         df_viewer_config={baseConfig}
@@ -78,7 +80,7 @@ describe("DFViewerInfinite", () => {
   });
 
   it("uses rowData for Raw mode and updates rowData via grid api on data change", () => {
-    const { rerender } = render(
+    const { rerender } = renderLegacy(
       <DFViewerInfinite
         data_wrapper={{ data_type: "Raw", data: [{ index: 0, a: 1 }], length: 1 }}
         df_viewer_config={baseConfig}
@@ -103,7 +105,7 @@ describe("DFViewerInfinite", () => {
   });
 
   it("applies pinned top rows on grid ready and summary updates", () => {
-    const { rerender } = render(
+    const { rerender } = renderLegacy(
       <DFViewerInfinite
         data_wrapper={{ data_type: "Raw", data: [{ index: 0, a: 1 }], length: 1 }}
         df_viewer_config={baseConfig}
@@ -127,7 +129,7 @@ describe("DFViewerInfinite", () => {
   });
 
   it("switches to infinite row model for DataSource mode", () => {
-    render(
+    renderLegacy(
       <DFViewerInfinite
         data_wrapper={{
           data_type: "DataSource",
@@ -145,7 +147,7 @@ describe("DFViewerInfinite", () => {
   });
 
   it("remounts grid and refreshes context when outside_df_params changes", () => {
-    const { rerender } = render(
+    const { rerender } = renderLegacy(
       <DFViewerInfinite
         data_wrapper={{
           data_type: "DataSource",
@@ -188,7 +190,7 @@ describe("DFViewerInfinite", () => {
   });
 
   it("changes getRowId identity across outside_df_params changes", () => {
-    const { rerender } = render(
+    const { rerender } = renderLegacy(
       <DFViewerInfinite
         data_wrapper={{
           data_type: "DataSource",
@@ -234,7 +236,7 @@ describe("DFViewerInfinite", () => {
   });
 
   it("keeps infinite grid options and sort reset behavior after outside param changes", () => {
-    const { rerender } = render(
+    const { rerender } = renderLegacy(
       <DFViewerInfinite
         data_wrapper={{
           data_type: "DataSource",
