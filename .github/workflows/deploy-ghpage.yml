@@ -16,10 +16,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          run_install: true
-          package_json_file: packages/package.json
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
       - uses: astral-sh/setup-uv@v7
       - name: Run tests
         working-directory: ./packages/buckaroo-js-core

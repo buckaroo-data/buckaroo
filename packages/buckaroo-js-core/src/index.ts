@@ -13,7 +13,8 @@ import { WidgetDCFCell } from "./components/DCFCell";
 import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from "./components/BuckarooWidgetInfinite";
 // Re-export hyparquet functions for transcript parsing in widget.tsx
 import { parquetRead, parquetMetadata } from 'hyparquet';
-import { resolveDFData, preResolveDFDataDict } from './components/DFViewerParts/resolveDFData';
+import { resolveDFData, resolveDFDataAsync, preResolveDFDataDict } from './components/DFViewerParts/resolveDFData';
+import { BuckarooStaticTable } from './components/BuckarooStaticTable';
 
 import { HistogramCell } from "./components/DFViewerParts/HistogramCell";
 import { InfiniteEx } from "./components/DFViewerParts/TableInfinite";
@@ -28,7 +29,6 @@ import { StatusBar } from "./components/StatusBar";
 
 import * as widgetUtils from "./widgetUtils";
 import { SampleButton, HeaderNoArgs, Counter } from "./SampleComponent";
-import _ from "lodash";
 export default {
     
     ColumnsEditor,
@@ -51,7 +51,33 @@ export default {
     parquetRead,
     parquetMetadata,
     resolveDFData,
+    resolveDFDataAsync,
     preResolveDFDataDict,
+    BuckarooStaticTable,
 };
 
-
+// Named exports for direct imports
+export {
+    ColumnsEditor,
+    DependentTabs,
+    OperationViewer,
+    WidgetDCFCell,
+    DFViewer,
+    DFViewerInfinite,
+    DFViewerInfiniteDS,
+    StatusBar,
+    HistogramCell,
+    CommandUtils,
+    utils,
+    BuckarooInfiniteWidget,
+    getKeySmartRowCache,
+    InfiniteEx,
+    widgetUtils,
+    SampleButton, HeaderNoArgs, Counter,
+    parquetRead,
+    parquetMetadata,
+    resolveDFData,
+    resolveDFDataAsync,
+    preResolveDFDataDict,
+    BuckarooStaticTable,
+};

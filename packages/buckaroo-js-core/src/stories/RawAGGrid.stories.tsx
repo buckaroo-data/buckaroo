@@ -4,20 +4,17 @@ import { DFData } from "../components/DFViewerParts/DFWhole";
 import { createDatasourceWrapper, DatasourceWrapper } from "../components/DFViewerParts/DFViewerDataHelper";
 
 import {SelectBox } from './StoryUtils'
-import { AgGridReact } from "@ag-grid-community/react"; // the AG Grid React Component
+import { AgGridReact } from "ag-grid-react";
 import {
     GridOptions,
-    //IDatasource,
     ModuleRegistry,
     ColDef,
-    CellClassParams
-} from "@ag-grid-community/core";
-
-import { themeAlpine} from '@ag-grid-community/theming';
-import { colorSchemeDark } from '@ag-grid-community/theming';
-
-import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-model";
-import { InfiniteRowModelModule } from "@ag-grid-community/infinite-row-model";
+    CellClassParams,
+    themeAlpine,
+    colorSchemeDark,
+    ClientSideRowModelModule,
+    InfiniteRowModelModule,
+} from "ag-grid-community";
 
 ModuleRegistry.registerModules([ClientSideRowModelModule]);
 ModuleRegistry.registerModules([InfiniteRowModelModule]);

@@ -5,7 +5,7 @@ import { DFViewerConfig } from "./DFWhole";
 const setGridOptionMock = jest.fn();
 let latestAgGridProps: any = null;
 
-jest.mock("@ag-grid-community/react", () => {
+jest.mock("ag-grid-react", () => {
   const React = require("react");
   return {
     AgGridReact: React.forwardRef((props: any, ref: any) => {

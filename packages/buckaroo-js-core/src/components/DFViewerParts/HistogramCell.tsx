@@ -1,10 +1,10 @@
-import _ from "lodash";
+import { isArray } from "lodash-es";
 import React from "react";
 import { createPortal } from "react-dom";
 
 import { Bar, BarChart, Tooltip } from "recharts";
 import { getChartColors } from "./ChartCell";
-import { ColDef, Column, Context, GridApi } from "@ag-grid-community/core";
+import { ColDef, Column, Context, GridApi } from "ag-grid-community";
 import { useColorScheme } from "../useColorScheme";
 
 export interface HistogramNode {
@@ -91,7 +91,7 @@ export const HistogramCell = (props:
     const potentialHistogramArr = props.value;
     //for key "index", the value is "histogram"
     // this causes ReChart to blow up, so we check to see if it's an array
-    if (potentialHistogramArr === undefined || !_.isArray(potentialHistogramArr)) {
+    if (potentialHistogramArr === undefined || !isArray(potentialHistogramArr)) {
         return <span></span>;
     }
   const histogramArr = potentialHistogramArr as HistogramBar[];

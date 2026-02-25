@@ -1,5 +1,5 @@
-import { IDatasource, IGetRowsParams } from "@ag-grid-community/core";
-import _ from "lodash";
+import { IDatasource, IGetRowsParams } from "ag-grid-community";
+import { keys, times, reduce } from "lodash-es";
 
 export type RawDataWrapper = {
   data: any[];
@@ -48,11 +48,11 @@ export const createDatasourceWrapper = (data: DFData, delay_in_milliseconds: num
 };
 
 export const dictOfArraystoDFData = (dict: Record<string, any[]>): DFData => {
-  const keys = _.keys(dict);
-  const length = dict[keys[0]].length;
+  const dictKeys = keys(dict);
+  const length = dict[dictKeys[0]].length;
 
-  return _.times(length, index => {
-    return _.reduce(keys, (result, key) => {
+  return times(length, index => {
+    return reduce(dictKeys, (result, key) => {
       result[key] = dict[key][index];
       return result;
     }, {} as Record<string, any>);

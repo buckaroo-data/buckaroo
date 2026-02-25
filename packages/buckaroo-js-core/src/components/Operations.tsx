@@ -1,5 +1,5 @@
 import { useState } from "react";
-import _ from "lodash";
+import { keys, map, merge } from "lodash-es";
 import { Operation, SetOperationsFunc, OperationEventFunc } from "./OperationUtils";
 import { CommandConfigT } from "./CommandUtils";
 import { replaceInArr } from "./utils";
@@ -32,7 +32,7 @@ export const OperationAdder = ({
         <div className="operation-adder">
             <span className={"column-name"}> Column: {column}</span>
             <fieldset>
-                {_.keys(defaultArgs).map((optionVal) => (
+                {keys(defaultArgs).map((optionVal) => (
                     <button key={optionVal} onClick={addOperationByName(optionVal)}>
                         {" "}
                         {optionVal}{" "}
@@ -61,21 +61,21 @@ export const OperationViewer = ({
         return name + idx.toString();
     };
 
-    const operationObjs = _.map(Array.from(operations.entries()), ([index, element]) => {
+    const operationObjs = map(Array.from(operations.entries()), ([index, element]) => {
         const rowEl: Record<string, Operation> = {};
         rowEl[opToKey(index, element)] = element;
         return rowEl;
     });
     //why am I doing this? probably something so I gauruntee a clean dict
 
-    const operationDict = _.merge({}, ...operationObjs);
+    const operationDict = merge({}, ...operationObjs);
 
-    const idxObjs = _.map(Array.from(operations.entries()), ([index, element]) => {
+    const idxObjs = map(Array.from(operations.entries()), ([index, element]) => {
         const rowEl: Record<string, number> = {};
         rowEl[opToKey(index, element)] = index;
         return rowEl;
     });
-    const keyToIdx = _.merge({}, ...idxObjs);
+    const keyToIdx = merge({}, ...idxObjs);
 
     // previously was null
     const [activeKey, setActiveKey] = useState("");
@@ -95,7 +95,7 @@ export const OperationViewer = ({
         };
     }
     const getColumns = (passedOperations: Operation[]): string[] =>
-        _.map(Array.from(passedOperations.entries()), ([index, element]) => {
+        map(Array.from(passedOperations.entries()), ([index, element]) => {
             const name = element[0]["symbol"];
             const key = name + index.toString();
 	    return key;

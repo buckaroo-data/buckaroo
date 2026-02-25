@@ -1,6 +1,6 @@
-import _ from "lodash";
+import { clone, pickBy } from "lodash-es";
 import { DFWhole } from "./DFViewerParts/DFWhole";
-import { ColDef } from "@ag-grid-community/core";
+import { ColDef } from "ag-grid-community";
 
 export type setDFFunc = (newDf: DFWhole) => void;
 
@@ -25,13 +25,13 @@ export function replaceAtIdx<T>(arr: T[], idx: number, subst: T): T[] {
 }
 
 export function replaceAtKey<T>(obj: Record<string, T>, key: string, subst: T): Record<string, T> {
-    const objCopy = _.clone(obj);
+    const objCopy = clone(obj);
     objCopy[key] = subst;
     return objCopy;
 }
 
-export const objWithoutNull = (obj: Record<string, string>, extraStrips: string[] = []) =>
-    _.pickBy(obj, (x) => ![null, undefined, ...extraStrips].includes(x));
+export const objWithoutNull = (obj: Record<string, string>, extraStrips: string[] = []): Record<string, string> =>
+    pickBy(obj, (x) => ![null, undefined, ...extraStrips].includes(x)) as Record<string, string>;
 export const updateAtMatch = (
     cols: ColDef[],
     key: string,

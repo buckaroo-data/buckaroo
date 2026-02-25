@@ -22,6 +22,7 @@ cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
 cd packages
 pnpm --filter buckaroo-widget run build
 pnpm --filter buckaroo-widget run build:standalone
+pnpm --filter buckaroo-widget run build:static
 
 # Build Python wheel
 cd ..
