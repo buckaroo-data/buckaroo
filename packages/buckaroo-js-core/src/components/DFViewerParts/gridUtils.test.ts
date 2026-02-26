@@ -1,7 +1,7 @@
 //import { add, multiply } from "../src/math";
 
-import { 
-    extractSDFT,  
+import {
+    extractSDFT,
     extractPinnedRows,
     dfToAgrid,
     getHeightStyle2,
@@ -9,12 +9,13 @@ import {
     getSubChildren,
     childColDef,
     multiIndexColToColDef,
-
+    getDs,
 } from './gridUtils';
 import * as _ from "lodash";
 import { DFData, DFViewerConfig, NormalColumnConfig, MultiIndexColumnConfig, PinnedRowConfig, ColumnConfig } from "./DFWhole";
 import { getFloatFormatter } from './Displayer';
 import { ColDef, ValueFormatterParams } from '@ag-grid-community/core';
+import { KeyAwareSmartRowCache, PayloadArgs } from './SmartRowCache';
 
 describe("testing utility functions in gridUtils ", () => {
   // mostly sanity checks to help develop gridUtils
@@ -442,6 +443,32 @@ describe("testing multi index organiztion  ", () => {
     expect(children.length).toBe(2);
 
   });
+});
 
-  
+describe("getDs datasource", () => {
+  it("reads outside_df_params from context and passes as sourceName", () => {
+    const mockReqFn = jest.fn((_pa: PayloadArgs) => {});
+    const src = new KeyAwareSmartRowCache(mockReqFn);
+    const datasource = getDs(src);
+
+    const mockSuccessCallback = jest.fn();
+    const mockFailCallback = jest.fn();
+
+    datasource.getRows({
+      startRow: 0,
+      endRow: 50,
+      sortModel: [],
+      filterModel: {},
+      context: { outside_df_params: { key: "test" } },
+      successCallback: mockSuccessCallback,
+      failCallback: mockFailCallback,
+    } as any);
+
+    expect(mockReqFn).toHaveBeenCalledTimes(1);
+    const calledPa: PayloadArgs = mockReqFn.mock.calls[0][0];
+    expect(calledPa.sourceName).toBe('{"key":"test"}');
+    expect(calledPa.start).toBe(0);
+    expect(calledPa.end).toBe(1000);
+    expect(calledPa.origEnd).toBe(50);
+  });
 });

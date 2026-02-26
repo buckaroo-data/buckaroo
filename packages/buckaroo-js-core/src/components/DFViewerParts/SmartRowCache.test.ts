@@ -798,5 +798,95 @@ describe('KeyAwareSmartRowCache tests', () => {
 
 
     })
-    
+
+    test('A1: Out-of-order response — only matching callback fires', () => {
+	const mockRequestFn = jest.fn((_pa:PayloadArgs) => {})
+	const src = new KeyAwareSmartRowCache(mockRequestFn);
+
+	const paA: PayloadArgs = { sourceName:"srcA", start:0, end:20, origEnd:20 }
+	const paB: PayloadArgs = { sourceName:"srcB", start:0, end:20, origEnd:20 }
+
+	const cbA = jest.fn((_df:DFData, _length:number) => {})
+	const failA = jest.fn()
+	const cbB = jest.fn((_df:DFData, _length:number) => {})
+	const failB = jest.fn()
+
+	src.getRequestRows(paA, cbA, failA)
+	src.getRequestRows(paB, cbB, failB)
+
+	// Respond to B first
+	src.addPayloadResponse({ key: paB, data: genRows(0,20,'b')[1], length: 100 })
+	expect(cbB).toHaveBeenCalledTimes(1)
+	expect(cbA).not.toHaveBeenCalled()
+	expect(failA).not.toHaveBeenCalled()
+	expect(failB).not.toHaveBeenCalled()
+
+	// Now respond to A
+	src.addPayloadResponse({ key: paA, data: genRows(0,20,'a')[1], length: 100 })
+	expect(cbA).toHaveBeenCalledTimes(1)
+	expect(cbB).toHaveBeenCalledTimes(1)
+    })
+
+    test('A2: Late response for stale source key does not invoke active waiter', () => {
+	const mockRequestFn = jest.fn((_pa:PayloadArgs) => {})
+	const src = new KeyAwareSmartRowCache(mockRequestFn);
+
+	const paA: PayloadArgs = { sourceName:"srcA", start:0, end:20, origEnd:20 }
+	const paB: PayloadArgs = { sourceName:"srcB", start:0, end:20, origEnd:20 }
+
+	const cbA = jest.fn((_df:DFData, _length:number) => {})
+	const failA = jest.fn()
+	const cbB = jest.fn((_df:DFData, _length:number) => {})
+	const failB = jest.fn()
+
+	src.getRequestRows(paA, cbA, failA)
+	src.getRequestRows(paB, cbB, failB)
+
+	src.addPayloadResponse({ key: paA, data: genRows(0,20,'a')[1], length: 100 })
+	expect(cbA).toHaveBeenCalledTimes(1)
+	expect(cbB).not.toHaveBeenCalled()
+    })
+
+    test('A3: addErrorResponse removes waiter, does not leak', () => {
+	const mockRequestFn = jest.fn((_pa:PayloadArgs) => {})
+	const src = new KeyAwareSmartRowCache(mockRequestFn);
+
+	const pa: PayloadArgs = { sourceName:"src", start:0, end:20, origEnd:20 }
+	const cb = jest.fn((_df:DFData, _length:number) => {})
+	const failCb = jest.fn()
+
+	src.getRequestRows(pa, cb, failCb)
+
+	src.addErrorResponse({ key: pa, data: [], length: 0 })
+	expect(failCb).toHaveBeenCalledTimes(1)
+	expect(cb).not.toHaveBeenCalled()
+
+	// Second error — waiter already cleaned up
+	src.addErrorResponse({ key: pa, data: [], length: 0 })
+	expect(failCb).toHaveBeenCalledTimes(1)
+
+	// Payload response — waiter gone
+	src.addPayloadResponse({ key: pa, data: genRows(0,20)[1], length: 100 })
+	expect(cb).not.toHaveBeenCalled()
+    })
+
+    test('A4: Repeated same-key requests do not leave duplicate waiters', () => {
+	const mockRequestFn = jest.fn((_pa:PayloadArgs) => {})
+	const src = new KeyAwareSmartRowCache(mockRequestFn);
+
+	const pa: PayloadArgs = { sourceName:"src", start:0, end:20, origEnd:20 }
+	const cb1 = jest.fn((_df:DFData, _length:number) => {})
+	const fail1 = jest.fn()
+	const cb2 = jest.fn((_df:DFData, _length:number) => {})
+	const fail2 = jest.fn()
+
+	src.getRequestRows(pa, cb1, fail1)
+	src.getRequestRows(pa, cb2, fail2)
+
+	src.addPayloadResponse({ key: pa, data: genRows(0,20)[1], length: 100 })
+
+	expect(cb2).toHaveBeenCalledTimes(1)
+	expect(cb1).not.toHaveBeenCalled()
+    })
+
 });
