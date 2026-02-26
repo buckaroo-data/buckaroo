@@ -41,11 +41,20 @@ That's it. This downloads Buckaroo from PyPI into an isolated environment and re
 
 ### Usage
 
-Once installed, ask Claude Code to view any CSV, TSV, Parquet, or JSON file:
+Once installed, Claude can call two Buckaroo MCP tools:
+
+- `view_data(path)` for a single CSV, TSV, Parquet, or JSON file
+- `compare_data(path1, path2, join_columns, how="outer")` to compare two files on join key(s)
+
+Examples:
 
 > show me sales_data.csv
 
-Claude will call the `view_data` tool, which opens the file in Buckaroo's interactive table UI in your browser.
+Claude calls `view_data` and opens the file in Buckaroo's interactive table UI.
+
+> compare sales_2024.csv and sales_2025.csv on order_id
+
+Claude calls `compare_data`, opens the merged diff view, and includes Buckaroo summary stats and histograms for the compared table.
 
 
 ## Compatibility
@@ -274,4 +283,3 @@ We :heart: contributions.
 Have you had a good experience with this project? Why not share some love and contribute code, or just let us know about any issues you had with it?
 
 We welcome [issue reports](../../issues); be sure to choose the proper issue template for your issue, so that we can be sure you're providing the necessary information.
-

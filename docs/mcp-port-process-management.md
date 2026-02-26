@@ -2,7 +2,7 @@
 
 ## Overview
 
-When Claude Code calls `view_data`, the MCP tool spawns a **Tornado HTTP server** as a child process and communicates with it over localhost. Three cooperating mechanisms ensure the server starts reliably, stays alive during the session, and dies when the session ends.
+When Claude Code calls `view_data` or `compare_data`, the MCP tool spawns a **Tornado HTTP server** as a child process and communicates with it over localhost. Three cooperating mechanisms ensure the server starts reliably, stays alive during the session, and dies when the session ends.
 
 ```
 Claude Code
@@ -27,7 +27,7 @@ Claude Code
 
 ## 2. Server Startup (`ensure_server`)
 
-`ensure_server()` is called on every `view_data` invocation. It follows this sequence:
+`ensure_server()` is called on every `view_data`/`compare_data` invocation. It follows this sequence:
 
 ```
 1. GET http://localhost:8700/health  (2s timeout)
@@ -135,7 +135,7 @@ This handles the case where a user upgrades the package and the old server is st
 
 ---
 
-## 5. Request Flow (`view_data`)
+## 5. Request Flow (`view_data` / `compare_data`)
 
 Once the server is confirmed healthy:
 
@@ -160,6 +160,8 @@ MCP tool                          Tornado server
 ```
 
 The session ID is a random 12-char hex string generated once per MCP process lifetime. The browser accesses the interactive view at `http://localhost:8700/s/{session_id}`, which serves an HTML page loading `standalone.js` from `/static/`.
+
+For `compare_data`, the MCP tool calls `POST /load_compare` with two paths plus join keys. The server stores the session in Buckaroo mode so the compare table includes summary stats rows such as `histogram` and `histogram_bins`.
 
 ---
 

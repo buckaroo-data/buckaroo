@@ -111,7 +111,8 @@ mcp = FastMCP(
     instructions=(
         "When the user mentions or asks about a CSV, TSV, Parquet, or JSON data file, "
         "always use the view_data tool to display it interactively in Buckaroo. "
-        "Prefer view_data over reading file contents directly."
+        "Prefer view_data over reading file contents directly. "
+        "When the user asks to compare two data files, use compare_data."
     ),
 )
 
@@ -324,6 +325,98 @@ def _view_impl(path: str) -> str:
     return summary
 
 
+def _normalize_join_columns(join_columns: str | list[str]) -> list[str]:
+    """Accept comma-separated or list join columns; return a validated list."""
+    if isinstance(join_columns, str):
+        parsed = [part.strip() for part in join_columns.split(",") if part.strip()]
+    elif isinstance(join_columns, list):
+        parsed = [str(part).strip() for part in join_columns if str(part).strip()]
+    else:
+        raise ValueError("join_columns must be a column name or comma-separated column names")
+
+    if not parsed:
+        raise ValueError("join_columns cannot be empty")
+    return parsed
+
+
+def _compare_impl(path1: str, path2: str, join_columns: str | list[str], how: str = "outer") -> str:
+    """Shared implementation for compare_data."""
+    path1 = os.path.abspath(path1)
+    path2 = os.path.abspath(path2)
+    join_cols = _normalize_join_columns(join_columns)
+    log.info("compare_data called — path1=%s path2=%s join_columns=%s how=%s", path1, path2, join_cols, how)
+
+    try:
+        server_info = ensure_server()
+    except Exception:
+        log.error("ensure_server failed:\n%s", traceback.format_exc())
+        raise
+
+    payload = json.dumps(
+        {
+            "session": SESSION_ID,
+            "path1": path1,
+            "path2": path2,
+            "join_columns": join_cols,
+            "how": how,
+        }
+    ).encode()
+    log.debug("POST %s/load_compare payload=%s", SERVER_URL, payload.decode())
+
+    try:
+        req = Request(
+            f"{SERVER_URL}/load_compare",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urlopen(req, timeout=60)
+        body = resp.read()
+        log.debug("Response status=%d body=%s", resp.status, body[:500])
+    except Exception as exc:
+        err_body = ""
+        if hasattr(exc, "read"):
+            try:
+                err_body = exc.read().decode(errors="replace")
+            except Exception:
+                pass
+        log.error(
+            "HTTP request to /load_compare failed: %s body=%s\n%s",
+            exc, err_body, traceback.format_exc(),
+        )
+        raise
+
+    result = json.loads(body)
+    rows = result.get("rows", 0)
+    cols = result.get("columns", [])
+    eqs = result.get("eqs", {})
+    changed_cols = [
+        col_name for col_name, diff in eqs.items()
+        if isinstance(diff, dict) and isinstance(diff.get("diff_count"), int) and diff["diff_count"] > 0
+    ]
+    col_lines = "\n".join(f"  - {c}" for c in cols)
+
+    url = f"{SERVER_URL}/s/{SESSION_ID}"
+    browser_action = result.get("browser_action", "unknown")
+    server_pid = result.get("server_pid", server_info.get("server_pid", "?"))
+
+    summary = (
+        f"Compared **{os.path.basename(path1)}** vs **{os.path.basename(path2)}**\n"
+        f"Join columns: {', '.join(join_cols)} | Join type: {how}\n"
+        f"Rows in merged result: {rows:,}\n"
+        f"Columns with differences: {len(changed_cols)}\n\n"
+        f"Merged columns:\n{col_lines}\n\n"
+        f"Interactive view: {url}\n"
+        f"Includes Buckaroo summary stats and histograms for the merged table.\n"
+        f"Server: pid={server_pid} ({server_info['server_status']}) | "
+        f"Browser: {browser_action} | Session: {SESSION_ID}"
+    )
+    log.info(
+        "compare_data success — rows=%d cols=%d changed_cols=%d browser=%s",
+        rows, len(cols), len(changed_cols), browser_action,
+    )
+    return summary
+
+
 @mcp.tool()
 def view_data(path: str) -> str:
     """Load a tabular data file (CSV, TSV, Parquet, JSON) in Buckaroo for interactive viewing.
@@ -342,6 +435,22 @@ def buckaroo_table(path: str) -> str:
     of the dataset (row count, column names and dtypes).
     """
     return _view_impl(path)
+
+
+@mcp.tool()
+def compare_data(path1: str, path2: str, join_columns: str, how: str = "outer") -> str:
+    """Compare two tabular files and open the merged diff view in Buckaroo.
+
+    Args:
+        path1: First file path.
+        path2: Second file path.
+        join_columns: Join key(s) as a single name or comma-separated list.
+        how: Join type: one of "outer", "inner", "left", "right".
+
+    Returns:
+        Summary text and URL for the interactive compare view.
+    """
+    return _compare_impl(path1, path2, join_columns, how=how)
 
 
 @mcp.tool()

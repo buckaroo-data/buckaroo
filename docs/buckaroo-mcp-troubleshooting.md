@@ -61,6 +61,16 @@ uv cache prune
 The next time Claude Code starts a session, `uvx` will re-resolve and
 fetch the latest `buckaroo[mcp]` from PyPI.
 
+## MCP tools
+
+The Buckaroo MCP server exposes:
+
+- `view_data(path)` to open one data file.
+- `compare_data(path1, path2, join_columns, how="outer")` to compare two files.
+
+For multi-key joins, pass `join_columns` as a comma-separated string, for example:
+`"account_id,order_id"`.
+
 ---
 
 # Troubleshooting
@@ -120,3 +130,8 @@ files weren't included in the wheel. Fix: upgrade to the latest version with
 
 ### MCP tool connects but view_data fails
 Check `~/.buckaroo/logs/mcp_tool.log` for the full traceback.
+
+### compare_data opens but no histograms
+You are likely on an older Buckaroo build without Buckaroo-mode compare sessions.
+Upgrade (`uv cache prune`) and reconnect MCP. Compare sessions should include
+`histogram` and `histogram_bins` summary rows.
