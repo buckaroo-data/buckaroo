@@ -13,6 +13,8 @@ from buckaroo.server.data_loading import (
     create_dataflow, get_buckaroo_display_state,
     load_file_lazy, get_metadata_lazy, get_display_state_lazy,
 )
+from buckaroo.compare import col_join_dfs
+from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.server.session import build_state_message
 
@@ -283,6 +285,160 @@ class LoadHandler(tornado.web.RequestHandler):
             "server_pid": os.getpid(),
             "browser_action": browser_action,
             **metadata,
+        })
+
+
+class LoadCompareHandler(tornado.web.RequestHandler):
+    """POST /load_compare — load two files, diff them via col_join_dfs, and
+    serve the merged result with diff styling applied."""
+
+    def _parse_request_body(self) -> dict:
+        try:
+            body = json.loads(self.request.body)
+        except (json.JSONDecodeError, TypeError):
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body"})
+            return None
+        if not isinstance(body, dict):
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body"})
+            return None
+        return body
+
+    def _validate_request(self, body: dict):
+        """Return (session_id, path1, path2, join_columns, how, no_browser)
+        or all-Nones on error."""
+        session_id = body.get("session")
+        path1 = body.get("path1")
+        path2 = body.get("path2")
+        join_columns = body.get("join_columns")
+
+        if not session_id or not path1 or not path2 or not join_columns:
+            self.set_status(400)
+            self.write({"error": "Missing required field(s): session, path1, path2, join_columns"})
+            return None, None, None, None, None, None
+
+        how = body.get("how", "outer")
+        no_browser = bool(body.get("no_browser", False))
+        return session_id, path1, path2, join_columns, how, no_browser
+
+    def _load_file(self, path: str):
+        """Load a single file, writing error response on failure.
+        Returns DataFrame or None."""
+        try:
+            return load_file(path)
+        except FileNotFoundError:
+            self.set_status(404)
+            self.write({"error_code": "file_not_found", "message": f"File not found: {path}"})
+            return None
+        except ValueError as e:
+            self.set_status(400)
+            self.write({"error_code": "invalid_file", "message": str(e)})
+            return None
+        except Exception:
+            tb = traceback.format_exc()
+            log.error("load error path=%s: %s", path, tb)
+            resp: dict = {"error_code": "load_error", "message": f"Failed to load file: {path}"}
+            if _BUCKAROO_DEBUG:
+                resp["details"] = tb
+            self.set_status(500)
+            self.write(resp)
+            return None
+
+    async def post(self):
+        body = self._parse_request_body()
+        if body is None:
+            return
+
+        session_id, path1, path2, join_columns, how, no_browser = self._validate_request(body)
+        if session_id is None:
+            return
+
+        df1 = self._load_file(path1)
+        if df1 is None:
+            return
+        df2 = self._load_file(path2)
+        if df2 is None:
+            return
+
+        try:
+            merged_df, column_config_overrides, eqs = col_join_dfs(df1, df2, join_columns, how)
+        except ValueError as e:
+            self.set_status(400)
+            self.write({"error_code": "compare_error", "message": str(e)})
+            return
+        except Exception:
+            tb = traceback.format_exc()
+            log.error("compare error: %s", tb)
+            resp: dict = {"error_code": "compare_error", "message": "Failed to compare files"}
+            if _BUCKAROO_DEBUG:
+                resp["details"] = tb
+            self.set_status(500)
+            self.write(resp)
+            return
+
+        # Build display state from merged DataFrame
+        display_state = get_display_state(merged_df, path1)
+
+        # Apply column_config_overrides with name translation
+        orig_to_renamed = dict(old_col_new_col(merged_df))
+        column_config = display_state["df_display_args"]["main"]["df_viewer_config"]["column_config"]
+
+        for cc_entry in column_config:
+            orig_name = cc_entry["header_name"]
+            override = column_config_overrides.get(orig_name)
+            if override is None:
+                continue
+            for key, value in override.items():
+                if key == "merge_rule":
+                    cc_entry["merge_rule"] = value
+                elif key in ("tooltip_config", "color_map_config"):
+                    translated = dict(value)
+                    if "val_column" in translated:
+                        translated["val_column"] = orig_to_renamed.get(
+                            translated["val_column"], translated["val_column"]
+                        )
+                    cc_entry[key] = translated
+                else:
+                    cc_entry[key] = value
+
+        # Store session state
+        sessions = self.application.settings["sessions"]
+        session = sessions.get_or_create(session_id, path1)
+        session.df = merged_df
+        session.metadata = {"path": path1, "path2": path2, "rows": len(merged_df),
+                            "columns": [{"name": str(c), "dtype": str(merged_df[c].dtype)} for c in merged_df.columns]}
+        session.df_display_args = display_state["df_display_args"]
+        session.df_data_dict = display_state["df_data_dict"]
+        session.df_meta = display_state["df_meta"]
+        session.mode = "viewer"
+
+        # Push to WebSocket clients
+        if session.ws_clients:
+            push_msg = json.dumps(build_state_message(session))
+            for client in list(session.ws_clients):
+                try:
+                    client.write_message(push_msg)
+                except Exception:
+                    session.ws_clients.discard(client)
+
+        # Browser window
+        if no_browser or not self.application.settings.get("open_browser", True):
+            browser_action = "skipped"
+        else:
+            port = self.application.settings.get("port", 8888)
+            browser_action = find_or_create_session_window(session_id, port, reload_if_found=True)
+
+        log.info("load_compare session=%s path1=%s path2=%s rows=%d",
+                 session_id, path1, path2, len(merged_df))
+
+        self.write({
+            "session": session_id,
+            "server_pid": os.getpid(),
+            "browser_action": browser_action,
+            "rows": len(merged_df),
+            "columns": [str(c) for c in merged_df.columns],
+            "eqs": eqs,
         })
 
 

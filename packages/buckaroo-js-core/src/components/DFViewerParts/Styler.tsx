@@ -9,6 +9,7 @@ import {
     ColorCategoricalRules,
     ColorWhenNotNullRules,
     ColorFromColumn,
+    ColorStaticRules,
     ColorMap
 } from "./DFWhole";
 
@@ -149,11 +150,20 @@ export function colorFromColumn(cmr: ColorFromColumn) {
     };
 }
 
+export function colorStatic(cmr: ColorStaticRules) {
+    function cellStyle(params: CellClassParams) {
+        const isPinned = params.node.rowPinned;
+        return { backgroundColor: isPinned ? "inherit" : cmr.color };
+    }
+    return { cellStyle };
+}
+
 export function getStyler(cmr: ColorMappingConfig) {
     switch (cmr.color_rule) {
-        case "color_map": return colorMap(cmr);
+        case "color_map":        return colorMap(cmr);
         case "color_categorical": return categoricalColor(cmr);
         case "color_from_column": return colorFromColumn(cmr);
         case "color_not_null":    return colorNotNull(cmr);
-        }
+        case "color_static":      return colorStatic(cmr);
+    }
 }
