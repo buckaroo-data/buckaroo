@@ -53,22 +53,28 @@ def col_join_dfs(df1, df2, join_columns, how):
 
     pl_how = _HOW_MAP.get(how, how)
 
-    # Join with coalesce=False so we can detect membership via null patterns on join keys
-    m_df = df1.join(df2, on=join_columns, how=pl_how, suffix=df2_suffix, coalesce=False)
+    # Add non-null marker columns before the join so membership detection
+    # works even when join keys contain nulls.
+    _left_marker = "__bk_left"
+    _right_marker = "__bk_right"
+    df1_marked = df1.with_columns(pl.lit(True).alias(_left_marker))
+    df2_marked = df2.with_columns(pl.lit(True).alias(_right_marker))
 
-    # Compute membership from null patterns on the first join key
-    # left key null => df2 only (2), right key null => df1 only (1), both non-null => both (3)
-    left_key = join_columns[0]
-    right_key = f"{left_key}{df2_suffix}"
+    m_df = df1_marked.join(
+        df2_marked, on=join_columns, how=pl_how, suffix=df2_suffix, coalesce=False,
+    )
+
+    # Compute membership from marker columns (immune to null join keys)
+    # left marker present => came from df1, right marker present => came from df2
     m_df = m_df.with_columns(
-        pl.when(pl.col(left_key).is_not_null() & pl.col(right_key).is_not_null())
+        pl.when(pl.col(_left_marker).is_not_null() & pl.col(_right_marker).is_not_null())
         .then(3)
-        .when(pl.col(left_key).is_not_null())
+        .when(pl.col(_left_marker).is_not_null())
         .then(1)
         .otherwise(2)
         .cast(pl.Int8)
         .alias("membership")
-    )
+    ).drop(_left_marker, _right_marker)
 
     # Coalesce join keys and drop suffixed copies
     for jc in join_columns:

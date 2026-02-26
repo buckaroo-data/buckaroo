@@ -142,3 +142,28 @@ def test_how_outer_alias():
     m2, _, _ = col_join_dfs(df1, df2, join_columns=["id"], how="full")
 
     assert m1.height == m2.height == 3
+
+
+def test_nullable_join_key_membership():
+    """Membership is correct when the join key itself contains nulls.
+
+    Polars does not match null keys (null != null in join semantics),
+    so null-keyed rows appear as one-sided. The marker-based membership
+    detection must still classify them correctly as df1-only / df2-only.
+    """
+    df1 = pl.DataFrame({"id": [None, 2, 3], "val": [10, 20, 30]})
+    df2 = pl.DataFrame({"id": [None, 3, 4], "val": [10, 30, 40]})
+
+    m_df, _, _ = col_join_dfs(df1, df2, join_columns=["id"], how="outer")
+
+    rows_by_id = {}
+    for row in m_df.iter_rows(named=True):
+        key = (row["id"], row["membership"])
+        rows_by_id[key] = True
+
+    assert (3, 3) in rows_by_id   # both
+    assert (2, 1) in rows_by_id   # df1 only
+    assert (4, 2) in rows_by_id   # df2 only
+    # Null keys don't match in polars joins — each null-keyed row is one-sided
+    assert (None, 1) in rows_by_id  # df1's null key → df1 only
+    assert (None, 2) in rows_by_id  # df2's null key → df2 only
