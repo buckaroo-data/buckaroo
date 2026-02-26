@@ -1,4 +1,4 @@
-import * as _ from "lodash";
+import { fromPairs, has, map, sum } from "lodash-es";
 import {
     DFData,
 } from "./DFWhole";
@@ -494,12 +494,12 @@ export class KeyAwareSmartRowCache {
 
 
     public usedSize(): number {
-        return _.sum(Array.from(this.srcAccesses.values()).map((x) => x.usedSize()))
+        return sum(Array.from(this.srcAccesses.values()).map((x) => x.usedSize()))
     }
 
     public debugCacheState():void {
-	_.map(
-	    _.fromPairs(
+	map(
+	    fromPairs(
 		Array.from(this.srcAccesses.entries())),
 	    (k, _c) => {console.log(k,  k.safeGetExtents())});
     }
@@ -640,7 +640,7 @@ export class KeyAwareSmartRowCache {
 	} else {
             src.addRows(seg, resp.data)
 	}
-        if (_.has(this.waitingCallbacks, cbKey)) {
+        if (has(this.waitingCallbacks, cbKey)) {
             const [success, fail] = this.waitingCallbacks[cbKey];
             if(verifyResp(resp)) {
                 success(this.getRows(resp.key), src.sentLength);
@@ -654,7 +654,7 @@ export class KeyAwareSmartRowCache {
     public addErrorResponse(resp: PayloadResponse) {
         const cbKey = getPayloadKey(resp.key)
 
-        if (_.has(this.waitingCallbacks, cbKey)) {
+        if (has(this.waitingCallbacks, cbKey)) {
             const [_success, fail] = this.waitingCallbacks[cbKey];
             fail()
             delete this.waitingCallbacks[cbKey]

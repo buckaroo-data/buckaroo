@@ -4,8 +4,8 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"build": "esbuild widget.tsx --format=esm --bundle --outdir=../../buckaroo/static/",
-		"build:standalone": "esbuild standalone.tsx --format=esm --bundle --minify --outdir=../../buckaroo/static/",
+		"build": "esbuild widget.tsx --format=esm --bundle --minify --sourcemap --outdir=../../buckaroo/static/",
+		"build:standalone": "esbuild standalone.tsx --format=esm --bundle --minify --sourcemap --outdir=../../buckaroo/static/",
 		"dev": "esbuild widget.tsx --format=esm --bundle --outdir=../../buckaroo/static/ --sourcemap=inline --watch",
 		"dev:standalone": "esbuild standalone.tsx --format=esm --bundle --outdir=../../buckaroo/static/ --sourcemap=inline --watch"
 	},

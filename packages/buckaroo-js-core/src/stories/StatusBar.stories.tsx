@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 
 import "../style/dcf-npm.css"
-import _ from "lodash";
 import { StatusBar } from "../components/StatusBar";
 import { BuckarooOptions, BuckarooState, DFMeta } from "../components/WidgetTypes";
 import { useState } from "react";

@@ -1,4 +1,3 @@
-import * as _ from "lodash";
 //import { describe, expect } from 'jest';
 import {
     Segment,

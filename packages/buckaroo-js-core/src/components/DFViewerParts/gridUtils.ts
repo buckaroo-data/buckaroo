@@ -23,7 +23,7 @@ import {
     ColDefOrGroup,
 } from "./DFWhole";
 
-import * as _ from "lodash";
+import { cloneDeep, filter, find, get, has, includes, indexOf, isArray, keys, map, pick, union, without, zipObject } from "lodash-es";
 import { getTextCellRenderer } from "./OtherRenderers";
 import { getStyler } from "./Styler";
 import { DFData, SDFMeasure, SDFT } from "./DFWhole";
@@ -50,7 +50,7 @@ export function getCellRendererorFormatter(
         return colDefExtras;
     }
 
-    if (_.includes(cellRendererDisplayers, dispArgs.displayer)) {
+    if (includes(cellRendererDisplayers, dispArgs.displayer)) {
         const crArgs: CellRendererArgs = dispArgs as CellRendererArgs;
         return {
             cellRenderer: getCellRenderer(crArgs),
@@ -62,7 +62,7 @@ export function getCellRendererorFormatter(
 
 
 export function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]) {
-    return _.map(_.map(prc, "primary_key_val"), (x) => _.find(sdf, { index: x }));
+    return map(map(prc, "primary_key_val"), (x) => find(sdf, { index: x }));
 }
 
 export function extractSingleSeriesSummary(
@@ -87,15 +87,15 @@ export function extractSingleSeriesSummary(
 	]
 	  
         },
-        data: _.filter(
-            _.map(full_summary_stats_df, (row) => _.pick(row, ["index", col_name])),
+        data: filter(
+            map(full_summary_stats_df, (row) => pick(row, ["index", col_name])),
             { index: "dtype" },
         ),
     };
 }
 
 export const getFieldVal = (f:ColumnConfig) : string => {
-  if(_.has(f, 'col_path')){
+  if(has(f, 'col_path')){
     return (f as MultiIndexColumnConfig).field;
   }
   return (f as NormalColumnConfig).col_name;
@@ -125,12 +125,12 @@ export function normalColToColDef (f:NormalColumnConfig) : ColDef {
 
 export const getSubChildren = (arr:ColumnConfig[], level:number): ColumnConfig[][] => {
   const keyFunc = (x:ColumnConfig) => {
-    if(_.has(x, 'col_path')) {
+    if(has(x, 'col_path')) {
       const xMICC: MultiIndexColumnConfig = x as MultiIndexColumnConfig
       return xMICC.col_path[level]
     }
     const xNCC: NormalColumnConfig = x as NormalColumnConfig;
-    return xNCC.col_name + "!&single" + _.indexOf(arr, x).toString(); // bad magic value
+    return xNCC.col_name + "!&single" + indexOf(arr, x).toString(); // bad magic value
   }
   return arr.reduce((acc: ColumnConfig[][], curr:ColumnConfig) => {
     
@@ -179,7 +179,7 @@ export function multiIndexColToColDef (f:MultiIndexColumnConfig[], level:number=
   if(rootDepth == 1) {
     const colDef: ColGroupDef = {
       //headerName: rootHeader,
-      children: _.map(f, (x) => childColDef(x, 0)),
+      children: map(f, (x) => childColDef(x, 0)),
       ...(f[0].ag_grid_specs)
     };
 
@@ -190,7 +190,7 @@ export function multiIndexColToColDef (f:MultiIndexColumnConfig[], level:number=
   if (childLevel == (rootDepth -1)) {
     const colDef: ColGroupDef = {
       headerName: rootHeader,
-      children: _.map(f, (x) => childColDef(x, childLevel)),
+      children: map(f, (x) => childColDef(x, childLevel)),
       ...(f[0].ag_grid_specs)
     };
     console.log(" colDef from multiIndexColToColDef", colDef)
@@ -199,7 +199,7 @@ export function multiIndexColToColDef (f:MultiIndexColumnConfig[], level:number=
     const groupedColumnConfigs = getSubChildren(f, childLevel);
     const colDef: ColGroupDef = {
       headerName: rootHeader,
-      children: _.map(groupedColumnConfigs, (x) => multiIndexColToColDef(x as MultiIndexColumnConfig[], childLevel)),
+      children: map(groupedColumnConfigs, (x) => multiIndexColToColDef(x as MultiIndexColumnConfig[], childLevel)),
       ...(f[0].ag_grid_specs)
     };
     console.log(" colDef from multiIndexColToColDef", colDef)
@@ -213,7 +213,7 @@ const switchToColDef = (x:ColumnConfig[]): ColDef|ColGroupDef => {
     //neverp
     throw new Error("x shouldn't be empty");
   }
-  if(_.has(x[0], 'col_path')) {
+  if(has(x[0], 'col_path')) {
     return multiIndexColToColDef(x as MultiIndexColumnConfig[])
   } else {
     if (x.length > 1) {
@@ -224,7 +224,7 @@ const switchToColDef = (x:ColumnConfig[]): ColDef|ColGroupDef => {
 }
 export function mergeCellClass(
   cOrig:ColDef|ColGroupDef, classSpec:"headerClass"|"cellClass", extraClass:string) : ColDef|ColGroupDef {
-    const c = _.cloneDeep(cOrig);
+    const c = cloneDeep(cOrig);
     //@ts-ignore
     if(c[classSpec] === undefined) { 
       //@ts-ignore
@@ -232,7 +232,7 @@ export function mergeCellClass(
     } else {
       console.log("c", c, classSpec)
       //@ts-ignore
-      if(_.isArray(c[classSpec])) {
+      if(isArray(c[classSpec])) {
 	//@ts-ignore
 	c[classSpec].push(extraClass)
       } else {
@@ -296,11 +296,11 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[], column_c
     return (params: ICellRendererParams<any, any, any>): CellRendererSelectorResult | undefined => {
         if (params.node.rowPinned) {
 
-            const pk = _.get(params.node.data, "index");
+            const pk = get(params.node.data, "index");
             if (pk === undefined) {
                 return anyRenderer; // default renderer
             }
-            const maybePrc: PinnedRowConfig | undefined = _.find(pinned_rows, {
+            const maybePrc: PinnedRowConfig | undefined = find(pinned_rows, {
                 primary_key_val: pk,
             });
             if (maybePrc === undefined) {
@@ -310,7 +310,7 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[], column_c
             const currentCol = params.column?.getColId();
             if (
                 (prc.default_renderer_columns === undefined && currentCol === "index") ||
-                _.includes(prc.default_renderer_columns, currentCol)
+                includes(prc.default_renderer_columns, currentCol)
             ) {
                 return anyRenderer;
             }
@@ -347,19 +347,19 @@ export function extractSDFT(summaryStatsDf: DFData): SDFT {
     /*  histogram_bins are special cased because of how they are passed to rendereres in pinned_rows
 	I think
      */
-    const maybeHistogramBins = _.find(summaryStatsDf, { index: "histogram_bins" }) || {};
-    const maybeHistogramLogBins = _.find(summaryStatsDf, { index: "histogram_log_bins" }) || {};
-    const allColumns: string[] = _.without(
-        _.union(_.keys(maybeHistogramBins), _.keys(maybeHistogramLogBins)),
+    const maybeHistogramBins = find(summaryStatsDf, { index: "histogram_bins" }) || {};
+    const maybeHistogramLogBins = find(summaryStatsDf, { index: "histogram_log_bins" }) || {};
+    const allColumns: string[] = without(
+        union(keys(maybeHistogramBins), keys(maybeHistogramLogBins)),
         "index",
     );
-    const vals: SDFMeasure[] = _.map(allColumns, (colName) => {
+    const vals: SDFMeasure[] = map(allColumns, (colName) => {
         return {
-            histogram_bins: _.get(maybeHistogramBins, colName, []) as number[],
-            histogram_log_bins: _.get(maybeHistogramLogBins, colName, []) as number[],
+            histogram_bins: get(maybeHistogramBins, colName, []) as number[],
+            histogram_log_bins: get(maybeHistogramLogBins, colName, []) as number[],
         };
     });
-    return _.zipObject(allColumns, vals) as SDFT;
+    return zipObject(allColumns, vals) as SDFT;
 }
 
 export const getPayloadKey = (payloadArgs: PayloadArgs): string => {

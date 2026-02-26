@@ -15,29 +15,29 @@ importers:
   buckaroo-js-core:
     dependencies:
       '@ag-grid-community/client-side-row-model':
-        specifier: ^32.3.3
-        version: 32.3.5
+        specifier: ^32.3.9
+        version: 32.3.9
       '@ag-grid-community/core':
-        specifier: ^32.3.3
-        version: 32.3.5
+        specifier: ^32.3.9
+        version: 32.3.9
       '@ag-grid-community/infinite-row-model':
-        specifier: ^32.3.3
-        version: 32.3.5
+        specifier: ^32.3.9
+        version: 32.3.9
       '@ag-grid-community/react':
-        specifier: ^32.3.3
-        version: 32.3.5(@ag-grid-community/core@32.3.5)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: ^32.3.9
+        version: 32.3.9(@ag-grid-community/core@32.3.9)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@ag-grid-community/styles':
-        specifier: ^32.3.3
-        version: 32.3.5
+        specifier: ^32.3.9
+        version: 32.3.9
       '@ag-grid-community/theming':
-        specifier: ^32.3.3
+        specifier: ^32.3.9
         version: 32.3.9
       hyparquet:
         specifier: ^1.8.2
         version: 1.23.3
-      lodash:
+      lodash-es:
         specifier: ^4.17.21
-        version: 4.17.21
+        version: 4.17.23
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -90,9 +90,9 @@ importers:
       '@types/jest':
         specifier: ^29.5.14
         version: 29.5.14
-      '@types/lodash':
-        specifier: ^4.17.13
-        version: 4.17.21
+      '@types/lodash-es':
+        specifier: ^4.17.12
+        version: 4.17.12
       '@types/node':
         specifier: ^22.15.3
         version: 22.19.3
@@ -129,6 +129,9 @@ importers:
       jsdom:
         specifier: ^26.0.0
         version: 26.1.0
+      lodash:
+        specifier: ^4.17.21
+        version: 4.17.21
       storybook:
         specifier: ^8.4.4
         version: 8.6.15
@@ -190,27 +193,24 @@ packages:
   '@adobe/css-tools@4.4.4':
     resolution: {integrity: sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg==}
 
-  '@ag-grid-community/client-side-row-model@32.3.5':
-    resolution: {integrity: sha512-dTAko9W0E914BMVfDBcresQfDZZPiVVmkbS2iRwDPX0erqYT2/nkuXXVh5If1LFnAqM1q5EQTZDZaLXDv2GO7Q==}
-
-  '@ag-grid-community/core@32.3.5':
-    resolution: {integrity: sha512-RGL3RyPCKC4R2fcG1gXdk7rs+CXig23wufTFJfbE46aQDxg941ww07G0cDS5Z5u/6btM9GJkxlwcR0JVEI003A==}
+  '@ag-grid-community/client-side-row-model@32.3.9':
+    resolution: {integrity: sha512-/x6gPhxn6c/QQSmDuNf81xrBNc3TKGymmokznvXPPf4tAXeLZn5kF0cW3sGa52XyqZcIsYFQvLkI+pCsX+I4ng==}
 
   '@ag-grid-community/core@32.3.9':
     resolution: {integrity: sha512-oZeAEPgaJVMzfKqbAPCyadcN5+iy+tjvhRLqEYJdBxtLgW/s2s0qXcXQvnrz7eUMD3Z7h3BQRVt2h/p0T6Ox/w==}
 
-  '@ag-grid-community/infinite-row-model@32.3.5':
-    resolution: {integrity: sha512-XdFwyeZfIOGc69H1OAJGiP2iTFIlUrC7ANIvxWtuAuy77lqjE1IYRxBv9Lfc+qM4pJRqYFVLmc9aOLJbmrr6DQ==}
+  '@ag-grid-community/infinite-row-model@32.3.9':
+    resolution: {integrity: sha512-jk/NCRTFeLUrqf9/meBnHufEjWGrq2EN+4NV6iwTs4o79hCbGhhldSh7h0hXzYpmTBqUyGsMHIb/Y77LmTU6Mg==}
 
-  '@ag-grid-community/react@32.3.5':
-    resolution: {integrity: sha512-GW2Alqo+U2eSXKZFVE+1F9THBSrHbbe4crAvjL4NOSaqimLtKyYJ8TCHgsn5PX/PPeOxfCVK5SMHD4oziSHidA==}
+  '@ag-grid-community/react@32.3.9':
+    resolution: {integrity: sha512-W21ELmhbniJQ2LMCytv5lwxz3FHpZp1iMp0Kvm9TXXxhldgDwMqVQa1uePeNBa068KIfXwnst0D2TGD8r0N/iA==}
     peerDependencies:
-      '@ag-grid-community/core': 32.3.5
+      '@ag-grid-community/core': 32.3.9
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
       react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  '@ag-grid-community/styles@32.3.5':
-    resolution: {integrity: sha512-gr4orZTYDqx3r+P+F8SSaL4BFzSTopjqaua5wXcOHfUm7OGENcgogMo2DiaMnxzcc33T/TbOIiL8RCDP7X0efw==}
+  '@ag-grid-community/styles@32.3.9':
+    resolution: {integrity: sha512-uPNR5EXeQqAIC0gohmY7CJ97cTIA/JtNSqAUzJ8AdVZcz4dbk9JJIl9DRFUYL+qWhMY+fUSTw2a+Yi6aOGSs8A==}
 
   '@ag-grid-community/theming@32.3.9':
     resolution: {integrity: sha512-NRqeoISBJncWDYDATc+cxG7D5CgVuOkJRpz3hWnEBY/CjEHCM/HBIDJnv1ALsNsro/6iwALrpHrPaScJbDF9vw==}
@@ -1498,6 +1498,9 @@ packages:
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
+  '@types/lodash-es@4.17.12':
+    resolution: {integrity: sha512-0NgftHUcV4v34VhXm8QBSftKVXtbkBG3ViCjs6+eJ5a6y6Mi/jiFGPc1sC7QK+9BFhWrURE3EOggmWaSxL9OzQ==}
+
   '@types/lodash@4.17.21':
     resolution: {integrity: sha512-FOvQ0YPD5NOfPgMzJihoT+Za5pdkDJWcbpuj1DjaKZIr/gxodQjY/uWEFlTNqW2ugXHUiL8lRQgw63dzKHZdeQ==}
 
@@ -1676,9 +1679,6 @@ packages:
     resolution: {integrity: sha512-NZyJarBfL7nWwIq+FDL6Zp/yHEhePMNnnJ0y3qfieCrmNvYct8uvtiV41UvlSe6apAfk0fY1FbWx+NwfmpvtTg==}
     engines: {node: '>=0.4.0'}
     hasBin: true
-
-  ag-charts-types@10.3.5:
-    resolution: {integrity: sha512-DtvV+IS4RlocGV2IcaQOe/eM6eBGGCvkLnwxGkDxKa8ddxivv90fwlfPxK0O5XnVectiKtWFfOw35Cm0k+4vMw==}
 
   ag-charts-types@10.3.9:
     resolution: {integrity: sha512-drcRiJVencliC8LnRwk4MmeQDNNBg5GzmOoLFihO3/k0CUK0VF/N+2nc7iFozwaNG0btSB9vAhYuJLjqHMtRrQ==}
@@ -2851,6 +2851,9 @@ packages:
     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
     engines: {node: '>=10'}
 
+  lodash-es@4.17.23:
+    resolution: {integrity: sha512-kVI48u3PZr38HdYz98UmfPnXl2DXrpdctLrFLCd3kOx1xUkOmpFPx7gCWWM5MPkL/fD8zb+Ph0QzjGFs4+hHWg==}
+
   lodash.memoize@4.1.2:
     resolution: {integrity: sha512-t7j+NzmgnQzTAYXcsHYLgimltOV1MXHtlOWf6GjL9Kj8GK5FInw5JotxvbOs+IvV1/Dzo04/fCGfLVs7aXb4Ag==}
 
@@ -3806,14 +3809,9 @@ snapshots:
 
   '@adobe/css-tools@4.4.4': {}
 
-  '@ag-grid-community/client-side-row-model@32.3.5':
+  '@ag-grid-community/client-side-row-model@32.3.9':
     dependencies:
-      '@ag-grid-community/core': 32.3.5
-      tslib: 2.8.1
-
-  '@ag-grid-community/core@32.3.5':
-    dependencies:
-      ag-charts-types: 10.3.5
+      '@ag-grid-community/core': 32.3.9
       tslib: 2.8.1
 
   '@ag-grid-community/core@32.3.9':
@@ -3821,19 +3819,19 @@ snapshots:
       ag-charts-types: 10.3.9
       tslib: 2.8.1
 
-  '@ag-grid-community/infinite-row-model@32.3.5':
+  '@ag-grid-community/infinite-row-model@32.3.9':
     dependencies:
-      '@ag-grid-community/core': 32.3.5
+      '@ag-grid-community/core': 32.3.9
       tslib: 2.8.1
 
-  '@ag-grid-community/react@32.3.5(@ag-grid-community/core@32.3.5)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+  '@ag-grid-community/react@32.3.9(@ag-grid-community/core@32.3.9)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
-      '@ag-grid-community/core': 32.3.5
+      '@ag-grid-community/core': 32.3.9
       prop-types: 15.8.1
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
 
-  '@ag-grid-community/styles@32.3.5': {}
+  '@ag-grid-community/styles@32.3.9': {}
 
   '@ag-grid-community/theming@32.3.9':
     dependencies:
@@ -5159,6 +5157,10 @@ snapshots:
 
   '@types/json-schema@7.0.15': {}
 
+  '@types/lodash-es@4.17.12':
+    dependencies:
+      '@types/lodash': 4.17.21
+
   '@types/lodash@4.17.21': {}
 
   '@types/mdx@2.0.13': {}
@@ -5395,8 +5397,6 @@ snapshots:
       acorn: 8.15.0
 
   acorn@8.15.0: {}
-
-  ag-charts-types@10.3.5: {}
 
   ag-charts-types@10.3.9: {}
 
@@ -6830,6 +6830,8 @@ snapshots:
   locate-path@6.0.0:
     dependencies:
       p-locate: 5.0.0
+
+  lodash-es@4.17.23: {}
 
   lodash.memoize@4.1.2: {}
 
