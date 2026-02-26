@@ -129,7 +129,15 @@ export interface ColorFromColumn {
     val_column: string;
 }
 
-export type ColorMappingConfig = ColorMapRules | ColorWhenNotNullRules | ColorFromColumn | ColorCategoricalRules;
+// Apply a single constant background color to every cell in the column.
+// Useful for visually marking a column's role (e.g. join key, sentinel) without
+// depending on any data value.
+export interface ColorStaticRules {
+    color_rule: "color_static";
+    color: string;
+}
+
+export type ColorMappingConfig = ColorMapRules | ColorWhenNotNullRules | ColorFromColumn | ColorCategoricalRules | ColorStaticRules;
 
 //TooltipRules
 export interface SimpleTooltip {
