@@ -180,12 +180,12 @@ document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeLigh
 if __name__ == "__main__":
     if not BEFORE_DIR.exists() and not AFTER_DIR.exists():
         print(
-            f"No screenshots found.\n"
-            f"Run:\n"
-            f"  ./scripts/download_styling_screenshots.sh\n"
-            f"or capture locally with:\n"
-            f"  cd packages/buckaroo-js-core && "
-            f"SCREENSHOT_DIR=screenshots/after npx playwright test pw-tests/styling-issues-screenshots.spec.ts",
+            "No screenshots found.\n"
+            "Run:\n"
+            "  ./scripts/download_styling_screenshots.sh\n"
+            "or capture locally with:\n"
+            "  cd packages/buckaroo-js-core && "
+            "SCREENSHOT_DIR=screenshots/after npx playwright test pw-tests/styling-issues-screenshots.spec.ts",
             file=sys.stderr,
         )
         sys.exit(1)

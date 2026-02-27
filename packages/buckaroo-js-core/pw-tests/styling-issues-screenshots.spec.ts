@@ -28,33 +28,34 @@ const screenshotsDir = path.resolve(
  * All 16 styling-issue stories.
  * Story IDs follow Storybook's slug rules:
  *   title "Buckaroo/DFViewer/StylingIssues" → "buckaroo-dfviewer-stylingissues"
- *   export name e.g. FewCols_ShortHdr_ShortData → "fewcols-shorthdr-shortdata"
+ *   export name e.g. FewCols_ShortHdr_ShortData → "few-cols-short-hdr-short-data"
+ *   (Storybook runs startCase() on the export name before slugifying)
  */
 const STORIES = [
   // Section A – width/contention (#595, #596, #599, #600)
-  { id: 'buckaroo-dfviewer-stylingissues--fewcols-shorthdr-shortdata',  name: 'A1_FewCols_ShortHdr_ShortData',  issues: '#599' },
-  { id: 'buckaroo-dfviewer-stylingissues--fewcols-shorthdr-longdata',   name: 'A2_FewCols_ShortHdr_LongData',   issues: '' },
-  { id: 'buckaroo-dfviewer-stylingissues--fewcols-longhdr-shortdata',   name: 'A3_FewCols_LongHdr_ShortData',   issues: '' },
-  { id: 'buckaroo-dfviewer-stylingissues--fewcols-longhdr-longdata',    name: 'A4_FewCols_LongHdr_LongData',    issues: '' },
-  { id: 'buckaroo-dfviewer-stylingissues--manycols-shorthdr-shortdata', name: 'A5_ManyCols_ShortHdr_ShortData', issues: '#595 #599' },
-  { id: 'buckaroo-dfviewer-stylingissues--manycols-shorthdr-longdata',  name: 'A6_ManyCols_ShortHdr_LongData',  issues: '#596' },
-  { id: 'buckaroo-dfviewer-stylingissues--manycols-longhdr-shortdata',  name: 'A7_ManyCols_LongHdr_ShortData',  issues: '#596' },
-  { id: 'buckaroo-dfviewer-stylingissues--manycols-longhdr-longdata',   name: 'A8_ManyCols_LongHdr_LongData',   issues: '#596 worst-case' },
+  { id: 'buckaroo-dfviewer-stylingissues--few-cols-short-hdr-short-data',  name: 'A1_FewCols_ShortHdr_ShortData',  issues: '#599' },
+  { id: 'buckaroo-dfviewer-stylingissues--few-cols-short-hdr-long-data',   name: 'A2_FewCols_ShortHdr_LongData',   issues: '' },
+  { id: 'buckaroo-dfviewer-stylingissues--few-cols-long-hdr-short-data',   name: 'A3_FewCols_LongHdr_ShortData',   issues: '' },
+  { id: 'buckaroo-dfviewer-stylingissues--few-cols-long-hdr-long-data',    name: 'A4_FewCols_LongHdr_LongData',    issues: '' },
+  { id: 'buckaroo-dfviewer-stylingissues--many-cols-short-hdr-short-data', name: 'A5_ManyCols_ShortHdr_ShortData', issues: '#595 #599' },
+  { id: 'buckaroo-dfviewer-stylingissues--many-cols-short-hdr-long-data',  name: 'A6_ManyCols_ShortHdr_LongData',  issues: '#596' },
+  { id: 'buckaroo-dfviewer-stylingissues--many-cols-long-hdr-short-data',  name: 'A7_ManyCols_LongHdr_ShortData',  issues: '#596' },
+  { id: 'buckaroo-dfviewer-stylingissues--many-cols-long-hdr-long-data',   name: 'A8_ManyCols_LongHdr_LongData',   issues: '#596 worst-case' },
 
   // Section B – large numbers / compact_number (#597, #602)
   // Note: compact_number stories may render raw values on pre-#597 commits.
-  { id: 'buckaroo-dfviewer-stylingissues--largenumbers-float',          name: 'B9_LargeNumbers_Float',          issues: '#597 before' },
-  { id: 'buckaroo-dfviewer-stylingissues--largenumbers-compact',        name: 'B10_LargeNumbers_Compact',        issues: '#597 after' },
-  { id: 'buckaroo-dfviewer-stylingissues--clusteredbillions-float',     name: 'B11_ClusteredBillions_Float',     issues: '#602 baseline' },
-  { id: 'buckaroo-dfviewer-stylingissues--clusteredbillions-compact',   name: 'B12_ClusteredBillions_Compact',   issues: '#602 precision' },
+  { id: 'buckaroo-dfviewer-stylingissues--large-numbers-float',            name: 'B9_LargeNumbers_Float',          issues: '#597 before' },
+  { id: 'buckaroo-dfviewer-stylingissues--large-numbers-compact',          name: 'B10_LargeNumbers_Compact',        issues: '#597 after' },
+  { id: 'buckaroo-dfviewer-stylingissues--clustered-billions-float',       name: 'B11_ClusteredBillions_Float',     issues: '#602 baseline' },
+  { id: 'buckaroo-dfviewer-stylingissues--clustered-billions-compact',     name: 'B12_ClusteredBillions_Compact',   issues: '#602 precision' },
 
   // Section C – pinned row / index alignment (#587)
-  { id: 'buckaroo-dfviewer-stylingissues--pinnedindex-fewcols',         name: 'C13_PinnedIndex_FewCols',         issues: '#587' },
-  { id: 'buckaroo-dfviewer-stylingissues--pinnedindex-manycols',        name: 'C14_PinnedIndex_ManyCols',        issues: '#587' },
+  { id: 'buckaroo-dfviewer-stylingissues--pinned-index-few-cols',          name: 'C13_PinnedIndex_FewCols',         issues: '#587' },
+  { id: 'buckaroo-dfviewer-stylingissues--pinned-index-many-cols',         name: 'C14_PinnedIndex_ManyCols',        issues: '#587' },
 
   // Section D – mixed cross-issue scenarios
-  { id: 'buckaroo-dfviewer-stylingissues--mixed-manynarrow-withpinned', name: 'D15_Mixed_ManyNarrow_WithPinned', issues: '#595 #587 #599' },
-  { id: 'buckaroo-dfviewer-stylingissues--mixed-fewwide-withpinned',    name: 'D16_Mixed_FewWide_WithPinned',    issues: '#587 baseline' },
+  { id: 'buckaroo-dfviewer-stylingissues--mixed-many-narrow-with-pinned',  name: 'D15_Mixed_ManyNarrow_WithPinned', issues: '#595 #587 #599' },
+  { id: 'buckaroo-dfviewer-stylingissues--mixed-few-wide-with-pinned',     name: 'D16_Mixed_FewWide_WithPinned',    issues: '#587 baseline' },
 ];
 
 test.beforeAll(() => {
