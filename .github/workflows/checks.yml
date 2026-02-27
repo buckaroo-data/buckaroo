@@ -469,7 +469,9 @@ jobs:
 
       # ── After screenshots (current branch) ──
       - name: Checkout current branch
-        run: git checkout ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          git checkout -f ${{ github.event.pull_request.head.sha || github.sha }}
+          git clean -fd packages/
       - name: Install pnpm deps (current)
         working-directory: packages
         run: pnpm install --no-frozen-lockfile
