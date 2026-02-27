@@ -306,25 +306,24 @@ export const ManyCols_LongHdr_LongData: Story = {
   render: () => <ManyLongLongInner />,
 };
 
-// #595 repro: force narrow columns so data values show "..."
-// width: 40 + suppressAutoSize prevents fitCellContents from expanding.
-// Without defaultColDef.minWidth (baseline) → columns stay 40px → "..."
-// With defaultColDef.minWidth: 80 (fix) → columns forced to 80px → values visible
+// #595 repro: fitGridWidth with 15 cols in 800px → ~53px each → "..."
+// Without defaultColDef.minWidth (baseline) → columns crushed → "..."
+// With defaultColDef.minWidth: 80 (fix) → columns at 80px → scrollbar + readable values
 const narrowColConfig: DFViewerConfig = {
   column_config: Array.from({ length: 15 }, (_, i) => ({
     col_name: `col_${i}`,
     header_name: LONG_HEADER_NAMES[i],
     displayer_args: { displayer: "integer" as const, min_digits: 1, max_digits: 4 },
-    ag_grid_specs: { width: 40, suppressAutoSize: true },
   })),
   left_col_configs: [INDEX_COL],
   pinned_rows: [],
+  extra_grid_config: { autoSizeStrategy: { type: "fitGridWidth" as const } },
 };
 const NarrowColInner = makeStoryComponent(
   narrowColConfig,
   genData(15, "year"),
 );
-/** 15 cols with initial 40px width + suppressAutoSize. #595 repro — "..." without minWidth fix. */
+/** 15 cols with fitGridWidth. #595 repro — values show "..." without minWidth fix. */
 export const ManyCols_LongHdr_YearData: Story = {
   render: () => <NarrowColInner />,
 };
