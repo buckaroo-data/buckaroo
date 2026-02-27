@@ -90,11 +90,16 @@ for (const story of STORIES) {
     // Grid is inside a Shadow DOM, so we pierce it via evaluate.
     if (story.name.includes('Pinned')) {
       await page.evaluate(() => {
-        const host = document.querySelector('div[ref]') ??
-                     document.querySelector('#storybook-root > div');
-        const shadow = host?.shadowRoot;
-        const vp = shadow?.querySelector('.ag-body-viewport') ??
-                   document.querySelector('.ag-body-viewport');
+        // Walk all elements looking for shadow roots containing AG-Grid
+        const allEls = document.querySelectorAll('*');
+        for (const el of allEls) {
+          if (el.shadowRoot) {
+            const vp = el.shadowRoot.querySelector('.ag-body-viewport');
+            if (vp) { vp.scrollLeft = 400; return; }
+          }
+        }
+        // Fallback: no shadow DOM
+        const vp = document.querySelector('.ag-body-viewport');
         if (vp) vp.scrollLeft = 400;
       });
       await page.waitForTimeout(400);
