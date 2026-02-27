@@ -87,9 +87,16 @@ for (const story of STORIES) {
 
     // For pinned-index stories, scroll the grid body right so the
     // index column is out of view — exposes #587 alignment bug.
+    // Grid is inside a Shadow DOM, so we pierce it via evaluate.
     if (story.name.includes('Pinned')) {
-      const viewport = page.locator('.ag-body-viewport');
-      await viewport.evaluate((el) => { el.scrollLeft = 200; });
+      await page.evaluate(() => {
+        const host = document.querySelector('div[ref]') ??
+                     document.querySelector('#storybook-root > div');
+        const shadow = host?.shadowRoot;
+        const vp = shadow?.querySelector('.ag-body-viewport') ??
+                   document.querySelector('.ag-body-viewport');
+        if (vp) vp.scrollLeft = 400;
+      });
       await page.waitForTimeout(400);
     }
 
