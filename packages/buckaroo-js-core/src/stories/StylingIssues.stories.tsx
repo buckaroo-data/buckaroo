@@ -158,6 +158,7 @@ function genConfig(
     col_name: `col_${i}`,
     header_name: headers[i % headers.length],
     displayer_args: displayer_args(),
+    ...(withPinned ? { ag_grid_specs: { minWidth: 120 } } : {}),
   }));
 
   const pinned_rows: PinnedRowConfig[] = withPinned
