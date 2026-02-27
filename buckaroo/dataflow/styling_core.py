@@ -63,6 +63,10 @@ IntegerDisplayerA = TypedDict('IntegerDisplayerA', {
     'max_digits': int
 })
 
+CompactNumberDisplayerA = TypedDict('CompactNumberDisplayerA', {
+    'displayer': Literal["compact_number"]
+})
+
 FormatterArgs = Union[
     ObjDisplayerA,
     BooleanDisplayerA,
@@ -70,7 +74,8 @@ FormatterArgs = Union[
     FloatDisplayerA,
     DatetimeDefaultDisplayerA,
     DatetimeLocaleDisplayerA,
-    IntegerDisplayerA
+    IntegerDisplayerA,
+    CompactNumberDisplayerA
 ]
 
 # Combined displayer types

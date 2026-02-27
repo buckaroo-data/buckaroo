@@ -45,6 +45,12 @@ export function getCellRendererorFormatter(
     dispArgs: DisplayerArgs,
 ):ColDef {
     const formatter = getFormatterFromArgs(dispArgs);
+    if (dispArgs.displayer === "compact_number" && formatter !== undefined) {
+        return {
+            valueFormatter: formatter,
+            tooltipValueGetter: (params) => params.value != null ? String(params.value) : "",
+        };
+    }
     if (formatter !== undefined) {
         const colDefExtras: ColDef = { valueFormatter: formatter };
         return colDefExtras;
