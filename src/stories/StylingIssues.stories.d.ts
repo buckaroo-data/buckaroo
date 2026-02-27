@@ -32,9 +32,9 @@ export declare const LargeNumbers_Compact: Story;
 export declare const ClusteredBillions_Float: Story;
 /** Same clustered data with compact_number – exposes precision loss (#602). */
 export declare const ClusteredBillions_Compact: Story;
-/** 5 numeric cols + pinned summary stats + left index. Tests #587 alignment. */
+/** 10 long-header cols + pinned summary stats + left index. Tests #587 alignment. */
 export declare const PinnedIndex_FewCols: Story;
-/** 15 numeric cols + pinned summary stats. #587 alignment under width contention. */
+/** 20 long-header cols + pinned summary stats. #587 alignment under width contention. */
 export declare const PinnedIndex_ManyCols: Story;
 /** 20 narrow cols + pinned rows. Cross-issue: #595 + #587 + #599. */
 export declare const Mixed_ManyNarrow_WithPinned: Story;
