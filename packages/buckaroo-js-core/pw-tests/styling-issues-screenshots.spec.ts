@@ -41,6 +41,7 @@ const STORIES = [
   { id: 'buckaroo-dfviewer-stylingissues--many-cols-short-hdr-long-data',  name: 'A6_ManyCols_ShortHdr_LongData',  issues: '#596' },
   { id: 'buckaroo-dfviewer-stylingissues--many-cols-long-hdr-short-data',  name: 'A7_ManyCols_LongHdr_ShortData',  issues: '#596' },
   { id: 'buckaroo-dfviewer-stylingissues--many-cols-long-hdr-long-data',   name: 'A8_ManyCols_LongHdr_LongData',   issues: '#596 worst-case' },
+  { id: 'buckaroo-dfviewer-stylingissues--many-cols-long-hdr-year-data',  name: 'A9_ManyCols_LongHdr_YearData',   issues: '#595 primary' },
 
   // Section B – large numbers / compact_number (#597, #602)
   // Note: compact_number stories may render raw values on pre-#597 commits.
