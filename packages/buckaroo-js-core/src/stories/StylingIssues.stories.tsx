@@ -307,11 +307,13 @@ export const ManyCols_LongHdr_LongData: Story = {
 };
 
 const ManyLongYearInner = makeStoryComponent(
-  genConfig(15, "long", "year"),
-  genData(15, "year"),
+  genConfig(25, "long", "long"),
+  genData(25, "long"),
+  [],
+  400,
 );
-/** 15 cols, long headers, 4-digit year values. #595 primary repro — narrow
- *  content causes fitCellContents to crush columns, truncating headers. */
+/** 25 cols, long headers, 6-7 digit values in 400px. #595 repro —
+ *  fitCellContents crushes columns, data values show "...". */
 export const ManyCols_LongHdr_YearData: Story = {
   render: () => <ManyLongYearInner />,
 };
