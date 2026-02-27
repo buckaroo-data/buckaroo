@@ -407,6 +407,76 @@ jobs:
           path: packages/buckaroo-js-core/screenshots/
           if-no-files-found: ignore
 
+  StylingScreenshots:
+    name: Styling Before/After Screenshots
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # need full history to access baseline commit
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+      - name: Install Playwright browsers
+        working-directory: packages/buckaroo-js-core
+        run: pnpm exec playwright install chromium
+      # ── AFTER: current branch ────────────────────────────────────────────
+      - name: Capture AFTER screenshots
+        working-directory: packages/buckaroo-js-core
+        env:
+          SCREENSHOT_DIR: screenshots/after
+        run: pnpm exec playwright test pw-tests/styling-issues-screenshots.spec.ts --reporter=line
+      # ── BEFORE: baseline commit b7956f8 (pre-#587) ───────────────────────
+      - name: Save new stories + spec
+        run: |
+          cp packages/buckaroo-js-core/src/stories/StylingIssues.stories.tsx /tmp/StylingIssues.stories.tsx
+          cp packages/buckaroo-js-core/pw-tests/styling-issues-screenshots.spec.ts /tmp/styling-issues-screenshots.spec.ts
+      - name: Checkout baseline commit into worktree
+        run: git worktree add /tmp/baseline b7956f8
+      - name: Restore stories + spec into baseline
+        run: |
+          cp /tmp/StylingIssues.stories.tsx /tmp/baseline/packages/buckaroo-js-core/src/stories/
+          cp /tmp/styling-issues-screenshots.spec.ts /tmp/baseline/packages/buckaroo-js-core/pw-tests/
+      - name: Install deps for baseline
+        working-directory: /tmp/baseline/packages
+        run: pnpm install --no-frozen-lockfile
+      - name: Capture BEFORE screenshots
+        working-directory: /tmp/baseline/packages/buckaroo-js-core
+        env:
+          SCREENSHOT_DIR: screenshots/before
+        continue-on-error: true
+        run: pnpm exec playwright test pw-tests/styling-issues-screenshots.spec.ts --reporter=line
+      # ── Upload both artifact sets ────────────────────────────────────────
+      - name: Upload before screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: styling-screenshots-before
+          path: /tmp/baseline/packages/buckaroo-js-core/screenshots/before/
+          if-no-files-found: ignore
+      - name: Upload after screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: styling-screenshots-after
+          path: packages/buckaroo-js-core/screenshots/after/
+          if-no-files-found: ignore
+
   TestServer:
     name: Server Playwright Tests
     needs: [BuildWheel]
