@@ -87,10 +87,32 @@ for (const story of STORIES) {
 
     // For pinned-index stories, scroll the grid body right so the
     // index column is out of view — exposes #587 alignment bug.
-    // Playwright CSS locators pierce shadow DOM by default.
     if (story.name.includes('Pinned')) {
-      const viewport = page.locator('.ag-body-viewport').first();
-      await viewport.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+      const scrolled = await page.evaluate(() => {
+        // Playwright locators pierce shadow DOM but evaluate doesn't.
+        // Manually walk shadow roots to find the AG-Grid viewport.
+        function findInShadow(selector: string): Element | null {
+          const light = document.querySelector(selector);
+          if (light) return light;
+          const walk = (root: Document | ShadowRoot): Element | null => {
+            const el = root.querySelector(selector);
+            if (el) return el;
+            for (const child of root.querySelectorAll('*')) {
+              if (child.shadowRoot) {
+                const found = walk(child.shadowRoot);
+                if (found) return found;
+              }
+            }
+            return null;
+          };
+          return walk(document);
+        }
+        const vp = findInShadow('.ag-body-viewport');
+        if (!vp) return 'not found';
+        vp.scrollLeft = vp.scrollWidth;
+        return `scrolled to ${vp.scrollLeft} of ${vp.scrollWidth} (client: ${vp.clientWidth})`;
+      });
+      console.log(`Scroll result for ${story.name}: ${scrolled}`);
       await page.waitForTimeout(400);
     }
 
