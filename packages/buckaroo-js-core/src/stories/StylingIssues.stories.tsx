@@ -306,11 +306,11 @@ export const ManyCols_LongHdr_LongData: Story = {
   render: () => <ManyLongLongInner />,
 };
 
-// #595 repro: fitGridWidth with 15 cols in 800px → ~53px each → "..."
+// #595 repro: fitGridWidth with 25 cols in 800px → ~32px each → "..."
 // Without defaultColDef.minWidth (baseline) → columns crushed → "..."
 // With defaultColDef.minWidth: 80 (fix) → columns at 80px → scrollbar + readable values
 const narrowColConfig: DFViewerConfig = {
-  column_config: Array.from({ length: 15 }, (_, i) => ({
+  column_config: Array.from({ length: 25 }, (_, i) => ({
     col_name: `col_${i}`,
     header_name: LONG_HEADER_NAMES[i],
     displayer_args: { displayer: "integer" as const, min_digits: 1, max_digits: 4 },
@@ -321,9 +321,9 @@ const narrowColConfig: DFViewerConfig = {
 };
 const NarrowColInner = makeStoryComponent(
   narrowColConfig,
-  genData(15, "year"),
+  genData(25, "year"),
 );
-/** 15 cols with fitGridWidth. #595 repro — values show "..." without minWidth fix. */
+/** 25 cols with fitGridWidth in 800px. #595 repro — values show "..." without minWidth fix. */
 export const ManyCols_LongHdr_YearData: Story = {
   render: () => <NarrowColInner />,
 };
