@@ -360,29 +360,29 @@ export const ClusteredBillions_Compact: Story = {
 
 // ── Section C: Pinned row / index (#587) ────────────────────────────────────
 
-const pinnedFewCfg = genConfig(5, "short", "short", true);
-const pinnedFewData = genData(5, "short");
-const pinnedFewSummary = genSummary(5, "short");
+const pinnedFewCfg = genConfig(10, "long", "short", true);
+const pinnedFewData = genData(10, "short");
+const pinnedFewSummary = genSummary(10, "short");
 
 const PinnedIndexFewInner = makeStoryComponent(pinnedFewCfg, pinnedFewData, pinnedFewSummary);
-/** 5 numeric cols + pinned summary stats + left index. Tests #587 alignment. */
+/** 10 long-header cols + pinned summary stats + left index. Tests #587 alignment. */
 export const PinnedIndex_FewCols: Story = {
   render: () => <PinnedIndexFewInner />,
 };
 
-const pinnedManyCfg = genConfig(15, "short", "short", true);
-const pinnedManyData = genData(15, "short");
-const pinnedManySummary = genSummary(15, "short");
+const pinnedManyCfg = genConfig(20, "long", "short", true);
+const pinnedManyData = genData(20, "short");
+const pinnedManySummary = genSummary(20, "short");
 
 const PinnedIndexManyInner = makeStoryComponent(pinnedManyCfg, pinnedManyData, pinnedManySummary);
-/** 15 numeric cols + pinned summary stats. #587 alignment under width contention. */
+/** 20 long-header cols + pinned summary stats. #587 alignment under width contention. */
 export const PinnedIndex_ManyCols: Story = {
   render: () => <PinnedIndexManyInner />,
 };
 
 // ── Section D: Mixed scenarios ───────────────────────────────────────────────
 
-const mixedManyNarrowCfg = genConfig(20, "short", "short", true);
+const mixedManyNarrowCfg = genConfig(20, "long", "short", true);
 const mixedManyNarrowData = genData(20, "short");
 const mixedManyNarrowSummary = genSummary(20, "short");
 

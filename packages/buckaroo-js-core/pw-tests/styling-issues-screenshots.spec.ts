@@ -87,21 +87,10 @@ for (const story of STORIES) {
 
     // For pinned-index stories, scroll the grid body right so the
     // index column is out of view — exposes #587 alignment bug.
-    // Grid is inside a Shadow DOM, so we pierce it via evaluate.
+    // Playwright CSS locators pierce shadow DOM by default.
     if (story.name.includes('Pinned')) {
-      await page.evaluate(() => {
-        // Walk all elements looking for shadow roots containing AG-Grid
-        const allEls = document.querySelectorAll('*');
-        for (const el of allEls) {
-          if (el.shadowRoot) {
-            const vp = el.shadowRoot.querySelector('.ag-body-viewport');
-            if (vp) { vp.scrollLeft = 400; return; }
-          }
-        }
-        // Fallback: no shadow DOM
-        const vp = document.querySelector('.ag-body-viewport');
-        if (vp) vp.scrollLeft = 400;
-      });
+      const viewport = page.locator('.ag-body-viewport').first();
+      await viewport.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
       await page.waitForTimeout(400);
     }
 
