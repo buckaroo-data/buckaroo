@@ -442,10 +442,6 @@ jobs:
           SCREENSHOT_DIR: screenshots/after
         run: pnpm exec playwright test pw-tests/styling-issues-screenshots.spec.ts --reporter=line
       # ── BEFORE: baseline commit b7956f8 (pre-#587) ───────────────────────
-      - name: Kill leftover Storybook from AFTER step
-        run: |
-          lsof -ti :6006 | xargs kill -9 2>/dev/null || true
-          sleep 1
       - name: Save new stories + spec
         run: |
           cp packages/buckaroo-js-core/src/stories/StylingIssues.stories.tsx /tmp/StylingIssues.stories.tsx
