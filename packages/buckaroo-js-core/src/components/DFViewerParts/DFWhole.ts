@@ -32,6 +32,10 @@ export interface IntegerDisplayerA {
     max_digits: number;
 }
 
+export interface CompactNumberDisplayerA {
+    displayer: "compact_number";
+}
+
 export interface InheritDisplayerA {
     displayer: "inherit";
 }
@@ -51,7 +55,8 @@ export type FormatterArgs =
     | FloatDisplayerA
     | DatetimeDefaultDisplayerA
     | DatetimeLocaleDisplayerA
-    | IntegerDisplayerA;
+    | IntegerDisplayerA
+    | CompactNumberDisplayerA;
 
 export interface HistogramDisplayerA {
     displayer: "histogram";

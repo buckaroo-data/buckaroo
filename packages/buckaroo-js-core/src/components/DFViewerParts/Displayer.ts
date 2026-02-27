@@ -163,6 +163,15 @@ export const getDatetimeFormatter = (colHint: DatetimeLocaleDisplayerA) => {
     };
 };
 
+const compactFormatter = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
+export const getCompactNumberFormatter = () => {
+    return (params: ValueFormatterParams): string => {
+        if (params.value === null || params.value === undefined) return "";
+        return compactFormatter.format(params.value);
+    };
+};
+
 export const defaultDatetimeFormatter = (params: ValueFormatterParams): string => {
     const val = params.value;
     if (val === null || val === undefined) {
@@ -191,6 +200,8 @@ export function getFormatter(fArgs: FormatterArgs): ValueFormatterFunc<unknown> 
             return booleanFormatter;
         case "obj":
             return getObjectFormatter(fArgs);
+        case "compact_number":
+            return getCompactNumberFormatter();
         default:
             return getStringFormatter({ displayer: "string" });
     }

@@ -13,7 +13,7 @@ import {
 } from './gridUtils';
 import * as _ from "lodash";
 import { DFData, DFViewerConfig, NormalColumnConfig, MultiIndexColumnConfig, PinnedRowConfig, ColumnConfig } from "./DFWhole";
-import { getFloatFormatter } from './Displayer';
+import { getFloatFormatter, getCompactNumberFormatter } from './Displayer';
 import { ColDef, ValueFormatterParams } from '@ag-grid-community/core';
 
 describe("testing utility functions in gridUtils ", () => {
@@ -22,6 +22,15 @@ describe("testing utility functions in gridUtils ", () => {
   it("should test getFormater", () => {
     //  expect(getFormatter({displayer: 'string'})).toBe(stringFormatter)
     // expect(getFormatter({displayer: 'obj'})).toBe(objFormatter);
+  });
+
+  it("should format compact numbers", () => {
+    const formatter = getCompactNumberFormatter();
+    expect(formatter({'value': 3_000_000} as ValueFormatterParams)).toBe("3M");
+    expect(formatter({'value': 5_700_000_000} as ValueFormatterParams)).toBe("5.7B");
+    expect(formatter({'value': 42} as ValueFormatterParams)).toBe("42");
+    expect(formatter({'value': null} as ValueFormatterParams)).toBe("");
+    expect(formatter({'value': undefined} as ValueFormatterParams)).toBe("");
   });
 
   it("should format floats with a consistently spaced decimal pont", () => {
