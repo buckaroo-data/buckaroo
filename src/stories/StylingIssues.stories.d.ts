@@ -24,7 +24,7 @@ export declare const ManyCols_ShortHdr_LongData: Story;
 export declare const ManyCols_LongHdr_ShortData: Story;
 /** 25 cols, long headers, long data. Worst-case contention (#596). */
 export declare const ManyCols_LongHdr_LongData: Story;
-/** 15 cols capped at 50px with 7-digit data. #595 repro — values show "...". */
+/** 15 cols with initial 40px width + suppressAutoSize. #595 repro — "..." without minWidth fix. */
 export declare const ManyCols_LongHdr_YearData: Story;
 /** 5 cols, values 3M–5.7B, float displayer. Shows why compact is needed (#597). */
 export declare const LargeNumbers_Float: Story;
