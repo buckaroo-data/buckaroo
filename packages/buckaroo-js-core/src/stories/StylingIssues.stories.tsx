@@ -307,21 +307,24 @@ export const ManyCols_LongHdr_LongData: Story = {
 };
 
 // #595 repro: force narrow columns so data values show "..."
+// width: 40 + suppressAutoSize prevents fitCellContents from expanding.
+// Without defaultColDef.minWidth (baseline) → columns stay 40px → "..."
+// With defaultColDef.minWidth: 80 (fix) → columns forced to 80px → values visible
 const narrowColConfig: DFViewerConfig = {
   column_config: Array.from({ length: 15 }, (_, i) => ({
     col_name: `col_${i}`,
     header_name: LONG_HEADER_NAMES[i],
-    displayer_args: { displayer: "integer" as const, min_digits: 1, max_digits: 7 },
-    ag_grid_specs: { maxWidth: 50 },
+    displayer_args: { displayer: "integer" as const, min_digits: 1, max_digits: 4 },
+    ag_grid_specs: { width: 40, suppressAutoSize: true },
   })),
   left_col_configs: [INDEX_COL],
   pinned_rows: [],
 };
 const NarrowColInner = makeStoryComponent(
   narrowColConfig,
-  genData(15, "long"),
+  genData(15, "year"),
 );
-/** 15 cols capped at 50px with 7-digit data. #595 repro — values show "...". */
+/** 15 cols with initial 40px width + suppressAutoSize. #595 repro — "..." without minWidth fix. */
 export const ManyCols_LongHdr_YearData: Story = {
   render: () => <NarrowColInner />,
 };
