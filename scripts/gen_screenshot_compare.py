@@ -24,35 +24,38 @@ BEFORE_DIR = SCREENSHOTS_DIR / "before"
 AFTER_DIR = SCREENSHOTS_DIR / "after"
 OUTPUT = SCREENSHOTS_DIR / "compare.html"
 
-# Stories in display order, with section headings and issue labels
+# Stories in display order: (name, issue_label, status)
+# status: "diff" = visible difference confirmed, "no-diff" = no visible difference,
+#          "wip" = still iterating on test setup
 STORIES = [
-    # Section A
+    # Section A — defaultMinWidth fix doesn't produce visible change for these cases
     ("A – Width / Contention  (#595, #596, #599, #600)", [
-        ("A1_FewCols_ShortHdr_ShortData",  "#599 baseline"),
-        ("A2_FewCols_ShortHdr_LongData",   "few cols, long data"),
-        ("A3_FewCols_LongHdr_ShortData",   "few cols, long headers"),
-        ("A4_FewCols_LongHdr_LongData",    "few cols, both wide"),
-        ("A5_ManyCols_ShortHdr_ShortData", "#595 #599 primary bug"),
-        ("A6_ManyCols_ShortHdr_LongData",  "#596 data contention"),
-        ("A7_ManyCols_LongHdr_ShortData",  "#596 header contention"),
-        ("A8_ManyCols_LongHdr_LongData",   "#596 worst case"),
+        ("A1_FewCols_ShortHdr_ShortData",  "#599 baseline",       "no-diff"),
+        ("A2_FewCols_ShortHdr_LongData",   "few cols, long data", "no-diff"),
+        ("A3_FewCols_LongHdr_ShortData",   "few cols, long hdrs", "no-diff"),
+        ("A4_FewCols_LongHdr_LongData",    "few cols, both wide", "no-diff"),
+        ("A5_ManyCols_ShortHdr_ShortData", "#595 #599 primary",   "no-diff"),
+        ("A6_ManyCols_ShortHdr_LongData",  "#596 data contention","no-diff"),
+        ("A7_ManyCols_LongHdr_ShortData",  "#596 hdr contention", "no-diff"),
+        ("A8_ManyCols_LongHdr_LongData",   "#596 worst case",     "no-diff"),
+        ("A9_ManyCols_LongHdr_YearData",  "#595 primary repro",  "wip"),
     ]),
-    # Section B
+    # Section B — compact_number displayer shows clear before/after difference
     ("B – Large Numbers / compact_number  (#597, #602)", [
-        ("B9_LargeNumbers_Float",         "#597 – float displayer (before)"),
-        ("B10_LargeNumbers_Compact",      "#597 – compact_number (after)"),
-        ("B11_ClusteredBillions_Float",   "#602 – clustered, float"),
-        ("B12_ClusteredBillions_Compact", "#602 – clustered, compact (precision loss)"),
+        ("B9_LargeNumbers_Float",         "#597 – float",           "no-diff"),
+        ("B10_LargeNumbers_Compact",      "#597 – compact_number",  "diff"),
+        ("B11_ClusteredBillions_Float",   "#602 – clustered float", "no-diff"),
+        ("B12_ClusteredBillions_Compact", "#602 – clustered compact","diff"),
     ]),
-    # Section C
+    # Section C — index column pinned vs scrolled away (#587)
     ("C – Pinned Row / Index Alignment  (#587)", [
-        ("C13_PinnedIndex_FewCols",  "#587 – 5 cols"),
-        ("C14_PinnedIndex_ManyCols", "#587 – 15 cols"),
+        ("C13_PinnedIndex_FewCols",  "#587 – 10 cols scrolled", "diff"),
+        ("C14_PinnedIndex_ManyCols", "#587 – 20 cols scrolled", "diff"),
     ]),
-    # Section D
+    # Section D — mixed pinned + width contention
     ("D – Mixed Scenarios", [
-        ("D15_Mixed_ManyNarrow_WithPinned", "#595 #587 #599"),
-        ("D16_Mixed_FewWide_WithPinned",    "#587 baseline"),
+        ("D15_Mixed_ManyNarrow_WithPinned", "#595 #587 #599", "diff"),
+        ("D16_Mixed_FewWide_WithPinned",    "#587 baseline",  "diff"),
     ]),
 ]
 
@@ -68,10 +71,11 @@ def build_html() -> str:
     # Build flat story list with embedded images for JS consumption
     flat: list[dict] = []
     for section_title, stories in STORIES:
-        for name, label in stories:
+        for name, label, status in stories:
             flat.append({
                 "name": name,
                 "label": label,
+                "status": status,
                 "section": section_title,
                 "before": img_data_uri(BEFORE_DIR / f"{name}.png"),
                 "after":  img_data_uri(AFTER_DIR  / f"{name}.png"),
@@ -89,9 +93,13 @@ def build_html() -> str:
                 f'<div class="nav-section">{current_section}</div>'
             )
         short = entry["name"].split("_", 1)[1].replace("_", " ") if "_" in entry["name"] else entry["name"]
+        status = entry["status"]
+        status_class = f"status-{status}"
+        status_label = {"diff": "DIFF", "no-diff": "NO DIFF", "wip": "WIP"}[status]
         nav_items.append(
-            f'<div class="nav-item" data-idx="{i}" onclick="loadStory({i})">'
-            f'<span class="nav-idx">{entry["name"][:2]}</span>'
+            f'<div class="nav-item {status_class}" data-idx="{i}" onclick="loadStory({i})">'
+            f'<span class="nav-idx">{entry["name"][:3]}</span>'
+            f'<span class="nav-tag tag-{status}">{status_label}</span>'
             f'<span class="nav-label">{short}</span>'
             f'<span class="nav-issue">{entry["label"]}</span>'
             f'</div>'
@@ -217,6 +225,19 @@ def build_html() -> str:
     color: #888;
     line-height: 1.2;
   }}
+  .nav-tag {{
+    font-size: 0.55rem;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: inline-block;
+    margin-bottom: 2px;
+  }}
+  .tag-diff {{ background: #2d5a2d; color: #6fcf6f; }}
+  .tag-no-diff {{ background: #3a3a3a; color: #999; }}
+  .tag-wip {{ background: #5a4a1a; color: #e0c040; }}
 
   /* ── Controls (bottom of sidebar) ───────────────────── */
   #controls {{

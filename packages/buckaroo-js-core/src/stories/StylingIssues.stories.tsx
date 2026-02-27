@@ -45,7 +45,7 @@ const INDEX_COL: NormalColumnConfig = {
 
 const ROW_COUNT = 20;
 
-type DataStyle = "short" | "long" | "large" | "clustered";
+type DataStyle = "short" | "long" | "large" | "clustered" | "year";
 type HeaderStyle = "short" | "long";
 
 function makeShortVal(row: number, col: number): number {
@@ -66,11 +66,17 @@ function makeClusteredVal(row: number, col: number): number {
   return 5_600_000_000 + ((row * 12_345 + col * 5_678) % 80_000_000);
 }
 
+function makeYearVal(row: number, col: number): number {
+  // 4-digit year-like values — narrow content that triggers #595
+  return 2000 + ((row * 3 + col * 7) % 25);
+}
+
 function genData(count: number, dataStyle: DataStyle): DFRow[] {
   const valFn =
     dataStyle === "short" ? makeShortVal :
     dataStyle === "long"  ? makeLongVal  :
     dataStyle === "large" ? makeLargeVal :
+    dataStyle === "year"  ? makeYearVal  :
                             makeClusteredVal;
 
   return Array.from({ length: ROW_COUNT }, (_, row) => {
@@ -93,7 +99,16 @@ function genSummary(count: number, dataStyle: DataStyle): DFRow[] {
     return r;
   };
 
-  if (dataStyle === "short") {
+  if (dataStyle === "year") {
+    return [
+      row("dtype",         () => dtype),
+      row("non_null_count",() => ROW_COUNT),
+      row("mean",          () => 2012),
+      row("std",           () => 7),
+      row("min",           () => 2000),
+      row("max",           () => 2024),
+    ];
+  } else if (dataStyle === "short") {
     return [
       row("dtype",         () => dtype),
       row("non_null_count",() => ROW_COUNT),
@@ -150,7 +165,7 @@ function genConfig(
     return {
       displayer: "integer",
       min_digits: 1,
-      max_digits: dataStyle === "short" ? 2 : 7,
+      max_digits: dataStyle === "year" ? 4 : dataStyle === "short" ? 2 : 7,
     };
   };
 
@@ -289,6 +304,16 @@ const ManyLongLongInner = makeStoryComponent(
 /** 25 cols, long headers, long data. Worst-case contention (#596). */
 export const ManyCols_LongHdr_LongData: Story = {
   render: () => <ManyLongLongInner />,
+};
+
+const ManyLongYearInner = makeStoryComponent(
+  genConfig(15, "long", "year"),
+  genData(15, "year"),
+);
+/** 15 cols, long headers, 4-digit year values. #595 primary repro — narrow
+ *  content causes fitCellContents to crush columns, truncating headers. */
+export const ManyCols_LongHdr_YearData: Story = {
+  render: () => <ManyLongYearInner />,
 };
 
 // ── Section B: Large numbers / compact (#597, #602) ─────────────────────────
