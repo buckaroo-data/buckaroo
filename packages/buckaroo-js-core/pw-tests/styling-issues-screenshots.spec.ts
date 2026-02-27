@@ -85,6 +85,14 @@ for (const story of STORIES) {
     // Settle time for animations / lazy column-width calculation
     await page.waitForTimeout(800);
 
+    // For pinned-index stories, scroll the grid body right so the
+    // index column is out of view — exposes #587 alignment bug.
+    if (story.name.includes('Pinned')) {
+      const viewport = page.locator('.ag-body-viewport');
+      await viewport.evaluate((el) => { el.scrollLeft = 200; });
+      await page.waitForTimeout(400);
+    }
+
     await page.screenshot({
       path: path.join(screenshotsDir, `${story.name}.png`),
       fullPage: true,
