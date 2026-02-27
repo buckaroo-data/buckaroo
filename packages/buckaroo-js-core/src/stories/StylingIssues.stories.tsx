@@ -306,16 +306,24 @@ export const ManyCols_LongHdr_LongData: Story = {
   render: () => <ManyLongLongInner />,
 };
 
-const ManyLongYearInner = makeStoryComponent(
-  genConfig(25, "long", "long"),
-  genData(25, "long"),
-  [],
-  400,
+// #595 repro: force narrow columns so data values show "..."
+const narrowColConfig: DFViewerConfig = {
+  column_config: Array.from({ length: 15 }, (_, i) => ({
+    col_name: `col_${i}`,
+    header_name: LONG_HEADER_NAMES[i],
+    displayer_args: { displayer: "integer" as const, min_digits: 1, max_digits: 7 },
+    ag_grid_specs: { maxWidth: 50 },
+  })),
+  left_col_configs: [INDEX_COL],
+  pinned_rows: [],
+};
+const NarrowColInner = makeStoryComponent(
+  narrowColConfig,
+  genData(15, "long"),
 );
-/** 25 cols, long headers, 6-7 digit values in 400px. #595 repro —
- *  fitCellContents crushes columns, data values show "...". */
+/** 15 cols capped at 50px with 7-digit data. #595 repro — values show "...". */
 export const ManyCols_LongHdr_YearData: Story = {
-  render: () => <ManyLongYearInner />,
+  render: () => <NarrowColInner />,
 };
 
 // ── Section B: Large numbers / compact (#597, #602) ─────────────────────────
