@@ -24,8 +24,8 @@ export declare const ManyCols_ShortHdr_LongData: Story;
 export declare const ManyCols_LongHdr_ShortData: Story;
 /** 25 cols, long headers, long data. Worst-case contention (#596). */
 export declare const ManyCols_LongHdr_LongData: Story;
-/** 15 cols, long headers, 4-digit year values. #595 primary repro — narrow
- *  content causes fitCellContents to crush columns, truncating headers. */
+/** 25 cols, long headers, 6-7 digit values in 400px. #595 repro —
+ *  fitCellContents crushes columns, data values show "...". */
 export declare const ManyCols_LongHdr_YearData: Story;
 /** 5 cols, values 3M–5.7B, float displayer. Shows why compact is needed (#597). */
 export declare const LargeNumbers_Float: Story;
