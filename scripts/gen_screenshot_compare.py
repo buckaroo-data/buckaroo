@@ -38,7 +38,7 @@ STORIES = [
         ("A6_ManyCols_ShortHdr_LongData",  "#596 data contention","no-diff"),
         ("A7_ManyCols_LongHdr_ShortData",  "#596 hdr contention", "no-diff"),
         ("A8_ManyCols_LongHdr_LongData",   "#596 worst case",     "no-diff"),
-        ("A9_ManyCols_LongHdr_YearData",  "#595 primary repro",  "wip"),
+        ("A9_ManyCols_LongHdr_YearData",  "#595 primary repro",  "diff"),
     ]),
     # Section B — compact_number displayer shows clear before/after difference
     ("B – Large Numbers / compact_number  (#597, #602)", [
@@ -452,12 +452,17 @@ const zoomVal = document.getElementById('zoom-val');
 const panxVal = document.getElementById('panx-val');
 const panyVal = document.getElementById('pany-val');
 
-function loadStory(idx) {{
+function loadStory(idx, pushHash) {{
   currentIdx = idx;
   const s = STORIES[idx];
 
   storyName.textContent  = s.name;
   storyLabel.textContent = s.label;
+
+  // Update URL hash (default: push)
+  if (pushHash !== false) {{
+    history.replaceState(null, '', '#' + s.name);
+  }}
 
   // before image
   if (s.before) {{
@@ -557,8 +562,20 @@ imgAfter.addEventListener('load', applyTransform);
 // Re-apply on window resize
 window.addEventListener('resize', applyTransform);
 
+// Hash routing: load story from URL hash
+function loadFromHash() {{
+  const hash = location.hash.slice(1);
+  if (hash) {{
+    const idx = STORIES.findIndex(s => s.name === hash);
+    if (idx >= 0) {{ loadStory(idx, false); return; }}
+  }}
+  loadStory(0, false);
+}}
+
+window.addEventListener('hashchange', loadFromHash);
+
 // Init
-loadStory(0);
+loadFromHash();
 </script>
 </body>
 </html>"""
