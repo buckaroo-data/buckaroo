@@ -408,13 +408,14 @@ jobs:
           if-no-files-found: ignore
 
   StylingScreenshots:
-    name: Styling Screenshots
+    name: Styling Screenshots (Before / After)
     runs-on: depot-ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -424,28 +425,84 @@ jobs:
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --no-frozen-lockfile
       - name: Cache Playwright browsers
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+
+      # Save story + spec from current branch (baseline commit won't have them)
+      - name: Save story and spec files
+        run: |
+          mkdir -p /tmp/styling-stories
+          cp packages/buckaroo-js-core/src/stories/StylingIssues.stories.tsx /tmp/styling-stories/
+          cp packages/buckaroo-js-core/pw-tests/styling-issues-screenshots.spec.ts /tmp/styling-stories/
+
+      # ── Before screenshots (baseline b7956f8, pre-#587) ──
+      - name: Checkout baseline (b7956f8)
+        run: git checkout b7956f8
+      - name: Copy stories to baseline
+        run: |
+          cp /tmp/styling-stories/StylingIssues.stories.tsx packages/buckaroo-js-core/src/stories/
+          cp /tmp/styling-stories/styling-issues-screenshots.spec.ts packages/buckaroo-js-core/pw-tests/
+      - name: Install pnpm deps (baseline)
+        working-directory: packages
+        run: pnpm install --no-frozen-lockfile
       - name: Install Playwright browsers
         working-directory: packages/buckaroo-js-core
         run: pnpm exec playwright install chromium
-      - name: Capture screenshots
+      - name: Capture before screenshots
         working-directory: packages/buckaroo-js-core
         env:
-          SCREENSHOT_DIR: screenshots/styling
-        run: pnpm exec playwright test pw-tests/styling-issues-screenshots.spec.ts --reporter=line
-      - name: Upload screenshots
+          SCREENSHOT_DIR: screenshots/before
+        run: |
+          pnpm storybook --no-open &
+          SB_PID=$!
+          timeout=60; elapsed=0
+          while ! curl -sf http://localhost:6006 > /dev/null 2>&1; do
+            sleep 2; elapsed=$((elapsed + 2))
+            if [ $elapsed -ge $timeout ]; then echo "Storybook failed to start"; exit 1; fi
+          done
+          pnpm exec playwright test pw-tests/styling-issues-screenshots.spec.ts --reporter=line || true
+          kill $SB_PID 2>/dev/null || true
+          lsof -ti:6006 | xargs kill -9 2>/dev/null || true
+
+      # ── After screenshots (current branch) ──
+      - name: Checkout current branch
+        run: git checkout ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install pnpm deps (current)
+        working-directory: packages
+        run: pnpm install --no-frozen-lockfile
+      - name: Capture after screenshots
+        working-directory: packages/buckaroo-js-core
+        env:
+          SCREENSHOT_DIR: screenshots/after
+        run: |
+          pnpm storybook --no-open &
+          SB_PID=$!
+          timeout=60; elapsed=0
+          while ! curl -sf http://localhost:6006 > /dev/null 2>&1; do
+            sleep 2; elapsed=$((elapsed + 2))
+            if [ $elapsed -ge $timeout ]; then echo "Storybook failed to start"; exit 1; fi
+          done
+          pnpm exec playwright test pw-tests/styling-issues-screenshots.spec.ts --reporter=line
+          kill $SB_PID 2>/dev/null || true
+          lsof -ti:6006 | xargs kill -9 2>/dev/null || true
+
+      # ── Upload artifacts ──
+      - name: Upload before screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: styling-screenshots
-          path: packages/buckaroo-js-core/screenshots/styling/
+          name: styling-screenshots-before
+          path: packages/buckaroo-js-core/screenshots/before/
+          if-no-files-found: ignore
+      - name: Upload after screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: styling-screenshots-after
+          path: packages/buckaroo-js-core/screenshots/after/
           if-no-files-found: ignore
 
   TestServer:
