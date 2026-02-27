@@ -25,6 +25,9 @@ export interface IntegerDisplayerA {
     min_digits: number;
     max_digits: number;
 }
+export interface CompactNumberDisplayerA {
+    displayer: "compact_number";
+}
 export interface InheritDisplayerA {
     displayer: "inherit";
 }
@@ -33,7 +36,7 @@ export interface DatetimeLocaleDisplayerA {
     locale: "en-US" | "en-GB" | "en-CA" | "fr-FR" | "es-ES" | "de-DE" | "ja-JP";
     args: Intl.DateTimeFormatOptions;
 }
-export type FormatterArgs = ObjDisplayerA | BooleanDisplayerA | StringDisplayerA | FloatDisplayerA | DatetimeDefaultDisplayerA | DatetimeLocaleDisplayerA | IntegerDisplayerA;
+export type FormatterArgs = ObjDisplayerA | BooleanDisplayerA | StringDisplayerA | FloatDisplayerA | DatetimeDefaultDisplayerA | DatetimeLocaleDisplayerA | IntegerDisplayerA | CompactNumberDisplayerA;
 export interface HistogramDisplayerA {
     displayer: "histogram";
 }

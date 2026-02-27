@@ -10,6 +10,7 @@ export declare const boolDisplayer: (val: boolean) => "" | "True" | "False";
 export declare const booleanFormatter: (params: ValueFormatterParams) => string;
 export declare const getFloatFormatter: (hint: FloatDisplayerA) => (params: ValueFormatterParams) => string;
 export declare const getDatetimeFormatter: (colHint: DatetimeLocaleDisplayerA) => (params: ValueFormatterParams) => string;
+export declare const getCompactNumberFormatter: () => (params: ValueFormatterParams) => string;
 export declare const defaultDatetimeFormatter: (params: ValueFormatterParams) => string;
 export declare function getFormatter(fArgs: FormatterArgs): ValueFormatterFunc<unknown>;
 export declare function getCellRenderer(crArgs: CellRendererArgs): ((props: {
