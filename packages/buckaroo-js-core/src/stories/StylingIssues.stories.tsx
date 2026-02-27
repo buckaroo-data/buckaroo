@@ -180,12 +180,13 @@ function makeStoryComponent(
   config: DFViewerConfig,
   data: DFRow[],
   summary: DFRow[] = [],
+  width = 800,
 ) {
   const data_wrapper = { data_type: "Raw" as const, data, length: data.length };
   return function StoryInner() {
     return (
       <ShadowDomWrapper>
-        <div style={{ height: 500, width: 800 }}>
+        <div style={{ height: 500, width }}>
           <DFViewerInfinite
             data_wrapper={data_wrapper}
             df_viewer_config={config}
@@ -364,7 +365,7 @@ const pinnedFewCfg = genConfig(10, "long", "short", true);
 const pinnedFewData = genData(10, "short");
 const pinnedFewSummary = genSummary(10, "short");
 
-const PinnedIndexFewInner = makeStoryComponent(pinnedFewCfg, pinnedFewData, pinnedFewSummary);
+const PinnedIndexFewInner = makeStoryComponent(pinnedFewCfg, pinnedFewData, pinnedFewSummary, 400);
 /** 10 long-header cols + pinned summary stats + left index. Tests #587 alignment. */
 export const PinnedIndex_FewCols: Story = {
   render: () => <PinnedIndexFewInner />,
@@ -374,7 +375,7 @@ const pinnedManyCfg = genConfig(20, "long", "short", true);
 const pinnedManyData = genData(20, "short");
 const pinnedManySummary = genSummary(20, "short");
 
-const PinnedIndexManyInner = makeStoryComponent(pinnedManyCfg, pinnedManyData, pinnedManySummary);
+const PinnedIndexManyInner = makeStoryComponent(pinnedManyCfg, pinnedManyData, pinnedManySummary, 400);
 /** 20 long-header cols + pinned summary stats. #587 alignment under width contention. */
 export const PinnedIndex_ManyCols: Story = {
   render: () => <PinnedIndexManyInner />,
@@ -387,7 +388,7 @@ const mixedManyNarrowData = genData(20, "short");
 const mixedManyNarrowSummary = genSummary(20, "short");
 
 const MixedManyNarrowInner = makeStoryComponent(
-  mixedManyNarrowCfg, mixedManyNarrowData, mixedManyNarrowSummary,
+  mixedManyNarrowCfg, mixedManyNarrowData, mixedManyNarrowSummary, 400,
 );
 /** 20 narrow cols + pinned rows. Cross-issue: #595 + #587 + #599. */
 export const Mixed_ManyNarrow_WithPinned: Story = {
@@ -399,7 +400,7 @@ const mixedFewWideData = genData(5, "long");
 const mixedFewWideSummary = genSummary(5, "long");
 
 const MixedFewWideInner = makeStoryComponent(
-  mixedFewWideCfg, mixedFewWideData, mixedFewWideSummary,
+  mixedFewWideCfg, mixedFewWideData, mixedFewWideSummary, 400,
 );
 /** 5 wide cols + pinned rows. #587 baseline (should look fine). */
 export const Mixed_FewWide_WithPinned: Story = {
