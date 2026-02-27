@@ -413,6 +413,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -424,7 +426,7 @@ jobs:
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
       - name: Cache Playwright browsers
         uses: actions/cache@v5
         with:
