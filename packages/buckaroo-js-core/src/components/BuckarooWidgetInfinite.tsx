@@ -184,6 +184,7 @@ export function BuckarooInfiniteWidget({
                         buckarooState={buckaroo_state}
                         setBuckarooState={on_buckaroo_state}
                         buckarooOptions={buckaroo_options}
+                        themeConfig={cDisp.df_viewer_config?.component_config?.theme}
                     />
                     <DFViewerInfinite
                         data_wrapper={data_wrapper}

@@ -160,13 +160,24 @@ PinnedRowConfig = TypedDict('PinnedRowConfig', {
     'default_renderer_columns': NotRequired[List[str]]  # used to render index column values with string not the specified displayer
 })
 
+ThemeConfig = TypedDict('ThemeConfig', {
+    'colorScheme': NotRequired[Literal["light", "dark", "auto"]],
+    'accentColor': NotRequired[str],
+    'accentHoverColor': NotRequired[str],
+    'backgroundColor': NotRequired[str],
+    'foregroundColor': NotRequired[str],
+    'oddRowBackgroundColor': NotRequired[str],
+    'borderColor': NotRequired[str],
+})
+
 ComponentConfig = TypedDict('ComponentConfig', {
     'height_fraction': NotRequired[float],
     'dfvHeight': NotRequired[int],  # temporary debugging prop
     'layoutType': NotRequired[Literal["autoHeight", "normal"]],
     'shortMode': NotRequired[bool],
     'selectionBackground': NotRequired[str],
-    'className': NotRequired[str]
+    'className': NotRequired[str],
+    'theme': NotRequired[ThemeConfig],
 })
 
 DFViewerConfig = TypedDict('DFViewerConfig', {
