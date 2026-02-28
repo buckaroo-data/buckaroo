@@ -444,3 +444,151 @@ const MixedFewWideInner = makeStoryComponent(
 export const Mixed_FewWide_WithPinned: Story = {
   render: () => <MixedFewWideInner />,
 };
+
+// ── Section E: Python-computed ag_grid_specs.minWidth ────────────────────────
+// These stories simulate the minWidth values that Python's estimate_min_width_px()
+// would compute, proving the lever works end-to-end in the grid.
+
+// E1: 25 narrow-int columns with Python-computed minWidth (38px each for short data/headers)
+const pythonNarrowConfig: DFViewerConfig = {
+  column_config: Array.from({ length: 25 }, (_, i) => ({
+    col_name: `col_${i}`,
+    header_name: SHORT_HEADER_NAMES[i],
+    displayer_args: { displayer: "integer" as const, min_digits: 1, max_digits: 2 },
+    ag_grid_specs: { minWidth: 38 },  // estimate_min_width_px({'displayer':'float','max_fraction_digits':0}, 'a', {'max':99,'min':1})
+  })),
+  left_col_configs: [INDEX_COL],
+  pinned_rows: [],
+};
+const PythonNarrowInner = makeStoryComponent(pythonNarrowConfig, genData(25, "short"));
+/** 25 cols with Python-computed minWidth=38. Narrow integers stay compact, no wasted space. */
+export const PythonMinWidth_NarrowInts: Story = {
+  render: () => <PythonNarrowInner />,
+};
+
+// E2: 25 cols with long headers — Python would compute 134px minWidth (header drives width)
+const pythonLongHdrConfig: DFViewerConfig = {
+  column_config: Array.from({ length: 25 }, (_, i) => ({
+    col_name: `col_${i}`,
+    header_name: LONG_HEADER_NAMES[i],
+    displayer_args: { displayer: "integer" as const, min_digits: 1, max_digits: 2 },
+    ag_grid_specs: { minWidth: 134 },  // header "revenue_total" (13 chars) drives width
+  })),
+  left_col_configs: [INDEX_COL],
+  pinned_rows: [],
+};
+const PythonLongHdrInner = makeStoryComponent(pythonLongHdrConfig, genData(25, "short"));
+/** 25 cols with Python-computed minWidth=134 (long headers force wider columns). */
+export const PythonMinWidth_LongHeaders: Story = {
+  render: () => <PythonLongHdrInner />,
+};
+
+// E3: Mixed — some narrow, some wide, showing per-column width variation
+const pythonMixedConfig: DFViewerConfig = {
+  column_config: [
+    // 3 narrow integer columns (short headers, small data)
+    ...Array.from({ length: 3 }, (_, i) => ({
+      col_name: `col_${i}`,
+      header_name: SHORT_HEADER_NAMES[i],
+      displayer_args: { displayer: "integer" as const, min_digits: 1, max_digits: 2 },
+      ag_grid_specs: { minWidth: 38 },
+    })),
+    // 3 wide float columns (long headers, large data → 134px)
+    ...Array.from({ length: 3 }, (_, i) => ({
+      col_name: `col_${i + 3}`,
+      header_name: LONG_HEADER_NAMES[i + 3],
+      displayer_args: { displayer: "float" as const, min_fraction_digits: 3, max_fraction_digits: 3 },
+      ag_grid_specs: { minWidth: 134 },
+    })),
+    // 2 compact_number columns (short headers → 51px)
+    ...Array.from({ length: 2 }, (_, i) => ({
+      col_name: `col_${i + 6}`,
+      header_name: SHORT_HEADER_NAMES[i + 6],
+      displayer_args: { displayer: "compact_number" as const },
+      ag_grid_specs: { minWidth: 51 },
+    })),
+  ],
+  left_col_configs: [INDEX_COL],
+  pinned_rows: [],
+};
+// generate 8 columns of mixed data
+const mixedPythonData: DFRow[] = Array.from({ length: ROW_COUNT }, (_, row) => {
+  const r: DFRow = { index: row };
+  for (let i = 0; i < 3; i++) r[`col_${i}`] = makeShortVal(row, i);
+  for (let i = 3; i < 6; i++) r[`col_${i}`] = makeLongVal(row, i);
+  for (let i = 6; i < 8; i++) r[`col_${i}`] = makeLargeVal(row, i);
+  return r;
+});
+const PythonMixedInner = makeStoryComponent(pythonMixedConfig, mixedPythonData);
+/** Mixed column types with varying Python-computed minWidths (38, 134, 51px). */
+export const PythonMinWidth_MixedTypes: Story = {
+  render: () => <PythonMixedInner />,
+};
+
+// ── Section F: Histogram + narrow columns ────────────────────────────────────
+// Proves the 100px histogram minimum width lever works visually.
+
+// F1: 15 narrow-data columns with histogram pinned rows — histogram forces 100px min
+const histNarrowConfig: DFViewerConfig = {
+  column_config: Array.from({ length: 15 }, (_, i) => ({
+    col_name: `col_${i}`,
+    header_name: SHORT_HEADER_NAMES[i],
+    displayer_args: { displayer: "integer" as const, min_digits: 1, max_digits: 2 },
+    ag_grid_specs: { minWidth: 100 },  // histogram forces 100px even though data only needs ~38px
+  })),
+  left_col_configs: [INDEX_COL],
+  pinned_rows: [
+    { primary_key_val: "dtype", displayer_args: { displayer: "obj" } },
+    { primary_key_val: "histogram", displayer_args: { displayer: "histogram" } },
+  ],
+};
+const histNarrowSummary: DFRow[] = (() => {
+  const cols = Array.from({ length: 15 }, (_, i) => `col_${i}`);
+  const row = (key: string, valFn: (i: number) => any): DFRow => {
+    const r: DFRow = { index: key };
+    cols.forEach((k, i) => { r[k] = valFn(i); });
+    return r;
+  };
+  return [
+    row("dtype", () => "int64"),
+    row("histogram", (i) => {
+      // Fake histogram bins — 10 values per column
+      return Array.from({ length: 10 }, (_, j) => ((i * 7 + j * 3) % 20) + 1);
+    }),
+    row("histogram_bins", (i) => {
+      return Array.from({ length: 10 }, (_, j) => j * 10 + i);
+    }),
+    row("histogram_log_bins", (i) => {
+      return Array.from({ length: 10 }, (_, j) => j * 10 + i);
+    }),
+  ];
+})();
+const HistNarrowInner = makeStoryComponent(
+  histNarrowConfig, genData(15, "short"), histNarrowSummary,
+);
+/** 15 narrow-data cols with histogram pinned rows. Histogram forces 100px min (vs ~38px without). */
+export const Histogram_NarrowCols: Story = {
+  render: () => <HistNarrowInner />,
+};
+
+// F2: Same 15 columns WITHOUT histogram minWidth — shows what happens when histograms are crushed
+const histNarrowNoMinConfig: DFViewerConfig = {
+  column_config: Array.from({ length: 15 }, (_, i) => ({
+    col_name: `col_${i}`,
+    header_name: SHORT_HEADER_NAMES[i],
+    displayer_args: { displayer: "integer" as const, min_digits: 1, max_digits: 2 },
+    ag_grid_specs: { minWidth: 38 },  // data-only width, no histogram consideration
+  })),
+  left_col_configs: [INDEX_COL],
+  pinned_rows: [
+    { primary_key_val: "dtype", displayer_args: { displayer: "obj" } },
+    { primary_key_val: "histogram", displayer_args: { displayer: "histogram" } },
+  ],
+};
+const HistNarrowNoMinInner = makeStoryComponent(
+  histNarrowNoMinConfig, genData(15, "short"), histNarrowSummary,
+);
+/** Same as Histogram_NarrowCols but with data-only minWidth=38 — histograms get crushed. */
+export const Histogram_NarrowCols_NoHistMin: Story = {
+  render: () => <HistNarrowNoMinInner />,
+};

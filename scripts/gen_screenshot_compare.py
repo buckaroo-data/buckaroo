@@ -57,6 +57,17 @@ STORIES = [
         ("D15_Mixed_ManyNarrow_WithPinned", "#595 #587 #599", "diff"),
         ("D16_Mixed_FewWide_WithPinned",    "#587 baseline",  "diff"),
     ]),
+    # Section E — Python-computed ag_grid_specs.minWidth
+    ("E – Python-Computed minWidth", [
+        ("E17_PythonMinWidth_NarrowInts",  "minWidth lever",  "wip"),
+        ("E18_PythonMinWidth_LongHeaders", "minWidth lever",  "wip"),
+        ("E19_PythonMinWidth_MixedTypes",  "minWidth lever",  "wip"),
+    ]),
+    # Section F — Histogram + narrow columns
+    ("F – Histogram + Narrow Columns", [
+        ("F20_Histogram_NarrowCols",           "histogram 100px min", "wip"),
+        ("F21_Histogram_NarrowCols_NoHistMin", "histogram crushed",   "wip"),
+    ]),
 ]
 
 

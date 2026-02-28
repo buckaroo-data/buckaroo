@@ -57,6 +57,15 @@ const STORIES = [
   // Section D – mixed cross-issue scenarios
   { id: 'buckaroo-dfviewer-stylingissues--mixed-many-narrow-with-pinned',  name: 'D15_Mixed_ManyNarrow_WithPinned', issues: '#595 #587 #599' },
   { id: 'buckaroo-dfviewer-stylingissues--mixed-few-wide-with-pinned',     name: 'D16_Mixed_FewWide_WithPinned',    issues: '#587 baseline' },
+
+  // Section E – Python-computed ag_grid_specs.minWidth
+  { id: 'buckaroo-dfviewer-stylingissues--python-min-width-narrow-ints',   name: 'E17_PythonMinWidth_NarrowInts',   issues: 'minWidth lever' },
+  { id: 'buckaroo-dfviewer-stylingissues--python-min-width-long-headers',  name: 'E18_PythonMinWidth_LongHeaders',  issues: 'minWidth lever' },
+  { id: 'buckaroo-dfviewer-stylingissues--python-min-width-mixed-types',   name: 'E19_PythonMinWidth_MixedTypes',   issues: 'minWidth lever' },
+
+  // Section F – Histogram + narrow columns
+  { id: 'buckaroo-dfviewer-stylingissues--histogram-narrow-cols',              name: 'F20_Histogram_NarrowCols',            issues: 'histogram min' },
+  { id: 'buckaroo-dfviewer-stylingissues--histogram-narrow-cols-no-hist-min',  name: 'F21_Histogram_NarrowCols_NoHistMin',  issues: 'histogram crushed' },
 ];
 
 test.beforeAll(() => {
