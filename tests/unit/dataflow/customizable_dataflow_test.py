@@ -348,9 +348,10 @@ def test_column_config_override_widget():
             {'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 }}})
         
     float_col_config = bw2.df_display_args['main']['df_viewer_config']['column_config'][1]
-    assert float_col_config == {'col_name': 'b', 'header_name':'float_col', 'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 },
-    #'tooltip_config': {'tooltip_type': 'simple', 'val_column': 'c'}
-    }
+    assert float_col_config['col_name'] == 'b'
+    assert float_col_config['header_name'] == 'float_col'
+    assert float_col_config['displayer_args'] == { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 }
+    assert float_col_config['ag_grid_specs']['minWidth'] > 0
 
 def test_column_config_override_rewrite():
     ROWS = 200
@@ -366,12 +367,12 @@ def test_column_config_override_rewrite():
             
         
     float_col_config = bw2.df_display_args['main']['df_viewer_config']['column_config'][1]
-    expected = {'col_name': 'b', 'header_name':'float_col', 
-                'displayer_args': {'displayer': 'float',
-                                   'max_fraction_digits': 3,
-                                   'min_fraction_digits': 3},
-                'tooltip_config': {'tooltip_type': 'simple', 'val_column': 'c'}}
-    assert expected == float_col_config
+    assert float_col_config['col_name'] == 'b'
+    assert float_col_config['header_name'] == 'float_col'
+    assert float_col_config['displayer_args'] == {
+        'displayer': 'float', 'max_fraction_digits': 3, 'min_fraction_digits': 3}
+    assert float_col_config['tooltip_config'] == {'tooltip_type': 'simple', 'val_column': 'c'}
+    assert float_col_config['ag_grid_specs']['minWidth'] > 0
     
 
 

@@ -246,7 +246,6 @@ export function DFViewerInfiniteInner({
         return {
             sortable: true,
             type: "rightAligned",
-            minWidth: 80,
             cellStyle: (params: CellClassParams) => {
                 const colDef = params.column.getColDef();
                 const field = colDef.field;
