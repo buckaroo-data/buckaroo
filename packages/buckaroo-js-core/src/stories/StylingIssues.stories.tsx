@@ -552,14 +552,11 @@ const histNarrowSummary: DFRow[] = (() => {
   return [
     row("dtype", () => "int64"),
     row("histogram", (i) => {
-      // Fake histogram bins — 10 values per column
-      return Array.from({ length: 10 }, (_, j) => ((i * 7 + j * 3) % 20) + 1);
-    }),
-    row("histogram_bins", (i) => {
-      return Array.from({ length: 10 }, (_, j) => j * 10 + i);
-    }),
-    row("histogram_log_bins", (i) => {
-      return Array.from({ length: 10 }, (_, j) => j * 10 + i);
+      // HistogramBar[] — must have {name, population} for the renderer
+      return Array.from({ length: 8 }, (_, j) => ({
+        name: `${j * 12 + i}-${(j + 1) * 12 + i}`,
+        population: ((i * 7 + j * 3) % 20) + 2,
+      }));
     }),
   ];
 })();
