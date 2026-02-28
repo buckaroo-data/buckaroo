@@ -42,3 +42,13 @@ export declare const PinnedIndex_ManyCols: Story;
 export declare const Mixed_ManyNarrow_WithPinned: Story;
 /** 5 wide cols + pinned rows. #587 baseline (should look fine). */
 export declare const Mixed_FewWide_WithPinned: Story;
+/** 25 cols with Python-computed minWidth=38. Narrow integers stay compact, no wasted space. */
+export declare const PythonMinWidth_NarrowInts: Story;
+/** 25 cols with Python-computed minWidth=134 (long headers force wider columns). */
+export declare const PythonMinWidth_LongHeaders: Story;
+/** Mixed column types with varying Python-computed minWidths (38, 134, 51px). */
+export declare const PythonMinWidth_MixedTypes: Story;
+/** 15 narrow-data cols with histogram pinned rows. Histogram forces 100px min (vs ~38px without). */
+export declare const Histogram_NarrowCols: Story;
+/** Same as Histogram_NarrowCols but with data-only minWidth=38 — histograms get crushed. */
+export declare const Histogram_NarrowCols_NoHistMin: Story;
