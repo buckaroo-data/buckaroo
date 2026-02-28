@@ -303,7 +303,7 @@ export function DFViewerInfiniteInner({
         return {
         ...outerGridOptions(setActiveCol, df_viewer_config.extra_grid_config),
         domLayout:  hs.domLayout,
-        autoSizeStrategy: getAutoSize(styledColumns.length),
+        autoSizeStrategy: df_viewer_config.extra_grid_config?.autoSizeStrategy || getAutoSize(styledColumns.length),
         onFirstDataRendered: (_params) => {
             // Grid finished rendering
         },

@@ -547,8 +547,7 @@ export const getAutoSize = (
     }
     return {
         type: "fitCellContents",
-        defaultMinWidth: 80,
-    } as SizeColumnsToContentStrategy & { defaultMinWidth: number };
+    };
 };
 
 

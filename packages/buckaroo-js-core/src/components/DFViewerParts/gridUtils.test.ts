@@ -181,7 +181,6 @@ describe("testing utility functions in gridUtils ", () => {
     it("should return fitCellContents for positive columns", () => {
       const result = getAutoSize(5);
       expect(result.type).toBe("fitCellContents");
-      expect(result).toHaveProperty("defaultMinWidth", 80);
     });
   });
 
