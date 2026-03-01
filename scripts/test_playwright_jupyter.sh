@@ -260,7 +260,7 @@ start_jupyter() {
     export JUPYTER_TOKEN="test-token-12345"
     
     # Start JupyterLab with clean workspace
-    python -m jupyter lab --no-browser --port=8889 --ServerApp.token=$JUPYTER_TOKEN --ServerApp.allow_origin='*' --ServerApp.disable_check_xsrf=True &
+    python -m jupyter lab --no-browser --port=8889 --ServerApp.token=$JUPYTER_TOKEN --ServerApp.allow_origin='*' --ServerApp.disable_check_xsrf=True --allow-root &
     JUPYTER_PID=$!
     log_message "JupyterLab started with PID: $JUPYTER_PID"
 

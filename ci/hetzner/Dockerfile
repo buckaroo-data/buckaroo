@@ -49,5 +49,7 @@ RUN /opt/venvs/3.13/bin/playwright install --with-deps chromium
 RUN cd /build-js/buckaroo-js-core && pnpm exec playwright install chromium
 
 # Source code is bind-mounted at /repo at runtime — not baked in.
+# Allow git to operate on the bind-mounted repo (owned by ci on host, root in container).
+RUN git config --system --add safe.directory /repo
 WORKDIR /repo
 CMD ["sleep", "infinity"]
