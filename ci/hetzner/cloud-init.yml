@@ -108,7 +108,8 @@ runcmd:
   - chown -R ci:ci /opt/ci
 
   # ── Clone repo ───────────────────────────────────────────────────────────────
-  - git clone https://github.com/buckaroo-data/buckaroo /opt/ci/repo
+  - git clone --branch main https://github.com/buckaroo-data/buckaroo /opt/ci/repo
+  - git config --global --add safe.directory /opt/ci/repo
   - chown -R ci:ci /opt/ci/repo
 
   # ── Webhook virtualenv (Flask + gunicorn) ────────────────────────────────────

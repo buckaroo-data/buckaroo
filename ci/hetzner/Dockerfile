@@ -7,6 +7,7 @@ ENV PNPM_STORE_DIR=/opt/pnpm-store
 # 1. OS + base tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git ca-certificates gnupg \
+    build-essential libffi-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. uv (pinned — bump when needed, not on a schedule)
