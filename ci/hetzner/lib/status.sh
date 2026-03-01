@@ -19,7 +19,13 @@ _github_status() {
     local target_url=$5
     local dry_run=${6:-}
 
-    local url="https://api.github.com/repos/${GITHUB_REPO}/statuses/${sha}"
+    # Skip when no token configured (local/SSH testing mode).
+    if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+        echo "[status] no GITHUB_TOKEN — skipping $state for $context"
+        return 0
+    fi
+
+    local url="https://api.github.com/repos/${GITHUB_REPO:-buckaroo-data/buckaroo}/statuses/${sha}"
     local payload
     payload=$(printf '{"state":"%s","context":"%s","description":"%s","target_url":"%s"}' \
         "$state" "$context" "$description" "$target_url")

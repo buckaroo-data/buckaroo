@@ -36,7 +36,6 @@ packages:
 write_files:
   - path: /opt/ci/.env
     permissions: "0600"
-    owner: ci:ci
     content: |
       # Fill in these values — see ci/hetzner/.env.example
       GITHUB_TOKEN=
@@ -141,4 +140,5 @@ runcmd:
   - systemctl start fail2ban
   # webhook is NOT auto-started: fill in /opt/ci/.env first, then start manually.
 
-  - echo "cloud-init complete. Fill in /opt/ci/.env then: systemctl start buckaroo-webhook"
+  - |
+    echo "cloud-init complete. Fill in /opt/ci/.env then: systemctl start buckaroo-webhook"
