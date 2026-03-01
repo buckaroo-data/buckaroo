@@ -48,6 +48,11 @@ done
 RUN /opt/venvs/3.13/bin/playwright install --with-deps chromium
 RUN cd /build-js/buckaroo-js-core && pnpm exec playwright install chromium
 
+# 8. Bake CI runner scripts into the image at a stable path so they survive
+#    `git checkout` of arbitrary SHAs inside /repo at runtime.
+COPY ci/hetzner/run-ci.sh ci/hetzner/lib/ /opt/ci-runner/
+RUN chmod +x /opt/ci-runner/run-ci.sh
+
 # Source code is bind-mounted at /repo at runtime — not baked in.
 # Allow git to operate on the bind-mounted repo (owned by ci on host, root in container).
 RUN git config --system --add safe.directory /repo

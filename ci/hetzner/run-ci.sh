@@ -25,8 +25,10 @@ OVERALL=0
 
 mkdir -p "$RESULTS_DIR"
 
-source "$REPO_DIR/ci/hetzner/lib/status.sh"
-source "$REPO_DIR/ci/hetzner/lib/lockcheck.sh"
+# Source lib from the image-baked path — survives git checkout of any SHA.
+CI_RUNNER_DIR=${CI_RUNNER_DIR:-/opt/ci-runner}
+source "$CI_RUNNER_DIR/status.sh"
+source "$CI_RUNNER_DIR/lockcheck.sh"
 
 log() { echo "[$(date +'%H:%M:%S')] $*" | tee -a "$RESULTS_DIR/ci.log"; }
 
