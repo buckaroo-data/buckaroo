@@ -17,6 +17,7 @@ eggs/
 .eggs/
 lib/
 lib64/
+!ci/hetzner/lib/
 parts/
 sdist/
 var/
