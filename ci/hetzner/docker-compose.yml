@@ -1,0 +1,21 @@
+services:
+  ci:
+    image: buckaroo-ci
+    container_name: buckaroo-ci
+    volumes:
+      # Source code — bind-mounted so git checkout + docker exec can work on it.
+      - /opt/ci/repo:/repo
+      # CI logs — shared with host so webhook.py can serve them at /logs/<sha>.
+      - /opt/ci/logs:/opt/ci/logs
+      # Playwright browser binaries — named volume so they survive image rebuilds.
+      # Initialized from image content on first start, then updated in place.
+      - playwright-browsers:/opt/ms-playwright
+    environment:
+      - PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+      - PNPM_STORE_DIR=/opt/pnpm-store
+    # Warm sidecar: stays alive between CI runs, avoiding ~500ms docker run overhead.
+    command: sleep infinity
+    restart: unless-stopped
+
+volumes:
+  playwright-browsers:

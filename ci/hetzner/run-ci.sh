@@ -1,0 +1,232 @@
+#!/bin/bash
+# CI orchestrator — runs inside the buckaroo-ci Docker container.
+#
+# Called by webhook.py via:
+#   docker exec -e GITHUB_TOKEN=... -e GITHUB_REPO=... buckaroo-ci \
+#     bash /repo/ci/hetzner/run-ci.sh <sha> <branch>
+#
+# Phases (each captures stdout/stderr to $RESULTS_DIR/<job>.log):
+#   1. Parallel:   lint-python, test-js, test-python-3.13
+#   2. Sequential: build-wheel  (must follow test-js to avoid JS build conflict)
+#   3. Sequential: test-python-3.11, 3.12, 3.14  (CPU budget)
+#   4. Parallel:   test-mcp-wheel, smoke-test-extras
+#   5. Sequential: playwright-storybook, playwright-server, playwright-marimo,
+#                  playwright-wasm-marimo, playwright-jupyter  (port conflicts)
+
+set -uo pipefail
+
+SHA=${1:?usage: run-ci.sh SHA BRANCH}
+BRANCH=${2:?usage: run-ci.sh SHA BRANCH}
+
+REPO_DIR=/repo
+RESULTS_DIR=/opt/ci/logs/$SHA
+LOG_URL="http://${HETZNER_SERVER_IP:-localhost}:9000/logs/$SHA"
+OVERALL=0
+
+mkdir -p "$RESULTS_DIR"
+
+source "$REPO_DIR/ci/hetzner/lib/status.sh"
+source "$REPO_DIR/ci/hetzner/lib/lockcheck.sh"
+
+log() { echo "[$(date +'%H:%M:%S')] $*" | tee -a "$RESULTS_DIR/ci.log"; }
+
+# Run a job: captures output, returns exit code.
+# run_job <name> <cmd> [args...]
+run_job() {
+    local name=$1; shift
+    local logfile="$RESULTS_DIR/$name.log"
+    log "START $name"
+    if "$@" >"$logfile" 2>&1; then
+        log "PASS  $name"
+        return 0
+    else
+        log "FAIL  $name  (see $LOG_URL/$name.log)"
+        return 1
+    fi
+}
+
+# ── Setup ────────────────────────────────────────────────────────────────────
+
+status_pending "$SHA" "ci/hetzner" "Running CI..." "$LOG_URL"
+
+log "Checkout $SHA (branch: $BRANCH)"
+cd "$REPO_DIR"
+git fetch origin
+git checkout -f "$SHA"
+# Clean untracked/ignored files; preserve warm caches in node_modules.
+git clean -fdx \
+    --exclude='packages/buckaroo-js-core/node_modules' \
+    --exclude='packages/js/node_modules' \
+    --exclude='packages/node_modules'
+
+# Lockfile check — rebuild deps only when lockfiles changed (~5% of pushes).
+if lockcheck_valid; then
+    log "Lockfiles unchanged — using warm caches"
+else
+    log "Lockfiles changed — rebuilding deps"
+    rebuild_deps
+    lockcheck_update
+fi
+
+# Create empty static files so Python unit tests can import buckaroo before
+# BuildWheel runs. BuildWheel overwrites these with real artifacts.
+mkdir -p buckaroo/static
+touch buckaroo/static/compiled.css buckaroo/static/widget.js buckaroo/static/widget.css
+
+# ── Job definitions ──────────────────────────────────────────────────────────
+
+job_lint_python() {
+    cd /repo
+    UV_PROJECT_ENVIRONMENT=/opt/venvs/3.13 \
+        uv sync --locked --dev --no-install-project
+    /opt/venvs/3.13/bin/ruff check
+}
+
+job_test_js() {
+    cd /repo/packages
+    pnpm install --frozen-lockfile --store-dir /opt/pnpm-store
+    cd buckaroo-js-core
+    pnpm run build
+    pnpm run test
+}
+
+job_test_python() {
+    local v=$1
+    cd /repo
+    # Quick sync installs buckaroo in editable mode (deps already in venv).
+    UV_PROJECT_ENVIRONMENT=/opt/venvs/$v \
+        uv sync --locked --dev --all-extras
+    /opt/venvs/$v/bin/python -m pytest tests/unit -m "not slow" --color=yes
+}
+
+job_build_wheel() {
+    cd /repo
+    PNPM_STORE_DIR=/opt/pnpm-store bash scripts/full_build.sh
+}
+
+job_test_mcp_wheel() {
+    cd /repo
+    local venv=/tmp/ci-mcp-$$
+    rm -rf "$venv"
+    uv venv "$venv" -q
+    local wheel
+    wheel=$(ls dist/buckaroo-*.whl | head -1)
+    uv pip install --python "$venv/bin/python" "${wheel}[mcp]" pytest -q
+    BUCKAROO_MCP_CMD="$venv/bin/buckaroo-table" \
+        "$venv/bin/pytest" \
+            tests/unit/server/test_mcp_uvx_install.py \
+            tests/unit/server/test_mcp_server_integration.py \
+            -v --color=yes -m slow
+    "$venv/bin/pytest" \
+        tests/unit/server/test_mcp_uvx_install.py::TestUvxFailureModes \
+        -v --color=yes -m slow
+    rm -rf "$venv"
+}
+
+job_smoke_test_extras() {
+    cd /repo
+    local wheel
+    wheel=$(ls dist/buckaroo-*.whl | head -1)
+    for extra in base polars mcp marimo jupyterlab notebook; do
+        local venv=/tmp/ci-smoke-${extra}-$$
+        rm -rf "$venv"
+        uv venv "$venv" -q
+        if [[ "$extra" == "base" ]]; then
+            uv pip install --python "$venv/bin/python" "$wheel" -q
+        else
+            uv pip install --python "$venv/bin/python" "${wheel}[${extra}]" -q
+        fi
+        "$venv/bin/python" scripts/smoke_test.py "$extra"
+        rm -rf "$venv"
+    done
+}
+
+job_playwright_storybook() {
+    cd /repo
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+        bash scripts/test_playwright_storybook.sh
+}
+
+job_playwright_server() {
+    cd /repo
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+        bash scripts/test_playwright_server.sh
+}
+
+job_playwright_marimo() {
+    cd /repo
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+        bash scripts/test_playwright_marimo.sh
+}
+
+job_playwright_wasm_marimo() {
+    cd /repo
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+        bash scripts/test_playwright_wasm_marimo.sh
+}
+
+job_playwright_jupyter() {
+    cd /repo
+    # Install the freshly-built wheel + JupyterLab into the 3.13 venv.
+    /opt/venvs/3.13/bin/pip install --force-reinstall \
+        "$(ls dist/buckaroo-*.whl | head -1)" polars jupyterlab -q
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+        bash scripts/test_playwright_jupyter.sh --venv-location=/opt/venvs/3.13
+}
+
+export -f job_lint_python job_test_js job_test_python job_build_wheel \
+           job_test_mcp_wheel job_smoke_test_extras \
+           job_playwright_storybook job_playwright_server job_playwright_marimo \
+           job_playwright_wasm_marimo job_playwright_jupyter
+
+# ── Phase 1: LintPython + TestJS + TestPython-3.13 (parallel) ────────────────
+log "=== Phase 1: lint-python, test-js, test-python-3.13 (parallel) ==="
+
+run_job lint-python         job_lint_python              & P1=$!
+run_job test-js             job_test_js                  & P2=$!
+run_job test-python-3.13   bash -c "job_test_python 3.13" & P3=$!
+
+wait $P1 || OVERALL=1
+wait $P2 || OVERALL=1
+wait $P3 || OVERALL=1
+
+# ── Phase 2: BuildWheel (after test-js to avoid JS build conflict) ────────────
+log "=== Phase 2: build-wheel ==="
+run_job build-wheel job_build_wheel || OVERALL=1
+
+# ── Phase 3: TestPython 3.11/3.12/3.14 (sequential, CPU budget) ─────────────
+log "=== Phase 3: test-python 3.11/3.12/3.14 (sequential) ==="
+for v in 3.11 3.12 3.14; do
+    run_job "test-python-$v" bash -c "job_test_python $v" || OVERALL=1
+done
+
+# ── Phase 4: TestMCPWheel + SmokeTestExtras (parallel, no port conflicts) ────
+log "=== Phase 4: test-mcp-wheel + smoke-test-extras (parallel) ==="
+
+run_job test-mcp-wheel      job_test_mcp_wheel     & P4=$!
+run_job smoke-test-extras   job_smoke_test_extras  & P5=$!
+
+wait $P4 || OVERALL=1
+wait $P5 || OVERALL=1
+
+# ── Phase 5: Playwright (sequential — each binds to a fixed port) ─────────────
+log "=== Phase 5: Playwright tests (sequential) ==="
+
+run_job playwright-storybook    job_playwright_storybook    || OVERALL=1
+run_job playwright-server       job_playwright_server       || OVERALL=1
+run_job playwright-marimo       job_playwright_marimo       || OVERALL=1
+run_job playwright-wasm-marimo  job_playwright_wasm_marimo  || OVERALL=1
+run_job playwright-jupyter      job_playwright_jupyter      || OVERALL=1
+
+# ── Final status ─────────────────────────────────────────────────────────────
+
+if [[ $OVERALL -eq 0 ]]; then
+    log "=== ALL JOBS PASSED ==="
+    status_success "$SHA" "ci/hetzner" "All checks passed" "$LOG_URL"
+    touch /opt/ci/last-success
+else
+    log "=== SOME JOBS FAILED — see $LOG_URL ==="
+    status_failure "$SHA" "ci/hetzner" "CI failed — see logs" "$LOG_URL"
+fi
+
+exit $OVERALL
