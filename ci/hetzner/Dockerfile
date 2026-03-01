@@ -53,6 +53,11 @@ RUN cd /build-js/buckaroo-js-core && pnpm exec playwright install chromium
 COPY ci/hetzner/run-ci.sh ci/hetzner/lib/ /opt/ci-runner/
 RUN chmod +x /opt/ci-runner/run-ci.sh
 
+# Allow JupyterLab to start as root (container runs as root).
+# This avoids needing --allow-root in every script that starts Jupyter.
+RUN mkdir -p /root/.jupyter && \
+    echo "c.ServerApp.allow_root = True" >> /root/.jupyter/jupyter_lab_config.py
+
 # Source code is bind-mounted at /repo at runtime — not baked in.
 # Allow git to operate on the bind-mounted repo (owned by ci on host, root in container).
 RUN git config --system --add safe.directory /repo
