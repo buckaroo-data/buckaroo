@@ -157,6 +157,16 @@ for nb in "${NOTEBOOKS[@]}"; do
     cp "tests/integration_notebooks/$nb" "$nb"
 done
 
+# Trust all notebooks so JupyterLab 4.x renders widget output.
+# JupyterLab blocks widget JS for untrusted notebooks; jupyter trust adds the
+# notebook's hash to the signatures DB so JupyterLab treats it as trusted.
+for nb in "${NOTEBOOKS[@]}"; do
+    jupyter trust "$nb" 2>/dev/null || true
+done
+
+# Clear any stale workspace state before the first test.
+rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
+
 # ── Kernel cleanup — delete all running kernels and sessions ─────────────────
 # Called after each notebook finishes so stale kernels don't accumulate
 # across batches and cause WebSocket comm failures for the next batch.
@@ -165,18 +175,21 @@ shutdown_kernels() {
     local kernels
     kernels=$(curl -s "http://localhost:$JUPYTER_PORT/api/kernels?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
     if [ "$kernels" != "[]" ] && [ -n "$kernels" ]; then
-        # || true: grep returns exit 1 when no IDs found; don't let pipefail kill script
-        echo "$kernels" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"$//' | while read -r kid; do
+        # JupyterLab returns "id": "uuid" (with space); use UUID pattern to extract.
+        # || true: grep exit 1 on no match; don't let pipefail kill the script.
+        echo "$kernels" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | while read -r kid; do
             curl -s -X DELETE "http://localhost:$JUPYTER_PORT/api/kernels/$kid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
         done || true
     fi
     local sessions
     sessions=$(curl -s "http://localhost:$JUPYTER_PORT/api/sessions?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
     if [ "$sessions" != "[]" ] && [ -n "$sessions" ]; then
-        echo "$sessions" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"$//' | while read -r sid; do
+        echo "$sessions" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | while read -r sid; do
             curl -s -X DELETE "http://localhost:$JUPYTER_PORT/api/sessions/$sid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
         done || true
     fi
+    # Clear workspace state so old notebooks don't reconnect on next test.
+    rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
     sleep 0.5
 }
 
