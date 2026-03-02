@@ -156,7 +156,7 @@ warmup_server() {
         | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" \
         2>/dev/null || true)
     if [ -n "$_kid" ]; then
-        for _i in $(seq 1 30); do
+        for _i in $(seq 1 60); do
             _state=$(curl -s \
                 "http://localhost:$port/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
                 2>/dev/null \
