@@ -306,17 +306,21 @@ else
     run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
     run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
     run_job playwright-server    job_playwright_server     & PID_PW_SV=$!
+
+    # pw-jupyter needs CPU headroom for JupyterLab startup — wait for the
+    # heavyweight wave-0 playwright jobs to finish first.
+    wait $PID_PW_MA  || OVERALL=1
+    wait $PID_PW_WM  || OVERALL=1
+    log "=== marimo/wasm done — starting playwright-jupyter ==="
     run_job playwright-jupyter   job_playwright_jupyter    & PID_PW_JP=$!
 
-    # ── Wait for everything ──────────────────────────────────────────────────
+    # ── Wait for everything else ─────────────────────────────────────────────
     wait $PID_LINT    || OVERALL=1
     wait $PID_PY311   || OVERALL=1
     wait $PID_PY312   || OVERALL=1
     wait $PID_PY313   || OVERALL=1
     wait $PID_PY314   || OVERALL=1
     wait $PID_PW_SB   || OVERALL=1
-    wait $PID_PW_MA   || OVERALL=1
-    wait $PID_PW_WM   || OVERALL=1
     wait $PID_MCP     || OVERALL=1
     wait $PID_SMOKE   || OVERALL=1
     wait $PID_PW_SV   || OVERALL=1
