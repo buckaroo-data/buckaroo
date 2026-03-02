@@ -156,6 +156,32 @@ for i in $(seq 1 30); do
 done
 ok "JupyterLab ready on port $JUPYTER_PORT"
 
+# ── Kernel gateway warmup ────────────────────────────────────────────────────
+# The HTTP endpoint responds before the kernel provisioner is fully ready.
+# Starting and waiting for a kernel to reach "idle" ensures the provisioner
+# is warm before batch 1 — prevents the first notebook from failing because
+# JupyterLab hasn't finished initialising its kernel machinery.
+log "Warming up kernel gateway..."
+_kid=$(curl -s -X POST \
+    "http://localhost:$JUPYTER_PORT/api/kernels?token=$JUPYTER_TOKEN" \
+    -H "Content-Type: application/json" -d '{"name":"python3"}' 2>/dev/null \
+    | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+if [ -n "$_kid" ]; then
+    for _i in $(seq 1 30); do
+        _state=$(curl -s \
+            "http://localhost:$JUPYTER_PORT/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
+            2>/dev/null | grep -o '"execution_state":"[^"]*"' | cut -d'"' -f4)
+        [ "$_state" = "idle" ] && break
+        sleep 0.5
+    done
+    curl -s -X DELETE \
+        "http://localhost:$JUPYTER_PORT/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
+        >/dev/null 2>&1 || true
+    ok "Kernel gateway ready"
+else
+    log "Warning: warmup kernel did not start — proceeding anyway"
+fi
+
 # ── Copy all notebooks up front ─────────────────────────────────────────────
 
 for nb in "${NOTEBOOKS[@]}"; do
