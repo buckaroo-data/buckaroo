@@ -4,12 +4,12 @@ import { Page } from '@playwright/test';
 const JUPYTER_BASE_URL = process.env.JUPYTER_BASE_URL || 'http://localhost:8889';
 const JUPYTER_TOKEN = process.env.JUPYTER_TOKEN || 'test-token-12345';
 const DEFAULT_TIMEOUT = 10000;
-const CELL_EXEC_TIMEOUT = 45000; // kernel startup can be slow when 3 run concurrently
+const CELL_EXEC_TIMEOUT = 60000; // kernel startup can be slow when 3 run concurrently
 const NAVIGATION_TIMEOUT = 12000;
 
-async function waitForAgGrid(page: Page, timeout = 5000) {
+async function waitForAgGrid(page: Page, timeout = DEFAULT_TIMEOUT) {
   await page.locator('.ag-root-wrapper').first().waitFor({ state: 'attached', timeout });
-  await page.locator('.ag-cell').first().waitFor({ state: 'attached', timeout });
+  await page.locator('.ag-cell').first().waitFor({ state: 'visible', timeout });
 }
 
 test.describe('Infinite Scroll Transcript Recording', () => {
@@ -338,7 +338,8 @@ test.describe('Infinite Scroll Transcript Recording', () => {
       const viewport = page.locator('.ag-body-viewport').first();
       if (await viewport.count() > 0) {
         await viewport.evaluate(el => el.scrollTop = 0);
-        await page.waitForTimeout(2000);
+        // Wait for row 0 to re-attach rather than a fixed sleep
+        await page.locator('[row-index="0"]').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
       }
     } catch (e) { /* non-fatal */ }
 
