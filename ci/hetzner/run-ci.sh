@@ -200,11 +200,13 @@ job_playwright_jupyter() {
     local wheel
     wheel=$(ls dist/buckaroo-*.whl | head -1)
     uv pip install --python "$venv/bin/python" "$wheel" polars jupyterlab -q
+    local rc=0
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
     PARALLEL=9 \
-        bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" --venv-location="$venv"
+        bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" --venv-location="$venv" || rc=$?
     rm -rf "$venv"
+    return $rc
 }
 
 export -f job_lint_python job_test_js job_test_python job_build_wheel \
