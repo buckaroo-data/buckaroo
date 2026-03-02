@@ -144,35 +144,13 @@ rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
 
 export JUPYTER_TOKEN
 
-# ── Kernel gateway warmup ─────────────────────────────────────────────────────
-# Defined before the server startup loop so it can be called inline.
-
-warmup_server() {
-    local port=$1
-    local _kid _state
-    _kid=$(curl -s -X POST \
-        "http://localhost:$port/api/kernels?token=$JUPYTER_TOKEN" \
-        -H "Content-Type: application/json" -d '{"name":"python3"}' 2>/dev/null \
-        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" \
-        2>/dev/null || true)
-    if [ -n "$_kid" ]; then
-        for _i in $(seq 1 60); do
-            _state=$(curl -s \
-                "http://localhost:$port/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
-                2>/dev/null \
-                | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('execution_state',''))" \
-                2>/dev/null || true)
-            [ "$_state" = "idle" ] && break
-            sleep 0.5
-        done
-        curl -s -X DELETE \
-            "http://localhost:$port/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
-            >/dev/null 2>&1 || true
-        ok "  port $port kernel gateway ready (state=$_state)"
-    else
-        log "  Warning: warmup kernel on port $port did not start — proceeding anyway"
-    fi
-}
+# ── Start JupyterLab servers (sequential — one at a time) ────────────────────
+# Starting one at a time prevents CPU competition during initialisation.
+# We do NOT start warmup kernels here: the JupyterLab REST API keeps a kernel
+# in "starting" state until a WebSocket client connects, so REST-only polling
+# never reaches "idle" and the lingering kernel process interferes with
+# batch-1 test kernels. Instead, we sleep once after all servers are HTTP-ready
+# to let the kernel provisioners finish initialising.
 
 log "Starting $PARALLEL isolated JupyterLab servers (sequential — one at a time)..."
 for slot in $(seq 0 $((PARALLEL-1))); do
@@ -196,8 +174,10 @@ for slot in $(seq 0 $((PARALLEL-1))); do
         exit 1
     fi
     ok "  JupyterLab ready on port $port (slot $slot)"
-    warmup_server "$port"
 done
+
+log "All $PARALLEL servers HTTP-ready — sleeping 20s for kernel provisioners to initialise..."
+sleep 20
 
 # ── Copy and trust notebooks ──────────────────────────────────────────────────
 
