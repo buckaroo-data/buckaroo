@@ -135,6 +135,11 @@ lsof -ti:$JUPYTER_PORT 2>/dev/null | while read pid; do
 done || true
 
 rm -rf .jupyter/lab/workspaces ~/.jupyter/lab/workspaces 2>/dev/null || true
+# Remove stale kernel connection files — these accumulate across runs and cause
+# JupyterLab to scan dead ZMQ connections on startup, delaying batch 1.
+rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
+rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
+rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
 
 export JUPYTER_TOKEN
 python -m jupyter lab --no-browser --port=$JUPYTER_PORT \

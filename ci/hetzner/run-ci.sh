@@ -206,7 +206,7 @@ job_playwright_jupyter() {
     ROOT_DIR=/repo \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
-    PARALLEL=1 \
+    PARALLEL=3 \
         bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" --venv-location="$venv" || rc=$?
     rm -rf "$venv"
     return $rc
@@ -266,7 +266,7 @@ wait $P_srv  || OVERALL=1
 wait $P_mar  || OVERALL=1
 wait $P_wmar || OVERALL=1
 
-# ── Phase 5b: Jupyter (after 5a — runs PARALLEL=3 notebooks with full CPU) ───
+# ── Phase 5b: Jupyter (after 5a completes — full CPU headroom, PARALLEL=3) ───
 log "=== Phase 5b: playwright-jupyter (port 8889, PARALLEL=3) ==="
 run_job playwright-jupyter job_playwright_jupyter || OVERALL=1
 
