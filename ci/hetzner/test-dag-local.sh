@@ -165,7 +165,7 @@ assert "build-wheel starts after build-js ends ($bw_start >= $bj_end)" test "$bw
 
 # wheel-dependent jobs must start after build-wheel ends
 bw_end=$(get_ts build-wheel END)
-for job in test-mcp-wheel smoke-test-extras pw-server pw-jupyter; do
+for job in test-mcp-wheel smoke-test-extras pw-server pw-jupyter pw-marimo pw-wasm; do
     j_start=$(get_ts "$job" START)
     assert "$job starts after build-wheel ends ($j_start >= $bw_end)" test "$j_start" -ge "$bw_end"
 done
@@ -186,6 +186,8 @@ assert "test-js overlaps build-wheel" started_before_ended test-js build-wheel
 
 # Wheel-dependent jobs should run in parallel with each other
 assert "pw-jupyter overlaps pw-server" started_before_ended pw-jupyter pw-server
+assert "pw-marimo overlaps pw-server" started_before_ended pw-marimo pw-server
+assert "pw-wasm overlaps pw-server" started_before_ended pw-wasm pw-server
 
 # ── Test 4: Failure propagation ─────────────────────────────────────────────
 

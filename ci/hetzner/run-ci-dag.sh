@@ -7,14 +7,15 @@
 # Dependency graph:
 #   No dependencies (start immediately):
 #     lint-python, build-js, test-python-{3.11,3.12,3.13,3.14},
-#     playwright-storybook, playwright-marimo, playwright-wasm-marimo
+#     playwright-storybook
 #
 #   Depends on build-js (needs tsc+vite output in dist/):
 #     test-js       (jest, runs in parallel with build-wheel)
 #     build-wheel   (esbuild + uv build, skips redundant pnpm install+build)
 #
 #   Depends on build-wheel (needs .whl):
-#     test-mcp-wheel, smoke-test-extras, playwright-server, playwright-jupyter
+#     test-mcp-wheel, smoke-test-extras, playwright-server, playwright-jupyter,
+#     playwright-marimo, playwright-wasm-marimo
 #
 # Critical path: build-js (~12s) → build-wheel (~10s) → pw-jupyter (~90s) ≈ 112s
 
@@ -243,8 +244,6 @@ run_job test-python-3.12      bash -c "job_test_python 3.12"  & PID_PY312=$!
 run_job test-python-3.13      bash -c "job_test_python 3.13"  & PID_PY313=$!
 run_job test-python-3.14      bash -c "job_test_python 3.14"  & PID_PY314=$!
 run_job playwright-storybook  job_playwright_storybook        & PID_PW_SB=$!
-run_job playwright-marimo     job_playwright_marimo            & PID_PW_MA=$!
-run_job playwright-wasm-marimo job_playwright_wasm_marimo     & PID_PW_WM=$!
 
 # ── Wait for build-js, then fork test-js + build-wheel in parallel ───────────
 
@@ -258,10 +257,12 @@ run_job build-wheel job_build_wheel || OVERALL=1
 
 log "=== build-wheel done — starting wheel-dependent jobs ==="
 
-run_job test-mcp-wheel        job_test_mcp_wheel              & PID_MCP=$!
-run_job smoke-test-extras     job_smoke_test_extras            & PID_SMOKE=$!
-run_job playwright-server     job_playwright_server            & PID_PW_SV=$!
-run_job playwright-jupyter    job_playwright_jupyter           & PID_PW_JP=$!
+run_job test-mcp-wheel         job_test_mcp_wheel              & PID_MCP=$!
+run_job smoke-test-extras      job_smoke_test_extras            & PID_SMOKE=$!
+run_job playwright-server      job_playwright_server            & PID_PW_SV=$!
+run_job playwright-jupyter     job_playwright_jupyter           & PID_PW_JP=$!
+run_job playwright-marimo      job_playwright_marimo            & PID_PW_MA=$!
+run_job playwright-wasm-marimo job_playwright_wasm_marimo       & PID_PW_WM=$!
 
 # ── Wait for everything ─────────────────────────────────────────────────────
 
@@ -272,12 +273,12 @@ wait $PID_PY312   || OVERALL=1
 wait $PID_PY313   || OVERALL=1
 wait $PID_PY314   || OVERALL=1
 wait $PID_PW_SB   || OVERALL=1
-wait $PID_PW_MA   || OVERALL=1
-wait $PID_PW_WM   || OVERALL=1
 wait $PID_MCP     || OVERALL=1
 wait $PID_SMOKE   || OVERALL=1
 wait $PID_PW_SV   || OVERALL=1
 wait $PID_PW_JP   || OVERALL=1
+wait $PID_PW_MA   || OVERALL=1
+wait $PID_PW_WM   || OVERALL=1
 
 # ── Final status ─────────────────────────────────────────────────────────────
 
