@@ -52,7 +52,7 @@ shared 3.13 venv while marimo/wasm-marimo are reading from it in parallel.
 | Phase 3 parallel (3.11/3.12/3.14) | ~1m07s | 7m21s |
 | Phase 5 parallel (5× playwright) | ~2m20s | 4m58s |
 | Phase 5 split + parallel jupyter (PARALLEL=1) | ~1m04s | **3m56s** |
-| Phase 5b PARALLEL=3 (untested) | ~45s est. | **~3m10s est.** |
+| Phase 5b PARALLEL=3 (tested, fails) | — | worse |
 
 Run 26 (commit 1759612, warm caches):
 - Phase 1: 1m15s | Phase 2: 22s | Phase 3: 1m16s | Phase 4: 20s
@@ -70,6 +70,15 @@ CPU headroom after Phase 5a completes — currently untested but likely viable).
 Upgrading from CCX33 (8 vCPU) to CCX43 (16 vCPU) gave identical timing
 (~5m05s vs ~4m58s). The bottleneck is the sequential critical path, not CPU
 core count. More cores only help if there's parallelisable work waiting on them.
+
+### Why PARALLEL=3 fails even after Phase 5a (batch-1 timing)
+PARALLEL=3 launches 3 notebooks in batch 1: 3 browsers + 3 fresh kernels + a
+freshly-started JupyterLab all compete for CPU simultaneously. The Playwright
+spec's 1.3s static wait (`waitForTimeout(800)` + `waitForTimeout(500)`) fires
+before widgets render → 6/9 failures. The first batch is the dangerous one
+because JupyterLab itself is still initialising. Batches 2+ would likely be
+fine, but we can't skip batch 1. PARALLEL=1 is the only safe value until the
+Playwright spec is updated to use proper `waitFor` instead of fixed timeouts.
 
 ### Why high Jupyter parallelism fails (when 5a is concurrent)
 Running 9 (or even 3) Jupyter notebooks in parallel while the other 4 playwright
@@ -248,7 +257,7 @@ Headroom is comfortable; CCX43 is not over-provisioned for this workload.
 
 | Item | Notes |
 |------|-------|
-| PARALLEL=3 for Phase 5b | Enabled in affe14a; verification run in progress |
+| PARALLEL=3 for Phase 5b | Tested and reverted — batch-1 timing fails. Needs Playwright spec fix first |
 | Webhook + GITHUB_TOKEN | For automatic PR status; currently all runs are manual |
 | `cffi` source compilation | Should be using manylinux wheels; investigate why uv falls back to source |
 | `mp_timeout` Docker tuning | forkserver spawn is ~1.5s on CCX43; tests hardcoded to 1.0s — defer, requires code changes |
