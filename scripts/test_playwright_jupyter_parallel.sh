@@ -161,23 +161,29 @@ ok "JupyterLab ready on port $JUPYTER_PORT"
 # Starting and waiting for a kernel to reach "idle" ensures the provisioner
 # is warm before batch 1 — prevents the first notebook from failing because
 # JupyterLab hasn't finished initialising its kernel machinery.
+#
+# Note: all subshell pipelines use `|| true` to suppress grep/pipe exit codes
+# that would otherwise trigger `set -e` and fire the cleanup trap prematurely.
 log "Warming up kernel gateway..."
 _kid=$(curl -s -X POST \
     "http://localhost:$JUPYTER_PORT/api/kernels?token=$JUPYTER_TOKEN" \
     -H "Content-Type: application/json" -d '{"name":"python3"}' 2>/dev/null \
-    | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" \
+    2>/dev/null || true)
 if [ -n "$_kid" ]; then
     for _i in $(seq 1 30); do
         _state=$(curl -s \
             "http://localhost:$JUPYTER_PORT/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
-            2>/dev/null | grep -o '"execution_state":"[^"]*"' | cut -d'"' -f4)
+            2>/dev/null \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('execution_state',''))" \
+            2>/dev/null || true)
         [ "$_state" = "idle" ] && break
         sleep 0.5
     done
     curl -s -X DELETE \
         "http://localhost:$JUPYTER_PORT/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
         >/dev/null 2>&1 || true
-    ok "Kernel gateway ready"
+    ok "Kernel gateway ready (state=$_state)"
 else
     log "Warning: warmup kernel did not start — proceeding anyway"
 fi
