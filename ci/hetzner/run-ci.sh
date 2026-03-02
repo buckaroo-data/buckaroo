@@ -252,21 +252,23 @@ run_job smoke-test-extras   job_smoke_test_extras  & P5=$!
 wait $P4 || OVERALL=1
 wait $P5 || OVERALL=1
 
-# ── Phase 5: Playwright (parallel — each binds to a distinct port) ────────────
-# Ports: storybook=6006, server=8701, marimo=2718, wasm-marimo=8765, jupyter=8889
-log "=== Phase 5: Playwright tests (parallel) ==="
+# ── Phase 5a: Playwright (parallel — each binds to a distinct port) ──────────
+# Ports: storybook=6006, server=8701, marimo=2718, wasm-marimo=8765
+log "=== Phase 5a: Playwright storybook/server/marimo/wasm-marimo (parallel) ==="
 
 run_job playwright-storybook    job_playwright_storybook    & P_sb=$!
 run_job playwright-server       job_playwright_server       & P_srv=$!
 run_job playwright-marimo       job_playwright_marimo       & P_mar=$!
 run_job playwright-wasm-marimo  job_playwright_wasm_marimo  & P_wmar=$!
-run_job playwright-jupyter      job_playwright_jupyter      & P_jup=$!
 
 wait $P_sb   || OVERALL=1
 wait $P_srv  || OVERALL=1
 wait $P_mar  || OVERALL=1
 wait $P_wmar || OVERALL=1
-wait $P_jup  || OVERALL=1
+
+# ── Phase 5b: Jupyter (after 5a — runs PARALLEL=3 notebooks with full CPU) ───
+log "=== Phase 5b: playwright-jupyter (port 8889, PARALLEL=3) ==="
+run_job playwright-jupyter job_playwright_jupyter || OVERALL=1
 
 # ── Final status ─────────────────────────────────────────────────────────────
 
