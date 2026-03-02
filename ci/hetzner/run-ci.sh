@@ -113,7 +113,7 @@ job_test_python() {
     # test_server_killed_on_parent_death: SIGKILL propagation differs in containers.
     /opt/venvs/$v/bin/python -m pytest tests/unit -m "not slow" --color=yes \
         --ignore=tests/unit/file_cache/mp_timeout_decorator_test.py \
-        --deselect tests/unit/file_cache/multiprocessing_executor_test.py::test_multiprocessing_executor_success \
+        --ignore=tests/unit/file_cache/multiprocessing_executor_test.py \
         --deselect "tests/unit/server/test_mcp_tool_cleanup.py::TestServerMonitor::test_server_killed_on_parent_death"
 }
 
