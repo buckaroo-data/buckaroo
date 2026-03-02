@@ -1,9 +1,9 @@
 #!/bin/bash
 # Local test harness for run-ci-dag.sh DAG orchestration.
 # Builds a patched copy with mock job functions, validates:
-#   1. All 14 jobs execute
-#   2. DAG ordering (build-wheel after test-js, wheel jobs after build-wheel)
-#   3. Parallelism (independent jobs overlap in time)
+#   1. All 15 jobs execute (build-js + test-js are now separate)
+#   2. DAG ordering (test-js + build-wheel after build-js, wheel jobs after build-wheel)
+#   3. Parallelism (independent jobs overlap, test-js || build-wheel)
 #   4. Failure propagation (any job failure → OVERALL=1)
 
 set -uo pipefail
@@ -74,7 +74,8 @@ HEADER
     # Job functions with failure injection (unquoted heredoc so $fail_job expands)
     cat >> "$patched" << JOBS
 job_lint_python()            { if [[ "$fail_job" == "lint-python" ]]; then mock_job lint-python 0.1 1; else mock_job lint-python 0.1; fi; }
-job_test_js()                { if [[ "$fail_job" == "test-js" ]]; then mock_job test-js 0.5 1; else mock_job test-js 0.5; fi; }
+job_build_js()               { if [[ "$fail_job" == "build-js" ]]; then mock_job build-js 0.3 1; else mock_job build-js 0.3; fi; }
+job_test_js()                { if [[ "$fail_job" == "test-js" ]]; then mock_job test-js 0.2 1; else mock_job test-js 0.2; fi; }
 job_test_python()            { local v=\$1; local n="test-python-\$v"; if [[ "$fail_job" == "\$n" ]]; then mock_job "\$n" 0.3 1; else mock_job "\$n" 0.3; fi; }
 job_build_wheel()            { if [[ "$fail_job" == "build-wheel" ]]; then mock_job build-wheel 0.3 1; else mock_job build-wheel 0.3; fi; }
 job_test_mcp_wheel()         { mock_job test-mcp-wheel 0.1; }
@@ -85,7 +86,7 @@ job_playwright_marimo()      { mock_job pw-marimo 0.2; }
 job_playwright_wasm_marimo() { mock_job pw-wasm 0.2; }
 job_playwright_jupyter()     { mock_job pw-jupyter 0.3; }
 
-export -f now_ms mock_job job_lint_python job_test_js job_test_python job_build_wheel \\
+export -f now_ms mock_job job_lint_python job_build_js job_test_js job_test_python job_build_wheel \\
            job_test_mcp_wheel job_smoke_test_extras \\
            job_playwright_storybook job_playwright_server job_playwright_marimo \\
            job_playwright_wasm_marimo job_playwright_jupyter
@@ -132,7 +133,7 @@ started_before_ended() {
     [[ -n "$a_start" && -n "$b_end" && "$a_start" -lt "$b_end" ]]
 }
 
-# ── Test 1: All 14 jobs run ──────────────────────────────────────────────────
+# ── Test 1: All 15 jobs run ──────────────────────────────────────────────────
 
 echo ""
 echo "Test 1: All jobs execute (happy path)"
@@ -142,9 +143,9 @@ rc=$?
 assert "exit code is 0" test "$rc" -eq 0
 
 job_count=$(grep ' START ' "$LAST_TIMELINE" | awk '{print $1}' | sort -u | wc -l | tr -d ' ')
-assert "14 jobs ran (got $job_count)" test "$job_count" -eq 14
+assert "15 jobs ran (got $job_count)" test "$job_count" -eq 15
 
-for job in lint-python test-js test-python-3.11 test-python-3.12 test-python-3.13 \
+for job in lint-python build-js test-js test-python-3.11 test-python-3.12 test-python-3.13 \
            test-python-3.14 build-wheel test-mcp-wheel smoke-test-extras \
            pw-storybook pw-server pw-marimo pw-wasm pw-jupyter; do
     assert "job $job ran" grep -q "^$job START" "$LAST_TIMELINE"
@@ -155,10 +156,14 @@ done
 echo ""
 echo "Test 2: DAG ordering constraints"
 
+# build-js must complete before test-js and build-wheel start
+bj_end=$(get_ts build-js END)
+tj_start=$(get_ts test-js START)
 bw_start=$(get_ts build-wheel START)
-tj_end=$(get_ts test-js END)
-assert "build-wheel starts after test-js ends ($bw_start >= $tj_end)" test "$bw_start" -ge "$tj_end"
+assert "test-js starts after build-js ends ($tj_start >= $bj_end)" test "$tj_start" -ge "$bj_end"
+assert "build-wheel starts after build-js ends ($bw_start >= $bj_end)" test "$bw_start" -ge "$bj_end"
 
+# wheel-dependent jobs must start after build-wheel ends
 bw_end=$(get_ts build-wheel END)
 for job in test-mcp-wheel smoke-test-extras pw-server pw-jupyter; do
     j_start=$(get_ts "$job" START)
@@ -170,11 +175,14 @@ done
 echo ""
 echo "Test 3: Independent jobs run in parallel"
 
-# These should all be running while test-js is still going (0.5s)
-assert "test-python-3.11 overlaps test-js" started_before_ended test-python-3.11 test-js
-assert "test-python-3.13 overlaps test-js" started_before_ended test-python-3.13 test-js
-assert "lint-python overlaps test-js" started_before_ended lint-python test-js
-assert "pw-storybook starts before build-wheel ends" started_before_ended pw-storybook build-wheel
+# These should all be running while build-js is still going (0.3s)
+assert "test-python-3.11 overlaps build-js" started_before_ended test-python-3.11 build-js
+assert "test-python-3.13 overlaps build-js" started_before_ended test-python-3.13 build-js
+assert "lint-python overlaps build-js" started_before_ended lint-python build-js
+assert "pw-storybook overlaps build-js" started_before_ended pw-storybook build-js
+
+# test-js and build-wheel should run in parallel after build-js
+assert "test-js overlaps build-wheel" started_before_ended test-js build-wheel
 
 # Wheel-dependent jobs should run in parallel with each other
 assert "pw-jupyter overlaps pw-server" started_before_ended pw-jupyter pw-server
@@ -190,10 +198,11 @@ assert "test-python-3.12 failure → exit 1" test "$rc" -eq 1
 assert "build-wheel still ran despite py3.12 failure" grep -q "^build-wheel START" "$LAST_TIMELINE"
 assert "pw-jupyter still ran despite py3.12 failure" grep -q "^pw-jupyter START" "$LAST_TIMELINE"
 
-run_dag "test-js"
+run_dag "build-js"
 rc=$?
-assert "test-js failure → exit 1" test "$rc" -eq 1
-assert "build-wheel still ran despite test-js failure" grep -q "^build-wheel START" "$LAST_TIMELINE"
+assert "build-js failure → exit 1" test "$rc" -eq 1
+# build-wheel should still attempt (we don't short-circuit)
+assert "build-wheel still ran despite build-js failure" grep -q "^build-wheel START" "$LAST_TIMELINE"
 
 run_dag "lint-python"
 rc=$?

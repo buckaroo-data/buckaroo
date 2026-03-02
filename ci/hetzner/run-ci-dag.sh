@@ -6,16 +6,17 @@
 #
 # Dependency graph:
 #   No dependencies (start immediately):
-#     lint-python, test-js, test-python-{3.11,3.12,3.13,3.14},
+#     lint-python, build-js, test-python-{3.11,3.12,3.13,3.14},
 #     playwright-storybook, playwright-marimo, playwright-wasm-marimo
 #
-#   Depends on test-js (dist/ write conflict):
-#     build-wheel
+#   Depends on build-js (needs tsc+vite output in dist/):
+#     test-js       (jest, runs in parallel with build-wheel)
+#     build-wheel   (esbuild + uv build, skips redundant pnpm install+build)
 #
 #   Depends on build-wheel (needs .whl):
 #     test-mcp-wheel, smoke-test-extras, playwright-server, playwright-jupyter
 #
-# Critical path: test-js (~20s) → build-wheel (~20s) → pw-jupyter (~90s) ≈ 2m10s
+# Critical path: build-js (~12s) → build-wheel (~10s) → pw-jupyter (~90s) ≈ 112s
 
 set -uo pipefail
 
@@ -89,11 +90,15 @@ job_lint_python() {
     /opt/venvs/3.13/bin/ruff check
 }
 
-job_test_js() {
+job_build_js() {
     cd /repo/packages
     pnpm install --frozen-lockfile --store-dir /opt/pnpm-store
     cd buckaroo-js-core
     pnpm run build
+}
+
+job_test_js() {
+    cd /repo/packages/buckaroo-js-core
     pnpm run test
 }
 
@@ -122,7 +127,16 @@ job_test_python() {
 
 job_build_wheel() {
     cd /repo
-    PNPM_STORE_DIR=/opt/pnpm-store bash scripts/full_build.sh
+    # build-js already ran pnpm install + pnpm build (tsc+vite).
+    # We only need: copy CSS, esbuild anywidget+standalone, uv build.
+    mkdir -p buckaroo/static
+    cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
+    cd packages
+    pnpm --filter buckaroo-widget run build
+    pnpm --filter buckaroo-widget run build:standalone
+    cd ..
+    rm -rf dist || true
+    uv build --wheel
 }
 
 job_test_mcp_wheel() {
@@ -210,19 +224,20 @@ job_playwright_jupyter() {
     rm -rf "$venv"
 }
 
-export -f job_lint_python job_test_js job_test_python job_build_wheel \
+export -f job_lint_python job_build_js job_test_js job_test_python job_build_wheel \
            job_test_mcp_wheel job_smoke_test_extras \
            job_playwright_storybook job_playwright_server job_playwright_marimo \
            job_playwright_wasm_marimo job_playwright_jupyter
 
 # ── DAG execution ────────────────────────────────────────────────────────────
-# All independent jobs start immediately. build-wheel waits only for test-js.
-# Wheel-dependent jobs start as soon as build-wheel completes.
+# build-js starts immediately alongside all other independent jobs.
+# Once build-js completes, test-js and build-wheel start in parallel.
+# Once build-wheel completes, wheel-dependent jobs start.
 
 log "=== Starting all independent jobs ==="
 
 run_job lint-python           job_lint_python                 & PID_LINT=$!
-run_job test-js               job_test_js                     & PID_TESTJS=$!
+run_job build-js              job_build_js                    & PID_BUILDJS=$!
 run_job test-python-3.11      bash -c "job_test_python 3.11"  & PID_PY311=$!
 run_job test-python-3.12      bash -c "job_test_python 3.12"  & PID_PY312=$!
 run_job test-python-3.13      bash -c "job_test_python 3.13"  & PID_PY313=$!
@@ -231,11 +246,12 @@ run_job playwright-storybook  job_playwright_storybook        & PID_PW_SB=$!
 run_job playwright-marimo     job_playwright_marimo            & PID_PW_MA=$!
 run_job playwright-wasm-marimo job_playwright_wasm_marimo     & PID_PW_WM=$!
 
-# ── Wait for test-js, then build wheel ───────────────────────────────────────
+# ── Wait for build-js, then fork test-js + build-wheel in parallel ───────────
 
-wait $PID_TESTJS || OVERALL=1
-log "=== test-js done — starting build-wheel ==="
+wait $PID_BUILDJS || OVERALL=1
+log "=== build-js done — starting test-js + build-wheel ==="
 
+run_job test-js   job_test_js     & PID_TESTJS=$!
 run_job build-wheel job_build_wheel || OVERALL=1
 
 # ── Wheel-dependent jobs ─────────────────────────────────────────────────────
@@ -249,18 +265,19 @@ run_job playwright-jupyter    job_playwright_jupyter           & PID_PW_JP=$!
 
 # ── Wait for everything ─────────────────────────────────────────────────────
 
-wait $PID_LINT   || OVERALL=1
-wait $PID_PY311  || OVERALL=1
-wait $PID_PY312  || OVERALL=1
-wait $PID_PY313  || OVERALL=1
-wait $PID_PY314  || OVERALL=1
-wait $PID_PW_SB  || OVERALL=1
-wait $PID_PW_MA  || OVERALL=1
-wait $PID_PW_WM  || OVERALL=1
-wait $PID_MCP    || OVERALL=1
-wait $PID_SMOKE  || OVERALL=1
-wait $PID_PW_SV  || OVERALL=1
-wait $PID_PW_JP  || OVERALL=1
+wait $PID_LINT    || OVERALL=1
+wait $PID_TESTJS  || OVERALL=1
+wait $PID_PY311   || OVERALL=1
+wait $PID_PY312   || OVERALL=1
+wait $PID_PY313   || OVERALL=1
+wait $PID_PY314   || OVERALL=1
+wait $PID_PW_SB   || OVERALL=1
+wait $PID_PW_MA   || OVERALL=1
+wait $PID_PW_WM   || OVERALL=1
+wait $PID_MCP     || OVERALL=1
+wait $PID_SMOKE   || OVERALL=1
+wait $PID_PW_SV   || OVERALL=1
+wait $PID_PW_JP   || OVERALL=1
 
 # ── Final status ─────────────────────────────────────────────────────────────
 
