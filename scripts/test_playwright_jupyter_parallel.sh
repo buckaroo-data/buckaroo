@@ -191,7 +191,7 @@ RUNNING=0
 QUEUE=("${NOTEBOOKS[@]}")
 NEXT=0
 
-TMPDIR=$(mktemp -d -t pw-jupyter-parallel)
+TMPDIR=$(mktemp -d -t pw-jupyter-parallelXXXXXX)
 
 start_next() {
     local nb="${QUEUE[$NEXT]}"
