@@ -1,15 +1,14 @@
 #!/bin/bash
 # Parallel Playwright tests against JupyterLab for Buckaroo widgets.
-# Drop-in replacement for test_playwright_jupyter.sh — runs notebooks in
-# parallel batches against a single JupyterLab server.
+# Each parallel slot gets its own isolated JupyterLab server on a distinct port,
+# eliminating ZMQ socket contention from concurrent kernel startups.
 #
 # Usage:
 #   bash scripts/test_playwright_jupyter_parallel.sh --venv-location=/path/to/venv
 #   bash scripts/test_playwright_jupyter_parallel.sh --use-local-venv
-#   PARALLEL=3 bash scripts/test_playwright_jupyter_parallel.sh  # max 3 concurrent
+#   PARALLEL=3 bash scripts/test_playwright_jupyter_parallel.sh  # 3 isolated servers
 #
-# Each notebook gets its own Playwright process (separate browser window).
-# JupyterLab handles multiple notebooks with independent kernels fine.
+# Ports used: BASE_PORT to BASE_PORT+PARALLEL-1 (default 8889..8889+N-1)
 set -euo pipefail
 
 if [ -z "${ROOT_DIR:-}" ]; then
@@ -18,12 +17,13 @@ if [ -z "${ROOT_DIR:-}" ]; then
 fi
 cd "$ROOT_DIR"
 
-# ── Argument parsing (same interface as test_playwright_jupyter.sh) ───────────
+# ── Argument parsing (same interface as before) ───────────────────────────────
 
 USE_LOCAL_VENV=false
 VENV_LOCATION=""
 NOTEBOOK=""
 PARALLEL=${PARALLEL:-4}
+BASE_PORT=${BASE_PORT:-8889}
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ── Notebooks ────────────────────────────────────────────────────────────────
+# ── Notebooks ─────────────────────────────────────────────────────────────────
 
 NOTEBOOKS=(
     "test_buckaroo_widget.ipynb"
@@ -58,14 +58,14 @@ fi
 
 TOTAL=${#NOTEBOOKS[@]}
 
-# ── Logging ──────────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────────
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 log() { echo -e "${BLUE}[$(date +'%H:%M:%S')]${NC} $1"; }
 ok()  { echo -e "${GREEN}$1${NC}"; }
 err() { echo -e "${RED}$1${NC}"; }
 
-# ── Venv setup (same as original) ───────────────────────────────────────────
+# ── Venv setup ────────────────────────────────────────────────────────────────
 
 if [ -n "$VENV_LOCATION" ]; then
     VENV_DIR="$VENV_LOCATION"
@@ -83,7 +83,7 @@ else
     source "$VENV_DIR/bin/activate"
 fi
 
-# ── Dependency check (same as original) ─────────────────────────────────────
+# ── Dependency check ──────────────────────────────────────────────────────────
 
 if [ -z "$VENV_LOCATION" ] && [ "$USE_LOCAL_VENV" = false ]; then
     python3 -c "import polars; import jupyterlab" 2>/dev/null || {
@@ -102,25 +102,24 @@ fi
 
 python -c "import buckaroo; print(f'buckaroo {getattr(buckaroo, \"__version__\", \"?\")}')"
 
-# ── Playwright deps ─────────────────────────────────────────────────────────
+# ── Playwright deps ───────────────────────────────────────────────────────────
 
 cd packages/buckaroo-js-core
 pnpm install 2>/dev/null || npm install
 pnpm exec playwright install chromium 2>/dev/null || true
 
-# ── JupyterLab ───────────────────────────────────────────────────────────────
+# ── Multiple isolated JupyterLab servers (one per parallel slot) ──────────────
 
 JUPYTER_TOKEN="test-token-12345"
-JUPYTER_PORT=8889
-JUPYTER_PID=""
+declare -a JUPYTER_PIDS=()
 
 cleanup() {
     log "Cleaning up..."
-    [ -n "$JUPYTER_PID" ] && kill "$JUPYTER_PID" 2>/dev/null; wait "$JUPYTER_PID" 2>/dev/null || true
-    # Clean up copied notebooks
+    for pid in "${JUPYTER_PIDS[@]:-}"; do
+        [ -n "$pid" ] && kill "$pid" 2>/dev/null && wait "$pid" 2>/dev/null || true
+    done
     cd "$ROOT_DIR"
     for nb in "${NOTEBOOKS[@]}"; do rm -f "$nb"; done
-    # Remove test venv if we created it
     if [ -z "$VENV_LOCATION" ] && [ "$USE_LOCAL_VENV" = false ] && [ -d "$VENV_DIR" ]; then
         rm -rf "$VENV_DIR"
     fi
@@ -129,111 +128,115 @@ trap cleanup EXIT
 
 cd "$ROOT_DIR"
 
-# Kill stale jupyter on our port
-lsof -ti:$JUPYTER_PORT 2>/dev/null | while read pid; do
-    ps -p "$pid" -o comm= 2>/dev/null | grep -qE 'jupyter|python' && kill -9 "$pid" 2>/dev/null
-done || true
+# Kill stale processes on all ports we'll use
+for slot in $(seq 0 $((PARALLEL-1))); do
+    port=$((BASE_PORT + slot))
+    lsof -ti:$port 2>/dev/null | while read -r pid; do
+        ps -p "$pid" -o comm= 2>/dev/null | grep -qE 'jupyter|python' && kill -9 "$pid" 2>/dev/null
+    done || true
+done
 
-rm -rf .jupyter/lab/workspaces ~/.jupyter/lab/workspaces 2>/dev/null || true
-# Remove stale kernel connection files — these accumulate across runs and cause
-# JupyterLab to scan dead ZMQ connections on startup, delaying batch 1.
+rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
+# Remove stale kernel connection files — accumulate across runs, delay startup
 rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
 rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
 rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
 
 export JUPYTER_TOKEN
-python -m jupyter lab --no-browser --port=$JUPYTER_PORT \
-    --ServerApp.token=$JUPYTER_TOKEN --ServerApp.allow_origin='*' \
-    --ServerApp.disable_check_xsrf=True --allow-root &
-JUPYTER_PID=$!
-log "JupyterLab PID: $JUPYTER_PID"
 
-# Wait for ready
-for i in $(seq 1 30); do
-    curl -sf "http://localhost:$JUPYTER_PORT/lab?token=$JUPYTER_TOKEN" >/dev/null 2>&1 && break
-    [ "$i" -eq 30 ] && { err "JupyterLab failed to start"; exit 1; }
-    sleep 1
+# Start one JupyterLab server per parallel slot
+for slot in $(seq 0 $((PARALLEL-1))); do
+    port=$((BASE_PORT + slot))
+    python -m jupyter lab --no-browser --port=$port \
+        --ServerApp.token=$JUPYTER_TOKEN --ServerApp.allow_origin='*' \
+        --ServerApp.disable_check_xsrf=True --allow-root &
+    JUPYTER_PIDS[$slot]=$!
+    log "JupyterLab slot $slot (port $port) PID: ${JUPYTER_PIDS[$slot]}"
 done
-ok "JupyterLab ready on port $JUPYTER_PORT"
 
-# ── Kernel gateway warmup ────────────────────────────────────────────────────
-# The HTTP endpoint responds before the kernel provisioner is fully ready.
-# Starting and waiting for a kernel to reach "idle" ensures the provisioner
-# is warm before batch 1 — prevents the first notebook from failing because
-# JupyterLab hasn't finished initialising its kernel machinery.
-#
-# Note: all subshell pipelines use `|| true` to suppress grep/pipe exit codes
-# that would otherwise trigger `set -e` and fire the cleanup trap prematurely.
-log "Warming up kernel gateway..."
-_kid=$(curl -s -X POST \
-    "http://localhost:$JUPYTER_PORT/api/kernels?token=$JUPYTER_TOKEN" \
-    -H "Content-Type: application/json" -d '{"name":"python3"}' 2>/dev/null \
-    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" \
-    2>/dev/null || true)
-if [ -n "$_kid" ]; then
-    for _i in $(seq 1 30); do
-        _state=$(curl -s \
-            "http://localhost:$JUPYTER_PORT/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
-            2>/dev/null \
-            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('execution_state',''))" \
-            2>/dev/null || true)
-        [ "$_state" = "idle" ] && break
-        sleep 0.5
+# Wait for all servers to be ready
+for slot in $(seq 0 $((PARALLEL-1))); do
+    port=$((BASE_PORT + slot))
+    for i in $(seq 1 30); do
+        curl -sf "http://localhost:$port/lab?token=$JUPYTER_TOKEN" >/dev/null 2>&1 && break
+        [ "$i" -eq 30 ] && { err "JupyterLab on port $port failed to start"; exit 1; }
+        sleep 1
     done
-    curl -s -X DELETE \
-        "http://localhost:$JUPYTER_PORT/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
-        >/dev/null 2>&1 || true
-    ok "Kernel gateway ready (state=$_state)"
-else
-    log "Warning: warmup kernel did not start — proceeding anyway"
-fi
+    ok "JupyterLab ready on port $port (slot $slot)"
+done
 
-# ── Copy all notebooks up front ─────────────────────────────────────────────
+# ── Kernel gateway warmup (one warmup kernel per server) ─────────────────────
+# Ensures each server's kernel provisioner is fully initialised before
+# the first test batch runs on that server.
+
+warmup_server() {
+    local port=$1
+    local _kid _state
+    _kid=$(curl -s -X POST \
+        "http://localhost:$port/api/kernels?token=$JUPYTER_TOKEN" \
+        -H "Content-Type: application/json" -d '{"name":"python3"}' 2>/dev/null \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" \
+        2>/dev/null || true)
+    if [ -n "$_kid" ]; then
+        for _i in $(seq 1 30); do
+            _state=$(curl -s \
+                "http://localhost:$port/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
+                2>/dev/null \
+                | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('execution_state',''))" \
+                2>/dev/null || true)
+            [ "$_state" = "idle" ] && break
+            sleep 0.5
+        done
+        curl -s -X DELETE \
+            "http://localhost:$port/api/kernels/$_kid?token=$JUPYTER_TOKEN" \
+            >/dev/null 2>&1 || true
+        ok "  port $port kernel gateway ready (state=$_state)"
+    else
+        log "  Warning: warmup kernel on port $port did not start — proceeding anyway"
+    fi
+}
+
+log "Warming up kernel gateways on $PARALLEL servers..."
+for slot in $(seq 0 $((PARALLEL-1))); do
+    warmup_server $((BASE_PORT + slot))
+done
+
+# ── Copy and trust notebooks ──────────────────────────────────────────────────
 
 for nb in "${NOTEBOOKS[@]}"; do
     cp "tests/integration_notebooks/$nb" "$nb"
 done
-
-# Trust all notebooks so JupyterLab 4.x renders widget output.
-# JupyterLab blocks widget JS for untrusted notebooks; jupyter trust adds the
-# notebook's hash to the signatures DB so JupyterLab treats it as trusted.
 for nb in "${NOTEBOOKS[@]}"; do
     jupyter trust "$nb" 2>/dev/null || true
 done
-
-# Clear any stale workspace state before the first test.
 rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
 
-# ── Kernel cleanup — delete all running kernels and sessions ─────────────────
-# Called after each notebook finishes so stale kernels don't accumulate
-# across batches and cause WebSocket comm failures for the next batch.
+# ── Per-server kernel cleanup (between batches) ───────────────────────────────
 
-shutdown_kernels() {
+shutdown_kernels_on_port() {
+    local port=$1
     local kernels
-    kernels=$(curl -s "http://localhost:$JUPYTER_PORT/api/kernels?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
+    kernels=$(curl -s "http://localhost:$port/api/kernels?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
     if [ "$kernels" != "[]" ] && [ -n "$kernels" ]; then
-        # JupyterLab returns "id": "uuid" (with space); use UUID pattern to extract.
-        # || true: grep exit 1 on no match; don't let pipefail kill the script.
         echo "$kernels" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | while read -r kid; do
-            curl -s -X DELETE "http://localhost:$JUPYTER_PORT/api/kernels/$kid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
+            curl -s -X DELETE "http://localhost:$port/api/kernels/$kid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
         done || true
     fi
     local sessions
-    sessions=$(curl -s "http://localhost:$JUPYTER_PORT/api/sessions?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
+    sessions=$(curl -s "http://localhost:$port/api/sessions?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
     if [ "$sessions" != "[]" ] && [ -n "$sessions" ]; then
         echo "$sessions" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | while read -r sid; do
-            curl -s -X DELETE "http://localhost:$JUPYTER_PORT/api/sessions/$sid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
+            curl -s -X DELETE "http://localhost:$port/api/sessions/$sid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
         done || true
     fi
-    # Clear workspace state so old notebooks don't reconnect on next test.
     rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
     sleep 0.5
 }
 
-# ── Run one notebook's tests (called in background) ─────────────────────────
+# ── Run one notebook (called in background, targets a specific server port) ───
 
 run_one() {
-    local nb=$1 idx=$2 logfile=$3
+    local nb=$1 idx=$2 logfile=$3 port=$4
     local spec="pw-tests/integration.spec.ts"
     local timeout=30000
 
@@ -244,6 +247,9 @@ run_one() {
 
     cd "$ROOT_DIR/packages/buckaroo-js-core"
     TEST_NOTEBOOK="$nb" \
+    JUPYTER_BASE_URL="http://localhost:$port" \
+    JUPYTER_TOKEN="$JUPYTER_TOKEN" \
+    PLAYWRIGHT_HTML_OUTPUT_DIR="/tmp/pw-html-jupyter-${nb%.ipynb}-$$" \
         npx playwright test "$spec" \
             --config playwright.config.integration.ts \
             --reporter=line \
@@ -253,50 +259,44 @@ run_one() {
 export -f run_one
 export ROOT_DIR JUPYTER_TOKEN
 
-# ── Parallel execution with bounded concurrency ─────────────────────────────
+# ── Batch execution ───────────────────────────────────────────────────────────
+# Each slot in a batch targets slot's dedicated JupyterLab server.
+# No two notebooks ever share a server simultaneously.
 
-log "Running $TOTAL notebooks, $PARALLEL at a time"
+log "Running $TOTAL notebooks, $PARALLEL at a time ($PARALLEL isolated JupyterLab servers)"
 
 OVERALL=0
-declare -A PIDS       # pid -> notebook name
-declare -A LOGFILES   # notebook name -> logfile
-RUNNING=0
+PASSED=0
+FAILED_LIST=()
+declare -A LOGFILES
 QUEUE=("${NOTEBOOKS[@]}")
 NEXT=0
 
 TMPDIR=$(mktemp -d -t pw-jupyter-parallelXXXXXX)
 
-# ── Explicit batch execution ─────────────────────────────────────────────────
-# Run notebooks in batches of PARALLEL. Wait for the whole batch to finish,
-# shut down all kernels, then start the next batch. This prevents stale
-# kernels from accumulating and interfering with subsequent batches.
-
-PASSED=0
-FAILED_LIST=()
-NEXT=0
-declare -A BATCH_PIDS
-
 while [ $NEXT -lt $TOTAL ]; do
-    # Start up to PARALLEL notebooks
-    unset BATCH_PIDS; declare -A BATCH_PIDS
+    declare -A BATCH_PIDS=()
+    declare -A BATCH_PORTS=()
     BATCH_COUNT=0
+    BATCH_USED_PORTS=()
+
     while [ $BATCH_COUNT -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
         local_nb="${QUEUE[$NEXT]}"
         local_logfile="$TMPDIR/${local_nb%.ipynb}.log"
+        local_port=$((BASE_PORT + BATCH_COUNT))
         LOGFILES["$local_nb"]="$local_logfile"
-        run_one "$local_nb" "$NEXT" "$local_logfile" &
-        BATCH_PIDS[$!]="$local_nb"
-        log "START [$((NEXT+1))/$TOTAL] $local_nb"
+        run_one "$local_nb" "$NEXT" "$local_logfile" "$local_port" &
+        local_pid=$!
+        BATCH_PIDS[$local_pid]="$local_nb"
+        BATCH_PORTS[$local_pid]="$local_port"
+        BATCH_USED_PORTS+=("$local_port")
+        log "START [$((NEXT+1))/$TOTAL] $local_nb (port $local_port)"
         ((NEXT++)) || true
         ((BATCH_COUNT++)) || true
     done
 
-    # Wait for all jobs in this batch
     for pid in "${!BATCH_PIDS[@]}"; do
-        set +e
-        wait "$pid"
-        rc=$?
-        set -e
+        set +e; wait "$pid"; rc=$?; set -e
         nb="${BATCH_PIDS[$pid]}"
         if [ $rc -eq 0 ]; then
             ok "  PASS $nb"
@@ -307,15 +307,16 @@ while [ $NEXT -lt $TOTAL ]; do
             OVERALL=1
         fi
     done
-    unset BATCH_PIDS
 
-    # Shut down all kernels before next batch so they don't accumulate
+    # Clean up each used server's kernel before next batch
     if [ $NEXT -lt $TOTAL ]; then
-        shutdown_kernels
+        for p in "${BATCH_USED_PORTS[@]:-}"; do
+            shutdown_kernels_on_port "$p"
+        done
     fi
 done
 
-# ── Summary ──────────────────────────────────────────────────────────────────
+# ── Summary ───────────────────────────────────────────────────────────────────
 
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 if [ $OVERALL -eq 0 ]; then
@@ -324,13 +325,11 @@ else
     err "FAILED: ${#FAILED_LIST[@]}/$TOTAL notebooks"
     for nb in "${FAILED_LIST[@]}"; do
         err "  - $nb"
-        # Show last 5 lines of the log for quick diagnosis
         tail -5 "${LOGFILES[$nb]}" 2>/dev/null | sed 's/^/    /'
     done
 fi
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Dump individual logs on failure
 if [ $OVERALL -ne 0 ]; then
     for nb in "${FAILED_LIST[@]}"; do
         log "=== Full log: $nb ==="

@@ -214,7 +214,7 @@ job_playwright_jupyter() {
     ROOT_DIR=/repo \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
-    PARALLEL=1 \
+    PARALLEL=3 \
         bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" --venv-location="$venv" || rc=$?
     rm -rf "$venv"
     return $rc
@@ -274,8 +274,8 @@ wait $P_srv  || OVERALL=1
 wait $P_mar  || OVERALL=1
 wait $P_wmar || OVERALL=1
 
-# ── Phase 5b: Jupyter (after 5a — PARALLEL=1 required; >1 causes ZMQ socket errors under concurrent kernel startup) ─
-log "=== Phase 5b: playwright-jupyter (port 8889, PARALLEL=1) ==="
+# ── Phase 5b: Jupyter (after 5a — PARALLEL=3, each slot gets its own JupyterLab server) ─
+log "=== Phase 5b: playwright-jupyter (ports 8889-8891, PARALLEL=3) ==="
 run_job playwright-jupyter job_playwright_jupyter || OVERALL=1
 
 # ── Final status ─────────────────────────────────────────────────────────────

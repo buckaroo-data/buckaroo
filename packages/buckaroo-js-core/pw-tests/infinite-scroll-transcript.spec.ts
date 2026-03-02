@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { Page } from '@playwright/test';
 
-const JUPYTER_BASE_URL = 'http://localhost:8889';
-const JUPYTER_TOKEN = 'test-token-12345';
+const JUPYTER_BASE_URL = process.env.JUPYTER_BASE_URL || 'http://localhost:8889';
+const JUPYTER_TOKEN = process.env.JUPYTER_TOKEN || 'test-token-12345';
 const DEFAULT_TIMEOUT = 10000;
 const CELL_EXEC_TIMEOUT = 20000; // kernel startup can be slow when 2 run concurrently
 const NAVIGATION_TIMEOUT = 12000;
