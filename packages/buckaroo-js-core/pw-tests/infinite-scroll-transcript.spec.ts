@@ -323,53 +323,46 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
 
+    // Execute the cell
+    await page.locator('.jp-Notebook').first().dispatchEvent('click');
+    await page.waitForTimeout(200);
+    await page.keyboard.press('Shift+Enter');
+
     const outputArea = page.locator('.jp-OutputArea').first();
-
-    // Test 1 leaves a widget rendered in the output area; JupyterLab restores this
-    // on page.goto(). Use that existing output instead of re-executing (re-execution
-    // on a loaded machine can take >45s for the infinite widget).
-    // Fall back to executing the cell only if no output is present (isolation run).
-    const hasOutput = await outputArea.locator('.jp-OutputArea-output').first()
-      .waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT }).then(() => true).catch(() => false);
-
-    if (!hasOutput) {
-      await page.locator('.jp-Notebook .jp-CodeCell').first().click();
-      await page.waitForTimeout(500);
-      await page.keyboard.press('Shift+Enter');
-      await outputArea.locator('.jp-OutputArea-output').first()
-        .waitFor({ state: 'attached', timeout: CELL_EXEC_TIMEOUT });
-    }
+    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: CELL_EXEC_TIMEOUT });
 
     await waitForAgGrid(page);
 
-    // Reset scroll to top — JupyterLab workspace may restore the grid scrolled to
-    // row 1500 from test 1. Use bubbling scroll event so ag-grid virtual scroll updates.
+    // Reset scroll position in case test 1 left the grid scrolled
     try {
       const viewport = page.locator('.ag-body-viewport').first();
       if (await viewport.count() > 0) {
-        await viewport.evaluate(el => {
-          el.scrollTop = 0;
-          el.scrollLeft = 0;
-          el.dispatchEvent(new Event('scroll', { bubbles: true }));
-        });
+        await viewport.evaluate(el => el.scrollTop = 0);
+        await page.waitForTimeout(2000);
       }
     } catch (e) { /* non-fatal */ }
-    await page.waitForTimeout(2000); // ag-grid virtual scroll needs time to re-render row 0
 
-    // Wait for the DATA grid's row-index=0 to appear. The stats panel is also an
-    // ag-grid with row-index=0 rows; filter by 'foo_10' which only appears in the data.
-    await page.waitForFunction(
-      () => Array.from(document.querySelectorAll('[row-index="0"]'))
-        .some(el => (el.textContent || '').includes('foo_10')),
-      { timeout: DEFAULT_TIMEOUT }
-    );
+    // Verify initial data (row 0 should show int_col=10, str_col=foo_10)
+    const firstRowIntCell = page.locator('[row-index="0"] [col-id="int_col"]');
+    const firstRowStrCell = page.locator('[row-index="0"] [col-id="str_col"]');
 
-    // Verify row 0 data via textContent (robust to visibility:hidden cells)
-    const dataRow0 = page.locator('[row-index="0"]').filter({ hasText: 'foo_10' }).first();
-    const row0Text = await dataRow0.evaluate(el => el.textContent || '');
-    console.log(`📊 Row 0 textContent: ${row0Text.slice(0, 80)}`);
-    expect(row0Text).toContain('10');
-    expect(row0Text).toContain('foo_10');
+    const intCellVisible = await firstRowIntCell.isVisible().catch(() => false);
+    const strCellVisible = await firstRowStrCell.isVisible().catch(() => false);
+
+    if (intCellVisible && strCellVisible) {
+      const intVal = await firstRowIntCell.textContent();
+      const strVal = await firstRowStrCell.textContent();
+      console.log(`📊 Row 0: int_col=${intVal}, str_col=${strVal}`);
+      expect(intVal).toBe('10');
+      expect(strVal).toBe('foo_10');
+    } else {
+      // Try finding cells by content
+      const cell10 = page.locator('.ag-cell:has-text("10")').first();
+      const cellFoo10 = page.locator('.ag-cell:has-text("foo_10")').first();
+      await expect(cell10).toBeVisible({ timeout: DEFAULT_TIMEOUT });
+      await expect(cellFoo10).toBeVisible({ timeout: DEFAULT_TIMEOUT });
+      console.log('📊 Verified row 0 data via text search');
+    }
 
     // Scroll to see later rows and verify predictable pattern
     const viewport = page.locator('.ag-body-viewport').first();

@@ -181,8 +181,8 @@ log "All $PARALLEL servers HTTP-ready — pre-warming Python bytecaches..."
 # startups in batch 1 read from cache instead of compiling simultaneously.
 python3 -c "import buckaroo; import pandas; import polars; print('Pre-warm done')" 2>&1 || \
     python3 -c "import buckaroo; import pandas; print('Pre-warm done (no polars)')" 2>&1 || true
-log "Sleeping 20s for kernel provisioners to initialise..."
-sleep 20
+log "Sleeping 30s for kernel provisioners to initialise..."
+sleep 30
 
 # ── Copy and trust notebooks ──────────────────────────────────────────────────
 
@@ -265,11 +265,11 @@ while [ $NEXT -lt $TOTAL ]; do
     BATCH_USED_PORTS=()
 
     while [ $BATCH_COUNT -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
-        # Stagger batch-1 only: 10s between launches so each kernel has time to
-        # finish heavy Python imports before the next one starts, reducing peak
-        # CPU contention (polars + buckaroo can take ~15s each on first import).
+        # Stagger batch-1 only: 20s between launches to give each kernel time to
+        # finish heavy Python imports before the next one starts (very slack —
+        # will be tightened once this is confirmed passing).
         if [ $BATCH_NUM -eq 0 ] && [ $BATCH_COUNT -gt 0 ]; then
-            sleep 10
+            sleep 20
         fi
         local_nb="${QUEUE[$NEXT]}"
         local_logfile="$TMPDIR/${local_nb%.ipynb}.log"
