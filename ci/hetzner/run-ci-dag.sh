@@ -165,37 +165,47 @@ job_smoke_test_extras() {
 job_playwright_storybook() {
     cd /repo
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-storybook-$$ \
         bash scripts/test_playwright_storybook.sh
 }
 
 job_playwright_server() {
     cd /repo
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-server-$$ \
         bash scripts/test_playwright_server.sh
 }
 
 job_playwright_marimo() {
     cd /repo
+    # UV_PROJECT_ENVIRONMENT: reuse pre-synced 3.13 venv so `uv run marimo`
+    # doesn't race with other jobs creating /repo/.venv from scratch.
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-marimo-$$ \
+    UV_PROJECT_ENVIRONMENT=/opt/venvs/3.13 \
         bash scripts/test_playwright_marimo.sh
 }
 
 job_playwright_wasm_marimo() {
     cd /repo
+    # Same rationale as job_playwright_marimo.
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-wasm-marimo-$$ \
+    UV_PROJECT_ENVIRONMENT=/opt/venvs/3.13 \
         bash scripts/test_playwright_wasm_marimo.sh
 }
 
 job_playwright_jupyter() {
     cd /repo
-    # Use an isolated venv — the shared 3.13 venv may still be in use by
-    # test-python-3.13 running concurrently.
+    # Isolated venv — avoids pip-reinstalling into the shared 3.13 venv while
+    # marimo/wasm-marimo jobs are reading from it in parallel.
     local venv=/tmp/ci-jupyter-$$
     uv venv "$venv" --python 3.13 -q
     local wheel
     wheel=$(ls dist/buckaroo-*.whl | head -1)
     uv pip install --python "$venv/bin/python" "$wheel" polars jupyterlab -q
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
         bash scripts/test_playwright_jupyter.sh --venv-location="$venv"
     rm -rf "$venv"
 }
