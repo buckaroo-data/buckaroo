@@ -72,14 +72,12 @@ Python 3.14.0a5 is skipped entirely — segfaults on pytest startup (CPython pre
 
 ---
 
-## Final Clean Run Results
+## Clean Run Results (Run 6 — cold caches)
 
 **Commit:** `7b6a05c` (latest main)
 **Run:** 21:00:04 → 21:09:03 UTC
 **Total wall time: 8m59s**
 **Result: ALL JOBS PASSED**
-
-### Phase Timing
 
 | Phase | Jobs | Wall time |
 |---|---|---|
@@ -89,30 +87,57 @@ Python 3.14.0a5 is skipped entirely — segfaults on pytest startup (CPython pre
 | Phase 4 (parallel) | test-mcp-wheel, smoke-test-extras | 23s |
 | Phase 5 (sequential) | playwright × 5 | 4m42s |
 
-### Individual Job Timings (Phase 5)
+---
 
-| Job | Time |
-|---|---|
-| playwright-storybook | 20s |
-| playwright-server | 57s |
-| playwright-marimo | 53s |
-| playwright-wasm-marimo | 34s |
-| playwright-jupyter | 1m35s |
+## Warm Cache Run Results (Run 7)
 
-### Notes
+**Commit:** `7b6a05c` (same)
+**Run:** 02:26:13 → 02:34:36 UTC
+**Total wall time: 8m23s**
+**Result: ALL JOBS PASSED**
 
-- Phase 3 (sequential Python) is the wall-time bottleneck. Parallelising 3.11/3.12 would save ~80s but requires CPU budgeting consideration.
-- playwright-jupyter is slower than others (~95s vs ~35s in earlier failed runs) — likely because JupyterLab now actually starts and runs all 9 notebooks.
-- Total is ~9 minutes vs Depot CI benchmark of ~12 minutes (from research doc). Competitive even before any tuning.
-- Warm cache runs (lockfiles unchanged) will be faster — the rebuild_deps step (uv sync + pnpm install + playwright reinstall) adds ~30s that won't happen on subsequent runs.
+| Phase | Jobs | Wall time |
+|---|---|---|
+| Phase 1 (parallel) | lint-python, test-js, test-python-3.13 | 1m13s |
+| Phase 2 | build-wheel | 20s |
+| Phase 3 (sequential) | test-python-3.11, 3.12, 3.14 | 2m23s |
+| Phase 4 (parallel) | test-mcp-wheel, smoke-test-extras | 20s |
+| Phase 5 (sequential) | playwright × 5 | 4m05s |
+
+**Warm vs cold delta: ~36s** — saved mainly in Phase 1 (pnpm/uv sync skipped) and Phase 5 (no playwright install).
+
+---
+
+## Run 8 — Phase 3 Parallelised
+
+**Commit:** `7b6a05c`
+**Run:** 02:44:02 → 02:51:23 UTC
+**Total wall time: 7m21s**
+**Result: ALL JOBS PASSED**
+
+| Phase | Jobs | Wall time |
+|---|---|---|
+| Phase 1 (parallel) | lint-python, test-js, test-python-3.13 | 1m18s |
+| Phase 2 | build-wheel | 23s |
+| Phase 3 (parallel) | test-python-3.11, 3.12, 3.14 | **1m16s** (was 2m23s) |
+| Phase 4 (parallel) | test-mcp-wheel, smoke-test-extras | 20s |
+| Phase 5 (sequential) | playwright × 5 | 4m04s |
+
+**Phase 3 saving: 1m07s** — 3.11 (1m14s) and 3.12 (1m16s) ran concurrently.
+
+### Summary Notes
+
+- **7m21s** is now the steady-state benchmark. Depot was ~12 minutes; CCX33 is ~40% faster.
+- playwright-jupyter dominates Phase 5 (~93s) — it starts JupyterLab and runs all 9 notebooks.
+- The dep-rebuild step (lockfiles changed) adds ~36s; happens on <5% of pushes.
+- Further gains possible by parallelising playwright tests that don't conflict on ports.
 
 ---
 
 ## Next Steps
 
-1. Run a second clean run to verify warm-cache timing
-2. Add git server (bare repo + post-receive hook) for push-triggered runs
-3. Add GITHUB_TOKEN + webhook for PR status integration
-4. Investigate `cffi` source compilation — should be using manylinux wheels
-5. Tune mp_timeout values for Docker (forkserver spawn latency ~1.5s on CCX33)
-6. Consider running Python 3.11/3.12 in parallel (Phase 3) — would save ~80s wall time
+1. Add git server (bare repo + post-receive hook) for push-triggered runs
+2. Add GITHUB_TOKEN + webhook for PR status integration
+3. Investigate `cffi` source compilation — should be using manylinux wheels
+4. Tune mp_timeout values for Docker (forkserver spawn latency ~1.5s on CCX33)
+5. Consider running Python 3.11/3.12 in parallel (Phase 3) — would save ~80s wall time
