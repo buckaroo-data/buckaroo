@@ -144,30 +144,8 @@ rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
 
 export JUPYTER_TOKEN
 
-# Start one JupyterLab server per parallel slot
-for slot in $(seq 0 $((PARALLEL-1))); do
-    port=$((BASE_PORT + slot))
-    python -m jupyter lab --no-browser --port=$port \
-        --ServerApp.token=$JUPYTER_TOKEN --ServerApp.allow_origin='*' \
-        --ServerApp.disable_check_xsrf=True --allow-root &
-    JUPYTER_PIDS[$slot]=$!
-    log "JupyterLab slot $slot (port $port) PID: ${JUPYTER_PIDS[$slot]}"
-done
-
-# Wait for all servers to be ready
-for slot in $(seq 0 $((PARALLEL-1))); do
-    port=$((BASE_PORT + slot))
-    for i in $(seq 1 30); do
-        curl -sf "http://localhost:$port/lab?token=$JUPYTER_TOKEN" >/dev/null 2>&1 && break
-        [ "$i" -eq 30 ] && { err "JupyterLab on port $port failed to start"; exit 1; }
-        sleep 1
-    done
-    ok "JupyterLab ready on port $port (slot $slot)"
-done
-
-# ── Kernel gateway warmup (one warmup kernel per server) ─────────────────────
-# Ensures each server's kernel provisioner is fully initialised before
-# the first test batch runs on that server.
+# ── Kernel gateway warmup ─────────────────────────────────────────────────────
+# Defined before the server startup loop so it can be called inline.
 
 warmup_server() {
     local port=$1
@@ -196,9 +174,29 @@ warmup_server() {
     fi
 }
 
-log "Warming up kernel gateways on $PARALLEL servers..."
+log "Starting $PARALLEL isolated JupyterLab servers (sequential — one at a time)..."
 for slot in $(seq 0 $((PARALLEL-1))); do
-    warmup_server $((BASE_PORT + slot))
+    port=$((BASE_PORT + slot))
+    jupyter lab --no-browser --port="$port" \
+        --ServerApp.token="$JUPYTER_TOKEN" \
+        --ServerApp.allow_origin='*' \
+        --ServerApp.disable_check_xsrf=True \
+        --allow-root \
+        >/tmp/jupyter-port${port}-$$.log 2>&1 &
+    JUPYTER_PIDS[$slot]=$!
+    log "  Waiting for JupyterLab on port $port (pid ${JUPYTER_PIDS[$slot]})..."
+    started=false
+    for i in $(seq 1 30); do
+        curl -sf "http://localhost:${port}/api?token=${JUPYTER_TOKEN}" >/dev/null 2>&1 && { started=true; break; }
+        sleep 1
+    done
+    if [ "$started" = false ]; then
+        err "JupyterLab on port $port failed to start"
+        cat "/tmp/jupyter-port${port}-$$.log" || true
+        exit 1
+    fi
+    ok "  JupyterLab ready on port $port (slot $slot)"
+    warmup_server "$port"
 done
 
 # ── Copy and trust notebooks ──────────────────────────────────────────────────
