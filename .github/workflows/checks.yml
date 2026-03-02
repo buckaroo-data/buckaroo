@@ -92,7 +92,7 @@ jobs:
       - name: Build JS extension + Python wheel
         run: ./scripts/full_build.sh
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: buckaroo-build
           path: |
@@ -401,7 +401,7 @@ jobs:
         run: bash scripts/test_playwright_screenshots.sh
       - name: Upload Theme Screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: theme-screenshots
           path: packages/buckaroo-js-core/screenshots/
@@ -494,14 +494,14 @@ jobs:
       # ── Upload artifacts ──
       - name: Upload before screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: styling-screenshots-before
           path: packages/buckaroo-js-core/screenshots/before/
           if-no-files-found: ignore
       - name: Upload after screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: styling-screenshots-after
           path: packages/buckaroo-js-core/screenshots/after/
