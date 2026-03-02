@@ -165,16 +165,17 @@ shutdown_kernels() {
     local kernels
     kernels=$(curl -s "http://localhost:$JUPYTER_PORT/api/kernels?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
     if [ "$kernels" != "[]" ] && [ -n "$kernels" ]; then
+        # || true: grep returns exit 1 when no IDs found; don't let pipefail kill script
         echo "$kernels" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"$//' | while read -r kid; do
             curl -s -X DELETE "http://localhost:$JUPYTER_PORT/api/kernels/$kid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
-        done
+        done || true
     fi
     local sessions
     sessions=$(curl -s "http://localhost:$JUPYTER_PORT/api/sessions?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
     if [ "$sessions" != "[]" ] && [ -n "$sessions" ]; then
         echo "$sessions" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"$//' | while read -r sid; do
             curl -s -X DELETE "http://localhost:$JUPYTER_PORT/api/sessions/$sid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
-        done
+        done || true
     fi
     sleep 0.5
 }
@@ -223,10 +224,11 @@ TMPDIR=$(mktemp -d -t pw-jupyter-parallelXXXXXX)
 PASSED=0
 FAILED_LIST=()
 NEXT=0
+declare -A BATCH_PIDS
 
 while [ $NEXT -lt $TOTAL ]; do
     # Start up to PARALLEL notebooks
-    declare -A BATCH_PIDS
+    unset BATCH_PIDS; declare -A BATCH_PIDS
     BATCH_COUNT=0
     while [ $BATCH_COUNT -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
         local_nb="${QUEUE[$NEXT]}"
