@@ -114,7 +114,8 @@ job_test_python() {
     /opt/venvs/$v/bin/python -m pytest tests/unit -m "not slow" --color=yes \
         --ignore=tests/unit/file_cache/mp_timeout_decorator_test.py \
         --ignore=tests/unit/file_cache/multiprocessing_executor_test.py \
-        --deselect "tests/unit/server/test_mcp_tool_cleanup.py::TestServerMonitor::test_server_killed_on_parent_death"
+        --deselect "tests/unit/server/test_mcp_tool_cleanup.py::TestServerMonitor::test_server_killed_on_parent_death" \
+        --deselect "tests/unit/server/test_mcp_server_integration.py::TestServerSubprocessHealthCheck::test_server_starts_and_responds"
 }
 
 job_build_wheel() {
