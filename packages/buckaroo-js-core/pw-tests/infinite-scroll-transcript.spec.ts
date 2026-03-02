@@ -4,7 +4,7 @@ import { Page } from '@playwright/test';
 const JUPYTER_BASE_URL = process.env.JUPYTER_BASE_URL || 'http://localhost:8889';
 const JUPYTER_TOKEN = process.env.JUPYTER_TOKEN || 'test-token-12345';
 const DEFAULT_TIMEOUT = 10000;
-const CELL_EXEC_TIMEOUT = 30000; // kernel startup can be slow when 3 run concurrently
+const CELL_EXEC_TIMEOUT = 45000; // kernel startup can be slow when 3 run concurrently
 const NAVIGATION_TIMEOUT = 12000;
 
 async function waitForAgGrid(page: Page, timeout = 5000) {
@@ -338,7 +338,7 @@ test.describe('Infinite Scroll Transcript Recording', () => {
       const viewport = page.locator('.ag-body-viewport').first();
       if (await viewport.count() > 0) {
         await viewport.evaluate(el => el.scrollTop = 0);
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(2000);
       }
     } catch (e) { /* non-fatal */ }
 

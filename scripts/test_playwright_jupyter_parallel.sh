@@ -254,6 +254,7 @@ FAILED_LIST=()
 declare -A LOGFILES
 QUEUE=("${NOTEBOOKS[@]}")
 NEXT=0
+BATCH_NUM=0
 
 TMPDIR=$(mktemp -d -t pw-jupyter-parallelXXXXXX)
 
@@ -264,6 +265,12 @@ while [ $NEXT -lt $TOTAL ]; do
     BATCH_USED_PORTS=()
 
     while [ $BATCH_COUNT -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
+        # Stagger batch-1 only: 5s between launches so each kernel warms
+        # Python bytecaches before the next one starts, reducing peak I/O
+        # contention during first-run package imports.
+        if [ $BATCH_NUM -eq 0 ] && [ $BATCH_COUNT -gt 0 ]; then
+            sleep 5
+        fi
         local_nb="${QUEUE[$NEXT]}"
         local_logfile="$TMPDIR/${local_nb%.ipynb}.log"
         local_port=$((BASE_PORT + BATCH_COUNT))
@@ -297,6 +304,7 @@ while [ $NEXT -lt $TOTAL ]; do
             shutdown_kernels_on_port "$p"
         done
     fi
+    ((BATCH_NUM++)) || true
 done
 
 # ── Summary ───────────────────────────────────────────────────────────────────
