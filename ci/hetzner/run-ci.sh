@@ -202,7 +202,8 @@ job_playwright_jupyter() {
     uv pip install --python "$venv/bin/python" "$wheel" polars jupyterlab -q
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
-        bash scripts/test_playwright_jupyter.sh --venv-location="$venv"
+    PARALLEL=9 \
+        bash scripts/test_playwright_jupyter_parallel.sh --venv-location="$venv"
     rm -rf "$venv"
 }
 
