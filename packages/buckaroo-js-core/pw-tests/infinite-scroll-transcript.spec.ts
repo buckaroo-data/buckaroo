@@ -4,6 +4,7 @@ import { Page } from '@playwright/test';
 const JUPYTER_BASE_URL = 'http://localhost:8889';
 const JUPYTER_TOKEN = 'test-token-12345';
 const DEFAULT_TIMEOUT = 10000;
+const CELL_EXEC_TIMEOUT = 20000; // kernel startup can be slow when 2 run concurrently
 const NAVIGATION_TIMEOUT = 12000;
 
 async function waitForAgGrid(page: Page, timeout = 5000) {
@@ -43,7 +44,7 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     // Wait for cell execution — wait for output to appear rather than a fixed delay
     console.log('⏳ Waiting for cell execution...');
     const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: CELL_EXEC_TIMEOUT });
     console.log('✅ Cell executed');
 
     // Wait for widget to render — deterministic wait for actual elements
@@ -328,7 +329,7 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.keyboard.press('Shift+Enter');
 
     const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: CELL_EXEC_TIMEOUT });
 
     await waitForAgGrid(page);
 

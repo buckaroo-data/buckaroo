@@ -4,6 +4,7 @@ import { Page } from '@playwright/test';
 const JUPYTER_BASE_URL = 'http://localhost:8889';
 const JUPYTER_TOKEN = 'test-token-12345';
 const DEFAULT_TIMEOUT = 8000; // 8 seconds for most operations
+const CELL_EXEC_TIMEOUT = 20000; // kernel startup can be slow when 2 run concurrently
 const NAVIGATION_TIMEOUT = 10000; // 10 seconds max for navigation
 
 async function waitForAgGrid(outputArea: any, timeout = 5000) {
@@ -118,7 +119,7 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     // Wait for cell execution to complete — wait for output to appear rather than a fixed delay
     console.log('⏳ Waiting for cell execution...');
     const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: CELL_EXEC_TIMEOUT });
     console.log('✅ Cell executed');
 
     // Check for any error messages in the output
