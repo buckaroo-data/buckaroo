@@ -351,8 +351,8 @@ test.describe('Infinite Scroll Transcript Recording', () => {
       // Try finding cells by content
       const cell10 = page.locator('.ag-cell:has-text("10")').first();
       const cellFoo10 = page.locator('.ag-cell:has-text("foo_10")').first();
-      await expect(cell10).toBeVisible({ timeout: 3000 });
-      await expect(cellFoo10).toBeVisible({ timeout: 3000 });
+      await expect(cell10).toBeVisible({ timeout: DEFAULT_TIMEOUT });
+      await expect(cellFoo10).toBeVisible({ timeout: DEFAULT_TIMEOUT });
       console.log('📊 Verified row 0 data via text search');
     }
 
