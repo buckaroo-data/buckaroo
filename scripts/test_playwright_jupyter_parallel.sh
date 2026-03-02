@@ -200,8 +200,8 @@ start_next() {
     run_one "$nb" "$NEXT" "$logfile" &
     PIDS[$!]="$nb"
     log "START [$((NEXT+1))/$TOTAL] $nb"
-    ((NEXT++))
-    ((RUNNING++))
+    ((NEXT++)) || true
+    ((RUNNING++)) || true
 }
 
 # Fill initial batch
@@ -230,10 +230,10 @@ while [ $RUNNING -gt 0 ]; do
             set -e
             nb="${PIDS[$pid]}"
             unset "PIDS[$pid]"
-            ((RUNNING--))
+            ((RUNNING--)) || true
             if [ $rc -eq 0 ]; then
                 ok "  PASS $nb"
-                ((PASSED++))
+                ((PASSED++)) || true
             else
                 err "  FAIL $nb (see ${LOGFILES[$nb]})"
                 FAILED_LIST+=("$nb")
@@ -249,11 +249,11 @@ while [ $RUNNING -gt 0 ]; do
 
     nb="${PIDS[$DONE_PID]}"
     unset "PIDS[$DONE_PID]"
-    ((RUNNING--))
+    ((RUNNING--)) || true
 
     if [ $rc -eq 0 ]; then
         ok "  PASS $nb"
-        ((PASSED++))
+        ((PASSED++)) || true
     else
         err "  FAIL $nb (see ${LOGFILES[$nb]})"
         FAILED_LIST+=("$nb")
