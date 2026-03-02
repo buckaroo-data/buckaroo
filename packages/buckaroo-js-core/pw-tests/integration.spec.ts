@@ -115,12 +115,10 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     await page.waitForTimeout(200);
     await page.keyboard.press('Shift+Enter');
 
-    // Wait for cell execution to complete
+    // Wait for cell execution to complete — wait for output to appear rather than a fixed delay
     console.log('⏳ Waiting for cell execution...');
     const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    // Wait for widget to render
-    await page.waitForTimeout(800);
+    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Cell executed');
 
     // Check for any error messages in the output
@@ -133,25 +131,12 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
         throw new Error(`Cell execution failed with error: ${outputText}`);
     }
 
-    // Wait for the buckaroo widget to appear
+    // Wait for the buckaroo widget to appear — deterministic wait instead of fixed delay
     console.log('⏳ Waiting for buckaroo widget...');
-    
-    // Wait a moment for widget to render
-    await page.waitForTimeout(500);
-    
-    // Check for any buckaroo-related elements and ag-grid on the WHOLE PAGE
-    // (widget might be in a different output area than expected)
+    await page.locator('[class*="buckaroo"], .ag-root-wrapper').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     const buckarooElements = await page.locator('[class*="buckaroo"]').count();
     const agGridElements = await page.locator('.ag-root-wrapper, .ag-row').count();
-    
-    // If we find buckaroo or ag-grid elements, the widget is rendering - proceed
-    if (buckarooElements > 0 || agGridElements > 0) {
-        console.log(`✅ Found ${buckarooElements} buckaroo elements, ${agGridElements} ag-grid elements on page`);
-    } else {
-        // Only fail if we truly can't find any widget elements
-        console.log('❌ Widget failed to appear. No buckaroo or ag-grid elements found.');
-        throw new Error(`Widget failed to render. Found 0 buckaroo elements, 0 ag-grid elements.`);
-    }
+    console.log(`✅ Found ${buckarooElements} buckaroo elements, ${agGridElements} ag-grid elements on page`);
 
     // Wait for ag-grid to render
     console.log('⏳ Waiting for ag-grid to render...');

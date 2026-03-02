@@ -40,29 +40,18 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.waitForTimeout(200);
     await page.keyboard.press('Shift+Enter');
 
-    // Wait for cell execution and widget to render
+    // Wait for cell execution — wait for output to appear rather than a fixed delay
     console.log('⏳ Waiting for cell execution...');
     const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    await page.waitForTimeout(800);
+    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Cell executed');
 
-    // Wait for widget to render (larger datasets take longer to initialize)
+    // Wait for widget to render — deterministic wait for actual elements
     console.log('⏳ Waiting for buckaroo widget...');
-    await page.waitForTimeout(2000);
-    
-    // Check for buckaroo or ag-grid elements
+    await page.locator('[class*="buckaroo"], .ag-root-wrapper').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     const buckarooElements = await page.locator('[class*="buckaroo"]').count();
     const agGridElements = await page.locator('.ag-root-wrapper, .ag-row').count();
-    
-    if (buckarooElements > 0 || agGridElements > 0) {
-      console.log(`✅ Found ${buckarooElements} buckaroo elements, ${agGridElements} ag-grid elements`);
-    } else {
-      // Wait more for larger datasets
-      await page.waitForTimeout(3000);
-      const retryAgGrid = await page.locator('.ag-root-wrapper').count();
-      expect(retryAgGrid).toBeGreaterThan(0);
-    }
+    console.log(`✅ Found ${buckarooElements} buckaroo elements, ${agGridElements} ag-grid elements`);
     console.log('✅ Widget rendered with ag-grid');
 
     // Wait for ag-grid to be ready
@@ -192,9 +181,15 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     });
     
     console.log(`📊 Scroll result: ${JSON.stringify(scrollResult)}`);
-    
-    // Wait for data fetch to complete
-    await page.waitForTimeout(2000);
+
+    // Wait for grid to render rows at the scrolled position rather than a fixed delay
+    await page.waitForFunction(
+      () => {
+        const rows = document.querySelectorAll('.ag-row[row-index]');
+        return Array.from(rows).some(r => parseInt(r.getAttribute('row-index') || '0', 10) > 100);
+      },
+      { timeout: 10000 }
+    );
 
     // Check what rows are now visible
     const visibleCells = page.locator('.ag-cell');
@@ -333,8 +328,7 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.keyboard.press('Shift+Enter');
 
     const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    await page.waitForTimeout(1500);
+    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
 
     await waitForAgGrid(page);
 

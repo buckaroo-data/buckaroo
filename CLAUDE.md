@@ -40,6 +40,17 @@ Test suite should complete in under 40 seconds. If it doesn't, something is wron
 
 Runs on push to main and PRs. Key jobs: LintPython, TestJS, BuildWheel, TestPython (3.11-3.14), Playwright (Storybook, Jupyter, Marimo, WASM). Uses `depot-ubuntu-latest` runners.
 
+### Hetzner CI (manual/agent pre-push)
+
+Fast self-hosted CI on Hetzner. Trigger: `docker exec buckaroo-ci bash /opt/ci-runner/run-ci.sh <SHA> <BRANCH>`.
+
+**Every time a CI experiment completes, report:**
+- Wallclock total runtime
+- Runtime of each phase (Phase 1 / 2 / 3 / 4 / 5a / 5b)
+- Pass/fail per job
+
+Parse from `/opt/ci/logs/<sha>/ci.log` — lines like `[HH:MM:SS] START/PASS/FAIL <job>`.
+
 ## Architecture Notes
 
 - **Column renaming**: Internally rewrites column names to a,b,c... — use `orig_col_name` to map back to real names.
