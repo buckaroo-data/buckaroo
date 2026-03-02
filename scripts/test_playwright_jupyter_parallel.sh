@@ -157,6 +157,28 @@ for nb in "${NOTEBOOKS[@]}"; do
     cp "tests/integration_notebooks/$nb" "$nb"
 done
 
+# ── Kernel cleanup — delete all running kernels and sessions ─────────────────
+# Called after each notebook finishes so stale kernels don't accumulate
+# across batches and cause WebSocket comm failures for the next batch.
+
+shutdown_kernels() {
+    local kernels
+    kernels=$(curl -s "http://localhost:$JUPYTER_PORT/api/kernels?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
+    if [ "$kernels" != "[]" ] && [ -n "$kernels" ]; then
+        echo "$kernels" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"$//' | while read -r kid; do
+            curl -s -X DELETE "http://localhost:$JUPYTER_PORT/api/kernels/$kid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
+        done
+    fi
+    local sessions
+    sessions=$(curl -s "http://localhost:$JUPYTER_PORT/api/sessions?token=$JUPYTER_TOKEN" 2>/dev/null || echo "[]")
+    if [ "$sessions" != "[]" ] && [ -n "$sessions" ]; then
+        echo "$sessions" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"$//' | while read -r sid; do
+            curl -s -X DELETE "http://localhost:$JUPYTER_PORT/api/sessions/$sid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
+        done
+    fi
+    sleep 0.5
+}
+
 # ── Run one notebook's tests (called in background) ─────────────────────────
 
 run_one() {
@@ -239,8 +261,9 @@ while [ $RUNNING -gt 0 ]; do
                 FAILED_LIST+=("$nb")
                 OVERALL=1
             fi
-            # Start next if available
+            # Start next if available (shut down stale kernels first)
             if [ $NEXT -lt $TOTAL ]; then
+                shutdown_kernels
                 start_next
             fi
         done
@@ -260,8 +283,9 @@ while [ $RUNNING -gt 0 ]; do
         OVERALL=1
     fi
 
-    # Start next if available
+    # Start next if available (shut down stale kernels first)
     if [ $NEXT -lt $TOTAL ]; then
+        shutdown_kernels
         start_next
     fi
 done
