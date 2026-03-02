@@ -329,6 +329,13 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.keyboard.press('Shift+Enter');
 
     const outputArea = page.locator('.jp-OutputArea').first();
+    // If test 1 left output in the DOM, waitFor(attached) would return immediately
+    // before the new kernel output appears. Wait for old output to clear first.
+    try {
+      await outputArea.locator('.jp-OutputArea-output').first().waitFor({
+        state: 'detached', timeout: 8000
+      });
+    } catch (e) { /* no stale output to clear */ }
     await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: CELL_EXEC_TIMEOUT });
 
     await waitForAgGrid(page);
@@ -348,7 +355,7 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     } catch (e) { /* non-fatal */ }
 
     // Wait until row-index="0" is visible in the grid (deterministic, not fixed delay)
-    await page.locator('[row-index="0"]').first().waitFor({ state: 'visible', timeout: DEFAULT_TIMEOUT });
+    await page.locator('[row-index="0"]').first().waitFor({ state: 'visible', timeout: CELL_EXEC_TIMEOUT });
 
     // Verify initial data (row 0 should show int_col=10, str_col=foo_10)
     const firstRowIntCell = page.locator('[row-index="0"] [col-id="int_col"]');
