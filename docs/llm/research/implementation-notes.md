@@ -63,6 +63,15 @@ Upgrading from CCX33 (8 vCPU) to CCX43 (16 vCPU) gave identical timing
 (~5m05s vs ~4m58s). The bottleneck is the sequential critical path, not CPU
 core count. More cores only help if there's parallelisable work waiting on them.
 
+### Why high Jupyter parallelism fails
+Running 9 (or even 3) Jupyter notebooks in parallel while the other 4 playwright
+jobs are also running causes `tornado.iostream.StreamClosedError` — JupyterLab's
+WebSocket connections drop under CPU load. The widget comm channels never
+establish, giving "Comm not found" and "Widget failed to render: 0 elements."
+Fix: run the 4 non-Jupyter playwright tests first (Phase 5a, ~60s), then run
+Jupyter with PARALLEL=3 after CPU is free (Phase 5b). Expected total Phase 5:
+~135s vs old sequential 4m04s.
+
 ### Why the DAG approach failed
 Running all independent jobs simultaneously (9 concurrent on 8 vCPUs) caused:
 - CPU saturation → forkserver tests hit hardcoded 1s timeouts
@@ -72,6 +81,19 @@ The phased approach (P1→P2→P3→P4→P5) naturally throttles concurrency.
 ---
 
 ## Bugs That Will Bite You Again
+
+### `((x++))` with `set -e` exits on zero result
+`(( expression ))` returns exit code 1 when the expression evaluates to 0.
+With `set -e`, `((NEXT++))` when `NEXT=0` kills the script after the first
+background job launches. This burned us: one notebook started, cleanup trap
+fired, JupyterLab was killed. Fix: `((NEXT++)) || true` for all arithmetic
+that can evaluate to 0.
+
+### `cd "$(dirname "$0")/.."` breaks when called from `/opt/ci-runner/`
+Already documented above — same pattern also hit `test_playwright_jupyter_parallel.sh`.
+
+### Linux `mktemp` needs explicit X's
+`mktemp -d -t prefix` fails on Linux ("too few X's"). Use `mktemp -d -t prefixXXXXXX`.
 
 ### `rm -rf` masking exit codes
 ```bash
