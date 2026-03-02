@@ -5,18 +5,16 @@
 #   docker exec -e GITHUB_TOKEN=... -e GITHUB_REPO=... buckaroo-ci \
 #     bash /repo/ci/hetzner/run-ci.sh <sha> <branch> [--phase=PHASE]
 #
-# --phase=all   Run all phases (default)
+# --phase=all   Run all jobs (default, DAG-scheduled)
 # --phase=5b    Skip to playwright-jupyter only, using cached wheel from a
 #               prior full run. Useful for iterating on Jupyter failures.
 #
-# Phases (each captures stdout/stderr to $RESULTS_DIR/<job>.log):
-#   1. Parallel:   lint-python, test-js, test-python-3.13
-#   2. Sequential: build-wheel  → wheel cached to /opt/ci/wheel-cache/$SHA/
-#   3. Parallel:   test-python-3.11, 3.12, 3.14  (separate venvs, no conflicts)
-#   4. Parallel:   test-mcp-wheel, smoke-test-extras
-#   5a. Parallel:  playwright-storybook, playwright-server, playwright-marimo,
-#                  playwright-wasm-marimo  (distinct ports)
-#   5b. Sequential: playwright-jupyter  (PARALLEL=3, each slot own JupyterLab)
+# DAG execution (each captures stdout/stderr to $RESULTS_DIR/<job>.log):
+#   Immediate:     lint-python, test-js, test-python-3.{11,12,13,14},
+#                  playwright-storybook, playwright-marimo, playwright-wasm-marimo
+#   After test-js: build-wheel  → wheel cached to /opt/ci/wheel-cache/$SHA/
+#   After wheel:   test-mcp-wheel, smoke-test-extras, playwright-server,
+#                  playwright-jupyter (PARALLEL=1, isolated JupyterLab)
 
 set -uo pipefail
 
@@ -213,7 +211,7 @@ job_playwright_jupyter() {
     ROOT_DIR=/repo \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
-    PARALLEL=3 \
+    PARALLEL=1 \
         bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" --venv-location="$venv" || rc=$?
     rm -rf "$venv"
     return $rc
@@ -274,19 +272,23 @@ else
     mkdir -p buckaroo/static
     touch buckaroo/static/compiled.css buckaroo/static/widget.js buckaroo/static/widget.css
 
-    # ── Phase 1: LintPython + TestJS + TestPython-3.13 (parallel) ────────────
-    log "=== Phase 1: lint-python, test-js, test-python-3.13 (parallel) ==="
+    # ── Wave 0: All independent jobs (no deps — start immediately) ──────────
+    log "=== Starting all independent jobs ==="
 
-    run_job lint-python         job_lint_python              & P1=$!
-    run_job test-js             job_test_js                  & P2=$!
-    run_job test-python-3.13   bash -c "job_test_python 3.13" & P3=$!
+    run_job lint-python            job_lint_python                & PID_LINT=$!
+    run_job test-js                job_test_js                    & PID_TESTJS=$!
+    run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
+    run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
+    run_job test-python-3.13       bash -c "job_test_python 3.13" & PID_PY313=$!
+    run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
+    run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
+    run_job playwright-marimo      job_playwright_marimo           & PID_PW_MA=$!
+    run_job playwright-wasm-marimo job_playwright_wasm_marimo     & PID_PW_WM=$!
 
-    wait $P1 || OVERALL=1
-    wait $P2 || OVERALL=1
-    wait $P3 || OVERALL=1
+    # ── Wait for test-js only, then build wheel ──────────────────────────────
+    wait $PID_TESTJS || OVERALL=1
+    log "=== test-js done — starting build-wheel ==="
 
-    # ── Phase 2: BuildWheel (after test-js to avoid JS build conflict) ────────
-    log "=== Phase 2: build-wheel ==="
     run_job build-wheel job_build_wheel || OVERALL=1
 
     # Cache wheel by SHA so --phase=5b can skip the build on re-runs.
@@ -294,43 +296,27 @@ else
     cp dist/buckaroo-*.whl "$WHEEL_CACHE_DIR/" 2>/dev/null || true
     log "Cached wheel → $WHEEL_CACHE_DIR"
 
-    # ── Phase 3: TestPython 3.11/3.12/3.14 (parallel — separate venvs) ───────
-    log "=== Phase 3: test-python 3.11/3.12/3.14 (parallel) ==="
+    # ── Wheel-dependent jobs (start as soon as wheel exists) ─────────────────
+    log "=== build-wheel done — starting wheel-dependent jobs ==="
 
-    run_job "test-python-3.11" bash -c "job_test_python 3.11" & P_311=$!
-    run_job "test-python-3.12" bash -c "job_test_python 3.12" & P_312=$!
-    run_job "test-python-3.14" bash -c "job_test_python 3.14" & P_314=$!
+    run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
+    run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
+    run_job playwright-server    job_playwright_server     & PID_PW_SV=$!
+    run_job playwright-jupyter   job_playwright_jupyter    & PID_PW_JP=$!
 
-    wait $P_311 || OVERALL=1
-    wait $P_312 || OVERALL=1
-    wait $P_314 || OVERALL=1
-
-    # ── Phase 4: TestMCPWheel + SmokeTestExtras (parallel, no port conflicts) ─
-    log "=== Phase 4: test-mcp-wheel + smoke-test-extras (parallel) ==="
-
-    run_job test-mcp-wheel      job_test_mcp_wheel     & P4=$!
-    run_job smoke-test-extras   job_smoke_test_extras  & P5=$!
-
-    wait $P4 || OVERALL=1
-    wait $P5 || OVERALL=1
-
-    # ── Phase 5a: Playwright (parallel — each binds to a distinct port) ───────
-    # Ports: storybook=6006, server=8701, marimo=2718, wasm-marimo=8765
-    log "=== Phase 5a: Playwright storybook/server/marimo/wasm-marimo (parallel) ==="
-
-    run_job playwright-storybook    job_playwright_storybook    & P_sb=$!
-    run_job playwright-server       job_playwright_server       & P_srv=$!
-    run_job playwright-marimo       job_playwright_marimo       & P_mar=$!
-    run_job playwright-wasm-marimo  job_playwright_wasm_marimo  & P_wmar=$!
-
-    wait $P_sb   || OVERALL=1
-    wait $P_srv  || OVERALL=1
-    wait $P_mar  || OVERALL=1
-    wait $P_wmar || OVERALL=1
-
-    # ── Phase 5b: Jupyter (after 5a — PARALLEL=3, each slot own JupyterLab) ──
-    log "=== Phase 5b: playwright-jupyter (ports 8889-8891, PARALLEL=3) ==="
-    run_job playwright-jupyter job_playwright_jupyter || OVERALL=1
+    # ── Wait for everything ──────────────────────────────────────────────────
+    wait $PID_LINT    || OVERALL=1
+    wait $PID_PY311   || OVERALL=1
+    wait $PID_PY312   || OVERALL=1
+    wait $PID_PY313   || OVERALL=1
+    wait $PID_PY314   || OVERALL=1
+    wait $PID_PW_SB   || OVERALL=1
+    wait $PID_PW_MA   || OVERALL=1
+    wait $PID_PW_WM   || OVERALL=1
+    wait $PID_MCP     || OVERALL=1
+    wait $PID_SMOKE   || OVERALL=1
+    wait $PID_PW_SV   || OVERALL=1
+    wait $PID_PW_JP   || OVERALL=1
 
 fi
 
