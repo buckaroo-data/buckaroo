@@ -167,9 +167,9 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     // Buckaroo renders multiple ag-grid instances (main data + stats panel);
     // searching the whole outputArea catches Alice in whichever grid she's in.
     // textContent includes visibility:hidden cells (ag-grid column virtualisation).
-    const outputText = await outputArea.evaluate(el => el.textContent || '');
-    expect(outputText).toContain('Alice');
-    expect(outputText).toContain('85.5');
+    const widgetText = await outputArea.evaluate(el => el.textContent || '');
+    expect(widgetText).toContain('Alice');
+    expect(widgetText).toContain('85.5');
 
     console.log(`🎉 SUCCESS: Widget from ${notebookName} rendered ag-grid with ${rowCount} rows, ${headerCount} columns, and ${cellCount} cells`);
     console.log('📊 Verified data: Alice (age 25, score 85.5)');

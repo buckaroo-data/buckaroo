@@ -356,17 +356,17 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     } catch (e) { /* non-fatal */ }
     await page.waitForTimeout(2000); // ag-grid virtual scroll needs time to re-render row 0
 
-    // Wait for row-index=0 to exist in DOM (virtual scroll may still be rebuilding)
-    // Use waitForFunction (not waitFor visible) because ag-grid keeps cells in DOM
-    // as visibility:hidden during column virtualisation.
+    // Wait for the DATA grid's row-index=0 to appear. The stats panel is also an
+    // ag-grid with row-index=0 rows; filter by 'foo_10' which only appears in the data.
     await page.waitForFunction(
-      () => document.querySelector('[row-index="0"]') !== null,
+      () => Array.from(document.querySelectorAll('[row-index="0"]'))
+        .some(el => (el.textContent || '').includes('foo_10')),
       { timeout: DEFAULT_TIMEOUT }
     );
 
     // Verify row 0 data via textContent (robust to visibility:hidden cells)
-    const row0Text = await page.locator('[row-index="0"]').first()
-      .evaluate(el => el.textContent || '');
+    const dataRow0 = page.locator('[row-index="0"]').filter({ hasText: 'foo_10' }).first();
+    const row0Text = await dataRow0.evaluate(el => el.textContent || '');
     console.log(`📊 Row 0 textContent: ${row0Text.slice(0, 80)}`);
     expect(row0Text).toContain('10');
     expect(row0Text).toContain('foo_10');
