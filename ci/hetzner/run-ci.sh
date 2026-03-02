@@ -10,8 +10,8 @@
 #   2. Sequential: build-wheel  (must follow test-js to avoid JS build conflict)
 #   3. Parallel:   test-python-3.11, 3.12, 3.14  (separate venvs, no conflicts)
 #   4. Parallel:   test-mcp-wheel, smoke-test-extras
-#   5. Sequential: playwright-storybook, playwright-server, playwright-marimo,
-#                  playwright-wasm-marimo, playwright-jupyter  (port conflicts)
+#   5. Parallel:   playwright-storybook, playwright-server, playwright-marimo,
+#                  playwright-wasm-marimo, playwright-jupyter  (distinct ports)
 
 set -uo pipefail
 
@@ -161,24 +161,28 @@ job_smoke_test_extras() {
 job_playwright_storybook() {
     cd /repo
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-storybook-$$ \
         bash scripts/test_playwright_storybook.sh
 }
 
 job_playwright_server() {
     cd /repo
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-server-$$ \
         bash scripts/test_playwright_server.sh
 }
 
 job_playwright_marimo() {
     cd /repo
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-marimo-$$ \
         bash scripts/test_playwright_marimo.sh
 }
 
 job_playwright_wasm_marimo() {
     cd /repo
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-wasm-marimo-$$ \
         bash scripts/test_playwright_wasm_marimo.sh
 }
 
@@ -188,6 +192,7 @@ job_playwright_jupyter() {
     /opt/venvs/3.13/bin/pip install --force-reinstall \
         "$(ls dist/buckaroo-*.whl | head -1)" polars jupyterlab -q
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
         bash scripts/test_playwright_jupyter.sh --venv-location=/opt/venvs/3.13
 }
 
@@ -231,14 +236,21 @@ run_job smoke-test-extras   job_smoke_test_extras  & P5=$!
 wait $P4 || OVERALL=1
 wait $P5 || OVERALL=1
 
-# ── Phase 5: Playwright (sequential — each binds to a fixed port) ─────────────
-log "=== Phase 5: Playwright tests (sequential) ==="
+# ── Phase 5: Playwright (parallel — each binds to a distinct port) ────────────
+# Ports: storybook=6006, server=8701, marimo=2718, wasm-marimo=8765, jupyter=8889
+log "=== Phase 5: Playwright tests (parallel) ==="
 
-run_job playwright-storybook    job_playwright_storybook    || OVERALL=1
-run_job playwright-server       job_playwright_server       || OVERALL=1
-run_job playwright-marimo       job_playwright_marimo       || OVERALL=1
-run_job playwright-wasm-marimo  job_playwright_wasm_marimo  || OVERALL=1
-run_job playwright-jupyter      job_playwright_jupyter      || OVERALL=1
+run_job playwright-storybook    job_playwright_storybook    & P_sb=$!
+run_job playwright-server       job_playwright_server       & P_srv=$!
+run_job playwright-marimo       job_playwright_marimo       & P_mar=$!
+run_job playwright-wasm-marimo  job_playwright_wasm_marimo  & P_wmar=$!
+run_job playwright-jupyter      job_playwright_jupyter      & P_jup=$!
+
+wait $P_sb   || OVERALL=1
+wait $P_srv  || OVERALL=1
+wait $P_mar  || OVERALL=1
+wait $P_wmar || OVERALL=1
+wait $P_jup  || OVERALL=1
 
 # ── Final status ─────────────────────────────────────────────────────────────
 
