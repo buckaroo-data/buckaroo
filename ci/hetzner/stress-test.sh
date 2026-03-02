@@ -4,6 +4,7 @@
 # Usage:
 #   bash ci/hetzner/stress-test.sh                  # run all safe (passing) commits
 #   bash ci/hetzner/stress-test.sh --dag             # use run-ci-dag.sh
+#   bash ci/hetzner/stress-test.sh --stagger DELAY_PY311=15 DELAY_PY312=15
 #   bash ci/hetzner/stress-test.sh --set=failing     # run known-failing commits
 #   bash ci/hetzner/stress-test.sh --set=older       # run older Jan/Feb commits
 #   bash ci/hetzner/stress-test.sh --set=all         # run all commit sets
@@ -43,16 +44,19 @@ LIMIT=0
 DRY_RUN=false
 COMMIT_SET="safe"
 CUSTOM_SHAS=()
+DOCKER_ENV_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --dag)       RUNNER="run-ci-dag.sh"; shift ;;
+        --stagger)   RUNNER="run-ci-dag-stagger.sh"; shift ;;
         --limit=*)   LIMIT="${1#*=}"; shift ;;
         --limit)     LIMIT="$2"; shift 2 ;;
         --dry-run)   DRY_RUN=true; shift ;;
         --runner=*)  RUNNER="${1#*=}"; shift ;;
         --set=*)     COMMIT_SET="${1#*=}"; shift ;;
         --set)       COMMIT_SET="$2"; shift 2 ;;
+        DELAY_PY*=*) DOCKER_ENV_ARGS+=("-e" "$1"); shift ;;
         *)           CUSTOM_SHAS+=("$1"); shift ;;
     esac
 done
@@ -247,7 +251,7 @@ run_commit() {
     start_ts=$(date +%s)
 
     # Run CI on the server, capture exit code
-    ssh "$SERVER" "docker exec $CONTAINER \
+    ssh "$SERVER" "docker exec ${DOCKER_ENV_ARGS[*]} $CONTAINER \
         bash /opt/ci-runner/$RUNNER $sha main \
         > $logfile 2>&1" \
         </dev/null
