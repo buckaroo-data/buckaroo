@@ -51,6 +51,8 @@ run_job() {
 
 status_pending "$SHA" "ci/hetzner" "Running CI..." "$LOG_URL"
 
+RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
+log "CI runner: $RUNNER_VERSION"
 log "Checkout $SHA (branch: $BRANCH)"
 cd "$REPO_DIR"
 git fetch origin
