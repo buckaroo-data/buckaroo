@@ -172,6 +172,46 @@ This is a known issue with pyo3-0.26.0 + Polars on Python 3.11 under high memory
 
 ---
 
+## Exp 8 — PARALLEL=3, 60-iteration warmup (68fd933)
+
+Same as exp7 but warmup increased to 60 iterations (30s). Still shows `state=starting` on
+all 3 servers. 2/9 fail: `test_buckaroo_infinite_widget` and `test_infinite_scroll_transcript`.
+
+**Root cause discovered**: JupyterLab's REST API (`/api/kernels/{id}`) only reports `idle`
+after a WebSocket client connects to the kernel on IOPub channel. A REST-only warmup poll
+will never see `idle` — the kernel stays in `starting` indefinitely from the REST API's
+perspective. The warmup kernels are real processes that we then DELETE while still in
+`starting` state. The delete request is sent but the kernel process doesn't terminate
+immediately. By the time batch 1 starts, 2-3 ghost kernel processes are consuming CPU,
+slowing down the real test kernels.
+
+**Fix**: Remove warmup entirely. Sleep 20s once after all servers are HTTP-ready.
+
+---
+
+## Exp 9 — PARALLEL=3, 60-iteration warmup, fixed timeout in spec (2c3d5a7)
+
+Both spec fixes and 60-iteration warmup. 3/9 fail — WORSE than exp7.
+The longer warmup timeout means more time for ghost processes to accumulate.
+
+---
+
+## Infrastructure: Wheel cache + --phase=5b (bf904a8 / 92a99aa)
+
+Added two improvements to speed up iteration:
+
+1. **Wheel cache**: After `build-wheel` passes, `run-ci.sh` copies `dist/*.whl` to
+   `/opt/ci/wheel-cache/$SHA/`. Persists in the container across runs.
+
+2. **`--phase=5b` flag**: `run-ci.sh <SHA> <BRANCH> --phase=5b` skips phases 1-4,
+   loads the cached wheel, and runs only `playwright-jupyter`. Iteration time: ~2min
+   instead of ~6min.
+
+3. **Warmup replacement**: Removed per-server warmup kernels. Single `sleep 20` after
+   all servers are HTTP-ready. No ghost kernel processes.
+
+---
+
 ## Timing Targets
 
 Critical path (minimum possible): `test-js(24s) → build-wheel(22s) → playwright-jupyter`
