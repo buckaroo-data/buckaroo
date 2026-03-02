@@ -253,11 +253,62 @@ Headroom is comfortable; CCX43 is not over-provisioned for this workload.
 
 ---
 
+## Purpose and Design Intent
+
+This CI system is built for **manual and agent-driven use before pushing to GitHub** —
+not for PR status automation. Think of it as syntax highlighting for LLMs: fast,
+low-friction feedback on a commit while still on the local branch. The webhook and
+GITHUB_TOKEN integration are explicitly out of scope; the trigger is always a direct
+`docker exec` call by a human or agent.
+
+Implications for prioritisation:
+- Speed and reliability matter most — false positives waste agent iteration cycles
+- Webhook/PR-status integration is not a goal
+- The runner should be usable with a single SSH command or script call, no GitHub setup required
+
+---
+
 ## What's Left
+
+### Speed — critical path is 2m49s
+
+The entire suite currently runs in ~6min on CCX43. The theoretical minimum
+(critical path with ∞ cores) is **2m49s**: `test-js(24s) → build-wheel(22s) → playwright-jupyter(2m03s)`.
+Nothing else can beat this without shortening the playwright-jupyter leg.
+
+| Item | Expected saving | Notes |
+|------|----------------|-------|
+| PARALLEL=3 for Phase 5b | ~45s off total | Batch-1 timing flake is now fixed (kernel warmup). Ready to retry. |
+| Fix Playwright static waits (`waitForTimeout`) | Reduces playwright-jupyter from 2m03s; unblocks PARALLEL=4+ | The spec uses hardcoded 800ms+500ms waits instead of `waitFor` conditions. This is the main critical-path bottleneck and the prerequisite for any further parallelism gains. |
+| Downgrade CCX43 → CCX33 | Cost only, no speed change | Benchmarked identical timing on 8 vs 16 vCPU — bottleneck is the sequential critical path, not cores. CCX43 is paying for unused capacity. |
+
+### Reliability
 
 | Item | Notes |
 |------|-------|
-| PARALLEL=3 for Phase 5b | Tested and reverted — batch-1 timing fails. Needs Playwright spec fix first |
-| Webhook + GITHUB_TOKEN | For automatic PR status; currently all runs are manual |
-| `cffi` source compilation | Should be using manylinux wheels; investigate why uv falls back to source |
-| `mp_timeout` Docker tuning | forkserver spawn is ~1.5s on CCX43; tests hardcoded to 1.0s — defer, requires code changes |
+| Flaky `test_lazy_widget_status_and_messages` | Timing-sensitive async widget tests that occasionally fail under parallel Phase 3 CPU load. Rerunning reliably passes. Root fix is in the test spec (proper async assertions). |
+| `cffi` source compilation | `uv` falls back to building cffi from source instead of manylinux wheels on dep-change runs. Investigate wheel availability for the target platform. |
+| `mp_timeout` Docker tuning | forkserver spawn is ~1.5s on CCX43; tests hardcoded to 1.0s — requires code changes, deferred. |
+
+### Uncontended job timings (fcfe368, serial run)
+
+Measured with `run-ci-serial.sh` — each job runs alone with no parallel contention:
+
+| Job | Time |
+|-----|------|
+| lint-python | 0s |
+| test-js | 24s |
+| test-python-3.11/3.12/3.13 | ~63s each |
+| test-python-3.14 | 0s (skipped) |
+| build-wheel | 22s |
+| test-mcp-wheel | 12s |
+| smoke-test-extras | 20s |
+| playwright-storybook | 10s |
+| playwright-server | 58s |
+| playwright-marimo | 56s |
+| playwright-wasm-marimo | 35s |
+| playwright-jupyter | 2m03s |
+
+These are the numbers to optimise against. The Python test jobs each take ~63s
+uncontended but only ~75s even when three run in parallel — good CPU efficiency.
+playwright-jupyter dominates; fixing its static waits is the highest-leverage change.
