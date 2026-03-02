@@ -3,23 +3,36 @@
 #
 # Called by webhook.py via:
 #   docker exec -e GITHUB_TOKEN=... -e GITHUB_REPO=... buckaroo-ci \
-#     bash /repo/ci/hetzner/run-ci.sh <sha> <branch>
+#     bash /repo/ci/hetzner/run-ci.sh <sha> <branch> [--phase=PHASE]
+#
+# --phase=all   Run all phases (default)
+# --phase=5b    Skip to playwright-jupyter only, using cached wheel from a
+#               prior full run. Useful for iterating on Jupyter failures.
 #
 # Phases (each captures stdout/stderr to $RESULTS_DIR/<job>.log):
 #   1. Parallel:   lint-python, test-js, test-python-3.13
-#   2. Sequential: build-wheel  (must follow test-js to avoid JS build conflict)
+#   2. Sequential: build-wheel  → wheel cached to /opt/ci/wheel-cache/$SHA/
 #   3. Parallel:   test-python-3.11, 3.12, 3.14  (separate venvs, no conflicts)
 #   4. Parallel:   test-mcp-wheel, smoke-test-extras
-#   5. Parallel:   playwright-storybook, playwright-server, playwright-marimo,
-#                  playwright-wasm-marimo, playwright-jupyter  (distinct ports)
+#   5a. Parallel:  playwright-storybook, playwright-server, playwright-marimo,
+#                  playwright-wasm-marimo  (distinct ports)
+#   5b. Sequential: playwright-jupyter  (PARALLEL=3, each slot own JupyterLab)
 
 set -uo pipefail
 
-SHA=${1:?usage: run-ci.sh SHA BRANCH}
-BRANCH=${2:?usage: run-ci.sh SHA BRANCH}
+SHA=${1:?usage: run-ci.sh SHA BRANCH [--phase=PHASE]}
+BRANCH=${2:?usage: run-ci.sh SHA BRANCH [--phase=PHASE]}
+
+PHASE=all
+for arg in "${@:3}"; do
+    case "$arg" in
+        --phase=*) PHASE="${arg#*=}" ;;
+    esac
+done
 
 REPO_DIR=/repo
 RESULTS_DIR=/opt/ci/logs/$SHA
+WHEEL_CACHE_DIR=/opt/ci/wheel-cache/$SHA
 LOG_URL="http://${HETZNER_SERVER_IP:-localhost}:9000/logs/$SHA"
 OVERALL=0
 
@@ -49,10 +62,10 @@ run_job() {
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 
-status_pending "$SHA" "ci/hetzner" "Running CI..." "$LOG_URL"
+status_pending "$SHA" "ci/hetzner" "Running CI (phase=$PHASE)..." "$LOG_URL"
 
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
-log "CI runner: $RUNNER_VERSION"
+log "CI runner: $RUNNER_VERSION  phase=$PHASE"
 log "Checkout $SHA (branch: $BRANCH)"
 cd "$REPO_DIR"
 git fetch origin
@@ -62,20 +75,6 @@ git clean -fdx \
     --exclude='packages/buckaroo-js-core/node_modules' \
     --exclude='packages/js/node_modules' \
     --exclude='packages/node_modules'
-
-# Lockfile check — rebuild deps only when lockfiles changed (~5% of pushes).
-if lockcheck_valid; then
-    log "Lockfiles unchanged — using warm caches"
-else
-    log "Lockfiles changed — rebuilding deps"
-    rebuild_deps
-    lockcheck_update
-fi
-
-# Create empty static files so Python unit tests can import buckaroo before
-# BuildWheel runs. BuildWheel overwrites these with real artifacts.
-mkdir -p buckaroo/static
-touch buckaroo/static/compiled.css buckaroo/static/widget.js buckaroo/static/widget.css
 
 # ── Job definitions ──────────────────────────────────────────────────────────
 
@@ -225,63 +224,107 @@ export -f job_lint_python job_test_js job_test_python job_build_wheel \
            job_playwright_storybook job_playwright_server job_playwright_marimo \
            job_playwright_wasm_marimo job_playwright_jupyter
 
-# ── Phase 1: LintPython + TestJS + TestPython-3.13 (parallel) ────────────────
-log "=== Phase 1: lint-python, test-js, test-python-3.13 (parallel) ==="
+# ── Phase routing ─────────────────────────────────────────────────────────────
 
-run_job lint-python         job_lint_python              & P1=$!
-run_job test-js             job_test_js                  & P2=$!
-run_job test-python-3.13   bash -c "job_test_python 3.13" & P3=$!
+if [[ "$PHASE" == "5b" ]]; then
 
-wait $P1 || OVERALL=1
-wait $P2 || OVERALL=1
-wait $P3 || OVERALL=1
+    # ── Standalone Phase 5b — uses cached wheel from a prior full run ─────────
+    wheel_path=$(ls "$WHEEL_CACHE_DIR"/buckaroo-*.whl 2>/dev/null | head -1)
+    if [[ -z "$wheel_path" ]]; then
+        log "ERROR: no cached wheel at $WHEEL_CACHE_DIR"
+        log "Run full CI first: run-ci.sh $SHA $BRANCH"
+        status_failure "$SHA" "ci/hetzner" "No cached wheel — run full CI first" "$LOG_URL"
+        exit 1
+    fi
+    mkdir -p dist
+    cp "$wheel_path" dist/
+    log "Loaded cached wheel: $(basename "$wheel_path")"
 
-# ── Phase 2: BuildWheel (after test-js to avoid JS build conflict) ────────────
-log "=== Phase 2: build-wheel ==="
-run_job build-wheel job_build_wheel || OVERALL=1
+    log "=== Phase 5b (standalone): playwright-jupyter ==="
+    run_job playwright-jupyter job_playwright_jupyter || OVERALL=1
 
-# ── Phase 3: TestPython 3.11/3.12/3.14 (parallel — separate venvs, no conflicts) ──
-log "=== Phase 3: test-python 3.11/3.12/3.14 (parallel) ==="
+else
 
-run_job "test-python-3.11" bash -c "job_test_python 3.11" & P_311=$!
-run_job "test-python-3.12" bash -c "job_test_python 3.12" & P_312=$!
-run_job "test-python-3.14" bash -c "job_test_python 3.14" & P_314=$!
+    # ── Full CI (all phases) ──────────────────────────────────────────────────
 
-wait $P_311 || OVERALL=1
-wait $P_312 || OVERALL=1
-wait $P_314 || OVERALL=1
+    # Lockfile check — rebuild deps only when lockfiles changed (~5% of pushes).
+    if lockcheck_valid; then
+        log "Lockfiles unchanged — using warm caches"
+    else
+        log "Lockfiles changed — rebuilding deps"
+        rebuild_deps
+        lockcheck_update
+    fi
 
-# ── Phase 4: TestMCPWheel + SmokeTestExtras (parallel, no port conflicts) ────
-log "=== Phase 4: test-mcp-wheel + smoke-test-extras (parallel) ==="
+    # Create empty static files so Python unit tests can import buckaroo before
+    # BuildWheel runs. BuildWheel overwrites these with real artifacts.
+    mkdir -p buckaroo/static
+    touch buckaroo/static/compiled.css buckaroo/static/widget.js buckaroo/static/widget.css
 
-run_job test-mcp-wheel      job_test_mcp_wheel     & P4=$!
-run_job smoke-test-extras   job_smoke_test_extras  & P5=$!
+    # ── Phase 1: LintPython + TestJS + TestPython-3.13 (parallel) ────────────
+    log "=== Phase 1: lint-python, test-js, test-python-3.13 (parallel) ==="
 
-wait $P4 || OVERALL=1
-wait $P5 || OVERALL=1
+    run_job lint-python         job_lint_python              & P1=$!
+    run_job test-js             job_test_js                  & P2=$!
+    run_job test-python-3.13   bash -c "job_test_python 3.13" & P3=$!
 
-# ── Phase 5a: Playwright (parallel — each binds to a distinct port) ──────────
-# Ports: storybook=6006, server=8701, marimo=2718, wasm-marimo=8765
-log "=== Phase 5a: Playwright storybook/server/marimo/wasm-marimo (parallel) ==="
+    wait $P1 || OVERALL=1
+    wait $P2 || OVERALL=1
+    wait $P3 || OVERALL=1
 
-run_job playwright-storybook    job_playwright_storybook    & P_sb=$!
-run_job playwright-server       job_playwright_server       & P_srv=$!
-run_job playwright-marimo       job_playwright_marimo       & P_mar=$!
-run_job playwright-wasm-marimo  job_playwright_wasm_marimo  & P_wmar=$!
+    # ── Phase 2: BuildWheel (after test-js to avoid JS build conflict) ────────
+    log "=== Phase 2: build-wheel ==="
+    run_job build-wheel job_build_wheel || OVERALL=1
 
-wait $P_sb   || OVERALL=1
-wait $P_srv  || OVERALL=1
-wait $P_mar  || OVERALL=1
-wait $P_wmar || OVERALL=1
+    # Cache wheel by SHA so --phase=5b can skip the build on re-runs.
+    mkdir -p "$WHEEL_CACHE_DIR"
+    cp dist/buckaroo-*.whl "$WHEEL_CACHE_DIR/" 2>/dev/null || true
+    log "Cached wheel → $WHEEL_CACHE_DIR"
 
-# ── Phase 5b: Jupyter (after 5a — PARALLEL=3, each slot gets its own JupyterLab server) ─
-log "=== Phase 5b: playwright-jupyter (ports 8889-8891, PARALLEL=3) ==="
-run_job playwright-jupyter job_playwright_jupyter || OVERALL=1
+    # ── Phase 3: TestPython 3.11/3.12/3.14 (parallel — separate venvs) ───────
+    log "=== Phase 3: test-python 3.11/3.12/3.14 (parallel) ==="
+
+    run_job "test-python-3.11" bash -c "job_test_python 3.11" & P_311=$!
+    run_job "test-python-3.12" bash -c "job_test_python 3.12" & P_312=$!
+    run_job "test-python-3.14" bash -c "job_test_python 3.14" & P_314=$!
+
+    wait $P_311 || OVERALL=1
+    wait $P_312 || OVERALL=1
+    wait $P_314 || OVERALL=1
+
+    # ── Phase 4: TestMCPWheel + SmokeTestExtras (parallel, no port conflicts) ─
+    log "=== Phase 4: test-mcp-wheel + smoke-test-extras (parallel) ==="
+
+    run_job test-mcp-wheel      job_test_mcp_wheel     & P4=$!
+    run_job smoke-test-extras   job_smoke_test_extras  & P5=$!
+
+    wait $P4 || OVERALL=1
+    wait $P5 || OVERALL=1
+
+    # ── Phase 5a: Playwright (parallel — each binds to a distinct port) ───────
+    # Ports: storybook=6006, server=8701, marimo=2718, wasm-marimo=8765
+    log "=== Phase 5a: Playwright storybook/server/marimo/wasm-marimo (parallel) ==="
+
+    run_job playwright-storybook    job_playwright_storybook    & P_sb=$!
+    run_job playwright-server       job_playwright_server       & P_srv=$!
+    run_job playwright-marimo       job_playwright_marimo       & P_mar=$!
+    run_job playwright-wasm-marimo  job_playwright_wasm_marimo  & P_wmar=$!
+
+    wait $P_sb   || OVERALL=1
+    wait $P_srv  || OVERALL=1
+    wait $P_mar  || OVERALL=1
+    wait $P_wmar || OVERALL=1
+
+    # ── Phase 5b: Jupyter (after 5a — PARALLEL=3, each slot own JupyterLab) ──
+    log "=== Phase 5b: playwright-jupyter (ports 8889-8891, PARALLEL=3) ==="
+    run_job playwright-jupyter job_playwright_jupyter || OVERALL=1
+
+fi
 
 # ── Final status ─────────────────────────────────────────────────────────────
 
 if [[ $OVERALL -eq 0 ]]; then
-    log "=== ALL JOBS PASSED ==="
+    log "=== ALL JOBS PASSED (phase=$PHASE) ==="
     status_success "$SHA" "ci/hetzner" "All checks passed" "$LOG_URL"
     touch /opt/ci/last-success
 else
