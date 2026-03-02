@@ -240,6 +240,19 @@ if [[ "$PHASE" == "5b" ]]; then
     cp "$wheel_path" dist/
     log "Loaded cached wheel: $(basename "$wheel_path")"
 
+    # Extract compiled static assets from the wheel so source-path `import
+    # buckaroo` works correctly. git clean removed buckaroo/static/; anywidget
+    # resolves asset paths relative to __file__ in the source tree.
+    python3 -c "
+import zipfile, glob
+wheel = glob.glob('dist/buckaroo-*.whl')[0]
+with zipfile.ZipFile(wheel) as z:
+    for name in z.namelist():
+        if name.startswith('buckaroo/static/'):
+            z.extract(name, '.')
+print('Extracted static files from wheel')
+" 2>/dev/null || true
+
     log "=== Phase 5b (standalone): playwright-jupyter ==="
     run_job playwright-jupyter job_playwright_jupyter || OVERALL=1
 
