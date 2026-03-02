@@ -18,6 +18,21 @@
 #   - per-job START/PASS/FAIL timing parsed from ci.log (jobs-<sha>.csv)
 #
 # All results saved to $LOGDIR on the server, plus a local summary printed.
+#
+# NOTE: This script runs from your LOCAL machine and SSHes into Hetzner for
+# each commit. If your laptop sleeps or loses network, the run dies mid-way.
+# For unattended runs (e.g. kick off before driving to work), SSH into the
+# server and run inside tmux/screen:
+#
+#   ssh root@5.161.210.126
+#   tmux new -s stress
+#   # scp or git pull this script onto the server first, then:
+#   bash stress-test.sh --dag --set=safe
+#   # Ctrl-B D to detach, reattach later with: tmux attach -t stress
+#
+# The script would need a small refactor to skip the SSH wrapping when
+# running directly on the server (replace `ssh $SERVER "docker exec ..."`
+# with just `docker exec ...`). Not yet implemented.
 
 set -uo pipefail
 
@@ -125,11 +140,18 @@ if [[ $LIMIT -gt 0 && $LIMIT -lt ${#COMMITS[@]} ]]; then
 fi
 
 TOTAL=${#COMMITS[@]}
-LOGDIR="/opt/ci/logs/stress-$(date +%Y%m%d-%H%M%S)"
+
+# Capture the hetzner-ci repo commit so we know which CI code was under test.
+HETZNER_CI_SHA=$(git -C "$(dirname "$0")/../.." rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+# Predictable directory name: runner + set.  Re-running the same combo overwrites.
+RUNNER_TAG="${RUNNER%.sh}"                     # run-ci or run-ci-dag
+LOGDIR="/opt/ci/logs/stress-${RUNNER_TAG}-${COMMIT_SET}"
 
 echo "═══════════════════════════════════════════════════════════════"
 echo "  Stress test: $TOTAL commits using /opt/ci-runner/$RUNNER"
 echo "  Server: $SERVER  Container: $CONTAINER"
+echo "  Hetzner-CI commit: $HETZNER_CI_SHA"
 echo "  Remote log dir: $LOGDIR"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
@@ -302,6 +324,8 @@ echo "════════════════════════�
 # Save summary to server
 ssh "$SERVER" "cat > $LOGDIR/summary.txt" << SUMMARY
 Runner: $RUNNER
+Hetzner-CI: $HETZNER_CI_SHA
+Set: $COMMIT_SET
 Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 Commits: $TOTAL
 Passed: $pass_count
