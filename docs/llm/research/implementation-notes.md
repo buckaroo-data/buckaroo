@@ -52,6 +52,7 @@ shared 3.13 venv while marimo/wasm-marimo are reading from it in parallel.
 | Phase 3 parallel (3.11/3.12/3.14) | ~1m07s | 7m21s |
 | Phase 5 parallel (5× playwright) | ~2m20s | 4m58s |
 | Phase 5 split + parallel jupyter (PARALLEL=1) | ~1m04s | **3m56s** |
+| Phase 5b PARALLEL=3 (untested) | ~45s est. | **~3m10s est.** |
 
 Run 26 (commit 1759612, warm caches):
 - Phase 1: 1m15s | Phase 2: 22s | Phase 3: 1m16s | Phase 4: 20s
@@ -182,6 +183,29 @@ running tests that require an extras package (e.g. `pl-series-hash`), job B
 fails non-deterministically. Either: don't sync in the parallel job, or use
 `UV_PROJECT_ENVIRONMENT` pointing to a job-private venv.
 
+### Stale kernel runtime files cause batch-1 timing failures across runs
+`~/.local/share/jupyter/runtime/kernel-*.json` and `jpserver-*.json` files
+accumulate without cleanup — each 9-notebook CI run adds 9 kernel JSON files.
+When JupyterLab starts, it scans the runtime directory and attempts ZMQ
+heartbeat connections to every kernel JSON it finds. Dead kernels cause a
+connection timeout for each file. With 100+ stale files, this delays JupyterLab
+initialization by 1-2 seconds.
+
+The first notebook (test_buckaroo_widget.ipynb) runs while JupyterLab is still
+processing these stale connections. The Playwright test's 1.3s static wait after
+Shift+Enter isn't enough time for the widget to render, so it fails. Batches 2-9
+pass because JupyterLab finishes the scan before they run.
+
+This produced an alternating PASS/FAIL pattern in stress tests: runs after a
+full 9-notebook pass added more files, pushing the next run over the threshold.
+
+Fix: add to `test_playwright_jupyter_parallel.sh` startup:
+```bash
+rm -f ~/.local/share/jupyter/runtime/kernel-*.json
+rm -f ~/.local/share/jupyter/runtime/jpserver-*.json
+rm -f ~/.local/share/jupyter/runtime/jpserver-*.html
+```
+
 ### Double-run contamination from SSH heredocs
 Running `ssh host << 'EOF' ... EOF` can spawn two processes if the connection
 is slow. Always use `nohup bash -c "..." </dev/null &` and verify with
@@ -224,7 +248,7 @@ Headroom is comfortable; CCX43 is not over-provisioned for this workload.
 
 | Item | Notes |
 |------|-------|
-| PARALLEL=3 for Phase 5b | Untested; CPU is idle during 5b so should be safe. Could save ~45s |
+| PARALLEL=3 for Phase 5b | Enabled in affe14a; verification run in progress |
 | Webhook + GITHUB_TOKEN | For automatic PR status; currently all runs are manual |
 | `cffi` source compilation | Should be using manylinux wheels; investigate why uv falls back to source |
-| `mp_timeout` Docker tuning | forkserver spawn is ~1.5s on CCX43; tests hardcoded to 1.0s |
+| `mp_timeout` Docker tuning | forkserver spawn is ~1.5s on CCX43; tests hardcoded to 1.0s — defer, requires code changes |
