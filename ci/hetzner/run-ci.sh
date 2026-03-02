@@ -8,7 +8,7 @@
 # Phases (each captures stdout/stderr to $RESULTS_DIR/<job>.log):
 #   1. Parallel:   lint-python, test-js, test-python-3.13
 #   2. Sequential: build-wheel  (must follow test-js to avoid JS build conflict)
-#   3. Sequential: test-python-3.11, 3.12, 3.14  (CPU budget)
+#   3. Parallel:   test-python-3.11, 3.12, 3.14  (separate venvs, no conflicts)
 #   4. Parallel:   test-mcp-wheel, smoke-test-extras
 #   5. Sequential: playwright-storybook, playwright-server, playwright-marimo,
 #                  playwright-wasm-marimo, playwright-jupyter  (port conflicts)
@@ -211,11 +211,16 @@ wait $P3 || OVERALL=1
 log "=== Phase 2: build-wheel ==="
 run_job build-wheel job_build_wheel || OVERALL=1
 
-# ── Phase 3: TestPython 3.11/3.12/3.14 (sequential, CPU budget) ─────────────
-log "=== Phase 3: test-python 3.11/3.12/3.14 (sequential) ==="
-for v in 3.11 3.12 3.14; do
-    run_job "test-python-$v" bash -c "job_test_python $v" || OVERALL=1
-done
+# ── Phase 3: TestPython 3.11/3.12/3.14 (parallel — separate venvs, no conflicts) ──
+log "=== Phase 3: test-python 3.11/3.12/3.14 (parallel) ==="
+
+run_job "test-python-3.11" bash -c "job_test_python 3.11" & P_311=$!
+run_job "test-python-3.12" bash -c "job_test_python 3.12" & P_312=$!
+run_job "test-python-3.14" bash -c "job_test_python 3.14" & P_314=$!
+
+wait $P_311 || OVERALL=1
+wait $P_312 || OVERALL=1
+wait $P_314 || OVERALL=1
 
 # ── Phase 4: TestMCPWheel + SmokeTestExtras (parallel, no port conflicts) ────
 log "=== Phase 4: test-mcp-wheel + smoke-test-extras (parallel) ==="
