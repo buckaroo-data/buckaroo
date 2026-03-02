@@ -12,8 +12,11 @@
 # JupyterLab handles multiple notebooks with independent kernels fine.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-ROOT_DIR="$(pwd)"
+if [ -z "${ROOT_DIR:-}" ]; then
+    cd "$(dirname "$0")/.."
+    ROOT_DIR="$(pwd)"
+fi
+cd "$ROOT_DIR"
 
 # ── Argument parsing (same interface as test_playwright_jupyter.sh) ───────────
 
