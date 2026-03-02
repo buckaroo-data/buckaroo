@@ -215,78 +215,51 @@ NEXT=0
 
 TMPDIR=$(mktemp -d -t pw-jupyter-parallelXXXXXX)
 
-start_next() {
-    local nb="${QUEUE[$NEXT]}"
-    local logfile="$TMPDIR/${nb%.ipynb}.log"
-    LOGFILES["$nb"]="$logfile"
-    run_one "$nb" "$NEXT" "$logfile" &
-    PIDS[$!]="$nb"
-    log "START [$((NEXT+1))/$TOTAL] $nb"
-    ((NEXT++)) || true
-    ((RUNNING++)) || true
-}
+# ── Explicit batch execution ─────────────────────────────────────────────────
+# Run notebooks in batches of PARALLEL. Wait for the whole batch to finish,
+# shut down all kernels, then start the next batch. This prevents stale
+# kernels from accumulating and interfering with subsequent batches.
 
-# Fill initial batch
-while [ $RUNNING -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
-    start_next
-done
-
-# As each finishes, start the next
 PASSED=0
 FAILED_LIST=()
+NEXT=0
 
-while [ $RUNNING -gt 0 ]; do
-    # Wait for any child
-    set +e
-    wait -n -p DONE_PID 2>/dev/null
-    rc=$?
-    set -e
+while [ $NEXT -lt $TOTAL ]; do
+    # Start up to PARALLEL notebooks
+    declare -A BATCH_PIDS
+    BATCH_COUNT=0
+    while [ $BATCH_COUNT -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
+        local_nb="${QUEUE[$NEXT]}"
+        local_logfile="$TMPDIR/${local_nb%.ipynb}.log"
+        LOGFILES["$local_nb"]="$local_logfile"
+        run_one "$local_nb" "$NEXT" "$local_logfile" &
+        BATCH_PIDS[$!]="$local_nb"
+        log "START [$((NEXT+1))/$TOTAL] $local_nb"
+        ((NEXT++)) || true
+        ((BATCH_COUNT++)) || true
+    done
 
-    if [ -z "${DONE_PID:-}" ]; then
-        # Bash <5.1 doesn't support wait -n -p; fall back to waiting for all
-        # remaining PIDs individually
-        for pid in "${!PIDS[@]}"; do
-            set +e
-            wait "$pid"
-            rc=$?
-            set -e
-            nb="${PIDS[$pid]}"
-            unset "PIDS[$pid]"
-            ((RUNNING--)) || true
-            if [ $rc -eq 0 ]; then
-                ok "  PASS $nb"
-                ((PASSED++)) || true
-            else
-                err "  FAIL $nb (see ${LOGFILES[$nb]})"
-                FAILED_LIST+=("$nb")
-                OVERALL=1
-            fi
-            # Start next if available (shut down stale kernels first)
-            if [ $NEXT -lt $TOTAL ]; then
-                shutdown_kernels
-                start_next
-            fi
-        done
-        continue
-    fi
+    # Wait for all jobs in this batch
+    for pid in "${!BATCH_PIDS[@]}"; do
+        set +e
+        wait "$pid"
+        rc=$?
+        set -e
+        nb="${BATCH_PIDS[$pid]}"
+        if [ $rc -eq 0 ]; then
+            ok "  PASS $nb"
+            ((PASSED++)) || true
+        else
+            err "  FAIL $nb (see ${LOGFILES[$nb]})"
+            FAILED_LIST+=("$nb")
+            OVERALL=1
+        fi
+    done
+    unset BATCH_PIDS
 
-    nb="${PIDS[$DONE_PID]}"
-    unset "PIDS[$DONE_PID]"
-    ((RUNNING--)) || true
-
-    if [ $rc -eq 0 ]; then
-        ok "  PASS $nb"
-        ((PASSED++)) || true
-    else
-        err "  FAIL $nb (see ${LOGFILES[$nb]})"
-        FAILED_LIST+=("$nb")
-        OVERALL=1
-    fi
-
-    # Start next if available (shut down stale kernels first)
+    # Shut down all kernels before next batch so they don't accumulate
     if [ $NEXT -lt $TOTAL ]; then
         shutdown_kernels
-        start_next
     fi
 done
 
