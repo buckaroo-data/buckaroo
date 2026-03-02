@@ -51,26 +51,33 @@ shared 3.13 venv while marimo/wasm-marimo are reading from it in parallel.
 | Warm caches | ~36s | 8m23s |
 | Phase 3 parallel (3.11/3.12/3.14) | ~1m07s | 7m21s |
 | Phase 5 parallel (5× playwright) | ~2m20s | 4m58s |
+| Phase 5 split + parallel jupyter (PARALLEL=1) | ~1m04s | **3m56s** |
+
+Run 26 (commit 1759612, warm caches):
+- Phase 1: 1m15s | Phase 2: 22s | Phase 3: 1m16s | Phase 4: 20s
+- Phase 5a: 59s | Phase 5b: 1m44s (9 notebooks, PARALLEL=1)
+- **Total: 5m56s**
 
 **Critical path** after all parallelisation:
-`test-js (~25s) → build-wheel (~21s) → playwright-jupyter (~100s) ≈ 2m30s`
+`test-js (~24s) → build-wheel (~22s) → playwright-jupyter (~104s) ≈ 2m30s`
 
 Nothing else can beat this without shortening playwright-jupyter or decoupling
-build-wheel from test-js.
+build-wheel from test-js. Next opportunity: PARALLEL=3 for Phase 5b (requires
+CPU headroom after Phase 5a completes — currently untested but likely viable).
 
 ### Why CCX43 didn't help
 Upgrading from CCX33 (8 vCPU) to CCX43 (16 vCPU) gave identical timing
 (~5m05s vs ~4m58s). The bottleneck is the sequential critical path, not CPU
 core count. More cores only help if there's parallelisable work waiting on them.
 
-### Why high Jupyter parallelism fails
+### Why high Jupyter parallelism fails (when 5a is concurrent)
 Running 9 (or even 3) Jupyter notebooks in parallel while the other 4 playwright
 jobs are also running causes `tornado.iostream.StreamClosedError` — JupyterLab's
 WebSocket connections drop under CPU load. The widget comm channels never
 establish, giving "Comm not found" and "Widget failed to render: 0 elements."
 Fix: run the 4 non-Jupyter playwright tests first (Phase 5a, ~60s), then run
-Jupyter with PARALLEL=3 after CPU is free (Phase 5b). Expected total Phase 5:
-~135s vs old sequential 4m04s.
+Jupyter with PARALLEL=1+ after CPU is free (Phase 5b). PARALLEL=3 expected to
+be viable since the system is idle during Phase 5b.
 
 ### Why the DAG approach failed
 Running all independent jobs simultaneously (9 concurrent on 8 vCPUs) caused:
@@ -131,6 +138,43 @@ macOS silently appends the random suffix. Use:
 mktemp -d -t pw-jupyter-parallelXXXXXX
 ```
 
+### JupyterLab 4.x blocks widget rendering for untrusted notebooks
+Freshly copied `.ipynb` files have no trust signature. JupyterLab 4.x
+refuses to render widget JavaScript (anywidget's embedded `_esm`) for
+untrusted notebooks — even for newly-executed live outputs. All 9
+notebooks fail with "Widget failed to render: 0 elements".
+
+Fix: run `jupyter trust "$nb"` for every notebook after copying it, before
+starting Playwright tests. This adds the notebook's hash to
+`~/.local/share/jupyter/nbsignatures.db`, which JupyterLab checks when
+opening the notebook.
+
+### `shutdown_kernels` JSON parsing — `"id":"uuid"` vs `"id": "uuid"`
+`grep -o '"id":"[^"]*"'` requires no space between the colon and the
+opening quote. JupyterLab's `/api/kernels` response returns
+`"id": "uuid"` (with a space), so the grep never matches. Result: every
+batch call to `shutdown_kernels` silently does nothing — kernels
+accumulate throughout the test run, consuming memory and causing
+JupyterLab to reconnect old sessions on each new Playwright test.
+
+Fix: extract UUIDs with the UUID pattern instead:
+```bash
+grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+```
+
+### JupyterLab workspace state restored across Playwright sessions
+Even in Playwright's `--incognito` mode, JupyterLab stores workspace
+state (which notebooks are open) server-side in
+`~/.jupyter/lab/workspaces/`. When a new Playwright test opens JupyterLab,
+it restores the previous workspace, causing old notebook sessions to
+reconnect to stale kernels. The old kernel for notebook N reconnects
+briefly, flooding the server log and potentially interfering with notebook
+N+1's widget communication.
+
+Fix: add `rm -rf ~/.jupyter/lab/workspaces` to `shutdown_kernels` so each
+batch starts with a fresh workspace, and run the same cleanup once before
+the first batch.
+
 ### `uv sync` in a parallel job strips extras from a shared venv
 `uv sync --dev --no-install-project` removes packages not in the lock file for
 the current sync scope. If job A syncs the shared 3.13 venv and job B is
@@ -180,7 +224,7 @@ Headroom is comfortable; CCX43 is not over-provisioned for this workload.
 
 | Item | Notes |
 |------|-------|
-| Parallel jupyter notebooks (PARALLEL=9) | Still being debugged (runs 14–16+); should save ~60–70s off Phase 5 |
+| PARALLEL=3 for Phase 5b | Untested; CPU is idle during 5b so should be safe. Could save ~45s |
 | Webhook + GITHUB_TOKEN | For automatic PR status; currently all runs are manual |
 | `cffi` source compilation | Should be using manylinux wheels; investigate why uv falls back to source |
 | `mp_timeout` Docker tuning | forkserver spawn is ~1.5s on CCX43; tests hardcoded to 1.0s |
