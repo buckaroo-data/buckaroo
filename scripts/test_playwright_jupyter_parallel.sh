@@ -176,7 +176,12 @@ for slot in $(seq 0 $((PARALLEL-1))); do
     ok "  JupyterLab ready on port $port (slot $slot)"
 done
 
-log "All $PARALLEL servers HTTP-ready — sleeping 20s for kernel provisioners to initialise..."
+log "All $PARALLEL servers HTTP-ready — pre-warming Python bytecaches..."
+# Running imports in the current venv populates .pyc files so concurrent kernel
+# startups in batch 1 read from cache instead of compiling simultaneously.
+python3 -c "import buckaroo; import pandas; import polars; print('Pre-warm done')" 2>&1 || \
+    python3 -c "import buckaroo; import pandas; print('Pre-warm done (no polars)')" 2>&1 || true
+log "Sleeping 20s for kernel provisioners to initialise..."
 sleep 20
 
 # ── Copy and trust notebooks ──────────────────────────────────────────────────

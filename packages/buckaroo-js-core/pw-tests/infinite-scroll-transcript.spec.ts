@@ -4,7 +4,7 @@ import { Page } from '@playwright/test';
 const JUPYTER_BASE_URL = process.env.JUPYTER_BASE_URL || 'http://localhost:8889';
 const JUPYTER_TOKEN = process.env.JUPYTER_TOKEN || 'test-token-12345';
 const DEFAULT_TIMEOUT = 10000;
-const CELL_EXEC_TIMEOUT = 20000; // kernel startup can be slow when 2 run concurrently
+const CELL_EXEC_TIMEOUT = 30000; // kernel startup can be slow when 3 run concurrently
 const NAVIGATION_TIMEOUT = 12000;
 
 async function waitForAgGrid(page: Page, timeout = 5000) {
@@ -333,6 +333,15 @@ test.describe('Infinite Scroll Transcript Recording', () => {
 
     await waitForAgGrid(page);
 
+    // Reset scroll position in case test 1 left the grid scrolled
+    try {
+      const viewport = page.locator('.ag-body-viewport').first();
+      if (await viewport.count() > 0) {
+        await viewport.evaluate(el => el.scrollTop = 0);
+        await page.waitForTimeout(300);
+      }
+    } catch (e) { /* non-fatal */ }
+
     // Verify initial data (row 0 should show int_col=10, str_col=foo_10)
     const firstRowIntCell = page.locator('[row-index="0"] [col-id="int_col"]');
     const firstRowStrCell = page.locator('[row-index="0"] [col-id="str_col"]');
@@ -387,8 +396,8 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     const expectedStrCell = page.locator(`.ag-cell:has-text("${expectedStrCol}")`).first();
     
     // These should be visible if the data is correct
-    await expect(expectedIntCell).toBeVisible({ timeout: 3000 });
-    await expect(expectedStrCell).toBeVisible({ timeout: 3000 });
+    await expect(expectedIntCell).toBeVisible({ timeout: DEFAULT_TIMEOUT });
+    await expect(expectedStrCell).toBeVisible({ timeout: DEFAULT_TIMEOUT });
     
     console.log(`✅ Verified data at row ${targetRowIndex} matches predictable pattern!`);
   });
