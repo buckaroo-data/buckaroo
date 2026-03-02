@@ -163,14 +163,25 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     expect(headerTexts).toContain('age');
     expect(headerTexts).toContain('score');
 
-    // Verify data appears in cells
-    const nameCell = page.locator('.ag-cell').filter({ hasText: 'Alice' });
-    const ageCell = page.locator('.ag-cell').filter({ hasText: '25' });
-    const scoreCell = page.locator('.ag-cell').filter({ hasText: '85.5' });
+    // Scroll ag-grid to top-left to ensure row 0 cells are in the visible viewport
+    // (ag-grid marks off-screen cells as visibility:hidden via column virtualisation)
+    try {
+      const agViewport = outputArea.locator('.ag-body-viewport').first();
+      if (await agViewport.count() > 0) {
+        await agViewport.evaluate(el => { el.scrollTop = 0; el.scrollLeft = 0; });
+        await page.waitForTimeout(300);
+      }
+    } catch (e) { /* non-fatal */ }
 
-    await expect(nameCell).toBeVisible();
-    await expect(ageCell).toBeVisible();
-    await expect(scoreCell).toBeVisible();
+    // Verify data appears in cells — scoped to outputArea to avoid matching
+    // cells in secondary widgets, and with .first() for uniqueness
+    const nameCell = outputArea.locator('.ag-cell').filter({ hasText: 'Alice' }).first();
+    const ageCell = outputArea.locator('.ag-cell').filter({ hasText: '25' }).first();
+    const scoreCell = outputArea.locator('.ag-cell').filter({ hasText: '85.5' }).first();
+
+    await expect(nameCell).toBeVisible({ timeout: DEFAULT_TIMEOUT });
+    await expect(ageCell).toBeVisible({ timeout: DEFAULT_TIMEOUT });
+    await expect(scoreCell).toBeVisible({ timeout: DEFAULT_TIMEOUT });
 
     console.log(`🎉 SUCCESS: Widget from ${notebookName} rendered ag-grid with ${rowCount} rows, ${headerCount} columns, and ${cellCount} cells`);
     console.log('📊 Verified data: Alice (age 25, score 85.5)');

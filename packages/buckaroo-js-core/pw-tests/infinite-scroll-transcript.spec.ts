@@ -333,23 +333,30 @@ test.describe('Infinite Scroll Transcript Recording', () => {
 
     await waitForAgGrid(page);
 
-    // Reset scroll position in case test 1 left the grid scrolled
+    // Reset scroll position in case test 1 left the grid scrolled.
+    // Dispatch a scroll event after setting scrollTop so ag-grid's virtual
+    // scroll engine re-renders row 0 cells into the DOM.
     try {
       const viewport = page.locator('.ag-body-viewport').first();
       if (await viewport.count() > 0) {
-        await viewport.evaluate(el => el.scrollTop = 0);
-        await page.waitForTimeout(2000);
+        await viewport.evaluate(el => {
+          el.scrollTop = 0;
+          el.scrollLeft = 0;
+          el.dispatchEvent(new Event('scroll'));
+        });
       }
     } catch (e) { /* non-fatal */ }
+
+    // Wait until row-index="0" is visible in the grid (deterministic, not fixed delay)
+    await page.locator('[row-index="0"]').first().waitFor({ state: 'visible', timeout: DEFAULT_TIMEOUT });
 
     // Verify initial data (row 0 should show int_col=10, str_col=foo_10)
     const firstRowIntCell = page.locator('[row-index="0"] [col-id="int_col"]');
     const firstRowStrCell = page.locator('[row-index="0"] [col-id="str_col"]');
-    
-    // Check if we can see the cells
+
     const intCellVisible = await firstRowIntCell.isVisible().catch(() => false);
     const strCellVisible = await firstRowStrCell.isVisible().catch(() => false);
-    
+
     if (intCellVisible && strCellVisible) {
       const intVal = await firstRowIntCell.textContent();
       const strVal = await firstRowStrCell.textContent();
