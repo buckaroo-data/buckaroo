@@ -51,7 +51,8 @@ RUN cd /build-js/buckaroo-js-core && pnpm exec playwright install chromium
 # 8. Bake CI runner scripts into the image at a stable path so they survive
 #    `git checkout` of arbitrary SHAs inside /repo at runtime.
 COPY ci/hetzner/run-ci.sh ci/hetzner/lib/ /opt/ci-runner/
-RUN chmod +x /opt/ci-runner/run-ci.sh
+COPY scripts/test_playwright_jupyter_parallel.sh /opt/ci-runner/
+RUN chmod +x /opt/ci-runner/run-ci.sh /opt/ci-runner/test_playwright_jupyter_parallel.sh
 
 # Allow JupyterLab to start as root (container runs as root).
 # This avoids needing --allow-root in every script that starts Jupyter.

@@ -203,7 +203,7 @@ job_playwright_jupyter() {
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
     PARALLEL=9 \
-        bash scripts/test_playwright_jupyter_parallel.sh --venv-location="$venv"
+        bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" --venv-location="$venv"
     rm -rf "$venv"
 }
 
