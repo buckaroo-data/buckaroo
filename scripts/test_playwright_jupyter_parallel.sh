@@ -24,6 +24,7 @@ VENV_LOCATION=""
 NOTEBOOK=""
 PARALLEL=${PARALLEL:-4}
 BASE_PORT=${BASE_PORT:-8889}
+SERVERS_RUNNING=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -34,6 +35,7 @@ while [[ $# -gt 0 ]]; do
         --notebook)        NOTEBOOK="$2"; shift 2 ;;
         --parallel=*)      PARALLEL="${1#*=}"; shift ;;
         --parallel)        PARALLEL="$2"; shift 2 ;;
+        --servers-running) SERVERS_RUNNING=true; shift ;;
         *) shift ;;
     esac
 done
@@ -121,9 +123,12 @@ declare -a JUPYTER_PIDS=()
 
 cleanup() {
     log "Cleaning up..."
-    for pid in "${JUPYTER_PIDS[@]:-}"; do
-        [ -n "$pid" ] && kill "$pid" 2>/dev/null && wait "$pid" 2>/dev/null || true
-    done
+    # When --servers-running, caller manages server lifecycle
+    if [ "$SERVERS_RUNNING" = false ]; then
+        for pid in "${JUPYTER_PIDS[@]:-}"; do
+            [ -n "$pid" ] && kill "$pid" 2>/dev/null && wait "$pid" 2>/dev/null || true
+        done
+    fi
     cd "$ROOT_DIR"
     for nb in "${NOTEBOOKS[@]}"; do rm -f "$nb"; done
     if [ -z "$VENV_LOCATION" ] && [ "$USE_LOCAL_VENV" = false ] && [ -d "$VENV_DIR" ]; then
@@ -134,69 +139,76 @@ trap cleanup EXIT
 
 cd "$ROOT_DIR"
 
-# Kill stale processes on all ports we'll use
-for slot in $(seq 0 $((PARALLEL-1))); do
-    port=$((BASE_PORT + slot))
-    lsof -ti:$port 2>/dev/null | while read -r pid; do
-        ps -p "$pid" -o comm= 2>/dev/null | grep -qE 'jupyter|python' && kill -9 "$pid" 2>/dev/null
-    done || true
-done
-
-rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
-# Remove stale kernel connection files — accumulate across runs, delay startup
-rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
-rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
-rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
-
 export JUPYTER_TOKEN
 
-# ── Start JupyterLab servers (sequential — one at a time) ────────────────────
-# Starting one at a time prevents CPU competition during initialisation.
-# We do NOT start warmup kernels here: the JupyterLab REST API keeps a kernel
-# in "starting" state until a WebSocket client connects, so REST-only polling
-# never reaches "idle" and the lingering kernel process interferes with
-# batch-1 test kernels. Instead, we sleep once after all servers are HTTP-ready
-# to let the kernel provisioners finish initialising.
-
-log "Starting $PARALLEL isolated JupyterLab servers (sequential — one at a time)..."
-for slot in $(seq 0 $((PARALLEL-1))); do
-    port=$((BASE_PORT + slot))
-    jupyter lab --no-browser --port="$port" \
-        --ServerApp.token="$JUPYTER_TOKEN" \
-        --ServerApp.allow_origin='*' \
-        --ServerApp.disable_check_xsrf=True \
-        --allow-root \
-        >/tmp/jupyter-port${port}-$$.log 2>&1 &
-    JUPYTER_PIDS[$slot]=$!
-    log "  Waiting for JupyterLab on port $port (pid ${JUPYTER_PIDS[$slot]})..."
-    started=false
-    for i in $(seq 1 30); do
-        curl -sf "http://localhost:${port}/api?token=${JUPYTER_TOKEN}" >/dev/null 2>&1 && { started=true; break; }
-        sleep 1
-    done
-    if [ "$started" = false ]; then
-        err "JupyterLab on port $port failed to start"
-        cat "/tmp/jupyter-port${port}-$$.log" || true
-        exit 1
+if [ "$SERVERS_RUNNING" = true ]; then
+    # Pre-warmed servers from job_jupyter_warmup — load PIDs for cleanup trap
+    if [[ -f /tmp/ci-jupyter-warmup-pids ]]; then
+        read -ra JUPYTER_PIDS < /tmp/ci-jupyter-warmup-pids
     fi
-    ok "  JupyterLab ready on port $port (slot $slot)"
-done
+    log "Using pre-warmed servers (${#JUPYTER_PIDS[@]} PIDs loaded)"
+else
+    # Kill stale processes on all ports we'll use
+    for slot in $(seq 0 $((PARALLEL-1))); do
+        port=$((BASE_PORT + slot))
+        lsof -ti:$port 2>/dev/null | while read -r pid; do
+            ps -p "$pid" -o comm= 2>/dev/null | grep -qE 'jupyter|python' && kill -9 "$pid" 2>/dev/null
+        done || true
+    done
 
-log "All $PARALLEL servers HTTP-ready — warming up kernels..."
-# Pre-warm Python bytecaches so kernel imports don't compile .pyc concurrently.
-python3 -c "import buckaroo; import pandas; import polars; print('Pre-warm done')" 2>&1 || \
-    python3 -c "import buckaroo; import pandas; print('Pre-warm done (no polars)')" 2>&1 || true
+    rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
+    # Remove stale kernel connection files — accumulate across runs, delay startup
+    rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
+    rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
+    rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
 
-# Warm up each server via WebSocket nudge.
-# The REST API (GET /api/kernels/{id}) never updates execution_state from
-# "starting" to "idle" without a WebSocket client — this is a known upstream
-# limitation. Connecting to the WebSocket channels endpoint triggers
-# jupyter_server's built-in "nudge" mechanism (kernel_info_request), which
-# is exactly how JupyterLab itself waits for kernel readiness.
+    # ── Start JupyterLab servers (sequential — one at a time) ────────────────────
+    # Starting one at a time prevents CPU competition during initialisation.
+    # We do NOT start warmup kernels here: the JupyterLab REST API keeps a kernel
+    # in "starting" state until a WebSocket client connects, so REST-only polling
+    # never reaches "idle" and the lingering kernel process interferes with
+    # batch-1 test kernels. Instead, we sleep once after all servers are HTTP-ready
+    # to let the kernel provisioners finish initialising.
 
-warmup_one_kernel() {
-    local port=$1
-    python3 -c "
+    log "Starting $PARALLEL isolated JupyterLab servers (sequential — one at a time)..."
+    for slot in $(seq 0 $((PARALLEL-1))); do
+        port=$((BASE_PORT + slot))
+        jupyter lab --no-browser --port="$port" \
+            --ServerApp.token="$JUPYTER_TOKEN" \
+            --ServerApp.allow_origin='*' \
+            --ServerApp.disable_check_xsrf=True \
+            --allow-root \
+            >/tmp/jupyter-port${port}-$$.log 2>&1 &
+        JUPYTER_PIDS[$slot]=$!
+        log "  Waiting for JupyterLab on port $port (pid ${JUPYTER_PIDS[$slot]})..."
+        started=false
+        for i in $(seq 1 30); do
+            curl -sf "http://localhost:${port}/api?token=${JUPYTER_TOKEN}" >/dev/null 2>&1 && { started=true; break; }
+            sleep 1
+        done
+        if [ "$started" = false ]; then
+            err "JupyterLab on port $port failed to start"
+            cat "/tmp/jupyter-port${port}-$$.log" || true
+            exit 1
+        fi
+        ok "  JupyterLab ready on port $port (slot $slot)"
+    done
+
+    log "All $PARALLEL servers HTTP-ready — warming up kernels..."
+    # Pre-warm Python bytecaches so kernel imports don't compile .pyc concurrently.
+    python3 -c "import buckaroo; import pandas; import polars; print('Pre-warm done')" 2>&1 || \
+        python3 -c "import buckaroo; import pandas; print('Pre-warm done (no polars)')" 2>&1 || true
+
+    # Warm up each server via WebSocket nudge.
+    # The REST API (GET /api/kernels/{id}) never updates execution_state from
+    # "starting" to "idle" without a WebSocket client — this is a known upstream
+    # limitation. Connecting to the WebSocket channels endpoint triggers
+    # jupyter_server's built-in "nudge" mechanism (kernel_info_request), which
+    # is exactly how JupyterLab itself waits for kernel readiness.
+
+    warmup_one_kernel() {
+        local port=$1
+        python3 -c "
 import json, sys, time, urllib.request, websocket
 
 port = $port
@@ -245,36 +257,37 @@ except Exception:
 
 sys.exit(0 if state == 'idle' else 1)
 " 2>&1
-}
-export -f warmup_one_kernel
+    }
+    export -f warmup_one_kernel
 
-declare -a WARMUP_PIDS=()
-for slot in $(seq 0 $((PARALLEL-1))); do
-    port=$((BASE_PORT + slot))
-    log "  Warming kernel on port $port (background)..."
-    warmup_one_kernel "$port" &
-    WARMUP_PIDS+=($!)
-done
+    declare -a WARMUP_PIDS=()
+    for slot in $(seq 0 $((PARALLEL-1))); do
+        port=$((BASE_PORT + slot))
+        log "  Warming kernel on port $port (background)..."
+        warmup_one_kernel "$port" &
+        WARMUP_PIDS+=($!)
+    done
 
-warmup_ok=true
-for pid in "${WARMUP_PIDS[@]}"; do
-    if ! wait "$pid"; then warmup_ok=false; fi
-done
-if [ "$warmup_ok" = true ]; then
-    ok "  All $PARALLEL kernel warmups complete"
-else
-    log "  WARNING: some kernel warmups failed — continuing anyway"
+    warmup_ok=true
+    for pid in "${WARMUP_PIDS[@]}"; do
+        if ! wait "$pid"; then warmup_ok=false; fi
+    done
+    if [ "$warmup_ok" = true ]; then
+        ok "  All $PARALLEL kernel warmups complete"
+    else
+        log "  WARNING: some kernel warmups failed — continuing anyway"
+    fi
+
+    # ── Copy and trust notebooks ──────────────────────────────────────────────────
+
+    for nb in "${NOTEBOOKS[@]}"; do
+        cp "tests/integration_notebooks/$nb" "$nb"
+    done
+    for nb in "${NOTEBOOKS[@]}"; do
+        jupyter trust "$nb" 2>/dev/null || true
+    done
+    rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
 fi
-
-# ── Copy and trust notebooks ──────────────────────────────────────────────────
-
-for nb in "${NOTEBOOKS[@]}"; do
-    cp "tests/integration_notebooks/$nb" "$nb"
-done
-for nb in "${NOTEBOOKS[@]}"; do
-    jupyter trust "$nb" 2>/dev/null || true
-done
-rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
 
 # ── Per-server kernel cleanup (between batches) ───────────────────────────────
 

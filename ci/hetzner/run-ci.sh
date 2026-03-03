@@ -266,11 +266,148 @@ job_playwright_jupyter() {
     return $rc
 }
 
+job_jupyter_warmup() {
+    cd /repo
+    local venv=/tmp/ci-jupyter-warmup
+    rm -rf "$venv"
+    uv venv "$venv" --python 3.13 -q
+    uv pip install --python "$venv/bin/python" \
+        jupyterlab anywidget polars websocket-client -q
+    source "$venv/bin/activate"
+
+    # Save venv path for later phases
+    echo "$venv" > /tmp/ci-jupyter-warmup-venv
+
+    export JUPYTER_TOKEN="test-token-12345"
+    local BASE_PORT=8889 PARALLEL=4
+
+    # Clean stale state
+    rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
+    rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
+    rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
+    rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
+
+    # Kill stale processes on target ports
+    for slot in $(seq 0 $((PARALLEL-1))); do
+        port=$((BASE_PORT + slot))
+        fuser -k $port/tcp 2>/dev/null || true
+    done
+
+    # Start 4 JupyterLab servers sequentially
+    local pids=()
+    for slot in $(seq 0 $((PARALLEL-1))); do
+        port=$((BASE_PORT + slot))
+        jupyter lab --no-browser --port="$port" \
+            --ServerApp.token="$JUPYTER_TOKEN" \
+            --ServerApp.allow_origin='*' \
+            --ServerApp.disable_check_xsrf=True \
+            --allow-root \
+            >/tmp/jupyter-port${port}.log 2>&1 &
+        pids+=($!)
+        local started=false
+        for i in $(seq 1 30); do
+            curl -sf "http://localhost:${port}/api?token=${JUPYTER_TOKEN}" >/dev/null 2>&1 && { started=true; break; }
+            sleep 1
+        done
+        if [ "$started" = false ]; then
+            echo "JupyterLab on port $port failed to start"
+            cat "/tmp/jupyter-port${port}.log" || true
+            return 1
+        fi
+        echo "JupyterLab ready on port $port (slot $slot)"
+    done
+
+    # Save PIDs for cleanup
+    echo "${pids[*]}" > /tmp/ci-jupyter-warmup-pids
+
+    # Pre-warm Python bytecaches
+    python3 -c "import buckaroo; import pandas; import polars" 2>/dev/null || \
+    python3 -c "import pandas; import polars; print('Pre-warm (no buckaroo yet)')" 2>/dev/null || true
+
+    # WebSocket kernel warmup (all 4 in parallel)
+    local warmup_pids=()
+    for slot in $(seq 0 $((PARALLEL-1))); do
+        port=$((BASE_PORT + slot))
+        python3 -c "
+import json, sys, time, urllib.request, websocket
+
+port = $port
+token = '$JUPYTER_TOKEN'
+base = f'http://localhost:{port}'
+
+req = urllib.request.Request(
+    f'{base}/api/kernels?token={token}',
+    data=b'{}',
+    headers={'Content-Type': 'application/json'},
+    method='POST',
+)
+resp = urllib.request.urlopen(req)
+kid = json.loads(resp.read())['id']
+print(f'  kernel {kid[:8]}... created on port {port}')
+
+ws_url = f'ws://localhost:{port}/api/kernels/{kid}/channels?token={token}'
+ws = websocket.create_connection(ws_url, timeout=90)
+
+deadline = time.time() + 90
+state = 'unknown'
+while time.time() < deadline:
+    ws.settimeout(max(1, deadline - time.time()))
+    try:
+        msg = json.loads(ws.recv())
+    except (websocket.WebSocketTimeoutException, TimeoutError):
+        break
+    if msg.get('msg_type') == 'status':
+        state = msg.get('content', {}).get('execution_state', 'unknown')
+        if state == 'idle':
+            break
+
+ws.close()
+print(f'  kernel {kid[:8]}... on port {port} reached state: {state}')
+
+try:
+    req = urllib.request.Request(
+        f'{base}/api/kernels/{kid}?token={token}', method='DELETE')
+    urllib.request.urlopen(req)
+except Exception:
+    pass
+
+sys.exit(0 if state == 'idle' else 1)
+" 2>&1 &
+        warmup_pids+=($!)
+    done
+
+    local warmup_ok=true
+    for pid in "${warmup_pids[@]}"; do
+        if ! wait "$pid"; then warmup_ok=false; fi
+    done
+    if [ "$warmup_ok" = true ]; then
+        echo "All $PARALLEL kernel warmups complete"
+    else
+        echo "WARNING: some kernel warmups failed — continuing anyway"
+    fi
+
+    # Copy + trust notebooks
+    local notebooks=(test_buckaroo_widget.ipynb test_buckaroo_infinite_widget.ipynb
+        test_polars_widget.ipynb test_polars_infinite_widget.ipynb
+        test_dfviewer.ipynb test_dfviewer_infinite.ipynb
+        test_polars_dfviewer.ipynb test_polars_dfviewer_infinite.ipynb
+        test_infinite_scroll_transcript.ipynb)
+    for nb in "${notebooks[@]}"; do
+        cp "tests/integration_notebooks/$nb" "$nb"
+        jupyter trust "$nb" 2>/dev/null || true
+    done
+
+    # Clean workspaces after trust
+    rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
+
+    deactivate
+}
+
 export JS_CACHE_DIR JS_TREE_HASH
 export -f job_lint_python job_test_js job_test_python job_build_wheel \
            job_test_mcp_wheel job_smoke_test_extras \
            job_playwright_storybook job_playwright_server job_playwright_marimo \
-           job_playwright_wasm_marimo job_playwright_jupyter
+           job_playwright_wasm_marimo job_playwright_jupyter job_jupyter_warmup
 
 # ── Phase routing ─────────────────────────────────────────────────────────────
 
@@ -333,6 +470,9 @@ else
     run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
     run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
     run_job playwright-wasm-marimo job_playwright_wasm_marimo     & PID_PW_WM=$!
+    # Early kernel warmup — venv + 4 JupyterLab servers + kernel warmup while
+    # heavyweight jobs are running. Finishes by ~t=20s, long before wheel is ready.
+    run_job jupyter-warmup         job_jupyter_warmup             & PID_WARMUP=$!
 
     # ── Wait for test-js only, then build wheel ──────────────────────────────
     wait $PID_TESTJS || OVERALL=1
@@ -344,6 +484,14 @@ else
     mkdir -p "/opt/ci/wheel-cache/$SHA"
     cp dist/buckaroo-*.whl "/opt/ci/wheel-cache/$SHA/" 2>/dev/null || true
     log "Cached wheel → /opt/ci/wheel-cache/$SHA"
+
+    # ── Install wheel into warm jupyter venv ─────────────────────────────────
+    wait $PID_WARMUP || OVERALL=1
+    log "=== jupyter-warmup done — installing wheel into warm venv ==="
+    JUPYTER_VENV=$(cat /tmp/ci-jupyter-warmup-venv)
+    wheel=$(ls dist/buckaroo-*.whl | head -1)
+    uv pip install --python "$JUPYTER_VENV/bin/python" "$wheel" -q
+    "$JUPYTER_VENV/bin/python" -c "import buckaroo; import pandas; import polars" 2>/dev/null || true
 
     # ── Wheel-dependent jobs (start as soon as wheel exists) ─────────────────
     log "=== build-wheel done — starting wheel-dependent jobs ==="
@@ -362,7 +510,29 @@ else
     wait $PID_PW_MA   || OVERALL=1
     wait $PID_PW_WM   || OVERALL=1
     log "=== heavyweight Playwright jobs done — starting playwright-jupyter ==="
-    run_job playwright-jupyter   job_playwright_jupyter    & PID_PW_JP=$!
+
+    # Use pre-warmed servers — skip startup/warmup in the parallel script
+    job_playwright_jupyter_warm() {
+        cd /repo
+        local venv
+        venv=$(cat /tmp/ci-jupyter-warmup-venv)
+        local rc=0
+        ROOT_DIR=/repo \
+        PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+        PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
+        PARALLEL=4 \
+            bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
+                --venv-location="$venv" --servers-running || rc=$?
+        # Cleanup servers + venv
+        for pid in $(cat /tmp/ci-jupyter-warmup-pids 2>/dev/null); do
+            kill "$pid" 2>/dev/null || true
+        done
+        rm -rf "$venv"
+        rm -f /tmp/ci-jupyter-warmup-venv /tmp/ci-jupyter-warmup-pids
+        return $rc
+    }
+    export -f job_playwright_jupyter_warm
+    run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
 
     # Collect remaining job exit codes (these should already be done by now)
     wait $PID_LINT    || OVERALL=1
