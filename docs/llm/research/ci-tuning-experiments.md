@@ -1,909 +1,181 @@
-# CI Tuning Experiments — Night of 2026-03-03
+# CI Tuning — Current State & Open Research
 
 **Branch:** docs/ci-research
 **Server:** Vultr 16 vCPU / 32 GB (45.76.230.100)
-**Goal:** Minimize total CI wall-clock time while maintaining reliability.
-**Baseline:** 3m16s (full DAG, PARALLEL=3 jupyter, ALL PASSED)
+**Best config:** Exp 33 (P=6 batched) — **1m44s, 9/9 jupyter, 13/14 overall**
 
 ---
 
-## Summary of Results
-
-| Exp | Commit | Config | Pass Rate | Jupyter Time (pass) | Total Time (pass) |
-|-----|--------|--------|----------|-------------------|------------------|
-| 10 | 7e5754a | P=9 WebSocket phase5b | 8/9 notebooks | ~2m01s | N/A (5b only) |
-| 11 | 7e5754a | P=9 full DAG | 0/1 | N/A | N/A |
-| 12 | a869d12 | pytest-xdist -n 4 | N/A (python only) | N/A | ~30s/ver (was ~63s) |
-| 13 | 2207d1e | infinite_scroll fix | N/A | N/A | N/A |
-| 14a | 35e0fc8 | P=4 old DAG | **2/7 = 29%** | ~1m12s | ~2m40s |
-| 14b | 7770774 | P=4 wait-all DAG | **4/5 = 80%** | ~3m20s | ~3m30s |
-| 14c | 92ca618 | P=3 wait-all DAG | **3/5 = 60%** | ~5m18s | ~7m |
-| 14d | 6a11b71 | P=4 wait-all + kernel-idle-60s | **3/5 = 60%** | varies | varies |
-| 14e | 8695488 | P=4 wait-all + idle-15s + retry=2 | **4/5 = 80%** | ~1m12s | ~2m42s |
-| **15-21** | **5994612** | **jupyterapp + waitFor removal** | **10/10 jupyter, 9/10 overall** | **~1m36s** | **~2m59s** |
-| 23 | 200bac6 | JS build cache + ci-queue | N/A | N/A | saves 17s critical path |
-| 24 | 5c1e58f | Fix full_build.sh skip check | N/A | N/A | build-wheel 17s→3s |
-| **18+19+20** | **60618ce** | **parallel smoke + relaxed gate + marimo waits** | **pw-jupyter 1/1, overall FAIL (storybook flake)** | **1m38s** | **2m31s** |
-| **28** | **172158b** | **early kernel warmup in Wave 0** | **3/3 pw-jupyter, 2/3 overall (pw-server flake)** | **1m14s** | **2m25s** |
-| **30** | **d369894** | **remove heavyweight PW gate + CPU monitor** | **7/7 pw-jupyter, 6/7 overall (pw-server flake)** | **1m15s** | **1m43s** |
-| 31 | b2398d5 | PARALLEL=9 revisited | ABANDONED (too slow) | 4m+ | N/A |
-| 32 | b2398d5 | lean Wave 0 + defer pytest | 3/3 pw-jupyter, 1/3 overall (pw-server) | 80s | 1m51s |
-| **33** | **076f40f** | **P=6 batched + re-warmup + timeouts** | **9/9 jupyter, 13/14 overall** | **66s** | **1m44s** |
-| 33 | 0e98e13+ | P=9 (0s/1s/2s stagger, port 8900) | 1-3/9 jupyter (timeout) | 120s timeout | ~2m45s |
-| 29 | d020744 | Marimo auto-retry assertions + retries=2 | TBD (running) | N/A | reliability |
-| **34+36** | **2ba10e7** | **SKIP_INSTALL + renice + pw-server auto-retry** | **pw-server 3/3, pw-jupyter 1/3** | **76s** | **2m00s** |
-
----
-
-## Experiment Details
-
-### Exp 10 — PARALLEL=9 WebSocket warmup baseline (a1594bd → 7e5754a)
-
-**Status:** DONE
-**Mode:** --phase=5b (isolated, no DAG contention)
-**PARALLEL:** 9
-
-**Key discovery:** REST API (GET /api/kernels/{id}) NEVER updates execution_state from
-"starting" to "idle" without a WebSocket client. Known upstream limitation in jupyter_server.
-The fix: connect to `/api/kernels/{id}/channels` via WebSocket, which triggers the built-in
-"nudge" mechanism (kernel_info_request). All 9 kernels reached idle in 11 seconds.
-
-**Results:** 8/9 notebooks PASS. Only `test_infinite_scroll_transcript` fails (both tests
-timeout waiting for cell output — 2000-row PolarsBuckarooInfiniteWidget too heavy).
-
-**Fixed bugs:**
-- ENOENT race: 9 concurrent Playwright processes racing to mkdir `.playwright-artifacts-0`.
-  Fix: unique `--output` per slot.
-- REST warmup broken: replaced with WebSocket-based warmup using `websocket-client` package.
-
----
-
-### Exp 11 — PARALLEL=9 full DAG (7e5754a)
-
-**Status:** DONE
-**PARALLEL:** 9
-
-All 9 notebooks FAILED in full DAG mode. The playwright-server job (58s) was still running
-when playwright-jupyter started, creating CPU contention with 9 Chromium + 9 JupyterLab
-+ 9 Python kernels on top of the existing Playwright server process.
-
-**Key finding:** Phase 5b passes (isolated) but full DAG fails at P=9. CPU contention
-from other jobs is the bottleneck, not kernel startup.
-
----
-
-### Exp 12 — pytest-xdist for Python unit tests (a869d12)
-
-**Status:** DONE
-**What:** Added `pytest-xdist>=3` to test deps, run with `-n 4 --dist load`.
-
-**Results:** Python test time dropped from ~63s to ~30s per version. 4-way parallelism
-on test execution reduces total Python test wall time by ~50%.
-
-No test isolation issues found — all tests pass with xdist.
-
----
-
-### Exp 13 — Fix infinite_scroll_transcript flake (2207d1e → 61e9947)
-
-**Status:** DONE (partially)
-**Changes:**
-- Reduced DataFrame from 2000 to 500 rows (lighter widget under contention)
-- Scroll target: row 400 (was 1500)
-- Bumped test timeout to 180s, CELL_EXEC_TIMEOUT to 120s
-- Added Shift+Enter retry loop (dispatchEvent + keyboard, 15s per attempt)
-- Changed ag-cell wait from 'visible' to 'attached'
-
-**Result:** Passes when run alone in batch 3 (after other notebooks finish).
-Still fails under concurrency with other notebooks.
-
----
-
-### Exp 14a — PARALLEL=4 old DAG baseline (35e0fc8)
-
-**Status:** DONE — 5-run stability test
-**DAG:** Wait for marimo+wasm only before starting playwright-jupyter.
-**PARALLEL:** 4
-
-**Results:** 2/7 PASS = **29% pass rate**
-
-| Run | Jupyter Time | Result |
-|-----|-------------|--------|
-| 1 | 3m33s | FAIL |
-| 2 | 3m33s | FAIL |
-| 3 | 1m12s | **PASS** |
-| 4 | 3m18s | FAIL |
-| 5 | 3m34s | FAIL |
-| 6 | 3m33s | FAIL |
-| 7 | 1m11s | **PASS** |
-
-**Key finding:** playwright-server (58s) consistently overlaps playwright-jupyter start
-by ~4 seconds. The overlap causes enough CPU contention to make cell execution unreliable.
-
----
-
-### Exp 14b — PARALLEL=4 wait-all DAG (7770774) ⭐ BEST SO FAR
-
-**Status:** DONE — 5-run stability test
-**Changes from 14a:**
-1. Wait for ALL jobs (including playwright-server, MCP, smoke) before starting playwright-jupyter
-2. Added `--retries=1` to Playwright CLI
-
-**Results:** 4/5 PASS = **80% pass rate**
-
-| Run | Jupyter Time | Result |
-|-----|-------------|--------|
-| 1 | 3m20s | **PASS** |
-| 2 | 4m07s | FAIL |
-| 3 | 3m36s | **PASS** |
-| 4 | 3m21s | **PASS** |
-| 5 | 3m36s | **PASS** |
-
-**Key finding:** Waiting for ALL jobs before playwright-jupyter is the single biggest
-reliability improvement. Eliminates CPU contention from overlapping playwright-server.
-
-**Impact on total CI time:** Adds ~50s to critical path (waiting for server to finish)
-but reliability jumps from 29% to 80%. Total CI: ~5m.
-
----
-
-### Exp 14c — PARALLEL=3 wait-all DAG (92ca618)
-
-**Status:** DONE — 5-run stability test
-**PARALLEL:** 3 (3+3+3 batches instead of 4+4+1)
-
-**Results:** 3/5 PASS = **60% pass rate**
-
-| Run | Total Time | Result |
-|-----|-----------|--------|
-| 1 | 7m12s | **PASS** |
-| 2 | 6m40s | FAIL |
-| 3 | 1m08s | **PASS** |
-| 4 | 2m40s | **PASS** |
-| 5 | 7m56s | FAIL |
-
-**Key finding:** PARALLEL=3 is WORSE than PARALLEL=4. More batches (3+3+3 vs 4+4+1)
-means more kernel startup overhead between batches. Each batch takes ~2m34s regardless
-of whether it has 3 or 4 notebooks — so more batches = more time = more opportunity
-for flakes.
-
-**Conclusion:** Don't go below PARALLEL=4.
-
----
-
-### Exp 14d — PARALLEL=4 wait-all + kernel-idle-wait-60s (6a11b71)
-
-**Status:** DONE — 5-run stability test
-**Change:** Added `waitForFunction` checking JupyterLab's
-`.jp-Notebook-ExecutionIndicator[data-status="idle"]` before attempting Shift+Enter.
-Timeout: 60 seconds.
-
-**Results:** 3/5 PASS = **60% pass rate** (worse than 14b!)
-
-| Run | Jupyter Time | Result |
-|-----|-------------|--------|
-| 1 | 1m14s | **PASS** |
-| 2 | 3m37s | **PASS** |
-| 3 | 8m20s | FAIL |
-| 4 | 4m07s | FAIL |
-| 5 | 1m12s | **PASS** |
-
-**Key finding:** The 60s kernel idle wait HURTS reliability. When the DOM selector isn't
-found (JupyterLab hasn't fully rendered), the `waitForFunction` burns 60s of the 180s
-test timeout. This leaves only 120s for the actual retry loop + widget rendering, which
-isn't enough when the kernel is slow.
-
-**Conclusion:** Kernel idle wait concept is sound but 60s timeout is too aggressive.
-
----
-
-### Exp 14e — PARALLEL=4 wait-all + kernel-idle-15s + retries=2 (8695488)
-
-**Status:** DONE — 5-run stability test
-**Changes from 14d:**
-- Reduced kernel idle wait timeout from 60s to 15s
-- Increased Playwright retries from 1 to 2
-
-**Results:** 4/5 PASS = **80% pass rate** (same as 14b)
-
-| Run | Jupyter Time | Result | Notes |
-|-----|-------------|--------|-------|
-| 1 | 1m12s | **PASS** | |
-| 2 | 1m12s | **PASS** | |
-| 3 | 1m13s | **PASS** | |
-| 4 | ~10m | FAIL | cell execution timeout |
-| 5 | ~5m | PASS (jupyter) | storybook flake caused overall FAIL |
-
-**Conclusion:** Kernel idle wait + extra retry doesn't improve beyond wait-all + retries=1.
-The 80% pass rate appears to be the ceiling for PARALLEL=4 on Vultr 16 vCPU with
-DOM-based kernel readiness checks.
-
-See `jupyterlab-kernel-connection-deep-dive.md` for research into why the remaining
-20% fails and the architectural fix (query `window.jupyterapp` internal state instead
-of DOM selectors).
-
----
-
-### Exp 15+16+17+21 combined — `5994612` ⭐ BEST OVERALL
-
-**Status:** DONE — 10-run stability test
-**Changes (all in one commit):**
-1. **Exp 15:** Replace `waitForTimeout(3000)` in server specs with `expect().toPass()` polling
-2. **Exp 16:** Replace `sleep 5` in test_playwright_marimo.sh with curl polling loop
-3. **Exp 17:** Skip JS rebuild in full_build.sh when dist already exists
-4. **Exp 21:** Replace DOM kernel idle check with `window.jupyterapp` internal state query
-
-**Results:** pw-jupyter 10/10 = **100% pass rate**. Overall 9/10 (1 pw-server flake).
-
-| Run | pw-server | pw-marimo | pw-jupyter | Result | Total |
-|-----|----------|----------|-----------|--------|-------|
-| 1 | 37s | 42s | **1m36s** | **PASS** | **2m59s** |
-| 2 | 36s | 41s | **1m36s** | **PASS** | **2m59s** |
-| 3 | 36s | 42s | **1m35s** | **PASS** | **2m58s** |
-| 4 | FAIL | 41s | **1m35s** | FAIL | 2m58s |
-| 5 | 37s | 42s | **4m11s** | **PASS** | **5m34s** |
-| 6 | 36s | 42s | **4m11s** | **PASS** | **5m33s** |
-| 7 | 36s | 41s | **1m36s** | **PASS** | **2m58s** |
-| 8 | 36s | 42s | **1m36s** | **PASS** | **2m59s** |
-| 9 | 35s | 41s | **4m10s** | **PASS** | **5m32s** |
-| 10 | 36s | 42s | **1m35s** | **PASS** | **2m58s** |
-
-**Stage improvements vs baseline (14e):**
-- pw-server: 50s → **37s** (-13s, exp 15)
-- pw-marimo: 46s → **42s** (-4s, exp 16)
-- build-wheel: 17s → 17s (exp 17 no-op — checkout clears dist)
-- pw-jupyter pass rate: 80% → **100%** (exp 21)
-
-**Key findings:**
-1. `window.jupyterapp` kernel check (exp 21) broke the 80% ceiling completely — 10/10 jupyter passes.
-2. pw-server `waitForTimeout` removal saved 13s but introduced a 1/10 flake (needs investigation).
-3. pw-jupyter has a bimodal pattern: 7/10 runs at ~1m36s, 3/10 at ~4m11s (retries used).
-4. Median total CI time: **2m59s** (vs 2m43s in 14e, +16s from longer jupyter median).
-5. Exp 17 (skip JS rebuild) was a no-op — `git checkout` clears dist/ so the skip never triggers.
-
----
-
-## Next Experiments — Jupyter Reliability (from deep dive research)
-
-### Exp 21 — Replace DOM kernel check with `window.jupyterapp` internal state query
-
-**Priority:** CRITICAL — expected to break the 80% ceiling
-**Estimated impact:** 80% → ~95-100% pass rate
-**Files:** `pw-tests/integration.spec.ts`, `pw-tests/infinite-scroll-transcript.spec.ts`
-
-**Root cause of 20% failures (from deep dive):**
-The DOM-based check (`querySelector('.jp-Notebook-ExecutionIndicator')`) has three problems:
-1. The DOM element may not exist yet → `querySelector` returns `null` → burns entire timeout
-2. Even when found, `data-status` lags behind actual kernel state
-3. When timeout expires, test proceeds to `Shift+Enter` with `session.kernel === null` →
-   `CodeCell.execute()` at `widget.ts:1750` silently returns `void`, no error
-
-**The fix:** Query JupyterLab's runtime directly via `window.jupyterapp`:
-```typescript
-await page.waitForFunction(() => {
-  const app = (window as any).jupyterapp;
-  if (!app) return false;
-  const widget = app.shell.currentWidget;
-  if (!widget?.sessionContext?.session?.kernel) return false;
-  const kernel = widget.sessionContext.session.kernel;
-  return kernel.connectionStatus === 'connected' && kernel.status === 'idle';
-}, { timeout: 60000 });
+## Current Best Configuration (Exp 33, commit 076f40f)
+
+```
+Total: ~1m44s
+├─ Wave 0 (parallel):     25s  [lint, test-js, test-python-3.13, pw-storybook, jupyter-warmup]
+├─ build-wheel:            3s  [after test-js, JS cache HIT]
+├─ wheel install:          3s  [into pre-warmed jupyter venv]
+├─ Wheel-dependent (staggered 5s apart):
+│   ├─ pw-jupyter:        66s  [P=6 batched 6+3, critical path]
+│   ├─ pw-server:         47s
+│   ├─ pw-marimo:         50s
+│   ├─ pw-wasm-marimo:    35s
+│   ├─ test-mcp-wheel:    12s
+│   ├─ smoke-test-extras:  8s  [parallel venv installs]
+│   └─ test-python 3.11/3.12/3.14: ~30s each (deferred 20s)
 ```
 
-**Why this works:**
-- Checks the EXACT same `session.kernel` that `CodeCell.execute()` checks
-- Returns `false` cheaply when app hasn't loaded (no wasted timeout)
-- Returns `true` the instant kernel is actually ready to accept execution
-- 60s timeout safe because the function is cheap to evaluate (no DOM queries)
+Critical path: `test-js(7s) → build-wheel(3s) → warmup-wait → wheel-install(2s) → pw-jupyter(66s) = ~1m18s + overhead = ~1m44s`
 
-### Exp 22 — Verify `window.jupyterapp` availability
+### Key Techniques (all proven)
 
-**Priority:** Prerequisite for Exp 21
-**What:** Quick test — open JupyterLab in Playwright, run
-`page.evaluate(() => typeof (window as any).jupyterapp)` to confirm the global exists
-and has the expected shape. JupyterLab 4.x exposes this by default.
+| Technique | Exp | Impact |
+|-----------|-----|--------|
+| `window.jupyterapp` kernel check | 21 | pw-jupyter 80% → **100%** pass rate |
+| WebSocket kernel warmup in Wave 0 | 28 | -24s off pw-jupyter |
+| No heavyweight PW gate | 30 | -42s off total (1m43s vs 2m25s) |
+| PARALLEL=6 batched (6+3) | 33 | 66s pw-jupyter (vs 75s at P=4) |
+| JS build cache (tree-hash keyed) | 23 | -16s off critical path |
+| `full_build.sh` skip check fix | 24 | build-wheel 17s → 3s |
+| `expect().toPass()` polling | 15 | pw-server 50s → 37s |
+| Parallel smoke-test-extras | 18 | 20s → 8s |
+| pytest-xdist `-n 4` | 12 | ~63s → ~30s per Python version |
+| Staggered sub-waves (5s) | 33 | Reduces CPU burst at wheel-dependent launch |
+| Between-batch kernel re-warmup | 33 | Fixes batch-2 hang |
+| Pre-run cleanup (pkill, rm temps) | 33 | Clean state between CI runs |
+| 120s pw-jupyter timeout + 210s watchdog | 33 | Prevents runaway CI |
 
-**Risk:** If `jupyterapp` isn't exposed (some builds strip it), fall back to
-`document.querySelector('#main')._jupyterapp` or the Lumino app registry.
+### What Doesn't Work
 
----
-
-## Next Experiments — Non-Jupyter Optimizations
-
-Current full DAG timing (warm caches, Vultr 16 vCPU):
-```
-Total: ~2m42s
-├─ Wave 0 (parallel):     32s  [lint, test-py×3, test-js, pw-storybook, pw-wasm-marimo]
-├─ build-wheel:           16s  [after test-js]
-├─ Wheel-dependent:       50s  [mcp, smoke, pw-server, pw-marimo — all parallel]
-└─ playwright-jupyter:  1m12s  [after ALL other jobs finish]
-```
-
-Critical path: `test-js(24s) → build-wheel(16s) → wait-all(~50s) → pw-jupyter(1m12s) = 2m42s`
-
-### Exp 15 — Remove waitForTimeout in playwright-server specs (~15s savings)
-
-**Priority:** HIGH
-**Estimated savings:** 15-17s off playwright-server's 50s runtime
-**Files:**
-- `pw-tests/server-buckaroo-summary.spec.ts` — 3× `waitForTimeout(3000)` = **9s of hard sleeps** for view switching. Replace with `waitFor` on pinned row count changing or ag-grid re-render.
-- `pw-tests/server-buckaroo-search.spec.ts` — 1× `waitForTimeout(3000)` = 3s
-- `pw-tests/theme-screenshots-server.spec.ts` — 5× waits = ~3s
-- `pw-tests/server.spec.ts` — 2× `waitForTimeout(1000)` = 2s
-
-**Impact on critical path:** Indirect — playwright-server finishing faster means the wait-all gate for pw-jupyter triggers earlier. Could save ~15s off total CI time.
-
-### Exp 16 — Remove sleep 5 in playwright-marimo warmup (~5s savings)
-
-**Priority:** MEDIUM
-**Estimated savings:** ~5s off playwright-marimo's 46s runtime
-**File:** `scripts/test_playwright_marimo.sh` line 93
-**What:** Replace `sleep 5` after `curl` with polling for actual marimo readiness (e.g., check HTTP response body for compiled widget markers, or poll until the page serves JS assets).
-
-**Impact on critical path:** Same as exp 15 — marimo finishing faster triggers the wait-all gate sooner.
-
-### Exp 17 — Skip JS rebuild in full_build.sh when dist exists (~8s savings)
-
-**Priority:** MEDIUM
-**Estimated savings:** ~8s off build-wheel's 16s runtime
-**File:** `scripts/full_build.sh`
-**What:** `test-js` already runs `pnpm build` (produces `packages/buckaroo-js-core/dist/`). Then `full_build.sh` rebuilds it from scratch. Add a check: if `dist/` exists and is newer than source, skip the JS build and just copy CSS + run esbuild + build wheel.
-
-**Impact on critical path:** Direct — build-wheel is ON the critical path. Cutting it from 16s to ~8s saves 8s directly.
-
-### Exp 18 — Parallelize smoke-test-extras (~10s savings)
-
-**Priority:** LOW
-**Estimated savings:** ~10s off smoke-test-extras' 17s runtime
-**File:** `ci/hetzner/run-ci.sh` `job_smoke_test_extras()`
-**What:** Currently creates 6 venvs sequentially (base, polars, mcp, marimo, jupyterlab, notebook). Run all 6 in parallel with `&` and `wait`. Each is independent.
-
-**Impact on critical path:** None — smoke-test-extras runs parallel with pw-server/pw-marimo, which are slower. But reduces the wait-all gate target.
-
-### Exp 19 — Relax pw-jupyter gate (start after heavy jobs only)
-
-**Priority:** MEDIUM
-**Estimated savings:** ~10-15s off total CI time
-**File:** `ci/hetzner/run-ci.sh`
-**What:** Instead of waiting for ALL jobs, wait only for the heavyweight ones (pw-server, pw-marimo, pw-wasm-marimo) that actually compete for CPU. The light jobs (lint, test-mcp, smoke) are already done by then anyway.
-
-**Risk:** If a light job runs long (unlikely), it could overlap with pw-jupyter. Worth testing after exp 15-16 make the heavy jobs faster.
-
-### Exp 20 — Remove waitForTimeout in playwright-marimo/storybook specs
-
-**Priority:** LOW
-**Estimated savings:** ~3s each = ~6s total
-**Files:**
-- `pw-tests/theme-screenshots-marimo.spec.ts` — 6× waits = ~3.1s
-- `pw-tests/transcript-replayer.spec.ts` — 4× waits = ~3.6s
-
-**Impact:** Minor — these jobs are already fast (11s storybook, 46s marimo).
-
-### Priority Order (all done)
-
-1. ~~**Exp 15** (pw-server waitForTimeout)~~ — DONE in 5994612. Saved 13s (50s → 37s)
-2. ~~**Exp 17** (skip JS rebuild)~~ — DONE in 5994612 but was a no-op (git checkout clears dist). **Fixed properly in Exp 23** (external JS cache).
-3. ~~**Exp 16** (marimo sleep 5)~~ — DONE in 5994612. Saved 4s (46s → 42s)
-4. ~~**Exp 19** (relax gate)~~ — DONE in 60618ce. pw-jupyter starts right after heavyweight Playwright jobs.
-5. ~~**Exp 18** (parallel smoke)~~ — DONE in 60618ce. smoke-test-extras 20s→8s.
-6. ~~**Exp 20** (minor waitForTimeout)~~ — DONE in 60618ce. ~3.4s cut from marimo screenshots.
-
-### Projected Impact (superseded by actual results)
-
-~~If all experiments succeed:~~
-- ~~pw-server: 50s → ~33s (-17s)~~ → **Actual: 50s → 37s (-13s)**
-- ~~pw-marimo: 46s → ~41s (-5s)~~ → **Actual: 46s → 42s (-4s)**
-- ~~build-wheel: 16s → ~8s (-8s)~~ → **Actual: 17s → 17s (no-op — git checkout clears dist)**
-- ~~Total CI: ~2m42s → ~2m15s~~ → **Actual: 2m59s median** (jupyter bimodal: 7/10 at 1m36s, 3/10 at 4m11s)
-
-**Exp 17 root cause:** `full_build.sh` checked for `dist/index.js` but vite outputs `dist/index.es.js`. The skip condition never triggered. Fixed in `5c1e58f` but only helps future SHAs (old SHAs have old full_build.sh). The real fix is Exp 23 (external JS cache).
+| Approach | Exp | Why |
+|----------|-----|-----|
+| PARALLEL=3 | 14c | More batches = more overhead, worse than P=4 |
+| PARALLEL=9 | 11, 31, 33 | CPU starvation (27+ processes on 16 vCPU) |
+| DOM kernel idle check | 14d | Burns timeout when DOM not rendered |
+| REST kernel polling | 10 | Never updates without WebSocket |
+| Lean Wave 0 (shift work to later) | 32 | Just moves contention, +8s total |
+| `nice` on shell functions | 34+36 | `nice` is external cmd, can't run bash functions |
 
 ---
 
-### Exp 23 — JS Build Cache + CI Job Queue (f30da68 → 5c1e58f)
+## Open Issues
 
-**Status:** DONE — confirmed working (JS cache saves 17s on critical path)
-**Changes:**
-1. **JS build cache:** Cache `dist/` at `/opt/ci/js-cache/<tree-hash>` keyed by `sha256sum` of `git ls-tree` for `src/`, `package.json`, `tsconfig.json`, `vite.config.ts`. Restore after `git checkout`, save in `job_test_js()`.
-2. **CI job queue:** `ci-queue.sh` — directory-based queue with `flock` single-worker enforcement. Commands: push, status, cancel, clear, log, repeat.
-3. **full_build.sh fix:** Check `dist/index.es.js` not `dist/index.js` for skip logic.
+### 1. Zombie process accumulation (BLOCKING for back-to-back runs)
 
-**JS cache impact (measured):**
+**Discovered in:** Exp 34+36
+**Symptom:** First CI run after container restart passes. Subsequent runs: pw-jupyter times out (0/6 notebooks complete).
+**Root cause:** Docker PID 1 (`sleep infinity`) doesn't reap zombies. After each CI run, ~100+ defunct `jupyter-lab` and `python` processes accumulate. By run 2-3, 326+ zombies exist.
+**Ports are free** — zombies don't hold sockets. Warmup succeeds (all kernels reach idle). Notebooks start but never complete.
 
-| Metric | Cache MISS | Cache HIT | Savings |
-|--------|-----------|-----------|---------|
-| test-js | 21s | 5s | **-16s** |
-| build-wheel starts at | +23s | +7s | **-16s** |
-| wheel-dependent starts at | +40s | +25s | **-15s on critical path** |
+**Fix options:**
+1. **Add `tini` as PID 1** in Dockerfile (`ENTRYPOINT ["/usr/bin/tini", "--"]`) — reaps zombies automatically
+2. **Add `init: true`** in docker-compose.yml — same effect, uses Docker's built-in tini
+3. Investigate if the real issue is stale JupyterLab workspace state, not zombies
 
-build-wheel still takes 18s with cache HIT because `full_build.sh` had the wrong filename check — it rebuilt JS from scratch even though dist/ existed. Fixed in `5c1e58f` (`index.js` → `index.es.js`). **Expected build-wheel with both fixes: ~8s** (just esbuild widget + uv build, no tsc+vite).
+### 2. pw-server flake — FIXED (Exp 34+36)
 
-**CPU utilization during CI (Vultr 16 vCPU):**
-```
-Phase                  Host CPU    Container CPU    Notes
-─────────────────────  ─────────   ──────────────   ──────────────────
-Wave 0 (8 parallel)    ~60-90%     ~800-1200%       All 16 cores busy
-build-wheel            ~40%        ~400%            tsc+vite
-Wheel-dependent        ~40-60%     ~600%            4 jobs parallel
-pw-jupyter startup     ~40%        ~800%            4 JupyterLabs + 4 Chromiums launching
-pw-jupyter execution   ~5-10%      ~100%            Mostly idle — waiting on kernel I/O
-pw-jupyter idle gaps   ~1-3%       ~5-25%           Between batches, near zero
-```
+**Was:** 1/14 failure rate — `sort via header click` test used one-shot `getCellText()` which races with AG-Grid rendering.
+**Fix:** `cellLocator()` + `toHaveText()` auto-retrying assertions in `server.spec.ts` and `server-helpers.ts`.
+**Result:** 3/3 pw-server PASS after fix.
 
-**Key finding:** The machine is massively underutilized during playwright-jupyter (the longest phase). 16 vCPUs sit at 5-10% while waiting for kernel I/O. The bottleneck is kernel startup/connection latency, not CPU.
+### 3. Lockfile hash persistence across container restarts
 
-**Stress test results (in progress):**
-
-| SHA | Time | Result | JS Cache | Notes |
-|-----|------|--------|----------|-------|
-| 7b6a05c | 206s | FAIL | HIT (from prior test) | test-python × 3 fail (old code) |
-| fcfe368 | 186s | FAIL | HIT (from prior test) | pw-jupyter fail (old specs) |
-| 5ff4d6e | 209s | FAIL | HIT (same hash as 837654e) | pw-jupyter fail (old specs) |
-| 837654e | 206s | FAIL | HIT | pw-jupyter fail (old specs) |
-| f8a8b94 | ... | running | ... | ... |
-
-All failures are from old test code (no `window.jupyterapp` kernel check). This is exactly what synthetic merges (Part 3) would fix.
+Every container restart triggers "Lockfiles changed — rebuilding deps" because the hash store (`/var/ci/hashes/`) is inside the container. Should be a named volume or stored on the host bind mount.
 
 ---
 
-### Exp 24 — Fix build-wheel with JS cache (5c1e58f)
+## Queued Experiments
 
-**Status:** DONE — confirmed working in 60618ce
-**What:** `full_build.sh` checked for `dist/index.js` but vite outputs `dist/index.es.js`. Fixed the check.
+### Exp 37 — tini as PID 1 (zombie fix)
 
-**Actual impact (measured in 60618ce with Exp 23+24+18+19+20 combined):**
-```
-                    Before    Cache HIT + fix
-test-js              24s        7s
-build-wheel          17s        3s
-Critical path gap    41s       10s
-```
+**Priority:** HIGH — blocks reliable back-to-back runs
+**Files:** `ci/hetzner/Dockerfile`, `ci/hetzner/docker-compose.yml`
+**What:** Add `init: true` to docker-compose.yml (or `ENTRYPOINT ["/usr/bin/tini", "--"]` in Dockerfile). This makes Docker use tini as PID 1, which reaps zombie processes automatically.
+**Verification:** 3+ back-to-back CI runs, all pass. Zero zombies between runs.
 
-Saved **31s on the critical path** (from checkout to wheel-dependent jobs starting).
+### Exp 29 — Marimo auto-retry assertions (committed, untested on server)
 
----
+**Status:** Code committed at d020744, not yet validated in CI
+**What:** Replace one-shot `getCellText` with `cellLocator` + `toHaveText` in `marimo.spec.ts`. Retries 1→2.
+**Verification:** 3+ CI runs, pw-marimo 100%.
 
-### Exp 18+19+20 combined — 60618ce ⭐ NEW BEST
+### Exp 36 — renice CPU priority (partially working)
 
-**Status:** DONE — 1 run
-**Changes:**
-1. **Exp 18:** Parallelize smoke-test-extras — 6 venv installs run concurrently (20s→8s)
-2. **Exp 19:** Relax pw-jupyter gate — only wait for heavyweight Playwright jobs (pw-server, pw-marimo, pw-wasm-marimo), not all jobs
-3. **Exp 20:** Reduce waitForTimeout in theme-screenshots-marimo.spec.ts (~3.4s cut)
+**Status:** Implemented (renice after fork), but untested with clean back-to-back runs due to zombie issue.
+**What:** `renice -n -10` for critical-path (test-js), `renice -n 10` for background. jupyter-warmup left at default (servers persist).
+**Blocked by:** Exp 37 (zombie fix) — can't get clean back-to-back data.
 
-**Results:**
+### Exp 34 — SKIP_INSTALL (working)
 
-| Job | Before (5994612) | After (60618ce) | Savings |
-|-----|------------------|-----------------|---------|
-| test-js | 24s | 7s | -17s (JS cache) |
-| build-wheel | 17s | 3s | -14s (Exp 24) |
-| smoke-test-extras | 20s | 8s | -12s (Exp 18) |
-| pw-server | 37s | 42s | +5s (noise) |
-| pw-marimo | 42s | 43s | +1s (noise) |
-| pw-jupyter | 1m36s | 1m38s | +2s (noise) |
-| **Total** | **2m59s** | **2m31s** | **-28s** |
-
-**Pass/fail:** pw-jupyter PASS, pw-marimo PASS, pw-server PASS. Only failure: pw-storybook (pre-existing `transcript-replayer.spec.ts` flake).
-
-**Critical path:** `test-js(7s) → build-wheel(3s) → pw-marimo(43s) → pw-jupyter(98s) = ~2m31s`
-
-**Key finding:** The projected total from Exp 24 (`~2m31s`) was exactly right. The critical path is now dominated by pw-jupyter (65% of total time).
-
----
-
-### Exp 28 — Early Kernel Warmup (172158b)
-
-**Status:** DONE — 3-run stability test
-**Changes:**
-1. New `job_jupyter_warmup()` in Wave 0: creates venv, installs deps (jupyterlab, anywidget, polars, websocket-client), starts 4 JupyterLab servers, WebSocket kernel warmup, copies/trusts notebooks
-2. After build-wheel: installs wheel into warm venv (`uv pip install` — deps satisfied, ~2s)
-3. New `--servers-running` flag in `test_playwright_jupyter_parallel.sh`: skips server startup/warmup when pre-warmed servers available
-4. `job_playwright_jupyter_warm()` replaces `job_playwright_jupyter()` in full DAG: passes `--servers-running`, cleans up servers/venv after tests
-
-**Results:** pw-jupyter 3/3 = **100% pass rate**. Overall 2/3 (1 pw-server flake, pre-existing).
-
-| Run | jupyter-warmup | pw-jupyter | pw-server | Result | Total |
-|-----|---------------|------------|----------|--------|-------|
-| 1 | 27s | **1m14s** | FAIL | FAIL | **2m26s** |
-| 2 | 26s | **1m13s** | 38s | **PASS** | **2m24s** |
-| 3 | 27s | **1m14s** | 38s | **PASS** | **2m25s** |
-
-**Timing breakdown vs baseline (60618ce):**
-
-| Metric | Before | After | Savings |
-|--------|--------|-------|---------|
-| pw-jupyter total | 1m38s | **1m14s** | **-24s** (startup eliminated) |
-| jupyter-warmup | N/A | 27s | (overlapped with Wave 0, free) |
-| Total CI | 2m31s | **2m25s** | **-6s net** |
-
-**Why only -6s net (not -24s)?** The warmup overlaps with Wave 0 (free), and pw-jupyter tests-only is 24s faster. But the heavyweight PW jobs (server 38s, marimo 41s) still gate pw-jupyter start. The 24s savings are partially eaten by the warmup extending the wheel-install step by ~2s and slight scheduling variance.
-
-**Critical path:** `test-js(8s) → build-wheel(3s) → wait-warmup(0s, already done) → install-wheel(2s) → pw-marimo(41s) → pw-jupyter(74s) = ~2m08s + overhead = ~2m25s`
-
----
-
-## Future Experiments
-
-### Exp 25 — Synthetic Merge Commits for Stress Testing
-
-**Status:** Code written (`prepare-synth.sh`), not yet tested
-**What:** Merge latest test improvements (from `5994612`) onto old SHAs so stress tests use current Playwright specs with old application code. Resolves conflicts by taking "theirs" for test files, "ours" for app code.
-**Why:** Current stress test runs old SHAs with old specs that lack `window.jupyterapp` kernel check → all pw-jupyter tests fail. Synthetic merges would give accurate reliability data.
-
-### Exp 19 — Relax pw-jupyter gate ✅
-
-**Status:** DONE (60618ce)
-**What:** Wait only for heavy Playwright jobs (pw-server, pw-marimo, pw-wasm-marimo), not all jobs. Light jobs (lint, test-python, mcp, smoke) always finish before these.
-**Result:** pw-jupyter started at 15:22:42, right when pw-marimo finished (43s after wheel). No wasted time waiting for already-finished light jobs.
-
-### Exp 18 — Parallelize smoke-test-extras ✅
-
-**Status:** DONE (60618ce)
-**What:** Run all 6 venv installs (base, polars, mcp, marimo, jupyterlab, notebook) in parallel with `&` and `wait`.
-**Result:** smoke-test-extras **20s→8s** (-12s). Not on critical path but reduces wait-all gate target.
-
-### Exp 20 — Minor waitForTimeout cleanup ✅
-
-**Status:** DONE (60618ce)
-**What:** Reduced waitForTimeout in `theme-screenshots-marimo.spec.ts` — cut 1700ms per scheme × 2 schemes = ~3.4s.
-**Result:** pw-marimo 42s→43s (within noise — other factors dominate).
-
-### Exp 26 — Wheel cache across SHAs
-
-**Priority:** LOW — only saves ~3s (build-wheel is already 3s with JS cache)
-**What:** Cache the built wheel keyed by both Python source AND JS source (the wheel bundles built JS). Key by `git ls-tree -r HEAD buckaroo/ pyproject.toml packages/buckaroo-js-core/src/ packages/buckaroo-widget/ | sha256sum`. If neither Python nor JS changed, skip build-wheel entirely and reuse prior wheel.
-
-**Note:** The JS build cache (Exp 23) already handles the expensive part — tsc+vite is skipped on cache hit. With Exp 23+24, build-wheel only does esbuild widget + `uv build --wheel` = ~3s. A wheel cache would save those 3s but adds complexity for diminishing returns.
-
-**Relationship to JS cache:** If only Python changes (no JS changes), the JS cache already provides the built dist/. `full_build.sh` skips tsc+vite and just runs esbuild+wheel. A wheel cache would skip even that. If JS changes, both JS cache and wheel cache miss — full rebuild needed.
-
-### Exp 27 — Persistent pnpm install skip
-
-**Priority:** LOW — saves ~2-3s
-**What:** `pnpm install --frozen-lockfile` takes 2-3s even with warm store (just creating hardlinks). Skip if `node_modules/.package-lock.json` matches `pnpm-lock.yaml` hash.
-
-### Exp 36 — Unix nice for CPU priority scheduling
-
-**Priority:** MEDIUM — could reduce critical-path latency under contention without changing DAG
-**What:** Use `nice` / `renice` to give critical-path jobs higher CPU priority. Build-js and build-wheel are on the critical path (everything else waits for them) but currently compete equally with Wave 0 jobs like test-python, pw-storybook, and jupyter-warmup. Run critical-path jobs at `nice -10` (higher priority) and background jobs at `nice 10` (lower priority). This lets the kernel scheduler give build-js/build-wheel more CPU slices when the machine is saturated, without changing the DAG or adding delays. Candidates:
-- `nice -10`: build-js, build-wheel (critical path — everything gates on these)
-- `nice 0` (default): pw-jupyter (critical path after wheel, but long-running — unclear if nice helps)
-- `nice 10`: test-python, pw-storybook, jupyter-warmup, lint (Wave 0 background work)
+**Status:** Implemented and working in single runs.
+**What:** `SKIP_INSTALL=1` env var skips `pnpm install` + `playwright install chromium` in PW scripts. Set in CI wrappers.
+**Blocked by:** Exp 37 — need clean multi-run data.
 
 ### Exp 35 — Split test-js into build-js + test-js
 
 **Priority:** LOW — saves ~2-3s off critical path
-**What:** Currently `job_test_js` does `pnpm run build` then `pnpm run test`, and `build-wheel` waits for the entire job. But `build-wheel` (via `full_build.sh`) only needs the built JS dist, not the test results. Split into two steps: `build-js` (Wave 0, build-wheel gates on it) and `test-js` (runs in parallel after build completes). Saves the ~2-3s of JS test execution from the critical path since build-wheel can start as soon as `pnpm run build` finishes.
+**What:** `build-wheel` waits for all of `test-js` (build + test). Split so build-wheel gates only on the build step.
 
-### Exp 34 — Early pnpm install (move out of PW scripts)
+### Exp 26 — Wheel cache across SHAs
 
-**Priority:** MEDIUM — eliminates ~1-2s per PW job × 5 jobs, plus removes chromium startup stagger
-**What:** Every PW test script (`test_playwright_{jupyter,marimo,wasm_marimo,server,storybook}.sh`) does its own `pnpm install` + `pnpm exec playwright install chromium`. In CI these are no-ops (store warm from Docker build, chromium pre-installed) but each still takes 1-2s to resolve. Move a single `pnpm install` into the warmup phase (or right after `job_test_js` which already does one), then skip it in each PW script via a `--skip-install` flag or env var. The scripts keep their install logic for local dev use.
+**Priority:** LOW — saves ~3s (build-wheel is already 3s)
+**What:** Cache wheel keyed by Python+JS source hash. Skip build-wheel entirely on cache hit.
 
-### Exp 28 — Early Kernel Warmup ✅
+### Exp 25 — Synthetic merge commits for stress testing
 
-**Status:** DONE (172158b) — see detailed results above. Saved 24s off pw-jupyter, 6s net off total CI. Warmup fully overlaps with Wave 0.
+**Priority:** LOW
+**What:** Merge latest test code onto old SHAs for historical reliability testing.
 
-### Exp 29 — Marimo Assertion Robustness (apply flakiness research)
+### PARALLEL=9 (tabled)
 
-**Priority:** MEDIUM — reliability improvement, minor speed improvement
-**Status:** IN PROGRESS
-**What:** Apply findings from `marimo-playwright-flakiness.md` to our buckaroo marimo Playwright tests.
-
-**Changes:**
-1. **Retries 1→2** in `playwright.config.marimo.ts` (matches jupyter config)
-2. **Replace one-shot assertions with auto-retrying ones** in `marimo.spec.ts`:
-   - Old: `expect(await getCellText(widget, 'a', 0)).toBe('Alice')` — calls `innerText()` once, fails immediately if grid hasn't loaded data yet
-   - New: `await expect(cellLocator(widget, 'a', 0)).toHaveText('Alice')` — auto-retries until text matches or timeout expires
-3. Return locators instead of text from helper functions (enables Playwright's built-in retry mechanism)
-
-**Why:** The `getCellText()` pattern has a race condition: AG-Grid can render the cell DOM element before the kernel sends actual data. `innerText()` is a one-shot read — if it catches the cell in a loading state, the assertion fails. `toHaveText()` retries automatically until the expected value appears.
-
-This is the same class of bug identified in the marimo flakiness research (Category B: Test Assertion Races) and the Jupyter deep dive (Exp 21: DOM presence != application readiness).
-
-**Files:** `pw-tests/marimo.spec.ts`, `playwright.config.marimo.ts`
+**Status:** Conclusively failed at current hardware (16 vCPU), but not permanently dead.
+**Ideas for future retry:**
+- `renice` the kernel or server processes so they get more CPU
+- Single shared JupyterLab server instead of one-per-slot
+- Stagger only the last 3-4 starts by 5-10s
+- Profile which process uses the most CPU
+- Reduced reproduction on the same server
 
 ---
 
-### Exp 30 — Remove Heavyweight PW Gate (d369894) ⭐ NEW BEST
+## Operational Reference
 
-**Status:** DONE — 7 runs (5-run batch + 2 individual with CPU monitoring)
-**Changes:**
-1. Remove wait gate for pw-server/pw-marimo/pw-wasm-marimo before pw-jupyter
-2. pw-jupyter starts alongside all other wheel-dependent jobs immediately after wheel install
-3. Add `vmstat 1` CPU monitoring to every CI run
-
-**Hypothesis:** With `window.jupyterapp` kernel check (Exp 21) + early warmup (Exp 28), pw-jupyter no longer needs CPU headroom. The old DOM-based checks failed under contention; the new checks are resilient.
-
-**Results:** pw-jupyter 7/7 = **100% pass rate** under contention. Overall 6/7 (1 pw-server flake).
-
-| Run | pw-server | pw-marimo | pw-jupyter | Result | Total |
-|-----|----------|----------|-----------|--------|-------|
-| 1 | 40s | 42s | **1m15s** | **PASS** | **1m43s** |
-| 2 | 39s | 42s | **1m15s** | **PASS** | **1m44s** |
-| 3 | 39s | 41s | **1m14s** | **PASS** | **1m43s** |
-| 4 | FAIL | 43s | PASS | FAIL | ~1m45s |
-| 5 | (batch log race) | | | | |
-| 6 | 40s | 42s | **1m15s** | **PASS** | **1m43s** |
-
-**CPU profile (vmstat, run 6):**
-
-| Phase | Time | CPU busy (us+sy) | Idle |
-|-------|------|-----------------|------|
-| Wave 0 (9 jobs) | 0-25s | **80-97%** | 0-20% |
-| Wheel install | 25-27s | 30-55% | 45-67% |
-| All wheel jobs + pw-jupyter | 27-69s | **40-75%** | 25-60% |
-| pw-jupyter alone | 69-103s | **6-20%** | 75-95% |
-
-**Key findings:**
-1. pw-jupyter is **fully reliable under 40-75% CPU contention** with `window.jupyterapp` + early warmup
-2. The heavyweight gate was a workaround for broken DOM kernel checks — no longer needed
-3. Total CI: **1m43s** (was 2m25s with gate = **-42s**, was 2m31s pre-warmup = **-48s**)
-4. Machine has plenty of headroom during concurrent PW jobs (40-75% vs 80-97% in Wave 0)
-
-**Critical path:** `test-js(7s) → build-wheel(4s) → warmup-wait(0s) → wheel-install(2s) → pw-jupyter(75s) = 1m28s + overhead = ~1m43s`
-
----
-
-### Exp 31 — PARALLEL=9 revisited (b2398d5, reverted)
-
-**Status:** DONE — 1 run, ABANDONED (too slow)
-**Changes:** Bumped PARALLEL from 4 to 9 in pw-jupyter.
-**Hypothesis:** With `window.jupyterapp` kernel check, P=9 might now work under contention (it failed at P=9 in Exp 11 with DOM checks).
-
-**Results:** pw-jupyter took **4+ minutes** (vs 75-80s at P=4). Too many concurrent Chromium + JupyterLab + kernel processes overwhelm 16 vCPUs.
-
-**Conclusion:** PARALLEL=4 is confirmed optimal for 16 vCPU. P=9 is too many processes regardless of kernel check method. Reverted immediately.
-
----
-
-### Exp 32 — Lean Wave 0 + wasm-marimo after wheel + defer pytest (b2398d5)
-
-**Status:** DONE — 3-run stability test
-**Changes:**
-1. **Lean Wave 0:** Only 5 jobs (lint-python, test-js, test-python-3.13, playwright-storybook, jupyter-warmup) — was 9 jobs
-2. **pw-wasm-marimo after wheel:** Moved from Wave 0 to wheel-dependent phase (needs real widget.js)
-3. **Defer pytest 3.11/3.12/3.14:** Start 5 seconds after wheel-dependent jobs launch (reduce contention on PW startup)
-4. **Single pytest in Wave 0:** Only test-python-3.13 (signal check — failures on 3.13 likely affect all versions)
-
-**Results:** pw-jupyter 3/3 = **100% pass rate**. Overall 1/3 (2× pw-server flake: `sort via header click`).
-
-| Run | pw-server | pw-marimo | pw-wasm-marimo | pw-jupyter | Result | Total |
-|-----|----------|----------|---------------|-----------|--------|-------|
-| 1 | 45s FAIL | 49s | 43s | **79s** | FAIL | **1m47s** |
-| 2 | 47s PASS | 51s | 42s | **82s** | **PASS** | **1m55s** |
-| 3 | 47s FAIL | 50s | 41s | **80s** | FAIL | **1m51s** |
-
-**CPU profile (vmstat, run 1):**
-
-| Phase | Time | CPU busy (us+sy) | Idle |
-|-------|------|-----------------|------|
-| Wave 0 (5 jobs) | 0-22s | 24-76% | 24-76% |
-| Wheel-dependent burst | 27-55s | **73-100%** | 0-27% |
-| PW tests winding down | 55-80s | 35-73% | 27-65% |
-| pw-jupyter alone | 80-107s | 0-17% | 83-100% |
-
-**Timing breakdown vs Exp 30:**
-
-| Metric | Exp 30 | Exp 32 | Delta |
-|--------|--------|--------|-------|
-| Wave 0 jobs | 9 | 5 | -4 jobs |
-| Wave 0 peak CPU | 80-97% | 24-76% | much lighter |
-| Wheel-dependent CPU | 40-75% | 73-100% | heavier (more jobs in this phase) |
-| pw-jupyter | 75s | 80s | +5s (noise) |
-| Total | **1m43s** | **1m51s** | **+8s** |
-
-**Key findings:**
-1. Leaner Wave 0 didn't help — it just shifted work to the wheel-dependent phase
-2. CPU burst during wheel-dependent phase is higher (73-100%) vs Exp 30 (40-75%) because pw-wasm-marimo + 3 pytests now overlap
-3. pw-jupyter still 100% reliable under this higher contention (confirms `window.jupyterapp` check works)
-4. The 5s pytest delay is neutral — pytest finishes before PW tests anyway
-5. Net effect: slightly slower than Exp 30 (+8s), no reliability gain
-
-**Conclusion:** Exp 30 remains the best configuration. Spreading work across phases doesn't help when the critical path is pw-jupyter regardless.
-
-### Exp 33 — PARALLEL=6→9, staggered sub-waves, fine-grain CPU, batch re-warmup
-
-**Status:** DONE — PARALLEL=6 confirmed best, PARALLEL=9 conclusively dead
-**Commits:** 5279196 (initial), 8478735 (batch fix + timeouts), 076f40f (local fix), 0e98e13 (P=9), 75a81b2 (1s stagger), b566296 (2s stagger), 553bea0 (port 8900), 9dcc5e0 (pre-run cleanup)
-
-**Changes across iterations:**
-1. Staggered sub-wave launches (5s between wheel-dependent jobs) for CPU instrumentation
-2. PARALLEL=6 with batch re-warmup between batches (6+3 notebooks)
-3. 120s timeout on pw-jupyter job, 210s CI-wide watchdog (`kill -TERM 0`)
-4. Pre-run cleanup baked into run-ci.sh (kill stale processes, rm temp files)
-5. Fine-grain CPU monitoring (100ms /proc/stat sampling)
-
-**Bug fixes during Exp 33:**
-- **Batch 2 hang:** After `shutdown_kernels_on_port` between batches, new kernels need WebSocket nudge or they get stuck in "starting" state forever. Fix: between-batch `warmup_one_kernel` re-warmup.
-- **`local` outside function:** Bash `local` keyword in between-batch code was in a while loop, not a function. Caused immediate script failure after batch 1.
-
-**PARALLEL=6 results (076f40f) — the winner:**
-
-| Job | Time | Result |
-|-----|------|--------|
-| pw-jupyter (6+3 batched) | 66s | **PASS (9/9)** |
-| pw-server | 47s | FAIL (pre-existing flake) |
-| All others | — | PASS |
-| **Total** | **1m44s** | 13/14 jobs passed |
-
-**PARALLEL=9 results — all failed:**
-
-| Run | Stagger | Ports | Notebooks passed | pw-jupyter time | Failure mode |
-|-----|---------|-------|-----------------|----------------|-------------|
-| 0e98e13 | 0s | 8889-8897 | 3/9 | 120s (timeout) | CPU starvation — 6 notebooks never finished |
-| 75a81b2 | 1s | 8889-8897 | 1/9 | 120s (timeout) | Worse — stagger spread startup but didn't help |
-| b566296 | 2s | 8889-8897 | TBD | 120s (timeout) | Same pattern |
-| 9dcc5e0 | 2s | 8900-8908 | 1/9 | 120s (timeout) | Port change made no difference |
-
-**Root cause analysis for PARALLEL=9 failure:**
-- 9 JupyterLab servers + 9 IPython kernels + 9 Chromium instances = ~27 heavy processes on 16 vCPUs
-- Plus concurrent pw-server, pw-marimo, pw-wasm-marimo adding more Chromium/server processes
-- Kernel ready check (`window.jupyterapp`) times out because kernels never reach idle under CPU starvation
-- Notebooks fall through to Shift+Enter retry loop, but kernels still can't execute cells
-- Server logs show kernels starting but immediately going to "Starting buffering" (disconnected)
-- Some servers accumulate 2-3 kernels (warmup + notebook + retry), worsening contention
-- Port number is irrelevant — changing BASE_PORT from 8889 to 8900 had no effect
-- Stagger (0s, 1s, 2s) is irrelevant — CPU is saturated regardless of launch timing
-
-**Key insight:** PARALLEL=6 with batching (6+3) is strictly better than PARALLEL=9 because:
-1. Batch 1 (6 notebooks) runs with 6 servers/kernels/browsers = manageable load
-2. Batch 1 completes in ~17s per notebook, freeing resources
-3. Batch 2 (3 notebooks) runs on fresh kernels with minimal contention
-4. Total: ~35s active time vs 120s timeout for P=9
-
-**Conclusion:** PARALLEL=9 is conclusively dead on 16 vCPU. The CPU saturation threshold is somewhere between 6 and 9 concurrent Playwright+Jupyter instances. PARALLEL=6 with batching remains optimal.
-
-**Notes for later retry:** 
-I dont think its conclusively dead, but I do think we should table it.  it is so tempting to try, but obviously difficult.
-things to try - nicing the browser, the kernel, or the server, probably the kernel or the server so they are more important
-since we have reliable startup detection, maybe a single jupyter server could work
-change the stagger, also maybe just stagger the last 4 starts to 5 or 10 seconds later.  I don't believe that the cpu is absolutely saturated regardless of the stagger.
-further figure out which process is using the most CPU.
-
-
-alternatively work on some type of reduced reproduction of the bug, hopefully possible on the same server.  
-
-
-
----
-
-### Exp 34+36 — SKIP_INSTALL + renice + pw-server auto-retry (2ba10e7)
-
-**Status:** DONE — 3 runs. pw-server flake FIXED, pw-jupyter regression needs investigation.
-**Commits:** 630cf60 (initial), da3a7ad (renice fix), 2ba10e7 (warmup fix)
-
-**Changes:**
-1. **Exp 34 (SKIP_INSTALL):** All PW test scripts check `SKIP_INSTALL=1` env var and skip `pnpm install` + `playwright install chromium`. Set in CI job wrappers. Also added to `test_playwright_jupyter_parallel.sh` (baked). Eliminates redundant pnpm resolve (~1-2s per job).
-2. **Exp 36 (renice):** `renice -n -10` for critical-path jobs (test-js), `renice -n 10` for background jobs (lint, test-python, pw-storybook, mcp, smoke, etc.). pw-jupyter and jupyter-warmup left at default (0) since warmup servers persist for pw-jupyter.
-3. **pw-server flake fix:** Replaced all one-shot `getCellText` + `expect().toBe()` with auto-retrying `expect(cellLocator()).toHaveText()` in `server.spec.ts`. Added `cellLocator` helper to `server-helpers.ts`. Simplified sort test to always double-click for descending.
-
-**Bug fix during implementation:** `nice 10 run_job ...` silently fails because `nice` is an external command that can't execute shell functions. Fixed by using `renice -n 10 -p $PID` after backgrounding.
-
-**Bug fix 2:** jupyter-warmup was reniced to nice 10, but its JupyterLab servers persist for pw-jupyter. This made the servers low-priority, causing kernel timeouts under contention. Fixed by NOT renicing jupyter-warmup.
-
-**Results:** pw-server **3/3 PASS** (flake eliminated). pw-jupyter 1/3 (regression).
-
-| Run | pw-server | pw-marimo | pw-wasm-marimo | pw-jupyter | Result | Total |
-|-----|----------|----------|---------------|-----------|--------|-------|
-| 1 | 44s | 50s | 43s | **76s** | **ALL PASS** | **2m00s** |
-| 2 | 43s | 48s | 36s | 121s (timeout) | FAIL | 2m38s |
-| 3 | 43s | 47s | 36s | 120s (timeout) | FAIL | 2m38s |
-
-**Timing (run 1 — all pass):**
-
-| Phase | Time | Notes |
-|-------|------|-------|
-| Wave 0 | 39s | test-js 6s, build-wheel 3s, jupyter-warmup 37s |
-| Wheel-dependent | 76s | pw-jupyter is critical path |
-| **Total** | **2m00s** | +16s vs Exp 33 (1m44s) |
-
-**pw-jupyter regression analysis:**
-- Run 1 (first after container restart): ALL PASS
-- Runs 2-3 (subsequent): 0/6 batch-1 notebooks complete before 120s timeout
-- 326 zombie processes accumulate across runs (jupyter-lab, python `<defunct>`)
-- Docker's PID 1 (`sleep infinity`) doesn't reap zombies
-- Ports are free (zombies don't hold resources), warmup succeeds (all 6 kernels reach idle)
-- Root cause TBD: possibly stale workspace/kernel state, or zombie accumulation degrading performance
-
-**Key findings:**
-1. **pw-server flake is FIXED** — auto-retrying `toHaveText()` eliminates the AG-Grid render race
-2. **SKIP_INSTALL works** — pnpm prompt gone from pw-jupyter log
-3. **renice works** — test-js finishes in 6s (same as before, but now with priority guarantee)
-4. **Zombie accumulation is a problem** — need `tini` or `dumb-init` as PID 1 in Docker container
-5. **pw-jupyter regression needs separate investigation** — likely unrelated to renice/SKIP_INSTALL
-
-**Next steps:**
-1. Add `tini` as PID 1 in Dockerfile (reaps zombies automatically)
-2. Investigate pw-jupyter back-to-back run failure (stale kernel state?)
-3. Once pw-jupyter fixed, merge pw-server flake fix to main
-
----
-
-## Operational Notes
-
-### CPU Monitoring
-
-Every CI run MUST collect CPU usage data. Without it we can't correlate flakes with contention.
-
-Add a background `vmstat 1` sampler at CI start, kill at end, save to `$RESULTS_DIR/cpu.log`. Already implemented in run-ci.sh (Exp 30). Example:
+### Trigger a CI run
 ```bash
-vmstat 1 > "$RESULTS_DIR/cpu.log" 2>&1 &
-CPU_MONITOR_PID=$!
-# ... run CI ...
-kill $CPU_MONITOR_PID 2>/dev/null || true
+ssh root@45.76.230.100
+docker exec -d buckaroo-ci bash /opt/ci-runner/run-ci.sh <SHA> <BRANCH>
+tail -f /opt/ci/logs/<SHA>/ci.log
 ```
 
-When reporting results, include peak and average CPU% during each phase (Wave 0, build-wheel, heavyweight PW, pw-jupyter).
+### Rebuild Docker image (after changing baked files)
+```bash
+ssh root@45.76.230.100
+cd /opt/ci/repo && git fetch origin && git checkout <SHA>
+docker build -t buckaroo-ci -f ci/hetzner/Dockerfile .
+cd ci/hetzner && docker compose down && docker compose up -d
+```
 
-### Clean runs
-do whatever you have to kill all zombie processes after each run.  put this into a script, and refine it.  I have no preference between restarting the docker container or pkill, but it needs to be reliable
-also for the log files.  these should be reliablly cleaned, and reliably retrieved
+### Parse results from ci.log
+Lines: `[HH:MM:SS] START/PASS/FAIL <job>`
+Report: wallclock total, per-phase timing, pass/fail per job.
 
-
----
-
-## Architecture Notes
-
-### Process Model
-All processes run in a SINGLE Docker container:
-- N JupyterLab servers (one per parallel slot, different ports)
-- N Chromium browsers (one per Playwright process)
-- N Python kernels (one per notebook being tested)
-- Other DAG jobs (pytest, ruff, storybook, etc.) running concurrently
-
-At PARALLEL=4: 12 heavyweight processes (4 Chromium + 4 JupyterLab + 4 kernels) on 16 vCPUs.
-
-### Root Cause of Flakes
-Cell execution fails when JupyterLab's kernel connection isn't established when
-Shift+Enter is pressed. The keystroke is silently dropped. The retry loop
-(dispatchEvent('click') + Shift+Enter every 15s) eventually catches it, but
-under CPU contention the kernel connection can take >120s.
-
-### What Works
-1. WebSocket kernel warmup — all kernels reach idle in ~11s
-2. Wait-all DAG — eliminate CPU overlap with other jobs
-3. Playwright `--retries` — standard flake mitigation
-4. `dispatchEvent('click')` — works when DOM is attached but not visible
-5. pytest-xdist — halves Python test time
-
-### What Doesn't Work
-1. PARALLEL=3 — slower than 4, more batches = worse
-2. 60s kernel idle wait — eats test timeout budget
-3. PARALLEL=9 — too many processes for 16 vCPUs in full DAG
-4. REST API kernel polling — never updates without WebSocket
+### Baked files
+`run-ci.sh` and `test_playwright_jupyter_parallel.sh` are baked into the image at `/opt/ci-runner/`. Changes require image rebuild.
 
 ---
 
-## Commits (chronological)
+## Commits (chronological, recent only)
 
 | Commit | Description |
 |--------|-------------|
-| a1594bd | WebSocket warmup + remove batch stagger |
-| 7e5754a | Unique Playwright --output per slot |
-| a869d12 | pytest-xdist + infinite scroll timeout fixes |
-| 2207d1e | Reduce DataFrame to 500 rows, bump test timeout |
-| 6c1c743 | PARALLEL=8 |
-| c2a16ec | CELL_EXEC_TIMEOUT=120s, test timeout=180s |
-| 4cd4ccb | Robust cell focus (click + jp-mod-selected) |
-| fac3cb5 | Kernel idle indicator wait |
-| 4cd68b7 | PARALLEL=4 |
-| 61e9947 | Shift+Enter retry loop |
-| dc360ac | DEFAULT_TIMEOUT=30s |
-| 35e0fc8 | dispatchEvent in retry |
-| 7770774 | Wait-all DAG + Playwright retries=1 |
-| 92ca618 | PARALLEL=3 (worse than 4) |
-| 6a11b71 | Kernel idle wait 60s (too aggressive) |
-| 8695488 | Kernel idle wait 15s + retries=2 |
-| 5994612 | jupyterapp kernel check + waitForTimeout removal + marimo sleep removal |
-| 200bac6 | JS build cache + ci-queue + prepare-synth + stress-test --synth |
-| e7fff5b | Mount js-cache volume for persistence |
-| 5c1e58f | Fix full_build.sh index.es.js check (exp 24) |
-| 60618ce | Exp 18+19+20: parallel smoke, relaxed gate, marimo waits → **2m31s** |
-| 172158b | Exp 28: early kernel warmup in Wave 0 → **2m25s** |
-| d369894 | Exp 30: remove heavyweight PW gate + CPU monitoring → **1m43s** |
-| d020744 | Exp 29: marimo auto-retry assertions + retries=2 |
-| b2398d5 | Exp 31: PARALLEL=9 revisited (abandoned) + Exp 32: lean Wave 0, defer pytest → **1m51s** |
-| 630cf60 | Exp 34+36: SKIP_INSTALL, nice priority, auto-retry server assertions |
-| da3a7ad | Fix: use renice instead of nice for shell functions |
-| 2ba10e7 | Fix: don't renice jupyter-warmup (servers persist), SKIP_INSTALL in pw-jupyter |
+| 5994612 | jupyterapp kernel check + waitForTimeout removal |
+| 200bac6 | JS build cache + ci-queue |
+| 5c1e58f | Fix full_build.sh index.es.js check |
+| 60618ce | Exp 18+19+20: parallel smoke, relaxed gate → **2m31s** |
+| 172158b | Exp 28: early kernel warmup → **2m25s** |
+| d369894 | Exp 30: remove heavyweight PW gate → **1m43s** |
+| d020744 | Exp 29: marimo auto-retry assertions |
+| b2398d5 | Exp 31+32: P=9 abandoned, lean Wave 0 → **1m51s** |
+| 076f40f | Exp 33: P=6 batched + re-warmup → **1m44s** |
+| 9dcc5e0 | Pre-run cleanup |
+| 630cf60 | Exp 34+36: SKIP_INSTALL, renice, pw-server auto-retry |
+| da3a7ad | Fix: renice instead of nice for shell functions |
+| 2ba10e7 | Fix: don't renice jupyter-warmup, SKIP_INSTALL in pw-jupyter |
