@@ -9,7 +9,8 @@
 #   packages/pnpm-lock.yaml — JS deps
 #   pyproject.toml        — may add new extras without touching uv.lock
 #
-# Hash storage: /var/ci/hashes/ inside the container (persists with the container).
+# Hash storage: /opt/ci/logs/.lockcheck-hashes/ — persists across container
+# restarts because /opt/ci/logs is bind-mounted to the host.
 #
 # Usage (inside run-ci.sh, from /repo):
 #   source /repo/ci/hetzner/lib/lockcheck.sh
@@ -18,7 +19,7 @@
 #       lockcheck_update
 #   fi
 
-LOCKCHECK_HASH_DIR=/var/ci/hashes
+LOCKCHECK_HASH_DIR=/opt/ci/logs/.lockcheck-hashes
 LOCKCHECK_FILES=(
     uv.lock
     packages/pnpm-lock.yaml

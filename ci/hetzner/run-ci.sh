@@ -153,7 +153,7 @@ job_lint_python() {
     /opt/venvs/3.13/bin/ruff check
 }
 
-job_test_js() {
+job_build_js() {
     cd /repo/packages
     pnpm install --frozen-lockfile --store-dir /opt/pnpm-store
     cd buckaroo-js-core
@@ -167,6 +167,10 @@ job_test_js() {
     else
         log "JS build skipped (cache hit)"
     fi
+}
+
+job_test_js() {
+    cd /repo/packages/buckaroo-js-core
     pnpm run test
 }
 
@@ -455,7 +459,7 @@ sys.exit(0 if state == 'idle' else 1)
 }
 
 export JS_CACHE_DIR JS_TREE_HASH
-export -f job_lint_python job_test_js job_test_python job_build_wheel \
+export -f job_lint_python job_build_js job_test_js job_test_python job_build_wheel \
            job_test_mcp_wheel job_smoke_test_extras \
            job_playwright_storybook job_playwright_server job_playwright_marimo \
            job_playwright_wasm_marimo job_playwright_jupyter job_jupyter_warmup
@@ -519,8 +523,10 @@ else
     # (nice can't run shell functions; renice changes priority of running PID)
     run_job lint-python            job_lint_python                & PID_LINT=$!
     renice -n 10 -p $PID_LINT >/dev/null 2>&1 || true
-    run_job test-js                job_test_js                    & PID_TESTJS=$!
-    renice -n -10 -p $PID_TESTJS >/dev/null 2>&1 || true
+    # Exp 35: split build-js (critical path) from test-js (background).
+    # build-wheel gates only on build-js, not on test-js.
+    run_job build-js               job_build_js                   & PID_BUILDJS=$!
+    renice -n -10 -p $PID_BUILDJS >/dev/null 2>&1 || true
     run_job test-python-3.13       bash -c "job_test_python 3.13" & PID_PY313=$!
     renice -n 10 -p $PID_PY313 >/dev/null 2>&1 || true
     run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
@@ -529,11 +535,13 @@ else
     # heavyweight jobs are running. NOT reniced: servers persist for pw-jupyter.
     run_job jupyter-warmup         job_jupyter_warmup             & PID_WARMUP=$!
 
-    # ── Wait for test-js only, then build wheel ──────────────────────────────
-    wait $PID_TESTJS || OVERALL=1
-    log "=== test-js done — starting build-wheel ==="
+    # ── Wait for build-js only, then build wheel + start test-js ──────────────
+    wait $PID_BUILDJS || OVERALL=1
+    log "=== build-js done — starting build-wheel + test-js ==="
 
     run_job build-wheel job_build_wheel || OVERALL=1
+    run_job test-js     job_test_js     & PID_TESTJS=$!
+    renice -n 10 -p $PID_TESTJS >/dev/null 2>&1 || true
 
     # Cache wheel by current SHA so --phase=5b / --wheel-from can reuse it.
     mkdir -p "/opt/ci/wheel-cache/$SHA"
@@ -612,6 +620,7 @@ else
 
     # ── Wait for all jobs ─────────────────────────────────────────────────────
     wait $PID_LINT    || OVERALL=1
+    wait $PID_TESTJS  || OVERALL=1
     wait $PID_PY313   || OVERALL=1
     wait $PID_PY311   || OVERALL=1
     wait $PID_PY312   || OVERALL=1
