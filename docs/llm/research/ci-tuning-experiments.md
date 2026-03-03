@@ -102,8 +102,9 @@ P=6 batched (6+3) worked at Exp 33 (076f40f, old image) but fails on current ima
 
 ### Exp 26 — Wheel cache across SHAs
 
-**Priority:** LOW — saves ~3s (build-wheel is already 3s)
+**Priority:** LOWEST — CI-dev-only edge case, not useful for real CI
 **What:** Cache wheel keyed by Python+JS source hash. Skip build-wheel entirely on cache hit.
+**Note:** Only helps when iterating on CI harness/Playwright test code without touching Python or JS source. Not relevant for normal development CI runs.
 
 ### Exp 25 — Synthetic merge commits for stress testing
 
