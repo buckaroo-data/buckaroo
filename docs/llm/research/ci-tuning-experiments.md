@@ -162,16 +162,20 @@ Report: wallclock total, per-phase timing, pass/fail per job.
 | 2ba10e7 | Exp 34+36 (fixed) | 2m38s | 14/1 | First run post-restart |
 | 20fb931 | Exp 37 (`init: true`) | 2m59s | pw-jupyter FAIL | 101 zombies |
 
-### CPU Profile (Exp 34+36, commit 2ba10e7, passing run)
+### CPU Profile (commit 4a7fefc, passing run)
 
-| Phase | ~Duration | CPU (us+sy) |
-|-------|-----------|-------------|
-| Wave 0 (lint, test-js, warmup) | 18s | 10→75% ramping |
-| Peak (pytest-xdist + PW overlap) | 15s | 70-95% saturated |
-| Wheel-dependent (PW concurrent) | 40s | 30-65% |
-| pw-jupyter tail (kernel I/O) | 30s | **6-7% idle** |
+| Phase | Time | Duration | CPU (us+sy) |
+|-------|------|----------|-------------|
+| Setup + checkout | 0-3s | 3s | ~5% |
+| Wave 0 ramp (lint, build-js, pytest, storybook, warmup) | 4-12s | 8s | 21→97% |
+| Wave 0 peak (test-python-3.13 + warmup) | 13-18s | 5s | 48-73% |
+| Wave 0 tail + warmup finishing | 19-33s | 14s | 6-28% |
+| Wheel-dependent launch (all PW + pytest) | 34-55s | 21s | 39-64% |
+| Peak concurrent (all PW + pytest overlap) | 56-77s | 21s | 49-94% |
+| Jobs finishing, pw-jupyter tail | 78-87s | 9s | 20-35% |
+| pw-jupyter alone (kernel I/O bound) | 88-101s | 13s | **4-13%** |
 
-Machine is massively underutilized during pw-jupyter's tail — bottleneck is kernel I/O latency, not CPU.
+Machine is massively underutilized during pw-jupyter's last ~15s — 4-13% busy. Kernel I/O latency is the bottleneck, not CPU.
 
 ---
 
