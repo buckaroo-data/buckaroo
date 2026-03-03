@@ -6,24 +6,25 @@
 
 ---
 
-## Current Best Configuration (commit fff99fa)
+## Current Best Configuration (commit 4a7fefc)
 
 ```
-Total: ~2m01s
-├─ Wave 0 (parallel):     25s  [lint, test-js, test-python-3.13, pw-storybook, jupyter-warmup]
-├─ build-wheel:            3s  [after test-js, JS cache HIT]
-├─ wheel install:          2s  [into pre-warmed jupyter venv]
+Total: ~2m00s (warm caches) / ~2m21s (first run, lockfile rebuild)
+├─ Wave 0 (parallel):     25s  [lint, build-js, test-python-3.13, pw-storybook, jupyter-warmup]
+├─ build-wheel:            4s  [after build-js, JS cache HIT]
+├─ test-js:               ~4s  [starts after build-js, runs in background]
+├─ wheel install:          3s  [into pre-warmed jupyter venv]
 ├─ Wheel-dependent (staggered 5s apart):
-│   ├─ pw-jupyter:        95s  [P=4 batched 4+4+1, critical path]
+│   ├─ pw-jupyter:        96s  [P=4 batched 4+4+1, critical path]
 │   ├─ pw-server:         46s
 │   ├─ pw-marimo:         50s
 │   ├─ pw-wasm-marimo:    35s
-│   ├─ test-mcp-wheel:    12s
+│   ├─ test-mcp-wheel:    14s
 │   ├─ smoke-test-extras:  8s  [parallel venv installs]
 │   └─ test-python 3.11/3.12/3.14: ~30s each (deferred 20s)
 ```
 
-Critical path: `test-js(6s) → build-wheel(3s) → warmup-wait → wheel-install(2s) → pw-jupyter(95s) = ~2m01s`
+Critical path: `build-js(1s) → build-wheel(4s) → warmup-wait → wheel-install(3s) → pw-jupyter(96s)`
 
 ### Key Techniques (all proven)
 
@@ -45,6 +46,8 @@ Critical path: `test-js(6s) → build-wheel(3s) → warmup-wait → wheel-instal
 | Between-batch kernel re-warmup | 33 | Fixes batch-2 hang |
 | Pre-run cleanup (pkill, rm temps) | 33 | Clean state between CI runs |
 | Workspace cleanup in pre-run | 38 | Prevents stale kernel reconnection |
+| Split build-js / test-js | 35 | ~3s off critical path (test runs in background) |
+| Lockfile hash on bind mount | 39 | No dep rebuild on container restart |
 | 120s pw-jupyter timeout + 210s watchdog | 33 | Prevents runaway CI |
 
 ### What Doesn't Work
@@ -77,9 +80,10 @@ Critical path: `test-js(6s) → build-wheel(3s) → warmup-wait → wheel-instal
 **Fix:** `cellLocator()` + `toHaveText()` auto-retrying assertions in `server.spec.ts` and `server-helpers.ts`.
 **Result:** 3/3 pw-server PASS after fix.
 
-### 3. Lockfile hash persistence across container restarts
+### 3. Lockfile hash persistence across container restarts — FIXED (commit 4a7fefc)
 
-Every container restart triggers "Lockfiles changed — rebuilding deps" because the hash store (`/var/ci/hashes/`) is inside the container. Should be a named volume or stored on the host bind mount.
+**Was:** Every container restart triggered "Lockfiles changed — rebuilding deps" because the hash store (`/var/ci/hashes/`) was inside the container.
+**Fix:** Moved to `/opt/ci/logs/.lockcheck-hashes/` which is bind-mounted to the host. Hashes now persist across container restarts.
 
 ### 4. PARALLEL=6 regression
 
@@ -95,10 +99,10 @@ P=6 batched (6+3) worked at Exp 33 (076f40f, old image) but fails on current ima
 **What:** Replace one-shot `getCellText` with `cellLocator` + `toHaveText` in `marimo.spec.ts`. Retries 1→2.
 **Verification:** 3+ CI runs, pw-marimo 100%.
 
-### Exp 35 — Split test-js into build-js + test-js
+### Exp 35 — Split test-js into build-js + test-js — IMPLEMENTED (commit 4a7fefc)
 
-**Priority:** LOW — saves ~2-3s off critical path
-**What:** `build-wheel` waits for all of `test-js` (build + test). Split so build-wheel gates only on the build step.
+**What:** `build-wheel` now gates only on `build-js` (pnpm install + build). `test-js` (pnpm test) runs in background after build-wheel starts. Saves ~3s off critical path.
+**Status:** Pending validation.
 
 ### Exp 26 — Wheel cache across SHAs
 
@@ -143,6 +147,10 @@ Report: wallclock total, per-phase timing, pass/fail per job.
 
 | SHA | Experiment | Total | Result | Notes |
 |-----|-----------|-------|--------|-------|
+| 4a7fefc | Exp 35+39 (run 1, fresh) | 2m21s | **15/0 PASS** | Lockfile rebuild (first on new image); build-js 1s |
+| 4a7fefc | Exp 35+39 (run 2, b2b) | 2m00s | 14/1 FAIL | Lockfiles unchanged (fix works!); pw-jupyter b2b |
+| 4a7fefc | Exp 35+39 (post-restart) | 2m37s | 14/1 FAIL | Lockfiles unchanged after restart; pw-jupyter flaky |
+| 4a7fefc | Exp 35+39 (b2b again) | 1m36s | **15/0 PASS** | pw-jupyter 96s; fastest warm run |
 | fff99fa | P=4 + tini (run 1) | 2m41s | **14/0 PASS** | Post-restart, lockfile rebuild |
 | fff99fa | P=4 + tini (run 2) | 2m01s | **14/0 PASS** | Back-to-back, no lockfile |
 | fff99fa | P=4 + tini (run 3) | 2m10s | 13/1 FAIL | pw-jupyter timeout (back-to-back degradation) |
@@ -188,3 +196,5 @@ Machine is massively underutilized during pw-jupyter's tail — bottleneck is ke
 | 46c165c | Exp 37: tini ENTRYPOINT in Dockerfile (**working** — 0 zombies) |
 | ef53834 | Revert P=6→6, timeout→120, watchdog→210 (P=6 still broken) |
 | fff99fa | Revert P=6→4 (stable baseline) |
+| c5a0498 | Research docs committed |
+| 4a7fefc | Exp 35: split build-js/test-js + lockfile hash persistence fix |
