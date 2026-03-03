@@ -66,6 +66,11 @@ run_job() {
 
 status_pending "$SHA" "ci/hetzner" "Running CI (phase=$PHASE)..." "$LOG_URL"
 
+# ── CPU monitoring ────────────────────────────────────────────────────────────
+# Sample overall CPU every second for contention analysis.
+mpstat 1 > "$RESULTS_DIR/cpu.log" 2>&1 &
+CPU_MONITOR_PID=$!
+
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
 log "CI runner: $RUNNER_VERSION  phase=$PHASE"
 log "Checkout $SHA (branch: $BRANCH)"
@@ -494,7 +499,10 @@ else
     "$JUPYTER_VENV/bin/python" -c "import buckaroo; import pandas; import polars" 2>/dev/null || true
 
     # ── Wheel-dependent jobs (start as soon as wheel exists) ─────────────────
-    log "=== build-wheel done — starting wheel-dependent jobs ==="
+    # Exp 30: No heavyweight gate — pw-jupyter starts alongside other wheel jobs.
+    # Early warmup (Exp 28) + window.jupyterapp kernel check (Exp 21) should
+    # make pw-jupyter reliable even under CPU contention from concurrent PW jobs.
+    log "=== build-wheel done — starting all wheel-dependent jobs (incl. pw-jupyter) ==="
 
     run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
     run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
@@ -502,14 +510,6 @@ else
     # playwright-marimo needs the real widget.js produced by build-wheel
     # (the empty stub from `touch` won't render). Runs here, not in Wave 0.
     run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
-
-    # pw-jupyter needs CPU headroom from heavyweight Playwright jobs that
-    # compete for CPU (Chromium + server processes). Light jobs (lint,
-    # test-python, mcp, smoke) always finish before these, so don't block on them.
-    wait $PID_PW_SV   || OVERALL=1
-    wait $PID_PW_MA   || OVERALL=1
-    wait $PID_PW_WM   || OVERALL=1
-    log "=== heavyweight Playwright jobs done — starting playwright-jupyter ==="
 
     # Use pre-warmed servers — skip startup/warmup in the parallel script
     job_playwright_jupyter_warm() {
@@ -534,20 +534,24 @@ else
     export -f job_playwright_jupyter_warm
     run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
 
-    # Collect remaining job exit codes (these should already be done by now)
+    # ── Wait for all jobs ─────────────────────────────────────────────────────
     wait $PID_LINT    || OVERALL=1
     wait $PID_PY311   || OVERALL=1
     wait $PID_PY312   || OVERALL=1
     wait $PID_PY313   || OVERALL=1
     wait $PID_PY314   || OVERALL=1
     wait $PID_PW_SB   || OVERALL=1
+    wait $PID_PW_WM   || OVERALL=1
     wait $PID_MCP     || OVERALL=1
     wait $PID_SMOKE   || OVERALL=1
-
-    # ── Wait for jupyter ──────────────────────────────────────────────────────
+    wait $PID_PW_SV   || OVERALL=1
+    wait $PID_PW_MA   || OVERALL=1
     wait $PID_PW_JP   || OVERALL=1
 
 fi
+
+# ── Stop CPU monitor ──────────────────────────────────────────────────────────
+kill $CPU_MONITOR_PID 2>/dev/null || true
 
 # ── Final status ─────────────────────────────────────────────────────────────
 
