@@ -18,6 +18,10 @@ services:
     # Warm sidecar: stays alive between CI runs, avoiding ~500ms docker run overhead.
     command: sleep infinity
     restart: unless-stopped
+    # Use tini as PID 1 to reap zombie processes (jupyter-lab, python kernels).
+    # Without this, sleep-infinity PID 1 doesn't call wait(), zombies accumulate,
+    # and back-to-back CI runs fail.
+    init: true
 
 volumes:
   playwright-browsers:
