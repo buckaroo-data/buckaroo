@@ -284,7 +284,7 @@ job_jupyter_warmup() {
     echo "$venv" > /tmp/ci-jupyter-warmup-venv
 
     export JUPYTER_TOKEN="test-token-12345"
-    local BASE_PORT=8889 PARALLEL=4
+    local BASE_PORT=8889 PARALLEL=9
 
     # Clean stale state
     rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
@@ -520,7 +520,7 @@ else
         ROOT_DIR=/repo \
         PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
         PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
-        PARALLEL=4 \
+        PARALLEL=9 \
             bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
                 --venv-location="$venv" --servers-running || rc=$?
         # Cleanup servers + venv
