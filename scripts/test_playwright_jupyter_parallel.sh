@@ -100,6 +100,12 @@ else
     uv pip install --force-reinstall dist/*.whl
 fi
 
+# websocket-client is needed for WebSocket-based kernel warmup
+python -c "import websocket" 2>/dev/null || {
+    log "Installing websocket-client..."
+    uv pip install websocket-client
+}
+
 python -c "import buckaroo; print(f'buckaroo {getattr(buckaroo, \"__version__\", \"?\")}')"
 
 # ── Playwright deps ───────────────────────────────────────────────────────────
@@ -181,31 +187,64 @@ log "All $PARALLEL servers HTTP-ready — warming up kernels..."
 python3 -c "import buckaroo; import pandas; import polars; print('Pre-warm done')" 2>&1 || \
     python3 -c "import buckaroo; import pandas; print('Pre-warm done (no polars)')" 2>&1 || true
 
-# Warm up each server by starting a kernel, polling until idle, and deleting it.
-# A blind sleep doesn't guarantee the kernel provisioner is ready — the first
-# notebook reliably flakes without this.
-# All warmup kernels are created and polled CONCURRENTLY so 9 servers don't
-# take 9×70s = 10+ minutes sequentially.
+# Warm up each server via WebSocket nudge.
+# The REST API (GET /api/kernels/{id}) never updates execution_state from
+# "starting" to "idle" without a WebSocket client — this is a known upstream
+# limitation. Connecting to the WebSocket channels endpoint triggers
+# jupyter_server's built-in "nudge" mechanism (kernel_info_request), which
+# is exactly how JupyterLab itself waits for kernel readiness.
 
 warmup_one_kernel() {
     local port=$1
-    local kid
-    kid=$(curl -sf -X POST "http://localhost:$port/api/kernels?token=$JUPYTER_TOKEN" \
-        -H "Content-Type: application/json" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null) || {
-        echo "WARNING: failed to create warmup kernel on port $port"
-        sleep 30
-        return 0
-    }
-    local state="unknown"
-    for i in $(seq 1 90); do
-        state=$(curl -sf "http://localhost:$port/api/kernels/$kid?token=$JUPYTER_TOKEN" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin).get('execution_state','unknown'))" 2>/dev/null) || state="unknown"
-        if [ "$state" = "idle" ]; then break; fi
-        sleep 1
-    done
-    echo "Kernel $kid on port $port reached state: $state"
-    curl -sf -X DELETE "http://localhost:$port/api/kernels/$kid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
-    [ "$state" = "idle" ] && return 0 || return 1
+    python3 -c "
+import json, sys, time, urllib.request, websocket
+
+port = $port
+token = '$JUPYTER_TOKEN'
+base = f'http://localhost:{port}'
+
+# 1. Create a kernel via REST
+req = urllib.request.Request(
+    f'{base}/api/kernels?token={token}',
+    data=b'{}',
+    headers={'Content-Type': 'application/json'},
+    method='POST',
+)
+resp = urllib.request.urlopen(req)
+kid = json.loads(resp.read())['id']
+print(f'  kernel {kid[:8]}... created on port {port}')
+
+# 2. Connect WebSocket — triggers jupyter_server nudge mechanism
+ws_url = f'ws://localhost:{port}/api/kernels/{kid}/channels?token={token}'
+ws = websocket.create_connection(ws_url, timeout=90)
+
+# 3. Wait for status: idle on iopub
+deadline = time.time() + 90
+state = 'unknown'
+while time.time() < deadline:
+    ws.settimeout(max(1, deadline - time.time()))
+    try:
+        msg = json.loads(ws.recv())
+    except (websocket.WebSocketTimeoutException, TimeoutError):
+        break
+    if msg.get('msg_type') == 'status':
+        state = msg.get('content', {}).get('execution_state', 'unknown')
+        if state == 'idle':
+            break
+
+ws.close()
+print(f'  kernel {kid[:8]}... on port {port} reached state: {state}')
+
+# 4. Delete warmup kernel
+try:
+    req = urllib.request.Request(
+        f'{base}/api/kernels/{kid}?token={token}', method='DELETE')
+    urllib.request.urlopen(req)
+except Exception:
+    pass
+
+sys.exit(0 if state == 'idle' else 1)
+" 2>&1
 }
 export -f warmup_one_kernel
 
@@ -308,12 +347,8 @@ while [ $NEXT -lt $TOTAL ]; do
     BATCH_USED_PORTS=()
 
     while [ $BATCH_COUNT -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
-        # Stagger batch-1 only: 20s between launches to give each kernel time to
-        # finish heavy Python imports before the next one starts (very slack —
-        # will be tightened once this is confirmed passing).
-        if [ $BATCH_NUM -eq 0 ] && [ $BATCH_COUNT -gt 0 ]; then
-            sleep 20
-        fi
+        # No stagger needed — each notebook targets its own isolated JupyterLab
+        # server, and WebSocket-based warmup ensures kernels are ready.
         local_nb="${QUEUE[$NEXT]}"
         local_logfile="$TMPDIR/${local_nb%.ipynb}.log"
         local_port=$((BASE_PORT + BATCH_COUNT))
