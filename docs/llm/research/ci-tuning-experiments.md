@@ -24,6 +24,7 @@
 | 23 | 200bac6 | JS build cache + ci-queue | N/A | N/A | saves 17s critical path |
 | 24 | 5c1e58f | Fix full_build.sh skip check | N/A | N/A | build-wheel 17s→3s |
 | **18+19+20** | **60618ce** | **parallel smoke + relaxed gate + marimo waits** | **pw-jupyter 1/1, overall FAIL (storybook flake)** | **1m38s** | **2m31s** |
+| **28** | **172158b** | **early kernel warmup in Wave 0** | **3/3 pw-jupyter, 2/3 overall (pw-server flake)** | **1m14s** | **2m25s** |
 | 29 | d020744 | Marimo auto-retry assertions + retries=2 | TBD (running) | N/A | reliability |
 
 ---
@@ -484,6 +485,37 @@ Saved **31s on the critical path** (from checkout to wheel-dependent jobs starti
 
 ---
 
+### Exp 28 — Early Kernel Warmup (172158b) ⭐ NEW BEST
+
+**Status:** DONE — 3-run stability test
+**Changes:**
+1. New `job_jupyter_warmup()` in Wave 0: creates venv, installs deps (jupyterlab, anywidget, polars, websocket-client), starts 4 JupyterLab servers, WebSocket kernel warmup, copies/trusts notebooks
+2. After build-wheel: installs wheel into warm venv (`uv pip install` — deps satisfied, ~2s)
+3. New `--servers-running` flag in `test_playwright_jupyter_parallel.sh`: skips server startup/warmup when pre-warmed servers available
+4. `job_playwright_jupyter_warm()` replaces `job_playwright_jupyter()` in full DAG: passes `--servers-running`, cleans up servers/venv after tests
+
+**Results:** pw-jupyter 3/3 = **100% pass rate**. Overall 2/3 (1 pw-server flake, pre-existing).
+
+| Run | jupyter-warmup | pw-jupyter | pw-server | Result | Total |
+|-----|---------------|------------|----------|--------|-------|
+| 1 | 27s | **1m14s** | FAIL | FAIL | **2m26s** |
+| 2 | 26s | **1m13s** | 38s | **PASS** | **2m24s** |
+| 3 | 27s | **1m14s** | 38s | **PASS** | **2m25s** |
+
+**Timing breakdown vs baseline (60618ce):**
+
+| Metric | Before | After | Savings |
+|--------|--------|-------|---------|
+| pw-jupyter total | 1m38s | **1m14s** | **-24s** (startup eliminated) |
+| jupyter-warmup | N/A | 27s | (overlapped with Wave 0, free) |
+| Total CI | 2m31s | **2m25s** | **-6s net** |
+
+**Why only -6s net (not -24s)?** The warmup overlaps with Wave 0 (free), and pw-jupyter tests-only is 24s faster. But the heavyweight PW jobs (server 38s, marimo 41s) still gate pw-jupyter start. The 24s savings are partially eaten by the warmup extending the wheel-install step by ~2s and slight scheduling variance.
+
+**Critical path:** `test-js(8s) → build-wheel(3s) → wait-warmup(0s, already done) → install-wheel(2s) → pw-marimo(41s) → pw-jupyter(74s) = ~2m08s + overhead = ~2m25s`
+
+---
+
 ## Future Experiments
 
 ### Exp 25 — Synthetic Merge Commits for Stress Testing
@@ -524,32 +556,9 @@ Saved **31s on the critical path** (from checkout to wheel-dependent jobs starti
 **Priority:** LOW — saves ~2-3s
 **What:** `pnpm install --frozen-lockfile` takes 2-3s even with warm store (just creating hardlinks). Skip if `node_modules/.package-lock.json` matches `pnpm-lock.yaml` hash.
 
-### Exp 28 — Early Kernel Warmup (decouple kernel startup from wheel)
+### Exp 28 — Early Kernel Warmup ✅
 
-**Priority:** HIGH — saves ~30-40s off critical path
-**What:** Start JupyterLab servers and warm kernels at t0 (Wave 0), before the wheel is built. Install buckaroo wheel into the running venv after build-wheel completes. Run Playwright tests against already-warm kernels.
-
-**Why it works:**
-- JupyterLab needs `anywidget`/`ipywidgets` extensions loaded at startup (for widget rendering), but NOT `buckaroo` itself
-- Pre-install `jupyterlab`, `anywidget`, `ipywidgets`, `polars`, `websocket-client` at t0
-- Start 4 JupyterLab servers + WebSocket kernel warmup (overlaps with test-js → build-wheel)
-- After wheel built: `uv pip install buckaroo-*.whl` into the running venv — deps already satisfied, so just installs the Python package (~1-2s)
-- anywidget loads widget JS dynamically at runtime — no JupyterLab restart needed
-- New kernels spawned by Playwright tests will be able to `import buckaroo`
-
-**Current pw-jupyter breakdown (~1m36s):**
-1. Create venv + install wheel+polars+jupyterlab: ~10-15s
-2. Start 4 JupyterLab servers: ~5-10s
-3. WebSocket kernel warmup per server: ~20-30s
-4. Run Playwright tests: ~50-60s
-
-Steps 1-3 (~35-55s) can overlap with Wave 0 + build-wheel (~13-40s depending on cache).
-
-**CPU data supports this:** Machine is at 5-10% during pw-jupyter execution — the kernel I/O bottleneck means there's plenty of CPU headroom to warm kernels in Wave 0 alongside other jobs.
-
-**Risk:** If kernel warmup competes with Wave 0 CPU-intensive jobs (pytest-xdist, tsc+vite), it could slow both down. But warmup is mostly I/O-bound (waiting for kernel idle), not CPU-bound.
-
-**Files:** `ci/hetzner/run-ci.sh` (major restructure of DAG), `scripts/test_playwright_jupyter_parallel.sh` (accept pre-warmed servers)
+**Status:** DONE (172158b) — see detailed results above. Saved 24s off pw-jupyter, 6s net off total CI. Warmup fully overlaps with Wave 0.
 
 ### Exp 29 — Marimo Assertion Robustness (apply flakiness research)
 
@@ -629,4 +638,5 @@ under CPU contention the kernel connection can take >120s.
 | e7fff5b | Mount js-cache volume for persistence |
 | 5c1e58f | Fix full_build.sh index.es.js check (exp 24) |
 | 60618ce | Exp 18+19+20: parallel smoke, relaxed gate, marimo waits → **2m31s** |
+| 172158b | Exp 28: early kernel warmup in Wave 0 → **2m25s** |
 | d020744 | Exp 29: marimo auto-retry assertions + retries=2 |
