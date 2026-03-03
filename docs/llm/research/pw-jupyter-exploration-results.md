@@ -128,13 +128,61 @@ The failure pattern (everything starts, initial burst, then idle stuck) suggests
 2. **Between-notebook interference** — 5 concurrent WebSocket connections on different ports may be hitting a browser limit or Playwright worker contention
 3. **Harness bug at P=5** — the `test_playwright_jupyter_parallel.sh` batch logic may have an edge case at exactly 5 notebooks/5 servers
 
-### Run P3 — P=5 adjusted or repeated
+### Run P3 — P=5 with `--disable-dev-shm-usage` — COMPLETE
 
-*Status: pending*
+**PASS** — P=5, settle=0, fresh container. Test phase **71s** (vs 94s at P=4).
 
-### Run P4 — P=5 confirmed or P=6 first attempt
+#### Root Cause Found: `/dev/shm` Exhaustion
 
-*Status: pending*
+Docker defaults `/dev/shm` to 64MB. Chromium uses `/dev/shm` for renderer IPC. At P=5, 5 concurrent Chromium instances exhaust 64MB and silently block on shared memory allocation — not crash, not error, just hang.
+
+**Fix:** Added `--disable-dev-shm-usage` to Chromium launch args in `playwright.config.integration.ts`. This moves IPC to `/tmp` (still tmpfs on Linux, no performance impact). Commit e6ea620.
+
+#### Timing Improvement
+- P=4: 94s test phase (batches: 4+4+1)
+- P=5: **71s** test phase (batches: 5+4) — **24% faster**, eliminated one batch
+
+#### Jupyter Ecosystem Versions (resolved at install time)
+| Package | Version |
+|---------|---------|
+| jupyterlab | 4.5.5 |
+| jupyter_server | 2.17.0 |
+| jupyter_client | 8.8.0 |
+| ipykernel | 7.2.0 |
+| anywidget | 0.9.21 |
+
+### Run P4 — P=6 first attempt — COMPLETE
+
+**PASS** — P=6, settle=0, fresh container. Test phase **72s** (batches: 6+3).
+
+#### Scaling Summary
+
+| P | Test Phase | Batches | Savings vs P=4 |
+|---|-----------|---------|---------------|
+| 4 | 94s | 4+4+1 | baseline |
+| 5 | 71s | 5+4 | **-23s (24%)** |
+| 6 | 72s | 6+3 | **-22s (23%)** |
+
+P=5 and P=6 are nearly identical — the bottleneck is now per-notebook execution time (~25-30s), not batch count. The batch transition overhead is minimal (~1-2s for kernel cleanup + re-warmup).
+
+### Run P=9 — COMPLETE
+
+**PASS** — P=9, settle=0, fresh container. Test phase **49s** (single batch, all 9 notebooks).
+
+| P | Test Phase | Batches | Savings vs P=4 |
+|---|-----------|---------|---------------|
+| 4 | 94s | 4+4+1 | baseline |
+| 5 | 71s | 5+4 | -23s (24%) |
+| 6 | 72s | 6+3 | -22s (23%) |
+| **9** | **49s** | **9** (single batch) | **-45s (48%)** |
+
+P=9 was previously "conclusively dead" — it was `/dev/shm` all along.
+
+### Experiment 2 Conclusion
+
+**Root cause of all prior P=5/6/9 failures: Docker's 64MB `/dev/shm` default.**
+One-line fix (`--disable-dev-shm-usage` in `playwright.config.integration.ts`) unlocks P=9 with zero reliability issues. Test phase cut from 94s to 49s.
+This also explains the P=6 regression noted in MEMORY.md ("P=6 worked on old image but regressed on tini image") — the tini image rebuild may have changed `/dev/shm` allocation patterns.
 
 ---
 
