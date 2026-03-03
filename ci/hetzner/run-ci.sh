@@ -98,6 +98,12 @@ pkill -f "node.*storybook" 2>/dev/null || true
 pkill -f "npm exec serve" 2>/dev/null || true
 rm -rf /tmp/ci-jupyter-warmup* /tmp/pw-jupyter-parallel* /tmp/pw-html-* 2>/dev/null || true
 rm -f /tmp/ci-jupyter-warmup-venv /tmp/ci-jupyter-warmup-pids 2>/dev/null || true
+# Clean JupyterLab workspace + kernel state — stale workspace files from previous
+# runs cause JupyterLab to try reconnecting dead kernels, hanging Shift+Enter.
+rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
+rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
+rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
+rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
 
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
 log "CI runner: $RUNNER_VERSION  phase=$PHASE"
@@ -316,7 +322,7 @@ job_jupyter_warmup() {
     echo "$venv" > /tmp/ci-jupyter-warmup-venv
 
     export JUPYTER_TOKEN="test-token-12345"
-    local BASE_PORT=8889 PARALLEL=${JUPYTER_PARALLEL:-6}
+    local BASE_PORT=8889 PARALLEL=${JUPYTER_PARALLEL:-5}
 
     # Clean stale state
     rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
@@ -538,7 +544,7 @@ else
     # pw-jupyter is the critical path; start it FIRST with all pre-warmed servers.
     # Then stagger remaining jobs every 5s to let pw-jupyter claim CPU headroom
     # during its initial Chromium launch + first batch of tests.
-    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-6}
+    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-5}
     log "=== build-wheel done — starting staggered wheel-dependent jobs (PARALLEL=$JUPYTER_PARALLEL) ==="
 
     # t+0: pw-jupyter (critical path — uses pre-warmed servers)
