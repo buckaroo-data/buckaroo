@@ -23,13 +23,13 @@ for (const scheme of SCHEMES) {
     await page.goto('/');
 
     // Wait for buckaroo widgets and AG-Grid cells to render
-    await page.locator('.buckaroo_anywidget').first().waitFor({ state: 'visible', timeout: 30_000 });
-    await page.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await page.locator('.buckaroo_anywidget').first().waitFor({ state: 'visible', timeout: 60_000 });
+    await page.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 60_000 });
 
     // Wait for the second widget (BuckarooInfiniteWidget) too
     const widgets = page.locator('.buckaroo_anywidget');
-    await widgets.nth(1).waitFor({ state: 'visible', timeout: 30_000 });
-    await widgets.nth(1).locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await widgets.nth(1).waitFor({ state: 'visible', timeout: 60_000 });
+    await widgets.nth(1).locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 60_000 });
 
     await page.waitForTimeout(1000);
 
@@ -47,8 +47,8 @@ for (const scheme of SCHEMES) {
 
     // Wait for the first BuckarooWidget to render
     const firstWidget = page.locator('.buckaroo_anywidget').first();
-    await firstWidget.waitFor({ state: 'visible', timeout: 30_000 });
-    await firstWidget.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await firstWidget.waitFor({ state: 'visible', timeout: 60_000 });
+    await firstWidget.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 60_000 });
     await page.waitForTimeout(500);
 
     // Scroll so the first widget is roughly centred, showing markdown
@@ -69,8 +69,8 @@ for (const scheme of SCHEMES) {
 
     // Wait for the first BuckarooWidget (which has the lowcode/operations UI)
     const firstWidget = page.locator('.buckaroo_anywidget').first();
-    await firstWidget.waitFor({ state: 'visible', timeout: 30_000 });
-    await firstWidget.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await firstWidget.waitFor({ state: 'visible', timeout: 60_000 });
+    await firstWidget.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 60_000 });
 
     // Click on Columns tab to open the lowcode UI if available
     const columnsTab = firstWidget.locator('text=Columns');

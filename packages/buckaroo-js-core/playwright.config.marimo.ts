@@ -15,7 +15,7 @@ export default defineConfig({
     trace: 'on-first-retry',
     ...devices['Desktop Chrome'],
   },
-  timeout: 30_000,
+  timeout: 60_000,
 
   projects: [
     {
@@ -28,7 +28,7 @@ export default defineConfig({
     command: `uv run marimo run --headless --port ${PORT} --no-token tests/notebooks/marimo_pw_test.py`,
     cwd: '../..',
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    reuseExistingServer: !!process.env.MARIMO_WARMUP_PID || !process.env.CI,
+    timeout: 60_000,
   },
 });

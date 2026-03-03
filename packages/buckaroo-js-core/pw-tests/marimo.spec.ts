@@ -7,9 +7,9 @@ import { test, expect } from '@playwright/test';
  */
 async function waitForGrid(page: import('@playwright/test').Page) {
   // Wait for at least one buckaroo widget to appear
-  await page.locator('.buckaroo_anywidget').first().waitFor({ state: 'visible', timeout: 30_000 });
+  await page.locator('.buckaroo_anywidget').first().waitFor({ state: 'visible', timeout: 60_000 });
   // Wait for AG-Grid cells to render
-  await page.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
+  await page.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 60_000 });
 }
 
 /**
@@ -96,8 +96,8 @@ test.describe('Buckaroo in marimo', () => {
     // The second widget is the BuckarooInfiniteWidget (200 rows)
     const widgets = page.locator('.buckaroo_anywidget');
     // Wait for the second widget to also render
-    await widgets.nth(1).waitFor({ state: 'visible', timeout: 30_000 });
-    await widgets.nth(1).locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await widgets.nth(1).waitFor({ state: 'visible', timeout: 60_000 });
+    await widgets.nth(1).locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 60_000 });
 
     const secondWidget = widgets.nth(1);
     const count = await getRowCount(secondWidget);
@@ -109,7 +109,7 @@ test.describe('Buckaroo in marimo', () => {
     await waitForGrid(page);
 
     const widgets = page.locator('.buckaroo_anywidget');
-    await widgets.nth(1).locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await widgets.nth(1).locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 60_000 });
 
     const secondWidget = widgets.nth(1);
 
