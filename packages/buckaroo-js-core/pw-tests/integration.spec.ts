@@ -120,7 +120,7 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
         // Fallback: check the kernel status widget in the status bar
         const kernelStatus = document.querySelector('.jp-Notebook-KernelStatus');
         return kernelStatus?.textContent?.includes('Idle') || false;
-      }, { timeout: 60000 });
+      }, { timeout: 15000 });
       console.log('✅ Kernel is idle');
     } catch {
       console.log('⚠️ Kernel idle wait timed out — proceeding with retry loop');

@@ -48,7 +48,7 @@ test.describe('Infinite Scroll Transcript Recording', () => {
         }
         const kernelStatus = document.querySelector('.jp-Notebook-KernelStatus');
         return kernelStatus?.textContent?.includes('Idle') || false;
-      }, { timeout: 60000 });
+      }, { timeout: 15000 });
       console.log('✅ Kernel is idle');
     } catch {
       console.log('⚠️ Kernel idle wait timed out — proceeding with retry loop');
@@ -359,7 +359,7 @@ test.describe('Infinite Scroll Transcript Recording', () => {
         if (indicator) return indicator.getAttribute('data-status') === 'idle';
         const ks = document.querySelector('.jp-Notebook-KernelStatus');
         return ks?.textContent?.includes('Idle') || false;
-      }, { timeout: 60000 });
+      }, { timeout: 15000 });
     } catch { /* proceed with retry loop */ }
 
     // Execute with retry
