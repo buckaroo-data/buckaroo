@@ -7,7 +7,7 @@ ENV PNPM_STORE_DIR=/opt/pnpm-store
 # 1. OS + base tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git ca-certificates gnupg \
-    build-essential libffi-dev libssl-dev \
+    build-essential libffi-dev libssl-dev tini \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. uv (pinned — bump when needed, not on a schedule)
@@ -65,4 +65,8 @@ RUN mkdir -p /root/.jupyter && \
 # Allow git to operate on the bind-mounted repo (owned by ci on host, root in container).
 RUN git config --system --add safe.directory /repo
 WORKDIR /repo
+# tini as PID 1 reaps zombie processes from docker exec'd CI runs.
+# Without it, sleep-infinity PID 1 doesn't call wait(), zombies accumulate,
+# and back-to-back CI runs fail.
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["sleep", "infinity"]

@@ -16,12 +16,9 @@ services:
       - PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
       - PNPM_STORE_DIR=/opt/pnpm-store
     # Warm sidecar: stays alive between CI runs, avoiding ~500ms docker run overhead.
+    # tini as PID 1 (ENTRYPOINT in Dockerfile) reaps zombies from docker exec'd CI runs.
     command: sleep infinity
     restart: unless-stopped
-    # Use tini as PID 1 to reap zombie processes (jupyter-lab, python kernels).
-    # Without this, sleep-infinity PID 1 doesn't call wait(), zombies accumulate,
-    # and back-to-back CI runs fail.
-    init: true
 
 volumes:
   playwright-browsers:
