@@ -21,6 +21,8 @@
 | 14d | 6a11b71 | P=4 wait-all + kernel-idle-60s | **3/5 = 60%** | varies | varies |
 | 14e | 8695488 | P=4 wait-all + idle-15s + retry=2 | **4/5 = 80%** | ~1m12s | ~2m42s |
 | **15-21** | **5994612** | **jupyterapp + waitFor removal** | **10/10 jupyter, 9/10 overall** | **~1m36s** | **~2m59s** |
+| 23 | 200bac6 | JS build cache + ci-queue | TBD (stress test running) | N/A | saves 15s critical path |
+| 24 | 5c1e58f | Fix full_build.sh skip check | Not yet tested | N/A | saves ~10s more on build-wheel |
 
 ---
 
@@ -368,24 +370,125 @@ Critical path: `test-js(24s) → build-wheel(16s) → wait-all(~50s) → pw-jupy
 
 **Impact:** Minor — these jobs are already fast (11s storybook, 46s marimo).
 
-### Priority Order
+### Priority Order (superseded — exp 15-17 done in 5994612)
 
-1. **Exp 15** (pw-server waitForTimeout) — highest absolute savings, on the wait-all gate
-2. **Exp 17** (skip JS rebuild) — on the critical path, easy change
-3. **Exp 16** (marimo sleep 5) — on the wait-all gate
-4. **Exp 19** (relax gate) — unlocks earlier pw-jupyter start
-5. **Exp 18** (parallel smoke) — small but free
-6. **Exp 20** (minor waitForTimeout) — cleanup
+1. ~~**Exp 15** (pw-server waitForTimeout)~~ — DONE in 5994612. Saved 13s (50s → 37s)
+2. ~~**Exp 17** (skip JS rebuild)~~ — DONE in 5994612 but was a no-op (git checkout clears dist). **Fixed properly in Exp 23** (external JS cache).
+3. ~~**Exp 16** (marimo sleep 5)~~ — DONE in 5994612. Saved 4s (46s → 42s)
+4. **Exp 19** (relax gate) — still TODO
+5. **Exp 18** (parallel smoke) — still TODO
+6. **Exp 20** (minor waitForTimeout) — still TODO
 
-### Projected Impact
+### Projected Impact (superseded by actual results)
 
-If all experiments succeed:
-- pw-server: 50s → ~33s (-17s)
-- pw-marimo: 46s → ~41s (-5s)
-- build-wheel: 16s → ~8s (-8s)
-- Wait-all gate finishes ~17s earlier (bottleneck shifts from pw-server to pw-marimo)
-- **Total CI: ~2m42s → ~2m15s** (saves ~27s)
-- With relaxed gate (exp 19): **~2m05s**
+~~If all experiments succeed:~~
+- ~~pw-server: 50s → ~33s (-17s)~~ → **Actual: 50s → 37s (-13s)**
+- ~~pw-marimo: 46s → ~41s (-5s)~~ → **Actual: 46s → 42s (-4s)**
+- ~~build-wheel: 16s → ~8s (-8s)~~ → **Actual: 17s → 17s (no-op — git checkout clears dist)**
+- ~~Total CI: ~2m42s → ~2m15s~~ → **Actual: 2m59s median** (jupyter bimodal: 7/10 at 1m36s, 3/10 at 4m11s)
+
+**Exp 17 root cause:** `full_build.sh` checked for `dist/index.js` but vite outputs `dist/index.es.js`. The skip condition never triggered. Fixed in `5c1e58f` but only helps future SHAs (old SHAs have old full_build.sh). The real fix is Exp 23 (external JS cache).
+
+---
+
+### Exp 23 — JS Build Cache + CI Job Queue (f30da68 → 5c1e58f)
+
+**Status:** IN PROGRESS — stress test running (5/16 complete)
+**Changes:**
+1. **JS build cache:** Cache `dist/` at `/opt/ci/js-cache/<tree-hash>` keyed by `sha256sum` of `git ls-tree` for `src/`, `package.json`, `tsconfig.json`, `vite.config.ts`. Restore after `git checkout`, save in `job_test_js()`.
+2. **CI job queue:** `ci-queue.sh` — directory-based queue with `flock` single-worker enforcement. Commands: push, status, cancel, clear, log, repeat.
+3. **full_build.sh fix:** Check `dist/index.es.js` not `dist/index.js` for skip logic.
+
+**JS cache impact (measured):**
+
+| Metric | Cache MISS | Cache HIT | Savings |
+|--------|-----------|-----------|---------|
+| test-js | 21s | 5s | **-16s** |
+| build-wheel starts at | +23s | +7s | **-16s** |
+| wheel-dependent starts at | +40s | +25s | **-15s on critical path** |
+
+build-wheel still takes 18s with cache HIT because `full_build.sh` had the wrong filename check — it rebuilt JS from scratch even though dist/ existed. Fixed in `5c1e58f` (`index.js` → `index.es.js`). **Expected build-wheel with both fixes: ~8s** (just esbuild widget + uv build, no tsc+vite).
+
+**CPU utilization during CI (Vultr 16 vCPU):**
+```
+Phase                  Host CPU    Container CPU    Notes
+─────────────────────  ─────────   ──────────────   ──────────────────
+Wave 0 (8 parallel)    ~60-90%     ~800-1200%       All 16 cores busy
+build-wheel            ~40%        ~400%            tsc+vite
+Wheel-dependent        ~40-60%     ~600%            4 jobs parallel
+pw-jupyter startup     ~40%        ~800%            4 JupyterLabs + 4 Chromiums launching
+pw-jupyter execution   ~5-10%      ~100%            Mostly idle — waiting on kernel I/O
+pw-jupyter idle gaps   ~1-3%       ~5-25%           Between batches, near zero
+```
+
+**Key finding:** The machine is massively underutilized during playwright-jupyter (the longest phase). 16 vCPUs sit at 5-10% while waiting for kernel I/O. The bottleneck is kernel startup/connection latency, not CPU.
+
+**Stress test results (in progress):**
+
+| SHA | Time | Result | JS Cache | Notes |
+|-----|------|--------|----------|-------|
+| 7b6a05c | 206s | FAIL | HIT (from prior test) | test-python × 3 fail (old code) |
+| fcfe368 | 186s | FAIL | HIT (from prior test) | pw-jupyter fail (old specs) |
+| 5ff4d6e | 209s | FAIL | HIT (same hash as 837654e) | pw-jupyter fail (old specs) |
+| 837654e | 206s | FAIL | HIT | pw-jupyter fail (old specs) |
+| f8a8b94 | ... | running | ... | ... |
+
+All failures are from old test code (no `window.jupyterapp` kernel check). This is exactly what synthetic merges (Part 3) would fix.
+
+---
+
+### Exp 24 — Fix build-wheel with JS cache (5c1e58f)
+
+**Status:** DONE (code deployed, not yet tested with new SHAs)
+**What:** `full_build.sh` checked for `dist/index.js` but vite outputs `dist/index.es.js`. Fixed the check.
+
+**Expected impact with both Exp 23 + 24:**
+```
+                    Before    Cache MISS    Cache HIT + fix
+test-js              21s        21s            5s
+build-wheel          18s        18s           ~8s (esbuild + uv build only)
+Critical path gap    40s        40s           ~13s
+```
+
+This saves **27s on the critical path** (from checkout to wheel-dependent jobs starting).
+
+**Projected total CI with Exp 23+24:** `~13s (to wheel) + 42s (pw-marimo) + 96s (pw-jupyter) = ~2m31s`
+
+---
+
+## Future Experiments
+
+### Exp 25 — Synthetic Merge Commits for Stress Testing
+
+**Status:** Code written (`prepare-synth.sh`), not yet tested
+**What:** Merge latest test improvements (from `5994612`) onto old SHAs so stress tests use current Playwright specs with old application code. Resolves conflicts by taking "theirs" for test files, "ours" for app code.
+**Why:** Current stress test runs old SHAs with old specs that lack `window.jupyterapp` kernel check → all pw-jupyter tests fail. Synthetic merges would give accurate reliability data.
+
+### Exp 19 — Relax pw-jupyter gate
+
+**Priority:** MEDIUM — saves ~10-15s
+**What:** Wait only for heavy jobs (pw-server, pw-marimo) not all jobs. Light jobs (lint, smoke, mcp) are always done by then.
+**Risk:** If a light job runs long, it overlaps pw-jupyter.
+
+### Exp 18 — Parallelize smoke-test-extras
+
+**Priority:** LOW — saves ~10s off wall time but NOT on critical path
+**What:** Run 6 venv installs in parallel (currently sequential).
+
+### Exp 20 — Minor waitForTimeout cleanup
+
+**Priority:** LOW — ~6s total across marimo+storybook specs
+**What:** Replace remaining `waitForTimeout` calls in non-server specs.
+
+### Exp 26 — Wheel cache across SHAs
+
+**Priority:** MEDIUM
+**What:** If Python source hasn't changed between commits, reuse the wheel from a prior SHA. Key by `git ls-tree -r HEAD buckaroo/ pyproject.toml | sha256sum`. Would eliminate build-wheel entirely for JS-only changes.
+
+### Exp 27 — Persistent pnpm install skip
+
+**Priority:** LOW — saves ~2-3s
+**What:** `pnpm install --frozen-lockfile` takes 2-3s even with warm store (just creating hardlinks). Skip if `node_modules/.package-lock.json` matches `pnpm-lock.yaml` hash.
 
 ---
 
@@ -442,3 +545,6 @@ under CPU contention the kernel connection can take >120s.
 | 6a11b71 | Kernel idle wait 60s (too aggressive) |
 | 8695488 | Kernel idle wait 15s + retries=2 |
 | 5994612 | jupyterapp kernel check + waitForTimeout removal + marimo sleep removal |
+| 200bac6 | JS build cache + ci-queue + prepare-synth + stress-test --synth |
+| e7fff5b | Mount js-cache volume for persistence |
+| 5c1e58f | Fix full_build.sh index.es.js check (exp 24) |
