@@ -396,10 +396,10 @@ while [ $NEXT -lt $TOTAL ]; do
             shutdown_kernels_on_port "$p"
         done
         # Determine how many ports the next batch will use
-        local remaining=$((TOTAL - NEXT))
-        local next_batch_size=$((remaining < PARALLEL ? remaining : PARALLEL))
+        remaining=$((TOTAL - NEXT))
+        next_batch_size=$((remaining < PARALLEL ? remaining : PARALLEL))
         for slot in $(seq 0 $((next_batch_size - 1))); do
-            local rwport=$((BASE_PORT + slot))
+            rwport=$((BASE_PORT + slot))
             # Verify server is responsive
             curl -sf "http://localhost:${rwport}/api?token=${JUPYTER_TOKEN}" >/dev/null 2>&1 || {
                 log "WARNING: Server on port $rwport not responding after cleanup"
