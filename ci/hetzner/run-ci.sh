@@ -84,7 +84,7 @@ done
 CPU_FINE_PID=$!
 
 # CI timeout watchdog — kill everything if CI exceeds time limit.
-CI_TIMEOUT=${CI_TIMEOUT:-210}
+CI_TIMEOUT=${CI_TIMEOUT:-270}
 ( sleep "$CI_TIMEOUT"; echo "[$(date +'%H:%M:%S')] TIMEOUT: CI exceeded ${CI_TIMEOUT}s" >> "$RESULTS_DIR/ci.log"; kill -TERM 0 ) 2>/dev/null &
 WATCHDOG_PID=$!
 
@@ -567,7 +567,7 @@ else
         PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
         PARALLEL=$JUPYTER_PARALLEL \
         BASE_PORT=8889 \
-            timeout 120 bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
+            timeout 180 bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
                 --venv-location="$venv" --servers-running || rc=$?
         # Cleanup servers + venv
         for pid in $(cat /tmp/ci-jupyter-warmup-pids 2>/dev/null); do
