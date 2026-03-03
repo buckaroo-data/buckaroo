@@ -43,21 +43,25 @@ success "marimo is available"
 
 cd packages/buckaroo-js-core
 
-log_message "Installing npm dependencies..."
-if command -v pnpm &> /dev/null; then
-    pnpm install
+if [ "${SKIP_INSTALL:-0}" = "1" ]; then
+    log_message "SKIP_INSTALL=1 — skipping pnpm install + playwright install"
 else
-    npm install
-fi
+    log_message "Installing npm dependencies..."
+    if command -v pnpm &> /dev/null; then
+        pnpm install
+    else
+        npm install
+    fi
 
-log_message "Ensuring Playwright browsers are installed..."
-if command -v pnpm &> /dev/null; then
-    pnpm exec playwright install chromium
-else
-    npx playwright install chromium
-fi
+    log_message "Ensuring Playwright browsers are installed..."
+    if command -v pnpm &> /dev/null; then
+        pnpm exec playwright install chromium
+    else
+        npx playwright install chromium
+    fi
 
-success "Dependencies ready"
+    success "Dependencies ready"
+fi
 
 # ---------- 3. Warm up marimo server ------------------------------------------
 # Under CPU contention (CI with parallel jobs), marimo's first page load can

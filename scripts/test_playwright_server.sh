@@ -62,21 +62,25 @@ export BUCKAROO_SERVER_PYTHON="$MCP_VENV/bin/python"
 
 cd packages/buckaroo-js-core
 
-log_message "Installing npm dependencies..."
-if command -v pnpm &> /dev/null; then
-    pnpm install
+if [ "${SKIP_INSTALL:-0}" = "1" ]; then
+    log_message "SKIP_INSTALL=1 — skipping pnpm install + playwright install"
 else
-    npm install
-fi
+    log_message "Installing npm dependencies..."
+    if command -v pnpm &> /dev/null; then
+        pnpm install
+    else
+        npm install
+    fi
 
-log_message "Ensuring Playwright browsers are installed..."
-if command -v pnpm &> /dev/null; then
-    pnpm exec playwright install chromium
-else
-    npx playwright install chromium
-fi
+    log_message "Ensuring Playwright browsers are installed..."
+    if command -v pnpm &> /dev/null; then
+        pnpm exec playwright install chromium
+    else
+        npx playwright install chromium
+    fi
 
-success "Dependencies ready"
+    success "Dependencies ready"
+fi
 
 # ---------- 4. Run the server playwright tests --------------------------------
 

@@ -249,6 +249,7 @@ job_smoke_test_extras() {
 
 job_playwright_storybook() {
     cd /repo
+    SKIP_INSTALL=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-storybook-$$ \
         bash scripts/test_playwright_storybook.sh
@@ -256,6 +257,7 @@ job_playwright_storybook() {
 
 job_playwright_server() {
     cd /repo
+    SKIP_INSTALL=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-server-$$ \
         bash scripts/test_playwright_server.sh
@@ -265,6 +267,7 @@ job_playwright_marimo() {
     cd /repo
     # UV_PROJECT_ENVIRONMENT: reuse the pre-synced 3.13 venv so `uv run marimo`
     # doesn't race with other jobs creating /repo/.venv from scratch.
+    SKIP_INSTALL=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-marimo-$$ \
     UV_PROJECT_ENVIRONMENT=/opt/venvs/3.13 \
@@ -274,6 +277,7 @@ job_playwright_marimo() {
 job_playwright_wasm_marimo() {
     cd /repo
     # Same rationale as job_playwright_marimo.
+    SKIP_INSTALL=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-wasm-marimo-$$ \
     UV_PROJECT_ENVIRONMENT=/opt/venvs/3.13 \
@@ -497,19 +501,21 @@ else
     # CPU contention during Wave 0 — they start 5s after wheel-dependent jobs.
     log "=== Starting Wave 0 ==="
 
-    run_job lint-python            job_lint_python                & PID_LINT=$!
-    run_job test-js                job_test_js                    & PID_TESTJS=$!
-    run_job test-python-3.13       bash -c "job_test_python 3.13" & PID_PY313=$!
-    run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
+    # nice -10 = critical path (test-js gates build-wheel gates everything)
+    # nice 10  = background work (reduces CPU contention for critical path)
+    nice 10  run_job lint-python            job_lint_python                & PID_LINT=$!
+    nice -10 run_job test-js                job_test_js                    & PID_TESTJS=$!
+    nice 10  run_job test-python-3.13       bash -c "job_test_python 3.13" & PID_PY313=$!
+    nice 10  run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
     # Early kernel warmup — venv + 4 JupyterLab servers + kernel warmup while
     # heavyweight jobs are running. Finishes by ~t=20s, long before wheel is ready.
-    run_job jupyter-warmup         job_jupyter_warmup             & PID_WARMUP=$!
+    nice 10  run_job jupyter-warmup         job_jupyter_warmup             & PID_WARMUP=$!
 
     # ── Wait for test-js only, then build wheel ──────────────────────────────
     wait $PID_TESTJS || OVERALL=1
     log "=== test-js done — starting build-wheel ==="
 
-    run_job build-wheel job_build_wheel || OVERALL=1
+    nice -10 run_job build-wheel job_build_wheel || OVERALL=1
 
     # Cache wheel by current SHA so --phase=5b / --wheel-from can reuse it.
     mkdir -p "/opt/ci/wheel-cache/$SHA"
@@ -556,26 +562,26 @@ else
     run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
 
     # Also start lightweight jobs that won't compete much
-    run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
-    run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
+    nice 10 run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
+    nice 10 run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
 
     # t+5s: pw-marimo
     sleep 5
-    run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
+    nice 10 run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
 
     # t+10s: pw-wasm-marimo
     sleep 5
-    run_job playwright-wasm-marimo job_playwright_wasm_marimo & PID_PW_WM=$!
+    nice 10 run_job playwright-wasm-marimo job_playwright_wasm_marimo & PID_PW_WM=$!
 
     # t+15s: pw-server
     sleep 5
-    run_job playwright-server    job_playwright_server     & PID_PW_SV=$!
+    nice 10 run_job playwright-server    job_playwright_server     & PID_PW_SV=$!
 
     # t+20s: pytest 3.11/3.12/3.14 (3.13 already ran in Wave 0)
     sleep 5
-    run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
-    run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
-    run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
+    nice 10 run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
+    nice 10 run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
+    nice 10 run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
 
     # ── Wait for all jobs ─────────────────────────────────────────────────────
     wait $PID_LINT    || OVERALL=1
