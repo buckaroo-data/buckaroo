@@ -119,6 +119,7 @@ job_test_python() {
     # DAG concurrency (12 simultaneous jobs). Covered by test-mcp-wheel job
     # which runs server integration tests in isolation with the built wheel.
     /opt/venvs/$v/bin/python -m pytest tests/unit -m "not slow" --color=yes \
+        -n 4 --dist load \
         --ignore=tests/unit/file_cache/mp_timeout_decorator_test.py \
         --ignore=tests/unit/file_cache/multiprocessing_executor_test.py \
         --ignore=tests/unit/server/test_mcp_server_integration.py \

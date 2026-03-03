@@ -3,13 +3,15 @@ import { Page } from '@playwright/test';
 
 const JUPYTER_BASE_URL = process.env.JUPYTER_BASE_URL || 'http://localhost:8889';
 const JUPYTER_TOKEN = process.env.JUPYTER_TOKEN || 'test-token-12345';
-const DEFAULT_TIMEOUT = 10000;
-const CELL_EXEC_TIMEOUT = 60000; // kernel startup can be slow when 3 run concurrently
-const NAVIGATION_TIMEOUT = 12000;
+const DEFAULT_TIMEOUT = 30000;
+const CELL_EXEC_TIMEOUT = 120000; // kernel startup + 2000-row analysis under 9-way concurrency
+const NAVIGATION_TIMEOUT = 30000;
 
 async function waitForAgGrid(page: Page, timeout = DEFAULT_TIMEOUT) {
   await page.locator('.ag-root-wrapper').first().waitFor({ state: 'attached', timeout });
-  await page.locator('.ag-cell').first().waitFor({ state: 'visible', timeout });
+  // Use 'attached' not 'visible' — ag-grid infinite row model creates cells
+  // before datasource round-trip completes, so cells may be hidden initially.
+  await page.locator('.ag-cell').first().waitFor({ state: 'attached', timeout });
 }
 
 test.describe('Infinite Scroll Transcript Recording', () => {
