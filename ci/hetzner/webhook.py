@@ -25,6 +25,8 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory, abort
 
+CI_QUEUE_BIN = "/usr/local/bin/ci-queue"
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 def _load_env(path: str = "/opt/ci/.env") -> dict:
@@ -57,12 +59,9 @@ log = logging.getLogger(__name__)
 
 # ── State ─────────────────────────────────────────────────────────────────────
 
-# branch_name → SHA of the currently running CI job (or recently started).
+# branch_name → SHA of the most recently queued CI job.
 _branch_sha: dict[str, str] = {}
-# Guard for _branch_sha mutations.
 _branch_lock = threading.Lock()
-# Maximum two concurrent CI runs (different branches).
-_sem = threading.Semaphore(2)
 
 # ── Flask app ─────────────────────────────────────────────────────────────────
 
@@ -124,51 +123,22 @@ def _cancel_previous(branch: str) -> None:
     )
 
 
-def _run_ci(sha: str, branch: str) -> None:
-    """Run CI for sha in a background thread. Acquires _sem to cap concurrency."""
+def _enqueue_ci(sha: str, branch: str) -> None:
+    """Enqueue CI run via ci-queue. The queue worker handles sequential execution."""
     log_url = _log_url(sha)
-    _set_github_status(sha, "pending", "Running CI...", log_url)
+    _set_github_status(sha, "pending", "Queued for CI...", log_url)
 
-    _sem.acquire()
     try:
-        LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        env = {
-            **os.environ,
-            "GITHUB_TOKEN": GITHUB_TOKEN,
-            "GITHUB_REPO": GITHUB_REPO,
-            "HETZNER_SERVER_IP": SERVER_IP,
-        }
-        log.info("Starting CI for %s @ %s", branch, sha[:8])
-        proc = subprocess.Popen(
-            [
-                "docker", "exec",
-                "-e", f"GITHUB_TOKEN={GITHUB_TOKEN}",
-                "-e", f"GITHUB_REPO={GITHUB_REPO}",
-                "-e", f"HETZNER_SERVER_IP={SERVER_IP}",
-                CONTAINER_NAME,
-                "bash", "/repo/ci/hetzner/run-ci.sh", sha, branch,
-            ],
-            env=env,
+        result = subprocess.run(
+            [CI_QUEUE_BIN, "push", sha, branch],
+            capture_output=True, text=True, timeout=10,
         )
-
+        log.info("Queued CI for %s @ %s: %s", branch, sha[:8], result.stdout.strip())
         with _branch_lock:
             _branch_sha[branch] = sha
-
-        proc.wait()
-        rc = proc.returncode
-        log.info("CI finished for %s @ %s: rc=%d", branch, sha[:8], rc)
-        # run-ci.sh sets the final GitHub status itself.
-        # We only intervene if it crashed unexpectedly (rc=-N = killed by signal).
-        if rc < 0:
-            _set_github_status(sha, "failure", f"CI process killed (signal {-rc})", log_url)
     except Exception as exc:
-        log.exception("CI thread crashed for %s: %s", sha, exc)
-        _set_github_status(sha, "failure", f"CI error: {exc}", log_url)
-    finally:
-        _sem.release()
-        with _branch_lock:
-            if _branch_sha.get(branch) == sha:
-                _branch_sha.pop(branch, None)
+        log.exception("Failed to queue CI for %s: %s", sha, exc)
+        _set_github_status(sha, "failure", f"Queue error: {exc}", log_url)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -204,11 +174,9 @@ def webhook():
         return jsonify({"status": "ignored", "reason": "unrecognised event"})
 
     _cancel_previous(branch)
+    _enqueue_ci(sha, branch)
 
-    t = threading.Thread(target=_run_ci, args=(sha, branch), daemon=True)
-    t.start()
-
-    return jsonify({"status": "accepted", "sha": sha, "branch": branch})
+    return jsonify({"status": "queued", "sha": sha, "branch": branch})
 
 
 @app.get("/health")

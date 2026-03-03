@@ -78,6 +78,24 @@ git clean -fdx \
     --exclude='packages/js/node_modules' \
     --exclude='packages/node_modules'
 
+# ── JS build cache ──────────────────────────────────────────────────────────
+JS_CACHE_DIR=/opt/ci/js-cache
+JS_TREE_HASH=$(git ls-tree -r HEAD \
+    packages/buckaroo-js-core/src/ \
+    packages/buckaroo-js-core/package.json \
+    packages/buckaroo-js-core/tsconfig.json \
+    packages/buckaroo-js-core/vite.config.ts \
+    2>/dev/null | sha256sum | cut -c1-16)
+
+if [[ -d "$JS_CACHE_DIR/$JS_TREE_HASH" ]]; then
+    cp -r "$JS_CACHE_DIR/$JS_TREE_HASH" packages/buckaroo-js-core/dist
+    log "JS build cache HIT ($JS_TREE_HASH)"
+    export JS_DIST_CACHED=1
+else
+    log "JS build cache MISS ($JS_TREE_HASH)"
+    export JS_DIST_CACHED=0
+fi
+
 # ── Job definitions ──────────────────────────────────────────────────────────
 
 job_lint_python() {
@@ -92,7 +110,16 @@ job_test_js() {
     cd /repo/packages
     pnpm install --frozen-lockfile --store-dir /opt/pnpm-store
     cd buckaroo-js-core
-    pnpm run build
+    if [[ "${JS_DIST_CACHED:-0}" != "1" ]]; then
+        pnpm run build
+        # Cache for future runs
+        mkdir -p "$JS_CACHE_DIR"
+        rm -rf "$JS_CACHE_DIR/$JS_TREE_HASH"
+        cp -r dist "$JS_CACHE_DIR/$JS_TREE_HASH"
+        log "JS build cached ($JS_TREE_HASH)"
+    else
+        log "JS build skipped (cache hit)"
+    fi
     pnpm run test
 }
 
@@ -226,6 +253,7 @@ job_playwright_jupyter() {
     return $rc
 }
 
+export JS_CACHE_DIR JS_TREE_HASH
 export -f job_lint_python job_test_js job_test_python job_build_wheel \
            job_test_mcp_wheel job_smoke_test_extras \
            job_playwright_storybook job_playwright_server job_playwright_marimo \
