@@ -91,11 +91,16 @@ WATCHDOG_PID=$!
 # ── Pre-run cleanup — kill stale processes, remove temp files from prior runs ─
 # This ensures each CI run starts from a clean state regardless of how the
 # previous run ended (timeout, crash, manual kill, etc.).
-pkill -f jupyter-lab 2>/dev/null || true
-pkill -f playwright 2>/dev/null || true
-pkill -f chromium 2>/dev/null || true
-pkill -f "node.*storybook" 2>/dev/null || true
-pkill -f "npm exec serve" 2>/dev/null || true
+pkill -9 -f jupyter-lab 2>/dev/null || true
+pkill -9 -f playwright 2>/dev/null || true
+pkill -9 -f chromium 2>/dev/null || true
+pkill -9 -f "node.*storybook" 2>/dev/null || true
+pkill -9 -f "npm exec serve" 2>/dev/null || true
+# Kill anything on jupyter ports (8889-8893)
+for port in 8889 8890 8891 8892 8893; do
+    fuser -k $port/tcp 2>/dev/null || true
+done
+sleep 1  # let processes die before cleaning their files
 rm -rf /tmp/ci-jupyter-warmup* /tmp/pw-jupyter-parallel* /tmp/pw-html-* 2>/dev/null || true
 rm -f /tmp/ci-jupyter-warmup-venv /tmp/ci-jupyter-warmup-pids 2>/dev/null || true
 # Clean JupyterLab workspace + kernel state — stale workspace files from previous
@@ -104,6 +109,9 @@ rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || tr
 rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
 rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
 rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
+# Clean any IPython/Jupyter caches that might affect kernel startup
+rm -rf ~/.ipython/profile_default/db 2>/dev/null || true
+rm -rf ~/.local/share/jupyter/nbsignatures.db 2>/dev/null || true
 
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
 log "CI runner: $RUNNER_VERSION  phase=$PHASE"
