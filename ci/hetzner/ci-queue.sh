@@ -80,7 +80,7 @@ EOF
 
     # Auto-start worker if not already running
     if ! _worker_alive; then
-        nohup "$0" worker >> "$WORKER_LOG" 2>&1 &
+        nohup "$0" worker > /dev/null 2>&1 &
         disown
         echo "Worker started (pid $!)"
     fi
