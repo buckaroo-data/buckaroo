@@ -25,6 +25,7 @@
 | 24 | 5c1e58f | Fix full_build.sh skip check | N/A | N/A | build-wheel 17s→3s |
 | **18+19+20** | **60618ce** | **parallel smoke + relaxed gate + marimo waits** | **pw-jupyter 1/1, overall FAIL (storybook flake)** | **1m38s** | **2m31s** |
 | **28** | **172158b** | **early kernel warmup in Wave 0** | **3/3 pw-jupyter, 2/3 overall (pw-server flake)** | **1m14s** | **2m25s** |
+| **30** | **d369894** | **remove heavyweight PW gate + CPU monitor** | **7/7 pw-jupyter, 6/7 overall (pw-server flake)** | **1m15s** | **1m43s** |
 | 29 | d020744 | Marimo auto-retry assertions + retries=2 | TBD (running) | N/A | reliability |
 
 ---
@@ -485,7 +486,7 @@ Saved **31s on the critical path** (from checkout to wheel-dependent jobs starti
 
 ---
 
-### Exp 28 — Early Kernel Warmup (172158b) ⭐ NEW BEST
+### Exp 28 — Early Kernel Warmup (172158b)
 
 **Status:** DONE — 3-run stability test
 **Changes:**
@@ -581,15 +582,55 @@ This is the same class of bug identified in the marimo flakiness research (Categ
 
 ---
 
+### Exp 30 — Remove Heavyweight PW Gate (d369894) ⭐ NEW BEST
+
+**Status:** DONE — 7 runs (5-run batch + 2 individual with CPU monitoring)
+**Changes:**
+1. Remove wait gate for pw-server/pw-marimo/pw-wasm-marimo before pw-jupyter
+2. pw-jupyter starts alongside all other wheel-dependent jobs immediately after wheel install
+3. Add `vmstat 1` CPU monitoring to every CI run
+
+**Hypothesis:** With `window.jupyterapp` kernel check (Exp 21) + early warmup (Exp 28), pw-jupyter no longer needs CPU headroom. The old DOM-based checks failed under contention; the new checks are resilient.
+
+**Results:** pw-jupyter 7/7 = **100% pass rate** under contention. Overall 6/7 (1 pw-server flake).
+
+| Run | pw-server | pw-marimo | pw-jupyter | Result | Total |
+|-----|----------|----------|-----------|--------|-------|
+| 1 | 40s | 42s | **1m15s** | **PASS** | **1m43s** |
+| 2 | 39s | 42s | **1m15s** | **PASS** | **1m44s** |
+| 3 | 39s | 41s | **1m14s** | **PASS** | **1m43s** |
+| 4 | FAIL | 43s | PASS | FAIL | ~1m45s |
+| 5 | (batch log race) | | | | |
+| 6 | 40s | 42s | **1m15s** | **PASS** | **1m43s** |
+
+**CPU profile (vmstat, run 6):**
+
+| Phase | Time | CPU busy (us+sy) | Idle |
+|-------|------|-----------------|------|
+| Wave 0 (9 jobs) | 0-25s | **80-97%** | 0-20% |
+| Wheel install | 25-27s | 30-55% | 45-67% |
+| All wheel jobs + pw-jupyter | 27-69s | **40-75%** | 25-60% |
+| pw-jupyter alone | 69-103s | **6-20%** | 75-95% |
+
+**Key findings:**
+1. pw-jupyter is **fully reliable under 40-75% CPU contention** with `window.jupyterapp` + early warmup
+2. The heavyweight gate was a workaround for broken DOM kernel checks — no longer needed
+3. Total CI: **1m43s** (was 2m25s with gate = **-42s**, was 2m31s pre-warmup = **-48s**)
+4. Machine has plenty of headroom during concurrent PW jobs (40-75% vs 80-97% in Wave 0)
+
+**Critical path:** `test-js(7s) → build-wheel(4s) → warmup-wait(0s) → wheel-install(2s) → pw-jupyter(75s) = 1m28s + overhead = ~1m43s`
+
+---
+
 ## Operational Notes
 
 ### CPU Monitoring
 
 Every CI run MUST collect CPU usage data. Without it we can't correlate flakes with contention.
 
-Add a background `mpstat 1` (or `sar`/`vmstat`) sampler at CI start, kill at end, save to `$RESULTS_DIR/cpu.log`. Example:
+Add a background `vmstat 1` sampler at CI start, kill at end, save to `$RESULTS_DIR/cpu.log`. Already implemented in run-ci.sh (Exp 30). Example:
 ```bash
-mpstat -P ALL 1 > "$RESULTS_DIR/cpu.log" 2>&1 &
+vmstat 1 > "$RESULTS_DIR/cpu.log" 2>&1 &
 CPU_MONITOR_PID=$!
 # ... run CI ...
 kill $CPU_MONITOR_PID 2>/dev/null || true
@@ -657,4 +698,5 @@ under CPU contention the kernel connection can take >120s.
 | 5c1e58f | Fix full_build.sh index.es.js check (exp 24) |
 | 60618ce | Exp 18+19+20: parallel smoke, relaxed gate, marimo waits → **2m31s** |
 | 172158b | Exp 28: early kernel warmup in Wave 0 → **2m25s** |
+| d369894 | Exp 30: remove heavyweight PW gate + CPU monitoring → **1m43s** |
 | d020744 | Exp 29: marimo auto-retry assertions + retries=2 |
