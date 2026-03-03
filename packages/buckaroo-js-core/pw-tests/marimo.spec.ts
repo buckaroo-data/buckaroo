@@ -13,17 +13,18 @@ async function waitForGrid(page: import('@playwright/test').Page) {
 }
 
 /**
- * Get the text content of a cell by col-id and row-index within
+ * Get a cell locator by col-id and row-index within
  * the main data grid (.df-viewer) of a widget container.
+ * Returns a locator (not text) so callers can use Playwright's
+ * auto-retrying expect(locator).toHaveText() instead of one-shot innerText().
  */
-async function getCellText(
+function cellLocator(
   container: import('@playwright/test').Locator,
   colId: string,
   rowIndex: number,
-): Promise<string> {
+): import('@playwright/test').Locator {
   const dfViewer = container.locator('.df-viewer');
-  const cell = dfViewer.locator(`[row-index="${rowIndex}"] [col-id="${colId}"]`);
-  return (await cell.innerText()).trim();
+  return dfViewer.locator(`[row-index="${rowIndex}"] [col-id="${colId}"]`);
 }
 
 /**
@@ -71,11 +72,12 @@ test.describe('Buckaroo in marimo', () => {
     const firstWidget = page.locator('.buckaroo_anywidget').first();
 
     // Column names get mapped to col-ids: name→a, age→b, score→c
-    expect(await getCellText(firstWidget, 'a', 0)).toBe('Alice');
-    expect(await getCellText(firstWidget, 'a', 1)).toBe('Bob');
-    expect(await getCellText(firstWidget, 'a', 2)).toBe('Charlie');
-    expect(await getCellText(firstWidget, 'b', 0)).toBe('30');
-    expect(await getCellText(firstWidget, 'b', 1)).toBe('25');
+    // Use toHaveText() — auto-retries until data loads (handles kernel→grid race)
+    await expect(cellLocator(firstWidget, 'a', 0)).toHaveText('Alice');
+    await expect(cellLocator(firstWidget, 'a', 1)).toHaveText('Bob');
+    await expect(cellLocator(firstWidget, 'a', 2)).toHaveText('Charlie');
+    await expect(cellLocator(firstWidget, 'b', 0)).toHaveText('30');
+    await expect(cellLocator(firstWidget, 'b', 1)).toHaveText('25');
   });
 
   test('column headers are present', async ({ page }) => {
@@ -114,8 +116,9 @@ test.describe('Buckaroo in marimo', () => {
     const secondWidget = widgets.nth(1);
 
     // Columns: id→a, value→b, label→c
-    expect(await getCellText(secondWidget, 'a', 0)).toBe('0');
-    expect(await getCellText(secondWidget, 'b', 0)).toBe('0');
-    expect(await getCellText(secondWidget, 'c', 0)).toBe('row_0');
+    // Auto-retrying assertions handle kernel→grid data loading race
+    await expect(cellLocator(secondWidget, 'a', 0)).toHaveText('0');
+    await expect(cellLocator(secondWidget, 'b', 0)).toHaveText('0');
+    await expect(cellLocator(secondWidget, 'c', 0)).toHaveText('row_0');
   });
 });

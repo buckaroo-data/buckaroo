@@ -517,6 +517,25 @@ Steps 1-3 (~35-55s) can overlap with Wave 0 + build-wheel (~13-40s depending on 
 
 **Files:** `ci/hetzner/run-ci.sh` (major restructure of DAG), `scripts/test_playwright_jupyter_parallel.sh` (accept pre-warmed servers)
 
+### Exp 29 — Marimo Assertion Robustness (apply flakiness research)
+
+**Priority:** MEDIUM — reliability improvement, minor speed improvement
+**Status:** IN PROGRESS
+**What:** Apply findings from `marimo-playwright-flakiness.md` to our buckaroo marimo Playwright tests.
+
+**Changes:**
+1. **Retries 1→2** in `playwright.config.marimo.ts` (matches jupyter config)
+2. **Replace one-shot assertions with auto-retrying ones** in `marimo.spec.ts`:
+   - Old: `expect(await getCellText(widget, 'a', 0)).toBe('Alice')` — calls `innerText()` once, fails immediately if grid hasn't loaded data yet
+   - New: `await expect(cellLocator(widget, 'a', 0)).toHaveText('Alice')` — auto-retries until text matches or timeout expires
+3. Return locators instead of text from helper functions (enables Playwright's built-in retry mechanism)
+
+**Why:** The `getCellText()` pattern has a race condition: AG-Grid can render the cell DOM element before the kernel sends actual data. `innerText()` is a one-shot read — if it catches the cell in a loading state, the assertion fails. `toHaveText()` retries automatically until the expected value appears.
+
+This is the same class of bug identified in the marimo flakiness research (Category B: Test Assertion Races) and the Jupyter deep dive (Exp 21: DOM presence != application readiness).
+
+**Files:** `pw-tests/marimo.spec.ts`, `playwright.config.marimo.ts`
+
 ---
 
 ## Architecture Notes
