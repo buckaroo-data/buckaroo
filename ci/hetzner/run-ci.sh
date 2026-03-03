@@ -3,11 +3,12 @@
 #
 # Called by webhook.py via:
 #   docker exec -e GITHUB_TOKEN=... -e GITHUB_REPO=... buckaroo-ci \
-#     bash /repo/ci/hetzner/run-ci.sh <sha> <branch> [--phase=PHASE]
+#     bash /repo/ci/hetzner/run-ci.sh <sha> <branch> [--phase=PHASE] [--wheel-from=SHA]
 #
-# --phase=all   Run all jobs (default, DAG-scheduled)
-# --phase=5b    Skip to playwright-jupyter only, using cached wheel from a
-#               prior full run. Useful for iterating on Jupyter failures.
+# --phase=all        Run all jobs (default, DAG-scheduled)
+# --phase=5b         Skip to playwright-jupyter only, using cached wheel.
+# --wheel-from=SHA   Use wheel cached from a different commit (for iterating
+#                    on test code without rebuilding). Falls back to $SHA.
 #
 # DAG execution (each captures stdout/stderr to $RESULTS_DIR/<job>.log):
 #   Immediate:     lint-python, test-js, test-python-3.{11,12,13,14},
@@ -23,15 +24,17 @@ SHA=${1:?usage: run-ci.sh SHA BRANCH [--phase=PHASE]}
 BRANCH=${2:?usage: run-ci.sh SHA BRANCH [--phase=PHASE]}
 
 PHASE=all
+WHEEL_FROM=""
 for arg in "${@:3}"; do
     case "$arg" in
         --phase=*) PHASE="${arg#*=}" ;;
+        --wheel-from=*) WHEEL_FROM="${arg#*=}" ;;
     esac
 done
 
 REPO_DIR=/repo
 RESULTS_DIR=/opt/ci/logs/$SHA
-WHEEL_CACHE_DIR=/opt/ci/wheel-cache/$SHA
+WHEEL_CACHE_DIR=/opt/ci/wheel-cache/${WHEEL_FROM:-$SHA}
 LOG_URL="http://${HETZNER_SERVER_IP:-localhost}:9000/logs/$SHA"
 OVERALL=0
 
@@ -295,10 +298,11 @@ else
 
     run_job build-wheel job_build_wheel || OVERALL=1
 
-    # Cache wheel by SHA so --phase=5b can skip the build on re-runs.
-    mkdir -p "$WHEEL_CACHE_DIR"
-    cp dist/buckaroo-*.whl "$WHEEL_CACHE_DIR/" 2>/dev/null || true
-    log "Cached wheel → $WHEEL_CACHE_DIR"
+    # Cache wheel by current SHA so --phase=5b / --wheel-from can reuse it.
+    local this_sha_cache=/opt/ci/wheel-cache/$SHA
+    mkdir -p "$this_sha_cache"
+    cp dist/buckaroo-*.whl "$this_sha_cache/" 2>/dev/null || true
+    log "Cached wheel → $this_sha_cache"
 
     # ── Wheel-dependent jobs (start as soon as wheel exists) ─────────────────
     log "=== build-wheel done — starting wheel-dependent jobs ==="
