@@ -19,7 +19,7 @@
 | 14b | 7770774 | P=4 wait-all DAG | **4/5 = 80%** | ~3m20s | ~3m30s |
 | 14c | 92ca618 | P=3 wait-all DAG | **3/5 = 60%** | ~5m18s | ~7m |
 | 14d | 6a11b71 | P=4 wait-all + kernel-idle-60s | **3/5 = 60%** | varies | varies |
-| 14e | 8695488 | P=4 wait-all + idle-15s + retry=2 | **pending** | pending | pending |
+| 14e | 8695488 | P=4 wait-all + idle-15s + retry=2 | **4/5 = 80%** | ~1m12s | ~2m42s |
 
 ---
 
@@ -192,8 +192,19 @@ isn't enough when the kernel is slow.
 - Reduced kernel idle wait timeout from 60s to 15s
 - Increased Playwright retries from 1 to 2
 
-**Hypothesis:** 15s is enough to catch a ready kernel but won't waste timeout budget
-if the DOM indicator doesn't exist. 2 retries give more chances to recover from flakes.
+**Results:** 4/5 PASS = **80% pass rate** (same as 14b)
+
+| Run | Jupyter Time | Result | Notes |
+|-----|-------------|--------|-------|
+| 1 | 1m12s | **PASS** | |
+| 2 | 1m12s | **PASS** | |
+| 3 | 1m13s | **PASS** | |
+| 4 | ~10m | FAIL | cell execution timeout |
+| 5 | ~5m | PASS (jupyter) | storybook flake caused overall FAIL |
+
+**Conclusion:** Kernel idle wait + extra retry doesn't improve beyond wait-all + retries=1.
+The 80% pass rate appears to be the ceiling for PARALLEL=4 on Vultr 16 vCPU.
+The remaining 20% failure is inherent CPU contention during kernel startup in batch 2+.
 
 ---
 
