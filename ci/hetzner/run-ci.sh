@@ -11,9 +11,10 @@
 #
 # DAG execution (each captures stdout/stderr to $RESULTS_DIR/<job>.log):
 #   Immediate:     lint-python, test-js, test-python-3.{11,12,13,14},
-#                  playwright-storybook, playwright-marimo, playwright-wasm-marimo
+#                  playwright-storybook, playwright-wasm-marimo
 #   After test-js: build-wheel  → wheel cached to /opt/ci/wheel-cache/$SHA/
 #   After wheel:   test-mcp-wheel, smoke-test-extras, playwright-server,
+#                  playwright-marimo (needs real widget.js from build),
 #                  playwright-jupyter (PARALLEL=1, isolated JupyterLab)
 
 set -uo pipefail
@@ -286,7 +287,6 @@ else
     run_job test-python-3.13       bash -c "job_test_python 3.13" & PID_PY313=$!
     run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
     run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
-    run_job playwright-marimo      job_playwright_marimo           & PID_PW_MA=$!
     run_job playwright-wasm-marimo job_playwright_wasm_marimo     & PID_PW_WM=$!
 
     # ── Wait for test-js only, then build wheel ──────────────────────────────
@@ -306,9 +306,12 @@ else
     run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
     run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
     run_job playwright-server    job_playwright_server     & PID_PW_SV=$!
+    # playwright-marimo needs the real widget.js produced by build-wheel
+    # (the empty stub from `touch` won't render). Runs here, not in Wave 0.
+    run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
 
     # pw-jupyter needs CPU headroom for JupyterLab startup — wait for the
-    # heavyweight wave-0 playwright jobs to finish first.
+    # heavyweight playwright jobs to finish first.
     wait $PID_PW_MA  || OVERALL=1
     wait $PID_PW_WM  || OVERALL=1
     log "=== marimo/wasm done — starting playwright-jupyter ==="
