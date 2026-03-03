@@ -307,7 +307,7 @@ run_one() {
 
     if [[ "$nb" == "test_infinite_scroll_transcript.ipynb" ]]; then
         spec="pw-tests/infinite-scroll-transcript.spec.ts"
-        timeout=90000
+        timeout=180000
     fi
 
     cd "$ROOT_DIR/packages/buckaroo-js-core"

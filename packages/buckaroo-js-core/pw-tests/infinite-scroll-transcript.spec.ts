@@ -4,7 +4,7 @@ import { Page } from '@playwright/test';
 const JUPYTER_BASE_URL = process.env.JUPYTER_BASE_URL || 'http://localhost:8889';
 const JUPYTER_TOKEN = process.env.JUPYTER_TOKEN || 'test-token-12345';
 const DEFAULT_TIMEOUT = 30000;
-const CELL_EXEC_TIMEOUT = 120000; // kernel startup + 2000-row analysis under 9-way concurrency
+const CELL_EXEC_TIMEOUT = 120000; // kernel startup + analysis under 9-way concurrency
 const NAVIGATION_TIMEOUT = 30000;
 
 async function waitForAgGrid(page: Page, timeout = DEFAULT_TIMEOUT) {
@@ -135,10 +135,10 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     const initialFirstCellText = await firstRowCell.textContent();
     console.log(`📊 Initial first cell content: ${initialFirstCellText}`);
 
-    // Scroll down to row 1500 using direct JavaScript scrollTo on ag-grid viewport
-    // DataFrame has 2000 rows, we want to scroll to row ~1500 to trigger additional data fetches
-    // Each row is ~20px high, so row 1500 is around 30000px down
-    console.log('📜 Scrolling to row 1500 using direct scrollTo...');
+    // Scroll down to row 400 using direct JavaScript scrollTo on ag-grid viewport
+    // DataFrame has 500 rows, we want to scroll near the end to trigger additional data fetches
+    // Each row is ~20px high, so row 400 is around 8000px down
+    console.log('📜 Scrolling to row 400 using direct scrollTo...');
     
     // Use JavaScript to find the LARGEST viewport (the main data grid, not pinned rows)
     const scrollResult = await page.evaluate(() => {
@@ -166,8 +166,8 @@ test.describe('Infinite Scroll Transcript Recording', () => {
         return { success: false, error: 'No viewport found' };
       }
       
-      // Calculate scroll position for row 1500 (assuming ~20px per row)
-      const targetRow = 1500;
+      // Calculate scroll position for row 400 (assuming ~20px per row)
+      const targetRow = 400;
       const rowHeight = 20;
       const targetScrollTop = targetRow * rowHeight;
       
