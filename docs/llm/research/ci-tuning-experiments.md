@@ -2,20 +2,20 @@
 
 **Branch:** docs/ci-research
 **Server:** Vultr 16 vCPU / 32 GB (45.76.230.100)
-**Best config:** Exp 33 (P=6 batched) — **1m44s, 9/9 jupyter, 13/14 overall**
+**Best config:** P=4 + tini + SKIP_INSTALL + renice — **~2m01s, 14/14 overall**
 
 ---
 
-## Current Best Configuration (Exp 33, commit 076f40f)
+## Current Best Configuration (commit fff99fa)
 
 ```
-Total: ~1m44s
+Total: ~2m01s
 ├─ Wave 0 (parallel):     25s  [lint, test-js, test-python-3.13, pw-storybook, jupyter-warmup]
 ├─ build-wheel:            3s  [after test-js, JS cache HIT]
-├─ wheel install:          3s  [into pre-warmed jupyter venv]
+├─ wheel install:          2s  [into pre-warmed jupyter venv]
 ├─ Wheel-dependent (staggered 5s apart):
-│   ├─ pw-jupyter:        66s  [P=6 batched 6+3, critical path]
-│   ├─ pw-server:         47s
+│   ├─ pw-jupyter:        95s  [P=4 batched 4+4+1, critical path]
+│   ├─ pw-server:         46s
 │   ├─ pw-marimo:         50s
 │   ├─ pw-wasm-marimo:    35s
 │   ├─ test-mcp-wheel:    12s
@@ -23,7 +23,7 @@ Total: ~1m44s
 │   └─ test-python 3.11/3.12/3.14: ~30s each (deferred 20s)
 ```
 
-Critical path: `test-js(7s) → build-wheel(3s) → warmup-wait → wheel-install(2s) → pw-jupyter(66s) = ~1m18s + overhead = ~1m44s`
+Critical path: `test-js(6s) → build-wheel(3s) → warmup-wait → wheel-install(2s) → pw-jupyter(95s) = ~2m01s`
 
 ### Key Techniques (all proven)
 
@@ -32,15 +32,19 @@ Critical path: `test-js(7s) → build-wheel(3s) → warmup-wait → wheel-instal
 | `window.jupyterapp` kernel check | 21 | pw-jupyter 80% → **100%** pass rate |
 | WebSocket kernel warmup in Wave 0 | 28 | -24s off pw-jupyter |
 | No heavyweight PW gate | 30 | -42s off total (1m43s vs 2m25s) |
-| PARALLEL=6 batched (6+3) | 33 | 66s pw-jupyter (vs 75s at P=4) |
+| tini ENTRYPOINT in Dockerfile | 37 | Zero zombies (was 100+ per run) |
 | JS build cache (tree-hash keyed) | 23 | -16s off critical path |
 | `full_build.sh` skip check fix | 24 | build-wheel 17s → 3s |
 | `expect().toPass()` polling | 15 | pw-server 50s → 37s |
+| `cellLocator()` + `toHaveText()` | 34+36 | pw-server flake fixed (3/3 PASS) |
+| SKIP_INSTALL in PW scripts | 34 | Skips redundant pnpm/playwright install in CI |
+| `renice` after fork | 36 | -10 for critical-path, +10 for background |
 | Parallel smoke-test-extras | 18 | 20s → 8s |
 | pytest-xdist `-n 4` | 12 | ~63s → ~30s per Python version |
 | Staggered sub-waves (5s) | 33 | Reduces CPU burst at wheel-dependent launch |
 | Between-batch kernel re-warmup | 33 | Fixes batch-2 hang |
 | Pre-run cleanup (pkill, rm temps) | 33 | Clean state between CI runs |
+| Workspace cleanup in pre-run | 38 | Prevents stale kernel reconnection |
 | 120s pw-jupyter timeout + 210s watchdog | 33 | Prevents runaway CI |
 
 ### What Doesn't Work
@@ -48,27 +52,24 @@ Critical path: `test-js(7s) → build-wheel(3s) → warmup-wait → wheel-instal
 | Approach | Exp | Why |
 |----------|-----|-----|
 | PARALLEL=3 | 14c | More batches = more overhead, worse than P=4 |
+| PARALLEL=6 | 33, 38 | Worked on old image, fails on current (3-6/6 kernel timeouts) |
 | PARALLEL=9 | 11, 31, 33 | CPU starvation (27+ processes on 16 vCPU) |
 | DOM kernel idle check | 14d | Burns timeout when DOM not rendered |
 | REST kernel polling | 10 | Never updates without WebSocket |
 | Lean Wave 0 (shift work to later) | 32 | Just moves contention, +8s total |
 | `nice` on shell functions | 34+36 | `nice` is external cmd, can't run bash functions |
+| `init: true` in docker-compose | 37 | Tini wraps at host level; docker exec'd processes still parent to `sleep` PID 1 |
 
 ---
 
 ## Open Issues
 
-### 1. Zombie process accumulation (BLOCKING for back-to-back runs)
+### 1. Back-to-back run degradation (LOW — workaround: restart container)
 
-**Discovered in:** Exp 34+36
-**Symptom:** First CI run after container restart passes. Subsequent runs: pw-jupyter times out (0/6 notebooks complete).
-**Root cause:** Docker PID 1 (`sleep infinity`) doesn't reap zombies. After each CI run, ~100+ defunct `jupyter-lab` and `python` processes accumulate. By run 2-3, 326+ zombies exist.
-**Ports are free** — zombies don't hold sockets. Warmup succeeds (all kernels reach idle). Notebooks start but never complete.
-
-**Fix options:**
-1. **Add `tini` as PID 1** in Dockerfile (`ENTRYPOINT ["/usr/bin/tini", "--"]`) — reaps zombies automatically
-2. **Add `init: true`** in docker-compose.yml — same effect, uses Docker's built-in tini
-3. Investigate if the real issue is stale JupyterLab workspace state, not zombies
+**Discovered in:** Exp 34+36, confirmed with tini
+**Symptom:** Runs 1-2 after container restart pass. Run 3+ sometimes fails — pw-jupyter kernel connections hang.
+**NOT zombies:** tini confirmed 0 zombies. Root cause unknown — something else accumulates across runs.
+**Workaround:** Restart container between CI sessions. Single runs always pass.
 
 ### 2. pw-server flake — FIXED (Exp 34+36)
 
@@ -80,34 +81,19 @@ Critical path: `test-js(7s) → build-wheel(3s) → warmup-wait → wheel-instal
 
 Every container restart triggers "Lockfiles changed — rebuilding deps" because the hash store (`/var/ci/hashes/`) is inside the container. Should be a named volume or stored on the host bind mount.
 
+### 4. PARALLEL=6 regression
+
+P=6 batched (6+3) worked at Exp 33 (076f40f, old image) but fails on current image (tini + SKIP_INSTALL + renice). Kernel connections on later ports (8892-8894) time out. P=4 is stable. Low priority since P=4 only adds ~30s vs P=6.
+
 ---
 
 ## Queued Experiments
-
-### Exp 37 — tini as PID 1 (zombie fix)
-
-**Priority:** HIGH — blocks reliable back-to-back runs
-**Files:** `ci/hetzner/Dockerfile`, `ci/hetzner/docker-compose.yml`
-**What:** Add `init: true` to docker-compose.yml (or `ENTRYPOINT ["/usr/bin/tini", "--"]` in Dockerfile). This makes Docker use tini as PID 1, which reaps zombie processes automatically.
-**Verification:** 3+ back-to-back CI runs, all pass. Zero zombies between runs.
 
 ### Exp 29 — Marimo auto-retry assertions (committed, untested on server)
 
 **Status:** Code committed at d020744, not yet validated in CI
 **What:** Replace one-shot `getCellText` with `cellLocator` + `toHaveText` in `marimo.spec.ts`. Retries 1→2.
 **Verification:** 3+ CI runs, pw-marimo 100%.
-
-### Exp 36 — renice CPU priority (partially working)
-
-**Status:** Implemented (renice after fork), but untested with clean back-to-back runs due to zombie issue.
-**What:** `renice -n -10` for critical-path (test-js), `renice -n 10` for background. jupyter-warmup left at default (servers persist).
-**Blocked by:** Exp 37 (zombie fix) — can't get clean back-to-back data.
-
-### Exp 34 — SKIP_INSTALL (working)
-
-**Status:** Implemented and working in single runs.
-**What:** `SKIP_INSTALL=1` env var skips `pnpm install` + `playwright install chromium` in PW scripts. Set in CI wrappers.
-**Blocked by:** Exp 37 — need clean multi-run data.
 
 ### Exp 35 — Split test-js into build-js + test-js
 
@@ -123,16 +109,6 @@ Every container restart triggers "Lockfiles changed — rebuilding deps" because
 
 **Priority:** LOW
 **What:** Merge latest test code onto old SHAs for historical reliability testing.
-
-### PARALLEL=9 (tabled)
-
-**Status:** Conclusively failed at current hardware (16 vCPU), but not permanently dead.
-**Ideas for future retry:**
-- `renice` the kernel or server processes so they get more CPU
-- Single shared JupyterLab server instead of one-per-slot
-- Stagger only the last 3-4 starts by 5-10s
-- Profile which process uses the most CPU
-- Reduced reproduction on the same server
 
 ---
 
@@ -162,6 +138,34 @@ Report: wallclock total, per-phase timing, pass/fail per job.
 
 ---
 
+## Recent Run History
+
+| SHA | Experiment | Total | Result | Notes |
+|-----|-----------|-------|--------|-------|
+| fff99fa | P=4 + tini (run 1) | 2m41s | **14/0 PASS** | Post-restart, lockfile rebuild |
+| fff99fa | P=4 + tini (run 2) | 2m01s | **14/0 PASS** | Back-to-back, no lockfile |
+| fff99fa | P=4 + tini (run 3) | 2m10s | 13/1 FAIL | pw-jupyter timeout (back-to-back degradation) |
+| ef53834 | P=6 + tini (run 1) | 2m58s | 13/1 FAIL | 3/6 pw-jupyter pass |
+| ef53834 | P=6 + tini (run 2) | 2m01s | 13/1 FAIL | 0/6 pw-jupyter pass |
+| ef53834 | P=4 env override | 2m07s | **14/0 PASS** | Proves P=4 works on this image |
+| d369894 | Exp 30 (no PW gate) | 1m25s | 14/0 PASS | Best ever total |
+| 076f40f | Exp 33 (P=6 batched) | 1m44s | 14/1 | Best config on old image |
+| 2ba10e7 | Exp 34+36 (fixed) | 2m38s | 14/1 | First run post-restart |
+| 20fb931 | Exp 37 (`init: true`) | 2m59s | pw-jupyter FAIL | 101 zombies |
+
+### CPU Profile (Exp 34+36, commit 2ba10e7, passing run)
+
+| Phase | ~Duration | CPU (us+sy) |
+|-------|-----------|-------------|
+| Wave 0 (lint, test-js, warmup) | 18s | 10→75% ramping |
+| Peak (pytest-xdist + PW overlap) | 15s | 70-95% saturated |
+| Wheel-dependent (PW concurrent) | 40s | 30-65% |
+| pw-jupyter tail (kernel I/O) | 30s | **6-7% idle** |
+
+Machine is massively underutilized during pw-jupyter's tail — bottleneck is kernel I/O latency, not CPU.
+
+---
+
 ## Commits (chronological, recent only)
 
 | Commit | Description |
@@ -179,3 +183,7 @@ Report: wallclock total, per-phase timing, pass/fail per job.
 | 630cf60 | Exp 34+36: SKIP_INSTALL, renice, pw-server auto-retry |
 | da3a7ad | Fix: renice instead of nice for shell functions |
 | 2ba10e7 | Fix: don't renice jupyter-warmup, SKIP_INSTALL in pw-jupyter |
+| 20fb931 | Exp 37: `init: true` in docker-compose (failed) |
+| 46c165c | Exp 37: tini ENTRYPOINT in Dockerfile (**working** — 0 zombies) |
+| ef53834 | Revert P=6→6, timeout→120, watchdog→210 (P=6 still broken) |
+| fff99fa | Revert P=6→4 (stable baseline) |

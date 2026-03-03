@@ -31,6 +31,10 @@ Completed experiments from the CI optimization effort. For current state and ope
 | **33** | **076f40f** | **P=6 batched + re-warmup** | **9/9 jupyter** | **66s** | **1m44s** |
 | 33 | 0e98e13+ | P=9 (various stagger/port combos) | 1-3/9 jupyter | 120s timeout | ~2m45s |
 | **34+36** | **2ba10e7** | **SKIP_INSTALL + renice + pw-server fix** | **pw-server 3/3** | **76s** | **2m00s** |
+| 37 | 20fb931 | `init: true` in docker-compose | 101 zombies after run 1 | N/A | 2m59s |
+| **37** | **46c165c** | **tini ENTRYPOINT in Dockerfile** | **0 zombies** | N/A | N/A |
+| 38 | ef53834 | P=6 on tini image | 3-6/6 kernel timeout | N/A | ~2m58s |
+| **38** | **fff99fa** | **P=4 on tini image** | **14/0 PASS** | **95s** | **2m01s** |
 
 ---
 
@@ -184,6 +188,22 @@ Results: pw-server 3/3 PASS (flake fixed). pw-jupyter 1/3 — regression from zo
 
 ---
 
+### Exp 37 — tini as PID 1 (20fb931, 46c165c)
+
+**Attempt 1: `init: true` in docker-compose.yml (20fb931)**
+
+FAILED. `init: true` makes Docker wrap the container with tini at the *host* level. Inside the container, PID 1 is still `sleep`. `docker exec`'d CI processes become children of `sleep`, which doesn't call `wait()`. After run 1: 101 zombies (jupyter-lab, chrome-headless, node, python).
+
+Verification: `docker exec buckaroo-ci ps -p 1 -o comm` → `sleep` (not tini). `docker top` shows tini as host-level PID wrapping `sleep`.
+
+**Attempt 2: `ENTRYPOINT ["/usr/bin/tini", "--"]` in Dockerfile (46c165c)**
+
+Bakes tini into the image. `CMD ["sleep", "infinity"]` runs as tini's child. `docker exec`'d processes become children of tini (PID 1), which reaps them. Requires image rebuild (`apt-get install tini`).
+
+**VALIDATED.** Zero zombies after 3 runs. PID 1 is tini. But back-to-back pw-jupyter failures persist (not caused by zombies — see Open Issue #1 in current doc). Tini confirmed working, P=4 is reliable baseline.
+
+---
+
 ## Architecture Notes
 
 ### Process Model
@@ -234,3 +254,7 @@ Cell execution fails when JupyterLab's kernel connection isn't established when 
 | 630cf60 | Exp 34+36: SKIP_INSTALL, renice, pw-server auto-retry |
 | da3a7ad | Fix: renice instead of nice for shell functions |
 | 2ba10e7 | Fix: don't renice jupyter-warmup, SKIP_INSTALL in pw-jupyter |
+| 20fb931 | Exp 37: `init: true` in docker-compose (failed) |
+| 46c165c | Exp 37: tini ENTRYPOINT in Dockerfile (validated — 0 zombies) |
+| ef53834 | Exp 38: revert to P=6 on tini image (P=6 broken) |
+| fff99fa | Exp 38: revert P=6→4 (stable baseline) |
