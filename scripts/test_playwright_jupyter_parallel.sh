@@ -181,34 +181,51 @@ log "All $PARALLEL servers HTTP-ready — warming up kernels..."
 python3 -c "import buckaroo; import pandas; import polars; print('Pre-warm done')" 2>&1 || \
     python3 -c "import buckaroo; import pandas; print('Pre-warm done (no polars)')" 2>&1 || true
 
-# Warm up each server by starting a kernel, executing an import, and deleting it.
+# Warm up each server by starting a kernel, polling until idle, and deleting it.
 # A blind sleep doesn't guarantee the kernel provisioner is ready — the first
-# notebook reliably flakes without this. We use the REST API to create a kernel,
-# then poll the WebSocket-free /api/kernels endpoint until it shows "idle".
-for slot in $(seq 0 $((PARALLEL-1))); do
-    port=$((BASE_PORT + slot))
-    log "  Warming kernel on port $port..."
-    # Create a kernel
+# notebook reliably flakes without this.
+# All warmup kernels are created and polled CONCURRENTLY so 9 servers don't
+# take 9×70s = 10+ minutes sequentially.
+
+warmup_one_kernel() {
+    local port=$1
+    local kid
     kid=$(curl -sf -X POST "http://localhost:$port/api/kernels?token=$JUPYTER_TOKEN" \
         -H "Content-Type: application/json" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null) || {
-        log "  WARNING: failed to create warmup kernel on port $port, falling back to sleep"
+        echo "WARNING: failed to create warmup kernel on port $port"
         sleep 30
-        continue
+        return 0
     }
-    # Poll until kernel reaches idle (max 60s)
-    for i in $(seq 1 60); do
+    local state="unknown"
+    for i in $(seq 1 90); do
         state=$(curl -sf "http://localhost:$port/api/kernels/$kid?token=$JUPYTER_TOKEN" \
             | python3 -c "import sys,json; print(json.load(sys.stdin).get('execution_state','unknown'))" 2>/dev/null) || state="unknown"
-        if [ "$state" = "idle" ]; then
-            break
-        fi
+        if [ "$state" = "idle" ]; then break; fi
         sleep 1
     done
-    log "  Kernel $kid on port $port reached state: $state"
-    # Delete the warmup kernel
+    echo "Kernel $kid on port $port reached state: $state"
     curl -sf -X DELETE "http://localhost:$port/api/kernels/$kid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
-    ok "  Kernel warmup complete on port $port"
+    [ "$state" = "idle" ] && return 0 || return 1
+}
+export -f warmup_one_kernel
+
+declare -a WARMUP_PIDS=()
+for slot in $(seq 0 $((PARALLEL-1))); do
+    port=$((BASE_PORT + slot))
+    log "  Warming kernel on port $port (background)..."
+    warmup_one_kernel "$port" &
+    WARMUP_PIDS+=($!)
 done
+
+warmup_ok=true
+for pid in "${WARMUP_PIDS[@]}"; do
+    if ! wait "$pid"; then warmup_ok=false; fi
+done
+if [ "$warmup_ok" = true ]; then
+    ok "  All $PARALLEL kernel warmups complete"
+else
+    log "  WARNING: some kernel warmups failed — continuing anyway"
+fi
 
 # ── Copy and trust notebooks ──────────────────────────────────────────────────
 

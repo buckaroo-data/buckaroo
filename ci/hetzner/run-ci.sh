@@ -219,7 +219,7 @@ job_playwright_jupyter() {
     ROOT_DIR=/repo \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
-    PARALLEL=1 \
+    PARALLEL=9 \
         bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" --venv-location="$venv" || rc=$?
     rm -rf "$venv"
     return $rc
