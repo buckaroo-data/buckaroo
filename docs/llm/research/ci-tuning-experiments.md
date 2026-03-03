@@ -21,8 +21,10 @@
 | 14d | 6a11b71 | P=4 wait-all + kernel-idle-60s | **3/5 = 60%** | varies | varies |
 | 14e | 8695488 | P=4 wait-all + idle-15s + retry=2 | **4/5 = 80%** | ~1m12s | ~2m42s |
 | **15-21** | **5994612** | **jupyterapp + waitFor removal** | **10/10 jupyter, 9/10 overall** | **~1m36s** | **~2m59s** |
-| 23 | 200bac6 | JS build cache + ci-queue | TBD (stress test running) | N/A | saves 15s critical path |
-| 24 | 5c1e58f | Fix full_build.sh skip check | Not yet tested | N/A | saves ~10s more on build-wheel |
+| 23 | 200bac6 | JS build cache + ci-queue | N/A | N/A | saves 17s critical path |
+| 24 | 5c1e58f | Fix full_build.sh skip check | N/A | N/A | build-wheel 17s→3s |
+| **18+19+20** | **60618ce** | **parallel smoke + relaxed gate + marimo waits** | **pw-jupyter 1/1, overall FAIL (storybook flake)** | **1m38s** | **2m31s** |
+| 29 | d020744 | Marimo auto-retry assertions + retries=2 | TBD (running) | N/A | reliability |
 
 ---
 
@@ -370,14 +372,14 @@ Critical path: `test-js(24s) → build-wheel(16s) → wait-all(~50s) → pw-jupy
 
 **Impact:** Minor — these jobs are already fast (11s storybook, 46s marimo).
 
-### Priority Order (superseded — exp 15-17 done in 5994612)
+### Priority Order (all done)
 
 1. ~~**Exp 15** (pw-server waitForTimeout)~~ — DONE in 5994612. Saved 13s (50s → 37s)
 2. ~~**Exp 17** (skip JS rebuild)~~ — DONE in 5994612 but was a no-op (git checkout clears dist). **Fixed properly in Exp 23** (external JS cache).
 3. ~~**Exp 16** (marimo sleep 5)~~ — DONE in 5994612. Saved 4s (46s → 42s)
-4. **Exp 19** (relax gate) — still TODO
-5. **Exp 18** (parallel smoke) — still TODO
-6. **Exp 20** (minor waitForTimeout) — still TODO
+4. ~~**Exp 19** (relax gate)~~ — DONE in 60618ce. pw-jupyter starts right after heavyweight Playwright jobs.
+5. ~~**Exp 18** (parallel smoke)~~ — DONE in 60618ce. smoke-test-extras 20s→8s.
+6. ~~**Exp 20** (minor waitForTimeout)~~ — DONE in 60618ce. ~3.4s cut from marimo screenshots.
 
 ### Projected Impact (superseded by actual results)
 
@@ -393,7 +395,7 @@ Critical path: `test-js(24s) → build-wheel(16s) → wait-all(~50s) → pw-jupy
 
 ### Exp 23 — JS Build Cache + CI Job Queue (f30da68 → 5c1e58f)
 
-**Status:** IN PROGRESS — stress test running (5/16 complete)
+**Status:** DONE — confirmed working (JS cache saves 17s on critical path)
 **Changes:**
 1. **JS build cache:** Cache `dist/` at `/opt/ci/js-cache/<tree-hash>` keyed by `sha256sum` of `git ls-tree` for `src/`, `package.json`, `tsconfig.json`, `vite.config.ts`. Restore after `git checkout`, save in `job_test_js()`.
 2. **CI job queue:** `ci-queue.sh` — directory-based queue with `flock` single-worker enforcement. Commands: push, status, cancel, clear, log, repeat.
@@ -439,20 +441,46 @@ All failures are from old test code (no `window.jupyterapp` kernel check). This 
 
 ### Exp 24 — Fix build-wheel with JS cache (5c1e58f)
 
-**Status:** DONE (code deployed, not yet tested with new SHAs)
+**Status:** DONE — confirmed working in 60618ce
 **What:** `full_build.sh` checked for `dist/index.js` but vite outputs `dist/index.es.js`. Fixed the check.
 
-**Expected impact with both Exp 23 + 24:**
+**Actual impact (measured in 60618ce with Exp 23+24+18+19+20 combined):**
 ```
-                    Before    Cache MISS    Cache HIT + fix
-test-js              21s        21s            5s
-build-wheel          18s        18s           ~8s (esbuild + uv build only)
-Critical path gap    40s        40s           ~13s
+                    Before    Cache HIT + fix
+test-js              24s        7s
+build-wheel          17s        3s
+Critical path gap    41s       10s
 ```
 
-This saves **27s on the critical path** (from checkout to wheel-dependent jobs starting).
+Saved **31s on the critical path** (from checkout to wheel-dependent jobs starting).
 
-**Projected total CI with Exp 23+24:** `~13s (to wheel) + 42s (pw-marimo) + 96s (pw-jupyter) = ~2m31s`
+---
+
+### Exp 18+19+20 combined — 60618ce ⭐ NEW BEST
+
+**Status:** DONE — 1 run
+**Changes:**
+1. **Exp 18:** Parallelize smoke-test-extras — 6 venv installs run concurrently (20s→8s)
+2. **Exp 19:** Relax pw-jupyter gate — only wait for heavyweight Playwright jobs (pw-server, pw-marimo, pw-wasm-marimo), not all jobs
+3. **Exp 20:** Reduce waitForTimeout in theme-screenshots-marimo.spec.ts (~3.4s cut)
+
+**Results:**
+
+| Job | Before (5994612) | After (60618ce) | Savings |
+|-----|------------------|-----------------|---------|
+| test-js | 24s | 7s | -17s (JS cache) |
+| build-wheel | 17s | 3s | -14s (Exp 24) |
+| smoke-test-extras | 20s | 8s | -12s (Exp 18) |
+| pw-server | 37s | 42s | +5s (noise) |
+| pw-marimo | 42s | 43s | +1s (noise) |
+| pw-jupyter | 1m36s | 1m38s | +2s (noise) |
+| **Total** | **2m59s** | **2m31s** | **-28s** |
+
+**Pass/fail:** pw-jupyter PASS, pw-marimo PASS, pw-server PASS. Only failure: pw-storybook (pre-existing `transcript-replayer.spec.ts` flake).
+
+**Critical path:** `test-js(7s) → build-wheel(3s) → pw-marimo(43s) → pw-jupyter(98s) = ~2m31s`
+
+**Key finding:** The projected total from Exp 24 (`~2m31s`) was exactly right. The critical path is now dominated by pw-jupyter (65% of total time).
 
 ---
 
@@ -464,21 +492,23 @@ This saves **27s on the critical path** (from checkout to wheel-dependent jobs s
 **What:** Merge latest test improvements (from `5994612`) onto old SHAs so stress tests use current Playwright specs with old application code. Resolves conflicts by taking "theirs" for test files, "ours" for app code.
 **Why:** Current stress test runs old SHAs with old specs that lack `window.jupyterapp` kernel check → all pw-jupyter tests fail. Synthetic merges would give accurate reliability data.
 
-### Exp 19 — Relax pw-jupyter gate
+### Exp 19 — Relax pw-jupyter gate ✅
 
-**Priority:** MEDIUM — saves ~10-15s
-**What:** Wait only for heavy jobs (pw-server, pw-marimo) not all jobs. Light jobs (lint, smoke, mcp) are always done by then.
-**Risk:** If a light job runs long, it overlaps pw-jupyter.
+**Status:** DONE (60618ce)
+**What:** Wait only for heavy Playwright jobs (pw-server, pw-marimo, pw-wasm-marimo), not all jobs. Light jobs (lint, test-python, mcp, smoke) always finish before these.
+**Result:** pw-jupyter started at 15:22:42, right when pw-marimo finished (43s after wheel). No wasted time waiting for already-finished light jobs.
 
-### Exp 18 — Parallelize smoke-test-extras
+### Exp 18 — Parallelize smoke-test-extras ✅
 
-**Priority:** LOW — saves ~10s off wall time but NOT on critical path
-**What:** Run 6 venv installs in parallel (currently sequential).
+**Status:** DONE (60618ce)
+**What:** Run all 6 venv installs (base, polars, mcp, marimo, jupyterlab, notebook) in parallel with `&` and `wait`.
+**Result:** smoke-test-extras **20s→8s** (-12s). Not on critical path but reduces wait-all gate target.
 
-### Exp 20 — Minor waitForTimeout cleanup
+### Exp 20 — Minor waitForTimeout cleanup ✅
 
-**Priority:** LOW — ~6s total across marimo+storybook specs
-**What:** Replace remaining `waitForTimeout` calls in non-server specs.
+**Status:** DONE (60618ce)
+**What:** Reduced waitForTimeout in `theme-screenshots-marimo.spec.ts` — cut 1700ms per scheme × 2 schemes = ~3.4s.
+**Result:** pw-marimo 42s→43s (within noise — other factors dominate).
 
 ### Exp 26 — Wheel cache across SHAs
 
@@ -594,3 +624,5 @@ under CPU contention the kernel connection can take >120s.
 | 200bac6 | JS build cache + ci-queue + prepare-synth + stress-test --synth |
 | e7fff5b | Mount js-cache volume for persistence |
 | 5c1e58f | Fix full_build.sh index.es.js check (exp 24) |
+| 60618ce | Exp 18+19+20: parallel smoke, relaxed gate, marimo waits → **2m31s** |
+| d020744 | Exp 29: marimo auto-retry assertions + retries=2 |
