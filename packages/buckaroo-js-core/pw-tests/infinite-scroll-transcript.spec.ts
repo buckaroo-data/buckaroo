@@ -37,29 +37,30 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Notebook loaded');
 
-    // Wait for kernel to be idle before executing
-    console.log('⏳ Waiting for kernel to be idle...');
-    await page.locator('.jp-Notebook-ExecutionIndicator[data-status="idle"]').first().waitFor({
-      state: 'attached',
-      timeout: CELL_EXEC_TIMEOUT,
-    }).catch(() => {
-      console.log('⚠️ Kernel status indicator not found, proceeding anyway');
-    });
-    console.log('✅ Kernel ready');
-
-    // Execute the cell — click to focus, verify selection, then Shift+Enter
+    // Execute with retry — under concurrent load, Shift+Enter can be silently
+    // dropped if the kernel isn't connected yet. Retry every 10s.
     console.log('▶️ Executing widget code...');
-    const firstCell = page.locator('.jp-Cell').first();
-    await firstCell.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    await firstCell.click({ timeout: DEFAULT_TIMEOUT });
-    await page.locator('.jp-Cell.jp-mod-selected').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    await page.keyboard.press('Shift+Enter');
-
-    // Wait for cell execution — wait for output to appear rather than a fixed delay
-    console.log('⏳ Waiting for cell execution...');
     const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: CELL_EXEC_TIMEOUT });
-    console.log('✅ Cell executed');
+    const outputLocator = outputArea.locator('.jp-OutputArea-output').first();
+    const deadline = Date.now() + CELL_EXEC_TIMEOUT;
+
+    for (let attempt = 1; Date.now() < deadline; attempt++) {
+      console.log(`⏳ Shift+Enter attempt ${attempt}...`);
+      const firstCell = page.locator('.jp-Cell').first();
+      await firstCell.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+      await firstCell.click({ timeout: DEFAULT_TIMEOUT });
+      await page.locator('.jp-Cell.jp-mod-selected').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
+      await page.keyboard.press('Shift+Enter');
+
+      try {
+        await outputLocator.waitFor({ state: 'attached', timeout: 10000 });
+        console.log('✅ Cell executed');
+        break;
+      } catch {
+        if (Date.now() >= deadline) throw new Error(`Cell execution timed out after ${CELL_EXEC_TIMEOUT}ms`);
+        console.log(`⚠️ No output after attempt ${attempt}, retrying...`);
+      }
+    }
 
     // Wait for widget to render — deterministic wait for actual elements
     console.log('⏳ Waiting for buckaroo widget...');
@@ -337,21 +338,27 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
 
-    // Wait for kernel to be idle before executing
-    await page.locator('.jp-Notebook-ExecutionIndicator[data-status="idle"]').first().waitFor({
-      state: 'attached',
-      timeout: CELL_EXEC_TIMEOUT,
-    }).catch(() => {});
+    // Execute with retry
+    const outputArea2 = page.locator('.jp-OutputArea').first();
+    const outputLocator2 = outputArea2.locator('.jp-OutputArea-output').first();
+    const deadline2 = Date.now() + CELL_EXEC_TIMEOUT;
 
-    // Execute the cell — click to focus, verify selection, then Shift+Enter
-    const firstCell2 = page.locator('.jp-Cell').first();
-    await firstCell2.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    await firstCell2.click({ timeout: DEFAULT_TIMEOUT });
-    await page.locator('.jp-Cell.jp-mod-selected').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    await page.keyboard.press('Shift+Enter');
+    for (let attempt = 1; Date.now() < deadline2; attempt++) {
+      const cell2 = page.locator('.jp-Cell').first();
+      await cell2.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+      await cell2.click({ timeout: DEFAULT_TIMEOUT });
+      await page.locator('.jp-Cell.jp-mod-selected').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
+      await page.keyboard.press('Shift+Enter');
 
-    const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: CELL_EXEC_TIMEOUT });
+      try {
+        await outputLocator2.waitFor({ state: 'attached', timeout: 10000 });
+        break;
+      } catch {
+        if (Date.now() >= deadline2) throw new Error(`Cell execution timed out`);
+      }
+    }
+
+    const outputArea = outputArea2;
 
     await waitForAgGrid(page);
 

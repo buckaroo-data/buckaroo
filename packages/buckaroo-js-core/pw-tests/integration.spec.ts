@@ -110,31 +110,30 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     console.log(`▶️ Executing widget code from ${notebookName}...`);
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
 
-    // Wait for kernel to be idle before executing — JupyterLab shows kernel
-    // status in the toolbar. Under 8-way concurrency, kernel startup can take
-    // 30+ seconds after the notebook DOM loads.
-    console.log('⏳ Waiting for kernel to be idle...');
-    await page.locator('.jp-Notebook-ExecutionIndicator[data-status="idle"]').first().waitFor({
-      state: 'attached',
-      timeout: CELL_EXEC_TIMEOUT,
-    }).catch(() => {
-      // Fallback: some JupyterLab versions use different indicators
-      console.log('⚠️ Kernel status indicator not found, proceeding anyway');
-    });
-    console.log('✅ Kernel ready');
-
-    // Click on the first cell to focus it, then verify focus before Shift+Enter
-    const firstCell = page.locator('.jp-Cell').first();
-    await firstCell.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    await firstCell.click({ timeout: DEFAULT_TIMEOUT });
-    await page.locator('.jp-Cell.jp-mod-selected').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    await page.keyboard.press('Shift+Enter');
-
-    // Wait for cell execution to complete — wait for output to appear rather than a fixed delay
-    console.log('⏳ Waiting for cell execution...');
+    // Execute with retry — under concurrent load, the first Shift+Enter can be
+    // silently dropped if the kernel isn't connected yet. Retry every 10s.
     const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.locator('.jp-OutputArea-output').first().waitFor({ state: 'attached', timeout: CELL_EXEC_TIMEOUT });
-    console.log('✅ Cell executed');
+    const outputLocator = outputArea.locator('.jp-OutputArea-output').first();
+    const deadline = Date.now() + CELL_EXEC_TIMEOUT;
+
+    for (let attempt = 1; Date.now() < deadline; attempt++) {
+      console.log(`⏳ Shift+Enter attempt ${attempt}...`);
+      const firstCell = page.locator('.jp-Cell').first();
+      await firstCell.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+      await firstCell.click({ timeout: DEFAULT_TIMEOUT });
+      await page.locator('.jp-Cell.jp-mod-selected').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
+      await page.keyboard.press('Shift+Enter');
+
+      // Wait up to 10s for output to appear — if it does, we're done
+      try {
+        await outputLocator.waitFor({ state: 'attached', timeout: 10000 });
+        console.log('✅ Cell executed');
+        break;
+      } catch {
+        if (Date.now() >= deadline) throw new Error(`Cell execution timed out after ${CELL_EXEC_TIMEOUT}ms`);
+        console.log(`⚠️ No output after attempt ${attempt}, retrying...`);
+      }
+    }
 
     // Check for any error messages in the output
     // Target only stdout text output, not widget output (which also has .jp-OutputArea-output class)
