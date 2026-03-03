@@ -15,7 +15,7 @@ export default defineConfig({
     navigationTimeout: 15000,
     storageState: undefined,
     launchOptions: {
-      args: ['--incognito'],
+      args: ['--incognito', '--disable-dev-shm-usage'],
     },
   },
   timeout: 30000, // 30s per test
