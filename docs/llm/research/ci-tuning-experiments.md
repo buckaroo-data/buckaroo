@@ -28,6 +28,8 @@
 | **30** | **d369894** | **remove heavyweight PW gate + CPU monitor** | **7/7 pw-jupyter, 6/7 overall (pw-server flake)** | **1m15s** | **1m43s** |
 | 31 | b2398d5 | PARALLEL=9 revisited | ABANDONED (too slow) | 4m+ | N/A |
 | 32 | b2398d5 | lean Wave 0 + defer pytest | 3/3 pw-jupyter, 1/3 overall (pw-server) | 80s | 1m51s |
+| **33** | **076f40f** | **P=6 batched + re-warmup + timeouts** | **9/9 jupyter, 13/14 overall** | **66s** | **1m44s** |
+| 33 | 0e98e13+ | P=9 (0s/1s/2s stagger, port 8900) | 1-3/9 jupyter (timeout) | 120s timeout | ~2m45s |
 | 29 | d020744 | Marimo auto-retry assertions + retries=2 | TBD (running) | N/A | reliability |
 
 ---
@@ -559,6 +561,19 @@ Saved **31s on the critical path** (from checkout to wheel-dependent jobs starti
 **Priority:** LOW — saves ~2-3s
 **What:** `pnpm install --frozen-lockfile` takes 2-3s even with warm store (just creating hardlinks). Skip if `node_modules/.package-lock.json` matches `pnpm-lock.yaml` hash.
 
+### Exp 36 — Unix nice for CPU priority scheduling
+
+**Priority:** MEDIUM — could reduce critical-path latency under contention without changing DAG
+**What:** Use `nice` / `renice` to give critical-path jobs higher CPU priority. Build-js and build-wheel are on the critical path (everything else waits for them) but currently compete equally with Wave 0 jobs like test-python, pw-storybook, and jupyter-warmup. Run critical-path jobs at `nice -10` (higher priority) and background jobs at `nice 10` (lower priority). This lets the kernel scheduler give build-js/build-wheel more CPU slices when the machine is saturated, without changing the DAG or adding delays. Candidates:
+- `nice -10`: build-js, build-wheel (critical path — everything gates on these)
+- `nice 0` (default): pw-jupyter (critical path after wheel, but long-running — unclear if nice helps)
+- `nice 10`: test-python, pw-storybook, jupyter-warmup, lint (Wave 0 background work)
+
+### Exp 35 — Split test-js into build-js + test-js
+
+**Priority:** LOW — saves ~2-3s off critical path
+**What:** Currently `job_test_js` does `pnpm run build` then `pnpm run test`, and `build-wheel` waits for the entire job. But `build-wheel` (via `full_build.sh`) only needs the built JS dist, not the test results. Split into two steps: `build-js` (Wave 0, build-wheel gates on it) and `test-js` (runs in parallel after build completes). Saves the ~2-3s of JS test execution from the critical path since build-wheel can start as soon as `pnpm run build` finishes.
+
 ### Exp 34 — Early pnpm install (move out of PW scripts)
 
 **Priority:** MEDIUM — eliminates ~1-2s per PW job × 5 jobs, plus removes chromium startup stagger
@@ -685,6 +700,58 @@ This is the same class of bug identified in the marimo flakiness research (Categ
 5. Net effect: slightly slower than Exp 30 (+8s), no reliability gain
 
 **Conclusion:** Exp 30 remains the best configuration. Spreading work across phases doesn't help when the critical path is pw-jupyter regardless.
+
+### Exp 33 — PARALLEL=6→9, staggered sub-waves, fine-grain CPU, batch re-warmup
+
+**Status:** DONE — PARALLEL=6 confirmed best, PARALLEL=9 conclusively dead
+**Commits:** 5279196 (initial), 8478735 (batch fix + timeouts), 076f40f (local fix), 0e98e13 (P=9), 75a81b2 (1s stagger), b566296 (2s stagger), 553bea0 (port 8900), 9dcc5e0 (pre-run cleanup)
+
+**Changes across iterations:**
+1. Staggered sub-wave launches (5s between wheel-dependent jobs) for CPU instrumentation
+2. PARALLEL=6 with batch re-warmup between batches (6+3 notebooks)
+3. 120s timeout on pw-jupyter job, 210s CI-wide watchdog (`kill -TERM 0`)
+4. Pre-run cleanup baked into run-ci.sh (kill stale processes, rm temp files)
+5. Fine-grain CPU monitoring (100ms /proc/stat sampling)
+
+**Bug fixes during Exp 33:**
+- **Batch 2 hang:** After `shutdown_kernels_on_port` between batches, new kernels need WebSocket nudge or they get stuck in "starting" state forever. Fix: between-batch `warmup_one_kernel` re-warmup.
+- **`local` outside function:** Bash `local` keyword in between-batch code was in a while loop, not a function. Caused immediate script failure after batch 1.
+
+**PARALLEL=6 results (076f40f) — the winner:**
+
+| Job | Time | Result |
+|-----|------|--------|
+| pw-jupyter (6+3 batched) | 66s | **PASS (9/9)** |
+| pw-server | 47s | FAIL (pre-existing flake) |
+| All others | — | PASS |
+| **Total** | **1m44s** | 13/14 jobs passed |
+
+**PARALLEL=9 results — all failed:**
+
+| Run | Stagger | Ports | Notebooks passed | pw-jupyter time | Failure mode |
+|-----|---------|-------|-----------------|----------------|-------------|
+| 0e98e13 | 0s | 8889-8897 | 3/9 | 120s (timeout) | CPU starvation — 6 notebooks never finished |
+| 75a81b2 | 1s | 8889-8897 | 1/9 | 120s (timeout) | Worse — stagger spread startup but didn't help |
+| b566296 | 2s | 8889-8897 | TBD | 120s (timeout) | Same pattern |
+| 9dcc5e0 | 2s | 8900-8908 | 1/9 | 120s (timeout) | Port change made no difference |
+
+**Root cause analysis for PARALLEL=9 failure:**
+- 9 JupyterLab servers + 9 IPython kernels + 9 Chromium instances = ~27 heavy processes on 16 vCPUs
+- Plus concurrent pw-server, pw-marimo, pw-wasm-marimo adding more Chromium/server processes
+- Kernel ready check (`window.jupyterapp`) times out because kernels never reach idle under CPU starvation
+- Notebooks fall through to Shift+Enter retry loop, but kernels still can't execute cells
+- Server logs show kernels starting but immediately going to "Starting buffering" (disconnected)
+- Some servers accumulate 2-3 kernels (warmup + notebook + retry), worsening contention
+- Port number is irrelevant — changing BASE_PORT from 8889 to 8900 had no effect
+- Stagger (0s, 1s, 2s) is irrelevant — CPU is saturated regardless of launch timing
+
+**Key insight:** PARALLEL=6 with batching (6+3) is strictly better than PARALLEL=9 because:
+1. Batch 1 (6 notebooks) runs with 6 servers/kernels/browsers = manageable load
+2. Batch 1 completes in ~17s per notebook, freeing resources
+3. Batch 2 (3 notebooks) runs on fresh kernels with minimal contention
+4. Total: ~35s active time vs 120s timeout for P=9
+
+**Conclusion:** PARALLEL=9 is conclusively dead on 16 vCPU. The CPU saturation threshold is somewhere between 6 and 9 concurrent Playwright+Jupyter instances. PARALLEL=6 with batching remains optimal.
 
 ---
 
