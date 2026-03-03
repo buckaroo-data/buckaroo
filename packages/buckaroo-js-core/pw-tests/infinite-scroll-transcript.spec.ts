@@ -37,6 +37,23 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Notebook loaded');
 
+    // Wait for kernel to be connected and idle before attempting cell execution.
+    console.log('⏳ Waiting for kernel to be ready...');
+    try {
+      await page.waitForFunction(() => {
+        const indicator = document.querySelector('.jp-Notebook-ExecutionIndicator');
+        if (indicator) {
+          const status = indicator.getAttribute('data-status');
+          return status === 'idle';
+        }
+        const kernelStatus = document.querySelector('.jp-Notebook-KernelStatus');
+        return kernelStatus?.textContent?.includes('Idle') || false;
+      }, { timeout: 60000 });
+      console.log('✅ Kernel is idle');
+    } catch {
+      console.log('⚠️ Kernel idle wait timed out — proceeding with retry loop');
+    }
+
     // Execute cell with retry — use dispatchEvent to avoid visibility requirements
     console.log('▶️ Executing widget code...');
     const outputArea = page.locator('.jp-OutputArea').first();
@@ -334,6 +351,16 @@ test.describe('Infinite Scroll Transcript Recording', () => {
 
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+
+    // Wait for kernel to be ready
+    try {
+      await page.waitForFunction(() => {
+        const indicator = document.querySelector('.jp-Notebook-ExecutionIndicator');
+        if (indicator) return indicator.getAttribute('data-status') === 'idle';
+        const ks = document.querySelector('.jp-Notebook-KernelStatus');
+        return ks?.textContent?.includes('Idle') || false;
+      }, { timeout: 60000 });
+    } catch { /* proceed with retry loop */ }
 
     // Execute with retry
     const outputArea2 = page.locator('.jp-OutputArea').first();

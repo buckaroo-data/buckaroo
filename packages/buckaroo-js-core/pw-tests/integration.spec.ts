@@ -106,14 +106,27 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Notebook loaded');
 
-    // Find and run the first code cell
-    console.log(`▶️ Executing widget code from ${notebookName}...`);
-    await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
+    // Wait for kernel to be connected and idle before attempting cell execution.
+    // JupyterLab silently drops Shift+Enter if the kernel isn't connected yet.
+    console.log('⏳ Waiting for kernel to be ready...');
+    try {
+      await page.waitForFunction(() => {
+        // JupyterLab 4.x uses a Notebook-ExecutionIndicator with data-status
+        const indicator = document.querySelector('.jp-Notebook-ExecutionIndicator');
+        if (indicator) {
+          const status = indicator.getAttribute('data-status');
+          return status === 'idle';
+        }
+        // Fallback: check the kernel status widget in the status bar
+        const kernelStatus = document.querySelector('.jp-Notebook-KernelStatus');
+        return kernelStatus?.textContent?.includes('Idle') || false;
+      }, { timeout: 60000 });
+      console.log('✅ Kernel is idle');
+    } catch {
+      console.log('⚠️ Kernel idle wait timed out — proceeding with retry loop');
+    }
 
-    // Execute cell via JupyterLab's internal API to avoid UI rendering delays.
-    // Under concurrent load, the notebook UI can take 30+ seconds to become
-    // clickable. The REST kernel API is always available.
-    console.log('⏳ Executing cell via Jupyter REST API...');
+    console.log(`▶️ Executing widget code from ${notebookName}...`);
     const outputArea = page.locator('.jp-OutputArea').first();
     const outputLocator = outputArea.locator('.jp-OutputArea-output').first();
 
