@@ -311,6 +311,9 @@ run_one() {
     fi
 
     cd "$ROOT_DIR/packages/buckaroo-js-core"
+    # Each parallel slot needs its own test-results dir to avoid ENOENT races
+    # when 9 Playwright processes try to mkdir .playwright-artifacts-0 simultaneously.
+    local results_dir="/tmp/pw-results-${nb%.ipynb}-$$"
     TEST_NOTEBOOK="$nb" \
     JUPYTER_BASE_URL="http://localhost:$port" \
     JUPYTER_TOKEN="$JUPYTER_TOKEN" \
@@ -319,6 +322,7 @@ run_one() {
             --config playwright.config.integration.ts \
             --reporter=line \
             --timeout=$timeout \
+            --output="$results_dir" \
         >"$logfile" 2>&1
 }
 export -f run_one
