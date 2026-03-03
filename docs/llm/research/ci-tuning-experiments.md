@@ -26,6 +26,8 @@
 | **18+19+20** | **60618ce** | **parallel smoke + relaxed gate + marimo waits** | **pw-jupyter 1/1, overall FAIL (storybook flake)** | **1m38s** | **2m31s** |
 | **28** | **172158b** | **early kernel warmup in Wave 0** | **3/3 pw-jupyter, 2/3 overall (pw-server flake)** | **1m14s** | **2m25s** |
 | **30** | **d369894** | **remove heavyweight PW gate + CPU monitor** | **7/7 pw-jupyter, 6/7 overall (pw-server flake)** | **1m15s** | **1m43s** |
+| 31 | b2398d5 | PARALLEL=9 revisited | ABANDONED (too slow) | 4m+ | N/A |
+| 32 | b2398d5 | lean Wave 0 + defer pytest | 3/3 pw-jupyter, 1/3 overall (pw-server) | 80s | 1m51s |
 | 29 | d020744 | Marimo auto-retry assertions + retries=2 | TBD (running) | N/A | reliability |
 
 ---
@@ -622,6 +624,65 @@ This is the same class of bug identified in the marimo flakiness research (Categ
 
 ---
 
+### Exp 31 — PARALLEL=9 revisited (b2398d5, reverted)
+
+**Status:** DONE — 1 run, ABANDONED (too slow)
+**Changes:** Bumped PARALLEL from 4 to 9 in pw-jupyter.
+**Hypothesis:** With `window.jupyterapp` kernel check, P=9 might now work under contention (it failed at P=9 in Exp 11 with DOM checks).
+
+**Results:** pw-jupyter took **4+ minutes** (vs 75-80s at P=4). Too many concurrent Chromium + JupyterLab + kernel processes overwhelm 16 vCPUs.
+
+**Conclusion:** PARALLEL=4 is confirmed optimal for 16 vCPU. P=9 is too many processes regardless of kernel check method. Reverted immediately.
+
+---
+
+### Exp 32 — Lean Wave 0 + wasm-marimo after wheel + defer pytest (b2398d5)
+
+**Status:** DONE — 3-run stability test
+**Changes:**
+1. **Lean Wave 0:** Only 5 jobs (lint-python, test-js, test-python-3.13, playwright-storybook, jupyter-warmup) — was 9 jobs
+2. **pw-wasm-marimo after wheel:** Moved from Wave 0 to wheel-dependent phase (needs real widget.js)
+3. **Defer pytest 3.11/3.12/3.14:** Start 5 seconds after wheel-dependent jobs launch (reduce contention on PW startup)
+4. **Single pytest in Wave 0:** Only test-python-3.13 (signal check — failures on 3.13 likely affect all versions)
+
+**Results:** pw-jupyter 3/3 = **100% pass rate**. Overall 1/3 (2× pw-server flake: `sort via header click`).
+
+| Run | pw-server | pw-marimo | pw-wasm-marimo | pw-jupyter | Result | Total |
+|-----|----------|----------|---------------|-----------|--------|-------|
+| 1 | 45s FAIL | 49s | 43s | **79s** | FAIL | **1m47s** |
+| 2 | 47s PASS | 51s | 42s | **82s** | **PASS** | **1m55s** |
+| 3 | 47s FAIL | 50s | 41s | **80s** | FAIL | **1m51s** |
+
+**CPU profile (vmstat, run 1):**
+
+| Phase | Time | CPU busy (us+sy) | Idle |
+|-------|------|-----------------|------|
+| Wave 0 (5 jobs) | 0-22s | 24-76% | 24-76% |
+| Wheel-dependent burst | 27-55s | **73-100%** | 0-27% |
+| PW tests winding down | 55-80s | 35-73% | 27-65% |
+| pw-jupyter alone | 80-107s | 0-17% | 83-100% |
+
+**Timing breakdown vs Exp 30:**
+
+| Metric | Exp 30 | Exp 32 | Delta |
+|--------|--------|--------|-------|
+| Wave 0 jobs | 9 | 5 | -4 jobs |
+| Wave 0 peak CPU | 80-97% | 24-76% | much lighter |
+| Wheel-dependent CPU | 40-75% | 73-100% | heavier (more jobs in this phase) |
+| pw-jupyter | 75s | 80s | +5s (noise) |
+| Total | **1m43s** | **1m51s** | **+8s** |
+
+**Key findings:**
+1. Leaner Wave 0 didn't help — it just shifted work to the wheel-dependent phase
+2. CPU burst during wheel-dependent phase is higher (73-100%) vs Exp 30 (40-75%) because pw-wasm-marimo + 3 pytests now overlap
+3. pw-jupyter still 100% reliable under this higher contention (confirms `window.jupyterapp` check works)
+4. The 5s pytest delay is neutral — pytest finishes before PW tests anyway
+5. Net effect: slightly slower than Exp 30 (+8s), no reliability gain
+
+**Conclusion:** Exp 30 remains the best configuration. Spreading work across phases doesn't help when the critical path is pw-jupyter regardless.
+
+---
+
 ## Operational Notes
 
 ### CPU Monitoring
@@ -700,3 +761,4 @@ under CPU contention the kernel connection can take >120s.
 | 172158b | Exp 28: early kernel warmup in Wave 0 → **2m25s** |
 | d369894 | Exp 30: remove heavyweight PW gate + CPU monitoring → **1m43s** |
 | d020744 | Exp 29: marimo auto-retry assertions + retries=2 |
+| b2398d5 | Exp 31: PARALLEL=9 revisited (abandoned) + Exp 32: lean Wave 0, defer pytest → **1m51s** |
