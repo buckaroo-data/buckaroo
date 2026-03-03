@@ -108,14 +108,25 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
 
     // Find and run the first code cell
     console.log(`▶️ Executing widget code from ${notebookName}...`);
-    // Wait for notebook to be fully interactive — the kernel indicator shows
-    // the kernel is ready when its circle/icon appears
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
+
+    // Wait for kernel to be idle before executing — JupyterLab shows kernel
+    // status in the toolbar. Under 8-way concurrency, kernel startup can take
+    // 30+ seconds after the notebook DOM loads.
+    console.log('⏳ Waiting for kernel to be idle...');
+    await page.locator('.jp-Notebook-ExecutionIndicator[data-status="idle"]').first().waitFor({
+      state: 'attached',
+      timeout: CELL_EXEC_TIMEOUT,
+    }).catch(() => {
+      // Fallback: some JupyterLab versions use different indicators
+      console.log('⚠️ Kernel status indicator not found, proceeding anyway');
+    });
+    console.log('✅ Kernel ready');
+
     // Click on the first cell to focus it, then verify focus before Shift+Enter
     const firstCell = page.locator('.jp-Cell').first();
     await firstCell.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     await firstCell.click({ timeout: DEFAULT_TIMEOUT });
-    // Wait for JupyterLab to register focus (class change on cell)
     await page.locator('.jp-Cell.jp-mod-selected').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     await page.keyboard.press('Shift+Enter');
 

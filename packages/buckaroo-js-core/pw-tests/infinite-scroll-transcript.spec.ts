@@ -37,6 +37,16 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Notebook loaded');
 
+    // Wait for kernel to be idle before executing
+    console.log('⏳ Waiting for kernel to be idle...');
+    await page.locator('.jp-Notebook-ExecutionIndicator[data-status="idle"]').first().waitFor({
+      state: 'attached',
+      timeout: CELL_EXEC_TIMEOUT,
+    }).catch(() => {
+      console.log('⚠️ Kernel status indicator not found, proceeding anyway');
+    });
+    console.log('✅ Kernel ready');
+
     // Execute the cell — click to focus, verify selection, then Shift+Enter
     console.log('▶️ Executing widget code...');
     const firstCell = page.locator('.jp-Cell').first();
@@ -326,6 +336,12 @@ test.describe('Infinite Scroll Transcript Recording', () => {
 
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+
+    // Wait for kernel to be idle before executing
+    await page.locator('.jp-Notebook-ExecutionIndicator[data-status="idle"]').first().waitFor({
+      state: 'attached',
+      timeout: CELL_EXEC_TIMEOUT,
+    }).catch(() => {});
 
     // Execute the cell — click to focus, verify selection, then Shift+Enter
     const firstCell2 = page.locator('.jp-Cell').first();
