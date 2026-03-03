@@ -20,6 +20,7 @@
 | 14c | 92ca618 | P=3 wait-all DAG | **3/5 = 60%** | ~5m18s | ~7m |
 | 14d | 6a11b71 | P=4 wait-all + kernel-idle-60s | **3/5 = 60%** | varies | varies |
 | 14e | 8695488 | P=4 wait-all + idle-15s + retry=2 | **4/5 = 80%** | ~1m12s | ~2m42s |
+| **15-21** | **5994612** | **jupyterapp + waitFor removal** | **10/10 jupyter, 9/10 overall** | **~1m36s** | **~2m59s** |
 
 ---
 
@@ -187,7 +188,7 @@ isn't enough when the kernel is slow.
 
 ### Exp 14e — PARALLEL=4 wait-all + kernel-idle-15s + retries=2 (8695488)
 
-**Status:** RUNNING — 5-run stability test
+**Status:** DONE — 5-run stability test
 **Changes from 14d:**
 - Reduced kernel idle wait timeout from 60s to 15s
 - Increased Playwright retries from 1 to 2
@@ -209,6 +210,45 @@ DOM-based kernel readiness checks.
 See `jupyterlab-kernel-connection-deep-dive.md` for research into why the remaining
 20% fails and the architectural fix (query `window.jupyterapp` internal state instead
 of DOM selectors).
+
+---
+
+### Exp 15+16+17+21 combined — `5994612` ⭐ BEST OVERALL
+
+**Status:** DONE — 10-run stability test
+**Changes (all in one commit):**
+1. **Exp 15:** Replace `waitForTimeout(3000)` in server specs with `expect().toPass()` polling
+2. **Exp 16:** Replace `sleep 5` in test_playwright_marimo.sh with curl polling loop
+3. **Exp 17:** Skip JS rebuild in full_build.sh when dist already exists
+4. **Exp 21:** Replace DOM kernel idle check with `window.jupyterapp` internal state query
+
+**Results:** pw-jupyter 10/10 = **100% pass rate**. Overall 9/10 (1 pw-server flake).
+
+| Run | pw-server | pw-marimo | pw-jupyter | Result | Total |
+|-----|----------|----------|-----------|--------|-------|
+| 1 | 37s | 42s | **1m36s** | **PASS** | **2m59s** |
+| 2 | 36s | 41s | **1m36s** | **PASS** | **2m59s** |
+| 3 | 36s | 42s | **1m35s** | **PASS** | **2m58s** |
+| 4 | FAIL | 41s | **1m35s** | FAIL | 2m58s |
+| 5 | 37s | 42s | **4m11s** | **PASS** | **5m34s** |
+| 6 | 36s | 42s | **4m11s** | **PASS** | **5m33s** |
+| 7 | 36s | 41s | **1m36s** | **PASS** | **2m58s** |
+| 8 | 36s | 42s | **1m36s** | **PASS** | **2m59s** |
+| 9 | 35s | 41s | **4m10s** | **PASS** | **5m32s** |
+| 10 | 36s | 42s | **1m35s** | **PASS** | **2m58s** |
+
+**Stage improvements vs baseline (14e):**
+- pw-server: 50s → **37s** (-13s, exp 15)
+- pw-marimo: 46s → **42s** (-4s, exp 16)
+- build-wheel: 17s → 17s (exp 17 no-op — checkout clears dist)
+- pw-jupyter pass rate: 80% → **100%** (exp 21)
+
+**Key findings:**
+1. `window.jupyterapp` kernel check (exp 21) broke the 80% ceiling completely — 10/10 jupyter passes.
+2. pw-server `waitForTimeout` removal saved 13s but introduced a 1/10 flake (needs investigation).
+3. pw-jupyter has a bimodal pattern: 7/10 runs at ~1m36s, 3/10 at ~4m11s (retries used).
+4. Median total CI time: **2m59s** (vs 2m43s in 14e, +16s from longer jupyter median).
+5. Exp 17 (skip JS rebuild) was a no-op — `git checkout` clears dist/ so the skip never triggers.
 
 ---
 
@@ -401,3 +441,4 @@ under CPU contention the kernel connection can take >120s.
 | 92ca618 | PARALLEL=3 (worse than 4) |
 | 6a11b71 | Kernel idle wait 60s (too aggressive) |
 | 8695488 | Kernel idle wait 15s + retries=2 |
+| 5994612 | jupyterapp kernel check + waitForTimeout removal + marimo sleep removal |
