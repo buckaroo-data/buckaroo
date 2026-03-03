@@ -67,9 +67,21 @@ run_job() {
 status_pending "$SHA" "ci/hetzner" "Running CI (phase=$PHASE)..." "$LOG_URL"
 
 # ── CPU monitoring ────────────────────────────────────────────────────────────
-# Sample CPU every second for contention analysis (vmstat available in container).
-vmstat 1 > "$RESULTS_DIR/cpu.log" 2>&1 &
+# Sample CPU every 0.1s for fine-grain contention analysis.
+vmstat -n 1 > "$RESULTS_DIR/cpu.log" 2>&1 &
 CPU_MONITOR_PID=$!
+# Fine-grain /proc/stat sampling at 100ms for sub-second resolution
+(
+while true; do
+    ts=$(date +%s.%N)
+    read -r _ user nice system idle iowait irq softirq steal _ _ < /proc/stat
+    total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+    busy=$((total - idle - iowait))
+    echo "$ts $busy $total"
+    sleep 0.1
+done
+) > "$RESULTS_DIR/cpu-fine.log" 2>&1 &
+CPU_FINE_PID=$!
 
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
 log "CI runner: $RUNNER_VERSION  phase=$PHASE"
@@ -284,7 +296,7 @@ job_jupyter_warmup() {
     echo "$venv" > /tmp/ci-jupyter-warmup-venv
 
     export JUPYTER_TOKEN="test-token-12345"
-    local BASE_PORT=8889 PARALLEL=4
+    local BASE_PORT=8889 PARALLEL=${JUPYTER_PARALLEL:-6}
 
     # Clean stale state
     rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
@@ -496,20 +508,14 @@ else
     uv pip install --python "$JUPYTER_VENV/bin/python" "$wheel" -q
     "$JUPYTER_VENV/bin/python" -c "import buckaroo; import pandas; import polars" 2>/dev/null || true
 
-    # ── Wheel-dependent jobs (start as soon as wheel exists) ─────────────────
-    # Exp 30: No heavyweight gate — pw-jupyter starts alongside other wheel jobs.
-    # Early warmup (Exp 28) + window.jupyterapp kernel check (Exp 21) should
-    # make pw-jupyter reliable even under CPU contention from concurrent PW jobs.
-    log "=== build-wheel done — starting all wheel-dependent jobs (incl. pw-jupyter) ==="
+    # ── Wheel-dependent jobs — staggered sub-waves (Exp 33) ──────────────────
+    # pw-jupyter is the critical path; start it FIRST with all pre-warmed servers.
+    # Then stagger remaining jobs every 5s to let pw-jupyter claim CPU headroom
+    # during its initial Chromium launch + first batch of tests.
+    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-6}
+    log "=== build-wheel done — starting staggered wheel-dependent jobs (PARALLEL=$JUPYTER_PARALLEL) ==="
 
-    run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
-    run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
-    run_job playwright-server    job_playwright_server     & PID_PW_SV=$!
-    # pw-marimo and pw-wasm-marimo both need real widget.js from build-wheel.
-    run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
-    run_job playwright-wasm-marimo job_playwright_wasm_marimo & PID_PW_WM=$!
-
-    # Use pre-warmed servers — skip startup/warmup in the parallel script
+    # t+0: pw-jupyter (critical path — uses pre-warmed servers)
     job_playwright_jupyter_warm() {
         cd /repo
         local venv
@@ -518,7 +524,7 @@ else
         ROOT_DIR=/repo \
         PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
         PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
-        PARALLEL=4 \
+        PARALLEL=$JUPYTER_PARALLEL \
             bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
                 --venv-location="$venv" --servers-running || rc=$?
         # Cleanup servers + venv
@@ -532,8 +538,23 @@ else
     export -f job_playwright_jupyter_warm
     run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
 
-    # Delayed pytest jobs — start 5s after wheel-dependent jobs to reduce
-    # CPU contention. 3.13 already ran in Wave 0 for fast signal.
+    # Also start lightweight jobs that won't compete much
+    run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
+    run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
+
+    # t+5s: pw-marimo
+    sleep 5
+    run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
+
+    # t+10s: pw-wasm-marimo
+    sleep 5
+    run_job playwright-wasm-marimo job_playwright_wasm_marimo & PID_PW_WM=$!
+
+    # t+15s: pw-server
+    sleep 5
+    run_job playwright-server    job_playwright_server     & PID_PW_SV=$!
+
+    # t+20s: pytest 3.11/3.12/3.14 (3.13 already ran in Wave 0)
     sleep 5
     run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
     run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
@@ -555,8 +576,9 @@ else
 
 fi
 
-# ── Stop CPU monitor ──────────────────────────────────────────────────────────
+# ── Stop CPU monitors ─────────────────────────────────────────────────────────
 kill $CPU_MONITOR_PID 2>/dev/null || true
+kill $CPU_FINE_PID 2>/dev/null || true
 
 # ── Final status ─────────────────────────────────────────────────────────────
 
