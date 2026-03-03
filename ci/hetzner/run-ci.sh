@@ -67,8 +67,8 @@ run_job() {
 status_pending "$SHA" "ci/hetzner" "Running CI (phase=$PHASE)..." "$LOG_URL"
 
 # ── CPU monitoring ────────────────────────────────────────────────────────────
-# Sample overall CPU every second for contention analysis.
-mpstat 1 > "$RESULTS_DIR/cpu.log" 2>&1 &
+# Sample CPU every second for contention analysis (vmstat available in container).
+vmstat 1 > "$RESULTS_DIR/cpu.log" 2>&1 &
 CPU_MONITOR_PID=$!
 
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
