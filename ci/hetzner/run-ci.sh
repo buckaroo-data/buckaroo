@@ -88,6 +88,17 @@ CI_TIMEOUT=${CI_TIMEOUT:-210}
 ( sleep "$CI_TIMEOUT"; echo "[$(date +'%H:%M:%S')] TIMEOUT: CI exceeded ${CI_TIMEOUT}s" >> "$RESULTS_DIR/ci.log"; kill -TERM 0 ) 2>/dev/null &
 WATCHDOG_PID=$!
 
+# ── Pre-run cleanup — kill stale processes, remove temp files from prior runs ─
+# This ensures each CI run starts from a clean state regardless of how the
+# previous run ended (timeout, crash, manual kill, etc.).
+pkill -f jupyter-lab 2>/dev/null || true
+pkill -f playwright 2>/dev/null || true
+pkill -f chromium 2>/dev/null || true
+pkill -f "node.*storybook" 2>/dev/null || true
+pkill -f "npm exec serve" 2>/dev/null || true
+rm -rf /tmp/ci-jupyter-warmup* /tmp/pw-jupyter-parallel* /tmp/pw-html-* 2>/dev/null || true
+rm -f /tmp/ci-jupyter-warmup-venv /tmp/ci-jupyter-warmup-pids 2>/dev/null || true
+
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
 log "CI runner: $RUNNER_VERSION  phase=$PHASE"
 log "Checkout $SHA (branch: $BRANCH)"
