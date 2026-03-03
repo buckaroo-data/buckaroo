@@ -37,21 +37,20 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Notebook loaded');
 
-    // Wait for kernel to be connected and idle before attempting cell execution.
-    console.log('⏳ Waiting for kernel to be ready...');
+    // Wait for kernel via JupyterLab internal state (see deep dive doc).
+    console.log('⏳ Waiting for kernel to be ready (jupyterapp)...');
     try {
       await page.waitForFunction(() => {
-        const indicator = document.querySelector('.jp-Notebook-ExecutionIndicator');
-        if (indicator) {
-          const status = indicator.getAttribute('data-status');
-          return status === 'idle';
-        }
-        const kernelStatus = document.querySelector('.jp-Notebook-KernelStatus');
-        return kernelStatus?.textContent?.includes('Idle') || false;
-      }, { timeout: 15000 });
-      console.log('✅ Kernel is idle');
+        const app = (window as any).jupyterapp;
+        if (!app) return false;
+        const widget = app.shell.currentWidget;
+        if (!widget?.sessionContext?.session?.kernel) return false;
+        const kernel = widget.sessionContext.session.kernel;
+        return kernel.connectionStatus === 'connected' && kernel.status === 'idle';
+      }, { timeout: 60000 });
+      console.log('✅ Kernel connected and idle');
     } catch {
-      console.log('⚠️ Kernel idle wait timed out — proceeding with retry loop');
+      console.log('⚠️ Kernel ready wait timed out — proceeding with retry loop');
     }
 
     // Execute cell with retry — use dispatchEvent to avoid visibility requirements
@@ -355,11 +354,13 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     // Wait for kernel to be ready
     try {
       await page.waitForFunction(() => {
-        const indicator = document.querySelector('.jp-Notebook-ExecutionIndicator');
-        if (indicator) return indicator.getAttribute('data-status') === 'idle';
-        const ks = document.querySelector('.jp-Notebook-KernelStatus');
-        return ks?.textContent?.includes('Idle') || false;
-      }, { timeout: 15000 });
+        const app = (window as any).jupyterapp;
+        if (!app) return false;
+        const widget = app.shell.currentWidget;
+        if (!widget?.sessionContext?.session?.kernel) return false;
+        const kernel = widget.sessionContext.session.kernel;
+        return kernel.connectionStatus === 'connected' && kernel.status === 'idle';
+      }, { timeout: 60000 });
     } catch { /* proceed with retry loop */ }
 
     // Execute with retry

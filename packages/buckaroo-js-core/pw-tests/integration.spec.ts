@@ -106,24 +106,24 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Notebook loaded');
 
-    // Wait for kernel to be connected and idle before attempting cell execution.
-    // JupyterLab silently drops Shift+Enter if the kernel isn't connected yet.
-    console.log('⏳ Waiting for kernel to be ready...');
+    // Wait for kernel to be connected and idle by querying JupyterLab's internal
+    // state directly. This checks the EXACT same `session.kernel` condition that
+    // CodeCell.execute() checks at widget.ts:1750 — if kernel is null, execute()
+    // silently returns void with no error. DOM-based checks (ExecutionIndicator)
+    // lag behind and burn timeout when the element doesn't exist yet.
+    console.log('⏳ Waiting for kernel to be ready (jupyterapp internal state)...');
     try {
       await page.waitForFunction(() => {
-        // JupyterLab 4.x uses a Notebook-ExecutionIndicator with data-status
-        const indicator = document.querySelector('.jp-Notebook-ExecutionIndicator');
-        if (indicator) {
-          const status = indicator.getAttribute('data-status');
-          return status === 'idle';
-        }
-        // Fallback: check the kernel status widget in the status bar
-        const kernelStatus = document.querySelector('.jp-Notebook-KernelStatus');
-        return kernelStatus?.textContent?.includes('Idle') || false;
-      }, { timeout: 15000 });
-      console.log('✅ Kernel is idle');
+        const app = (window as any).jupyterapp;
+        if (!app) return false;
+        const widget = app.shell.currentWidget;
+        if (!widget?.sessionContext?.session?.kernel) return false;
+        const kernel = widget.sessionContext.session.kernel;
+        return kernel.connectionStatus === 'connected' && kernel.status === 'idle';
+      }, { timeout: 60000 });
+      console.log('✅ Kernel connected and idle');
     } catch {
-      console.log('⚠️ Kernel idle wait timed out — proceeding with retry loop');
+      console.log('⚠️ Kernel ready wait timed out — proceeding with retry loop');
     }
 
     console.log(`▶️ Executing widget code from ${notebookName}...`);

@@ -87,11 +87,17 @@ if ! curl -sf "http://localhost:$MARIMO_PORT" >/dev/null 2>&1; then
 fi
 success "marimo server is responding"
 
-# Warm up: fetch the page so marimo compiles widgets and caches them
+# Warm up: fetch the page so marimo compiles widgets and caches them.
+# Poll until the response contains JS (compiled widgets) instead of hard sleep.
 log_message "Warming up marimo (fetching page to trigger widget compilation)..."
 curl -sf "http://localhost:$MARIMO_PORT" >/dev/null 2>&1
-sleep 5
-curl -sf "http://localhost:$MARIMO_PORT" >/dev/null 2>&1
+for _i in $(seq 1 20); do
+    body=$(curl -sf "http://localhost:$MARIMO_PORT" 2>/dev/null || echo "")
+    if echo "$body" | grep -q '<script'; then
+        break
+    fi
+    sleep 0.5
+done
 success "marimo warmup complete"
 
 cd packages/buckaroo-js-core

@@ -148,7 +148,6 @@ test.describe('Buckaroo standalone server', () => {
 
     // Click the "name" column header to sort
     await page.getByRole('columnheader', { name: 'name' }).click();
-    await page.waitForTimeout(1000);
     await waitForGrid(page);
 
     // After sort the order should change
@@ -157,8 +156,11 @@ test.describe('Buckaroo standalone server', () => {
     if (after === 'Alice') {
       // Click again for descending
       await page.getByRole('columnheader', { name: 'name' }).click();
-      await page.waitForTimeout(1000);
-      await waitForGrid(page);
+      // Wait for sort to take effect — first cell should change from Alice
+      await expect(async () => {
+        const val = await getCellText(page, COL.name, 0);
+        expect(val).not.toBe('Alice');
+      }).toPass({ timeout: 5000 });
       const desc = await getCellText(page, COL.name, 0);
       expect(desc).toBe('Eve');
     } else {
