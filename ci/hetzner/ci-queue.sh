@@ -273,11 +273,17 @@ cmd_worker() {
             done < /opt/ci/.env
         fi
 
-        # Run CI
+        # Ensure log directory exists (run-ci.sh creates it too, but we need
+        # it before docker exec for our own redirection).
+        mkdir -p "/opt/ci/logs/$sha"
+
+        # Run CI — run-ci.sh already writes to /opt/ci/logs/$sha/ci.log via
+        # tee internally, so we just capture docker exec stdout/stderr to a
+        # separate file to avoid double-writing.
         local rc=0
         docker exec "${env_args[@]}" "$CONTAINER" \
             bash /opt/ci-runner/run-ci.sh "$sha" "$branch" $args \
-            >> "/opt/ci/logs/$sha/ci.log" 2>&1 || rc=$?
+            > "/opt/ci/logs/$sha/queue-exec.log" 2>&1 || rc=$?
 
         local end_ts
         end_ts=$(date +%s)
