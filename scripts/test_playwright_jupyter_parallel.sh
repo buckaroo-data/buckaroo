@@ -321,6 +321,7 @@ run_one() {
             --config playwright.config.integration.ts \
             --reporter=line \
             --timeout=$timeout \
+            --retries=1 \
             --output="$results_dir" \
         >"$logfile" 2>&1
 }

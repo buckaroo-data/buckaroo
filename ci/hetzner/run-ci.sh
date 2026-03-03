@@ -314,14 +314,10 @@ else
     # (the empty stub from `touch` won't render). Runs here, not in Wave 0.
     run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
 
-    # pw-jupyter needs CPU headroom for JupyterLab startup — wait for the
-    # heavyweight playwright jobs to finish first.
+    # pw-jupyter needs maximum CPU headroom — wait for ALL other jobs first.
+    # playwright-server (58s) used to overlap, causing random 1/9 failures.
     wait $PID_PW_MA  || OVERALL=1
     wait $PID_PW_WM  || OVERALL=1
-    log "=== marimo/wasm done — starting playwright-jupyter ==="
-    run_job playwright-jupyter   job_playwright_jupyter    & PID_PW_JP=$!
-
-    # ── Wait for everything else ─────────────────────────────────────────────
     wait $PID_LINT    || OVERALL=1
     wait $PID_PY311   || OVERALL=1
     wait $PID_PY312   || OVERALL=1
@@ -331,6 +327,10 @@ else
     wait $PID_MCP     || OVERALL=1
     wait $PID_SMOKE   || OVERALL=1
     wait $PID_PW_SV   || OVERALL=1
+    log "=== all other jobs done — starting playwright-jupyter ==="
+    run_job playwright-jupyter   job_playwright_jupyter    & PID_PW_JP=$!
+
+    # ── Wait for jupyter ──────────────────────────────────────────────────────
     wait $PID_PW_JP   || OVERALL=1
 
 fi
