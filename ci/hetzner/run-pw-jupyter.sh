@@ -169,13 +169,15 @@ done
 [ "$warmup_ok" = true ] && log "  All $PARALLEL kernels warmed" || log "  WARNING: some warmups failed"
 
 # Copy + trust notebooks (parallel — serial trust takes ~17s)
+TRUST_PIDS=()
 for nb in tests/integration_notebooks/test_*.ipynb; do
     cp "$nb" "$(basename "$nb")"
 done
 for nb in test_*.ipynb; do
     jupyter trust "$nb" 2>/dev/null &
+    TRUST_PIDS+=($!)
 done
-wait
+for pid in "${TRUST_PIDS[@]}"; do wait "$pid" 2>/dev/null || true; done
 rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
 
 deactivate
