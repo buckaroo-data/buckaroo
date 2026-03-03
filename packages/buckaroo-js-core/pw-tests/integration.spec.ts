@@ -108,12 +108,15 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
 
     // Find and run the first code cell
     console.log(`▶️ Executing widget code from ${notebookName}...`);
-    // Wait for notebook to be fully interactive
+    // Wait for notebook to be fully interactive — the kernel indicator shows
+    // the kernel is ready when its circle/icon appears
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
-    // Focus on the notebook and use keyboard shortcut to run cell (Shift+Enter)
-    // Use dispatchEvent to trigger click without visibility requirement
-    await page.locator('.jp-Notebook').first().dispatchEvent('click');
-    await page.waitForTimeout(200);
+    // Click on the first cell to focus it, then verify focus before Shift+Enter
+    const firstCell = page.locator('.jp-Cell').first();
+    await firstCell.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+    await firstCell.click({ timeout: DEFAULT_TIMEOUT });
+    // Wait for JupyterLab to register focus (class change on cell)
+    await page.locator('.jp-Cell.jp-mod-selected').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     await page.keyboard.press('Shift+Enter');
 
     // Wait for cell execution to complete — wait for output to appear rather than a fixed delay

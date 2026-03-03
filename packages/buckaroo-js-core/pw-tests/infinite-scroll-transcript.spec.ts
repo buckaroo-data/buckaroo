@@ -37,10 +37,12 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Notebook loaded');
 
-    // Execute the cell
+    // Execute the cell — click to focus, verify selection, then Shift+Enter
     console.log('▶️ Executing widget code...');
-    await page.locator('.jp-Notebook').first().dispatchEvent('click');
-    await page.waitForTimeout(200);
+    const firstCell = page.locator('.jp-Cell').first();
+    await firstCell.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+    await firstCell.click({ timeout: DEFAULT_TIMEOUT });
+    await page.locator('.jp-Cell.jp-mod-selected').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     await page.keyboard.press('Shift+Enter');
 
     // Wait for cell execution — wait for output to appear rather than a fixed delay
@@ -325,9 +327,11 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
 
-    // Execute the cell
-    await page.locator('.jp-Notebook').first().dispatchEvent('click');
-    await page.waitForTimeout(200);
+    // Execute the cell — click to focus, verify selection, then Shift+Enter
+    const firstCell2 = page.locator('.jp-Cell').first();
+    await firstCell2.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+    await firstCell2.click({ timeout: DEFAULT_TIMEOUT });
+    await page.locator('.jp-Cell.jp-mod-selected').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     await page.keyboard.press('Shift+Enter');
 
     const outputArea = page.locator('.jp-OutputArea').first();
