@@ -359,8 +359,8 @@ while [ $NEXT -lt $TOTAL ]; do
     BATCH_USED_PORTS=()
 
     while [ $BATCH_COUNT -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
-        # Stagger Chromium launches by 1s to avoid CPU spike from 9 simultaneous startups
-        [ $BATCH_COUNT -gt 0 ] && sleep 1
+        # Stagger Chromium launches by 2s to avoid CPU spike from 9 simultaneous startups
+        [ $BATCH_COUNT -gt 0 ] && sleep 2
         local_nb="${QUEUE[$NEXT]}"
         local_logfile="$TMPDIR/${local_nb%.ipynb}.log"
         local_port=$((BASE_PORT + BATCH_COUNT))
