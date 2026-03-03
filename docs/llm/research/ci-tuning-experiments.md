@@ -203,8 +203,57 @@ isn't enough when the kernel is slow.
 | 5 | ~5m | PASS (jupyter) | storybook flake caused overall FAIL |
 
 **Conclusion:** Kernel idle wait + extra retry doesn't improve beyond wait-all + retries=1.
-The 80% pass rate appears to be the ceiling for PARALLEL=4 on Vultr 16 vCPU.
-The remaining 20% failure is inherent CPU contention during kernel startup in batch 2+.
+The 80% pass rate appears to be the ceiling for PARALLEL=4 on Vultr 16 vCPU with
+DOM-based kernel readiness checks.
+
+See `jupyterlab-kernel-connection-deep-dive.md` for research into why the remaining
+20% fails and the architectural fix (query `window.jupyterapp` internal state instead
+of DOM selectors).
+
+---
+
+## Next Experiments — Jupyter Reliability (from deep dive research)
+
+### Exp 21 — Replace DOM kernel check with `window.jupyterapp` internal state query
+
+**Priority:** CRITICAL — expected to break the 80% ceiling
+**Estimated impact:** 80% → ~95-100% pass rate
+**Files:** `pw-tests/integration.spec.ts`, `pw-tests/infinite-scroll-transcript.spec.ts`
+
+**Root cause of 20% failures (from deep dive):**
+The DOM-based check (`querySelector('.jp-Notebook-ExecutionIndicator')`) has three problems:
+1. The DOM element may not exist yet → `querySelector` returns `null` → burns entire timeout
+2. Even when found, `data-status` lags behind actual kernel state
+3. When timeout expires, test proceeds to `Shift+Enter` with `session.kernel === null` →
+   `CodeCell.execute()` at `widget.ts:1750` silently returns `void`, no error
+
+**The fix:** Query JupyterLab's runtime directly via `window.jupyterapp`:
+```typescript
+await page.waitForFunction(() => {
+  const app = (window as any).jupyterapp;
+  if (!app) return false;
+  const widget = app.shell.currentWidget;
+  if (!widget?.sessionContext?.session?.kernel) return false;
+  const kernel = widget.sessionContext.session.kernel;
+  return kernel.connectionStatus === 'connected' && kernel.status === 'idle';
+}, { timeout: 60000 });
+```
+
+**Why this works:**
+- Checks the EXACT same `session.kernel` that `CodeCell.execute()` checks
+- Returns `false` cheaply when app hasn't loaded (no wasted timeout)
+- Returns `true` the instant kernel is actually ready to accept execution
+- 60s timeout safe because the function is cheap to evaluate (no DOM queries)
+
+### Exp 22 — Verify `window.jupyterapp` availability
+
+**Priority:** Prerequisite for Exp 21
+**What:** Quick test — open JupyterLab in Playwright, run
+`page.evaluate(() => typeof (window as any).jupyterapp)` to confirm the global exists
+and has the expected shape. JupyterLab 4.x exposes this by default.
+
+**Risk:** If `jupyterapp` isn't exposed (some builds strip it), fall back to
+`document.querySelector('#main')._jupyterapp` or the Lumino app registry.
 
 ---
 
