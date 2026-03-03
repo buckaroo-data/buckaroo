@@ -303,11 +303,10 @@ shutdown_kernels_on_port() {
 run_one() {
     local nb=$1 idx=$2 logfile=$3 port=$4
     local spec="pw-tests/integration.spec.ts"
-    local timeout=90000
+    local timeout=180000
 
     if [[ "$nb" == "test_infinite_scroll_transcript.ipynb" ]]; then
         spec="pw-tests/infinite-scroll-transcript.spec.ts"
-        timeout=180000
     fi
 
     cd "$ROOT_DIR/packages/buckaroo-js-core"

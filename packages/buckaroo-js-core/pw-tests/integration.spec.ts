@@ -4,7 +4,7 @@ import { Page } from '@playwright/test';
 const JUPYTER_BASE_URL = process.env.JUPYTER_BASE_URL || 'http://localhost:8889';
 const JUPYTER_TOKEN = process.env.JUPYTER_TOKEN || 'test-token-12345';
 const DEFAULT_TIMEOUT = 8000; // 8 seconds for most operations
-const CELL_EXEC_TIMEOUT = 60000; // kernel startup can be slow when 3 run concurrently
+const CELL_EXEC_TIMEOUT = 120000; // kernel startup can be slow when 8 run concurrently
 const NAVIGATION_TIMEOUT = 10000; // 10 seconds max for navigation
 
 async function waitForAgGrid(outputArea: any, timeout = DEFAULT_TIMEOUT) {
