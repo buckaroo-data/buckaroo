@@ -284,7 +284,7 @@ job_jupyter_warmup() {
     echo "$venv" > /tmp/ci-jupyter-warmup-venv
 
     export JUPYTER_TOKEN="test-token-12345"
-    local BASE_PORT=8889 PARALLEL=9
+    local BASE_PORT=8889 PARALLEL=4
 
     # Clean stale state
     rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
@@ -464,17 +464,15 @@ else
     mkdir -p buckaroo/static
     touch buckaroo/static/compiled.css buckaroo/static/widget.js buckaroo/static/widget.css
 
-    # ── Wave 0: All independent jobs (no deps — start immediately) ──────────
-    log "=== Starting all independent jobs ==="
+    # ── Wave 0: Minimal jobs — only what's needed on the critical path ──────
+    # Run one pytest (3.13) for fast signal. Delay 3.11/3.12/3.14 to reduce
+    # CPU contention during Wave 0 — they start 5s after wheel-dependent jobs.
+    log "=== Starting Wave 0 ==="
 
     run_job lint-python            job_lint_python                & PID_LINT=$!
     run_job test-js                job_test_js                    & PID_TESTJS=$!
-    run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
-    run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
     run_job test-python-3.13       bash -c "job_test_python 3.13" & PID_PY313=$!
-    run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
     run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
-    run_job playwright-wasm-marimo job_playwright_wasm_marimo     & PID_PW_WM=$!
     # Early kernel warmup — venv + 4 JupyterLab servers + kernel warmup while
     # heavyweight jobs are running. Finishes by ~t=20s, long before wheel is ready.
     run_job jupyter-warmup         job_jupyter_warmup             & PID_WARMUP=$!
@@ -507,9 +505,9 @@ else
     run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
     run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
     run_job playwright-server    job_playwright_server     & PID_PW_SV=$!
-    # playwright-marimo needs the real widget.js produced by build-wheel
-    # (the empty stub from `touch` won't render). Runs here, not in Wave 0.
+    # pw-marimo and pw-wasm-marimo both need real widget.js from build-wheel.
     run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
+    run_job playwright-wasm-marimo job_playwright_wasm_marimo & PID_PW_WM=$!
 
     # Use pre-warmed servers — skip startup/warmup in the parallel script
     job_playwright_jupyter_warm() {
@@ -520,7 +518,7 @@ else
         ROOT_DIR=/repo \
         PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
         PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
-        PARALLEL=9 \
+        PARALLEL=4 \
             bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
                 --venv-location="$venv" --servers-running || rc=$?
         # Cleanup servers + venv
@@ -534,11 +532,18 @@ else
     export -f job_playwright_jupyter_warm
     run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
 
+    # Delayed pytest jobs — start 5s after wheel-dependent jobs to reduce
+    # CPU contention. 3.13 already ran in Wave 0 for fast signal.
+    sleep 5
+    run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
+    run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
+    run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
+
     # ── Wait for all jobs ─────────────────────────────────────────────────────
     wait $PID_LINT    || OVERALL=1
+    wait $PID_PY313   || OVERALL=1
     wait $PID_PY311   || OVERALL=1
     wait $PID_PY312   || OVERALL=1
-    wait $PID_PY313   || OVERALL=1
     wait $PID_PY314   || OVERALL=1
     wait $PID_PW_SB   || OVERALL=1
     wait $PID_PW_WM   || OVERALL=1
