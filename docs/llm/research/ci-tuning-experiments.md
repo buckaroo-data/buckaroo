@@ -512,8 +512,12 @@ Saved **31s on the critical path** (from checkout to wheel-dependent jobs starti
 
 ### Exp 26 — Wheel cache across SHAs
 
-**Priority:** MEDIUM
-**What:** If Python source hasn't changed between commits, reuse the wheel from a prior SHA. Key by `git ls-tree -r HEAD buckaroo/ pyproject.toml | sha256sum`. Would eliminate build-wheel entirely for JS-only changes.
+**Priority:** LOW — only saves ~3s (build-wheel is already 3s with JS cache)
+**What:** Cache the built wheel keyed by both Python source AND JS source (the wheel bundles built JS). Key by `git ls-tree -r HEAD buckaroo/ pyproject.toml packages/buckaroo-js-core/src/ packages/buckaroo-widget/ | sha256sum`. If neither Python nor JS changed, skip build-wheel entirely and reuse prior wheel.
+
+**Note:** The JS build cache (Exp 23) already handles the expensive part — tsc+vite is skipped on cache hit. With Exp 23+24, build-wheel only does esbuild widget + `uv build --wheel` = ~3s. A wheel cache would save those 3s but adds complexity for diminishing returns.
+
+**Relationship to JS cache:** If only Python changes (no JS changes), the JS cache already provides the built dist/. `full_build.sh` skips tsc+vite and just runs esbuild+wheel. A wheel cache would skip even that. If JS changes, both JS cache and wheel cache miss — full rebuild needed.
 
 ### Exp 27 — Persistent pnpm install skip
 
