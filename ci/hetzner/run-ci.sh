@@ -83,6 +83,11 @@ done
 ) > "$RESULTS_DIR/cpu-fine.log" 2>&1 &
 CPU_FINE_PID=$!
 
+# CI timeout watchdog — kill everything if CI exceeds time limit.
+CI_TIMEOUT=${CI_TIMEOUT:-210}
+( sleep "$CI_TIMEOUT"; echo "[$(date +'%H:%M:%S')] TIMEOUT: CI exceeded ${CI_TIMEOUT}s" >> "$RESULTS_DIR/ci.log"; kill -TERM 0 ) 2>/dev/null &
+WATCHDOG_PID=$!
+
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
 log "CI runner: $RUNNER_VERSION  phase=$PHASE"
 log "Checkout $SHA (branch: $BRANCH)"
@@ -310,7 +315,7 @@ job_jupyter_warmup() {
         fuser -k $port/tcp 2>/dev/null || true
     done
 
-    # Start 4 JupyterLab servers sequentially
+    # Start $PARALLEL JupyterLab servers sequentially
     local pids=()
     for slot in $(seq 0 $((PARALLEL-1))); do
         port=$((BASE_PORT + slot))
@@ -525,7 +530,7 @@ else
         PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
         PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
         PARALLEL=$JUPYTER_PARALLEL \
-            bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
+            timeout 120 bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
                 --venv-location="$venv" --servers-running || rc=$?
         # Cleanup servers + venv
         for pid in $(cat /tmp/ci-jupyter-warmup-pids 2>/dev/null); do
@@ -576,7 +581,8 @@ else
 
 fi
 
-# ── Stop CPU monitors ─────────────────────────────────────────────────────────
+# ── Stop monitors ────────────────────────────────────────────────────────────
+kill $WATCHDOG_PID 2>/dev/null || true
 kill $CPU_MONITOR_PID 2>/dev/null || true
 kill $CPU_FINE_PID 2>/dev/null || true
 

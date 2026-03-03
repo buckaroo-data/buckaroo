@@ -559,6 +559,11 @@ Saved **31s on the critical path** (from checkout to wheel-dependent jobs starti
 **Priority:** LOW — saves ~2-3s
 **What:** `pnpm install --frozen-lockfile` takes 2-3s even with warm store (just creating hardlinks). Skip if `node_modules/.package-lock.json` matches `pnpm-lock.yaml` hash.
 
+### Exp 34 — Early pnpm install (move out of PW scripts)
+
+**Priority:** MEDIUM — eliminates ~1-2s per PW job × 5 jobs, plus removes chromium startup stagger
+**What:** Every PW test script (`test_playwright_{jupyter,marimo,wasm_marimo,server,storybook}.sh`) does its own `pnpm install` + `pnpm exec playwright install chromium`. In CI these are no-ops (store warm from Docker build, chromium pre-installed) but each still takes 1-2s to resolve. Move a single `pnpm install` into the warmup phase (or right after `job_test_js` which already does one), then skip it in each PW script via a `--skip-install` flag or env var. The scripts keep their install logic for local dev use.
+
 ### Exp 28 — Early Kernel Warmup ✅
 
 **Status:** DONE (172158b) — see detailed results above. Saved 24s off pw-jupyter, 6s net off total CI. Warmup fully overlaps with Wave 0.

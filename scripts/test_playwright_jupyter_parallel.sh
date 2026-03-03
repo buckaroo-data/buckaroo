@@ -141,6 +141,60 @@ cd "$ROOT_DIR"
 
 export JUPYTER_TOKEN
 
+# ── Kernel warmup function (used for initial warmup and between-batch re-warmup)
+# Creates a kernel, connects via WebSocket to trigger the "nudge" mechanism,
+# waits for idle state, then deletes the warmup kernel. Without this, kernels
+# can get stuck in "starting" state forever (REST API never transitions).
+warmup_one_kernel() {
+    local port=$1
+    python3 -c "
+import json, sys, time, urllib.request, websocket
+
+port = $port
+token = '$JUPYTER_TOKEN'
+base = f'http://localhost:{port}'
+
+req = urllib.request.Request(
+    f'{base}/api/kernels?token={token}',
+    data=b'{}',
+    headers={'Content-Type': 'application/json'},
+    method='POST',
+)
+resp = urllib.request.urlopen(req)
+kid = json.loads(resp.read())['id']
+print(f'  kernel {kid[:8]}... created on port {port}')
+
+ws_url = f'ws://localhost:{port}/api/kernels/{kid}/channels?token={token}'
+ws = websocket.create_connection(ws_url, timeout=30)
+
+deadline = time.time() + 30
+state = 'unknown'
+while time.time() < deadline:
+    ws.settimeout(max(1, deadline - time.time()))
+    try:
+        msg = json.loads(ws.recv())
+    except (websocket.WebSocketTimeoutException, TimeoutError):
+        break
+    if msg.get('msg_type') == 'status':
+        state = msg.get('content', {}).get('execution_state', 'unknown')
+        if state == 'idle':
+            break
+
+ws.close()
+print(f'  kernel {kid[:8]}... on port {port} reached state: {state}')
+
+try:
+    req = urllib.request.Request(
+        f'{base}/api/kernels/{kid}?token={token}', method='DELETE')
+    urllib.request.urlopen(req)
+except Exception:
+    pass
+
+sys.exit(0 if state == 'idle' else 1)
+" 2>&1
+}
+export -f warmup_one_kernel
+
 if [ "$SERVERS_RUNNING" = true ]; then
     # Pre-warmed servers from job_jupyter_warmup — load PIDs for cleanup trap
     if [[ -f /tmp/ci-jupyter-warmup-pids ]]; then
@@ -199,66 +253,7 @@ else
     python3 -c "import buckaroo; import pandas; import polars; print('Pre-warm done')" 2>&1 || \
         python3 -c "import buckaroo; import pandas; print('Pre-warm done (no polars)')" 2>&1 || true
 
-    # Warm up each server via WebSocket nudge.
-    # The REST API (GET /api/kernels/{id}) never updates execution_state from
-    # "starting" to "idle" without a WebSocket client — this is a known upstream
-    # limitation. Connecting to the WebSocket channels endpoint triggers
-    # jupyter_server's built-in "nudge" mechanism (kernel_info_request), which
-    # is exactly how JupyterLab itself waits for kernel readiness.
-
-    warmup_one_kernel() {
-        local port=$1
-        python3 -c "
-import json, sys, time, urllib.request, websocket
-
-port = $port
-token = '$JUPYTER_TOKEN'
-base = f'http://localhost:{port}'
-
-# 1. Create a kernel via REST
-req = urllib.request.Request(
-    f'{base}/api/kernels?token={token}',
-    data=b'{}',
-    headers={'Content-Type': 'application/json'},
-    method='POST',
-)
-resp = urllib.request.urlopen(req)
-kid = json.loads(resp.read())['id']
-print(f'  kernel {kid[:8]}... created on port {port}')
-
-# 2. Connect WebSocket — triggers jupyter_server nudge mechanism
-ws_url = f'ws://localhost:{port}/api/kernels/{kid}/channels?token={token}'
-ws = websocket.create_connection(ws_url, timeout=90)
-
-# 3. Wait for status: idle on iopub
-deadline = time.time() + 90
-state = 'unknown'
-while time.time() < deadline:
-    ws.settimeout(max(1, deadline - time.time()))
-    try:
-        msg = json.loads(ws.recv())
-    except (websocket.WebSocketTimeoutException, TimeoutError):
-        break
-    if msg.get('msg_type') == 'status':
-        state = msg.get('content', {}).get('execution_state', 'unknown')
-        if state == 'idle':
-            break
-
-ws.close()
-print(f'  kernel {kid[:8]}... on port {port} reached state: {state}')
-
-# 4. Delete warmup kernel
-try:
-    req = urllib.request.Request(
-        f'{base}/api/kernels/{kid}?token={token}', method='DELETE')
-    urllib.request.urlopen(req)
-except Exception:
-    pass
-
-sys.exit(0 if state == 'idle' else 1)
-" 2>&1
-    }
-    export -f warmup_one_kernel
+    # Warm up each server via WebSocket nudge (uses warmup_one_kernel defined above).
 
     declare -a WARMUP_PIDS=()
     for slot in $(seq 0 $((PARALLEL-1))); do
@@ -393,10 +388,24 @@ while [ $NEXT -lt $TOTAL ]; do
         fi
     done
 
-    # Clean up each used server's kernel before next batch
+    # Clean up each used server's kernel and re-warm before next batch.
+    # Without re-warmup, new kernels can get stuck in "starting" state —
+    # the REST API never transitions without a WebSocket nudge.
     if [ $NEXT -lt $TOTAL ]; then
         for p in "${BATCH_USED_PORTS[@]:-}"; do
             shutdown_kernels_on_port "$p"
+        done
+        # Determine how many ports the next batch will use
+        local remaining=$((TOTAL - NEXT))
+        local next_batch_size=$((remaining < PARALLEL ? remaining : PARALLEL))
+        for slot in $(seq 0 $((next_batch_size - 1))); do
+            local rwport=$((BASE_PORT + slot))
+            # Verify server is responsive
+            curl -sf "http://localhost:${rwport}/api?token=${JUPYTER_TOKEN}" >/dev/null 2>&1 || {
+                log "WARNING: Server on port $rwport not responding after cleanup"
+            }
+            # Quick kernel warmup: create → WebSocket nudge → wait idle → delete
+            warmup_one_kernel "$rwport" >/dev/null 2>&1 || true
         done
     fi
     ((BATCH_NUM++)) || true
