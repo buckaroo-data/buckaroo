@@ -20,7 +20,7 @@ while true; do
     ps aux | grep '[j]upyter-lab' | awk '{printf "PID=%s CPU=%s%% MEM=%s%% RSS=%sMB CMD=%s\n", $2, $3, $4, $6/1024, $11}' 2>/dev/null || true
 
     echo "--- python kernels ---"
-    ps aux | grep '[i]python.*kernel' | awk '{printf "PID=%s CPU=%s%% MEM=%s%% RSS=%sMB CMD=%s\n", $2, $3, $4, $6/1024, $11}' 2>/dev/null || true
+    ps aux | grep -E '[i]pykernel|[k]ernel.*python|python.*[k]ernel' | awk '{printf "PID=%s CPU=%s%% MEM=%s%% RSS=%sMB CMD=%s %s %s\n", $2, $3, $4, $6/1024, $11, $12, $13}' 2>/dev/null || true
 
     echo "--- chromium (top 5 by CPU) ---"
     ps aux | grep '[c]hromium' | sort -k3 -rn | head -5 | awk '{printf "PID=%s CPU=%s%% MEM=%s%% RSS=%sMB\n", $2, $3, $4, $6/1024}' 2>/dev/null || true
