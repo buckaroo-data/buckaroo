@@ -84,7 +84,7 @@ done
 CPU_FINE_PID=$!
 
 # CI timeout watchdog — kill everything if CI exceeds time limit.
-CI_TIMEOUT=${CI_TIMEOUT:-270}
+CI_TIMEOUT=${CI_TIMEOUT:-210}
 ( sleep "$CI_TIMEOUT"; echo "[$(date +'%H:%M:%S')] TIMEOUT: CI exceeded ${CI_TIMEOUT}s" >> "$RESULTS_DIR/ci.log"; kill -TERM 0 ) 2>/dev/null &
 WATCHDOG_PID=$!
 
@@ -97,7 +97,7 @@ pkill -9 -f chromium 2>/dev/null || true
 pkill -9 -f "node.*storybook" 2>/dev/null || true
 pkill -9 -f "npm exec serve" 2>/dev/null || true
 # Kill anything on jupyter ports (8889-8893)
-for port in 8889 8890 8891 8892 8893; do
+for port in 8889 8890 8891 8892 8893 8894; do
     fuser -k $port/tcp 2>/dev/null || true
 done
 sleep 1  # let processes die before cleaning their files
@@ -330,7 +330,7 @@ job_jupyter_warmup() {
     echo "$venv" > /tmp/ci-jupyter-warmup-venv
 
     export JUPYTER_TOKEN="test-token-12345"
-    local BASE_PORT=8889 PARALLEL=${JUPYTER_PARALLEL:-5}
+    local BASE_PORT=8889 PARALLEL=${JUPYTER_PARALLEL:-6}
 
     # Clean stale state
     rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
@@ -552,7 +552,7 @@ else
     # pw-jupyter is the critical path; start it FIRST with all pre-warmed servers.
     # Then stagger remaining jobs every 5s to let pw-jupyter claim CPU headroom
     # during its initial Chromium launch + first batch of tests.
-    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-5}
+    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-6}
     log "=== build-wheel done — starting staggered wheel-dependent jobs (PARALLEL=$JUPYTER_PARALLEL) ==="
 
     # t+0: pw-jupyter (critical path — uses pre-warmed servers)
@@ -567,7 +567,7 @@ else
         PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
         PARALLEL=$JUPYTER_PARALLEL \
         BASE_PORT=8889 \
-            timeout 180 bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
+            timeout 120 bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
                 --venv-location="$venv" --servers-running || rc=$?
         # Cleanup servers + venv
         for pid in $(cat /tmp/ci-jupyter-warmup-pids 2>/dev/null); do
