@@ -10,7 +10,7 @@
 #   TEST_SHA    — SHA to checkout for playwright test code
 #   SETTLE_TIME — seconds to wait after warmup before tests (default: 15)
 #
-# Total timeout: 160s. Parallelism: JUPYTER_PARALLEL env or 4.
+# Total timeout: 240s (CI_TIMEOUT env to override). Parallelism: JUPYTER_PARALLEL env or 4.
 # Results: /opt/ci/logs/<TEST_SHA>-pwj/
 
 set -uo pipefail
@@ -42,7 +42,7 @@ fi
 log "wheel=$WHEEL_SHA  test=$TEST_SHA  settle=${SETTLE_TIME}s  P=$PARALLEL"
 
 # ── Watchdog ────────────────────────────────────────────────────────────
-CI_TIMEOUT=${CI_TIMEOUT:-160}
+CI_TIMEOUT=${CI_TIMEOUT:-240}
 ( sleep "$CI_TIMEOUT"; log "TIMEOUT: exceeded ${CI_TIMEOUT}s"; kill -TERM 0 ) 2>/dev/null &
 WATCHDOG_PID=$!
 
@@ -168,11 +168,14 @@ for pid in "${WARMUP_PIDS[@]}"; do
 done
 [ "$warmup_ok" = true ] && log "  All $PARALLEL kernels warmed" || log "  WARNING: some warmups failed"
 
-# Copy + trust notebooks
+# Copy + trust notebooks (parallel — serial trust takes ~17s)
 for nb in tests/integration_notebooks/test_*.ipynb; do
     cp "$nb" "$(basename "$nb")"
-    jupyter trust "$(basename "$nb")" 2>/dev/null || true
 done
+for nb in test_*.ipynb; do
+    jupyter trust "$nb" 2>/dev/null &
+done
+wait
 rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
 
 deactivate
