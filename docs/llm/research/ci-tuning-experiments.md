@@ -490,6 +490,33 @@ This saves **27s on the critical path** (from checkout to wheel-dependent jobs s
 **Priority:** LOW — saves ~2-3s
 **What:** `pnpm install --frozen-lockfile` takes 2-3s even with warm store (just creating hardlinks). Skip if `node_modules/.package-lock.json` matches `pnpm-lock.yaml` hash.
 
+### Exp 28 — Early Kernel Warmup (decouple kernel startup from wheel)
+
+**Priority:** HIGH — saves ~30-40s off critical path
+**What:** Start JupyterLab servers and warm kernels at t0 (Wave 0), before the wheel is built. Install buckaroo wheel into the running venv after build-wheel completes. Run Playwright tests against already-warm kernels.
+
+**Why it works:**
+- JupyterLab needs `anywidget`/`ipywidgets` extensions loaded at startup (for widget rendering), but NOT `buckaroo` itself
+- Pre-install `jupyterlab`, `anywidget`, `ipywidgets`, `polars`, `websocket-client` at t0
+- Start 4 JupyterLab servers + WebSocket kernel warmup (overlaps with test-js → build-wheel)
+- After wheel built: `uv pip install buckaroo-*.whl` into the running venv — deps already satisfied, so just installs the Python package (~1-2s)
+- anywidget loads widget JS dynamically at runtime — no JupyterLab restart needed
+- New kernels spawned by Playwright tests will be able to `import buckaroo`
+
+**Current pw-jupyter breakdown (~1m36s):**
+1. Create venv + install wheel+polars+jupyterlab: ~10-15s
+2. Start 4 JupyterLab servers: ~5-10s
+3. WebSocket kernel warmup per server: ~20-30s
+4. Run Playwright tests: ~50-60s
+
+Steps 1-3 (~35-55s) can overlap with Wave 0 + build-wheel (~13-40s depending on cache).
+
+**CPU data supports this:** Machine is at 5-10% during pw-jupyter execution — the kernel I/O bottleneck means there's plenty of CPU headroom to warm kernels in Wave 0 alongside other jobs.
+
+**Risk:** If kernel warmup competes with Wave 0 CPU-intensive jobs (pytest-xdist, tsc+vite), it could slow both down. But warmup is mostly I/O-bound (waiting for kernel idle), not CPU-bound.
+
+**Files:** `ci/hetzner/run-ci.sh` (major restructure of DAG), `scripts/test_playwright_jupyter_parallel.sh` (accept pre-warmed servers)
+
 ---
 
 ## Architecture Notes

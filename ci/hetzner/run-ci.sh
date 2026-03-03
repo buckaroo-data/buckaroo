@@ -187,18 +187,31 @@ job_smoke_test_extras() {
     cd /repo
     local wheel
     wheel=$(ls dist/buckaroo-*.whl | head -1)
+    local pids=() names=() rc=0
     for extra in base polars mcp marimo jupyterlab notebook; do
-        local venv=/tmp/ci-smoke-${extra}-$$
-        rm -rf "$venv"
-        uv venv "$venv" -q
-        if [[ "$extra" == "base" ]]; then
-            uv pip install --python "$venv/bin/python" "$wheel" -q
-        else
-            uv pip install --python "$venv/bin/python" "${wheel}[${extra}]" -q
-        fi
-        "$venv/bin/python" scripts/smoke_test.py "$extra"
-        rm -rf "$venv"
+        (
+            cd /repo
+            venv=/tmp/ci-smoke-${extra}-$$
+            rm -rf "$venv"
+            uv venv "$venv" -q
+            if [[ "$extra" == "base" ]]; then
+                uv pip install --python "$venv/bin/python" "$wheel" -q
+            else
+                uv pip install --python "$venv/bin/python" "${wheel}[${extra}]" -q
+            fi
+            "$venv/bin/python" scripts/smoke_test.py "$extra"
+            rm -rf "$venv"
+        ) &
+        pids+=($!)
+        names+=("$extra")
     done
+    for i in "${!pids[@]}"; do
+        if ! wait "${pids[$i]}"; then
+            echo "FAIL: smoke-${names[$i]}"
+            rc=1
+        fi
+    done
+    return $rc
 }
 
 job_playwright_storybook() {
@@ -342,10 +355,16 @@ else
     # (the empty stub from `touch` won't render). Runs here, not in Wave 0.
     run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
 
-    # pw-jupyter needs maximum CPU headroom — wait for ALL other jobs first.
-    # playwright-server (58s) used to overlap, causing random 1/9 failures.
-    wait $PID_PW_MA  || OVERALL=1
-    wait $PID_PW_WM  || OVERALL=1
+    # pw-jupyter needs CPU headroom from heavyweight Playwright jobs that
+    # compete for CPU (Chromium + server processes). Light jobs (lint,
+    # test-python, mcp, smoke) always finish before these, so don't block on them.
+    wait $PID_PW_SV   || OVERALL=1
+    wait $PID_PW_MA   || OVERALL=1
+    wait $PID_PW_WM   || OVERALL=1
+    log "=== heavyweight Playwright jobs done — starting playwright-jupyter ==="
+    run_job playwright-jupyter   job_playwright_jupyter    & PID_PW_JP=$!
+
+    # Collect remaining job exit codes (these should already be done by now)
     wait $PID_LINT    || OVERALL=1
     wait $PID_PY311   || OVERALL=1
     wait $PID_PY312   || OVERALL=1
@@ -354,9 +373,6 @@ else
     wait $PID_PW_SB   || OVERALL=1
     wait $PID_MCP     || OVERALL=1
     wait $PID_SMOKE   || OVERALL=1
-    wait $PID_PW_SV   || OVERALL=1
-    log "=== all other jobs done — starting playwright-jupyter ==="
-    run_job playwright-jupyter   job_playwright_jupyter    & PID_PW_JP=$!
 
     # ── Wait for jupyter ──────────────────────────────────────────────────────
     wait $PID_PW_JP   || OVERALL=1

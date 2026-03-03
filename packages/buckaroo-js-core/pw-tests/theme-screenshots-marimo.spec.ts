@@ -31,7 +31,7 @@ for (const scheme of SCHEMES) {
     await widgets.nth(1).waitFor({ state: 'visible', timeout: 60_000 });
     await widgets.nth(1).locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 60_000 });
 
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(500);
 
     // fullPage: true captures the entire scrollable area — markdown cells
     // above and below the widgets will be visible in the screenshot.
@@ -49,7 +49,6 @@ for (const scheme of SCHEMES) {
     const firstWidget = page.locator('.buckaroo_anywidget').first();
     await firstWidget.waitFor({ state: 'visible', timeout: 60_000 });
     await firstWidget.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 60_000 });
-    await page.waitForTimeout(500);
 
     // Scroll so the first widget is roughly centred, showing markdown
     // cells above and the second widget heading below.
@@ -76,10 +75,8 @@ for (const scheme of SCHEMES) {
     const columnsTab = firstWidget.locator('text=Columns');
     if (await columnsTab.isVisible()) {
       await columnsTab.click();
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(300);
     }
-
-    await page.waitForTimeout(500);
 
     // Scroll so surrounding cells are visible
     await firstWidget.scrollIntoViewIfNeeded();
