@@ -581,6 +581,24 @@ This is the same class of bug identified in the marimo flakiness research (Categ
 
 ---
 
+## Operational Notes
+
+### CPU Monitoring
+
+Every CI run MUST collect CPU usage data. Without it we can't correlate flakes with contention.
+
+Add a background `mpstat 1` (or `sar`/`vmstat`) sampler at CI start, kill at end, save to `$RESULTS_DIR/cpu.log`. Example:
+```bash
+mpstat -P ALL 1 > "$RESULTS_DIR/cpu.log" 2>&1 &
+CPU_MONITOR_PID=$!
+# ... run CI ...
+kill $CPU_MONITOR_PID 2>/dev/null || true
+```
+
+When reporting results, include peak and average CPU% during each phase (Wave 0, build-wheel, heavyweight PW, pw-jupyter).
+
+---
+
 ## Architecture Notes
 
 ### Process Model
