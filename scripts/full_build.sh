@@ -4,7 +4,7 @@ set -e
 # If JS core dist already exists (e.g. from a prior `pnpm build` in test-js),
 # skip the expensive tsc+vite rebuild and just do the packaging steps.
 if [ -f packages/buckaroo-js-core/dist/style.css ] && \
-   [ -f packages/buckaroo-js-core/dist/index.js ]; then
+   [ -f packages/buckaroo-js-core/dist/index.es.js ]; then
     echo "[full_build] JS core dist exists — skipping rebuild"
 else
     # Clean previous builds
