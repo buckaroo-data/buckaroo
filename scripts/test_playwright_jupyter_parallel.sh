@@ -176,13 +176,39 @@ for slot in $(seq 0 $((PARALLEL-1))); do
     ok "  JupyterLab ready on port $port (slot $slot)"
 done
 
-log "All $PARALLEL servers HTTP-ready — pre-warming Python bytecaches..."
-# Running imports in the current venv populates .pyc files so concurrent kernel
-# startups in batch 1 read from cache instead of compiling simultaneously.
+log "All $PARALLEL servers HTTP-ready — warming up kernels..."
+# Pre-warm Python bytecaches so kernel imports don't compile .pyc concurrently.
 python3 -c "import buckaroo; import pandas; import polars; print('Pre-warm done')" 2>&1 || \
     python3 -c "import buckaroo; import pandas; print('Pre-warm done (no polars)')" 2>&1 || true
-log "Sleeping 30s for kernel provisioners to initialise..."
-sleep 30
+
+# Warm up each server by starting a kernel, executing an import, and deleting it.
+# A blind sleep doesn't guarantee the kernel provisioner is ready — the first
+# notebook reliably flakes without this. We use the REST API to create a kernel,
+# then poll the WebSocket-free /api/kernels endpoint until it shows "idle".
+for slot in $(seq 0 $((PARALLEL-1))); do
+    port=$((BASE_PORT + slot))
+    log "  Warming kernel on port $port..."
+    # Create a kernel
+    kid=$(curl -sf -X POST "http://localhost:$port/api/kernels?token=$JUPYTER_TOKEN" \
+        -H "Content-Type: application/json" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null) || {
+        log "  WARNING: failed to create warmup kernel on port $port, falling back to sleep"
+        sleep 30
+        continue
+    }
+    # Poll until kernel reaches idle (max 60s)
+    for i in $(seq 1 60); do
+        state=$(curl -sf "http://localhost:$port/api/kernels/$kid?token=$JUPYTER_TOKEN" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin).get('execution_state','unknown'))" 2>/dev/null) || state="unknown"
+        if [ "$state" = "idle" ]; then
+            break
+        fi
+        sleep 1
+    done
+    log "  Kernel $kid on port $port reached state: $state"
+    # Delete the warmup kernel
+    curl -sf -X DELETE "http://localhost:$port/api/kernels/$kid?token=$JUPYTER_TOKEN" >/dev/null 2>&1 || true
+    ok "  Kernel warmup complete on port $port"
+done
 
 # ── Copy and trust notebooks ──────────────────────────────────────────────────
 
