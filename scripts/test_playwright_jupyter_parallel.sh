@@ -113,8 +113,10 @@ python -c "import buckaroo; print(f'buckaroo {getattr(buckaroo, \"__version__\",
 # ── Playwright deps ───────────────────────────────────────────────────────────
 
 cd packages/buckaroo-js-core
-pnpm install 2>/dev/null || npm install
-pnpm exec playwright install chromium 2>/dev/null || true
+if [ "${SKIP_INSTALL:-0}" != "1" ]; then
+    pnpm install 2>/dev/null || npm install
+    pnpm exec playwright install chromium 2>/dev/null || true
+fi
 
 # ── Multiple isolated JupyterLab servers (one per parallel slot) ──────────────
 

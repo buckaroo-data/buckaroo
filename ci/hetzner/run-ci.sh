@@ -511,10 +511,9 @@ else
     renice -n 10 -p $PID_PY313 >/dev/null 2>&1 || true
     run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
     renice -n 10 -p $PID_PW_SB >/dev/null 2>&1 || true
-    # Early kernel warmup — venv + 4 JupyterLab servers + kernel warmup while
-    # heavyweight jobs are running. Finishes by ~t=20s, long before wheel is ready.
+    # Early kernel warmup — venv + JupyterLab servers + kernel warmup while
+    # heavyweight jobs are running. NOT reniced: servers persist for pw-jupyter.
     run_job jupyter-warmup         job_jupyter_warmup             & PID_WARMUP=$!
-    renice -n 10 -p $PID_WARMUP >/dev/null 2>&1 || true
 
     # ── Wait for test-js only, then build wheel ──────────────────────────────
     wait $PID_TESTJS || OVERALL=1
@@ -549,6 +548,7 @@ else
         venv=$(cat /tmp/ci-jupyter-warmup-venv)
         local rc=0
         ROOT_DIR=/repo \
+        SKIP_INSTALL=1 \
         PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
         PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
         PARALLEL=$JUPYTER_PARALLEL \
