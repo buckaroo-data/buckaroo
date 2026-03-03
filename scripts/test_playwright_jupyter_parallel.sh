@@ -359,8 +359,8 @@ while [ $NEXT -lt $TOTAL ]; do
     BATCH_USED_PORTS=()
 
     while [ $BATCH_COUNT -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
-        # No stagger needed — each notebook targets its own isolated JupyterLab
-        # server, and WebSocket-based warmup ensures kernels are ready.
+        # Stagger Chromium launches by 1s to avoid CPU spike from 9 simultaneous startups
+        [ $BATCH_COUNT -gt 0 ] && sleep 1
         local_nb="${QUEUE[$NEXT]}"
         local_logfile="$TMPDIR/${local_nb%.ipynb}.log"
         local_port=$((BASE_PORT + BATCH_COUNT))
