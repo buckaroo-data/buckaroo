@@ -299,10 +299,9 @@ else
     run_job build-wheel job_build_wheel || OVERALL=1
 
     # Cache wheel by current SHA so --phase=5b / --wheel-from can reuse it.
-    local this_sha_cache=/opt/ci/wheel-cache/$SHA
-    mkdir -p "$this_sha_cache"
-    cp dist/buckaroo-*.whl "$this_sha_cache/" 2>/dev/null || true
-    log "Cached wheel → $this_sha_cache"
+    mkdir -p "/opt/ci/wheel-cache/$SHA"
+    cp dist/buckaroo-*.whl "/opt/ci/wheel-cache/$SHA/" 2>/dev/null || true
+    log "Cached wheel → /opt/ci/wheel-cache/$SHA"
 
     # ── Wheel-dependent jobs (start as soon as wheel exists) ─────────────────
     log "=== build-wheel done — starting wheel-dependent jobs ==="
