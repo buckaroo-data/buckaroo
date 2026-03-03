@@ -31,6 +31,7 @@
 | **33** | **076f40f** | **P=6 batched + re-warmup + timeouts** | **9/9 jupyter, 13/14 overall** | **66s** | **1m44s** |
 | 33 | 0e98e13+ | P=9 (0s/1s/2s stagger, port 8900) | 1-3/9 jupyter (timeout) | 120s timeout | ~2m45s |
 | 29 | d020744 | Marimo auto-retry assertions + retries=2 | TBD (running) | N/A | reliability |
+| **34+36** | **2ba10e7** | **SKIP_INSTALL + renice + pw-server auto-retry** | **pw-server 3/3, pw-jupyter 1/3** | **76s** | **2m00s** |
 
 ---
 
@@ -753,6 +754,70 @@ This is the same class of bug identified in the marimo flakiness research (Categ
 
 **Conclusion:** PARALLEL=9 is conclusively dead on 16 vCPU. The CPU saturation threshold is somewhere between 6 and 9 concurrent Playwright+Jupyter instances. PARALLEL=6 with batching remains optimal.
 
+**Notes for later retry:** 
+I dont think its conclusively dead, but I do think we should table it.  it is so tempting to try, but obviously difficult.
+things to try - nicing the browser, the kernel, or the server, probably the kernel or the server so they are more important
+since we have reliable startup detection, maybe a single jupyter server could work
+change the stagger, also maybe just stagger the last 4 starts to 5 or 10 seconds later.  I don't believe that the cpu is absolutely saturated regardless of the stagger.
+further figure out which process is using the most CPU.
+
+
+alternatively work on some type of reduced reproduction of the bug, hopefully possible on the same server.  
+
+
+
+---
+
+### Exp 34+36 — SKIP_INSTALL + renice + pw-server auto-retry (2ba10e7)
+
+**Status:** DONE — 3 runs. pw-server flake FIXED, pw-jupyter regression needs investigation.
+**Commits:** 630cf60 (initial), da3a7ad (renice fix), 2ba10e7 (warmup fix)
+
+**Changes:**
+1. **Exp 34 (SKIP_INSTALL):** All PW test scripts check `SKIP_INSTALL=1` env var and skip `pnpm install` + `playwright install chromium`. Set in CI job wrappers. Also added to `test_playwright_jupyter_parallel.sh` (baked). Eliminates redundant pnpm resolve (~1-2s per job).
+2. **Exp 36 (renice):** `renice -n -10` for critical-path jobs (test-js), `renice -n 10` for background jobs (lint, test-python, pw-storybook, mcp, smoke, etc.). pw-jupyter and jupyter-warmup left at default (0) since warmup servers persist for pw-jupyter.
+3. **pw-server flake fix:** Replaced all one-shot `getCellText` + `expect().toBe()` with auto-retrying `expect(cellLocator()).toHaveText()` in `server.spec.ts`. Added `cellLocator` helper to `server-helpers.ts`. Simplified sort test to always double-click for descending.
+
+**Bug fix during implementation:** `nice 10 run_job ...` silently fails because `nice` is an external command that can't execute shell functions. Fixed by using `renice -n 10 -p $PID` after backgrounding.
+
+**Bug fix 2:** jupyter-warmup was reniced to nice 10, but its JupyterLab servers persist for pw-jupyter. This made the servers low-priority, causing kernel timeouts under contention. Fixed by NOT renicing jupyter-warmup.
+
+**Results:** pw-server **3/3 PASS** (flake eliminated). pw-jupyter 1/3 (regression).
+
+| Run | pw-server | pw-marimo | pw-wasm-marimo | pw-jupyter | Result | Total |
+|-----|----------|----------|---------------|-----------|--------|-------|
+| 1 | 44s | 50s | 43s | **76s** | **ALL PASS** | **2m00s** |
+| 2 | 43s | 48s | 36s | 121s (timeout) | FAIL | 2m38s |
+| 3 | 43s | 47s | 36s | 120s (timeout) | FAIL | 2m38s |
+
+**Timing (run 1 — all pass):**
+
+| Phase | Time | Notes |
+|-------|------|-------|
+| Wave 0 | 39s | test-js 6s, build-wheel 3s, jupyter-warmup 37s |
+| Wheel-dependent | 76s | pw-jupyter is critical path |
+| **Total** | **2m00s** | +16s vs Exp 33 (1m44s) |
+
+**pw-jupyter regression analysis:**
+- Run 1 (first after container restart): ALL PASS
+- Runs 2-3 (subsequent): 0/6 batch-1 notebooks complete before 120s timeout
+- 326 zombie processes accumulate across runs (jupyter-lab, python `<defunct>`)
+- Docker's PID 1 (`sleep infinity`) doesn't reap zombies
+- Ports are free (zombies don't hold resources), warmup succeeds (all 6 kernels reach idle)
+- Root cause TBD: possibly stale workspace/kernel state, or zombie accumulation degrading performance
+
+**Key findings:**
+1. **pw-server flake is FIXED** — auto-retrying `toHaveText()` eliminates the AG-Grid render race
+2. **SKIP_INSTALL works** — pnpm prompt gone from pw-jupyter log
+3. **renice works** — test-js finishes in 6s (same as before, but now with priority guarantee)
+4. **Zombie accumulation is a problem** — need `tini` or `dumb-init` as PID 1 in Docker container
+5. **pw-jupyter regression needs separate investigation** — likely unrelated to renice/SKIP_INSTALL
+
+**Next steps:**
+1. Add `tini` as PID 1 in Dockerfile (reaps zombies automatically)
+2. Investigate pw-jupyter back-to-back run failure (stale kernel state?)
+3. Once pw-jupyter fixed, merge pw-server flake fix to main
+
 ---
 
 ## Operational Notes
@@ -770,6 +835,11 @@ kill $CPU_MONITOR_PID 2>/dev/null || true
 ```
 
 When reporting results, include peak and average CPU% during each phase (Wave 0, build-wheel, heavyweight PW, pw-jupyter).
+
+### Clean runs
+do whatever you have to kill all zombie processes after each run.  put this into a script, and refine it.  I have no preference between restarting the docker container or pkill, but it needs to be reliable
+also for the log files.  these should be reliablly cleaned, and reliably retrieved
+
 
 ---
 
@@ -834,3 +904,6 @@ under CPU contention the kernel connection can take >120s.
 | d369894 | Exp 30: remove heavyweight PW gate + CPU monitoring → **1m43s** |
 | d020744 | Exp 29: marimo auto-retry assertions + retries=2 |
 | b2398d5 | Exp 31: PARALLEL=9 revisited (abandoned) + Exp 32: lean Wave 0, defer pytest → **1m51s** |
+| 630cf60 | Exp 34+36: SKIP_INSTALL, nice priority, auto-retry server assertions |
+| da3a7ad | Fix: use renice instead of nice for shell functions |
+| 2ba10e7 | Fix: don't renice jupyter-warmup (servers persist), SKIP_INSTALL in pw-jupyter |
