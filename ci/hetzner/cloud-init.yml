@@ -1,15 +1,16 @@
 #cloud-config
-# Hetzner CCX33 provisioning for Buckaroo CI.
+# Buckaroo CI server provisioning (Ubuntu 24.04).
+# Works on any cloud provider that supports cloud-init (Hetzner, Vultr, etc).
 #
-# Usage:
+# Usage examples:
+#   # Hetzner:
 #   hcloud server create \
-#     --name buckaroo-ci \
-#     --type ccx33 \
-#     --image ubuntu-24.04 \
-#     --user-data-from-file ci/hetzner/cloud-init.yml \
-#     --ssh-key <your-key>
+#     --name buckaroo-ci --type ccx33 --image ubuntu-24.04 \
+#     --user-data-from-file ci/hetzner/cloud-init.yml --ssh-key <your-key>
 #
-# After provisioning completes (~8 min):
+#   # Vultr: paste this as "User Data" when creating a Cloud Compute instance.
+#
+# After provisioning completes (~10 min):
 #   1. SSH into the server.
 #   2. Fill in /opt/ci/.env (copy from ci/hetzner/.env.example).
 #   3. systemctl start buckaroo-webhook
@@ -41,7 +42,7 @@ write_files:
       GITHUB_TOKEN=
       WEBHOOK_SECRET=
       GITHUB_REPO=buckaroo-data/buckaroo
-      HETZNER_SERVER_ID=
+      # Server IP (for log URLs in GitHub commit statuses)
       HETZNER_SERVER_IP=
 
   - path: /etc/systemd/system/buckaroo-webhook.service
@@ -104,7 +105,7 @@ runcmd:
   - useradd -m -s /bin/bash -G docker ci
 
   # ── Directory structure ──────────────────────────────────────────────────────
-  - mkdir -p /opt/ci/logs /opt/ci/hashes
+  - mkdir -p /opt/ci/logs /opt/ci/hashes /opt/ci/runner /opt/ci/js-cache /opt/ci/queue
   - chown -R ci:ci /opt/ci
 
   # ── Clone repo ───────────────────────────────────────────────────────────────
@@ -112,9 +113,14 @@ runcmd:
   - git config --global --add safe.directory /opt/ci/repo
   - chown -R ci:ci /opt/ci/repo
 
-  # ── Webhook virtualenv (Flask + gunicorn) ────────────────────────────────────
+  # ── CI queue (directory-based job queue) ────────────────────────────────────
+  - cp /opt/ci/repo/ci/hetzner/ci-queue.sh /opt/ci/ci-queue.sh
+  - chmod +x /opt/ci/ci-queue.sh
+  - ln -sf /opt/ci/ci-queue.sh /usr/local/bin/ci-queue
+
+  # ── Webhook virtualenv (Flask + gunicorn with systemd support) ──────────────
   - python3 -m venv /opt/ci/venv
-  - /opt/ci/venv/bin/pip install --quiet flask gunicorn
+  - /opt/ci/venv/bin/pip install --quiet flask "gunicorn[setproctitle]"
   - chown -R ci:ci /opt/ci/venv
 
   # ── Build the CI Docker image ────────────────────────────────────────────────
@@ -122,6 +128,17 @@ runcmd:
     cd /opt/ci/repo && \
     docker build -f ci/hetzner/Dockerfile -t buckaroo-ci . \
       2>&1 | tee /opt/ci/logs/docker-build.log
+
+  # ── Populate CI runner scripts (bind-mounted into container) ─────────────────
+  # Copy scripts to /opt/ci/runner/ (bind-mounted as /opt/ci-runner/ in container).
+  # After initial setup, use update-runner.sh for ongoing updates.
+  - |
+    mkdir -p /opt/ci/runner && \
+    cp /opt/ci/repo/ci/hetzner/run-ci.sh /opt/ci/runner/ && \
+    cp /opt/ci/repo/ci/hetzner/lib/*.sh /opt/ci/runner/ && \
+    cp /opt/ci/repo/scripts/test_playwright_jupyter_parallel.sh /opt/ci/runner/ && \
+    chmod +x /opt/ci/runner/*.sh && \
+    sha256sum /opt/ci/repo/ci/hetzner/Dockerfile | cut -c1-64 > /opt/ci/runner/.dockerfile-hash
 
   # ── Start warm sidecar container ─────────────────────────────────────────────
   - |
