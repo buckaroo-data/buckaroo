@@ -92,7 +92,7 @@ if [ -n "${CI:-}" ] || [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]; then
     PW_REPORTER_FLAG="--reporter=list"
 fi
 
-if pnpm exec playwright test --config playwright.config.server.ts $PW_REPORTER_FLAG; then
+if pnpm exec playwright test --config playwright.config.server.ts $PW_REPORTER_FLAG ${PW_GREP:+--grep "$PW_GREP"}; then
     success "ALL SERVER PLAYWRIGHT TESTS PASSED!"
     EXIT_CODE=0
 else

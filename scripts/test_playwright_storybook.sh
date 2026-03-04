@@ -108,7 +108,7 @@ log_message "━━━━━━━━━━━━━━━━━━━━━━�
 for test_file in "${STORYBOOK_TESTS[@]}"; do
     if [ -f "$test_file" ]; then
         log_message "Running $test_file..."
-        if npx playwright test "$test_file" --reporter=line; then
+        if npx playwright test "$test_file" --reporter=line ${PW_GREP:+--grep "$PW_GREP"}; then
             success "$test_file passed!"
         else
             error "$test_file failed!"

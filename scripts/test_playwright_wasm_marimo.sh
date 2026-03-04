@@ -88,7 +88,7 @@ fi
 log_message "Running Playwright tests against WASM marimo notebook..."
 warning "Note: First test run may take 15-30 seconds for Pyodide initialization"
 
-if pnpm exec playwright test --config playwright.config.wasm-marimo.ts; then
+if pnpm exec playwright test --config playwright.config.wasm-marimo.ts ${PW_GREP:+--grep "$PW_GREP"}; then
     success "ALL WASM MARIMO PLAYWRIGHT TESTS PASSED!"
     EXIT_CODE=0
 else

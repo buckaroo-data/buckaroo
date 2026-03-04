@@ -2,77 +2,9 @@
 
 **Branch:** docs/ci-research
 **Server:** Vultr VX1 16C (137.220.56.81) — 16 vCPU/64GB, EPYC Turin Zen 5
-**Previous servers:** VX1 32C (66.42.115.86, active), VX1 16C (destroyed), Rome 32C (destroyed)
 **Best config (VX1 16C):** P=9, 0s stagger, parallel overlap — **51s** (commit 1455934, with --skip)
 **Full CI (no skip):** ~1m10s, 15-16/16 pass (timing-flaky pytest under load)
-**Archive:** See `ci-tuning-experiments-archive.md` for Exp 10-42, 51 details.
-
----
-
-## ~~Current Blocker: pw-jupyter BROKEN on VX1 32C~~ — RESOLVED
-
-**Root cause: `PARALLEL=5` caused batch server reuse.** With 9 notebooks and P=5,
-batch 2 reuses JupyterLab servers from batch 1. Kernels on reused servers never
-reach idle from the browser. Fix: `PARALLEL=9` — each notebook gets a dedicated
-server, no reuse. 4/4 b2b runs pass (commit 0103187).
-
-The ipykernel version hypothesis was wrong — both 6.29.5 and 7.2.0 fail with P=5,
-both pass with P=9. Packages were upgraded anyway (commit cd51c9e).
-
-Full investigation: [`pw-jupyter-batch-reuse-fix.md`](pw-jupyter-batch-reuse-fix.md)
-
----
-
-## Current Best Configuration (commit 09c6faa, Rome 32v — server destroyed)
-
-```
-Total: 1m42s (warm caches, 32 vCPU / 64 GB)
-├─ Wave 0 (parallel):     44s  [lint, build-js, test-python-3.13, pw-storybook, jupyter-warmup]
-├─ build-wheel:            3s  [after build-js, JS cache HIT]
-├─ test-js:               ~5s  [starts after build-js, runs in background]
-├─ wheel install:          3s  [into pre-warmed jupyter venv]
-├─ Wheel-dependent (staggered 2s apart):
-│   ├─ pw-jupyter (P=9):  52s  [critical path — 9 parallel notebooks]
-│   ├─ pw-server:         44s
-│   ├─ pw-marimo:         53s
-│   ├─ pw-wasm-marimo:    39s
-│   ├─ test-mcp-wheel:    14s
-│   ├─ smoke-test-extras:  6s  [no memory pressure on 64GB]
-│   └─ test-python 3.11/3.12/3.14: ~24s each (deferred 8s)
-```
-
-Critical path: `build-js(2s) → build-wheel(3s) → warmup-wait → wheel-install(3s) → pw-jupyter(52s)`
-
-### Key Techniques (all proven)
-
-| Technique | Exp | Impact |
-|-----------|-----|--------|
-| `window.jupyterapp` kernel check | 21 | pw-jupyter 80% → **100%** pass rate |
-| WebSocket kernel warmup in Wave 0 | 28 | -24s off pw-jupyter |
-| No heavyweight PW gate | 30 | -42s off total (1m43s vs 2m25s) |
-| tini ENTRYPOINT in Dockerfile | 37 | Zero zombies (was 100+ per run) |
-| JS build cache (tree-hash keyed) | 23 | -16s off critical path |
-| `full_build.sh` skip check fix | 24 | build-wheel 17s → 3s |
-| `expect().toPass()` polling | 15 | pw-server 50s → 37s |
-| `cellLocator()` + `toHaveText()` | 34+36 | pw-server flake fixed (3/3 PASS) |
-| SKIP_INSTALL in PW scripts | 34 | Skips redundant pnpm/playwright install in CI |
-| `renice` after fork | 36 | -10 for critical-path, +10 for background |
-| `--disable-dev-shm-usage` on all PW configs | 40 | P=9 stable (Docker 64MB /dev/shm was root cause) |
-| P=9 parallel jupyter (settle=0) | 40 | 50s pw-jupyter (down from 96s at P=4) |
-| Bind-mount CI runner scripts | 41 | No rebuild needed for script changes |
-| 2s stagger (on 64GB) | 42 | 5s→2s, saves ~6s off total vs 5s stagger |
-
-### What Doesn't Work
-
-| Approach | Exp | Why |
-|----------|-----|-----|
-| PARALLEL=3 | 14c | More batches = more overhead, worse than P=4 |
-| PARALLEL=9 on 16 vCPU | 11, 31, 33 | CPU starvation (27+ processes on 16 vCPU) |
-| 0s stagger (on 64GB) | 42 | Kernel provisioner/ZMQ contention |
-| 2s stagger (on 32GB) | 41-B | 12 Chromium in 6s exhausts RAM |
-| `nice` on shell functions | 34+36 | `nice` is external cmd, can't run bash functions |
-| `init: true` in docker-compose | 37 | Tini wraps at host level, not inside container |
-| Move pw-wasm-marimo to Wave 0 | 51 | Requires built wheel — all PW integration tests need the widget installed |
+**Archive:** See `ci-tuning-experiments-archive.md` for Exp 10-42, 51-56, 58.
 
 ---
 
@@ -80,14 +12,14 @@ Critical path: `build-js(2s) → build-wheel(3s) → warmup-wait → wheel-insta
 
 ### Trigger a CI run
 ```bash
-ssh root@66.42.115.86
-docker exec -d buckaroo-ci bash /opt/ci-runner/run-ci.sh <SHA> <BRANCH>
+ssh root@137.220.56.81
+docker exec buckaroo-ci bash /opt/ci-runner/run-ci.sh <SHA> <BRANCH>
 tail -f /opt/ci/logs/<SHA>/ci.log
 ```
 
 ### Update CI scripts (no rebuild needed)
 ```bash
-ssh root@66.42.115.86
+ssh root@137.220.56.81
 cd /opt/ci/repo && git fetch origin
 git checkout origin/<branch> -- ci/hetzner/ scripts/
 bash ci/hetzner/update-runner.sh
@@ -99,137 +31,7 @@ Report: wallclock total, per-phase timing, pass/fail per job.
 
 ---
 
-## Next Round — Detailed Experiment Plans
-
-### ~~Exp 52 — Fix ipykernel version~~ — DONE (not the blocker)
-
-Packages upgraded in commit cd51c9e (ipykernel 6.29.5→7.2.0, jupyterlab 4.5.0→4.5.5,
-jupyter-server 2.15.0→2.17.0, tornado 6.4.2→6.5.4). But this wasn't the fix —
-the real fix was PARALLEL=9 (commit 0103187). See `pw-jupyter-batch-reuse-fix.md`.
-
----
-
-### Exp 53 — Restore full parallel DAG — DONE
-
-**Result:** 1m45s → **1m11s** (-34s). All Playwright jobs pass. Commit 5b85d83.
-
-Overlapped pw-marimo (+2s), pw-server (+4s), pw-wasm-marimo (+6s), pytest (+8s)
-alongside pw-jupyter. Staggered 2s apart. Mean CPU 47.7%, peak 100% for ~15s
-during overlap window (30-45s). Works on VX1 16C — plenty of headroom.
-
-Pre-existing flaky unit tests (`test_lazy_widget_init_should_not_block`,
-`test_huge_dataframe_partial_cache_scenario`) occasionally fail due to timing
-assertions under CPU pressure. Not CI infra issues — tests need looser thresholds.
-
-**Stagger reduction (0s):** Removed the 2s inter-notebook stagger inside pw-jupyter.
-Was needed when batch server reuse was the root cause; with P=9 dedicated servers,
-no contention. pw-jupyter 48s → **36s** (-12s). Commit 61bf303.
-
-**Warmup optimization:** Reuse Docker venv (`/opt/venvs/3.13`) instead of creating
-a fresh one every run (saves ~5s). Parallel JupyterLab server polling (saves ~3s).
-Warmup 20s → **10s**. Commit 93a425d.
-
-**Current best (warm cache, 16C):** ~1m07-1m12s total, pw-jupyter 36s, warmup 10s.
-Critical path: warmup(10s) → build-wheel-wait → wheel install(1s) → pw-jupyter(36s).
-
-**Async build-wheel with renice -10:** Made build-wheel run in background with
-elevated priority so it overlaps with warmup/storybook. Marginal gain since warmup
-(9s) was already longer than build-wheel (8s). Commit 2f44b86.
-
----
-
-### Exp 53b — tmpfs ramdisk experiment — NOT WORTH IT
-
-**Goal:** Eliminate disk I/O by running CI entirely in RAM.
-**Commits:** 3a7697e → 740273a (ramdisk experiments), reverted to 2f44b86.
-**Server:** VX1 16C (137.220.56.81), 62GB RAM, 55GB free.
-
-**Approaches tried:**
-1. **In-container tmpfs** (3a7697e–ff6f1b3): Mount `/ramdisk` inside container, copy
-   repo there, work from `/ramdisk/repo`. Failed due to:
-   - `rsync` not in container → switched to tar pipe
-   - Docker tmpfs defaults to `noexec` → esbuild EACCES
-   - pnpm cross-filesystem hardlinks (store on named volume, repo on tmpfs) → `reused 0`
-   - All paths hardcoded to `/repo` (Python editable install, anywidget static files,
-     JupyterLab notebook dirs) → `FileNotFoundError: /repo/buckaroo/static/compiled.css`
-2. **Host-level tmpfs** (740273a): Mount single tmpfs at `/opt/ci/ramdisk` on host,
-   put both repo and pnpm store there, bind-mount both into container. Same filesystem
-   = hardlinks work. Zero path changes needed.
-
-**Raw benchmarks:**
-| Metric | Disk | tmpfs |
-|--------|------|-------|
-| Sequential write (256MB) | 509 MB/s | 4.9 GB/s (10x) |
-| Small file creation (10K files) | 3.66s | 0.12s (30x) |
-
-**CI results (host tmpfs, warm caches):**
-| Run | Total | build-wheel | warmup | wheel install | pw-jupyter |
-|-----|-------|-------------|--------|---------------|------------|
-| Disk baseline (2f44b86) | 1m06s | 8s | 9s | **5s** | 36s |
-| tmpfs run 2 (warm) | 1m06s | 8s | 10s | **1s** | 36s |
-| tmpfs run 3 (warm) | 1m06s | 7s | 11s | **1s** | 35s |
-
-| Metric | Disk | tmpfs |
-|--------|------|-------|
-| iowait mean | 9.7% | 8.8% |
-| iowait max | 52 | 37 |
-| CPU mean | 47.0% | 46.3% |
-
-**Conclusion:** tmpfs saves 4s on wheel install (5s→1s) and reduces iowait peaks,
-but total CI time is identical because the critical path is CPU-bound (pw-jupyter 35-36s).
-The 30x small-file speedup doesn't help when I/O phases overlap with CPU-heavy work.
-
-**Not worth the complexity:**
-- Requires host-level tmpfs mount (lost on reboot, needs cloud-init automation)
-- pnpm store must be on same tmpfs for hardlinks (375MB duplication)
-- Cold start after reboot needs full re-clone + pnpm install
-- Linux page cache already makes warm reads RAM-speed
-
-**Reverted to disk-based approach (commit 2f44b86).**
-
----
-
-### Exp 54 — Fast-fail mode — DONE
-
-**Commits:** 69e46e0 (fast-fail), 3528d5f (pnpm install race fix), 1455934 (ci_pkill self-kill fix)
-
-Implemented `--fast-fail` flag. Gates after build-js and build-wheel abort CI if either
-fails. Also reduced CI_TIMEOUT from 240s to 180s.
-
-**Side fix (3528d5f):** `full_build.sh` had `pnpm install` on line 30 that ran even when
-dist existed. This "Recreated" node_modules while test-js was reading them — race condition.
-Fixed: skip pnpm install if node_modules already exists.
-
----
-
-### Exp 55 — Selective test runs (`--only` / `--skip`) — DONE
-
-**Commits:** e3b4d31 (--only/--skip), 1455934 (ci_pkill fix)
-
-Implemented `--only=JOB,JOB` and `--skip=JOB,JOB` flags. `should_run()` checks filters
-before each `run_job`. Dependencies not auto-resolved (documented).
-
-**Bug found:** `pkill -9 -f 'marimo'` matched the CI script's own args
-(`--skip=playwright-wasm-marimo`) and killed it during cleanup. Fixed with `ci_pkill()`
-helper that excludes `$$` from matches.
-
-**Results (1455934, VX1 16C):**
-
-| Mode | Total | Jobs run | Result |
-|------|-------|----------|--------|
-| `--skip=3.11,3.12,3.14,wasm-marimo` | **51s** | 12/16 | ALL PASS |
-| `--only=lint-python,test-python-3.13` | **20s** | 2/16 | ALL PASS |
-| Full run (no filter) | ~1m10s | 16/16 | 15/16 PASS (flaky timing) |
-
----
-
-### Exp 56 — Fix GitHub CI on this branch — ALREADY PASSING
-
-GitHub CI on `docs/ci-research` is consistently passing. Last 3 completed Checks runs:
-all `success`. The `cancelled` runs are from rapid pushes superseding earlier runs.
-No action needed.
-
----
+## Open Experiments
 
 ### Exp 57 — Deterministic tuning script
 
@@ -261,31 +63,6 @@ No action needed.
 - `STAGGER_DELAY` × `JUPYTER_PARALLEL`: P=9 with 0s stagger failed on Rome 64GB. VX1 128GB might handle it. Or might not (the bottleneck was ZMQ contention, not RAM).
 
 **Depends on:** Exp 52 (pw-jupyter must work), Exp 55 (need `--skip` to skip irrelevant jobs for focused testing, or use `--phase=5b` for jupyter-only sweeps).
-
----
-
-### Exp 58 — Stress test execution — PARTIAL (infra validated)
-
-**Server:** VX1 16C (137.220.56.81), commit 1455934
-
-Ran 3/16 safe synth commits. All 5 Playwright tests pass every time. Consistent
-failures in non-infra tests:
-
-| Job | d301edb | 55f158a | 4f24190 | Root cause |
-|-----|---------|---------|---------|------------|
-| pw-jupyter | PASS | PASS | PASS | — |
-| pw-storybook | PASS | PASS | PASS | — |
-| pw-server | PASS | PASS | PASS | — |
-| pw-wasm-marimo | PASS | PASS | PASS | — |
-| pw-marimo | FAIL | FAIL | FAIL | Old app code compat |
-| test-js | FAIL | FAIL | FAIL | Missing jest-util (old lockfile) |
-| test-python-3.13 | FAIL | FAIL | FAIL | Flaky timing under load |
-| test-python-3.11/12 | FAIL | FAIL | FAIL | Flaky timing under load |
-
-**Conclusion:** CI infrastructure is solid — all Playwright tests pass across code
-variants. The synth commits have code-level issues (old dependency lockfiles, flaky
-timing assertions) that aren't CI runner bugs. Full 16-commit run deferred — would
-show the same pattern.
 
 ---
 

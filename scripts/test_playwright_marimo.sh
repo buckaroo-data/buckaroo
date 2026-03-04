@@ -112,7 +112,12 @@ log_message "Running Playwright tests against marimo notebook..."
 
 # Tell Playwright to reuse the running server (reuseExistingServer in config
 # is only set for non-CI; we override via env so the warmup server is used)
-if MARIMO_WARMUP_PID=$MARIMO_PID pnpm test:marimo; then
+# Use direct playwright invocation when PW_GREP is set (pnpm scripts can't pass extra args).
+PW_MARIMO_CMD="pnpm test:marimo"
+if [ -n "${PW_GREP:-}" ]; then
+    PW_MARIMO_CMD="pnpm exec playwright test --config playwright.config.marimo.ts --grep $PW_GREP"
+fi
+if MARIMO_WARMUP_PID=$MARIMO_PID $PW_MARIMO_CMD; then
     success "ALL MARIMO PLAYWRIGHT TESTS PASSED!"
     EXIT_CODE=0
 else

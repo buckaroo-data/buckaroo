@@ -333,6 +333,7 @@ run_one() {
             --timeout=$timeout \
             --retries=2 \
             --output="$results_dir" \
+            ${PW_GREP:+--grep "$PW_GREP"} \
         >"$logfile" 2>&1
 }
 export -f run_one

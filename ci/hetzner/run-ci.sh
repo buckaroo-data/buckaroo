@@ -5,14 +5,22 @@
 #   docker exec -e GITHUB_TOKEN=... -e GITHUB_REPO=... buckaroo-ci \
 #     bash /repo/ci/hetzner/run-ci.sh <sha> <branch> [--phase=PHASE] [--wheel-from=SHA]
 #
-# --phase=all        Run all jobs (default, DAG-scheduled)
-# --phase=5b         Skip to playwright-jupyter only, using cached wheel.
-# --wheel-from=SHA   Use wheel cached from a different commit (for iterating
-#                    on test code without rebuilding). Falls back to $SHA.
-# --fast-fail        Abort after build-js or build-wheel failure.
-# --only=JOB,JOB     Run only listed jobs (comma-separated). Dependencies
-#                    not auto-resolved — include build-js,build-wheel,etc.
-# --skip=JOB,JOB     Skip listed jobs. Safer than --only for ad-hoc filtering.
+# --phase=all          Run all jobs (default, DAG-scheduled)
+# --phase=5b           Skip to playwright-jupyter only, using cached wheel.
+# --wheel-from=SHA     Use wheel cached from a different commit (for iterating
+#                      on test code without rebuilding). Falls back to $SHA.
+# --fast-fail          Abort after build-js or build-wheel failure.
+# --only-jobs=JOB,JOB  Run only listed jobs (comma-separated). Dependencies
+#                      not auto-resolved — include build-js,build-wheel,etc.
+# --skip-jobs=JOB,JOB  Skip listed jobs. Safer than --only for ad-hoc filtering.
+# --only=JOB,JOB       Alias for --only-jobs (backward compat).
+# --skip=JOB,JOB       Alias for --skip-jobs (backward compat).
+# --only-testcases=PAT  Run ONLY matching test cases within jobs. Comma-separated.
+#                       pytest: -k "pat1 or pat2"; Playwright: --grep "pat1|pat2"
+# --first-jobs=JOB,JOB  Run these jobs FIRST (Phase A), then all remaining (Phase B).
+#                       With --fast-fail, stops after Phase A failure.
+# --first-testcases=PAT Run matching testcases first, then full suite per job.
+#                       With --fast-fail, skip full suite if filtered run fails.
 #
 # DAG execution (each captures stdout/stderr to $RESULTS_DIR/<job>.log):
 #   Immediate:     lint-python, test-js, test-python-3.{11,12,13,14},
@@ -32,15 +40,29 @@ WHEEL_FROM=""
 FAST_FAIL=0
 ONLY_JOBS=""
 SKIP_JOBS=""
+ONLY_TESTCASES=""
+FIRST_JOBS=""
+FIRST_TESTCASES=""
 for arg in "${@:3}"; do
     case "$arg" in
         --phase=*) PHASE="${arg#*=}" ;;
         --wheel-from=*) WHEEL_FROM="${arg#*=}" ;;
         --fast-fail) FAST_FAIL=1 ;;
-        --only=*) ONLY_JOBS="${arg#*=}" ;;
-        --skip=*) SKIP_JOBS="${arg#*=}" ;;
+        --only-jobs=*|--only=*) ONLY_JOBS="${arg#*=}" ;;
+        --skip-jobs=*|--skip=*) SKIP_JOBS="${arg#*=}" ;;
+        --only-testcases=*) ONLY_TESTCASES="${arg#*=}" ;;
+        --first-jobs=*) FIRST_JOBS="${arg#*=}" ;;
+        --first-testcases=*) FIRST_TESTCASES="${arg#*=}" ;;
     esac
 done
+
+# Mutual exclusion checks
+if [[ -n "$FIRST_JOBS" && -n "$ONLY_JOBS" ]]; then
+    echo "ERROR: --first-jobs and --only-jobs are mutually exclusive" >&2; exit 1
+fi
+if [[ -n "$FIRST_TESTCASES" && -n "$ONLY_TESTCASES" ]]; then
+    echo "ERROR: --first-testcases and --only-testcases are mutually exclusive" >&2; exit 1
+fi
 
 REPO_DIR=/repo
 RESULTS_DIR=/opt/ci/logs/$SHA
@@ -62,9 +84,11 @@ if [[ -x "$CI_RUNNER_DIR/capture-versions.sh" ]]; then
     bash "$CI_RUNNER_DIR/capture-versions.sh" > "$RESULTS_DIR/versions.txt" 2>&1
 fi
 
-# Job filtering: --only=job1,job2 runs only listed jobs; --skip=job1,job2 skips them.
+# Job filtering: --only-jobs / --skip-jobs / --first-jobs (phase-aware).
 # Dependencies are NOT auto-resolved — include build-js,build-wheel,jupyter-warmup
-# manually if you --only a job that depends on them.
+# manually if you --only-jobs a job that depends on them.
+# FIRST_JOBS_PHASE: set to "A" or "B" by run_dag() for --first-jobs support.
+FIRST_JOBS_PHASE=""
 should_run() {
     local name=$1
     if [[ -n "$ONLY_JOBS" ]]; then
@@ -73,8 +97,26 @@ should_run() {
     if [[ -n "$SKIP_JOBS" ]]; then
         [[ ",$SKIP_JOBS," == *",$name,"* ]] && return 1 || return 0
     fi
+    if [[ -n "$FIRST_JOBS" ]]; then
+        local is_first=0
+        [[ ",$FIRST_JOBS," == *",$name,"* ]] && is_first=1
+        if [[ "$FIRST_JOBS_PHASE" == "A" ]]; then
+            # Phase A: only first-jobs run
+            [[ $is_first -eq 1 ]] && return 0 || return 1
+        elif [[ "$FIRST_JOBS_PHASE" == "B" ]]; then
+            # Phase B: only non-first-jobs run (first-jobs already ran)
+            [[ $is_first -eq 0 ]] && return 0 || return 1
+        fi
+    fi
     return 0
 }
+
+# Testcase filter helpers: convert comma-separated patterns to pytest -k / PW --grep.
+pytest_k_expr() { [[ -z "${1:-}" ]] && return; echo "${1//,/ or }"; }
+pw_grep_expr()  { [[ -z "${1:-}" ]] && return; echo "${1//,/|}"; }
+
+# maybe_renice: wraps renice; skipped when DISABLE_RENICE=1 (Exp 60).
+maybe_renice() { [[ "${DISABLE_RENICE:-0}" == "1" ]] && return 0; renice "$@" >/dev/null 2>&1 || true; }
 
 # Run a job: captures output, returns exit code. Skips if filtered out.
 # run_job <name> <cmd> [args...]
@@ -209,7 +251,7 @@ CI_TIMEOUT=${CI_TIMEOUT:-180}
 WATCHDOG_PID=$!
 
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
-log "CI runner: $RUNNER_VERSION  phase=$PHASE${ONLY_JOBS:+  only=$ONLY_JOBS}${SKIP_JOBS:+  skip=$SKIP_JOBS}"
+log "CI runner: $RUNNER_VERSION  phase=$PHASE${ONLY_JOBS:+  only-jobs=$ONLY_JOBS}${SKIP_JOBS:+  skip-jobs=$SKIP_JOBS}${FIRST_JOBS:+  first-jobs=$FIRST_JOBS}${ONLY_TESTCASES:+  only-tc=$ONLY_TESTCASES}${FIRST_TESTCASES:+  first-tc=$FIRST_TESTCASES}"
 log "Checkout $SHA (branch: $BRANCH)"
 cd "$REPO_DIR"
 git fetch origin
@@ -284,19 +326,20 @@ job_test_python() {
 
     # Ignored in Docker — require forkserver/spawn multiprocessing which behaves
     # differently inside container PID namespaces and takes >1s to spawn.
-    # mp_timeout_decorator_test.py: entire file ignored (new tests added regularly).
-    # multiprocessing_executor_test.py: test_multiprocessing_executor_success fails
-    # with "module '__main__' has no attribute '__spec__'" in Docker.
-    # test_server_killed_on_parent_death: SIGKILL propagation differs in containers.
-    # Files ignored: multiprocessing and server-subprocess tests fail under
-    # DAG concurrency (12 simultaneous jobs). Covered by test-mcp-wheel job
-    # which runs server integration tests in isolation with the built wheel.
-    /opt/venvs/$v/bin/python -m pytest tests/unit -m "not slow" --color=yes \
-        -n 4 --dist load \
-        --ignore=tests/unit/file_cache/mp_timeout_decorator_test.py \
-        --ignore=tests/unit/file_cache/multiprocessing_executor_test.py \
-        --ignore=tests/unit/server/test_mcp_server_integration.py \
+    local pytest_args=(
+        tests/unit -m "not slow" --color=yes
+        -n "${PYTEST_WORKERS:-4}" --dist load
+        --ignore=tests/unit/file_cache/mp_timeout_decorator_test.py
+        --ignore=tests/unit/file_cache/multiprocessing_executor_test.py
+        --ignore=tests/unit/server/test_mcp_server_integration.py
         --deselect "tests/unit/server/test_mcp_tool_cleanup.py::TestServerMonitor::test_server_killed_on_parent_death"
+    )
+    # Testcase filtering: --only-testcases or --first-testcases
+    local k_expr
+    k_expr=$(pytest_k_expr "${PYTEST_K_FILTER:-}")
+    [[ -n "$k_expr" ]] && pytest_args+=(-k "$k_expr")
+
+    /opt/venvs/$v/bin/python -m pytest "${pytest_args[@]}"
 }
 
 job_build_wheel() {
@@ -365,6 +408,7 @@ job_playwright_storybook() {
     SKIP_INSTALL=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-storybook-$$ \
+    PW_GREP="${PW_GREP_FILTER:-}" \
         bash scripts/test_playwright_storybook.sh
 }
 
@@ -373,6 +417,7 @@ job_playwright_server() {
     SKIP_INSTALL=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-server-$$ \
+    PW_GREP="${PW_GREP_FILTER:-}" \
         bash scripts/test_playwright_server.sh
 }
 
@@ -384,6 +429,7 @@ job_playwright_marimo() {
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-marimo-$$ \
     UV_PROJECT_ENVIRONMENT=/opt/venvs/3.13 \
+    PW_GREP="${PW_GREP_FILTER:-}" \
         bash scripts/test_playwright_marimo.sh
 }
 
@@ -394,6 +440,7 @@ job_playwright_wasm_marimo() {
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-wasm-marimo-$$ \
     UV_PROJECT_ENVIRONMENT=/opt/venvs/3.13 \
+    PW_GREP="${PW_GREP_FILTER:-}" \
         bash scripts/test_playwright_wasm_marimo.sh
 }
 
@@ -411,6 +458,7 @@ job_playwright_jupyter() {
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
     PARALLEL=9 \
+    PW_GREP="${PW_GREP_FILTER:-}" \
         bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" --venv-location="$venv" || rc=$?
     rm -rf "$venv"
     return $rc
@@ -564,11 +612,12 @@ sys.exit(0 if state == 'idle' else 1)
     deactivate
 }
 
-export JS_CACHE_DIR JS_TREE_HASH
+export JS_CACHE_DIR JS_TREE_HASH PYTEST_WORKERS DISABLE_RENICE PW_GREP_FILTER PYTEST_K_FILTER
 export -f job_lint_python job_build_js job_test_js job_test_python job_build_wheel \
            job_test_mcp_wheel job_smoke_test_extras \
            job_playwright_storybook job_playwright_server job_playwright_marimo \
-           job_playwright_wasm_marimo job_playwright_jupyter job_jupyter_warmup
+           job_playwright_wasm_marimo job_playwright_jupyter job_jupyter_warmup \
+           pytest_k_expr pw_grep_expr maybe_renice
 
 # ── Phase routing ─────────────────────────────────────────────────────────────
 
@@ -620,141 +669,172 @@ else
     mkdir -p buckaroo/static
     touch buckaroo/static/compiled.css buckaroo/static/widget.js buckaroo/static/widget.css
 
-    # ── Wave 0: Minimal jobs — only what's needed on the critical path ──────
-    # Run one pytest (3.13) for fast signal. Delay 3.11/3.12/3.14 to reduce
-    # CPU contention during Wave 0 — they start 5s after wheel-dependent jobs.
-    log "=== Starting Wave 0 ==="
+    # ── run_dag: Execute the full CI DAG ─────────────────────────────────────
+    # Extracted to a function so --first-jobs can call it twice (Phase A then B).
+    run_dag() {
+        local stagger=${STAGGER_DELAY:-2}
 
-    # renice after fork: -10 = critical path, 10 = background work
-    # (nice can't run shell functions; renice changes priority of running PID)
-    run_job lint-python            job_lint_python                & PID_LINT=$!
-    renice -n 10 -p $PID_LINT >/dev/null 2>&1 || true
-    # Exp 35: split build-js (critical path) from test-js (background).
-    # build-wheel gates only on build-js, not on test-js.
-    run_job build-js               job_build_js                   & PID_BUILDJS=$!
-    renice -n -10 -p $PID_BUILDJS >/dev/null 2>&1 || true
-    run_job test-python-3.13       bash -c "job_test_python 3.13" & PID_PY313=$!
-    renice -n 10 -p $PID_PY313 >/dev/null 2>&1 || true
-    # Early kernel warmup — venv + JupyterLab servers + kernel warmup while
-    # heavyweight jobs are running. NOT reniced: servers persist for pw-jupyter.
-    run_job jupyter-warmup         job_jupyter_warmup             & PID_WARMUP=$!
+        # ── Wave 0: Minimal jobs — only what's needed on the critical path ──
+        log "=== Starting Wave 0 ==="
 
-    # ── Wait for build-js only, then build wheel + test-js + storybook ─────────
-    wait $PID_BUILDJS || OVERALL=1
-    if [[ $FAST_FAIL -eq 1 && $OVERALL -ne 0 ]]; then
-        log "FAST-FAIL: build-js failed — skipping remaining jobs"
-        wait $PID_LINT $PID_PY313 $PID_WARMUP 2>/dev/null || true
-        log "=== FAST-FAIL EXIT ==="
-        exit 1
-    fi
-    log "=== build-js done — starting build-wheel + test-js + storybook ==="
+        run_job lint-python            job_lint_python                & PID_LINT=$!
+        maybe_renice -n 10 -p $PID_LINT
+        run_job build-js               job_build_js                   & PID_BUILDJS=$!
+        maybe_renice -n -10 -p $PID_BUILDJS
+        run_job test-python-3.13       bash -c "job_test_python 3.13" & PID_PY313=$!
+        maybe_renice -n 10 -p $PID_PY313
+        run_job jupyter-warmup         job_jupyter_warmup             & PID_WARMUP=$!
 
-    run_job build-wheel job_build_wheel & PID_WHEEL=$!
-    renice -n -10 -p $PID_WHEEL >/dev/null 2>&1 || true
-    run_job test-js     job_test_js     & PID_TESTJS=$!
-    renice -n 10 -p $PID_TESTJS >/dev/null 2>&1 || true
-    # Storybook needs node_modules from build-js (pnpm install); can't run in Wave 0.
-    run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
-    renice -n 10 -p $PID_PW_SB >/dev/null 2>&1 || true
+        # ── Wait for build-js, then build wheel + test-js + storybook ────────
+        wait $PID_BUILDJS || OVERALL=1
+        if [[ $FAST_FAIL -eq 1 && $OVERALL -ne 0 ]]; then
+            log "FAST-FAIL: build-js failed — skipping remaining jobs"
+            wait $PID_LINT $PID_PY313 $PID_WARMUP 2>/dev/null || true
+            log "=== FAST-FAIL EXIT ==="
+            return 1
+        fi
+        log "=== build-js done — starting build-wheel + test-js + storybook ==="
 
-    # Wait for build-wheel + warmup (both needed before pw-jupyter)
-    wait $PID_WHEEL  || OVERALL=1
-    if [[ $FAST_FAIL -eq 1 && $OVERALL -ne 0 ]]; then
-        log "FAST-FAIL: build-wheel failed — skipping remaining jobs"
-        wait $PID_LINT $PID_PY313 $PID_WARMUP $PID_TESTJS $PID_PW_SB 2>/dev/null || true
-        log "=== FAST-FAIL EXIT ==="
-        exit 1
-    fi
+        run_job build-wheel job_build_wheel & PID_WHEEL=$!
+        maybe_renice -n -10 -p $PID_WHEEL
+        run_job test-js     job_test_js     & PID_TESTJS=$!
+        maybe_renice -n 10 -p $PID_TESTJS
+        run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
+        maybe_renice -n 10 -p $PID_PW_SB
 
-    # Cache wheel by current SHA so --phase=5b / --wheel-from can reuse it.
-    mkdir -p "/opt/ci/wheel-cache/$SHA"
-    cp dist/buckaroo-*.whl "/opt/ci/wheel-cache/$SHA/" 2>/dev/null || true
-    log "Cached wheel → /opt/ci/wheel-cache/$SHA"
+        # Wait for build-wheel + warmup (both needed before pw-jupyter)
+        wait $PID_WHEEL  || OVERALL=1
+        if [[ $FAST_FAIL -eq 1 && $OVERALL -ne 0 ]]; then
+            log "FAST-FAIL: build-wheel failed — skipping remaining jobs"
+            wait $PID_LINT $PID_PY313 $PID_WARMUP $PID_TESTJS $PID_PW_SB 2>/dev/null || true
+            log "=== FAST-FAIL EXIT ==="
+            return 1
+        fi
 
-    # ── Install wheel into warm jupyter venv ─────────────────────────────────
-    wait $PID_WARMUP || OVERALL=1
-    log "=== jupyter-warmup done — installing wheel into warm venv ==="
-    JUPYTER_VENV=$(cat /tmp/ci-jupyter-warmup-venv)
-    wheel=$(ls dist/buckaroo-*.whl | head -1)
-    uv pip install --python "$JUPYTER_VENV/bin/python" "$wheel" -q
-    "$JUPYTER_VENV/bin/python" -c "import buckaroo; import pandas; import polars" 2>/dev/null || true
+        # Cache wheel by current SHA so --phase=5b / --wheel-from can reuse it.
+        mkdir -p "/opt/ci/wheel-cache/$SHA"
+        cp dist/buckaroo-*.whl "/opt/ci/wheel-cache/$SHA/" 2>/dev/null || true
+        log "Cached wheel → /opt/ci/wheel-cache/$SHA"
 
-    # ── Wheel-dependent jobs — staggered sub-waves ───────────────────────────
-    # pw-jupyter is the critical path; start it FIRST with all pre-warmed servers.
-    # Then stagger remaining jobs every 2s. 0s stagger causes pw-jupyter kernel
-    # hangs (8/9 notebooks fail) even on 32 vCPU / 64GB — likely ZMQ/kernel
-    # provisioner contention from simultaneous Chromium+kernel starts.
-    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-9}
-    log "=== build-wheel done — starting staggered wheel-dependent jobs (PARALLEL=$JUPYTER_PARALLEL) ==="
+        # ── Install wheel into warm jupyter venv ─────────────────────────────
+        wait $PID_WARMUP || OVERALL=1
+        log "=== jupyter-warmup done — installing wheel into warm venv ==="
+        JUPYTER_VENV=$(cat /tmp/ci-jupyter-warmup-venv)
+        wheel=$(ls dist/buckaroo-*.whl | head -1)
+        uv pip install --python "$JUPYTER_VENV/bin/python" "$wheel" -q
+        "$JUPYTER_VENV/bin/python" -c "import buckaroo; import pandas; import polars" 2>/dev/null || true
 
-    # t+0: pw-jupyter (critical path — uses pre-warmed servers)
-    # IMPORTANT: pw-jupyter with 9 concurrent Chromium+kernel launches is very
-    # sensitive to CPU contention. Other heavy jobs (smoke-test-extras, pw-marimo,
-    # pw-server, pytest) are DEFERRED until pw-jupyter finishes.
-    # Only test-mcp-wheel (lightweight, single process) runs concurrently.
-    job_playwright_jupyter_warm() {
-        cd /repo
-        local venv
-        venv=$(cat /tmp/ci-jupyter-warmup-venv)
-        local rc=0
-        ROOT_DIR=/repo \
-        SKIP_INSTALL=1 \
-        PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
-        PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
-        PARALLEL=$JUPYTER_PARALLEL \
-        BASE_PORT=8889 \
-            timeout 120 bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
-                --venv-location="$venv" --servers-running || rc=$?
-        # Cleanup servers (don't delete /opt/venvs/3.13 — it's the Docker venv)
-        for pid in $(cat /tmp/ci-jupyter-warmup-pids 2>/dev/null); do
-            kill "$pid" 2>/dev/null || true
-        done
-        rm -f /tmp/ci-jupyter-warmup-venv /tmp/ci-jupyter-warmup-pids
-        return $rc
+        # ── Wheel-dependent jobs — staggered sub-waves ───────────────────────
+        JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-9}
+        log "=== build-wheel done — starting staggered wheel-dependent jobs (PARALLEL=$JUPYTER_PARALLEL, stagger=${stagger}s) ==="
+
+        # t+0: pw-jupyter (critical path — uses pre-warmed servers)
+        job_playwright_jupyter_warm() {
+            cd /repo
+            local venv
+            venv=$(cat /tmp/ci-jupyter-warmup-venv)
+            local rc=0
+            ROOT_DIR=/repo \
+            SKIP_INSTALL=1 \
+            PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+            PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
+            PARALLEL=$JUPYTER_PARALLEL \
+            BASE_PORT=8889 \
+            PW_GREP="${PW_GREP_FILTER:-}" \
+                timeout 120 bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
+                    --venv-location="$venv" --servers-running || rc=$?
+            for pid in $(cat /tmp/ci-jupyter-warmup-pids 2>/dev/null); do
+                kill "$pid" 2>/dev/null || true
+            done
+            rm -f /tmp/ci-jupyter-warmup-venv /tmp/ci-jupyter-warmup-pids
+            return $rc
+        }
+        export -f job_playwright_jupyter_warm
+        run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
+
+        run_job test-mcp-wheel         job_test_mcp_wheel         & PID_MCP=$!
+        maybe_renice -n 10 -p $PID_MCP
+
+        # t+stagger: pw-marimo
+        [[ $stagger -gt 0 ]] && sleep "$stagger"
+        run_job playwright-marimo      job_playwright_marimo       & PID_PW_MA=$!
+
+        # t+2*stagger: pw-server
+        [[ $stagger -gt 0 ]] && sleep "$stagger"
+        run_job playwright-server      job_playwright_server       & PID_PW_SV=$!
+
+        # t+3*stagger: smoke + pw-wasm-marimo
+        [[ $stagger -gt 0 ]] && sleep "$stagger"
+        run_job smoke-test-extras      job_smoke_test_extras       & PID_SMOKE=$!
+        run_job playwright-wasm-marimo job_playwright_wasm_marimo  & PID_PW_WM=$!
+
+        # t+4*stagger: deferred pytest (low priority, not on critical path)
+        [[ $stagger -gt 0 ]] && sleep "$stagger"
+        run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
+        run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
+        run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
+        maybe_renice -n 10 -p $PID_PY311 $PID_PY312 $PID_PY314
+
+        # ── Wait for all jobs ────────────────────────────────────────────────
+        wait $PID_LINT    || OVERALL=1
+        wait $PID_TESTJS  || OVERALL=1
+        wait $PID_PY313   || OVERALL=1
+        wait $PID_PW_JP   || OVERALL=1
+        wait $PID_PY311   || OVERALL=1
+        wait $PID_PY312   || OVERALL=1
+        wait $PID_PY314   || OVERALL=1
+        wait $PID_PW_SB   || OVERALL=1
+        wait $PID_PW_WM   || OVERALL=1
+        wait $PID_MCP     || OVERALL=1
+        wait $PID_SMOKE   || OVERALL=1
+        wait $PID_PW_SV   || OVERALL=1
+        wait $PID_PW_MA   || OVERALL=1
     }
-    export -f job_playwright_jupyter_warm
-    run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
 
-    # Exp 53: Restore overlapping — stagger other jobs alongside pw-jupyter.
-    # Proven safe on VX1 16C (8 vCPU) through 32C. P=9 fix (no server reuse)
-    # was the real issue, not CPU contention.
-    run_job test-mcp-wheel         job_test_mcp_wheel         & PID_MCP=$!
-    renice -n 10 -p $PID_MCP >/dev/null 2>&1 || true
+    # ── Execute DAG (with --first-jobs / --first-testcases support) ──────────
 
-    # t+2s: pw-marimo
-    sleep 2
-    run_job playwright-marimo      job_playwright_marimo       & PID_PW_MA=$!
-
-    # t+4s: pw-server
-    sleep 2
-    run_job playwright-server      job_playwright_server       & PID_PW_SV=$!
-
-    # t+6s: smoke + pw-wasm-marimo
-    sleep 2
-    run_job smoke-test-extras      job_smoke_test_extras       & PID_SMOKE=$!
-    run_job playwright-wasm-marimo job_playwright_wasm_marimo  & PID_PW_WM=$!
-
-    # t+8s: deferred pytest (low priority, not on critical path)
-    sleep 2
-    run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
-    run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
-    run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
-    renice -n 10 -p $PID_PY311 $PID_PY312 $PID_PY314 >/dev/null 2>&1 || true
-
-    # ── Wait for all jobs ─────────────────────────────────────────────────────
-    wait $PID_LINT    || OVERALL=1
-    wait $PID_TESTJS  || OVERALL=1
-    wait $PID_PY313   || OVERALL=1
-    wait $PID_PW_JP   || OVERALL=1
-    wait $PID_PY311   || OVERALL=1
-    wait $PID_PY312   || OVERALL=1
-    wait $PID_PY314   || OVERALL=1
-    wait $PID_PW_SB   || OVERALL=1
-    wait $PID_PW_WM   || OVERALL=1
-    wait $PID_MCP     || OVERALL=1
-    wait $PID_SMOKE   || OVERALL=1
-    wait $PID_PW_SV   || OVERALL=1
-    wait $PID_PW_MA   || OVERALL=1
+    if [[ -n "$FIRST_TESTCASES" ]]; then
+        # Phase 1: run with testcase filter
+        log "=== FIRST-TESTCASES Phase 1: filtered run ==="
+        PYTEST_K_FILTER=$(pytest_k_expr "$FIRST_TESTCASES")
+        PW_GREP_FILTER=$(pw_grep_expr "$FIRST_TESTCASES")
+        export PYTEST_K_FILTER PW_GREP_FILTER
+        run_dag
+        PHASE1_RESULT=$OVERALL
+        if [[ $FAST_FAIL -eq 1 && $PHASE1_RESULT -ne 0 ]]; then
+            log "FAST-FAIL: filtered testcases failed — skipping full suite"
+        else
+            # Phase 2: full unfiltered run
+            log "=== FIRST-TESTCASES Phase 2: full suite ==="
+            PYTEST_K_FILTER=""
+            PW_GREP_FILTER=""
+            export PYTEST_K_FILTER PW_GREP_FILTER
+            run_dag
+        fi
+    elif [[ -n "$FIRST_JOBS" ]]; then
+        # Phase A: only first-jobs
+        log "=== FIRST-JOBS Phase A: ${FIRST_JOBS} ==="
+        FIRST_JOBS_PHASE="A"
+        run_dag
+        PHASE_A_RESULT=$OVERALL
+        if [[ $FAST_FAIL -eq 1 && $PHASE_A_RESULT -ne 0 ]]; then
+            log "FAST-FAIL: first-jobs failed — skipping Phase B"
+        else
+            # Phase B: remaining jobs
+            log "=== FIRST-JOBS Phase B: remaining jobs ==="
+            FIRST_JOBS_PHASE="B"
+            run_dag
+        fi
+    elif [[ -n "$ONLY_TESTCASES" ]]; then
+        # Single run with testcase filter
+        PYTEST_K_FILTER=$(pytest_k_expr "$ONLY_TESTCASES")
+        PW_GREP_FILTER=$(pw_grep_expr "$ONLY_TESTCASES")
+        export PYTEST_K_FILTER PW_GREP_FILTER
+        run_dag
+    else
+        # Normal: single full run
+        run_dag
+    fi
 
 fi
 

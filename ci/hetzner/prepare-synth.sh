@@ -1,15 +1,17 @@
 #!/bin/bash
-# Generate synthetic merge commits: merge latest test improvements onto old SHAs.
+# DEPRECATED: Merge commits are now pre-baked locally via create-merge-commits.sh
+# and pushed to origin as synth/* branches. stress-test.sh references the merge
+# SHAs directly — no runtime synth generation needed.
 #
-# Usage:
+# Original purpose: generate synthetic merge commits at runtime on the server.
+#
+# Usage (historical):
 #   bash prepare-synth.sh TEST_SHA SHA1 SHA2 ...
-#   bash prepare-synth.sh TEST_SHA --set=safe          # use safe commit set from stress-test.sh
-#
-# Runs inside the container's /repo (full clone). No pushes to GitHub —
-# synthetic SHAs are local-only. run-ci.sh's `git checkout SHA` works
-# with local commits.
+#   bash prepare-synth.sh TEST_SHA --set=safe
 #
 # Output: /opt/ci/synth-map.txt (OLD_SHA SYNTH_SHA per line)
+
+echo "WARNING: prepare-synth.sh is deprecated. Use create-merge-commits.sh instead." >&2
 
 set -uo pipefail
 

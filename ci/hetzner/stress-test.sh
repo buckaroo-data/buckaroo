@@ -7,6 +7,7 @@
 #   bash ci/hetzner/stress-test.sh --stagger DELAY_PY311=15 DELAY_PY312=15
 #   bash ci/hetzner/stress-test.sh --set=failing     # run known-failing commits
 #   bash ci/hetzner/stress-test.sh --set=older       # run older Jan/Feb commits
+#   bash ci/hetzner/stress-test.sh --set=new         # run 50 deeper commits
 #   bash ci/hetzner/stress-test.sh --set=all         # run all commit sets
 #   bash ci/hetzner/stress-test.sh --limit=5         # first 5 only
 #   bash ci/hetzner/stress-test.sh --dry-run         # print what would run
@@ -100,6 +101,13 @@ FAILING_COMMITS=(
     ada8bb1   # 7b9c341 Remove accidental -l and wc files          (Python Test 3.11 fail)
 )
 
+# 50 deeper commits (after fdbe325) — merge SHAs from create-merge-commits.sh --set=new.
+# Comments show original SHA. Populated after running create-merge-commits.sh.
+NEW_COMMITS=(
+    # Will be filled after running: bash ci/hetzner/create-merge-commits.sh --set=new
+    # Then paste mapping here. Format: merge_sha   # orig_sha description
+)
+
 # 16 older commits from Jan–mid Feb 2026 (pre-CI or early CI era).
 OLDER_COMMITS=(
     1c8abfd   # f10ee77 Auto-kill old server on upgrade            (2026-02-17)
@@ -129,8 +137,9 @@ else
         safe)    COMMITS=("${SAFE_COMMITS[@]}") ;;
         failing) COMMITS=("${FAILING_COMMITS[@]}") ;;
         older)   COMMITS=("${OLDER_COMMITS[@]}") ;;
-        all)     COMMITS=("${SAFE_COMMITS[@]}" "${FAILING_COMMITS[@]}" "${OLDER_COMMITS[@]}") ;;
-        *)       echo "Unknown --set value: $COMMIT_SET (use safe|failing|older|all)"; exit 1 ;;
+        new)     COMMITS=("${NEW_COMMITS[@]}") ;;
+        all)     COMMITS=("${SAFE_COMMITS[@]}" "${FAILING_COMMITS[@]}" "${OLDER_COMMITS[@]}" "${NEW_COMMITS[@]}") ;;
+        *)       echo "Unknown --set value: $COMMIT_SET (use safe|failing|older|new|all)"; exit 1 ;;
     esac
 fi
 
