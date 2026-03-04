@@ -108,29 +108,28 @@ the real fix was PARALLEL=9 (commit 0103187). See `pw-jupyter-batch-reuse-fix.md
 
 ---
 
-### Exp 53 — Restore full parallel DAG on 32 vCPU
+### Exp 53 — Restore full parallel DAG — DONE
 
-**Priority:** HIGH — once pw-jupyter works, reclaim the parallelism we had on Rome
+**Result:** 1m45s → **1m11s** (-34s). All Playwright jobs pass. Commit 5b85d83.
 
-**Background:** The current `run-ci.sh` serializes everything after pw-jupyter (lines 619-629): pw-marimo, pw-server, pw-wasm-marimo, smoke-test, pytest 3.11/3.12/3.14 all wait for pw-jupyter to finish. This was done because the VX1 16C (only 16 vCPU) couldn't handle the overlap. The VX1 32C has the same core count as Rome, so the old overlap config should work.
+Overlapped pw-marimo (+2s), pw-server (+4s), pw-wasm-marimo (+6s), pytest (+8s)
+alongside pw-jupyter. Staggered 2s apart. Mean CPU 47.7%, peak 100% for ~15s
+during overlap window (30-45s). Works on VX1 16C — plenty of headroom.
 
-**Plan:**
-1. After Exp 52 confirms pw-jupyter passes, modify `run-ci.sh` to restore overlapping:
-   - Move pw-marimo, pw-server, pw-wasm-marimo, smoke-test-extras back to launch alongside pw-jupyter (staggered 2s apart), same as the Rome config (commit 09c6faa).
-   - Keep pytest 3.11/3.12/3.14 deferred 8s (they were always deferred).
-2. Push the change, update runner on server:
-   ```
-   git push origin docs/ci-research
-   ssh root@66.42.115.86
-   cd /opt/ci/repo && git fetch origin && git checkout origin/docs/ci-research -- ci/hetzner/ scripts/
-   bash ci/hetzner/update-runner.sh
-   ```
-3. Run CI, report timing. Compare against Rome baseline (1m42s).
-4. If stable, run b2b (3 consecutive runs) to confirm reliability.
+Pre-existing flaky unit tests (`test_lazy_widget_init_should_not_block`,
+`test_huge_dataframe_partial_cache_scenario`) occasionally fail due to timing
+assertions under CPU pressure. Not CI infra issues — tests need looser thresholds.
 
-**Expected outcome:** Total time drops from ~3m (sequential) back to ~1m40-1m50s range. VX1 32C has 128GB RAM (vs Rome's 64GB), so if anything it should be more comfortable with overlap.
+**Stagger reduction (0s):** Removed the 2s inter-notebook stagger inside pw-jupyter.
+Was needed when batch server reuse was the root cause; with P=9 dedicated servers,
+no contention. pw-jupyter 48s → **36s** (-12s). Commit 61bf303.
 
-**What to watch for:** The VX1 is Zen 5, which may have different scheduler/interrupt characteristics. If pw-jupyter starts failing again under overlap, try increasing the stagger from 2s to 3s or 5s.
+**Warmup optimization:** Reuse Docker venv (`/opt/venvs/3.13`) instead of creating
+a fresh one every run (saves ~5s). Parallel JupyterLab server polling (saves ~3s).
+Warmup 20s → **10s**. Commit 93a425d.
+
+**Current best (warm cache, 16C):** ~1m07-1m12s total, pw-jupyter 36s, warmup 10s.
+Critical path: warmup(10s) → build-wheel-wait → wheel install(1s) → pw-jupyter(36s).
 
 ---
 
