@@ -601,9 +601,13 @@ else
     export -f job_playwright_jupyter_warm
     run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
 
-    # Only test-mcp-wheel runs alongside pw-jupyter (lightweight, single process)
+    # Lightweight jobs that can overlap with pw-jupyter without contention:
+    # - test-mcp-wheel: single process, pytest
+    # - pw-marimo: 1 Chromium + 1 marimo server (much lighter than 12+ procs that caused hangs)
     run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
     renice -n 10 -p $PID_MCP >/dev/null 2>&1 || true
+    run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
+    renice -n 10 -p $PID_PW_MA >/dev/null 2>&1 || true
 
     # ── Wait for pw-jupyter before starting heavy jobs ─────────────────────────
     wait $PID_PW_JP   || OVERALL=1
@@ -612,7 +616,6 @@ else
     # Now start all remaining heavy jobs in parallel (no stagger needed — pw-jupyter
     # is done, so there's no kernel contention risk)
     run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
-    run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
     run_job playwright-wasm-marimo job_playwright_wasm_marimo & PID_PW_WM=$!
     run_job playwright-server    job_playwright_server     & PID_PW_SV=$!
     run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
