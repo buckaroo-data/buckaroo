@@ -383,11 +383,10 @@ job_playwright_jupyter() {
 
 job_jupyter_warmup() {
     cd /repo
-    local venv=/tmp/ci-jupyter-warmup
-    rm -rf "$venv"
-    uv venv "$venv" --python 3.13 -q
-    uv pip install --python "$venv/bin/python" \
-        jupyterlab anywidget polars websocket-client -q
+    # Reuse the Docker-built venv (already has jupyterlab, anywidget, polars).
+    # Just ensure websocket-client is there (for kernel warmup).
+    local venv=/opt/venvs/3.13
+    uv pip install --python "$venv/bin/python" websocket-client -q 2>/dev/null || true
     source "$venv/bin/activate"
 
     # Save venv path for later phases
@@ -422,20 +421,26 @@ job_jupyter_warmup() {
         pids+=($!)
     done
 
-    # Poll all servers until each responds (up to 30s)
+    # Poll all servers in parallel until each responds (up to 30s)
+    local poll_pids=()
     for slot in $(seq 0 $((PARALLEL-1))); do
         port=$((BASE_PORT + slot))
-        local started=false
-        for i in $(seq 1 30); do
-            curl -sf "http://localhost:${port}/api?token=${JUPYTER_TOKEN}" >/dev/null 2>&1 && { started=true; break; }
-            sleep 1
-        done
-        if [ "$started" = false ]; then
+        (
+            for i in $(seq 1 60); do
+                curl -sf "http://localhost:${port}/api?token=${JUPYTER_TOKEN}" >/dev/null 2>&1 && {
+                    echo "JupyterLab ready on port $port (slot $slot)"
+                    exit 0
+                }
+                sleep 0.5
+            done
             echo "JupyterLab on port $port failed to start"
-            cat "/tmp/jupyter-port${port}.log" || true
-            return 1
-        fi
-        echo "JupyterLab ready on port $port (slot $slot)"
+            cat "/tmp/jupyter-port${port}.log" 2>/dev/null || true
+            exit 1
+        ) &
+        poll_pids+=($!)
+    done
+    for pid in "${poll_pids[@]}"; do
+        if ! wait "$pid"; then return 1; fi
     done
 
     # Save PIDs for cleanup
@@ -649,11 +654,10 @@ else
         BASE_PORT=8889 \
             timeout 120 bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" \
                 --venv-location="$venv" --servers-running || rc=$?
-        # Cleanup servers + venv
+        # Cleanup servers (don't delete /opt/venvs/3.13 — it's the Docker venv)
         for pid in $(cat /tmp/ci-jupyter-warmup-pids 2>/dev/null); do
             kill "$pid" 2>/dev/null || true
         done
-        rm -rf "$venv"
         rm -f /tmp/ci-jupyter-warmup-venv /tmp/ci-jupyter-warmup-pids
         return $rc
     }
