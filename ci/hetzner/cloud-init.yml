@@ -1,0 +1,162 @@
+#cloud-config
+# Buckaroo CI server provisioning (Ubuntu 24.04).
+# Works on any cloud provider that supports cloud-init (Hetzner, Vultr, etc).
+#
+# Usage examples:
+#   # Hetzner:
+#   hcloud server create \
+#     --name buckaroo-ci --type ccx33 --image ubuntu-24.04 \
+#     --user-data-from-file ci/hetzner/cloud-init.yml --ssh-key <your-key>
+#
+#   # Vultr: paste this as "User Data" when creating a Cloud Compute instance.
+#
+# After provisioning completes (~10 min):
+#   1. SSH into the server.
+#   2. Fill in /opt/ci/.env (copy from ci/hetzner/.env.example).
+#   3. systemctl start buckaroo-webhook
+#   4. Configure the GitHub webhook:
+#        URL: http://<server-ip>:9000/webhook
+#        Content-type: application/json
+#        Secret: value from .env WEBHOOK_SECRET
+#        Events: Pushes, Pull requests
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - git
+  - curl
+  - python3
+  - python3-pip
+  - python3-venv
+  - ufw
+  - fail2ban
+  - ca-certificates
+  - gnupg
+
+write_files:
+  - path: /opt/ci/.env
+    permissions: "0600"
+    content: |
+      # Fill in these values — see ci/hetzner/.env.example
+      GITHUB_TOKEN=
+      WEBHOOK_SECRET=
+      GITHUB_REPO=buckaroo-data/buckaroo
+      # Server IP (for log URLs in GitHub commit statuses)
+      HETZNER_SERVER_IP=
+
+  - path: /etc/systemd/system/buckaroo-webhook.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Buckaroo CI Webhook
+      After=network.target docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=notify
+      User=ci
+      WorkingDirectory=/opt/ci
+      EnvironmentFile=/opt/ci/.env
+      ExecStart=/opt/ci/venv/bin/gunicorn \
+        --workers 1 \
+        --bind 0.0.0.0:9000 \
+        --chdir /opt/ci/repo/ci/hetzner \
+        --timeout 0 \
+        webhook:app
+      Restart=always
+      RestartSec=5
+      NotifyAccess=main
+      WatchdogSec=60
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/cron.weekly/ci-disk-hygiene
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Weekly disk cleanup: prune unused Docker objects and old CI logs.
+      docker system prune --force
+      find /opt/ci/logs -mindepth 1 -maxdepth 1 -type d \
+        -mtime +7 -exec rm -rf {} +
+
+  - path: /etc/cron.d/ci-dead-mans-switch
+    permissions: "0644"
+    content: |
+      # Weekdays at 9am: warn if no successful CI run in 24h.
+      0 9 * * 1-5 ci test -f /opt/ci/last-success && \
+        [ $(( $(date +%s) - $(stat -c %Y /opt/ci/last-success) )) -lt 86400 ] || \
+        echo "WARNING: no successful CI run in 24h" >> /opt/ci/logs/health-warnings.log
+
+runcmd:
+  # ── Docker ──────────────────────────────────────────────────────────────────
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - |
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+    https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    > /etc/apt/sources.list.d/docker.list
+  - apt-get update -q
+  - apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+  # ── ci user ─────────────────────────────────────────────────────────────────
+  - useradd -m -s /bin/bash -G docker ci
+
+  # ── Directory structure ──────────────────────────────────────────────────────
+  - mkdir -p /opt/ci/logs /opt/ci/hashes /opt/ci/runner /opt/ci/js-cache /opt/ci/queue
+  - chown -R ci:ci /opt/ci
+
+  # ── Clone repo ───────────────────────────────────────────────────────────────
+  - git clone --branch main https://github.com/buckaroo-data/buckaroo /opt/ci/repo
+  - git config --global --add safe.directory /opt/ci/repo
+  - chown -R ci:ci /opt/ci/repo
+
+  # ── CI queue (directory-based job queue) ────────────────────────────────────
+  - cp /opt/ci/repo/ci/hetzner/ci-queue.sh /opt/ci/ci-queue.sh
+  - chmod +x /opt/ci/ci-queue.sh
+  - ln -sf /opt/ci/ci-queue.sh /usr/local/bin/ci-queue
+
+  # ── Webhook virtualenv (Flask + gunicorn with systemd support) ──────────────
+  - python3 -m venv /opt/ci/venv
+  - /opt/ci/venv/bin/pip install --quiet flask "gunicorn[setproctitle]"
+  - chown -R ci:ci /opt/ci/venv
+
+  # ── Build the CI Docker image ────────────────────────────────────────────────
+  - |
+    cd /opt/ci/repo && \
+    docker build -f ci/hetzner/Dockerfile -t buckaroo-ci . \
+      2>&1 | tee /opt/ci/logs/docker-build.log
+
+  # ── Populate CI runner scripts (bind-mounted into container) ─────────────────
+  # Copy scripts to /opt/ci/runner/ (bind-mounted as /opt/ci-runner/ in container).
+  # After initial setup, use update-runner.sh for ongoing updates.
+  - |
+    mkdir -p /opt/ci/runner && \
+    cp /opt/ci/repo/ci/hetzner/run-ci.sh /opt/ci/runner/ && \
+    cp /opt/ci/repo/ci/hetzner/lib/*.sh /opt/ci/runner/ && \
+    cp /opt/ci/repo/scripts/test_playwright_jupyter_parallel.sh /opt/ci/runner/ && \
+    chmod +x /opt/ci/runner/*.sh && \
+    sha256sum /opt/ci/repo/ci/hetzner/Dockerfile | cut -c1-64 > /opt/ci/runner/.dockerfile-hash
+
+  # ── Start warm sidecar container ─────────────────────────────────────────────
+  - |
+    cd /opt/ci/repo/ci/hetzner && \
+    docker compose up -d
+
+  # ── Firewall: SSH + webhook port only ────────────────────────────────────────
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow ssh
+  - ufw allow 9000/tcp
+  - ufw --force enable
+
+  # ── Enable systemd services ───────────────────────────────────────────────────
+  - systemctl daemon-reload
+  - systemctl enable fail2ban buckaroo-webhook
+  - systemctl start fail2ban
+  # webhook is NOT auto-started: fill in /opt/ci/.env first, then start manually.
+
+  - |
+    echo "cloud-init complete. Fill in /opt/ci/.env then: systemctl start buckaroo-webhook"
