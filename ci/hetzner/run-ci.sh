@@ -608,12 +608,16 @@ else
     wait $PID_BUILDJS || OVERALL=1
     log "=== build-js done — starting build-wheel + test-js + storybook ==="
 
-    run_job build-wheel job_build_wheel || OVERALL=1
+    run_job build-wheel job_build_wheel & PID_WHEEL=$!
+    renice -n -10 -p $PID_WHEEL >/dev/null 2>&1 || true
     run_job test-js     job_test_js     & PID_TESTJS=$!
     renice -n 10 -p $PID_TESTJS >/dev/null 2>&1 || true
     # Storybook needs node_modules from build-js (pnpm install); can't run in Wave 0.
     run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
     renice -n 10 -p $PID_PW_SB >/dev/null 2>&1 || true
+
+    # Wait for build-wheel + warmup (both needed before pw-jupyter)
+    wait $PID_WHEEL  || OVERALL=1
 
     # Cache wheel by current SHA so --phase=5b / --wheel-from can reuse it.
     mkdir -p "/opt/ci/wheel-cache/$SHA"
