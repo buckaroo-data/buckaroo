@@ -613,17 +613,19 @@ else
     renice -n 10 -p $PID_PW_WM >/dev/null 2>&1 || true
     run_job playwright-server      job_playwright_server       & PID_PW_SV=$!
     renice -n 10 -p $PID_PW_SV >/dev/null 2>&1 || true
+    # test-python: 3 × pytest -n 4 = 12 workers. 32 vCPU handles this fine.
+    run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
+    renice -n 10 -p $PID_PY311 >/dev/null 2>&1 || true
+    run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
+    renice -n 10 -p $PID_PY312 >/dev/null 2>&1 || true
+    run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
 
-    # ── Wait for pw-jupyter before starting heavy jobs ─────────────────────────
+    # ── Wait for pw-jupyter before starting heavy IO jobs ──────────────────────
     wait $PID_PW_JP   || OVERALL=1
     log "=== pw-jupyter done — starting remaining jobs ==="
 
-    # Heavy jobs deferred: smoke-test-extras (6 parallel uv pip install) and
-    # test-python (3 × pytest -n 4 = 12 workers) would cause kernel contention.
+    # Deferred: smoke-test-extras (6 parallel uv pip install) causes memory/IO pressure
     run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
-    run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
-    run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
-    run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
 
     # ── Wait for all jobs ─────────────────────────────────────────────────────
     wait $PID_LINT    || OVERALL=1
