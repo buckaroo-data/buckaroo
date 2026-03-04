@@ -1,15 +1,16 @@
 import { test, expect } from '@playwright/test';
 import { Page } from '@playwright/test';
 
-const JUPYTER_BASE_URL = 'http://localhost:8889';
-const JUPYTER_TOKEN = 'test-token-12345';
-const DEFAULT_TIMEOUT = 8000; // 8 seconds for most operations
-const NAVIGATION_TIMEOUT = 10000; // 10 seconds max for navigation
+const JUPYTER_BASE_URL = process.env.JUPYTER_BASE_URL || 'http://localhost:8889';
+const JUPYTER_TOKEN = process.env.JUPYTER_TOKEN || 'test-token-12345';
+const DEFAULT_TIMEOUT = 30000; // 30 seconds — JupyterLab UI can be slow under concurrency
+const CELL_EXEC_TIMEOUT = 120000; // kernel startup can be slow when 8 run concurrently
+const NAVIGATION_TIMEOUT = 30000; // 30 seconds for navigation under concurrency
 
-async function waitForAgGrid(outputArea: any, timeout = 5000) {
-  // Wait for ag-grid to be present and rendered
+async function waitForAgGrid(outputArea: any, timeout = DEFAULT_TIMEOUT) {
+  // Wait for ag-grid to be present and rendered; 'visible' ensures column layout is done
   await outputArea.locator('.ag-root-wrapper').first().waitFor({ state: 'attached', timeout });
-  await outputArea.locator('.ag-cell').first().waitFor({ state: 'attached', timeout });
+  await outputArea.locator('.ag-cell').first().waitFor({ state: 'visible', timeout });
 }
 
 // Helper function to get cell content by row and column
@@ -105,23 +106,63 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Notebook loaded');
 
-    // Find and run the first code cell
-    console.log(`▶️ Executing widget code from ${notebookName}...`);
-    // Wait for notebook to be fully interactive
-    await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
-    // Focus on the notebook and use keyboard shortcut to run cell (Shift+Enter)
-    // Use dispatchEvent to trigger click without visibility requirement
-    await page.locator('.jp-Notebook').first().dispatchEvent('click');
-    await page.waitForTimeout(200);
-    await page.keyboard.press('Shift+Enter');
+    // Wait for kernel to be connected and idle by querying JupyterLab's internal
+    // state directly. This checks the EXACT same `session.kernel` condition that
+    // CodeCell.execute() checks at widget.ts:1750 — if kernel is null, execute()
+    // silently returns void with no error. DOM-based checks (ExecutionIndicator)
+    // lag behind and burn timeout when the element doesn't exist yet.
+    console.log('⏳ Waiting for kernel to be ready (jupyterapp internal state)...');
+    try {
+      await page.waitForFunction(() => {
+        const app = (window as any).jupyterapp;
+        if (!app) return false;
+        const widget = app.shell.currentWidget;
+        if (!widget?.sessionContext?.session?.kernel) return false;
+        const kernel = widget.sessionContext.session.kernel;
+        return kernel.connectionStatus === 'connected' && kernel.status === 'idle';
+      }, { timeout: 60000 });
+      console.log('✅ Kernel connected and idle');
+    } catch {
+      console.log('⚠️ Kernel ready wait timed out — proceeding with retry loop');
+    }
 
-    // Wait for cell execution to complete
-    console.log('⏳ Waiting for cell execution...');
+    console.log(`▶️ Executing widget code from ${notebookName}...`);
     const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    // Wait for widget to render
-    await page.waitForTimeout(800);
-    console.log('✅ Cell executed');
+    const outputLocator = outputArea.locator('.jp-OutputArea-output').first();
+
+    // Try UI-based execution first (fast path when UI is responsive)
+    let cellExecuted = false;
+    try {
+      const firstCell = page.locator('.jp-Cell').first();
+      await firstCell.click({ timeout: 5000 });
+      await page.keyboard.press('Shift+Enter');
+      await outputLocator.waitFor({ state: 'attached', timeout: 15000 });
+      cellExecuted = true;
+      console.log('✅ Cell executed (UI path)');
+    } catch {
+      console.log('⚠️ UI path failed, retrying with longer waits...');
+    }
+
+    // Retry with longer waits if UI path failed
+    if (!cellExecuted) {
+      const deadline = Date.now() + CELL_EXEC_TIMEOUT;
+      for (let attempt = 2; Date.now() < deadline; attempt++) {
+        console.log(`⏳ Shift+Enter attempt ${attempt}...`);
+        try {
+          // Use dispatchEvent which doesn't require visibility
+          await page.locator('.jp-Cell').first().dispatchEvent('click');
+          await page.waitForTimeout(1000);
+          await page.keyboard.press('Shift+Enter');
+          await outputLocator.waitFor({ state: 'attached', timeout: 15000 });
+          console.log('✅ Cell executed');
+          cellExecuted = true;
+          break;
+        } catch {
+          if (Date.now() >= deadline) throw new Error(`Cell execution timed out after ${CELL_EXEC_TIMEOUT}ms`);
+          console.log(`⚠️ No output after attempt ${attempt}, retrying...`);
+        }
+      }
+    }
 
     // Check for any error messages in the output
     // Target only stdout text output, not widget output (which also has .jp-OutputArea-output class)
@@ -133,29 +174,16 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
         throw new Error(`Cell execution failed with error: ${outputText}`);
     }
 
-    // Wait for the buckaroo widget to appear
+    // Wait for the buckaroo widget to appear — deterministic wait instead of fixed delay
     console.log('⏳ Waiting for buckaroo widget...');
-    
-    // Wait a moment for widget to render
-    await page.waitForTimeout(500);
-    
-    // Check for any buckaroo-related elements and ag-grid on the WHOLE PAGE
-    // (widget might be in a different output area than expected)
+    await page.locator('[class*="buckaroo"], .ag-root-wrapper').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     const buckarooElements = await page.locator('[class*="buckaroo"]').count();
     const agGridElements = await page.locator('.ag-root-wrapper, .ag-row').count();
-    
-    // If we find buckaroo or ag-grid elements, the widget is rendering - proceed
-    if (buckarooElements > 0 || agGridElements > 0) {
-        console.log(`✅ Found ${buckarooElements} buckaroo elements, ${agGridElements} ag-grid elements on page`);
-    } else {
-        // Only fail if we truly can't find any widget elements
-        console.log('❌ Widget failed to appear. No buckaroo or ag-grid elements found.');
-        throw new Error(`Widget failed to render. Found 0 buckaroo elements, 0 ag-grid elements.`);
-    }
+    console.log(`✅ Found ${buckarooElements} buckaroo elements, ${agGridElements} ag-grid elements on page`);
 
     // Wait for ag-grid to render
     console.log('⏳ Waiting for ag-grid to render...');
-    await waitForAgGrid(page);
+    await waitForAgGrid(outputArea);
     console.log('✅ ag-grid rendered successfully');
 
     // Verify the grid structure on the page
