@@ -8,7 +8,7 @@
 #   WHEEL_SHA   — SHA with a cached wheel at /opt/ci/wheel-cache/<SHA>/
 #                 No wheel? Run full pipeline first: run-ci.sh <SHA> <BRANCH>
 #   TEST_SHA    — SHA to checkout for playwright test code
-#   SETTLE_TIME — seconds to wait after warmup before tests (default: 15)
+#   SETTLE_TIME — seconds to wait after warmup before tests (default: 0)
 #
 # Total timeout: 240s (CI_TIMEOUT env to override). Parallelism: JUPYTER_PARALLEL env or 4.
 # Results: /opt/ci/logs/<TEST_SHA>-pwj/
@@ -17,8 +17,8 @@ set -uo pipefail
 
 WHEEL_SHA=${1:?usage: run-pw-jupyter.sh WHEEL_SHA TEST_SHA [SETTLE_TIME]}
 TEST_SHA=${2:?usage: run-pw-jupyter.sh WHEEL_SHA TEST_SHA [SETTLE_TIME]}
-SETTLE_TIME=${3:-15}
-PARALLEL=${JUPYTER_PARALLEL:-4}
+SETTLE_TIME=${3:-0}
+PARALLEL=${JUPYTER_PARALLEL:-9}
 BASE_PORT=8889
 
 REPO_DIR=/repo

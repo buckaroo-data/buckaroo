@@ -315,7 +315,7 @@ job_playwright_jupyter() {
     ROOT_DIR=/repo \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
-    PARALLEL=4 \
+    PARALLEL=9 \
         bash "$CI_RUNNER_DIR/test_playwright_jupyter_parallel.sh" --venv-location="$venv" || rc=$?
     rm -rf "$venv"
     return $rc
@@ -334,7 +334,7 @@ job_jupyter_warmup() {
     echo "$venv" > /tmp/ci-jupyter-warmup-venv
 
     export JUPYTER_TOKEN="test-token-12345"
-    local BASE_PORT=8889 PARALLEL=${JUPYTER_PARALLEL:-4}
+    local BASE_PORT=8889 PARALLEL=${JUPYTER_PARALLEL:-9}
 
     # Clean stale state
     rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
@@ -560,7 +560,7 @@ else
     # pw-jupyter is the critical path; start it FIRST with all pre-warmed servers.
     # Then stagger remaining jobs every 5s to let pw-jupyter claim CPU headroom
     # during its initial Chromium launch + first batch of tests.
-    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-4}
+    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-9}
     log "=== build-wheel done — starting staggered wheel-dependent jobs (PARALLEL=$JUPYTER_PARALLEL) ==="
 
     # t+0: pw-jupyter (critical path — uses pre-warmed servers)

@@ -14,6 +14,9 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: 'on-first-retry',
     ...devices['Desktop Chrome'],
+    launchOptions: {
+      args: ['--disable-dev-shm-usage'],
+    },
   },
   timeout: 60_000,
 
