@@ -102,10 +102,57 @@ FAILING_COMMITS=(
 )
 
 # 50 deeper commits (after fdbe325) — merge SHAs from create-merge-commits.sh --set=new.
-# Comments show original SHA. Populated after running create-merge-commits.sh.
 NEW_COMMITS=(
-    # Will be filled after running: bash ci/hetzner/create-merge-commits.sh --set=new
-    # Then paste mapping here. Format: merge_sha   # orig_sha description
+    d7108fe0  # 5170fa2 Add DFViewerInfinite unit tests
+    f49f7275  # aab8b96 feat: automated release workflow
+    67382568  # c307fb3 fix: pandas 3.0+ compatibility
+    ebfbf28d  # 66b7b4c fix: --index-strategy unsafe-best-match
+    f2c71c73  # f2ad09d ci: add non-blocking Windows Python test
+    f3d4e867  # 366389b ci: add smoke tests for extras
+    bc22f4b8  # a918c09 Bump astral-sh/setup-uv from 6 to 7
+    1780ae73  # 094a90a Bump actions/setup-node from 4 to 6
+    415d4b8f  # b8f0900 Bump actions/github-script from 7 to 8
+    a6f0b019  # bb38628 Bump actions/checkout from 4 to 6
+    43444951  # 6ff2b56 Bump actions/cache from 4 to 5
+    77d7ebf2  # 1b0a782 feat: per-request no_browser in /load
+    1ed3d310  # 7b43be4 ci: add Dependabot
+    9d7407a2  # 5ac690b fix: summary stats inherit alignment
+    a5b88109  # 36dabd5 ci: make marimo PW tests required
+    f007011b  # cb77802 ci: publish dev wheel to TestPyPI
+    ac0d9782  # 8897a64 ci: consolidate ci.yml + build.yml
+    39d72c80  # 7545a24 ci: move JupyterLab PW to dedicated job
+    f0f755e8  # eb08afb fix: Pyodide-bundled fastparquet for WASM
+    15501c71  # 25492e7 ci: fix dead if-conditions in build.yml
+    858b9f98  # 8dcdb33 Fix marimo PW tests — display widgets as output
+    1595156a  # 7c3e07d ci: skip unnecessary dep install for lint
+    c708a603  # aacc4d3 CI: optimize jobs, add timeouts, Python 3.14
+    d836bc8f  # fc56645 CI: add Python 3.14 to test matrices
+    db0d3f0b  # 74d55a4 ci: optimize job structure + cache PW
+    ac0badd3  # 27eb8f5 CI v3: artifact upload/download
+    fb416eaf  # 1dcb47f feat/paf-v2-polars-v2 merge
+    6ad47b71  # c0635af Wire up polars widgets to DfStatsV2
+    98763844  # 3f56728 Split default_summary_stats
+    e21ff3f9  # f2f06a2 feat/light-adaptable-v2 merge
+    f3e904b5  # b4d32c0 feat/pluggable-analysis-v2 merge
+    0174137e  # f1e45dd Adapt histogram colors to light/dark
+    3971c41f  # f4ac6a6 Remove double borders on search input
+    3ad08336  # d0a4277 Fix theme-hanger background
+    e7d6c604  # 135754a Fix light mode styling
+    b1dc3eb5  # af585ec Add automatic light/dark theme support
+    aca2cb3b  # c7ba883 Add notebook context to screenshots
+    5aea6ec6  # 7e6392e Wire up pandas widgets to DfStatsV2
+    39e7af5f  # 3190319 Rewrite v1 ColAnalysis as v2 @stat functions
+    6a953f00  # 14b00ed Fix ruff lint in test file
+    ee8d1102  # a27a2b7 Fix ruff lint: remove unused imports
+    11a457aa  # 87c2957 Add runtime type enforcement at stat boundaries
+    650404b7  # 6bfdb18 Add Pluggable Analysis Framework v2
+    ce9a7cd9  # bc9a06c Add buckaroo/static/ to .gitignore
+    1870489a  # 14f5ad7 feat/fix-marimo-wasm merge
+    ae6fc1ce  # e5d78bd Remove accidental -l and wc files
+    a11541a8  # f38e56e Lower fastparquet version for Pyodide
+    fe7ecdcd  # af17de6 Trim WASM tests to single smoke test
+    9c17495b  # 0f31209 Optimize WASM tests: single page load
+    fdde46d4  # 7806961 Switch WASM test server to npx serve
 )
 
 # 16 older commits from Jan–mid Feb 2026 (pre-CI or early CI era).
