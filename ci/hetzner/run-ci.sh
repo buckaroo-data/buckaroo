@@ -96,12 +96,13 @@ pkill -9 -f playwright 2>/dev/null || true
 pkill -9 -f chromium 2>/dev/null || true
 pkill -9 -f "node.*storybook" 2>/dev/null || true
 pkill -9 -f "npm exec serve" 2>/dev/null || true
-# Kill anything on jupyter ports (8889-8893)
-for port in 8889 8890 8891 8892 8893 8894; do
+pkill -9 -f esbuild 2>/dev/null || true
+# Kill anything on jupyter ports (8889-8897, P=9)
+for port in 8889 8890 8891 8892 8893 8894 8895 8896 8897; do
     fuser -k $port/tcp 2>/dev/null || true
 done
 sleep 1  # let processes die before cleaning their files
-rm -rf /tmp/ci-jupyter-warmup* /tmp/pw-jupyter-parallel* /tmp/pw-html-* 2>/dev/null || true
+rm -rf /tmp/ci-jupyter-warmup* /tmp/pw-jupyter-parallel* /tmp/pw-html-* /tmp/pw-results-* 2>/dev/null || true
 rm -f /tmp/ci-jupyter-warmup-venv /tmp/ci-jupyter-warmup-pids 2>/dev/null || true
 # Clean JupyterLab workspace + kernel state — stale workspace files from previous
 # runs cause JupyterLab to try reconnecting dead kernels, hanging Shift+Enter.
