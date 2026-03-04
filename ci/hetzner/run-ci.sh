@@ -32,7 +32,13 @@ for arg in "${@:3}"; do
     esac
 done
 
-REPO_DIR=/repo
+REPO_SRC=/repo
+# Use ramdisk if available — all build I/O in RAM.
+if [[ -d /ramdisk ]]; then
+    REPO_DIR=/ramdisk/repo
+else
+    REPO_DIR=/repo
+fi
 RESULTS_DIR=/opt/ci/logs/$SHA
 WHEEL_CACHE_DIR=/opt/ci/wheel-cache/${WHEEL_FROM:-$SHA}
 LOG_URL="http://${HETZNER_SERVER_IP:-localhost}:9000/logs/$SHA"
@@ -176,7 +182,7 @@ WATCHDOG_PID=$!
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
 log "CI runner: $RUNNER_VERSION  phase=$PHASE"
 log "Checkout $SHA (branch: $BRANCH)"
-cd "$REPO_DIR"
+cd "$REPO_SRC"
 git fetch origin
 git checkout -f "$SHA"
 # Clean untracked/ignored files; preserve warm caches in node_modules.
@@ -185,7 +191,7 @@ git clean -fdx \
     --exclude='packages/js/node_modules' \
     --exclude='packages/node_modules'
 
-# ── JS build cache ──────────────────────────────────────────────────────────
+# ── JS build cache (compute hash while we still have .git) ─────────────────
 JS_CACHE_DIR=/opt/ci/js-cache
 JS_TREE_HASH=$(git ls-tree -r HEAD \
     packages/buckaroo-js-core/src/ \
@@ -193,6 +199,16 @@ JS_TREE_HASH=$(git ls-tree -r HEAD \
     packages/buckaroo-js-core/tsconfig.json \
     packages/buckaroo-js-core/vite.config.ts \
     2>/dev/null | sha256sum | cut -c1-16)
+
+# Copy working tree to ramdisk if available — all build I/O in RAM.
+if [[ "$REPO_DIR" != "$REPO_SRC" ]]; then
+    log "Copying repo to ramdisk..."
+    rsync -a --delete \
+        --exclude='.git' \
+        "$REPO_SRC/" "$REPO_DIR/"
+    log "Ramdisk copy done ($(du -sh "$REPO_DIR" | cut -f1))"
+fi
+cd "$REPO_DIR"
 
 if [[ -d "$JS_CACHE_DIR/$JS_TREE_HASH" ]]; then
     cp -r "$JS_CACHE_DIR/$JS_TREE_HASH" packages/buckaroo-js-core/dist
