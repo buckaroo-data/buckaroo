@@ -84,7 +84,8 @@ snapshot_container_state() {
         echo ""
         echo "--- TCP sockets ---"
         cat /proc/net/tcp 2>/dev/null | awk 'NR>1 {
-            split($2,a,":"); port=strtonum("0x" a[2])
+            cmd="printf \"%d\" 0x" substr($2, index($2,":")+1)
+            cmd | getline port; close(cmd)
             if($4=="01") st="ESTABLISHED"; else if($4=="06") st="TIME_WAIT"; else st=$4
             printf "%s port=%d\n", st, port
         }' | sort | uniq -c | sort -rn || true
@@ -627,7 +628,7 @@ else
     # Then stagger remaining jobs every 2s. 0s stagger causes pw-jupyter kernel
     # hangs (8/9 notebooks fail) even on 32 vCPU / 64GB — likely ZMQ/kernel
     # provisioner contention from simultaneous Chromium+kernel starts.
-    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-5}
+    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-9}
     log "=== build-wheel done — starting staggered wheel-dependent jobs (PARALLEL=$JUPYTER_PARALLEL) ==="
 
     # t+0: pw-jupyter (critical path — uses pre-warmed servers)
