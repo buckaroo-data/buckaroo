@@ -5,6 +5,13 @@ services:
     volumes:
       # Source code — bind-mounted so git checkout + docker exec can work on it.
       - /opt/ci/repo:/repo
+      # CI runner scripts — bind-mounted so script changes take effect instantly
+      # without rebuilding the Docker image. Only Dockerfile changes (new deps,
+      # system packages) require a rebuild. Overrides the baked-in /opt/ci-runner/.
+      # Uses /opt/ci/runner/ (separate from /opt/ci/repo/) so git checkout of
+      # arbitrary SHAs inside /repo doesn't swap out the runner mid-run.
+      # Update with: ci/hetzner/update-runner.sh
+      - /opt/ci/runner:/opt/ci-runner:ro
       # CI logs — shared with host so webhook.py can serve them at /logs/<sha>.
       - /opt/ci/logs:/opt/ci/logs
       # JS build cache — persists across container restarts.
