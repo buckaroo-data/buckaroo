@@ -25,10 +25,12 @@ BRANCH=${2:?usage: run-ci.sh SHA BRANCH [--phase=PHASE]}
 
 PHASE=all
 WHEEL_FROM=""
+FAST_FAIL=0
 for arg in "${@:3}"; do
     case "$arg" in
         --phase=*) PHASE="${arg#*=}" ;;
         --wheel-from=*) WHEEL_FROM="${arg#*=}" ;;
+        --fast-fail) FAST_FAIL=1 ;;
     esac
 done
 
@@ -606,6 +608,12 @@ else
 
     # ── Wait for build-js only, then build wheel + test-js + storybook ─────────
     wait $PID_BUILDJS || OVERALL=1
+    if [[ $FAST_FAIL -eq 1 && $OVERALL -ne 0 ]]; then
+        log "FAST-FAIL: build-js failed — skipping remaining jobs"
+        wait $PID_LINT $PID_PY313 $PID_WARMUP 2>/dev/null || true
+        log "=== FAST-FAIL EXIT ==="
+        exit 1
+    fi
     log "=== build-js done — starting build-wheel + test-js + storybook ==="
 
     run_job build-wheel job_build_wheel & PID_WHEEL=$!
@@ -618,6 +626,12 @@ else
 
     # Wait for build-wheel + warmup (both needed before pw-jupyter)
     wait $PID_WHEEL  || OVERALL=1
+    if [[ $FAST_FAIL -eq 1 && $OVERALL -ne 0 ]]; then
+        log "FAST-FAIL: build-wheel failed — skipping remaining jobs"
+        wait $PID_LINT $PID_PY313 $PID_WARMUP $PID_TESTJS $PID_PW_SB 2>/dev/null || true
+        log "=== FAST-FAIL EXIT ==="
+        exit 1
+    fi
 
     # Cache wheel by current SHA so --phase=5b / --wheel-from can reuse it.
     mkdir -p "/opt/ci/wheel-cache/$SHA"
