@@ -24,6 +24,7 @@ services:
       - PNPM_STORE_DIR=/opt/pnpm-store
     # Warm sidecar: stays alive between CI runs, avoiding ~500ms docker run overhead.
     # tini as PID 1 (ENTRYPOINT in Dockerfile) reaps zombies from docker exec'd CI runs.
+    shm_size: '2g'
     command: sleep infinity
     restart: unless-stopped
 
