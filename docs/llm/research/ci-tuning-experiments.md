@@ -131,6 +131,61 @@ Warmup 20s → **10s**. Commit 93a425d.
 **Current best (warm cache, 16C):** ~1m07-1m12s total, pw-jupyter 36s, warmup 10s.
 Critical path: warmup(10s) → build-wheel-wait → wheel install(1s) → pw-jupyter(36s).
 
+**Async build-wheel with renice -10:** Made build-wheel run in background with
+elevated priority so it overlaps with warmup/storybook. Marginal gain since warmup
+(9s) was already longer than build-wheel (8s). Commit 2f44b86.
+
+---
+
+### Exp 53b — tmpfs ramdisk experiment — NOT WORTH IT
+
+**Goal:** Eliminate disk I/O by running CI entirely in RAM.
+**Commits:** 3a7697e → 740273a (ramdisk experiments), reverted to 2f44b86.
+**Server:** VX1 16C (137.220.56.81), 62GB RAM, 55GB free.
+
+**Approaches tried:**
+1. **In-container tmpfs** (3a7697e–ff6f1b3): Mount `/ramdisk` inside container, copy
+   repo there, work from `/ramdisk/repo`. Failed due to:
+   - `rsync` not in container → switched to tar pipe
+   - Docker tmpfs defaults to `noexec` → esbuild EACCES
+   - pnpm cross-filesystem hardlinks (store on named volume, repo on tmpfs) → `reused 0`
+   - All paths hardcoded to `/repo` (Python editable install, anywidget static files,
+     JupyterLab notebook dirs) → `FileNotFoundError: /repo/buckaroo/static/compiled.css`
+2. **Host-level tmpfs** (740273a): Mount single tmpfs at `/opt/ci/ramdisk` on host,
+   put both repo and pnpm store there, bind-mount both into container. Same filesystem
+   = hardlinks work. Zero path changes needed.
+
+**Raw benchmarks:**
+| Metric | Disk | tmpfs |
+|--------|------|-------|
+| Sequential write (256MB) | 509 MB/s | 4.9 GB/s (10x) |
+| Small file creation (10K files) | 3.66s | 0.12s (30x) |
+
+**CI results (host tmpfs, warm caches):**
+| Run | Total | build-wheel | warmup | wheel install | pw-jupyter |
+|-----|-------|-------------|--------|---------------|------------|
+| Disk baseline (2f44b86) | 1m06s | 8s | 9s | **5s** | 36s |
+| tmpfs run 2 (warm) | 1m06s | 8s | 10s | **1s** | 36s |
+| tmpfs run 3 (warm) | 1m06s | 7s | 11s | **1s** | 35s |
+
+| Metric | Disk | tmpfs |
+|--------|------|-------|
+| iowait mean | 9.7% | 8.8% |
+| iowait max | 52 | 37 |
+| CPU mean | 47.0% | 46.3% |
+
+**Conclusion:** tmpfs saves 4s on wheel install (5s→1s) and reduces iowait peaks,
+but total CI time is identical because the critical path is CPU-bound (pw-jupyter 35-36s).
+The 30x small-file speedup doesn't help when I/O phases overlap with CPU-heavy work.
+
+**Not worth the complexity:**
+- Requires host-level tmpfs mount (lost on reboot, needs cloud-init automation)
+- pnpm store must be on same tmpfs for hardlinks (375MB duplication)
+- Cold start after reboot needs full re-clone + pnpm install
+- Linux page cache already makes warm reads RAM-speed
+
+**Reverted to disk-based approach (commit 2f44b86).**
+
 ---
 
 ### Exp 54 — Fast-fail mode
