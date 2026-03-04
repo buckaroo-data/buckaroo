@@ -574,10 +574,8 @@ else
     uv pip install --python "$JUPYTER_VENV/bin/python" "$wheel" -q
     "$JUPYTER_VENV/bin/python" -c "import buckaroo; import pandas; import polars" 2>/dev/null || true
 
-    # ── Wheel-dependent jobs — staggered sub-waves (Exp 33, tuned A+B) ───────
-    # pw-jupyter is the critical path; start it FIRST with all pre-warmed servers.
-    # Stagger remaining PW jobs every 2s (tightened from 5s — safe with /dev/shm fix).
-    # smoke-test-extras deferred until after pw-jupyter to avoid memory pressure.
+    # ── Wheel-dependent jobs — all launched simultaneously ──────────────────
+    # No stagger needed on 32 vCPU / 64GB. pw-jupyter uses pre-warmed servers.
     JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-9}
     log "=== build-wheel done — starting staggered wheel-dependent jobs (PARALLEL=$JUPYTER_PARALLEL) ==="
 
@@ -606,47 +604,18 @@ else
     export -f job_playwright_jupyter_warm
     run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
 
-    # Also start lightweight jobs that won't compete much (nice 10 = lower priority)
-    # NOTE: smoke-test-extras deferred until after pw-jupyter (Exp A) — it only
-    # takes 5s uncontended but balloons to 61s under memory pressure from 9 Chromium.
-    run_job test-mcp-wheel       job_test_mcp_wheel       & PID_MCP=$!
-    renice -n 10 -p $PID_MCP >/dev/null 2>&1 || true
-
-    # Stagger remaining PW jobs at 2s intervals (Exp B — tightened from 5s,
-    # safe now that --disable-dev-shm-usage is in place).
-    # t+2s: pw-marimo
-    sleep 2
-    run_job playwright-marimo    job_playwright_marimo      & PID_PW_MA=$!
-    renice -n 10 -p $PID_PW_MA >/dev/null 2>&1 || true
-
-    # t+4s: pw-wasm-marimo
-    sleep 2
-    run_job playwright-wasm-marimo job_playwright_wasm_marimo & PID_PW_WM=$!
-    renice -n 10 -p $PID_PW_WM >/dev/null 2>&1 || true
-
-    # t+6s: pw-server
-    sleep 2
-    run_job playwright-server    job_playwright_server     & PID_PW_SV=$!
-    renice -n 10 -p $PID_PW_SV >/dev/null 2>&1 || true
-
-    # t+8s: pytest 3.11/3.12/3.14 (3.13 already ran in Wave 0)
-    sleep 2
+    # All wheel-dependent jobs launch simultaneously — no stagger needed on
+    # 32 vCPU / 64GB (CPU peaks at ~83%, plenty of headroom).
+    run_job test-mcp-wheel         job_test_mcp_wheel         & PID_MCP=$!
+    run_job smoke-test-extras      job_smoke_test_extras       & PID_SMOKE=$!
+    run_job playwright-marimo      job_playwright_marimo       & PID_PW_MA=$!
+    run_job playwright-wasm-marimo job_playwright_wasm_marimo  & PID_PW_WM=$!
+    run_job playwright-server      job_playwright_server       & PID_PW_SV=$!
     run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
-    renice -n 10 -p $PID_PY311 >/dev/null 2>&1 || true
     run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
-    renice -n 10 -p $PID_PY312 >/dev/null 2>&1 || true
     run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
-    renice -n 10 -p $PID_PY314 >/dev/null 2>&1 || true
 
-    # ── Wait for pw-jupyter first, then launch smoke-test-extras (Exp A) ─────
-    # pw-jupyter is the critical path (~50s). Once it finishes, 9 Chromium
-    # instances are gone and smoke-test-extras can run uncontended (~5s).
-    wait $PID_PW_JP   || OVERALL=1
-    log "=== pw-jupyter done — launching smoke-test-extras ==="
-    run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
-    renice -n 10 -p $PID_SMOKE >/dev/null 2>&1 || true
-
-    # ── Wait for remaining jobs ───────────────────────────────────────────────
+    # ── Wait for all jobs ─────────────────────────────────────────────────────
     wait $PID_LINT    || OVERALL=1
     wait $PID_TESTJS  || OVERALL=1
     wait $PID_PY313   || OVERALL=1
@@ -654,6 +623,7 @@ else
     wait $PID_PY312   || OVERALL=1
     wait $PID_PY314   || OVERALL=1
     wait $PID_PW_SB   || OVERALL=1
+    wait $PID_PW_JP   || OVERALL=1
     wait $PID_PW_WM   || OVERALL=1
     wait $PID_MCP     || OVERALL=1
     wait $PID_SMOKE   || OVERALL=1
