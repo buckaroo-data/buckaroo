@@ -1,13 +1,16 @@
 import { test, expect } from '@playwright/test';
 import { Page } from '@playwright/test';
 
-const JUPYTER_BASE_URL = 'http://localhost:8889';
-const JUPYTER_TOKEN = 'test-token-12345';
-const DEFAULT_TIMEOUT = 10000;
-const NAVIGATION_TIMEOUT = 12000;
+const JUPYTER_BASE_URL = process.env.JUPYTER_BASE_URL || 'http://localhost:8889';
+const JUPYTER_TOKEN = process.env.JUPYTER_TOKEN || 'test-token-12345';
+const DEFAULT_TIMEOUT = 30000;
+const CELL_EXEC_TIMEOUT = 120000; // kernel startup + analysis under 9-way concurrency
+const NAVIGATION_TIMEOUT = 30000;
 
-async function waitForAgGrid(page: Page, timeout = 5000) {
+async function waitForAgGrid(page: Page, timeout = DEFAULT_TIMEOUT) {
   await page.locator('.ag-root-wrapper').first().waitFor({ state: 'attached', timeout });
+  // Use 'attached' not 'visible' — ag-grid infinite row model creates cells
+  // before datasource round-trip completes, so cells may be hidden initially.
   await page.locator('.ag-cell').first().waitFor({ state: 'attached', timeout });
 }
 
@@ -34,35 +37,50 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     console.log('✅ Notebook loaded');
 
-    // Execute the cell
+    // Wait for kernel via JupyterLab internal state (see deep dive doc).
+    console.log('⏳ Waiting for kernel to be ready (jupyterapp)...');
+    try {
+      await page.waitForFunction(() => {
+        const app = (window as any).jupyterapp;
+        if (!app) return false;
+        const widget = app.shell.currentWidget;
+        if (!widget?.sessionContext?.session?.kernel) return false;
+        const kernel = widget.sessionContext.session.kernel;
+        return kernel.connectionStatus === 'connected' && kernel.status === 'idle';
+      }, { timeout: 60000 });
+      console.log('✅ Kernel connected and idle');
+    } catch {
+      console.log('⚠️ Kernel ready wait timed out — proceeding with retry loop');
+    }
+
+    // Execute cell with retry — use dispatchEvent to avoid visibility requirements
     console.log('▶️ Executing widget code...');
-    await page.locator('.jp-Notebook').first().dispatchEvent('click');
-    await page.waitForTimeout(200);
-    await page.keyboard.press('Shift+Enter');
-
-    // Wait for cell execution and widget to render
-    console.log('⏳ Waiting for cell execution...');
     const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    await page.waitForTimeout(800);
-    console.log('✅ Cell executed');
+    const outputLocator = outputArea.locator('.jp-OutputArea-output').first();
+    const deadline = Date.now() + CELL_EXEC_TIMEOUT;
 
-    // Wait for widget to render (larger datasets take longer to initialize)
+    for (let attempt = 1; Date.now() < deadline; attempt++) {
+      console.log(`⏳ Shift+Enter attempt ${attempt}...`);
+      await page.locator('.jp-Cell').first().dispatchEvent('click');
+      await page.waitForTimeout(1000);
+      await page.keyboard.press('Shift+Enter');
+
+      try {
+        await outputLocator.waitFor({ state: 'attached', timeout: 15000 });
+        console.log('✅ Cell executed');
+        break;
+      } catch {
+        if (Date.now() >= deadline) throw new Error(`Cell execution timed out after ${CELL_EXEC_TIMEOUT}ms`);
+        console.log(`⚠️ No output after attempt ${attempt}, retrying...`);
+      }
+    }
+
+    // Wait for widget to render — deterministic wait for actual elements
     console.log('⏳ Waiting for buckaroo widget...');
-    await page.waitForTimeout(2000);
-    
-    // Check for buckaroo or ag-grid elements
+    await page.locator('[class*="buckaroo"], .ag-root-wrapper').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
     const buckarooElements = await page.locator('[class*="buckaroo"]').count();
     const agGridElements = await page.locator('.ag-root-wrapper, .ag-row').count();
-    
-    if (buckarooElements > 0 || agGridElements > 0) {
-      console.log(`✅ Found ${buckarooElements} buckaroo elements, ${agGridElements} ag-grid elements`);
-    } else {
-      // Wait more for larger datasets
-      await page.waitForTimeout(3000);
-      const retryAgGrid = await page.locator('.ag-root-wrapper').count();
-      expect(retryAgGrid).toBeGreaterThan(0);
-    }
+    console.log(`✅ Found ${buckarooElements} buckaroo elements, ${agGridElements} ag-grid elements`);
     console.log('✅ Widget rendered with ag-grid');
 
     // Wait for ag-grid to be ready
@@ -143,10 +161,10 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     const initialFirstCellText = await firstRowCell.textContent();
     console.log(`📊 Initial first cell content: ${initialFirstCellText}`);
 
-    // Scroll down to row 1500 using direct JavaScript scrollTo on ag-grid viewport
-    // DataFrame has 2000 rows, we want to scroll to row ~1500 to trigger additional data fetches
-    // Each row is ~20px high, so row 1500 is around 30000px down
-    console.log('📜 Scrolling to row 1500 using direct scrollTo...');
+    // Scroll down to row 400 using direct JavaScript scrollTo on ag-grid viewport
+    // DataFrame has 500 rows, we want to scroll near the end to trigger additional data fetches
+    // Each row is ~20px high, so row 400 is around 8000px down
+    console.log('📜 Scrolling to row 400 using direct scrollTo...');
     
     // Use JavaScript to find the LARGEST viewport (the main data grid, not pinned rows)
     const scrollResult = await page.evaluate(() => {
@@ -174,8 +192,8 @@ test.describe('Infinite Scroll Transcript Recording', () => {
         return { success: false, error: 'No viewport found' };
       }
       
-      // Calculate scroll position for row 1500 (assuming ~20px per row)
-      const targetRow = 1500;
+      // Calculate scroll position for row 400 (assuming ~20px per row)
+      const targetRow = 400;
       const rowHeight = 20;
       const targetScrollTop = targetRow * rowHeight;
       
@@ -192,9 +210,15 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     });
     
     console.log(`📊 Scroll result: ${JSON.stringify(scrollResult)}`);
-    
-    // Wait for data fetch to complete
-    await page.waitForTimeout(2000);
+
+    // Wait for grid to render rows at the scrolled position rather than a fixed delay
+    await page.waitForFunction(
+      () => {
+        const rows = document.querySelectorAll('.ag-row[row-index]');
+        return Array.from(rows).some(r => parseInt(r.getAttribute('row-index') || '0', 10) > 100);
+      },
+      { timeout: 10000 }
+    );
 
     // Check what rows are now visible
     const visibleCells = page.locator('.ag-cell');
@@ -327,25 +351,57 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT });
     await page.locator('.jp-Notebook').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
 
-    // Execute the cell
-    await page.locator('.jp-Notebook').first().dispatchEvent('click');
-    await page.waitForTimeout(200);
-    await page.keyboard.press('Shift+Enter');
+    // Wait for kernel to be ready
+    try {
+      await page.waitForFunction(() => {
+        const app = (window as any).jupyterapp;
+        if (!app) return false;
+        const widget = app.shell.currentWidget;
+        if (!widget?.sessionContext?.session?.kernel) return false;
+        const kernel = widget.sessionContext.session.kernel;
+        return kernel.connectionStatus === 'connected' && kernel.status === 'idle';
+      }, { timeout: 60000 });
+    } catch { /* proceed with retry loop */ }
 
-    const outputArea = page.locator('.jp-OutputArea').first();
-    await outputArea.waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
-    await page.waitForTimeout(1500);
+    // Execute with retry
+    const outputArea2 = page.locator('.jp-OutputArea').first();
+    const outputLocator2 = outputArea2.locator('.jp-OutputArea-output').first();
+    const deadline2 = Date.now() + CELL_EXEC_TIMEOUT;
+
+    for (let attempt = 1; Date.now() < deadline2; attempt++) {
+      await page.locator('.jp-Cell').first().dispatchEvent('click');
+      await page.waitForTimeout(1000);
+      await page.keyboard.press('Shift+Enter');
+
+      try {
+        await outputLocator2.waitFor({ state: 'attached', timeout: 15000 });
+        break;
+      } catch {
+        if (Date.now() >= deadline2) throw new Error(`Cell execution timed out`);
+      }
+    }
+
+    const outputArea = outputArea2;
 
     await waitForAgGrid(page);
+
+    // Reset scroll position in case test 1 left the grid scrolled
+    try {
+      const viewport = page.locator('.ag-body-viewport').first();
+      if (await viewport.count() > 0) {
+        await viewport.evaluate(el => el.scrollTop = 0);
+        // Wait for row 0 to re-attach rather than a fixed sleep
+        await page.locator('[row-index="0"]').first().waitFor({ state: 'attached', timeout: DEFAULT_TIMEOUT });
+      }
+    } catch (e) { /* non-fatal */ }
 
     // Verify initial data (row 0 should show int_col=10, str_col=foo_10)
     const firstRowIntCell = page.locator('[row-index="0"] [col-id="int_col"]');
     const firstRowStrCell = page.locator('[row-index="0"] [col-id="str_col"]');
-    
-    // Check if we can see the cells
+
     const intCellVisible = await firstRowIntCell.isVisible().catch(() => false);
     const strCellVisible = await firstRowStrCell.isVisible().catch(() => false);
-    
+
     if (intCellVisible && strCellVisible) {
       const intVal = await firstRowIntCell.textContent();
       const strVal = await firstRowStrCell.textContent();
@@ -356,8 +412,8 @@ test.describe('Infinite Scroll Transcript Recording', () => {
       // Try finding cells by content
       const cell10 = page.locator('.ag-cell:has-text("10")').first();
       const cellFoo10 = page.locator('.ag-cell:has-text("foo_10")').first();
-      await expect(cell10).toBeVisible({ timeout: 3000 });
-      await expect(cellFoo10).toBeVisible({ timeout: 3000 });
+      await expect(cell10).toBeVisible({ timeout: DEFAULT_TIMEOUT });
+      await expect(cellFoo10).toBeVisible({ timeout: DEFAULT_TIMEOUT });
       console.log('📊 Verified row 0 data via text search');
     }
 
@@ -392,8 +448,8 @@ test.describe('Infinite Scroll Transcript Recording', () => {
     const expectedStrCell = page.locator(`.ag-cell:has-text("${expectedStrCol}")`).first();
     
     // These should be visible if the data is correct
-    await expect(expectedIntCell).toBeVisible({ timeout: 3000 });
-    await expect(expectedStrCell).toBeVisible({ timeout: 3000 });
+    await expect(expectedIntCell).toBeVisible({ timeout: DEFAULT_TIMEOUT });
+    await expect(expectedStrCell).toBeVisible({ timeout: DEFAULT_TIMEOUT });
     
     console.log(`✅ Verified data at row ${targetRowIndex} matches predictable pattern!`);
   });
