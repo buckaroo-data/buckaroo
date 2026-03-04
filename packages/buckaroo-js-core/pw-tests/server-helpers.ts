@@ -34,12 +34,21 @@ export async function waitForGrid(page: Page) {
  */
 export async function getRowCount(page: Page): Promise<number> {
   const headers = await page
-    .locator('.ag-header .ag-header-row')
+    .locator('.ag-header-viewport .ag-header-row')
     .and(page.getByRole('row'))
     .all();
   const grid = page.getByRole('treegrid').or(page.getByRole('grid'));
   const total = await grid.first().getAttribute('aria-rowcount');
   return Number(total) - headers.length;
+}
+
+/**
+ * Get a cell locator by col-id and row-index.
+ * Returns a Locator so callers can use auto-retrying expect(locator).toHaveText()
+ * instead of one-shot innerText() which races with AG-Grid rendering.
+ */
+export function cellLocator(page: Page, colId: string, rowIndex: number) {
+  return page.locator(`[row-index="${rowIndex}"] [col-id="${colId}"]`);
 }
 
 /**
