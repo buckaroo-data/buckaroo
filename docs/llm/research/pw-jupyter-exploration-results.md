@@ -267,3 +267,69 @@ All other heavy jobs start after pw-jupyter finishes.
 3. **pw-jupyter is the bottleneck at 51-52s** — everything else fits in the remaining ~75s
 4. **Contamination hypothesis disproven** — the issue was always concurrent contention, not
    stale state from failed runs
+
+---
+
+## Experiment 6: Stagger Reduction (1.5s) — COMPLETE
+
+**Server:** Vultr 32 vCPU / 64GB (45.76.18.207)
+**Branch:** docs/ci-research
+
+### Results
+
+| Run | Stagger | Result | pw-jupyter | Total CI | Notes |
+|-----|---------|--------|-----------|----------|-------|
+| 1 | 1.5s | PASS | 47s | ~2m01s | Fresh after b2b |
+| 2 (b2b) | 1.5s | FAIL | 120s timeout | — | 4/9 notebooks hung |
+| 3 | 2s (reverted) | PASS | 51s | 2m09s | Back to reliable |
+
+### Conclusion
+
+1.5s stagger passes on first run but fails on immediate back-to-back. The extra 0.5s headroom in 2s stagger is necessary for reliable b2b runs. **Reverted to 2s** (commit 5cbd74f).
+
+---
+
+## Experiment 7: Parallelize Marimo Tests — COMPLETE (reverted)
+
+**Goal:** Reduce pw-marimo from 53s by using workers:2.
+
+### Results
+
+| Run | Workers | Result | Notes |
+|-----|---------|--------|-------|
+| 1 | 2 (unconditional) | FAIL | CI=true not set → evaluated as workers:1 anyway |
+| 2 | 2 (+ CI=true env) | FAIL | ERR_CONNECTION_REFUSED — 2 Playwright workers crash single marimo server |
+| 3 | 1 (reverted) | PASS | 53s, back to baseline |
+
+### Conclusion
+
+Marimo workers:2 causes ERR_CONNECTION_REFUSED — single marimo server can't handle concurrent Playwright connections. Would need 2 marimo servers on different ports. **Reverted to workers:1** (commit d77aff2). Not worth the complexity for ~20s savings.
+
+---
+
+## Storybook Semver Fix — COMPLETE
+
+**Problem:** After container recreate + pnpm store volume addition, `pnpm storybook` failed with "Cannot find module 'semver'" from inside `.pnpm/@storybook+core@8.6.15/...`.
+
+**Root cause:** Race condition in CI DAG. `playwright-storybook` was in Wave 0 alongside `build-js` (which runs `pnpm install`). Storybook tried to load from node_modules while pnpm install was restructuring it (especially after adding `shamefully-hoist=true` to `.npmrc`).
+
+**Fix:** Moved `playwright-storybook` to start after `build-js` completes (commit 33b31ab). ~5s cost.
+
+### CI Results (commit 33b31ab) — ALL PASS
+
+| Job | Duration |
+|-----|----------|
+| lint-python | 0s |
+| build-js | 5s |
+| test-python-3.13 | 23s |
+| jupyter-warmup | 20s |
+| build-wheel | 8s |
+| test-js | 5s |
+| playwright-storybook | 27s |
+| pw-jupyter (P=9) | 52s |
+| test-mcp-wheel | 13s |
+| pw-marimo | 53s |
+| pw-wasm-marimo | 37s |
+| pw-server | 44s |
+| smoke-test-extras | 6s |
+| **Total** | **2m08s** |
