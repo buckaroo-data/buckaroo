@@ -9,18 +9,49 @@ import { test, expect, Page } from '@playwright/test';
 
 let sharedPage: Page;
 
+// Collect all browser console output for CI debugging
+const consoleLogs: string[] = [];
+const pageErrors: string[] = [];
+
 test.describe('Buckaroo in Marimo WASM (Pyodide)', () => {
   test.describe.configure({ mode: 'serial' });
 
   test.beforeAll(async ({ browser }) => {
     sharedPage = await browser.newPage();
+
+    // Capture all console messages for debugging
+    sharedPage.on('console', (msg) => {
+      const text = `[${msg.type()}] ${msg.text()}`;
+      consoleLogs.push(text);
+    });
+
+    sharedPage.on('pageerror', (err) => {
+      pageErrors.push(`[PAGE ERROR] ${err.message}`);
+    });
+
     await sharedPage.goto('/');
     // Wait for Pyodide init + buckaroo widget + AG-Grid render
-    await sharedPage.locator('.buckaroo_anywidget').first().waitFor({ state: 'visible', timeout: 60_000 });
-    await sharedPage.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 15_000 });
+    // Use longer timeout since Pyodide needs to download & compile fastparquet WASM
+    await sharedPage.locator('.buckaroo_anywidget').first().waitFor({ state: 'visible', timeout: 120_000 });
+    await sharedPage.locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
   });
 
   test.afterAll(async () => {
+    // Print all captured console output for CI debugging
+    if (consoleLogs.length > 0) {
+      console.log('\n=== Browser Console Output ===');
+      for (const log of consoleLogs) {
+        console.log(log);
+      }
+      console.log('=== End Console Output ===\n');
+    }
+    if (pageErrors.length > 0) {
+      console.log('\n=== Page Errors ===');
+      for (const err of pageErrors) {
+        console.log(err);
+      }
+      console.log('=== End Page Errors ===\n');
+    }
     await sharedPage?.close();
   });
 
