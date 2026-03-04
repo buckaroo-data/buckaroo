@@ -72,6 +72,7 @@ rebuild_deps() {
     done
 
     echo "[lockcheck] Rebuilding JS deps..."
+    rm -rf /repo/packages/node_modules
     cd packages
     pnpm install --frozen-lockfile --store-dir /opt/pnpm-store
     cd ..

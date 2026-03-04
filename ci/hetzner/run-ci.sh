@@ -317,6 +317,9 @@ job_test_python() {
     # Quick sync installs buckaroo in editable mode (deps already in venv).
     UV_PROJECT_ENVIRONMENT=/opt/venvs/$v \
         uv sync --locked --dev --all-extras
+    # pytest-xdist may not be in older commits' lockfiles — force-install it
+    # so -n 4 --dist load always works.
+    uv pip install --python "/opt/venvs/$v/bin/python" pytest-xdist -q 2>/dev/null || true
 
     # 3.14 is still alpha — segfaults on pytest startup; skip for now.
     if [[ "$v" == "3.14" ]]; then
