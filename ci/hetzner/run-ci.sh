@@ -67,16 +67,86 @@ run_job() {
     fi
 }
 
+# ── Container state snapshot (for b2b contamination debugging) ────────────────
+snapshot_container_state() {
+    local label=$1 outfile=$2
+    {
+        echo "=== Container snapshot: $label at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+        echo ""
+        echo "--- Processes (ps aux --sort=-rss) ---"
+        ps aux --sort=-rss 2>/dev/null || true
+        echo ""
+        echo "--- /tmp listing ---"
+        ls -la /tmp/ 2>/dev/null || true
+        echo ""
+        echo "--- /dev/shm ---"
+        ls -la /dev/shm/ 2>/dev/null || true
+        echo ""
+        echo "--- TCP sockets ---"
+        cat /proc/net/tcp 2>/dev/null | awk 'NR>1 {
+            split($2,a,":"); port=strtonum("0x" a[2])
+            if($4=="01") st="ESTABLISHED"; else if($4=="06") st="TIME_WAIT"; else st=$4
+            printf "%s port=%d\n", st, port
+        }' | sort | uniq -c | sort -rn || true
+        echo ""
+        echo "--- Jupyter runtime ---"
+        ls -la ~/.local/share/jupyter/runtime/ 2>/dev/null || echo "(empty)"
+        echo ""
+        echo "--- Jupyter workspaces ---"
+        ls -la ~/.jupyter/lab/workspaces/ 2>/dev/null || echo "(none)"
+        cat ~/.jupyter/lab/workspaces/*.jupyterlab-workspace 2>/dev/null || true
+        echo ""
+        echo "--- Memory ---"
+        free -m 2>/dev/null || cat /proc/meminfo | head -5
+        echo ""
+    } > "$outfile" 2>&1
+}
+
 # ── Setup ────────────────────────────────────────────────────────────────────
 
-# Kill stale processes from previous runs (b2b contamination fix).
-# Zombie Chromium/JupyterLab/node processes cause pw-jupyter hangs.
+# Snapshot BEFORE cleanup — see what the previous run left behind.
+snapshot_container_state "before-cleanup" "$RESULTS_DIR/container-before.txt"
+
+# ── Pre-run cleanup — kill stale processes, remove temp files from prior runs ─
+# This ensures each CI run starts from a clean state regardless of how the
+# previous run ended (timeout, crash, manual kill, etc.).
 pkill -9 -f 'chromium|chrome' 2>/dev/null || true
 pkill -9 -f 'jupyter' 2>/dev/null || true
 pkill -9 -f 'node.*playwright' 2>/dev/null || true
-# Clean stale temp files
+pkill -9 -f 'marimo' 2>/dev/null || true
+pkill -9 -f jupyter-lab 2>/dev/null || true
+pkill -9 -f ipykernel 2>/dev/null || true
+pkill -9 -f "node.*storybook" 2>/dev/null || true
+pkill -9 -f "npm exec serve" 2>/dev/null || true
+pkill -9 -f esbuild 2>/dev/null || true
+# Kill anything on known service ports (jupyter 8889-8897, marimo 2718, storybook 6006)
+for port in 8889 8890 8891 8892 8893 8894 8895 8896 8897 2718 6006; do
+    fuser -k $port/tcp 2>/dev/null || true
+done
+sleep 1  # let processes die before cleaning their files
+# Clean temp files from CI jobs
 rm -rf /tmp/ci-jupyter-* /tmp/pw-* /tmp/.org.chromium.* 2>/dev/null || true
-sleep 1
+rm -f /tmp/ci-jupyter-warmup-venv /tmp/ci-jupyter-warmup-pids 2>/dev/null || true
+# Clean ALL JupyterLab log files (accumulate across runs with PID suffixes)
+rm -f /tmp/jupyter-port*.log 2>/dev/null || true
+# Clean per-port workspace temp dirs
+rm -rf /tmp/jlab-ws-* 2>/dev/null || true
+# Clean small temp files left by pytest/jupyter
+rm -f /tmp/tmp*.txt 2>/dev/null || true
+# Clean Playwright artifact directories
+rm -rf /tmp/playwright-artifacts-* /tmp/playwright_chromiumdev_profile-* 2>/dev/null || true
+# Clean JupyterLab workspace + kernel state — stale workspace files from previous
+# runs cause JupyterLab to try reconnecting dead kernels, hanging Shift+Enter.
+rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
+rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
+rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
+rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
+# Clean any IPython/Jupyter caches that might affect kernel startup
+rm -rf ~/.ipython/profile_default/db 2>/dev/null || true
+rm -rf ~/.local/share/jupyter/nbsignatures.db 2>/dev/null || true
+
+# Snapshot AFTER cleanup — verify we're starting clean.
+snapshot_container_state "after-cleanup" "$RESULTS_DIR/container-after.txt"
 
 status_pending "$SHA" "ci/hetzner" "Running CI (phase=$PHASE)..." "$LOG_URL"
 
@@ -101,33 +171,6 @@ CPU_FINE_PID=$!
 CI_TIMEOUT=${CI_TIMEOUT:-240}
 ( sleep "$CI_TIMEOUT"; echo "[$(date +'%H:%M:%S')] TIMEOUT: CI exceeded ${CI_TIMEOUT}s" >> "$RESULTS_DIR/ci.log"; kill -TERM 0 ) 2>/dev/null &
 WATCHDOG_PID=$!
-
-# ── Pre-run cleanup — kill stale processes, remove temp files from prior runs ─
-# This ensures each CI run starts from a clean state regardless of how the
-# previous run ended (timeout, crash, manual kill, etc.).
-pkill -9 -f jupyter-lab 2>/dev/null || true
-pkill -9 -f ipykernel 2>/dev/null || true
-pkill -9 -f playwright 2>/dev/null || true
-pkill -9 -f chromium 2>/dev/null || true
-pkill -9 -f "node.*storybook" 2>/dev/null || true
-pkill -9 -f "npm exec serve" 2>/dev/null || true
-pkill -9 -f esbuild 2>/dev/null || true
-# Kill anything on jupyter ports (8889-8897, P=9)
-for port in 8889 8890 8891 8892 8893 8894 8895 8896 8897; do
-    fuser -k $port/tcp 2>/dev/null || true
-done
-sleep 1  # let processes die before cleaning their files
-rm -rf /tmp/ci-jupyter-warmup* /tmp/pw-jupyter-parallel* /tmp/pw-html-* /tmp/pw-results-* 2>/dev/null || true
-rm -f /tmp/ci-jupyter-warmup-venv /tmp/ci-jupyter-warmup-pids 2>/dev/null || true
-# Clean JupyterLab workspace + kernel state — stale workspace files from previous
-# runs cause JupyterLab to try reconnecting dead kernels, hanging Shift+Enter.
-rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
-rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
-rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
-rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
-# Clean any IPython/Jupyter caches that might affect kernel startup
-rm -rf ~/.ipython/profile_default/db 2>/dev/null || true
-rm -rf ~/.local/share/jupyter/nbsignatures.db 2>/dev/null || true
 
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
 log "CI runner: $RUNNER_VERSION  phase=$PHASE"
@@ -372,6 +415,7 @@ job_jupyter_warmup() {
             --ServerApp.token="$JUPYTER_TOKEN" \
             --ServerApp.allow_origin='*' \
             --ServerApp.disable_check_xsrf=True \
+            --LabApp.workspaces_dir="/tmp/jlab-ws-$$-$port" \
             --allow-root \
             >/tmp/jupyter-port${port}.log 2>&1 &
         pids+=($!)
@@ -653,6 +697,9 @@ fi
 kill $WATCHDOG_PID 2>/dev/null || true
 kill $CPU_MONITOR_PID 2>/dev/null || true
 kill $CPU_FINE_PID 2>/dev/null || true
+
+# ── End-of-run snapshot — capture what this run left behind ──────────────────
+snapshot_container_state "end-of-run" "$RESULTS_DIR/container-end.txt"
 
 # ── Final status ─────────────────────────────────────────────────────────────
 
