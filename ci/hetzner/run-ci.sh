@@ -96,8 +96,8 @@ pkill -9 -f playwright 2>/dev/null || true
 pkill -9 -f chromium 2>/dev/null || true
 pkill -9 -f "node.*storybook" 2>/dev/null || true
 pkill -9 -f "npm exec serve" 2>/dev/null || true
-# Kill anything on jupyter ports (8889-8893)
-for port in 8889 8890 8891 8892 8893 8894; do
+# Kill anything on jupyter ports (8889-8897, P=9)
+for port in 8889 8890 8891 8892 8893 8894 8895 8896 8897; do
     fuser -k $port/tcp 2>/dev/null || true
 done
 sleep 1  # let processes die before cleaning their files
