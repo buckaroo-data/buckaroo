@@ -361,8 +361,8 @@ while [ $NEXT -lt $TOTAL ]; do
     BATCH_USED_PORTS=()
 
     while [ $BATCH_COUNT -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
-        # Brief stagger to avoid kernel provisioner contention from simultaneous starts
-        [ $BATCH_COUNT -gt 0 ] && sleep 0.5
+        # Stagger Chromium launches — 0s and 0.5s cause kernel hangs, 2s works but wastes 16s
+        [ $BATCH_COUNT -gt 0 ] && sleep 1
         local_nb="${QUEUE[$NEXT]}"
         local_logfile="$TMPDIR/${local_nb%.ipynb}.log"
         local_port=$((BASE_PORT + BATCH_COUNT))
