@@ -9,6 +9,10 @@
 # --phase=5b         Skip to playwright-jupyter only, using cached wheel.
 # --wheel-from=SHA   Use wheel cached from a different commit (for iterating
 #                    on test code without rebuilding). Falls back to $SHA.
+# --fast-fail        Abort after build-js or build-wheel failure.
+# --only=JOB,JOB     Run only listed jobs (comma-separated). Dependencies
+#                    not auto-resolved — include build-js,build-wheel,etc.
+# --skip=JOB,JOB     Skip listed jobs. Safer than --only for ad-hoc filtering.
 #
 # DAG execution (each captures stdout/stderr to $RESULTS_DIR/<job>.log):
 #   Immediate:     lint-python, test-js, test-python-3.{11,12,13,14},
@@ -26,11 +30,15 @@ BRANCH=${2:?usage: run-ci.sh SHA BRANCH [--phase=PHASE]}
 PHASE=all
 WHEEL_FROM=""
 FAST_FAIL=0
+ONLY_JOBS=""
+SKIP_JOBS=""
 for arg in "${@:3}"; do
     case "$arg" in
         --phase=*) PHASE="${arg#*=}" ;;
         --wheel-from=*) WHEEL_FROM="${arg#*=}" ;;
         --fast-fail) FAST_FAIL=1 ;;
+        --only=*) ONLY_JOBS="${arg#*=}" ;;
+        --skip=*) SKIP_JOBS="${arg#*=}" ;;
     esac
 done
 
@@ -54,10 +62,28 @@ if [[ -x "$CI_RUNNER_DIR/capture-versions.sh" ]]; then
     bash "$CI_RUNNER_DIR/capture-versions.sh" > "$RESULTS_DIR/versions.txt" 2>&1
 fi
 
-# Run a job: captures output, returns exit code.
+# Job filtering: --only=job1,job2 runs only listed jobs; --skip=job1,job2 skips them.
+# Dependencies are NOT auto-resolved — include build-js,build-wheel,jupyter-warmup
+# manually if you --only a job that depends on them.
+should_run() {
+    local name=$1
+    if [[ -n "$ONLY_JOBS" ]]; then
+        [[ ",$ONLY_JOBS," == *",$name,"* ]] && return 0 || return 1
+    fi
+    if [[ -n "$SKIP_JOBS" ]]; then
+        [[ ",$SKIP_JOBS," == *",$name,"* ]] && return 1 || return 0
+    fi
+    return 0
+}
+
+# Run a job: captures output, returns exit code. Skips if filtered out.
 # run_job <name> <cmd> [args...]
 run_job() {
     local name=$1; shift
+    if ! should_run "$name"; then
+        log "SKIP  $name (filtered)"
+        return 0
+    fi
     local logfile="$RESULTS_DIR/$name.log"
     log "START $name"
     if "$@" >"$logfile" 2>&1; then
@@ -171,12 +197,12 @@ done
 CPU_FINE_PID=$!
 
 # CI timeout watchdog — kill everything if CI exceeds time limit.
-CI_TIMEOUT=${CI_TIMEOUT:-240}
+CI_TIMEOUT=${CI_TIMEOUT:-180}
 ( sleep "$CI_TIMEOUT"; echo "[$(date +'%H:%M:%S')] TIMEOUT: CI exceeded ${CI_TIMEOUT}s" >> "$RESULTS_DIR/ci.log"; kill -TERM 0 ) 2>/dev/null &
 WATCHDOG_PID=$!
 
 RUNNER_VERSION=$(cat "$CI_RUNNER_DIR/VERSION" 2>/dev/null || echo "unknown")
-log "CI runner: $RUNNER_VERSION  phase=$PHASE"
+log "CI runner: $RUNNER_VERSION  phase=$PHASE${ONLY_JOBS:+  only=$ONLY_JOBS}${SKIP_JOBS:+  skip=$SKIP_JOBS}"
 log "Checkout $SHA (branch: $BRANCH)"
 cd "$REPO_DIR"
 git fetch origin
