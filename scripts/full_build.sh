@@ -27,7 +27,9 @@ cp packages/buckaroo-js-core/dist/style.css buckaroo/static/compiled.css
 
 # Build anywidget wrapper + standalone entry point (esbuild)
 cd packages
-pnpm install 2>/dev/null || true
+# Skip install if node_modules exists (build-js already ran pnpm install in CI).
+# Running pnpm install here "Recreates" node_modules, which races with test-js.
+[ -d node_modules ] || pnpm install 2>/dev/null || true
 pnpm --filter buckaroo-widget run build
 pnpm --filter buckaroo-widget run build:standalone
 
