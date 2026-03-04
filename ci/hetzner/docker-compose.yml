@@ -25,9 +25,8 @@ services:
       - CI=true
       - PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
       - PNPM_STORE_DIR=/opt/pnpm-store
-    # Ramdisk for CI working directory — all build I/O in RAM.
-    # Repo is copied here at CI start; 10G fits repo (1.5G) + builds + headroom.
-    # Must use long-form mount to set exec (Docker defaults tmpfs to noexec).
+    # Ramdisk — repo + pnpm store copied here at CI start so all I/O is in RAM
+    # and pnpm can hardlink (same filesystem). 10G fits repo+store+builds.
     tmpfs:
       - /ramdisk:size=10G,exec
     # Warm sidecar: stays alive between CI runs, avoiding ~500ms docker run overhead.

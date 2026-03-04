@@ -33,7 +33,6 @@ for arg in "${@:3}"; do
 done
 
 REPO_SRC=/repo
-# Use ramdisk if available — all build I/O in RAM.
 if [[ -d /ramdisk ]]; then
     REPO_DIR=/ramdisk/repo
 else
@@ -200,17 +199,18 @@ JS_TREE_HASH=$(git ls-tree -r HEAD \
     packages/buckaroo-js-core/vite.config.ts \
     2>/dev/null | sha256sum | cut -c1-16)
 
-# Copy working tree to ramdisk if available — all build I/O in RAM.
+# Copy working tree + pnpm store to ramdisk — all build I/O in RAM.
+# Both must be on the same filesystem so pnpm can hardlink from store.
 if [[ "$REPO_DIR" != "$REPO_SRC" ]]; then
-    log "Copying repo to ramdisk..."
-    rm -rf "$REPO_DIR"
+    log "Copying repo + pnpm store to ramdisk..."
+    rm -rf "$REPO_DIR" /ramdisk/pnpm-store
     mkdir -p "$REPO_DIR"
     # tar pipe: fast, excludes .git (900MB+), no rsync dependency.
     tar cf - --exclude='.git' -C "$REPO_SRC" . | tar xf - -C "$REPO_DIR"
-    # pnpm uses hardlinks from its store; cross-filesystem hardlinks fail (store
-    # is on a named volume, ramdisk is tmpfs). Tell pnpm to copy instead.
-    export PNPM_CONFIG_PACKAGE_IMPORT_METHOD=copy
-    log "Ramdisk copy done ($(du -sh "$REPO_DIR" | cut -f1))"
+    # Copy pnpm store to ramdisk so hardlinks work (same filesystem).
+    cp -a /opt/pnpm-store /ramdisk/pnpm-store
+    export PNPM_STORE_DIR=/ramdisk/pnpm-store
+    log "Ramdisk copy done (repo=$(du -sh "$REPO_DIR" | cut -f1), store=$(du -sh /ramdisk/pnpm-store | cut -f1))"
 fi
 cd "$REPO_DIR" || { log "FATAL: cannot cd to $REPO_DIR"; exit 1; }
 
@@ -235,7 +235,7 @@ job_lint_python() {
 
 job_build_js() {
     cd "$REPO_DIR/packages"
-    pnpm install --frozen-lockfile --store-dir /opt/pnpm-store
+    pnpm install --frozen-lockfile --store-dir "${PNPM_STORE_DIR:-/opt/pnpm-store}"
     cd buckaroo-js-core
     if [[ "${JS_DIST_CACHED:-0}" != "1" ]]; then
         pnpm run build
@@ -286,7 +286,7 @@ job_test_python() {
 
 job_build_wheel() {
     cd "$REPO_DIR"
-    PNPM_STORE_DIR=/opt/pnpm-store bash scripts/full_build.sh
+    bash scripts/full_build.sh
 }
 
 job_test_mcp_wheel() {
