@@ -349,7 +349,7 @@ job_jupyter_warmup() {
         fuser -k $port/tcp 2>/dev/null || true
     done
 
-    # Start $PARALLEL JupyterLab servers sequentially
+    # Start all $PARALLEL JupyterLab servers in parallel, then wait for all to be HTTP-ready
     local pids=()
     for slot in $(seq 0 $((PARALLEL-1))); do
         port=$((BASE_PORT + slot))
@@ -360,6 +360,11 @@ job_jupyter_warmup() {
             --allow-root \
             >/tmp/jupyter-port${port}.log 2>&1 &
         pids+=($!)
+    done
+
+    # Poll all servers until each responds (up to 30s)
+    for slot in $(seq 0 $((PARALLEL-1))); do
+        port=$((BASE_PORT + slot))
         local started=false
         for i in $(seq 1 30); do
             curl -sf "http://localhost:${port}/api?token=${JUPYTER_TOKEN}" >/dev/null 2>&1 && { started=true; break; }
