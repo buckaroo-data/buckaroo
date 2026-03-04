@@ -142,14 +142,18 @@ Docker defaults `/dev/shm` to 64MB. Chromium uses `/dev/shm` for renderer IPC. A
 - P=4: 94s test phase (batches: 4+4+1)
 - P=5: **71s** test phase (batches: 5+4) — **24% faster**, eliminated one batch
 
-#### Jupyter Ecosystem Versions (resolved at install time)
+#### Jupyter Ecosystem Versions (from uv.lock, verified)
 | Package | Version |
 |---------|---------|
-| jupyterlab | 4.5.5 |
-| jupyter_server | 2.17.0 |
-| jupyter_client | 8.8.0 |
-| ipykernel | 7.2.0 |
+| jupyterlab | 4.5.0 |
+| jupyter_server | 2.15.0 |
+| jupyter_client | 8.6.3 |
+| ipykernel | 6.29.5 |
 | anywidget | 0.9.21 |
+
+> **Note:** An earlier version of this table had incorrect versions (7.2.0, 4.5.5, etc.)
+> that were not verified against the lockfile. Corrected 2026-03-04 after confirming
+> `uv.lock` has always pinned these exact versions across all builds.
 
 ### Run P4 — P=6 first attempt — COMPLETE
 

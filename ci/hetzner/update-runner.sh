@@ -38,6 +38,7 @@ if [[ "$DOCKERFILE_HASH" != "$OLD_HASH" ]]; then
     # Sync scripts before compose up (container mounts /opt/ci/runner/)
     mkdir -p "$RUNNER_DIR"
     cp ci/hetzner/run-ci.sh "$RUNNER_DIR/"
+    cp ci/hetzner/capture-versions.sh "$RUNNER_DIR/"
     cp ci/hetzner/lib/*.sh "$RUNNER_DIR/"
     cp scripts/test_playwright_jupyter_parallel.sh "$RUNNER_DIR/"
     echo "$DOCKERFILE_HASH" > "$RUNNER_DIR/.dockerfile-hash"
@@ -49,6 +50,7 @@ else
     # ── Scripts only — just copy, no restart needed ──────────────────────────
     mkdir -p "$RUNNER_DIR"
     cp ci/hetzner/run-ci.sh "$RUNNER_DIR/"
+    cp ci/hetzner/capture-versions.sh "$RUNNER_DIR/"
     cp ci/hetzner/lib/*.sh "$RUNNER_DIR/"
     cp scripts/test_playwright_jupyter_parallel.sh "$RUNNER_DIR/"
     chmod +x "$RUNNER_DIR"/*.sh

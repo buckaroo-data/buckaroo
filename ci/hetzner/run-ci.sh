@@ -47,6 +47,11 @@ source "$CI_RUNNER_DIR/lockcheck.sh"
 
 log() { echo "[$(date +'%H:%M:%S')] $*" | tee -a "$RESULTS_DIR/ci.log"; }
 
+# Capture exact package versions for reproducibility debugging.
+if [[ -x "$CI_RUNNER_DIR/capture-versions.sh" ]]; then
+    bash "$CI_RUNNER_DIR/capture-versions.sh" > "$RESULTS_DIR/versions.txt" 2>&1
+fi
+
 # Run a job: captures output, returns exit code.
 # run_job <name> <cmd> [args...]
 run_job() {

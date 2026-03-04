@@ -50,7 +50,7 @@ RUN cd /build-js/buckaroo-js-core && pnpm exec playwright install chromium
 
 # 8. Bake CI runner scripts into the image at a stable path so they survive
 #    `git checkout` of arbitrary SHAs inside /repo at runtime.
-COPY ci/hetzner/run-ci.sh ci/hetzner/lib/ /opt/ci-runner/
+COPY ci/hetzner/run-ci.sh ci/hetzner/capture-versions.sh ci/hetzner/lib/ /opt/ci-runner/
 COPY scripts/test_playwright_jupyter_parallel.sh /opt/ci-runner/
 ARG GIT_SHA=unknown
 RUN echo "$GIT_SHA" > /opt/ci-runner/VERSION && \
