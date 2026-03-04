@@ -1,31 +1,30 @@
 # CI Tuning — Current State & Open Research
 
 **Branch:** docs/ci-research
-**Server:** Vultr 16 vCPU / 32 GB (45.76.230.100) — planning move to larger server
-**Best config:** P=9 + /dev/shm fix + 5s stagger — **1m42s, all PASS** (commit 176f6f6)
+**Server:** Vultr 32 vCPU / 64 GB (45.76.18.207) — voc-c-32c-64gb-500s-amd
+**Best config:** P=9 + /dev/shm fix + 2s stagger — **1m42s, all PASS** (commit 09c6faa)
 
 ---
 
-## Current Best Configuration (commit 176f6f6, P=9 + /dev/shm fix)
+## Current Best Configuration (commit 09c6faa, P=9, 2s stagger, 64GB)
 
 ```
-Total: 1m42s (warm caches)
-├─ Wave 0 (parallel):     37s  [lint, build-js, test-python-3.13, pw-storybook, jupyter-warmup]
-├─ build-wheel:            4s  [after build-js, JS cache HIT]
-├─ test-js:               ~4s  [starts after build-js, runs in background]
+Total: 1m42s (warm caches, 32 vCPU / 64 GB)
+├─ Wave 0 (parallel):     44s  [lint, build-js, test-python-3.13, pw-storybook, jupyter-warmup]
+├─ build-wheel:            3s  [after build-js, JS cache HIT]
+├─ test-js:               ~5s  [starts after build-js, runs in background]
 ├─ wheel install:          3s  [into pre-warmed jupyter venv]
-├─ Wheel-dependent (staggered 5s apart):
-│   ├─ pw-jupyter (P=9):  50s  [critical path — 9 parallel notebooks]
-│   ├─ pw-server:         40s
-│   ├─ pw-marimo:         45s
-│   ├─ pw-wasm-marimo:    36s
-│   ├─ test-mcp-wheel:    15s
-│   ├─ smoke-test-extras: 61s  [5s uncontended, 61s under memory pressure]
-│   └─ test-python 3.11/3.12/3.14: ~29s each (deferred 20s)
+├─ Wheel-dependent (staggered 2s apart):
+│   ├─ pw-jupyter (P=9):  52s  [critical path — 9 parallel notebooks]
+│   ├─ pw-server:         44s
+│   ├─ pw-marimo:         53s
+│   ├─ pw-wasm-marimo:    39s
+│   ├─ test-mcp-wheel:    14s
+│   ├─ smoke-test-extras:  6s  [no memory pressure on 64GB]
+│   └─ test-python 3.11/3.12/3.14: ~24s each (deferred 8s)
 ```
 
-Critical path: `build-js(1s) → build-wheel(4s) → warmup-wait → wheel-install(3s) → pw-jupyter(50s)`
-Tail: smoke-test-extras finishes 11s after pw-jupyter due to memory pressure from 9 concurrent Chromium instances
+Critical path: `build-js(2s) → build-wheel(3s) → warmup-wait → wheel-install(3s) → pw-jupyter(52s)`
 
 ### Key Techniques (all proven)
 
@@ -53,6 +52,10 @@ Tail: smoke-test-extras finishes 11s after pw-jupyter due to memory pressure fro
 | `--disable-dev-shm-usage` on all PW configs | 40 | P=9 stable (Docker 64MB /dev/shm was root cause) |
 | P=9 parallel jupyter (settle=0) | 40 | 50s pw-jupyter (down from 96s at P=4) |
 | Bind-mount CI runner scripts | 41 | No rebuild needed for script changes |
+| 2s stagger (on 64GB) | 42 | 5s→2s, saves ~6s off total vs 5s stagger |
+| Port cleanup 8889-8897 | 42 | Fix: was only cleaning 8889-8894 (6 of 9) |
+| esbuild + pw-results cleanup | 42 | Prevents ~400MB leak + /tmp accumulation |
+| CI watchdog 360s | 42 | Handles cold-start (uv cache miss = +2min) |
 
 ### What Doesn't Work
 
@@ -67,17 +70,21 @@ Tail: smoke-test-extras finishes 11s after pw-jupyter due to memory pressure fro
 | `nice` on shell functions | 34+36 | `nice` is external cmd, can't run bash functions |
 | `init: true` in docker-compose | 37 | Tini wraps at host level; docker exec'd processes still parent to `sleep` PID 1 |
 | 2s stagger (on 32GB) | 41-B | Too aggressive — 12 Chromium instances in 6s exhausts RAM, pw-jupyter hangs |
+| 0s stagger (on 64GB) | 42 | All jobs simultaneous → 8/9 pw-jupyter notebooks hang. Kernel provisioner or ZMQ contention |
 
 ---
 
 ## Open Issues
 
-### 1. Back-to-back run degradation (LOW — workaround: restart container)
+### 1. Back-to-back run degradation — LARGELY FIXED
 
 **Discovered in:** Exp 34+36, confirmed with tini
-**Symptom:** Runs 1-2 after container restart pass. Run 3+ sometimes fails — pw-jupyter kernel connections hang.
-**NOT zombies:** tini confirmed 0 zombies. Root cause unknown — something else accumulates across runs.
-**Workaround:** Restart container between CI sessions. Single runs always pass.
+**Root causes found:**
+- Docker 64MB `/dev/shm` exhaustion (fixed with `--disable-dev-shm-usage`)
+- Stale storybook/esbuild processes leaking ~400MB between runs (fixed: `pkill esbuild` in pre-run cleanup)
+- Stale JupyterLab on ports 8895-8897 not cleaned (fixed: port range 8889-8897)
+- `/tmp/pw-results-*` accumulating across runs (fixed: cleanup added)
+**Status:** b2b run 1→2 passes on 64GB with all fixes. Needs more testing for run 3+.
 
 ### 2. pw-server flake — FIXED (Exp 34+36)
 
@@ -94,14 +101,23 @@ Tail: smoke-test-extras finishes 11s after pw-jupyter due to memory pressure fro
 
 P=6 issues were caused by Docker's 64MB /dev/shm. `--disable-dev-shm-usage` on all Playwright configs fixes this. P=9 is now stable with 5s stagger on 32GB.
 
-### 5. 32GB RAM is the constraint for aggressive scheduling
+### 5. 32GB RAM constraint — RESOLVED (moved to 64GB)
 
-With P=9 jupyter (9 Chromium) + 3 concurrent PW tests (3 more Chromium), free RAM drops to ~860MB. This causes:
-- Page cache eviction → slow Python processes (smoke-test-extras: 5s → 61s)
-- 2s stagger causes all 12 Chromium instances to launch within 6s, overwhelming memory
-- 5s stagger works because it spreads memory allocation over 20s
+Moved from Vultr 16 vCPU / 32GB (45.76.230.100, destroyed) to 32 vCPU / 64GB (45.76.18.207).
+On 64GB: smoke-test-extras runs in 6s (was 61s on 32GB). 2s stagger works. 0s stagger does NOT work (kernel contention, not RAM).
 
-**Resolution:** Move to larger server (64GB+) or accept 5s stagger on 32GB.
+### 6. Container detritus between runs
+
+After each CI run, these processes/files leak and must be cleaned by the next run's pre-run cleanup:
+- **Storybook node process** (~400MB RSS) — stays running after playwright-storybook completes
+- **3 esbuild processes** (~100MB total) — child processes of storybook/build
+- **Watchdog sleep** — `sleep 360` from CI timeout, harmless
+- **/tmp/pw-results-*** — Playwright test result dirs, ~15MB per run
+- **/tmp/pw-html-*** — Playwright HTML report dirs
+- **~/.jupyter/lab/workspaces/** — JupyterLab workspace files
+- **~/.local/share/jupyter/runtime/jupyter_cookie_secret** — harmless, persists
+
+The pre-run cleanup in run-ci.sh handles all of these. Verified: after cleanup runs, old storybook/esbuild PIDs are gone, /tmp dirs are removed, ports are freed.
 
 ---
 
@@ -136,6 +152,21 @@ With P=9 jupyter (9 Chromium) + 3 concurrent PW tests (3 more Chromium), free RA
 **What:** Added `--reporter=list` to pw-server in CI for per-test timing. Plus `[pw-server-timing]` total elapsed.
 **Result (from fd85f0a run):** pw-server total 41s. Per-test breakdown in pw-server.log.
 
+### Exp 42 — Server upgrade + stagger tuning (commits 6c8590d, 7626c67, 09c6faa) — SUCCESS
+
+**What:** Moved to 32 vCPU / 64GB server. Tested stagger values:
+- **0s stagger:** FAILS — 8/9 pw-jupyter notebooks hang at "Shift+Enter attempt 7". Port 8889 works, 8890-8897 don't. Reproducible on both 176f6f6 and 37aed6b. Root cause: kernel provisioner or ZMQ contention when 12 Chromium + 9 JupyterLab kernel starts all race simultaneously. NOT a RAM issue (64GB plenty, free stays >40GB).
+- **2s stagger:** WORKS — all pass consistently. 1m42-1m49s total.
+- **5s stagger:** WORKS — baseline from 176f6f6, 1m42s on old 32GB server.
+
+**Also fixed:**
+- Port cleanup range: was 8889-8894 (6 ports), now 8889-8897 (9 ports for P=9)
+- esbuild cleanup: `pkill -9 -f esbuild` added to pre-run cleanup
+- /tmp/pw-results-* cleanup: added to pre-run rm
+- CI watchdog: 210s → 360s (cold-start on fresh image needs ~3.5min for uv cache miss)
+
+**Key insight:** The 0s stagger failure was initially misattributed to SHA-specific differences (37aed6b vs 176f6f6). In reality, both SHAs fail with 0s stagger when using the bind-mounted runner. The earlier apparent SHA-specificity was because the bind-mounted runner was updated between test runs.
+
 ### Infra: Bind-mount CI runner scripts (commit 1c49a02) — SUCCESS
 
 **What:** Volume-mount `/opt/ci/runner/` into container at `/opt/ci-runner/:ro`. Added `update-runner.sh` that:
@@ -149,27 +180,33 @@ With P=9 jupyter (9 Chromium) + 3 concurrent PW tests (3 more Chromium), free RA
 
 ## Queued Experiments
 
-### Exp 29 — Marimo auto-retry assertions (committed, untested on server)
+### Exp 29 — Marimo auto-retry assertions — VALIDATED
 
-**Status:** Code committed at d020744, not yet validated in CI
-**What:** Replace one-shot `getCellText` with `cellLocator` + `toHaveText` in `marimo.spec.ts`. Retries 1→2.
-**Verification:** 3+ CI runs, pw-marimo 100%.
+**Status:** Validated in CI — pw-marimo passes consistently on 64GB server.
 
-### Exp 35 — Split test-js into build-js + test-js — IMPLEMENTED (commit 4a7fefc)
+### Exp 43 — New box deployment checklist
 
-**What:** `build-wheel` now gates only on `build-js` (pnpm install + build). `test-js` (pnpm test) runs in background after build-wheel starts. Saves ~3s off critical path.
-**Status:** Pending validation.
+**Priority:** HIGH — needed before spinning up another server
+**What:** Codify the full deployment procedure:
+1. Provision server (cloud-init or manual)
+2. Clone repo, build Docker image
+3. Set up bind mounts (`/opt/ci/runner/`, `/opt/ci/logs/`, `/opt/ci/js-cache/`)
+4. `docker compose up -d`
+5. Run CI with known-good SHA — must ALL PASS
+6. Run CI again (b2b) — must ALL PASS
+7. Check detritus between runs
+**Status:** Procedure documented informally; needs a script or checklist.
+
+### Exp 44 — Post-run cleanup (kill storybook/esbuild at end of CI)
+
+**Priority:** LOW — pre-run cleanup handles it, but cleaner to not leak
+**What:** After all jobs complete and results are reported, kill storybook and esbuild processes. Currently they leak ~400MB until the next run's pre-run cleanup kills them.
+**Risk:** Low — these processes are only needed during playwright-storybook job.
 
 ### Exp 26 — Wheel cache across SHAs
 
 **Priority:** LOWEST — CI-dev-only edge case, not useful for real CI
 **What:** Cache wheel keyed by Python+JS source hash. Skip build-wheel entirely on cache hit.
-**Note:** Only helps when iterating on CI harness/Playwright test code without touching Python or JS source. Not relevant for normal development CI runs.
-
-### Exp 25 — Synthetic merge commits for stress testing
-
-**Priority:** LOW
-**What:** Merge latest test code onto old SHAs for historical reliability testing.
 
 ---
 
@@ -177,7 +214,7 @@ With P=9 jupyter (9 Chromium) + 3 concurrent PW tests (3 more Chromium), free RA
 
 ### Trigger a CI run
 ```bash
-ssh root@45.76.230.100
+ssh root@45.76.18.207
 docker exec -d buckaroo-ci bash /opt/ci-runner/run-ci.sh <SHA> <BRANCH>
 tail -f /opt/ci/logs/<SHA>/ci.log
 ```
@@ -212,7 +249,13 @@ Report: wallclock total, per-phase timing, pass/fail per job.
 
 | SHA | Experiment | Total | Result | Notes |
 |-----|-----------|-------|--------|-------|
-| fd85f0a | Exp 41-A+B (2s stagger) | 3m08s | 13/2 FAIL | pw-jupyter timeout (0/9), pw-wasm-marimo timeout; smoke 28s |
+| 09c6faa | Exp 42 (2s stagger, 64GB, run 1) | 1m42s | **all PASS** | Post-restart, clean container |
+| 09c6faa | Exp 42 (2s stagger, 64GB, b2b) | 2m27s | **all PASS** | pw-wasm-marimo slow (1m35s anomaly) |
+| 37aed6b | 0s stagger, 64GB (5 runs) | 2m-3m | ALL FAIL | pw-jupyter hangs 8/9 every time |
+| 176f6f6 | 0s stagger runner, 64GB (run 3) | 2m01s | FAIL | 0s stagger fails on ALL SHAs |
+| c26897f | 2s stagger, 64GB, port fix | 1m45s | **all PASS** | First clean run after port fix |
+| c26897f | 2s stagger, 64GB, warm cache | 1m47s | **all PASS** | Cache hit confirmed |
+| fd85f0a | Exp 41-A+B (2s stagger, 32GB) | 3m08s | 13/2 FAIL | pw-jupyter timeout (0/9), pw-wasm-marimo timeout; smoke 28s |
 | 1c49a02 | Exp 41-A+B (2s stagger) | 3m29s | 13/2 FAIL | pw-jupyter timeout (1/9); first bind-mount run |
 | 176f6f6 | P=9, /dev/shm fix, 5s stagger | 1m42s | **all PASS** | Best config — baseline for optimization |
 | e6ea620 | P=5 + /dev/shm fix | — | all PASS | /dev/shm fix validated |
@@ -231,7 +274,7 @@ Report: wallclock total, per-phase timing, pass/fail per job.
 | 2ba10e7 | Exp 34+36 (fixed) | 2m38s | 14/1 | First run post-restart |
 | 20fb931 | Exp 37 (`init: true`) | 2m59s | pw-jupyter FAIL | 101 zombies |
 
-### CPU Profile (commit 4a7fefc, passing run)
+### CPU Profile (commit 4a7fefc, 16 vCPU — OLD SERVER)
 
 | Phase | Time | Duration | CPU (us+sy) |
 |-------|------|----------|-------------|
@@ -244,7 +287,7 @@ Report: wallclock total, per-phase timing, pass/fail per job.
 | Jobs finishing, pw-jupyter tail | 78-87s | 9s | 20-35% |
 | pw-jupyter alone (kernel I/O bound) | 88-101s | 13s | **4-13%** |
 
-Machine is massively underutilized during pw-jupyter's last ~15s — 4-13% busy. Kernel I/O latency is the bottleneck, not CPU.
+Note: This profile is from the old 16 vCPU server. On the new 32 vCPU server, CPU is no longer a constraint — the bottleneck is kernel I/O latency and (with 0s stagger) ZMQ/kernel provisioner contention.
 
 ---
 
@@ -252,6 +295,12 @@ Machine is massively underutilized during pw-jupyter's last ~15s — 4-13% busy.
 
 | Commit | Description |
 |--------|-------------|
+| 09c6faa | Exp 42: bump watchdog 210→360s for cold starts |
+| 7626c67 | Exp 42: cleanup esbuild, pw-results, port range 8889-8897 |
+| 6c8590d | Exp 42: restore 2s stagger (0s stagger proven broken) |
+| 37aed6b | Remove all stagger (BROKEN — do not use) |
+| c26897f | Fix: clean all 9 jupyter ports (8889-8897) |
+| 676161f | Docs update |
 | fd85f0a | Exp 41: fix awk timing (bc not in container) |
 | 1c49a02 | Bind-mount CI scripts + update-runner.sh |
 | 29b19fa | Exp 41: delay smoke-test, tighten stagger 5→2s, MCP/server timing |
