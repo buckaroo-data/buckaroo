@@ -86,7 +86,13 @@ fi
 
 log_message "Running Playwright tests against Buckaroo server..."
 
-if pnpm test:server; then
+# In CI, use list reporter for per-test timing in logs
+PW_REPORTER_FLAG=""
+if [ -n "${CI:-}" ] || [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]; then
+    PW_REPORTER_FLAG="--reporter=list"
+fi
+
+if pnpm exec playwright test --config playwright.config.server.ts $PW_REPORTER_FLAG; then
     success "ALL SERVER PLAYWRIGHT TESTS PASSED!"
     EXIT_CODE=0
 else
