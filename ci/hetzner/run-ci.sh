@@ -92,6 +92,7 @@ WATCHDOG_PID=$!
 # This ensures each CI run starts from a clean state regardless of how the
 # previous run ended (timeout, crash, manual kill, etc.).
 pkill -9 -f jupyter-lab 2>/dev/null || true
+pkill -9 -f ipykernel 2>/dev/null || true
 pkill -9 -f playwright 2>/dev/null || true
 pkill -9 -f chromium 2>/dev/null || true
 pkill -9 -f "node.*storybook" 2>/dev/null || true
