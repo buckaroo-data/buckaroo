@@ -72,7 +72,7 @@ rebuild_deps() {
     done
 
     echo "[lockcheck] Rebuilding JS deps..."
-    rm -rf /repo/packages/node_modules
+    rm -rf /repo/packages/node_modules /repo/packages/js/node_modules /repo/packages/buckaroo-js-core/node_modules
     cd packages
     pnpm install --frozen-lockfile --store-dir /opt/pnpm-store
     cd ..
