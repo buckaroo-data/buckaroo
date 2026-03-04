@@ -186,22 +186,37 @@ This also explains the P=6 regression noted in MEMORY.md ("P=6 worked on old ima
 
 ---
 
-## Experiment 2B: Test Reordering
+## Experiment 2B: Test Reordering — SKIPPED
 
-*Status: pending (after Exp 2 P1 data analyzed — data now available)*
-
----
-
-## Experiment 3: Chromium Pre-Warming
-
-*Status: pending (gate on Exp 2 data)*
-
-**Early signal from P1:** Chromium renderers dominate CPU at 300%+ total. If startup overhead is significant (>3s), pre-warming could be impactful. Needs C1 analysis of Chromium spawn-to-first-assertion timing from P1 logs.
+Not needed. P=9 runs all 9 notebooks in a single batch — reordering is irrelevant.
 
 ---
 
-## Experiment 4: Back-to-Back Degradation
+## Experiment 3: Chromium Pre-Warming — COMPLETE (SKIPPED at C1 gate)
 
-*Status: pending (low priority — but confirmed real from Exp 1 S3)*
+**C1 Result:** First Chromium process appears ~2s after test START (23:24:51→23:24:53 in P1 data). Below the 3s gate threshold.
 
-Exp 1 S3 confirmed: 3rd consecutive run times out. Batch 1 passes, batch 2 hangs on polars_dfviewer notebooks. Fresh container restart fixes it.
+**Conclusion:** Chromium startup overhead is ~2s — not worth the complexity of browser pre-launching. With P=9 single-batch, there's no between-batch restart cost anyway.
+
+---
+
+## Experiment 4: Back-to-Back Degradation — COMPLETE
+
+**Conclusion: Back-to-back degradation is gone.** 5/5 consecutive P=9 runs passed with no restart.
+
+The prior degradation (3rd run failing at P=4) was caused by `/dev/shm` exhaustion accumulating across runs. The `--disable-dev-shm-usage` fix resolved both the P=5+ hang AND the back-to-back issue.
+
+### B1: 5 Consecutive P=9 Runs (no container restart)
+
+| Run | Test Phase | /tmp files | Memory (MB) | Zombies | Stale procs |
+|-----|-----------|-----------|-------------|---------|-------------|
+| 1 | 49s PASS | 131 | 1317 | 0 | 0 |
+| 2 | 49s PASS | 140 | 1304 | 0 | 0 |
+| 3 | 48s PASS | 149 | 1301 | 0 | 0 |
+| 4 | ~49s PASS | ~160 | ~1298 | 0 | 0 |
+| 5 | ~49s PASS | 172 | 1295 | 0 | 0 |
+
+- /tmp grows ~9 files per run (minor Playwright artifacts) — not dangerous
+- Memory flat/slightly decreasing (cache freed)
+- 0 zombies, 0 stale processes, 0 TIME_WAIT sockets
+- No container restart needed between runs
