@@ -73,8 +73,11 @@ test.describe('Buckaroo mode: summary stats view', () => {
     const dfDisplaySelect = statusBar.locator('select').first();
     await dfDisplaySelect.selectOption('summary');
 
-    // Wait for re-render — the view change triggers a server roundtrip
-    await page.waitForTimeout(3000);
+    // Wait for summary view to render — pinned row count increases after server roundtrip
+    await expect(async () => {
+      const count = await getPinnedRowCount(page);
+      expect(count).toBeGreaterThan(mainPinnedCount);
+    }).toPass({ timeout: 10000 });
 
     const summaryPinnedCount = await getPinnedRowCount(page);
 
@@ -94,11 +97,14 @@ test.describe('Buckaroo mode: summary stats view', () => {
     const statusBar = page.locator('.status-bar');
     const dfDisplaySelect = statusBar.locator('select').first();
     await dfDisplaySelect.selectOption('summary');
-    await page.waitForTimeout(3000);
+    // Wait for summary pinned rows to appear
+    await expect(async () => {
+      const count = await getPinnedRowCount(page);
+      expect(count).toBeGreaterThanOrEqual(5);
+    }).toPass({ timeout: 10000 });
 
     // Switch back to main
     await dfDisplaySelect.selectOption('main');
-    await page.waitForTimeout(3000);
     await waitForDataGrid(page);
 
     // After switching back, verify grid has data cells
