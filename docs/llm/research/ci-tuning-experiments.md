@@ -1,9 +1,10 @@
 # CI Tuning — Current State & Next Experiments
 
 **Branch:** docs/ci-research
-**Server:** Vultr VX1 32C (66.42.115.86) — vx1-g-32c-128g, 32 vCPU/128GB, EPYC Turin Zen 5
-**Previous servers:** VX1 16C (destroyed), Rome 32C (destroyed)
-**Best config (Rome 32v):** P=9 + /dev/shm fix + 2s stagger — **1m42s, all PASS** (commit 09c6faa)
+**Server:** Vultr VX1 16C (137.220.56.81) — 16 vCPU/64GB, EPYC Turin Zen 5
+**Previous servers:** VX1 32C (66.42.115.86, active), VX1 16C (destroyed), Rome 32C (destroyed)
+**Best config (VX1 16C):** P=9, 0s stagger, parallel overlap — **51s** (commit 1455934, with --skip)
+**Full CI (no skip):** ~1m10s, 15-16/16 pass (timing-flaky pytest under load)
 **Archive:** See `ci-tuning-experiments-archive.md` for Exp 10-42, 51 details.
 
 ---
@@ -188,79 +189,45 @@ The 30x small-file speedup doesn't help when I/O phases overlap with CPU-heavy w
 
 ---
 
-### Exp 54 — Fast-fail mode
+### Exp 54 — Fast-fail mode — DONE
 
-**Priority:** HIGH — saves minutes when iterating on fixes
+**Commits:** 69e46e0 (fast-fail), 3528d5f (pnpm install race fix), 1455934 (ci_pkill self-kill fix)
 
-**Problem:** When a job fails early (e.g., lint-python at t+10s), the full ~3 minute run continues. During development, this wastes 2+ minutes per iteration.
+Implemented `--fast-fail` flag. Gates after build-js and build-wheel abort CI if either
+fails. Also reduced CI_TIMEOUT from 240s to 180s.
 
-**Plan:**
-1. Add a `--fast-fail` flag to `run-ci.sh` arg parsing (alongside existing `--phase` and `--wheel-from`).
-2. After each `wait $PID_xxx || OVERALL=1` line, check: if `$FAST_FAIL` is set and `$OVERALL` is non-zero, skip launching subsequent waves. Already-running background jobs are left alone (killing them cleanly is complex and not worth it).
-3. The key insertion points:
-   - After `wait $PID_BUILDJS` (line 553): if build-js fails, don't build-wheel or launch any playwright
-   - After `run_job build-wheel` (line 556): if wheel build fails, don't launch wheel-dependent jobs
-   - After `wait $PID_PW_JP` (line 620): if pw-jupyter fails, still launch the remaining jobs (they're independent) — OR skip them for maximum speed. Make this configurable or just skip.
-4. Test by intentionally introducing a lint failure, verifying CI exits in ~15s instead of ~3m.
-5. For the webhook/ci-queue path, fast-fail should be opt-in (default off) since you want full results for real CI.
-
-**Implementation notes:**
-- Don't try to `kill` background PIDs — they may have spawned children (JupyterLab, Chromium) that won't get cleaned up. Let them finish naturally; the pre-run cleanup will handle them next run.
-- The `wait` calls at the end (lines 632-643) should still run so we collect accurate pass/fail for the jobs that did start.
-- Log `SKIP <job> (fast-fail)` so the ci.log is parseable.
+**Side fix (3528d5f):** `full_build.sh` had `pnpm install` on line 30 that ran even when
+dist existed. This "Recreated" node_modules while test-js was reading them — race condition.
+Fixed: skip pnpm install if node_modules already exists.
 
 ---
 
-### Exp 55 — Selective test runs (`--only` / `--skip`)
+### Exp 55 — Selective test runs (`--only` / `--skip`) — DONE
 
-**Priority:** HIGH — enables fast iteration and is a prerequisite for the tuning script
+**Commits:** e3b4d31 (--only/--skip), 1455934 (ci_pkill fix)
 
-**Problem:** To iterate on pw-jupyter, you have to run the entire CI. To iterate on a Python test fix, you wait for build-js + build-wheel even though you only need pytest. pw-wasm-marimo takes 2+ minutes and rarely fails from app changes.
+Implemented `--only=JOB,JOB` and `--skip=JOB,JOB` flags. `should_run()` checks filters
+before each `run_job`. Dependencies not auto-resolved (documented).
 
-**Plan:**
-1. Add `--only=JOB1,JOB2` and `--skip=JOB1,JOB2` flags to `run-ci.sh`. Job names match the `run_job` first argument (e.g., `lint-python`, `build-js`, `playwright-jupyter`, `test-python-3.13`).
-2. Before each `run_job` call, check if the job is allowed:
-   - If `--only` is set: skip jobs not in the list
-   - If `--skip` is set: skip jobs in the list
-   - Dependency handling: if `--only=playwright-jupyter`, implicitly include `build-js`, `build-wheel`, `jupyter-warmup` (its dependencies). OR, document that the user must include dependencies manually. The simpler approach (manual) is better to start.
-3. Skipped jobs should log `SKIP <job> (filtered)` and return 0.
-4. Special case: `--only=playwright-jupyter` is essentially `--phase=5b` but starting from scratch. Consider whether `--phase=5b` (which uses cached wheel) is sufficient, or if `--only` adds value.
-5. Example usage:
-   ```
-   run-ci.sh SHA BRANCH --only=lint-python,test-python-3.13    # 15s
-   run-ci.sh SHA BRANCH --skip=playwright-wasm-marimo           # saves 2min
-   run-ci.sh SHA BRANCH --only=playwright-jupyter,build-js,build-wheel,jupyter-warmup  # just pw-jupyter
-   ```
-6. Test by running with various `--only`/`--skip` combos, verify correct jobs run.
+**Bug found:** `pkill -9 -f 'marimo'` matched the CI script's own args
+(`--skip=playwright-wasm-marimo`) and killed it during cleanup. Fixed with `ci_pkill()`
+helper that excludes `$$` from matches.
 
-**Interaction with `--fast-fail`:** These are orthogonal. `--only` controls which jobs start, `--fast-fail` controls whether to abort after a failure. Both can be used together.
+**Results (1455934, VX1 16C):**
+
+| Mode | Total | Jobs run | Result |
+|------|-------|----------|--------|
+| `--skip=3.11,3.12,3.14,wasm-marimo` | **51s** | 12/16 | ALL PASS |
+| `--only=lint-python,test-python-3.13` | **20s** | 2/16 | ALL PASS |
+| Full run (no filter) | ~1m10s | 16/16 | 15/16 PASS (flaky timing) |
 
 ---
 
-### Exp 56 — Fix GitHub CI on this branch
+### Exp 56 — Fix GitHub CI on this branch — ALREADY PASSING
 
-**Priority:** MEDIUM — stops the failure notification noise
-
-**Problem:** The `docs/ci-research` branch generates GitHub Actions failure notifications on every push.
-
-**Plan:**
-1. Check what's actually failing:
-   ```
-   gh run list --branch docs/ci-research --limit 5
-   gh run view <run-id>
-   ```
-2. Likely issues:
-   - `ci/hetzner/` shell scripts may fail shellcheck or have syntax that triggers lint
-   - `packages/.npmrc` with `shamefully-hoist=true` may break pnpm on GH runners
-   - Playwright config changes (`--disable-dev-shm-usage`) shouldn't matter on GH
-   - `stress-test.sh`, `create-merge-commits.sh` are new files that may not pass lint
-3. Options to fix:
-   - **Option A:** Add this branch to the GH workflow's `branches-ignore` list in `.github/workflows/checks.yml`. Quick but hides real issues.
-   - **Option B:** Fix the actual failures. Better long-term since changes will eventually merge to main.
-   - **Option C:** Add a `.github/workflows/` override on this branch that skips the problematic jobs. Middle ground.
-4. For Option B, push fixes, check CI passes via `gh run watch`.
-
-**Note:** Don't spend a lot of time on this if the failures are in CI-research-only files (shell scripts, docs). Option A is fine for a research branch.
+GitHub CI on `docs/ci-research` is consistently passing. Last 3 completed Checks runs:
+all `success`. The `cancelled` runs are from rapid pushes superseding earlier runs.
+No action needed.
 
 ---
 
