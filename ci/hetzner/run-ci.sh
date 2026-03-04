@@ -536,19 +536,20 @@ else
     renice -n -10 -p $PID_BUILDJS >/dev/null 2>&1 || true
     run_job test-python-3.13       bash -c "job_test_python 3.13" & PID_PY313=$!
     renice -n 10 -p $PID_PY313 >/dev/null 2>&1 || true
-    run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
-    renice -n 10 -p $PID_PW_SB >/dev/null 2>&1 || true
     # Early kernel warmup — venv + JupyterLab servers + kernel warmup while
     # heavyweight jobs are running. NOT reniced: servers persist for pw-jupyter.
     run_job jupyter-warmup         job_jupyter_warmup             & PID_WARMUP=$!
 
-    # ── Wait for build-js only, then build wheel + start test-js ──────────────
+    # ── Wait for build-js only, then build wheel + test-js + storybook ─────────
     wait $PID_BUILDJS || OVERALL=1
-    log "=== build-js done — starting build-wheel + test-js ==="
+    log "=== build-js done — starting build-wheel + test-js + storybook ==="
 
     run_job build-wheel job_build_wheel || OVERALL=1
     run_job test-js     job_test_js     & PID_TESTJS=$!
     renice -n 10 -p $PID_TESTJS >/dev/null 2>&1 || true
+    # Storybook needs node_modules from build-js (pnpm install); can't run in Wave 0.
+    run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
+    renice -n 10 -p $PID_PW_SB >/dev/null 2>&1 || true
 
     # Cache wheel by current SHA so --phase=5b / --wheel-from can reuse it.
     mkdir -p "/opt/ci/wheel-cache/$SHA"
