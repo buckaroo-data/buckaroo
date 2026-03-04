@@ -366,3 +366,45 @@ Marimo workers:2 causes ERR_CONNECTION_REFUSED — single marimo server can't ha
 3. **smoke-test-extras** (6 parallel uv pip install) stays deferred — heavy IO
 4. **Sweet spot: pw-jupyter + pw-marimo + pw-wasm + pw-server** — 1m40s, reliable b2b
 5. **Savings: 28s** (2m08s → 1m40s) from overlapping Playwright jobs
+
+---
+
+## Cloud-Init Hardening — COMPLETE (commit aeb76f7)
+
+**Changes:**
+- Added missing directories: `/opt/ci/runner`, `/opt/ci/js-cache`, `/opt/ci/queue`
+- Deploy `ci-queue.sh` to `/usr/local/bin/ci-queue` (job queue for webhook)
+- Copy CI runner scripts directly (update-runner.sh not suitable for first-run)
+- Save Dockerfile hash so subsequent `update-runner.sh` calls work correctly
+- Made provider-agnostic (Hetzner, Vultr, or any cloud-init provider)
+- Removed obsolete `HETZNER_SERVER_ID` from .env template
+
+---
+
+## Final Summary
+
+**Starting point:** 2m08s, all jobs sequential after pw-jupyter
+**Final result:** 1m40s, 4 Playwright jobs overlapping with pw-jupyter
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Total CI | 2m08s | 1m40s | **-22%** |
+| pw-jupyter | 52s | 52s | unchanged |
+| pw-marimo | 53s (sequential) | 52s (parallel) | **hidden behind pw-jupyter** |
+| pw-wasm-marimo | 37s (sequential) | 36s (parallel) | **hidden** |
+| pw-server | 44s (sequential) | 43s (parallel) | **hidden** |
+
+**Critical path:** warmup (20s) → wheel install (3s) → pw-jupyter (52s) → test-python (24s) = **99s**
+
+### Experiment Status
+
+| # | Experiment | Status | Result |
+|---|-----------|--------|--------|
+| 1 | CI timeout 4min | Done | Saves iteration time |
+| 2 | Contamination | Done | Deferred heavy jobs → reliable |
+| 3 | Stagger 1.5s | Done | Unreliable b2b, 2s is minimum |
+| 4 | Chromium pre-warming | Skipped | Startup is only ~2s |
+| 5 | Single JupyterLab | Skipped | Marginal savings, ZMQ risk |
+| 6 | Cloud-init hardening | Done | Fixed missing dirs, ci-queue, provider-agnostic |
+| 7 | Parallelize marimo | Done | workers:2 crashes single server |
+| 8 | Job overlap | Done | **1m40s** — 4 PW jobs parallel with pw-jupyter |
