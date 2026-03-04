@@ -84,7 +84,7 @@ done
 CPU_FINE_PID=$!
 
 # CI timeout watchdog — kill everything if CI exceeds time limit.
-CI_TIMEOUT=${CI_TIMEOUT:-360}
+CI_TIMEOUT=${CI_TIMEOUT:-240}
 ( sleep "$CI_TIMEOUT"; echo "[$(date +'%H:%M:%S')] TIMEOUT: CI exceeded ${CI_TIMEOUT}s" >> "$RESULTS_DIR/ci.log"; kill -TERM 0 ) 2>/dev/null &
 WATCHDOG_PID=$!
 
