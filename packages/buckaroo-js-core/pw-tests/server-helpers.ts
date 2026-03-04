@@ -43,6 +43,15 @@ export async function getRowCount(page: Page): Promise<number> {
 }
 
 /**
+ * Get a cell locator by col-id and row-index.
+ * Returns a Locator so callers can use auto-retrying expect(locator).toHaveText()
+ * instead of one-shot innerText() which races with AG-Grid rendering.
+ */
+export function cellLocator(page: Page, colId: string, rowIndex: number) {
+  return page.locator(`[row-index="${rowIndex}"] [col-id="${colId}"]`);
+}
+
+/**
  * Get the text content of a cell by col-id and row-index.
  */
 export async function getCellText(
