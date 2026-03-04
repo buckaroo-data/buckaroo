@@ -220,3 +220,50 @@ The prior degradation (3rd run failing at P=4) was caused by `/dev/shm` exhausti
 - Memory flat/slightly decreasing (cache freed)
 - 0 zombies, 0 stale processes, 0 TIME_WAIT sockets
 - No container restart needed between runs
+
+---
+
+## Experiment 5: Concurrent Job Contention — COMPLETE
+
+**Date:** 2026-03-04
+**Server:** Vultr 32 vCPU / 64GB (45.76.18.207)
+**Baseline:** All jobs launched concurrently with 2s stagger (commit 6a3f4ba)
+
+### Problem
+
+pw-jupyter consistently failed (8/9 notebooks hung) when running concurrently with:
+- smoke-test-extras (6 parallel `uv pip install` + smoke tests)
+- pw-marimo, pw-wasm-marimo, pw-server (3 Chromium instances)
+- test-python-3.{11,12,14} (3 pytest runs with `-n 4` = 12 processes)
+
+Failure was **100% reproducible** across 4 runs, including fresh container restarts and
+even the known-good commit c26897f. First 1-2 notebooks passed (started before heavy
+jobs ramped up), remaining 7-8 hung with "Shift+Enter attempt N" retries.
+
+Phase 5b (pw-jupyter running alone) passed consistently — confirming contention as root cause.
+
+### Fix: Defer heavy jobs until pw-jupyter completes (commit 45824a0)
+
+Only test-mcp-wheel (lightweight, single process) runs alongside pw-jupyter.
+All other heavy jobs start after pw-jupyter finishes.
+
+### Results
+
+| Run | Commit | pw-jupyter | Total CI | Result |
+|-----|--------|-----------|----------|--------|
+| 1 (concurrent) | 6a3f4ba | HUNG (120s timeout) | 2m28s | FAIL |
+| 2 (concurrent) | 6a3f4ba | HUNG (120s timeout) | 2m25s | FAIL |
+| 3 (concurrent) | c26897f | HUNG (120s timeout) | 2m25s | FAIL |
+| 4 (concurrent, 2GB shm) | 28ae719 | HUNG (120s timeout) | 2m31s | FAIL |
+| 5 (phase 5b, alone) | 28ae719 | 107s | 1m47s | PASS |
+| 6 (deferred) | 45824a0 | 52s | 2m07s | PASS |
+| 7 (deferred, b2b) | 45824a0 | 51s | 2m09s | PASS |
+
+### Key Findings
+
+1. **2GB /dev/shm didn't help** — the hang is CPU/kernel contention, not shared memory
+2. **Deferred approach adds ~20s** to total CI (was ~1m45s concurrent, now ~2m09s) because
+   heavy jobs can't overlap with pw-jupyter
+3. **pw-jupyter is the bottleneck at 51-52s** — everything else fits in the remaining ~75s
+4. **Contamination hypothesis disproven** — the issue was always concurrent contention, not
+   stale state from failed runs
