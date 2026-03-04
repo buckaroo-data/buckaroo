@@ -408,3 +408,63 @@ Marimo workers:2 causes ERR_CONNECTION_REFUSED — single marimo server can't ha
 | 6 | Cloud-init hardening | Done | Fixed missing dirs, ci-queue, provider-agnostic |
 | 7 | Parallelize marimo | Done | workers:2 crashes single server |
 | 8 | Job overlap | Done | **1m40s** — 4 PW jobs parallel with pw-jupyter |
+| 9 | VX1 Zen 5 (16 vCPU) | Done | **UNRELIABLE** — per-core faster but not enough cores |
+
+---
+
+## Experiment 9: VX1 Zen 5 (16 vCPU / 64 GB) — COMPLETE
+
+**Server:** Vultr VX1 16C ($350/mo) — AMD EPYC Turin (Zen 5) @ 2.4 GHz, 16 vCPU, 64 GB
+**Goal:** Test whether faster per-core performance (Zen 5 vs Zen 2) compensates for fewer cores (16 vs 32).
+**Commit:** 45d10c8 (deferred overlap DAG)
+
+### Setup
+1. Destroyed old Rome box (45.76.18.207, 32 vCPU, $315/mo)
+2. Created VX1 instance (45.76.229.165, id: 683527e4)
+3. Manual setup: Docker CE, repo clone, Docker image build, runner scripts, docker-compose
+
+### Results
+
+| Run | P | Total | pw-jupyter | Restart? | Result |
+|-----|---|-------|-----------|----------|--------|
+| 1 (cold) | 9 | 2m34s | 47s | N/A | test-python flaky |
+| 2 (warm, overlap DAG) | 9 | 1m33s | 48s | No (b2b) | **ALL PASS** |
+| 3 (b2b) | 9 | 2m49s | 120s timeout | No | FAIL (6/9 pass) |
+| 4 (deferred DAG) | 9 | 1m46s | 46s | Yes | **ALL PASS** |
+| 5 (b2b) | 9 | 2m58s | 120s timeout | No | FAIL |
+| 6 (restart) | 9 | 2m59s | 120s timeout | Yes | FAIL |
+| 7 (restart) | 6 | 2m57s | 120s timeout | Yes | FAIL |
+| 8 (phase=5b) | 3 | >240s | 240s timeout | Yes | FAIL |
+| 9 (restart) | 9 | 2m59s | 120s timeout | Yes | FAIL (5/9) |
+| 10 (restart) | 4 | 2m17s | 1m21s | Yes | **ALL PASS** |
+| 11 (b2b) | 4 | 2m57s | 120s timeout | No | FAIL |
+| 12 (restart) | 9 | 2m59s | 120s timeout | Yes | FAIL (5/9) |
+
+**Pass rate:** 3/12 runs (25%) — vs 100% on Rome 32 vCPU
+
+### Per-Job Comparison (passing runs only)
+
+| Job | VX1 16v Zen 5 | Rome 32v Zen 2 | Change |
+|---|---|---|---|
+| jupyter-warmup | **21s** | 45s | **-53%** |
+| pw-jupyter | 46-48s | 51s | -6% |
+| pw-marimo | 34-36s | 52s | **-33%** |
+| pw-wasm-marimo | 23-25s | 37s | **-35%** |
+| pw-server | 36-37s | 43s | **-16%** |
+| test-python-3.13 | 26-29s | 24s | +13% (contention) |
+
+### Key Findings
+
+1. **Zen 5 is 30-50% faster per-core** for single-threaded workloads (warmup, marimo)
+2. **16 vCPU is insufficient for P=9 pw-jupyter** — 9 Chromium + 9 JupyterLab + kernel processes overwhelm 16 cores
+3. **Even P=3 and P=4 are unreliable** on this box — passes only after fresh container restart
+4. **b2b contamination is severe** — first run sometimes passes, b2b always fails
+5. **The contamination is NOT about orphan processes** — after restart, no stale processes exist but tests still hang
+6. **Core count matters more than per-core speed** for our heavily parallel Playwright workload
+
+### Conclusion
+
+VX1 16 vCPU is not viable for P=9 pw-jupyter. Need either:
+- VX1 32C ($700/mo) — expensive but would combine Zen 5 speed with enough cores
+- Stay on Rome 32 vCPU ($315/mo) — reliable, already optimized to 1m40s
+- Investigate pw-jupyter to reduce parallelism needs (batch mode, shared browser)
