@@ -217,12 +217,12 @@ job_test_mcp_wheel() {
     t0=$(date +%s.%N)
     uv venv "$venv" -q
     t1=$(date +%s.%N)
-    echo "[mcp-timing] venv creation: $(echo "$t1 - $t0" | bc)s"
+    echo "[mcp-timing] venv creation: $(awk "BEGIN{printf \"%.1f\", $t1 - $t0}")s"
     local wheel
     wheel=$(ls dist/buckaroo-*.whl | head -1)
     uv pip install --python "$venv/bin/python" "${wheel}[mcp]" pytest -q
     t2=$(date +%s.%N)
-    echo "[mcp-timing] wheel+deps install: $(echo "$t2 - $t1" | bc)s"
+    echo "[mcp-timing] wheel+deps install: $(awk "BEGIN{printf \"%.1f\", $t2 - $t1}")s"
     local rc=0
     # test_uvx_no_stdout_pollution: flushes subprocess stdin which Docker closes
     # unexpectedly (non-TTY pipe), causing ValueError: flush of closed file.
@@ -234,14 +234,14 @@ job_test_mcp_wheel() {
             --deselect tests/unit/server/test_mcp_uvx_install.py::TestMcpInstall::test_uvx_no_stdout_pollution \
             -v --color=yes -m slow || rc=$?
     t3=$(date +%s.%N)
-    echo "[mcp-timing] pytest run 1 (integration): $(echo "$t3 - $t2" | bc)s"
+    echo "[mcp-timing] pytest run 1 (integration): $(awk "BEGIN{printf \"%.1f\", $t3 - $t2}")s"
     "$venv/bin/pytest" \
         tests/unit/server/test_mcp_uvx_install.py::TestUvxFailureModes \
         -v --color=yes -m slow || rc=$?
     local t4
     t4=$(date +%s.%N)
-    echo "[mcp-timing] pytest run 2 (failure modes): $(echo "$t4 - $t3" | bc)s"
-    echo "[mcp-timing] total: $(echo "$t4 - $t0" | bc)s"
+    echo "[mcp-timing] pytest run 2 (failure modes): $(awk "BEGIN{printf \"%.1f\", $t4 - $t3}")s"
+    echo "[mcp-timing] total: $(awk "BEGIN{printf \"%.1f\", $t4 - $t0}")s"
     rm -rf "$venv"
     return $rc
 }
@@ -295,7 +295,7 @@ job_playwright_server() {
         bash scripts/test_playwright_server.sh
     local rc=$?
     t1=$(date +%s.%N)
-    echo "[pw-server-timing] total: $(echo "$t1 - $t0" | bc)s"
+    echo "[pw-server-timing] total: $(awk "BEGIN{printf \"%.1f\", $t1 - $t0}")s"
     return $rc
 }
 
