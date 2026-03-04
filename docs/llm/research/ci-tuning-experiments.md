@@ -1,30 +1,31 @@
 # CI Tuning — Current State & Open Research
 
 **Branch:** docs/ci-research
-**Server:** Vultr 16 vCPU / 32 GB (45.76.230.100)
-**Best config:** P=4 + tini + SKIP_INSTALL + renice — **~2m01s, 14/14 overall**
+**Server:** Vultr 16 vCPU / 32 GB (45.76.230.100) — planning move to larger server
+**Best config:** P=9 + /dev/shm fix + 5s stagger — **1m42s, all PASS** (commit 176f6f6)
 
 ---
 
-## Current Best Configuration (commit 4a7fefc)
+## Current Best Configuration (commit 176f6f6, P=9 + /dev/shm fix)
 
 ```
-Total: ~2m00s (warm caches) / ~2m21s (first run, lockfile rebuild)
-├─ Wave 0 (parallel):     25s  [lint, build-js, test-python-3.13, pw-storybook, jupyter-warmup]
+Total: 1m42s (warm caches)
+├─ Wave 0 (parallel):     37s  [lint, build-js, test-python-3.13, pw-storybook, jupyter-warmup]
 ├─ build-wheel:            4s  [after build-js, JS cache HIT]
 ├─ test-js:               ~4s  [starts after build-js, runs in background]
 ├─ wheel install:          3s  [into pre-warmed jupyter venv]
 ├─ Wheel-dependent (staggered 5s apart):
-│   ├─ pw-jupyter:        96s  [P=4 batched 4+4+1, critical path]
-│   ├─ pw-server:         46s
-│   ├─ pw-marimo:         50s
-│   ├─ pw-wasm-marimo:    35s
-│   ├─ test-mcp-wheel:    14s
-│   ├─ smoke-test-extras:  8s  [parallel venv installs]
-│   └─ test-python 3.11/3.12/3.14: ~30s each (deferred 20s)
+│   ├─ pw-jupyter (P=9):  50s  [critical path — 9 parallel notebooks]
+│   ├─ pw-server:         40s
+│   ├─ pw-marimo:         45s
+│   ├─ pw-wasm-marimo:    36s
+│   ├─ test-mcp-wheel:    15s
+│   ├─ smoke-test-extras: 61s  [5s uncontended, 61s under memory pressure]
+│   └─ test-python 3.11/3.12/3.14: ~29s each (deferred 20s)
 ```
 
-Critical path: `build-js(1s) → build-wheel(4s) → warmup-wait → wheel-install(3s) → pw-jupyter(96s)`
+Critical path: `build-js(1s) → build-wheel(4s) → warmup-wait → wheel-install(3s) → pw-jupyter(50s)`
+Tail: smoke-test-extras finishes 11s after pw-jupyter due to memory pressure from 9 concurrent Chromium instances
 
 ### Key Techniques (all proven)
 
@@ -49,6 +50,9 @@ Critical path: `build-js(1s) → build-wheel(4s) → warmup-wait → wheel-insta
 | Split build-js / test-js | 35 | ~3s off critical path (test runs in background) |
 | Lockfile hash on bind mount | 39 | No dep rebuild on container restart |
 | 120s pw-jupyter timeout + 210s watchdog | 33 | Prevents runaway CI |
+| `--disable-dev-shm-usage` on all PW configs | 40 | P=9 stable (Docker 64MB /dev/shm was root cause) |
+| P=9 parallel jupyter (settle=0) | 40 | 50s pw-jupyter (down from 96s at P=4) |
+| Bind-mount CI runner scripts | 41 | No rebuild needed for script changes |
 
 ### What Doesn't Work
 
@@ -62,6 +66,7 @@ Critical path: `build-js(1s) → build-wheel(4s) → warmup-wait → wheel-insta
 | Lean Wave 0 (shift work to later) | 32 | Just moves contention, +8s total |
 | `nice` on shell functions | 34+36 | `nice` is external cmd, can't run bash functions |
 | `init: true` in docker-compose | 37 | Tini wraps at host level; docker exec'd processes still parent to `sleep` PID 1 |
+| 2s stagger (on 32GB) | 41-B | Too aggressive — 12 Chromium instances in 6s exhausts RAM, pw-jupyter hangs |
 
 ---
 
@@ -85,9 +90,60 @@ Critical path: `build-js(1s) → build-wheel(4s) → warmup-wait → wheel-insta
 **Was:** Every container restart triggered "Lockfiles changed — rebuilding deps" because the hash store (`/var/ci/hashes/`) was inside the container.
 **Fix:** Moved to `/opt/ci/logs/.lockcheck-hashes/` which is bind-mounted to the host. Hashes now persist across container restarts.
 
-### 4. PARALLEL=6 regression
+### 4. PARALLEL=6 regression — SUPERSEDED by P=9 + /dev/shm fix
 
-P=6 batched (6+3) worked at Exp 33 (076f40f, old image) but fails on current image (tini + SKIP_INSTALL + renice). Kernel connections on later ports (8892-8894) time out. P=4 is stable. Low priority since P=4 only adds ~30s vs P=6.
+P=6 issues were caused by Docker's 64MB /dev/shm. `--disable-dev-shm-usage` on all Playwright configs fixes this. P=9 is now stable with 5s stagger on 32GB.
+
+### 5. 32GB RAM is the constraint for aggressive scheduling
+
+With P=9 jupyter (9 Chromium) + 3 concurrent PW tests (3 more Chromium), free RAM drops to ~860MB. This causes:
+- Page cache eviction → slow Python processes (smoke-test-extras: 5s → 61s)
+- 2s stagger causes all 12 Chromium instances to launch within 6s, overwhelming memory
+- 5s stagger works because it spreads memory allocation over 20s
+
+**Resolution:** Move to larger server (64GB+) or accept 5s stagger on 32GB.
+
+---
+
+## Recent Experiments (Exp 40-41)
+
+### Exp 40 — /dev/shm fix + P=9 (commits e6ea620, 176f6f6) — SUCCESS
+
+**What:** Add `--disable-dev-shm-usage` to all Playwright configs (storybook, server, marimo, wasm-marimo, jupyter). Docker default /dev/shm is 64MB which causes Chromium crashes at P=5+.
+**Result:** P=9 stable, settle=0 works, all jobs PASS. Total 1m42s — best ever.
+**Key insight:** Back-to-back degradation was also caused by /dev/shm exhaustion, not zombie accumulation.
+
+### Exp 41-A — Defer smoke-test-extras (commit fd85f0a) — WORKS (needs larger server)
+
+**What:** Launch smoke-test-extras after `wait $PID_PW_JP` instead of at t+0. Event-driven, not sleep-based.
+**Result on 32GB:** smoke-test-extras 28s (down from 61s). Still not the ideal 5s because pw-wasm-marimo was still running, keeping memory pressure elevated.
+**Expected on 64GB+:** should hit the 5s uncontended target.
+
+### Exp 41-B — Tighten stagger 5s→2s (commit fd85f0a) — FAILED on 32GB
+
+**What:** Reduce gaps between pw-marimo/wasm/server from 5s to 2s.
+**Result:** pw-jupyter hangs consistently (0/9 or 1/9 notebooks complete in 120s timeout). All 12 Chromium instances launching within 6s overwhelms 32GB RAM.
+**Conclusion:** 5s stagger is necessary on 32GB. Re-test on larger server.
+
+### Exp 41-C — MCP timing instrumentation (commit fd85f0a) — IN PLACE
+
+**What:** Added `[mcp-timing]` lines to `job_test_mcp_wheel` — times venv creation, wheel install, each pytest run.
+**Note:** Uses `awk` not `bc` (bc not installed in container).
+**Result (from fd85f0a run):** test-mcp-wheel total 11s. Detailed breakdown needs green run to read.
+
+### Exp 41-D — pw-server timing instrumentation (commit fd85f0a) — IN PLACE
+
+**What:** Added `--reporter=list` to pw-server in CI for per-test timing. Plus `[pw-server-timing]` total elapsed.
+**Result (from fd85f0a run):** pw-server total 41s. Per-test breakdown in pw-server.log.
+
+### Infra: Bind-mount CI runner scripts (commit 1c49a02) — SUCCESS
+
+**What:** Volume-mount `/opt/ci/runner/` into container at `/opt/ci-runner/:ro`. Added `update-runner.sh` that:
+- Copies scripts from repo to `/opt/ci/runner/`
+- Detects Dockerfile changes via sha256 hash
+- Only rebuilds image when Dockerfile changes
+
+**Result:** Script changes take effect instantly. Tested: `update-runner.sh` correctly prints "Scripts updated (no rebuild needed)" for script-only changes, and triggers full rebuild when Dockerfile hash differs.
 
 ---
 
@@ -126,9 +182,21 @@ docker exec -d buckaroo-ci bash /opt/ci-runner/run-ci.sh <SHA> <BRANCH>
 tail -f /opt/ci/logs/<SHA>/ci.log
 ```
 
-### Rebuild Docker image (after changing baked files)
+### Update CI scripts (no rebuild needed)
 ```bash
-ssh root@45.76.230.100
+ssh root@<server-ip>
+cd /opt/ci/repo && git fetch origin
+git checkout origin/<branch> -- ci/hetzner/ scripts/
+bash ci/hetzner/update-runner.sh
+```
+The `update-runner.sh` script:
+- Copies scripts to `/opt/ci/runner/` (bind-mounted into container)
+- Detects Dockerfile changes via sha256 hash — only rebuilds when needed
+- Script changes take effect instantly, no container restart required
+
+### Manual rebuild (only for Dockerfile changes)
+```bash
+ssh root@<server-ip>
 cd /opt/ci/repo && git fetch origin && git checkout <SHA>
 docker build -t buckaroo-ci -f ci/hetzner/Dockerfile .
 cd ci/hetzner && docker compose down && docker compose up -d
@@ -138,15 +206,16 @@ cd ci/hetzner && docker compose down && docker compose up -d
 Lines: `[HH:MM:SS] START/PASS/FAIL <job>`
 Report: wallclock total, per-phase timing, pass/fail per job.
 
-### Baked files
-`run-ci.sh` and `test_playwright_jupyter_parallel.sh` are baked into the image at `/opt/ci-runner/`. Changes require image rebuild.
-
 ---
 
 ## Recent Run History
 
 | SHA | Experiment | Total | Result | Notes |
 |-----|-----------|-------|--------|-------|
+| fd85f0a | Exp 41-A+B (2s stagger) | 3m08s | 13/2 FAIL | pw-jupyter timeout (0/9), pw-wasm-marimo timeout; smoke 28s |
+| 1c49a02 | Exp 41-A+B (2s stagger) | 3m29s | 13/2 FAIL | pw-jupyter timeout (1/9); first bind-mount run |
+| 176f6f6 | P=9, /dev/shm fix, 5s stagger | 1m42s | **all PASS** | Best config — baseline for optimization |
+| e6ea620 | P=5 + /dev/shm fix | — | all PASS | /dev/shm fix validated |
 | 4a7fefc | Exp 35+39 (run 1, fresh) | 2m21s | **15/0 PASS** | Lockfile rebuild (first on new image); build-js 1s |
 | 4a7fefc | Exp 35+39 (run 2, b2b) | 2m00s | 14/1 FAIL | Lockfiles unchanged (fix works!); pw-jupyter b2b |
 | 4a7fefc | Exp 35+39 (post-restart) | 2m37s | 14/1 FAIL | Lockfiles unchanged after restart; pw-jupyter flaky |
@@ -183,6 +252,11 @@ Machine is massively underutilized during pw-jupyter's last ~15s — 4-13% busy.
 
 | Commit | Description |
 |--------|-------------|
+| fd85f0a | Exp 41: fix awk timing (bc not in container) |
+| 1c49a02 | Bind-mount CI scripts + update-runner.sh |
+| 29b19fa | Exp 41: delay smoke-test, tighten stagger 5→2s, MCP/server timing |
+| 176f6f6 | Integrate /dev/shm fix — P=9, settle=0, --disable-dev-shm-usage |
+| e6ea620 | Add --disable-dev-shm-usage for Docker P=5+ |
 | 5994612 | jupyterapp kernel check + waitForTimeout removal |
 | 200bac6 | JS build cache + ci-queue |
 | 5c1e58f | Fix full_build.sh index.es.js check |
