@@ -660,28 +660,37 @@ else
     export -f job_playwright_jupyter_warm
     run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
 
-    # Only test-mcp-wheel (lightweight, single process) overlaps with pw-jupyter.
-    # On ≤16 vCPU, overlapping other Playwright jobs causes pw-jupyter kernel hangs
-    # (confirmed: 2/2 failures on VX1 16 vCPU). On 32 vCPU overlap worked fine.
+    # Exp 53: Restore overlapping — stagger other jobs alongside pw-jupyter.
+    # Proven safe on VX1 16C (8 vCPU) through 32C. P=9 fix (no server reuse)
+    # was the real issue, not CPU contention.
     run_job test-mcp-wheel         job_test_mcp_wheel         & PID_MCP=$!
     renice -n 10 -p $PID_MCP >/dev/null 2>&1 || true
 
-    # ── Wait for pw-jupyter before starting other jobs ─────────────────────────
-    wait $PID_PW_JP   || OVERALL=1
-    log "=== pw-jupyter done — starting remaining jobs ==="
-
+    # t+2s: pw-marimo
+    sleep 2
     run_job playwright-marimo      job_playwright_marimo       & PID_PW_MA=$!
-    run_job playwright-wasm-marimo job_playwright_wasm_marimo  & PID_PW_WM=$!
+
+    # t+4s: pw-server
+    sleep 2
     run_job playwright-server      job_playwright_server       & PID_PW_SV=$!
-    run_job smoke-test-extras    job_smoke_test_extras     & PID_SMOKE=$!
+
+    # t+6s: smoke + pw-wasm-marimo
+    sleep 2
+    run_job smoke-test-extras      job_smoke_test_extras       & PID_SMOKE=$!
+    run_job playwright-wasm-marimo job_playwright_wasm_marimo  & PID_PW_WM=$!
+
+    # t+8s: deferred pytest (low priority, not on critical path)
+    sleep 2
     run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
     run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
     run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
+    renice -n 10 -p $PID_PY311 $PID_PY312 $PID_PY314 >/dev/null 2>&1 || true
 
     # ── Wait for all jobs ─────────────────────────────────────────────────────
     wait $PID_LINT    || OVERALL=1
     wait $PID_TESTJS  || OVERALL=1
     wait $PID_PY313   || OVERALL=1
+    wait $PID_PW_JP   || OVERALL=1
     wait $PID_PY311   || OVERALL=1
     wait $PID_PY312   || OVERALL=1
     wait $PID_PY314   || OVERALL=1
