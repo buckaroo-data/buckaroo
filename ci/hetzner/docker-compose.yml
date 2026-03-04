@@ -20,6 +20,7 @@ services:
       # Initialized from image content on first start, then updated in place.
       - playwright-browsers:/opt/ms-playwright
     environment:
+      - CI=true
       - PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
       - PNPM_STORE_DIR=/opt/pnpm-store
     # Warm sidecar: stays alive between CI runs, avoiding ~500ms docker run overhead.
