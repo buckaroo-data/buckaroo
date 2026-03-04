@@ -64,6 +64,15 @@ run_job() {
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 
+# Kill stale processes from previous runs (b2b contamination fix).
+# Zombie Chromium/JupyterLab/node processes cause pw-jupyter hangs.
+pkill -9 -f 'chromium|chrome' 2>/dev/null || true
+pkill -9 -f 'jupyter' 2>/dev/null || true
+pkill -9 -f 'node.*playwright' 2>/dev/null || true
+# Clean stale temp files
+rm -rf /tmp/ci-jupyter-* /tmp/pw-* /tmp/.org.chromium.* 2>/dev/null || true
+sleep 1
+
 status_pending "$SHA" "ci/hetzner" "Running CI (phase=$PHASE)..." "$LOG_URL"
 
 # ── CPU monitoring ────────────────────────────────────────────────────────────
@@ -569,7 +578,7 @@ else
     # Then stagger remaining jobs every 2s. 0s stagger causes pw-jupyter kernel
     # hangs (8/9 notebooks fail) even on 32 vCPU / 64GB — likely ZMQ/kernel
     # provisioner contention from simultaneous Chromium+kernel starts.
-    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-9}
+    JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-5}
     log "=== build-wheel done — starting staggered wheel-dependent jobs (PARALLEL=$JUPYTER_PARALLEL) ==="
 
     # t+0: pw-jupyter (critical path — uses pre-warmed servers)
