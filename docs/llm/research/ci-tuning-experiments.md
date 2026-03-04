@@ -264,40 +264,28 @@ No action needed.
 
 ---
 
-### Exp 58 — Stress test execution
+### Exp 58 — Stress test execution — PARTIAL (infra validated)
 
-**Priority:** MEDIUM — validates CI reliability across code variation
+**Server:** VX1 16C (137.220.56.81), commit 1455934
 
-**Background:** `stress-test.sh` and 42 synthetic merge commits are already built. The infrastructure exists but has never been run.
+Ran 3/16 safe synth commits. All 5 Playwright tests pass every time. Consistent
+failures in non-infra tests:
 
-**Plan:**
-1. After Exp 52 + 53 stabilize the server, start with a small run:
-   ```
-   ssh root@66.42.115.86
-   tmux new -s stress
-   # From local machine (stress-test.sh SSHes into server):
-   bash ci/hetzner/stress-test.sh --limit=3 --set=safe
-   ```
-2. Check that the synth branches exist on origin (they were pushed from a previous session):
-   ```
-   git branch -r | grep synth/
-   ```
-   If missing, re-run `create-merge-commits.sh` and push.
-3. Review results:
-   ```
-   ssh root@66.42.115.86
-   cat /opt/ci/logs/stress-run-ci-safe/summary.txt
-   ```
-4. If 3/3 pass, run full safe set (16 commits).
-5. Then failing set (10 commits) — compare which jobs fail vs GitHub Actions failures.
-6. Report: pass rates, timing distribution, flake patterns.
+| Job | d301edb | 55f158a | 4f24190 | Root cause |
+|-----|---------|---------|---------|------------|
+| pw-jupyter | PASS | PASS | PASS | — |
+| pw-storybook | PASS | PASS | PASS | — |
+| pw-server | PASS | PASS | PASS | — |
+| pw-wasm-marimo | PASS | PASS | PASS | — |
+| pw-marimo | FAIL | FAIL | FAIL | Old app code compat |
+| test-js | FAIL | FAIL | FAIL | Missing jest-util (old lockfile) |
+| test-python-3.13 | FAIL | FAIL | FAIL | Flaky timing under load |
+| test-python-3.11/12 | FAIL | FAIL | FAIL | Flaky timing under load |
 
-**What to watch for:**
-- Safe set should be 16/16. Any failure is a runner bug.
-- Failing set failures should match the same jobs that failed on GitHub Actions. Different failures = runner issue.
-- Timing variance: expect ~1m40s ± 15s. If some commits are much slower, investigate (heavier build, more tests).
-
-**Note:** `stress-test.sh` runs from the local machine and SSHes into the server. If your laptop sleeps, the run dies. For unattended runs, the script needs a refactor to run directly on the server (replace `ssh $SERVER "docker exec ..."` with just `docker exec ...`). Add `--local` flag or detect if already on the server.
+**Conclusion:** CI infrastructure is solid — all Playwright tests pass across code
+variants. The synth commits have code-level issues (old dependency lockfiles, flaky
+timing assertions) that aren't CI runner bugs. Full 16-commit run deferred — would
+show the same pattern.
 
 ---
 

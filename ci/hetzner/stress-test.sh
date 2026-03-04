@@ -10,7 +10,6 @@
 #   bash ci/hetzner/stress-test.sh --set=all         # run all commit sets
 #   bash ci/hetzner/stress-test.sh --limit=5         # first 5 only
 #   bash ci/hetzner/stress-test.sh --dry-run         # print what would run
-#   bash ci/hetzner/stress-test.sh --synth           # use synthetic merge commits
 #   bash ci/hetzner/stress-test.sh <sha1> <sha2> ... # specific SHAs
 #
 # Runs each commit sequentially on the Hetzner server via docker exec.
@@ -38,14 +37,12 @@
 
 set -uo pipefail
 
-SERVER=${HETZNER_SERVER:-root@5.161.210.126}
+SERVER=${HETZNER_SERVER:-root@137.220.56.81}
 CONTAINER=${HETZNER_CONTAINER:-buckaroo-ci}
 RUNNER="run-ci.sh"
 LIMIT=0
 DRY_RUN=false
 COMMIT_SET="safe"
-USE_SYNTH=false
-SYNTH_MAP=/opt/ci/synth-map.txt
 CUSTOM_SHAS=()
 DOCKER_ENV_ARGS=()
 
@@ -59,75 +56,68 @@ while [[ $# -gt 0 ]]; do
         --runner=*)  RUNNER="${1#*=}"; shift ;;
         --set=*)     COMMIT_SET="${1#*=}"; shift ;;
         --set)       COMMIT_SET="$2"; shift 2 ;;
-        --synth)     USE_SYNTH=true; shift ;;
-        --synth=*)   USE_SYNTH=true; SYNTH_MAP="${1#*=}"; shift ;;
         DELAY_PY*=*) DOCKER_ENV_ARGS+=("-e" "$1"); shift ;;
         *)           CUSTOM_SHAS+=("$1"); shift ;;
     esac
 done
 
 # ── Commit sets ────────────────────────────────────────────────────────────────
+# Each SHA is a pre-baked merge: old app code + test infra from 82c148b.
+# Created by ci/hetzner/create-merge-commits.sh. Comments show original SHA.
 
 # 16 recent main commits — all passed GitHub CI (2026-02-23 → 2026-02-28).
 SAFE_COMMITS=(
-    7b6a05c   # feat: content-aware column widths
-    fcfe368   # feat: compact_number displayer
-    5ff4d6e   # Add CLAUDE.md
-    837654e   # fix: defaultMinWidth on fitCellContents
-    f8a8b94   # feat: color_static color rule
-    314e89f   # feat: /load_compare endpoint
-    8e9e1ed   # Fix BuckarooCompare for arbitrary join keys
-    1fccaba   # fix: Playwright row count off-by-one
-    b7956f8   # fix: harden release workflow
-    612e22f   # Fix left-pinned index column
-    e392c78   # fix: MCP + server reliability
-    6b9e695   # fix: handle zero PRs in release notes
-    6056636   # fix: plain release notes fallback
-    ec68a78   # for the PR
-    2175249   # fix: add GH_TOKEN to release notes
-    fdbe325   # test: MCP server integration tests
+    d301edb   # 7b6a05c feat: content-aware column widths
+    55f158a   # fcfe368 feat: compact_number displayer
+    4f24190   # 5ff4d6e Add CLAUDE.md
+    83b4841   # 837654e fix: defaultMinWidth on fitCellContents
+    bb953b1   # f8a8b94 feat: color_static color rule
+    401b997   # 314e89f feat: /load_compare endpoint
+    7516544   # 8e9e1ed Fix BuckarooCompare for arbitrary join keys
+    d389537   # 1fccaba fix: Playwright row count off-by-one
+    bbefc32   # b7956f8 fix: harden release workflow
+    e7a6e56   # 612e22f Fix left-pinned index column
+    8d4de1d   # e392c78 fix: MCP + server reliability
+    ba219c9   # 6b9e695 fix: handle zero PRs in release notes
+    1baaf8e   # 6056636 fix: plain release notes fallback
+    0d2efa1   # ec68a78 for the PR
+    adf6088   # 2175249 fix: add GH_TOKEN to release notes
+    973e3e0   # fdbe325 test: MCP server integration tests
 )
 
-# 15 commits that failed at least one check on GitHub Actions.
-# Mix of Playwright, Python test, lint, and CI config failures.
+# 10 commits that failed at least one check on GitHub Actions.
+# (5 original SHAs not in local clone: cf7e02a, e0f358a, 7b3141c, 516a1fa, f01c9c6)
 FAILING_COMMITS=(
-    cf7e02a   # ci: test 8-CPU Depot runners              (Screenshots fail)
-    e0f358a   # ci: test 4-CPU Depot runners              (Screenshots fail)
-    7b3141c   # ci: latency measurement test              (Screenshots fail)
-    703c034   # Address PR review on compare module       (Python Test 3.11 fail)
-    db1ca96   # Fix left-pinned index column              (pw-server + pw-marimo fail)
-    4ddcac1   # fix: release workflow review comments      (pw-server + pw-marimo fail)
-    7d8b751   # Fix marimo Playwright tests               (pw-wasm-marimo fail)
-    b1eb6a5   # ci: continue-on-error in build.yml        (pw-wasm-marimo fail)
-    1839f59   # ci: skip unnecessary lint deps             (pw-wasm-marimo fail)
-    88a8743   # ci: Python 3.14 in build.yml              (pw-wasm-marimo fail)
-    2bec338   # ci: optimize job structure + cache PW      (pw-wasm-marimo fail)
-    c8e98d3   # ci: 4min timeout to marimo tests          (pw-wasm-marimo fail)
-    7b9c341   # Remove accidental -l and wc files          (Python Test 3.11 fail)
-    516a1fa   # ci: v1 cache-based BuildWheel              (pw-wasm + pw-marimo + lint)
-    f01c9c6   # ci: v2 self-build per job                  (pw-wasm + pw-marimo + pytest)
+    27603ae   # 703c034 Address PR review on compare module       (Python Test 3.11 fail)
+    ad3fec4   # db1ca96 Fix left-pinned index column              (pw-server + pw-marimo fail)
+    19686a7   # 4ddcac1 fix: release workflow review comments      (pw-server + pw-marimo fail)
+    44a9a7c   # 7d8b751 Fix marimo Playwright tests               (pw-wasm-marimo fail)
+    356585d   # b1eb6a5 ci: continue-on-error in build.yml        (pw-wasm-marimo fail)
+    a67bc5c   # 1839f59 ci: skip unnecessary lint deps             (pw-wasm-marimo fail)
+    1c1d0ae   # 88a8743 ci: Python 3.14 in build.yml              (pw-wasm-marimo fail)
+    371d59e   # 2bec338 ci: optimize job structure + cache PW      (pw-wasm-marimo fail)
+    5362efa   # c8e98d3 ci: 4min timeout to marimo tests          (pw-wasm-marimo fail)
+    ada8bb1   # 7b9c341 Remove accidental -l and wc files          (Python Test 3.11 fail)
 )
 
 # 16 older commits from Jan–mid Feb 2026 (pre-CI or early CI era).
-# No GitHub Actions results, but good for testing the Hetzner runner against
-# older code that may lack scripts/configs the runner expects.
 OLDER_COMMITS=(
-    f10ee77   # Auto-kill old server on upgrade            (2026-02-17)
-    3bb6d71   # Fix search not updating table in MCP app   (2026-02-16)
-    8623244   # Fix summary stats view in MCP app          (2026-02-16)
-    5c3f861   # MCP install tweaks 2                       (2026-02-14)
-    e2f610f   # Summary stats parquet b64                  (2026-02-12)
-    ae9006d   # MCP UI tool                                (2026-02-08)
-    5f20962   # Fix blank rows scrolling small DataFrames  (2026-02-06)
-    dbac567   # pandas_commands tests + suite analysis     (2026-01-30)
-    fa011f8   # pandas 3.0 compat regression tests         (2026-01-26)
-    25d674b   # more specific cache-dependency-glob        (2026-01-20)
-    79da494   # BuckarooCompare + Pandera README links     (2026-01-17)
-    2ea8866   # enable cache for pnpm                      (2026-01-14)
-    14ec761   # reduced CI timeout experiment              (2026-01-13)
-    af9fa79   # integrate Depot                            (2026-01-12)
-    9693b9b   # Serialize summary stats as parquet         (2026-02-10)
-    23e3096   # Fix lint: unused imports, ordering          (2026-02-10)
+    1c8abfd   # f10ee77 Auto-kill old server on upgrade            (2026-02-17)
+    30fb572   # 3bb6d71 Fix search not updating table in MCP app   (2026-02-16)
+    f2e759a   # 8623244 Fix summary stats view in MCP app          (2026-02-16)
+    6597cdb   # 5c3f861 MCP install tweaks 2                       (2026-02-14)
+    68dccf8   # e2f610f Summary stats parquet b64                  (2026-02-12)
+    b8fe50c   # ae9006d MCP UI tool                                (2026-02-08)
+    35a9048   # 5f20962 Fix blank rows scrolling small DataFrames  (2026-02-06)
+    1aed18f   # dbac567 pandas_commands tests + suite analysis     (2026-01-30)
+    064c892   # fa011f8 pandas 3.0 compat regression tests         (2026-01-26)
+    ece6615   # 25d674b more specific cache-dependency-glob        (2026-01-20)
+    e0e0589   # 79da494 BuckarooCompare + Pandera README links     (2026-01-17)
+    127125f   # 2ea8866 enable cache for pnpm                      (2026-01-14)
+    b3c57bf   # 14ec761 reduced CI timeout experiment              (2026-01-13)
+    c219eb7   # af9fa79 integrate Depot                            (2026-01-12)
+    bc442c7   # 9693b9b Serialize summary stats as parquet         (2026-02-10)
+    94a25bb   # 23e3096 Fix lint: unused imports, ordering          (2026-02-10)
 )
 
 # ── Select commit set ──────────────────────────────────────────────────────────
@@ -161,9 +151,6 @@ echo "════════════════════════�
 echo "  Stress test: $TOTAL commits using /opt/ci-runner/$RUNNER"
 echo "  Server: $SERVER  Container: $CONTAINER"
 echo "  Hetzner-CI commit: $HETZNER_CI_SHA"
-if $USE_SYNTH; then
-    echo "  Synthetic merges: $SYNTH_MAP"
-fi
 echo "  Remote log dir: $LOGDIR"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
@@ -242,21 +229,6 @@ with open('$csv', 'w') as f:
 \"" </dev/null 2>/dev/null || true
 }
 
-# ── Synthetic SHA lookup ─────────────────────────────────────────────────────
-
-lookup_synth() {
-    local sha=$1
-    if $USE_SYNTH; then
-        local synth
-        synth=$(ssh "$SERVER" "grep '^${sha}' $SYNTH_MAP 2>/dev/null | awk '{print \$2}'" </dev/null)
-        if [[ -n "$synth" ]]; then
-            echo "$synth"
-            return 0
-        fi
-    fi
-    echo "$sha"
-}
-
 # ── Run one commit ───────────────────────────────────────────────────────────
 
 run_commit() {
@@ -264,14 +236,7 @@ run_commit() {
     local logfile="$LOGDIR/${sha}.log"
     local resfile="$LOGDIR/resources-${sha}.csv"
 
-    # Look up synthetic SHA if --synth enabled
-    local run_sha
-    run_sha=$(lookup_synth "$sha")
-    if [[ "$run_sha" != "$sha" ]]; then
-        echo "[$((idx+1))/$TOTAL] Running $sha (synth: ${run_sha:0:10}) ..."
-    else
-        echo "[$((idx+1))/$TOTAL] Running $sha ..."
-    fi
+    echo "[$((idx+1))/$TOTAL] Running $sha ..."
 
     # Start resource monitor
     local mon_pid
@@ -280,9 +245,9 @@ run_commit() {
     local start_ts end_ts elapsed status
     start_ts=$(date +%s)
 
-    # Run CI on the server, capture exit code (use run_sha for the actual checkout)
+    # Run CI on the server
     ssh "$SERVER" "docker exec ${DOCKER_ENV_ARGS[*]} $CONTAINER \
-        bash /opt/ci-runner/$RUNNER $run_sha main \
+        bash /opt/ci-runner/$RUNNER $sha main \
         > $logfile 2>&1" \
         </dev/null
     local rc=$?
@@ -293,8 +258,8 @@ run_commit() {
     # Stop resource monitor
     stop_monitor "$mon_pid"
 
-    # Extract per-job timings from ci.log (use run_sha since logs are stored under that)
-    extract_job_timings "$run_sha"
+    # Extract per-job timings from ci.log
+    extract_job_timings "$sha"
 
     if [[ $rc -eq 0 ]]; then
         status="PASS"
