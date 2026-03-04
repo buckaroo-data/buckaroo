@@ -207,6 +207,9 @@ if [[ "$REPO_DIR" != "$REPO_SRC" ]]; then
     mkdir -p "$REPO_DIR"
     # tar pipe: fast, excludes .git (900MB+), no rsync dependency.
     tar cf - --exclude='.git' -C "$REPO_SRC" . | tar xf - -C "$REPO_DIR"
+    # pnpm uses hardlinks from its store; cross-filesystem hardlinks fail (store
+    # is on a named volume, ramdisk is tmpfs). Tell pnpm to copy instead.
+    export PNPM_CONFIG_PACKAGE_IMPORT_METHOD=copy
     log "Ramdisk copy done ($(du -sh "$REPO_DIR" | cut -f1))"
 fi
 cd "$REPO_DIR" || { log "FATAL: cannot cd to $REPO_DIR"; exit 1; }
