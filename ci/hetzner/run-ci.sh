@@ -144,7 +144,7 @@ rm -f /tmp/tmp*.txt 2>/dev/null || true
 rm -rf /tmp/playwright-artifacts-* /tmp/playwright_chromiumdev_profile-* 2>/dev/null || true
 # Clean JupyterLab workspace + kernel state — stale workspace files from previous
 # runs cause JupyterLab to try reconnecting dead kernels, hanging Shift+Enter.
-rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
+rm -rf ~/.jupyter/lab/workspaces $REPO_DIR/.jupyter/lab/workspaces 2>/dev/null || true
 rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
 rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
 rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
@@ -203,12 +203,13 @@ JS_TREE_HASH=$(git ls-tree -r HEAD \
 # Copy working tree to ramdisk if available — all build I/O in RAM.
 if [[ "$REPO_DIR" != "$REPO_SRC" ]]; then
     log "Copying repo to ramdisk..."
-    rsync -a --delete \
-        --exclude='.git' \
-        "$REPO_SRC/" "$REPO_DIR/"
+    rm -rf "$REPO_DIR"
+    mkdir -p "$REPO_DIR"
+    # tar pipe: fast, excludes .git (900MB+), no rsync dependency.
+    tar cf - --exclude='.git' -C "$REPO_SRC" . | tar xf - -C "$REPO_DIR"
     log "Ramdisk copy done ($(du -sh "$REPO_DIR" | cut -f1))"
 fi
-cd "$REPO_DIR"
+cd "$REPO_DIR" || { log "FATAL: cannot cd to $REPO_DIR"; exit 1; }
 
 if [[ -d "$JS_CACHE_DIR/$JS_TREE_HASH" ]]; then
     cp -r "$JS_CACHE_DIR/$JS_TREE_HASH" packages/buckaroo-js-core/dist
@@ -222,7 +223,7 @@ fi
 # ── Job definitions ──────────────────────────────────────────────────────────
 
 job_lint_python() {
-    cd /repo
+    cd "$REPO_DIR"
     # ruff is already in the 3.13 venv from the image build.
     # Do NOT run uv sync here — it would strip --all-extras packages (e.g.
     # pl-series-hash) from the shared venv, racing with job_test_python_3.13.
@@ -230,7 +231,7 @@ job_lint_python() {
 }
 
 job_build_js() {
-    cd /repo/packages
+    cd "$REPO_DIR/packages"
     pnpm install --frozen-lockfile --store-dir /opt/pnpm-store
     cd buckaroo-js-core
     if [[ "${JS_DIST_CACHED:-0}" != "1" ]]; then
@@ -246,13 +247,13 @@ job_build_js() {
 }
 
 job_test_js() {
-    cd /repo/packages/buckaroo-js-core
+    cd "$REPO_DIR/packages/buckaroo-js-core"
     pnpm run test
 }
 
 job_test_python() {
     local v=$1
-    cd /repo
+    cd "$REPO_DIR"
     # Quick sync installs buckaroo in editable mode (deps already in venv).
     UV_PROJECT_ENVIRONMENT=/opt/venvs/$v \
         uv sync --locked --dev --all-extras
@@ -281,12 +282,12 @@ job_test_python() {
 }
 
 job_build_wheel() {
-    cd /repo
+    cd "$REPO_DIR"
     PNPM_STORE_DIR=/opt/pnpm-store bash scripts/full_build.sh
 }
 
 job_test_mcp_wheel() {
-    cd /repo
+    cd "$REPO_DIR"
     local venv=/tmp/ci-mcp-$$
     rm -rf "$venv"
     uv venv "$venv" -q
@@ -311,13 +312,13 @@ job_test_mcp_wheel() {
 }
 
 job_smoke_test_extras() {
-    cd /repo
+    cd "$REPO_DIR"
     local wheel
     wheel=$(ls dist/buckaroo-*.whl | head -1)
     local pids=() names=() rc=0
     for extra in base polars mcp marimo jupyterlab notebook; do
         (
-            cd /repo
+            cd "$REPO_DIR"
             venv=/tmp/ci-smoke-${extra}-$$
             rm -rf "$venv"
             uv venv "$venv" -q
@@ -342,7 +343,7 @@ job_smoke_test_extras() {
 }
 
 job_playwright_storybook() {
-    cd /repo
+    cd "$REPO_DIR"
     SKIP_INSTALL=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-storybook-$$ \
@@ -350,7 +351,7 @@ job_playwright_storybook() {
 }
 
 job_playwright_server() {
-    cd /repo
+    cd "$REPO_DIR"
     SKIP_INSTALL=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-server-$$ \
@@ -358,7 +359,7 @@ job_playwright_server() {
 }
 
 job_playwright_marimo() {
-    cd /repo
+    cd "$REPO_DIR"
     # UV_PROJECT_ENVIRONMENT: reuse the pre-synced 3.13 venv so `uv run marimo`
     # doesn't race with other jobs creating /repo/.venv from scratch.
     SKIP_INSTALL=1 \
@@ -369,7 +370,7 @@ job_playwright_marimo() {
 }
 
 job_playwright_wasm_marimo() {
-    cd /repo
+    cd "$REPO_DIR"
     # Same rationale as job_playwright_marimo.
     SKIP_INSTALL=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
@@ -379,7 +380,7 @@ job_playwright_wasm_marimo() {
 }
 
 job_playwright_jupyter() {
-    cd /repo
+    cd "$REPO_DIR"
     # Isolated venv — avoids pip-reinstalling into the shared 3.13 venv while
     # marimo/wasm-marimo jobs are reading from it in parallel.
     local venv=/tmp/ci-jupyter-$$
@@ -388,7 +389,7 @@ job_playwright_jupyter() {
     wheel=$(ls dist/buckaroo-*.whl | head -1)
     uv pip install --python "$venv/bin/python" "$wheel" polars jupyterlab -q
     local rc=0
-    ROOT_DIR=/repo \
+    ROOT_DIR="$REPO_DIR" \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
     PARALLEL=9 \
@@ -398,7 +399,7 @@ job_playwright_jupyter() {
 }
 
 job_jupyter_warmup() {
-    cd /repo
+    cd "$REPO_DIR"
     # Reuse the Docker-built venv (already has jupyterlab, anywidget, polars).
     # Just ensure websocket-client is there (for kernel warmup).
     local venv=/opt/venvs/3.13
@@ -412,7 +413,7 @@ job_jupyter_warmup() {
     local BASE_PORT=8889 PARALLEL=${JUPYTER_PARALLEL:-9}
 
     # Clean stale state
-    rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
+    rm -rf ~/.jupyter/lab/workspaces $REPO_DIR/.jupyter/lab/workspaces 2>/dev/null || true
     rm -f ~/.local/share/jupyter/runtime/kernel-*.json 2>/dev/null || true
     rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
     rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
@@ -540,7 +541,7 @@ sys.exit(0 if state == 'idle' else 1)
     done
 
     # Clean workspaces after trust
-    rm -rf ~/.jupyter/lab/workspaces /repo/.jupyter/lab/workspaces 2>/dev/null || true
+    rm -rf ~/.jupyter/lab/workspaces $REPO_DIR/.jupyter/lab/workspaces 2>/dev/null || true
 
     deactivate
 }
@@ -662,11 +663,11 @@ else
     # pw-server, pytest) are DEFERRED until pw-jupyter finishes.
     # Only test-mcp-wheel (lightweight, single process) runs concurrently.
     job_playwright_jupyter_warm() {
-        cd /repo
+        cd "$REPO_DIR"
         local venv
         venv=$(cat /tmp/ci-jupyter-warmup-venv)
         local rc=0
-        ROOT_DIR=/repo \
+        ROOT_DIR="$REPO_DIR" \
         SKIP_INSTALL=1 \
         PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
         PLAYWRIGHT_HTML_OUTPUT_DIR=/tmp/pw-html-jupyter-$$ \
