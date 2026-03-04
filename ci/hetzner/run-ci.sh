@@ -139,15 +139,22 @@ snapshot_container_state "before-cleanup" "$RESULTS_DIR/container-before.txt"
 # ── Pre-run cleanup — kill stale processes, remove temp files from prior runs ─
 # This ensures each CI run starts from a clean state regardless of how the
 # previous run ended (timeout, crash, manual kill, etc.).
-pkill -9 -f 'chromium|chrome' 2>/dev/null || true
-pkill -9 -f 'jupyter' 2>/dev/null || true
-pkill -9 -f 'node.*playwright' 2>/dev/null || true
-pkill -9 -f 'marimo' 2>/dev/null || true
-pkill -9 -f jupyter-lab 2>/dev/null || true
-pkill -9 -f ipykernel 2>/dev/null || true
-pkill -9 -f "node.*storybook" 2>/dev/null || true
-pkill -9 -f "npm exec serve" 2>/dev/null || true
-pkill -9 -f esbuild 2>/dev/null || true
+# ci_pkill: pkill -f excluding our own PID. Without this, patterns like 'marimo'
+# match our args (e.g. --skip=playwright-wasm-marimo) and kill the CI script.
+ci_pkill() {
+    local pids
+    pids=$(pgrep -f "$1" | grep -v "^$$\$") || true
+    [[ -n "$pids" ]] && echo "$pids" | xargs kill -9 2>/dev/null || true
+}
+ci_pkill 'chromium|chrome'
+ci_pkill 'jupyter'
+ci_pkill 'node.*playwright'
+ci_pkill 'marimo'
+ci_pkill jupyter-lab
+ci_pkill ipykernel
+ci_pkill "node.*storybook"
+ci_pkill "npm exec serve"
+ci_pkill esbuild
 # Kill anything on known service ports (jupyter 8889-8897, marimo 2718, storybook 6006)
 for port in 8889 8890 8891 8892 8893 8894 8895 8896 8897 2718 6006; do
     fuser -k $port/tcp 2>/dev/null || true
