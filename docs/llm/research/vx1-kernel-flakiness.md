@@ -231,22 +231,22 @@ and pyproject.toml are identical between the Rome and VX1 builds.
 
 ---
 
-## Hypothesis Ranking (updated after debunking version mismatch)
+## ~~Hypothesis Ranking~~ — RESOLVED
 
-| # | Hypothesis | Likelihood | Evidence |
-|---|-----------|-----------|---------|
-| 1 | **VX1 platform-specific** — Zen 5 timer resolution, interrupt coalescing, or scheduler behavior affects ZMQ/WebSocket timing | High | Same code works on Rome, fails on VX1. Only variable is hardware. |
-| 2 | **Widget rendering time** — DFViewerInfinite is slow on VX1 | Medium | 5/9 pass (simple), 4/9 fail (infinite). But even single test at P=1 fails. |
-| 3 | **Chromium behavior differs** — V8 JIT, WebSocket implementation, or rendering pipeline behaves differently on Zen 5 | Medium | Playwright uses Chromium headless; Chromium may have platform-specific codepaths |
-| 4 | **JupyterLab frontend loading** — JS bundle loading or extension init is slower on VX1 | Low-Medium | Not yet measured; could explain why browser doesn't see kernel idle |
+**All hypotheses below were wrong.** The root cause was `PARALLEL=5` causing
+JupyterLab server reuse between batches. Kernels on reused servers fail to reach
+idle from the browser. The fix: `PARALLEL=9` gives each notebook a dedicated
+server. 4/4 b2b runs pass on VX1 32C (commit 0103187).
 
-**Key fact: this is a hardware-level issue.** The software stack is identical. Something about
-the VX1 (EPYC Turin / Zen 5) platform causes the JupyterLab-in-browser kernel readiness
-detection to fail, while the same kernel works perfectly via direct ZMQ and raw WebSocket.
+This was NOT a hardware issue, NOT a version issue, NOT a timing issue. It was
+a configuration bug: warmup started 9 servers but the test only used 5, forcing
+batch 2 to reuse servers from batch 1.
 
-**Recommended next steps:**
-1. Run the browser-based kernel check (`pw-kernel-check.cjs`) to see what the browser
-   actually observes during notebook loading on VX1
-2. If browser sees kernel idle but widget rendering is slow, increase timeouts
-3. If browser never sees kernel idle, investigate Chromium WebSocket behavior on Zen 5
-4. As a control: spin up a Rome box and verify the exact same Docker image passes
+See [`pw-jupyter-batch-reuse-fix.md`](pw-jupyter-batch-reuse-fix.md) for full details.
+
+| # | Hypothesis | Status |
+|---|-----------|--------|
+| 1 | VX1 platform-specific | **Debunked** — P=9 works perfectly on VX1 |
+| 2 | Widget rendering time | **Debunked** — all notebooks pass with P=9 |
+| 3 | Chromium behavior differs | **Debunked** — same Chromium, works with P=9 |
+| 4 | JupyterLab frontend loading | **Debunked** — loads fine on dedicated servers |
