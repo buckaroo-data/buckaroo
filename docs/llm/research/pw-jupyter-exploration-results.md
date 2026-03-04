@@ -333,3 +333,36 @@ Marimo workers:2 causes ERR_CONNECTION_REFUSED — single marimo server can't ha
 | pw-server | 44s |
 | smoke-test-extras | 6s |
 | **Total** | **2m08s** |
+
+---
+
+## Job Overlap Experiments — COMPLETE
+
+**Goal:** Overlap Playwright jobs with pw-jupyter to reduce sequential wait.
+
+### Progressive Overlap Results
+
+| Config | pw-jupyter | Total CI | Result |
+|--------|-----------|----------|--------|
+| Baseline (deferred all) | 52s | 2m08s | PASS |
+| + pw-marimo | 52s | 2m00s | PASS (2/2 b2b) |
+| + pw-wasm + pw-server | 51s | **1m40s** | PASS (2/2 b2b) |
+| + test-python (12 workers) | TIMEOUT 120s | — | **FAIL** |
+| Reverted to pw-marimo+wasm+server | 51s | 1m40s | PASS |
+
+### Commit Timeline
+
+| Commit | Change | Result |
+|--------|--------|--------|
+| 49b71ca | Overlap pw-marimo with pw-jupyter | 2m00s PASS |
+| 9e67c37 | + pw-wasm-marimo + pw-server | 1m40s PASS |
+| 233398a | + test-python (3 × -n 4) | FAIL — pw-jupyter 120s timeout |
+| 634452d | Revert test-python overlap | 1m40s PASS (expected) |
+
+### Key Findings
+
+1. **pw-jupyter tolerates 3 extra Chromium instances** (marimo, wasm, server) running concurrently
+2. **12 pytest workers (-n 4 × 3) push it over the edge** — kernel contention causes pw-jupyter to timeout
+3. **smoke-test-extras** (6 parallel uv pip install) stays deferred — heavy IO
+4. **Sweet spot: pw-jupyter + pw-marimo + pw-wasm + pw-server** — 1m40s, reliable b2b
+5. **Savings: 28s** (2m08s → 1m40s) from overlapping Playwright jobs
