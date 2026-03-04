@@ -79,16 +79,22 @@ Output: `$LOGDIR/sweep.csv` with pass/fail, total time, pw-jupyter time per comb
 
 ---
 
-### Exp 60 — Investigate renice effectiveness — READY TO RUN
+### Exp 60 — Investigate renice effectiveness — DONE (no effect)
 
 **Script:** `ci/hetzner/test-renice.sh`
 
-A/B test: 3 runs with renice, 3 without (`DISABLE_RENICE=1`). Uses `maybe_renice()`
-wrapper added in this commit.
+| Run | Renice | Failed Job | pw-jupyter |
+|-----|--------|-----------|------------|
+| with-1 | ON | test-python-3.13 (flaky) | 37s |
+| with-2 | ON | test-python-3.13 (flaky) | 35s |
+| with-3 | ON | test-python-3.13 (flaky) | 36s |
+| no-1 | OFF | — (ALL PASS) | 37s |
+| no-2 | OFF | — (ALL PASS) | 36s |
+| no-3 | OFF | pw-jupyter (120s timeout) | 120s |
 
-```bash
-bash ci/hetzner/test-renice.sh --sha=fa5e5a7 --runs=3
-```
+**Verdict:** renice has zero effect on pw-jupyter (35-37s either way). The with-renice
+FAILs are all the known flaky `test-python-3.13` timing test. The no-renice run 3
+pw-jupyter timeout is an unrelated b2b flake. **Can safely remove renice to simplify.**
 
 ---
 
