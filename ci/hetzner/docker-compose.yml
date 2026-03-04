@@ -3,8 +3,11 @@ services:
     image: buckaroo-ci
     container_name: buckaroo-ci
     volumes:
-      # Source code — bind-mounted so git checkout + docker exec can work on it.
-      - /opt/ci/repo:/repo
+      # Source code + pnpm store — both on host tmpfs (/opt/ci/ramdisk) so all
+      # I/O is in RAM and pnpm can hardlink (same filesystem). Set up by
+      # cloud-init / manual: mount -t tmpfs -o size=10G tmpfs /opt/ci/ramdisk
+      - /opt/ci/ramdisk/repo:/repo
+      - /opt/ci/ramdisk/pnpm-store:/opt/pnpm-store
       # CI runner scripts — bind-mounted so script changes take effect instantly
       # without rebuilding the Docker image. Only Dockerfile changes (new deps,
       # system packages) require a rebuild. Overrides the baked-in /opt/ci-runner/.
@@ -16,8 +19,6 @@ services:
       - /opt/ci/logs:/opt/ci/logs
       # JS build cache — persists across container restarts.
       - /opt/ci/js-cache:/opt/ci/js-cache
-      # pnpm store — named volume so hardlinks in node_modules survive container recreates.
-      - pnpm-store:/opt/pnpm-store
       # Playwright browser binaries — named volume so they survive image rebuilds.
       # Initialized from image content on first start, then updated in place.
       - playwright-browsers:/opt/ms-playwright
@@ -32,5 +33,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  pnpm-store:
   playwright-browsers:

@@ -16,7 +16,12 @@
 #     triggers full docker build + compose recreate.
 set -euo pipefail
 
-REPO_DIR=/opt/ci/repo
+# Support both ramdisk layout (/opt/ci/ramdisk/repo) and legacy (/opt/ci/repo).
+if [[ -d /opt/ci/ramdisk/repo/.git ]]; then
+    REPO_DIR=/opt/ci/ramdisk/repo
+else
+    REPO_DIR=/opt/ci/repo
+fi
 RUNNER_DIR=/opt/ci/runner
 BRANCH=${1:-}
 
