@@ -71,12 +71,14 @@ test.describe('Buckaroo mode: search filtering', () => {
     await searchInput.fill('Alice');
     await searchInput.press('Enter');
 
-    // Wait for server roundtrip
-    await page.waitForTimeout(3000);
+    // Wait for filtered data to render — Bob should disappear from the grid
+    await expect(async () => {
+      const text = await dataGrid.textContent();
+      expect(text).toContain('Alice');
+      expect(text).not.toContain('Bob');
+    }).toPass({ timeout: 10000 });
 
-    // The table data should update to show only matching rows.
-    // With the bug, the data grid still shows all 5 rows because the
-    // datasource/cache key doesn't change when quick_command_args changes.
+    // Verify full filtering
     const filteredBodyText = await dataGrid.textContent();
     expect(filteredBodyText).toContain('Alice');
     expect(filteredBodyText).not.toContain('Bob');
