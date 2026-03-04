@@ -361,8 +361,9 @@ while [ $NEXT -lt $TOTAL ]; do
     BATCH_USED_PORTS=()
 
     while [ $BATCH_COUNT -lt "$PARALLEL" ] && [ $NEXT -lt $TOTAL ]; do
-        # Stagger Chromium launches — 1.5s fails on b2b runs; 2s is minimum reliable
-        [ $BATCH_COUNT -gt 0 ] && sleep 2
+        # Stagger Chromium launches — was 2s, trying 0s now that P=9 fix
+        # ensures each notebook gets a dedicated server (no batch reuse).
+        [ $BATCH_COUNT -gt 0 ] && sleep 0
         local_nb="${QUEUE[$NEXT]}"
         local_logfile="$TMPDIR/${local_nb%.ipynb}.log"
         local_port=$((BASE_PORT + BATCH_COUNT))
