@@ -33,6 +33,43 @@ Report: wallclock total, per-phase timing, pass/fail per job.
 
 ## Open Experiments
 
+### Exp 63 — B2B stress test (50 new commits) — DONE
+
+**Script:** `ci/hetzner/stress-test.sh --set=new`
+
+**Runner commit:** c8787afa (includes all b2b fixes)
+**Date:** 2026-03-04/05
+
+**Results:** 0/50 passed — all failures are app-level (expected). Infrastructure was stable after fixes.
+
+**Failure pattern by category:**
+
+| Failure | Commits affected | Root cause |
+|---------|-----------------|------------|
+| `playwright-server` | 50/50 | 2 `/load API` tests added after these commits |
+| `playwright-marimo` | ~40/50 | Old app code doesn't support current marimo tests |
+| `playwright-jupyter` | ~30/50 | Old app code fails notebook tests (2m timeout) |
+| `test-python-3.x` | ~15/50 | Timing flakes under b2b load |
+| `lint-python` | 3/50 (ee8d1102, 11a457aa, 650404b7) | Old test files have unused imports (F401) caught by current ruff |
+| `test-mcp-wheel` | 0/50 | Fixed: skip when `test_mcp_server_integration.py` absent |
+| `test-js` | 0/50 | Fixed: npm_config_store_dir prevents pnpm store mismatch |
+| `build-wheel` | 0/50 | Fixed: wipe all node_modules on lockfile change |
+
+**Timing:** Recent commits ~1m03-1m19s. Older commits ~2m13-2m23s (playwright-jupyter hangs 120s on broken old code).
+
+**Infrastructure bugs found and fixed during this experiment:**
+
+| Bug | Fix commit | Description |
+|-----|-----------|-------------|
+| pnpm ENOTEMPTY race | ae19ed2a | Wipe all 3 node_modules dirs (not just workspace) before reinstall |
+| pytest-xdist missing | 4a3a7635 | Force-install after uv sync (old lockfiles don't have it) |
+| pnpm store-dir mismatch | a8dfb1b0 | `export npm_config_store_dir=/opt/pnpm-store` in run-ci.sh |
+| test-mcp-wheel false positive | c8787afa | Check `test_mcp_server_integration.py` (not `test_mcp_uvx_install.py`) |
+
+**GH CI comparison:** 17/50 commits had GH CI data; 15 "success" on GH → "FAIL" on Hetzner (expected: new tests test features not in old code); 2 were already failing on GH (Dependabot/github-script bumps).
+
+---
+
 ### Exp 57 — Deterministic tuning script — READY TO RUN
 
 **Script:** `ci/hetzner/tuning-sweep.sh`
