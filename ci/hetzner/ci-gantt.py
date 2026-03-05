@@ -44,10 +44,15 @@ JOB_ORDER = [
 ]
 
 COLORS = {
-    "PASS":    "#22c55e",
-    "FAIL":    "#ef4444",
-    "SKIP":    "#334155",
-    "running": "#f59e0b",
+    "PASS":    "#00e676",   # bright green
+    "FAIL":    "#ff5252",   # bright red
+    "SKIP":    "#546e7a",   # blue-gray
+    "running": "#ffd740",   # amber
+}
+
+GATE_COLORS = {
+    "build-js":    ("#38bdf8", "JS built"),      # sky blue
+    "build-wheel": ("#c084fc", "Wheel built"),   # purple
 }
 
 
@@ -133,21 +138,10 @@ def parse_log(text, sha_hint=""):
 
 # ── animation ─────────────────────────────────────────────────────────────────
 
-def abbrev(name):
-    return (name
-            .replace('playwright-', 'pw-')
-            .replace('test-python-', 'py-')
-            .replace('smoke-test-extras', 'smoke')
-            .replace('jupyter-warmup', 'warmup')
-            .replace('build-wheel', 'bld-wheel')
-            .replace('build-js', 'bld-js'))
-
-
 def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
     from matplotlib.animation import FuncAnimation, PillowWriter
 
     # collect ordered job list
@@ -162,28 +156,35 @@ def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
     max_t    = max(r['total'] for r in runs)
     max_t    = max(max_t, 60)
 
-    fig_w = 9 * n_panels
-    fig_h = max(4, n_jobs * 0.4 + 1.5)
-    fig, axes = plt.subplots(1, n_panels, figsize=(fig_w, fig_h), sharey=True)
+    # wide enough for full labels + bars; tall enough for all rows
+    label_inches = 2.2        # fixed left space for job names
+    bar_inches   = 7.5        # chart area per panel
+    fig_w = label_inches + bar_inches * n_panels
+    fig_h = max(4.5, n_jobs * 0.42 + 1.8)
+
+    fig, axes = plt.subplots(1, n_panels, figsize=(fig_w, fig_h))
     if n_panels == 1:
         axes = [axes]
-
     fig.patch.set_facecolor('#0b0f1a')
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
 
-    for ax in axes:
+    # left margin sized for the longest label
+    left_frac = label_inches / fig_w
+    fig.subplots_adjust(left=left_frac, right=0.97, top=0.88, bottom=0.10,
+                        wspace=0.08)
+
+    def setup_ax(ax):
         ax.set_facecolor('#0d1320')
         for sp in ax.spines.values():
-            sp.set_color('#1e293b')
-        ax.tick_params(colors='#64748b', labelsize=9)
+            sp.set_color('#2d3748')
+        ax.tick_params(colors='#94a3b8', labelsize=9.5, length=3)
         ax.set_xlim(0, max_t)
         ax.set_ylim(-0.7, n_jobs - 0.3)
         ax.invert_yaxis()
         ax.set_yticks(range(n_jobs))
-        ax.set_yticklabels([abbrev(j) for j in ordered],
-                           fontsize=9, fontfamily='monospace', color='#64748b')
-        ax.grid(axis='x', color='#1e293b', linewidth=0.6, zorder=0)
-        ax.set_xlabel('seconds', fontsize=9, color='#475569')
+        ax.set_yticklabels(ordered, fontsize=9.5, fontfamily='monospace',
+                           color='#94a3b8')
+        ax.grid(axis='x', color='#1e293b', linewidth=0.7, zorder=0)
+        ax.set_xlabel('seconds', fontsize=9, color='#64748b')
 
     total_frames = n_frames + hold_frames
 
@@ -191,57 +192,74 @@ def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
         t = min(max_t, (frame / n_frames) * max_t)
 
         for ax, run in zip(axes, runs):
-            # clear bars only (keep axes ticks etc)
-            for p in list(ax.patches):
-                p.remove()
-            for txt in list(ax.texts):
-                txt.remove()
-            for line in ax.lines:
-                line.set_xdata([t, t])
+            ax.cla()
+            setup_ax(ax)
 
+            # ── gate lines ───────────────────────────────────────────────────
+            gate_label_y = [0.5, 2.0]   # stagger if two gates are close
+            for gi, (gate_job, (gate_color, gate_label)) in \
+                    enumerate(GATE_COLORS.items()):
+                j = run['jobs'].get(gate_job)
+                if j is None:
+                    continue
+                gx = j['end']
+                ax.axvline(gx, color=gate_color, alpha=0.55,
+                           linewidth=1.4, linestyle='--', zorder=4)
+                ax.text(gx + max_t * 0.008, gate_label_y[gi],
+                        gate_label, color=gate_color,
+                        fontsize=8, fontfamily='monospace',
+                        va='top', ha='left', zorder=5)
+
+            # ── job bars ─────────────────────────────────────────────────────
             for i, job_name in enumerate(ordered):
                 j = run['jobs'].get(job_name)
                 if j is None:
                     continue
 
                 if t < j['start']:
-                    # future — ghost outline
-                    ax.barh(i, j['dur'], left=j['start'], height=0.55,
-                            color='#0f172a', linewidth=0.8,
+                    # future — faint ghost
+                    ax.barh(i, j['dur'], left=j['start'], height=0.56,
+                            color='#0f1729', linewidth=0.6,
                             edgecolor='#1e293b', zorder=2)
+
                 elif t >= j['end']:
                     # complete
                     c = COLORS.get(j['status'], '#475569')
-                    ax.barh(i, j['dur'], left=j['start'], height=0.55,
-                            color=c, alpha=0.25, linewidth=0, zorder=2)
-                    ax.barh(i, min(2, max(j['dur'], 0.5)), left=j['start'],
-                            height=0.55, color=c, alpha=0.9, linewidth=0, zorder=3)
-                    if j['dur'] >= 5:
+                    ax.barh(i, j['dur'], left=j['start'], height=0.56,
+                            color=c, alpha=0.22, linewidth=0, zorder=2)
+                    ax.barh(i, min(2.5, max(j['dur'], 0.5)), left=j['start'],
+                            height=0.56, color=c, alpha=1.0,
+                            linewidth=0, zorder=3)
+                    if j['dur'] >= 4:
                         ax.text(j['start'] + j['dur'] / 2, i,
                                 f"{j['dur']}s", ha='center', va='center',
-                                fontsize=8, color=c, fontfamily='monospace',
-                                zorder=4)
+                                fontsize=8.5, color=c,
+                                fontfamily='monospace',
+                                fontweight='bold', zorder=4)
+
                 else:
-                    # running — partial bar
+                    # running — growing bar
                     visible = t - j['start']
                     c = COLORS['running']
-                    ax.barh(i, visible, left=j['start'], height=0.55,
-                            color=c, alpha=0.35, linewidth=0, zorder=2)
-                    ax.barh(i, min(2, max(visible, 0.5)), left=j['start'],
-                            height=0.55, color=c, alpha=0.9, linewidth=0, zorder=3)
+                    ax.barh(i, visible, left=j['start'], height=0.56,
+                            color=c, alpha=0.30, linewidth=0, zorder=2)
+                    ax.barh(i, min(2.5, max(visible, 0.5)), left=j['start'],
+                            height=0.56, color=c, alpha=1.0,
+                            linewidth=0, zorder=3)
 
-            result_color = COLORS.get(run['result'], '#94a3b8') if t >= run['total'] else '#64748b'
-            result_str   = run['result'] if t >= run['total'] else '…'
+            # ── time cursor ──────────────────────────────────────────────────
+            ax.axvline(t, color='#ffffff', alpha=0.45,
+                       linewidth=1.2, zorder=6)
+
+            # ── title ────────────────────────────────────────────────────────
+            done = t >= run['total']
+            result_color = COLORS.get(run['result'], '#94a3b8') if done else '#64748b'
+            result_str   = run['result'] if done else f"{t:.0f}s…"
             ax.set_title(
-                f"{run['sha']}   {result_str}   {run['total']}s",
+                f"{run['sha']}   {result_str}   (wall-clock {run['total']}s)",
                 fontsize=10, fontfamily='monospace',
-                color=result_color, pad=6
+                color=result_color, pad=7
             )
-
-    # initialise time lines
-    time_lines = [ax.axvline(0, color='#38bdf8', alpha=0.5, linewidth=1.5,
-                             linestyle='--', zorder=5)
-                  for ax in axes]
 
     def animate(frame):
         draw_frame(frame)
