@@ -237,17 +237,19 @@ status_pending "$SHA" "ci/hetzner" "Running CI (phase=$PHASE)..." "$LOG_URL"
 # Sample CPU every 0.1s for fine-grain contention analysis.
 vmstat -n 1 > "$RESULTS_DIR/cpu.log" 2>&1 &
 CPU_MONITOR_PID=$!
-# Fine-grain /proc/stat sampling at 100ms for sub-second resolution
+# Fine-grain /proc/stat sampling at 100ms for sub-second resolution.
+# Appends with a RUN marker so multiple runs of the same SHA are preserved.
+echo "# RUN $(date +%s)" >> "$RESULTS_DIR/cpu-fine.log"
 (
 while true; do
     ts=$(date +%s.%N)
     read -r _ user nice system idle iowait irq softirq steal _ _ < /proc/stat
     total=$((user + nice + system + idle + iowait + irq + softirq + steal))
     busy=$((total - idle - iowait))
-    echo "$ts $busy $total"
+    echo "$ts $busy $total $iowait"
     sleep 0.1
 done
-) > "$RESULTS_DIR/cpu-fine.log" 2>&1 &
+) >> "$RESULTS_DIR/cpu-fine.log" 2>&1 &
 CPU_FINE_PID=$!
 
 # CI timeout watchdog — kill everything if CI exceeds time limit.

@@ -66,6 +66,12 @@ def fetch_log(sha):
     return r.stdout
 
 
+def fetch_cpu_log(sha):
+    r = subprocess.run(["ssh", SERVER, f"cat /opt/ci/logs/{sha}/cpu-fine.log"],
+                       capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
 def latest_sha():
     r = subprocess.run(
         ["ssh", SERVER,
@@ -132,8 +138,80 @@ def parse_log(text, sha_hint=""):
         out.append(dict(sha=run['sha'] or sha_hint,
                         result=run['result'],
                         total=total,
-                        jobs=jobs))
+                        jobs=jobs,
+                        t0=t0))
     return out
+
+
+def parse_cpu_fine(text, t0):
+    """Parse cpu-fine.log → list of (t_rel_s, cpu_pct, iowait_pct).
+
+    Format (new): <unix_ts> <busy_jiffies> <total_jiffies> <iowait_jiffies>
+    Format (old): <unix_ts> <busy_jiffies> <total_jiffies>
+    Lines starting with '#' are run-boundary markers.
+
+    The file may contain multiple runs (appended with # RUN markers).
+    Returns points for the run whose start aligns most closely with t0.
+    """
+    import datetime as dt_mod
+
+    # Split into per-run segments
+    segments: list[list[tuple]] = []
+    cur: list[tuple] = []
+    for line in text.splitlines():
+        if line.startswith('#'):
+            if cur:
+                segments.append(cur)
+            cur = []
+            continue
+        parts = line.split()
+        if len(parts) >= 3:
+            try:
+                row = (float(parts[0]), int(parts[1]), int(parts[2]),
+                       int(parts[3]) if len(parts) >= 4 else 0)
+                cur.append(row)
+            except ValueError:
+                pass
+    if cur:
+        segments.append(cur)
+    if not segments:
+        return []
+
+    def align_and_compute(rows, t0):
+        if len(rows) < 2:
+            return None, []
+        first_unix = rows[0][0]
+        cpu_start_utc = dt_mod.datetime.fromtimestamp(
+            first_unix, tz=dt_mod.timezone.utc)
+        t0_full = cpu_start_utc.replace(
+            hour=t0.hour, minute=t0.minute, second=t0.second, microsecond=0)
+        t0_unix = t0_full.timestamp()
+        points = []
+        for i in range(1, len(rows)):
+            ts, busy, total, iow       = rows[i]
+            _, pb,  pt,  piow          = rows[i - 1]
+            d_total = total - pt
+            d_busy  = busy  - pb
+            d_iow   = iow   - piow
+            if d_total > 0:
+                cpu_pct = max(0.0, min(100.0, d_busy / d_total * 100))
+                iow_pct = max(0.0, min(100.0, d_iow  / d_total * 100))
+                points.append((ts - t0_unix, cpu_pct, iow_pct))
+        return t0_unix, points
+
+    # Pick the segment that best covers t0 (offset closest to 0)
+    best_pts, best_offset = [], float('inf')
+    for seg in segments:
+        if len(seg) < 2:
+            continue
+        t0_unix, pts = align_and_compute(seg, t0)
+        if pts:
+            # How close is the first point to t=0?
+            offset = abs(pts[0][0])
+            if offset < best_offset:
+                best_offset, best_pts = offset, pts
+
+    return best_pts
 
 
 # ── animation ─────────────────────────────────────────────────────────────────
@@ -245,6 +323,35 @@ def make_image(runs, output_path):
                         fontsize=8, color=c, fontfamily='monospace',
                         fontweight='bold', zorder=4)
 
+        # ── CPU overlay (bottom 1/3 of panel) ────────────────────────────────
+        cpu_pts = run.get('cpu_data') or []
+        if cpu_pts:
+            cpu_ax = ax.inset_axes([0, 0, 1, 0.33])
+            cpu_ax.set_facecolor((0, 0, 0, 0))
+            ts_cpu, cpu_pct, iow_pct = zip(*cpu_pts)
+            # CPU fill + line (blue)
+            cpu_ax.fill_between(ts_cpu, cpu_pct, alpha=0.30,
+                                color='#38bdf8', linewidth=0)
+            cpu_ax.plot(ts_cpu, cpu_pct, color='#7dd3fc',
+                        linewidth=0.8, alpha=0.9)
+            # IO wait line (orange) — only if data has non-zero iowait
+            if any(w > 0 for w in iow_pct):
+                cpu_ax.plot(ts_cpu, iow_pct, color='#fb923c',
+                            linewidth=0.8, alpha=0.85)
+            cpu_ax.set_xlim(0, max_t)
+            cpu_ax.set_ylim(0, 100)
+            cpu_ax.set_yticks([50, 100])
+            cpu_ax.set_yticklabels(['50%', '100%'])
+            cpu_ax.tick_params(labelsize=6.5, colors='#4b7090',
+                               length=2, pad=1)
+            cpu_ax.set_xticks([])
+            for sp in ['top', 'right', 'bottom']:
+                cpu_ax.spines[sp].set_visible(False)
+            cpu_ax.spines['left'].set_color('#1e293b')
+            cpu_ax.text(max_t * 0.99, 92, 'CPU%', ha='right', va='top',
+                        fontsize=6.5, color='#4b7090',
+                        fontfamily='monospace')
+
         # ── title ────────────────────────────────────────────────────────────
         result_color = COLORS.get(run['result'], '#94a3b8')
         label = run.get('label') or run['sha']
@@ -291,7 +398,7 @@ def main():
     if local_file:
         text     = open(local_file).read()
         all_parsed = [(parse_log(text, sha_hint=os.path.basename(local_file)),
-                       os.path.basename(local_file), 1)]
+                       os.path.basename(local_file), 1, None)]
     else:
         if not specs:
             sha = latest_sha()
@@ -300,16 +407,24 @@ def main():
         all_parsed = []
         for sha, label, run_idx in specs:
             print(f"Fetching {sha} …")
-            all_parsed.append((parse_log(fetch_log(sha), sha_hint=sha),
-                               label, run_idx))
+            ci_runs = parse_log(fetch_log(sha), sha_hint=sha)
+            cpu_text = fetch_cpu_log(sha)
+            all_parsed.append((ci_runs, label, run_idx, cpu_text))
 
     selected = []
-    for sha_runs, label, run_idx in all_parsed:
+    for sha_runs, label, run_idx, cpu_text in all_parsed:
         if not sha_runs:
             sys.exit("No runs found in log")
         idx = min(run_idx - 1, len(sha_runs) - 1)
         r   = dict(sha_runs[idx])   # copy so we can annotate
         r['label'] = label or r['sha']
+        if cpu_text:
+            cpu_pts = parse_cpu_fine(cpu_text, r['t0'])
+            # Only keep points that fall within this run's time window.
+            in_range = [(t, c, w) for t, c, w in cpu_pts
+                        if -5 <= t <= r['total'] + 30]
+            if in_range:
+                r['cpu_data'] = in_range
         print(f"  {r['label']}  ({r['sha']} run {idx+1})  {r['result']}  {r['total']}s")
         selected.append(r)
 
