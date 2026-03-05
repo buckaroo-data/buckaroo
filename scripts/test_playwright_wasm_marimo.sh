@@ -63,28 +63,32 @@ fi
 
 cd "$ROOT_DIR/packages/buckaroo-js-core"
 
-log_message "Installing npm dependencies..."
-if command -v pnpm &> /dev/null; then
-    pnpm install
+if [ "${SKIP_INSTALL:-0}" = "1" ]; then
+    log_message "SKIP_INSTALL=1 — skipping pnpm install + playwright install"
 else
-    npm install
-fi
+    log_message "Installing npm dependencies..."
+    if command -v pnpm &> /dev/null; then
+        pnpm install
+    else
+        npm install
+    fi
 
-log_message "Ensuring Playwright browsers are installed..."
-if command -v pnpm &> /dev/null; then
-    pnpm exec playwright install chromium
-else
-    npx playwright install chromium
-fi
+    log_message "Ensuring Playwright browsers are installed..."
+    if command -v pnpm &> /dev/null; then
+        pnpm exec playwright install chromium
+    else
+        npx playwright install chromium
+    fi
 
-success "Dependencies ready"
+    success "Dependencies ready"
+fi
 
 # ---------- 4. Run the WASM marimo playwright tests --------------------------------
 
 log_message "Running Playwright tests against WASM marimo notebook..."
 warning "Note: First test run may take 15-30 seconds for Pyodide initialization"
 
-if pnpm exec playwright test --config playwright.config.wasm-marimo.ts; then
+if pnpm exec playwright test --config playwright.config.wasm-marimo.ts ${PW_GREP:+--grep "$PW_GREP"}; then
     success "ALL WASM MARIMO PLAYWRIGHT TESTS PASSED!"
     EXIT_CODE=0
 else
