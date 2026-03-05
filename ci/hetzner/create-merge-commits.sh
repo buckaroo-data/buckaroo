@@ -19,7 +19,7 @@
 
 set -uo pipefail
 
-TEST_SHA=82c148b
+TEST_SHA=031c787e
 ORIG_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 COMMIT_SET="all"
 
