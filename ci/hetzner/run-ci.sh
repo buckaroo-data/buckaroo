@@ -336,20 +336,41 @@ job_test_python() {
 
     # Ignored in Docker — require forkserver/spawn multiprocessing which behaves
     # differently inside container PID namespaces and takes >1s to spawn.
-    local pytest_args=(
-        tests/unit -m "not slow" --color=yes
-        -n "${PYTEST_WORKERS:-4}" --dist load
+    local common_ignores=(
         --ignore=tests/unit/file_cache/mp_timeout_decorator_test.py
         --ignore=tests/unit/file_cache/multiprocessing_executor_test.py
         --ignore=tests/unit/server/test_mcp_server_integration.py
         --deselect "tests/unit/server/test_mcp_tool_cleanup.py::TestServerMonitor::test_server_killed_on_parent_death"
     )
-    # Testcase filtering: --only-testcases or --first-testcases
     local k_expr
     k_expr=$(pytest_k_expr "${PYTEST_K_FILTER:-}")
-    [[ -n "$k_expr" ]] && pytest_args+=(-k "$k_expr")
 
-    /opt/venvs/$v/bin/python -m pytest "${pytest_args[@]}"
+    # ── timing_dependent: high priority, single worker ───────────────────────
+    local timing_args=(
+        tests/unit -m "timing_dependent" --color=yes
+        --dist no
+        "${common_ignores[@]}"
+    )
+    [[ -n "$k_expr" ]] && timing_args+=(-k "$k_expr")
+
+    # ── regular: low priority, parallel workers ──────────────────────────────
+    local regular_args=(
+        tests/unit -m "not slow and not timing_dependent" --color=yes
+        -n "${PYTEST_WORKERS:-4}" --dist load
+        "${common_ignores[@]}"
+    )
+    [[ -n "$k_expr" ]] && regular_args+=(-k "$k_expr")
+
+    # Run both in parallel; timing tests get high CPU priority
+    nice -n -15 /opt/venvs/$v/bin/python -m pytest "${timing_args[@]}" &
+    local pid_timing=$!
+    nice -n 19  /opt/venvs/$v/bin/python -m pytest "${regular_args[@]}" &
+    local pid_regular=$!
+
+    wait "$pid_timing";  local rc_timing=$?
+    wait "$pid_regular"; local rc_regular=$?
+
+    return $(( rc_timing != 0 || rc_regular != 0 ))
 }
 
 job_build_wheel() {

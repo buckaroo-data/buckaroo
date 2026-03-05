@@ -138,6 +138,7 @@ installer = "uv"
 [tool.pytest.ini_options]
 markers = [
     "slow: marks tests as slow (hit the network, e.g. uvx integration tests)",
+    "timing_dependent: tests with hard wall-clock assertions; run with high CPU priority and no parallelism",
 ]
 
 [tool.basedpyright]
