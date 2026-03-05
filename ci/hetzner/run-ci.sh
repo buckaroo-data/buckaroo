@@ -64,6 +64,11 @@ if [[ -n "$FIRST_TESTCASES" && -n "$ONLY_TESTCASES" ]]; then
     echo "ERROR: --first-testcases and --only-testcases are mutually exclusive" >&2; exit 1
 fi
 
+# Ensure all pnpm commands in this run use the same store dir, preventing
+# node_modules re-linking when pnpm detects a storeDir mismatch between
+# build-js (--store-dir /opt/pnpm-store) and full_build.sh (no flag).
+export npm_config_store_dir=/opt/pnpm-store
+
 REPO_DIR=/repo
 RESULTS_DIR=/opt/ci/logs/$SHA
 WHEEL_CACHE_DIR=/opt/ci/wheel-cache/${WHEEL_FROM:-$SHA}
