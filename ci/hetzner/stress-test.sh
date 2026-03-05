@@ -65,7 +65,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # rsh: run a command either locally or via SSH depending on --local flag
-rsh() { $LOCAL && bash -c "$1" || ssh "$SERVER" "$1"; }
+rsh() { if $LOCAL; then bash -c "$1"; else ssh "$SERVER" "$1"; fi; }
 
 # ── Commit sets ────────────────────────────────────────────────────────────────
 # Each SHA is a pre-baked merge: old app code + test infra from 82c148b.

@@ -203,9 +203,21 @@ ci_pkill "node.*storybook"
 ci_pkill "npm exec serve"
 ci_pkill esbuild
 ci_pkill 'buckaroo.server'
-# Kill anything on known service ports (jupyter 8889-8897, marimo 2718, storybook 6006, buckaroo-server 8701)
+# Kill anything on known service ports using /proc/net/tcp (fuser not available in container)
+kill_port() {
+    local port=$1 hex_port inode pid
+    printf -v hex_port "%04X" "$port"
+    inode=$(awk "/:${hex_port} /{print \$10}" /proc/net/tcp /proc/net/tcp6 2>/dev/null | head -1)
+    [[ -z "$inode" ]] && return 0
+    for fd in /proc/*/fd/*; do
+        [[ "$(readlink "$fd" 2>/dev/null)" == "socket:[$inode]" ]] || continue
+        pid=${fd#/proc/}; pid=${pid%%/*}
+        kill -9 "$pid" 2>/dev/null || true
+        return 0
+    done
+}
 for port in 8889 8890 8891 8892 8893 8894 8895 8896 8897 2718 6006 8701; do
-    fuser -k $port/tcp 2>/dev/null || true
+    kill_port $port
 done
 sleep 1  # let processes die before cleaning their files
 # Clean temp files from CI jobs
@@ -370,6 +382,10 @@ job_test_python() {
 
     wait "$pid_timing";  local rc_timing=$?
     wait "$pid_regular"; local rc_regular=$?
+
+    # pytest exit code 5 = no tests collected (e.g. old code without the mark) — treat as pass
+    [[ $rc_timing  -eq 5 ]] && rc_timing=0
+    [[ $rc_regular -eq 5 ]] && rc_regular=0
 
     return $(( rc_timing != 0 || rc_regular != 0 ))
 }
