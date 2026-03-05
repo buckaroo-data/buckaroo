@@ -144,7 +144,7 @@ def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
     import matplotlib.pyplot as plt
     from matplotlib.animation import FuncAnimation, PillowWriter
 
-    # collect ordered job list
+    # collect ordered job list across all runs
     seen = set()
     for r in runs:
         seen.update(r['jobs'].keys())
@@ -156,44 +156,57 @@ def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
     max_t    = max(r['total'] for r in runs)
     max_t    = max(max_t, 60)
 
-    # wide enough for full labels + bars; tall enough for all rows
-    label_inches = 2.2        # fixed left space for job names
-    bar_inches   = 7.5        # chart area per panel
-    fig_w = label_inches + bar_inches * n_panels
-    fig_h = max(4.5, n_jobs * 0.42 + 1.8)
+    # stacked vertically: one panel per run, old on top → new on bottom
+    label_inches  = 2.2
+    bar_inches    = 9.5
+    panel_h       = max(4.0, n_jobs * 0.42 + 1.5)
+    fig_w         = label_inches + bar_inches
+    fig_h         = panel_h * n_panels
 
-    fig, axes = plt.subplots(1, n_panels, figsize=(fig_w, fig_h))
+    sharex = n_panels > 1
+    fig, axes = plt.subplots(n_panels, 1, figsize=(fig_w, fig_h),
+                             sharex=sharex)
     if n_panels == 1:
         axes = [axes]
     fig.patch.set_facecolor('#0b0f1a')
 
-    # left margin sized for the longest label
     left_frac = label_inches / fig_w
-    fig.subplots_adjust(left=left_frac, right=0.97, top=0.88, bottom=0.10,
-                        wspace=0.08)
+    fig.subplots_adjust(left=left_frac, right=0.97,
+                        top=1 - 0.3 / fig_h,   # tiny top margin
+                        bottom=0.45 / fig_h,    # room for bottom xlabel
+                        hspace=0.35)
 
-    def setup_ax(ax):
+    # compute tick step once so both panels use identical positions
+    tick_step = 5 if max_t <= 40 else 10 if max_t <= 90 else 20
+    xticks = list(range(0, int(max_t) + tick_step, tick_step))
+
+    def setup_ax(ax, is_bottom):
         ax.set_facecolor('#0d1320')
         for sp in ax.spines.values():
             sp.set_color('#2d3748')
-        ax.tick_params(colors='#94a3b8', labelsize=9.5, length=3)
         ax.set_xlim(0, max_t)
         ax.set_ylim(-0.7, n_jobs - 0.3)
         ax.invert_yaxis()
         ax.set_yticks(range(n_jobs))
         ax.set_yticklabels(ordered, fontsize=9.5, fontfamily='monospace',
                            color='#94a3b8')
+        # explicit identical ticks so grid columns align across panels
+        ax.set_xticks(xticks)
+        ax.tick_params(colors='#94a3b8', labelsize=9.5, length=3)
+        if not is_bottom:
+            ax.tick_params(labelbottom=False)
         ax.grid(axis='x', color='#1e293b', linewidth=0.7, zorder=0)
-        ax.set_xlabel('seconds', fontsize=9, color='#64748b')
+        if is_bottom:
+            ax.set_xlabel('seconds', fontsize=9, color='#64748b')
 
     total_frames = n_frames + hold_frames
 
     def draw_frame(frame):
         t = min(max_t, (frame / n_frames) * max_t)
 
-        for ax, run in zip(axes, runs):
+        for pi, (ax, run) in enumerate(zip(axes, runs)):
             ax.cla()
-            setup_ax(ax)
+            setup_ax(ax, is_bottom=(pi == n_panels - 1))
 
             # ── gate lines ───────────────────────────────────────────────────
             gate_label_y = [0.5, 2.0]   # stagger if two gates are close
@@ -255,9 +268,10 @@ def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
             done = t >= run['total']
             result_color = COLORS.get(run['result'], '#94a3b8') if done else '#64748b'
             result_str   = run['result'] if done else f"{t:.0f}s…"
+            label = run.get('label') or run['sha']
             ax.set_title(
-                f"{run['sha']}   {result_str}   (wall-clock {run['total']}s)",
-                fontsize=10, fontfamily='monospace',
+                f"{label}   {result_str}   {run['total']}s wall-clock",
+                fontsize=10.5, fontfamily='monospace',
                 color=result_color, pad=7
             )
 
@@ -273,51 +287,64 @@ def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
 
 # ── main ───────────────────────────────────────────────────────────────────────
 
+# Fixed output path so we always overwrite the same file (no old-GIF confusion)
+OUT_PATH = os.path.join(tempfile.gettempdir(), 'ci-gantt-latest.gif')
+
+
+def parse_sha_arg(arg):
+    """Accept 'SHA', 'SHA:label', or 'SHA:label:runN'. Returns (sha, label, run_idx)."""
+    parts   = arg.split(':', 2)
+    sha     = parts[0]
+    label   = parts[1] if len(parts) > 1 else None
+    run_idx = int(parts[2].lstrip('run')) if len(parts) > 2 else 1
+    return sha, label, run_idx
+
+
 def main():
-    shas       = []
+    specs      = []   # list of (sha, label, run_idx)
     local_file = None
-    run_idx    = 1      # 1-based
     args       = sys.argv[1:]
     i          = 0
     while i < len(args):
         if args[i] == '--file' and i + 1 < len(args):
             local_file = args[i + 1]; i += 2
-        elif args[i] == '--run' and i + 1 < len(args):
-            run_idx = int(args[i + 1]); i += 2
-        elif re.match(r'^[0-9a-f]{6,40}$', args[i]):
-            shas.append(args[i]); i += 1
+        elif re.match(r'^[0-9a-f]{6,40}', args[i]):
+            specs.append(parse_sha_arg(args[i])); i += 1
         else:
             sys.exit(f"Unknown argument: {args[i]!r}")
 
     if local_file:
         text     = open(local_file).read()
-        all_runs = [parse_log(text, sha_hint=os.path.basename(local_file))]
+        all_parsed = [(parse_log(text, sha_hint=os.path.basename(local_file)),
+                       os.path.basename(local_file), 1)]
     else:
-        if not shas:
+        if not specs:
             sha = latest_sha()
             print(f"Latest SHA: {sha}")
-            shas = [sha]
-        all_runs = []
-        for sha in shas:
+            specs = [(sha, None, 1)]
+        all_parsed = []
+        for sha, label, run_idx in specs:
             print(f"Fetching {sha} …")
-            all_runs.append(parse_log(fetch_log(sha), sha_hint=sha))
+            all_parsed.append((parse_log(fetch_log(sha), sha_hint=sha),
+                               label, run_idx))
 
-    # pick the requested run from each SHA
     selected = []
-    for sha_runs in all_runs:
+    for sha_runs, label, run_idx in all_parsed:
         if not sha_runs:
             sys.exit("No runs found in log")
         idx = min(run_idx - 1, len(sha_runs) - 1)
-        r   = sha_runs[idx]
-        print(f"  {r['sha']}  run {idx+1}/{len(sha_runs)}  {r['result']}  {r['total']}s")
+        r   = dict(sha_runs[idx])   # copy so we can annotate
+        r['label'] = label or r['sha']
+        print(f"  {r['label']}  ({r['sha']} run {idx+1})  {r['result']}  {r['total']}s")
         selected.append(r)
 
-    out = tempfile.NamedTemporaryFile(suffix='.gif', delete=False)
-    out.close()
+    # delete old output so browser always reloads fresh
+    if os.path.exists(OUT_PATH):
+        os.remove(OUT_PATH)
 
-    make_gif(selected, out.name)
-    print(f"Opening {out.name}")
-    webbrowser.open(f"file://{out.name}")
+    make_gif(selected, OUT_PATH)
+    print(f"Opening {OUT_PATH}")
+    webbrowser.open(f"file://{OUT_PATH}")
 
 
 if __name__ == '__main__':
