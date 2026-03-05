@@ -138,11 +138,10 @@ def parse_log(text, sha_hint=""):
 
 # ── animation ─────────────────────────────────────────────────────────────────
 
-def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
+def make_image(runs, output_path):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation, PillowWriter
 
     # collect ordered job list across all runs
     seen = set()
@@ -158,8 +157,9 @@ def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
 
     # stacked vertically: one panel per run, old on top → new on bottom
     label_inches  = 2.2
-    bar_inches    = 9.5
-    panel_h       = max(4.0, n_jobs * 0.42 + 1.5)
+    bar_inches    = 13.0          # wide
+    row_h_inches  = 0.26          # compact row height
+    panel_h       = n_jobs * row_h_inches + 0.9   # tight: rows + title/axis
     fig_w         = label_inches + bar_inches
     fig_h         = panel_h * n_panels
 
@@ -171,10 +171,10 @@ def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
     fig.patch.set_facecolor('#0b0f1a')
 
     left_frac = label_inches / fig_w
-    fig.subplots_adjust(left=left_frac, right=0.97,
-                        top=1 - 0.3 / fig_h,   # tiny top margin
-                        bottom=0.45 / fig_h,    # room for bottom xlabel
-                        hspace=0.35)
+    fig.subplots_adjust(left=left_frac, right=0.98,
+                        top=1 - 0.2 / fig_h,
+                        bottom=0.35 / fig_h,
+                        hspace=0.45)
 
     # compute tick step once so both panels use identical positions
     tick_step = 5 if max_t <= 40 else 10 if max_t <= 90 else 20
@@ -199,96 +199,59 @@ def make_gif(runs, output_path, n_frames=60, fps=12, hold_frames=15):
         if is_bottom:
             ax.set_xlabel('seconds', fontsize=9, color='#64748b')
 
-    total_frames = n_frames + hold_frames
+    for pi, (ax, run) in enumerate(zip(axes, runs)):
+        setup_ax(ax, is_bottom=(pi == n_panels - 1))
 
-    def draw_frame(frame):
-        t = min(max_t, (frame / n_frames) * max_t)
+        # ── gate lines ───────────────────────────────────────────────────────
+        gate_label_y = [0.5, 2.0]
+        for gi, (gate_job, (gate_color, gate_label)) in \
+                enumerate(GATE_COLORS.items()):
+            j = run['jobs'].get(gate_job)
+            if j is None:
+                continue
+            gx = j['end']
+            ax.axvline(gx, color=gate_color, alpha=0.6,
+                       linewidth=1.4, linestyle='--', zorder=4)
+            ax.text(gx + max_t * 0.008, gate_label_y[gi],
+                    gate_label, color=gate_color,
+                    fontsize=8, fontfamily='monospace',
+                    va='top', ha='left', zorder=5)
 
-        for pi, (ax, run) in enumerate(zip(axes, runs)):
-            ax.cla()
-            setup_ax(ax, is_bottom=(pi == n_panels - 1))
+        # ── job bars ─────────────────────────────────────────────────────────
+        for i, job_name in enumerate(ordered):
+            j = run['jobs'].get(job_name)
+            if j is None:
+                continue
+            c = COLORS.get(j['status'], '#475569')
+            ax.barh(i, j['dur'], left=j['start'], height=0.62,
+                    color=c, alpha=0.22, linewidth=0, zorder=2)
+            ax.barh(i, min(2.5, max(j['dur'], 0.5)), left=j['start'],
+                    height=0.62, color=c, alpha=1.0, linewidth=0, zorder=3)
+            if j['dur'] >= 4:
+                ax.text(j['start'] + j['dur'] / 2, i,
+                        f"{j['dur']}s", ha='center', va='center',
+                        fontsize=8, color=c, fontfamily='monospace',
+                        fontweight='bold', zorder=4)
 
-            # ── gate lines ───────────────────────────────────────────────────
-            gate_label_y = [0.5, 2.0]   # stagger if two gates are close
-            for gi, (gate_job, (gate_color, gate_label)) in \
-                    enumerate(GATE_COLORS.items()):
-                j = run['jobs'].get(gate_job)
-                if j is None:
-                    continue
-                gx = j['end']
-                ax.axvline(gx, color=gate_color, alpha=0.55,
-                           linewidth=1.4, linestyle='--', zorder=4)
-                ax.text(gx + max_t * 0.008, gate_label_y[gi],
-                        gate_label, color=gate_color,
-                        fontsize=8, fontfamily='monospace',
-                        va='top', ha='left', zorder=5)
+        # ── title ────────────────────────────────────────────────────────────
+        result_color = COLORS.get(run['result'], '#94a3b8')
+        label = run.get('label') or run['sha']
+        ax.set_title(
+            f"{label}   {run['result']}   {run['total']}s wall-clock",
+            fontsize=10.5, fontfamily='monospace',
+            color=result_color, pad=7
+        )
 
-            # ── job bars ─────────────────────────────────────────────────────
-            for i, job_name in enumerate(ordered):
-                j = run['jobs'].get(job_name)
-                if j is None:
-                    continue
-
-                if t < j['start']:
-                    # future — faint ghost
-                    ax.barh(i, j['dur'], left=j['start'], height=0.56,
-                            color='#0f1729', linewidth=0.6,
-                            edgecolor='#1e293b', zorder=2)
-
-                elif t >= j['end']:
-                    # complete
-                    c = COLORS.get(j['status'], '#475569')
-                    ax.barh(i, j['dur'], left=j['start'], height=0.56,
-                            color=c, alpha=0.22, linewidth=0, zorder=2)
-                    ax.barh(i, min(2.5, max(j['dur'], 0.5)), left=j['start'],
-                            height=0.56, color=c, alpha=1.0,
-                            linewidth=0, zorder=3)
-                    if j['dur'] >= 4:
-                        ax.text(j['start'] + j['dur'] / 2, i,
-                                f"{j['dur']}s", ha='center', va='center',
-                                fontsize=8.5, color=c,
-                                fontfamily='monospace',
-                                fontweight='bold', zorder=4)
-
-                else:
-                    # running — growing bar
-                    visible = t - j['start']
-                    c = COLORS['running']
-                    ax.barh(i, visible, left=j['start'], height=0.56,
-                            color=c, alpha=0.30, linewidth=0, zorder=2)
-                    ax.barh(i, min(2.5, max(visible, 0.5)), left=j['start'],
-                            height=0.56, color=c, alpha=1.0,
-                            linewidth=0, zorder=3)
-
-            # ── time cursor ──────────────────────────────────────────────────
-            ax.axvline(t, color='#ffffff', alpha=0.45,
-                       linewidth=1.2, zorder=6)
-
-            # ── title ────────────────────────────────────────────────────────
-            done = t >= run['total']
-            result_color = COLORS.get(run['result'], '#94a3b8') if done else '#64748b'
-            result_str   = run['result'] if done else f"{t:.0f}s…"
-            label = run.get('label') or run['sha']
-            ax.set_title(
-                f"{label}   {result_str}   {run['total']}s wall-clock",
-                fontsize=10.5, fontfamily='monospace',
-                color=result_color, pad=7
-            )
-
-    def animate(frame):
-        draw_frame(frame)
-
-    anim = FuncAnimation(fig, animate, frames=total_frames, interval=1000 // fps)
-
-    print(f"Saving GIF ({total_frames} frames @ {fps}fps) …")
-    anim.save(output_path, writer=PillowWriter(fps=fps), dpi=100)
+    print("Saving image …")
+    fig.savefig(output_path, dpi=120, bbox_inches='tight',
+                facecolor=fig.get_facecolor())
     plt.close(fig)
 
 
 # ── main ───────────────────────────────────────────────────────────────────────
 
 # Fixed output path so we always overwrite the same file (no old-GIF confusion)
-OUT_PATH = os.path.join(tempfile.gettempdir(), 'ci-gantt-latest.gif')
+OUT_PATH = os.path.join(tempfile.gettempdir(), 'ci-gantt-latest.jpg')
 
 
 def parse_sha_arg(arg):
@@ -342,7 +305,7 @@ def main():
     if os.path.exists(OUT_PATH):
         os.remove(OUT_PATH)
 
-    make_gif(selected, OUT_PATH)
+    make_image(selected, OUT_PATH)
     print(f"Opening {OUT_PATH}")
     webbrowser.open(f"file://{OUT_PATH}")
 
