@@ -43,12 +43,21 @@ fi
 log_message "Using wheel: $WHEEL"
 
 # ---------- 2. Create a clean venv with only buckaroo[mcp] -------------------
+# Cache the venv at a stable path keyed by wheel hash — skip rebuild on warm runs.
 
-MCP_VENV="$ROOT_DIR/.venv-mcp-test"
-log_message "Creating clean venv at $MCP_VENV ..."
-rm -rf "$MCP_VENV"
-uv venv "$MCP_VENV" -q
-uv pip install --python "$MCP_VENV/bin/python" "${WHEEL}[mcp]" -q
+MCP_VENV="/opt/venvs/mcp-test"
+WHEEL_HASH=$(sha256sum "$WHEEL" | cut -d' ' -f1)
+HASH_FILE="$MCP_VENV/.wheel-sha256"
+
+if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$WHEEL_HASH" ]; then
+    log_message "Reusing cached [mcp] venv (wheel unchanged)"
+else
+    log_message "Creating clean venv at $MCP_VENV ..."
+    rm -rf "$MCP_VENV"
+    uv venv "$MCP_VENV" -q
+    uv pip install --python "$MCP_VENV/bin/python" "${WHEEL}[mcp]" -q
+    echo "$WHEEL_HASH" > "$HASH_FILE"
+fi
 
 # Sanity-check: server module must be importable
 "$MCP_VENV/bin/python" -c "from buckaroo.server.app import make_app" 2>&1 \
@@ -62,35 +71,42 @@ export BUCKAROO_SERVER_PYTHON="$MCP_VENV/bin/python"
 
 cd packages/buckaroo-js-core
 
-log_message "Installing npm dependencies..."
-if command -v pnpm &> /dev/null; then
-    pnpm install
+if [ "${SKIP_INSTALL:-0}" = "1" ]; then
+    log_message "SKIP_INSTALL=1 — skipping pnpm install + playwright install"
 else
-    npm install
-fi
+    log_message "Installing npm dependencies..."
+    if command -v pnpm &> /dev/null; then
+        pnpm install
+    else
+        npm install
+    fi
 
-log_message "Ensuring Playwright browsers are installed..."
-if command -v pnpm &> /dev/null; then
-    pnpm exec playwright install chromium
-else
-    npx playwright install chromium
-fi
+    log_message "Ensuring Playwright browsers are installed..."
+    if command -v pnpm &> /dev/null; then
+        pnpm exec playwright install chromium
+    else
+        npx playwright install chromium
+    fi
 
-success "Dependencies ready"
+    success "Dependencies ready"
+fi
 
 # ---------- 4. Run the server playwright tests --------------------------------
 
 log_message "Running Playwright tests against Buckaroo server..."
 
-if pnpm test:server; then
+# In CI, use list reporter for per-test timing in logs
+PW_REPORTER_FLAG=""
+if [ -n "${CI:-}" ] || [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]; then
+    PW_REPORTER_FLAG="--reporter=list"
+fi
+
+if pnpm exec playwright test --config playwright.config.server.ts $PW_REPORTER_FLAG ${PW_GREP:+--grep "$PW_GREP"}; then
     success "ALL SERVER PLAYWRIGHT TESTS PASSED!"
     EXIT_CODE=0
 else
     error "SERVER TESTS FAILED"
     EXIT_CODE=1
 fi
-
-# ---------- 5. Cleanup -------------------------------------------------------
-rm -rf "$MCP_VENV"
 
 exit $EXIT_CODE
