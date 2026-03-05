@@ -46,6 +46,7 @@ DRY_RUN=false
 COMMIT_SET="safe"
 CUSTOM_SHAS=()
 DOCKER_ENV_ARGS=()
+LOCAL=false   # --local: run directly on this machine (no SSH), for server-side execution
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -54,6 +55,7 @@ while [[ $# -gt 0 ]]; do
         --limit=*)   LIMIT="${1#*=}"; shift ;;
         --limit)     LIMIT="$2"; shift 2 ;;
         --dry-run)   DRY_RUN=true; shift ;;
+        --local)     LOCAL=true; shift ;;
         --runner=*)  RUNNER="${1#*=}"; shift ;;
         --set=*)     COMMIT_SET="${1#*=}"; shift ;;
         --set)       COMMIT_SET="$2"; shift 2 ;;
@@ -61,6 +63,9 @@ while [[ $# -gt 0 ]]; do
         *)           CUSTOM_SHAS+=("$1"); shift ;;
     esac
 done
+
+# rsh: run a command either locally or via SSH depending on --local flag
+rsh() { $LOCAL && bash -c "$1" || ssh "$SERVER" "$1"; }
 
 # ── Commit sets ────────────────────────────────────────────────────────────────
 # Each SHA is a pre-baked merge: old app code + test infra from 82c148b.
@@ -221,7 +226,7 @@ if $DRY_RUN; then
 fi
 
 # Create remote log directory
-ssh "$SERVER" "mkdir -p $LOGDIR"
+rsh "mkdir -p $LOGDIR"
 
 # Results arrays
 declare -a R_SHA R_STATUS R_TIME
@@ -232,7 +237,7 @@ start_monitor() {
     local csv=$1
     # Sample CPU idle% and memory every 2s on the HOST (not inside container).
     # Container workload shows up in host CPU/mem since it's not a VM.
-    ssh "$SERVER" "nohup bash -c '
+    rsh "nohup bash -c '
         echo \"time,cpu_idle,mem_used_mb,mem_total_mb\" > $csv
         while true; do
             cpu_idle=\$(top -bn1 | grep \"Cpu(s)\" | awk \"{print \\\$8}\")
@@ -247,7 +252,7 @@ start_monitor() {
 
 stop_monitor() {
     local pid=$1
-    ssh "$SERVER" "kill $pid 2>/dev/null; wait $pid 2>/dev/null" </dev/null 2>/dev/null || true
+    rsh "kill $pid 2>/dev/null; wait $pid 2>/dev/null" </dev/null 2>/dev/null || true
 }
 
 # ── Per-job timing extractor ─────────────────────────────────────────────────
@@ -257,7 +262,7 @@ extract_job_timings() {
     local csv="$LOGDIR/jobs-${sha}.csv"
     # Parse ci.log: lines like "[HH:MM:SS] START job-name" / "[HH:MM:SS] PASS job-name"
     # Produce CSV: job,status,start_time,end_time,duration_s
-    ssh "$SERVER" "python3 -c \"
+    rsh "python3 -c \"
 import re, sys
 from datetime import datetime
 
@@ -302,7 +307,7 @@ run_commit() {
     start_ts=$(date +%s)
 
     # Run CI on the server
-    ssh "$SERVER" "docker exec ${DOCKER_ENV_ARGS[*]} $CONTAINER \
+    rsh "docker exec ${DOCKER_ENV_ARGS[*]} $CONTAINER \
         bash /opt/ci-runner/$RUNNER $sha main \
         > $logfile 2>&1" \
         </dev/null
@@ -377,7 +382,7 @@ echo "    └── jobs-<sha>.csv           # per-job timing (parsed from ci.lo
 echo "═══════════════════════════════════════════════════════════════"
 
 # Save summary to server
-ssh "$SERVER" "cat > $LOGDIR/summary.txt" << SUMMARY
+rsh "cat > $LOGDIR/summary.txt" << SUMMARY
 Runner: $RUNNER
 Hetzner-CI: $HETZNER_CI_SHA
 Set: $COMMIT_SET
@@ -392,7 +397,7 @@ $(for i in "${!R_SHA[@]}"; do printf "%-10s  %-6s  %s\n" "${R_SHA[$i]}" "${R_STA
 SUMMARY
 
 # Build combined job timing CSV across all commits
-ssh "$SERVER" "python3 -c \"
+rsh "python3 -c \"
 import csv, glob, os
 
 outpath = '$LOGDIR/all-jobs.csv'
