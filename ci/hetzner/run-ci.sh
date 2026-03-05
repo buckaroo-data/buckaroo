@@ -772,13 +772,23 @@ else
         ( sleep 10; run_job test-python-3.12 bash -c "job_test_python 3.12"; ) & PID_PY312=$!
         ( sleep 10; run_job test-python-3.14 bash -c "job_test_python 3.14"; ) & PID_PY314=$!
 
-        # ── Install wheel into warm jupyter venv (waits for warmup) ──────────
-        wait $PID_WARMUP || OVERALL=1
-        log "=== jupyter-warmup done — installing wheel into warm venv ==="
-        JUPYTER_VENV=$(cat /tmp/ci-jupyter-warmup-venv)
+        # ── Install wheel into jupyter venv in background, overlapping warmup ─
+        # The warmup writes /tmp/ci-jupyter-warmup-venv immediately, before servers
+        # start. We poll for it and install as soon as wheel+venv are both ready,
+        # overlapping the ~8s server polling window.
+        local wheel
         wheel=$(ls dist/buckaroo-*.whl | head -1)
-        uv pip install --python "$JUPYTER_VENV/bin/python" "$wheel" -q
-        "$JUPYTER_VENV/bin/python" -c "import buckaroo; import pandas; import polars" 2>/dev/null || true
+        (
+            while [[ ! -f /tmp/ci-jupyter-warmup-venv ]]; do sleep 0.2; done
+            uv pip install --python "$(cat /tmp/ci-jupyter-warmup-venv)/bin/python" "$wheel" -q
+            "$(cat /tmp/ci-jupyter-warmup-venv)/bin/python" \
+                -c "import buckaroo; import pandas; import polars" 2>/dev/null || true
+        ) & PID_WHEEL_INSTALL=$!
+
+        # ── Wait for warmup (servers ready) + wheel install ───────────────────
+        wait $PID_WARMUP || OVERALL=1
+        wait $PID_WHEEL_INSTALL || true
+        log "=== jupyter-warmup + wheel-install done — starting playwright-jupyter ==="
 
         # ── pw-jupyter — starts after warmup+install ─────────────────────────
         log "=== starting playwright-jupyter (PARALLEL=$JUPYTER_PARALLEL) ==="
