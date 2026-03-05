@@ -1,12 +1,15 @@
 import { render } from "@testing-library/react";
+import { vi } from "vitest";
 import { DFViewerInfinite } from "./DFViewerInfinite";
 import { DFViewerConfig } from "./DFWhole";
 
-const setGridOptionMock = jest.fn();
+const { setGridOptionMock } = vi.hoisted(() => ({
+  setGridOptionMock: vi.fn(),
+}));
 let latestAgGridProps: any = null;
 
-jest.mock("@ag-grid-community/react", () => {
-  const React = require("react");
+vi.mock("@ag-grid-community/react", async () => {
+  const { default: React } = await import("react");
   return {
     AgGridReact: React.forwardRef((props: any, ref: any) => {
       latestAgGridProps = props;
@@ -29,7 +32,7 @@ jest.mock("@ag-grid-community/react", () => {
   };
 });
 
-jest.mock("../useColorScheme", () => ({
+vi.mock("../useColorScheme", () => ({
   useColorScheme: () => "light",
 }));
 
