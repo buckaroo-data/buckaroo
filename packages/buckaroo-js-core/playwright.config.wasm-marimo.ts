@@ -18,6 +18,9 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: 'on-first-retry',
     ...devices['Desktop Chrome'],
+    launchOptions: {
+      args: ['--disable-dev-shm-usage'],
+    },
   },
   // Longer timeout for WASM: Pyodide init + fastparquet WASM compilation can be slow
   timeout: 180_000,
