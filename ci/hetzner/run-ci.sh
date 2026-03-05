@@ -718,24 +718,26 @@ else
         maybe_renice -n 10 -p $PID_LINT
         run_job build-js               job_build_js                   & PID_BUILDJS=$!
         maybe_renice -n -10 -p $PID_BUILDJS
+        run_job test-js                job_test_js                    & PID_TESTJS=$!
+        maybe_renice -n 10 -p $PID_TESTJS
         run_job test-python-3.13       bash -c "job_test_python 3.13" & PID_PY313=$!
         maybe_renice -n 10 -p $PID_PY313
+        run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
+        maybe_renice -n 10 -p $PID_PY311
         run_job jupyter-warmup         job_jupyter_warmup             & PID_WARMUP=$!
 
-        # ── Wait for build-js, then build wheel + test-js + storybook ────────
+        # ── Wait for build-js, then build wheel + storybook ──────────────────
         wait $PID_BUILDJS || OVERALL=1
         if [[ $FAST_FAIL -eq 1 && $OVERALL -ne 0 ]]; then
             log "FAST-FAIL: build-js failed — skipping remaining jobs"
-            wait $PID_LINT $PID_PY313 $PID_WARMUP 2>/dev/null || true
+            wait $PID_LINT $PID_PY313 $PID_PY311 $PID_TESTJS $PID_WARMUP 2>/dev/null || true
             log "=== FAST-FAIL EXIT ==="
             return 1
         fi
-        log "=== build-js done — starting build-wheel + test-js + storybook ==="
+        log "=== build-js done — starting build-wheel + storybook ==="
 
         run_job build-wheel job_build_wheel & PID_WHEEL=$!
         maybe_renice -n -10 -p $PID_WHEEL
-        run_job test-js     job_test_js     & PID_TESTJS=$!
-        maybe_renice -n 10 -p $PID_TESTJS
         run_job playwright-storybook   job_playwright_storybook       & PID_PW_SB=$!
         maybe_renice -n 10 -p $PID_PW_SB
 
@@ -743,7 +745,7 @@ else
         wait $PID_WHEEL  || OVERALL=1
         if [[ $FAST_FAIL -eq 1 && $OVERALL -ne 0 ]]; then
             log "FAST-FAIL: build-wheel failed — skipping remaining jobs"
-            wait $PID_LINT $PID_PY313 $PID_WARMUP $PID_TESTJS $PID_PW_SB 2>/dev/null || true
+            wait $PID_LINT $PID_PY313 $PID_PY311 $PID_WARMUP $PID_TESTJS $PID_PW_SB 2>/dev/null || true
             log "=== FAST-FAIL EXIT ==="
             return 1
         fi
@@ -766,11 +768,9 @@ else
         run_job smoke-test-extras      job_smoke_test_extras       & PID_SMOKE=$!
         run_job playwright-wasm-marimo job_playwright_wasm_marimo  & PID_PW_WM=$!
 
-        [[ $stagger -gt 0 ]] && sleep "$stagger"
-        run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
-        run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
-        run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
-        maybe_renice -n 10 -p $PID_PY311 $PID_PY312 $PID_PY314
+        # 3.12 + 3.14 deferred ~10s after wheel — reduce peak CPU contention
+        ( sleep 10; run_job test-python-3.12 bash -c "job_test_python 3.12"; ) & PID_PY312=$!
+        ( sleep 10; run_job test-python-3.14 bash -c "job_test_python 3.14"; ) & PID_PY314=$!
 
         # ── Install wheel into warm jupyter venv (waits for warmup) ──────────
         wait $PID_WARMUP || OVERALL=1
