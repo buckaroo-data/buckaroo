@@ -143,12 +143,18 @@ def make_image(runs, output_path):
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
 
-    # collect ordered job list across all runs
-    seen = set()
+    # collect ordered job list: sort by average start time across runs,
+    # use JOB_ORDER index as stable tiebreaker within the same wave
+    job_starts: dict[str, list[int]] = {}
     for r in runs:
-        seen.update(r['jobs'].keys())
-    ordered = [j for j in JOB_ORDER if j in seen]
-    ordered += sorted(j for j in seen if j not in ordered)
+        for name, j in r['jobs'].items():
+            job_starts.setdefault(name, []).append(j['start'])
+    avg_start = {name: sum(v) / len(v) for name, v in job_starts.items()}
+    seen = set(job_starts)
+    ordered = sorted(seen, key=lambda j: (
+        avg_start.get(j, 9999),
+        JOB_ORDER.index(j) if j in JOB_ORDER else 999,
+    ))
     n_jobs = len(ordered)
 
     n_panels = len(runs)
