@@ -389,9 +389,11 @@ def main():
     i          = 0
     while i < len(args):
         if args[i] == '--file' and i + 1 < len(args):
-            local_file = args[i + 1]; i += 2
+            local_file = args[i + 1]
+            i += 2
         elif re.match(r'^[0-9a-f]{6,40}', args[i]):
-            specs.append(parse_sha_arg(args[i])); i += 1
+            specs.append(parse_sha_arg(args[i]))
+            i += 1
         else:
             sys.exit(f"Unknown argument: {args[i]!r}")
 
