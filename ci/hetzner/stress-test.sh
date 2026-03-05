@@ -68,27 +68,28 @@ done
 rsh() { if $LOCAL; then bash -c "$1"; else ssh "$SERVER" "$1"; fi; }
 
 # ── Commit sets ────────────────────────────────────────────────────────────────
-# Each SHA is a pre-baked merge: old app code + test infra from 82c148b.
+# Each SHA is a pre-baked merge: old app code + test infra from 031c787e.
 # Created by ci/hetzner/create-merge-commits.sh. Comments show original SHA.
 
 # 16 recent main commits — all passed GitHub CI (2026-02-23 → 2026-02-28).
+# Re-baked from TEST_SHA=031c787e (includes playwright.config.*.ts in overlay).
 SAFE_COMMITS=(
-    d301edb   # 7b6a05c feat: content-aware column widths
-    55f158a   # fcfe368 feat: compact_number displayer
-    4f24190   # 5ff4d6e Add CLAUDE.md
-    83b4841   # 837654e fix: defaultMinWidth on fitCellContents
-    bb953b1   # f8a8b94 feat: color_static color rule
-    401b997   # 314e89f feat: /load_compare endpoint
-    7516544   # 8e9e1ed Fix BuckarooCompare for arbitrary join keys
-    d389537   # 1fccaba fix: Playwright row count off-by-one
-    bbefc32   # b7956f8 fix: harden release workflow
-    e7a6e56   # 612e22f Fix left-pinned index column
-    8d4de1d   # e392c78 fix: MCP + server reliability
-    ba219c9   # 6b9e695 fix: handle zero PRs in release notes
-    1baaf8e   # 6056636 fix: plain release notes fallback
-    0d2efa1   # ec68a78 for the PR
-    adf6088   # 2175249 fix: add GH_TOKEN to release notes
-    973e3e0   # fdbe325 test: MCP server integration tests
+    bd5494e   # 7b6a05c feat: content-aware column widths
+    5acdf43   # fcfe368 feat: compact_number displayer
+    06a2b56   # 5ff4d6e Add CLAUDE.md
+    f8e7e92   # 837654e fix: defaultMinWidth on fitCellContents
+    c7c3666   # f8a8b94 feat: color_static color rule
+    27daca9   # 314e89f feat: /load_compare endpoint
+    c0be8aa   # 8e9e1ed Fix BuckarooCompare for arbitrary join keys
+    f1ac7fc   # 1fccaba fix: Playwright row count off-by-one
+    d13f086   # b7956f8 fix: harden release workflow
+    2d35d96   # 612e22f Fix left-pinned index column
+    6035273   # e392c78 fix: MCP + server reliability
+    5d050fc   # 6b9e695 fix: handle zero PRs in release notes
+    677e1ed   # 6056636 fix: plain release notes fallback
+    8986b82   # ec68a78 for the PR
+    a4b47eb   # 2175249 fix: add GH_TOKEN to release notes
+    c1d5f62   # fdbe325 test: MCP server integration tests
 )
 
 # 10 commits that failed at least one check on GitHub Actions.
