@@ -357,6 +357,11 @@ job_build_wheel() {
 
 job_test_mcp_wheel() {
     cd /repo
+    # Skip entirely if MCP test files aren't present (old commits predate MCP).
+    if [[ ! -f tests/unit/server/test_mcp_uvx_install.py ]]; then
+        echo "[skip] MCP tests not present in this commit"
+        return 0
+    fi
     local venv=/tmp/ci-mcp-$$
     rm -rf "$venv"
     uv venv "$venv" -q
