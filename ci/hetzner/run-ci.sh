@@ -753,7 +753,26 @@ else
         cp dist/buckaroo-*.whl "/opt/ci/wheel-cache/$SHA/" 2>/dev/null || true
         log "Cached wheel → /opt/ci/wheel-cache/$SHA"
 
-        # ── Install wheel into warm jupyter venv ─────────────────────────────
+        # ── Wheel-only jobs — start immediately after wheel, no warmup needed ─
+        JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-9}
+        log "=== build-wheel done — starting wheel-dependent jobs (no warmup needed) ==="
+
+        run_job test-mcp-wheel         job_test_mcp_wheel         & PID_MCP=$!
+        maybe_renice -n 10 -p $PID_MCP
+        run_job playwright-marimo      job_playwright_marimo       & PID_PW_MA=$!
+        run_job playwright-server      job_playwright_server       & PID_PW_SV=$!
+
+        [[ $stagger -gt 0 ]] && sleep "$stagger"
+        run_job smoke-test-extras      job_smoke_test_extras       & PID_SMOKE=$!
+        run_job playwright-wasm-marimo job_playwright_wasm_marimo  & PID_PW_WM=$!
+
+        [[ $stagger -gt 0 ]] && sleep "$stagger"
+        run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
+        run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
+        run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
+        maybe_renice -n 10 -p $PID_PY311 $PID_PY312 $PID_PY314
+
+        # ── Install wheel into warm jupyter venv (waits for warmup) ──────────
         wait $PID_WARMUP || OVERALL=1
         log "=== jupyter-warmup done — installing wheel into warm venv ==="
         JUPYTER_VENV=$(cat /tmp/ci-jupyter-warmup-venv)
@@ -761,11 +780,9 @@ else
         uv pip install --python "$JUPYTER_VENV/bin/python" "$wheel" -q
         "$JUPYTER_VENV/bin/python" -c "import buckaroo; import pandas; import polars" 2>/dev/null || true
 
-        # ── Wheel-dependent jobs — staggered sub-waves ───────────────────────
-        JUPYTER_PARALLEL=${JUPYTER_PARALLEL:-9}
-        log "=== build-wheel done — starting staggered wheel-dependent jobs (PARALLEL=$JUPYTER_PARALLEL, stagger=${stagger}s) ==="
+        # ── pw-jupyter — starts after warmup+install ─────────────────────────
+        log "=== starting playwright-jupyter (PARALLEL=$JUPYTER_PARALLEL) ==="
 
-        # t+0: pw-jupyter (critical path — uses pre-warmed servers)
         job_playwright_jupyter_warm() {
             cd /repo
             local venv
@@ -788,26 +805,6 @@ else
         }
         export -f job_playwright_jupyter_warm
         run_job playwright-jupyter   job_playwright_jupyter_warm & PID_PW_JP=$!
-
-        run_job test-mcp-wheel         job_test_mcp_wheel         & PID_MCP=$!
-        maybe_renice -n 10 -p $PID_MCP
-
-        # pw-marimo + pw-server start together (no stagger between them)
-        [[ $stagger -gt 0 ]] && sleep "$stagger"
-        run_job playwright-marimo      job_playwright_marimo       & PID_PW_MA=$!
-        run_job playwright-server      job_playwright_server       & PID_PW_SV=$!
-
-        # t+2*stagger: smoke + pw-wasm-marimo
-        [[ $stagger -gt 0 ]] && sleep "$stagger"
-        run_job smoke-test-extras      job_smoke_test_extras       & PID_SMOKE=$!
-        run_job playwright-wasm-marimo job_playwright_wasm_marimo  & PID_PW_WM=$!
-
-        # t+4*stagger: deferred pytest (low priority, not on critical path)
-        [[ $stagger -gt 0 ]] && sleep "$stagger"
-        run_job test-python-3.11       bash -c "job_test_python 3.11" & PID_PY311=$!
-        run_job test-python-3.12       bash -c "job_test_python 3.12" & PID_PY312=$!
-        run_job test-python-3.14       bash -c "job_test_python 3.14" & PID_PY314=$!
-        maybe_renice -n 10 -p $PID_PY311 $PID_PY312 $PID_PY314
 
         # ── Wait for all jobs ────────────────────────────────────────────────
         wait $PID_LINT    || OVERALL=1
