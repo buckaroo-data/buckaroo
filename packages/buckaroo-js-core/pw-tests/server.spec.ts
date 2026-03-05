@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { loadSession, waitForGrid, getRowCount, getCellText } from './server-helpers';
+import { loadSession, waitForGrid, getRowCount, getCellText, cellLocator } from './server-helpers';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -116,10 +116,10 @@ test.describe('Buckaroo standalone server', () => {
     await page.goto(`${BASE}/s/${session}`);
     await waitForGrid(page);
 
-    // Verify first column (name → col-id "a") values
-    expect(await getCellText(page, COL.name, 0)).toBe('Alice');
-    expect(await getCellText(page, COL.name, 1)).toBe('Bob');
-    expect(await getCellText(page, COL.name, 2)).toBe('Charlie');
+    // Verify first column (name → col-id "a") values — auto-retry handles render race
+    await expect(cellLocator(page, COL.name, 0)).toHaveText('Alice');
+    await expect(cellLocator(page, COL.name, 1)).toHaveText('Bob');
+    await expect(cellLocator(page, COL.name, 2)).toHaveText('Charlie');
   });
 
   test('column headers present', async ({ page, request }) => {
@@ -142,28 +142,18 @@ test.describe('Buckaroo standalone server', () => {
     await page.goto(`${BASE}/s/${session}`);
     await waitForGrid(page);
 
-    // Get the initial first-row name value
-    const before = await getCellText(page, COL.name, 0);
-    expect(before).toBe('Alice');
+    // Verify initial first-row value with auto-retry (handles AG-Grid render race)
+    const firstCell = cellLocator(page, COL.name, 0);
+    await expect(firstCell).toHaveText('Alice');
 
     // Click the "name" column header to sort
     await page.getByRole('columnheader', { name: 'name' }).click();
-    await page.waitForTimeout(1000);
-    await waitForGrid(page);
 
-    // After sort the order should change
-    const after = await getCellText(page, COL.name, 0);
-    // One click = ascending, which keeps Alice first; a second click = descending
-    if (after === 'Alice') {
-      // Click again for descending
-      await page.getByRole('columnheader', { name: 'name' }).click();
-      await page.waitForTimeout(1000);
-      await waitForGrid(page);
-      const desc = await getCellText(page, COL.name, 0);
-      expect(desc).toBe('Eve');
-    } else {
-      expect(after).not.toBe('Alice');
-    }
+    // One click = ascending (keeps Alice first); click again for descending
+    // Use auto-retrying assertion: wait for cell to NOT be Alice (descending sort)
+    await page.getByRole('columnheader', { name: 'name' }).click();
+    await expect(firstCell).not.toHaveText('Alice', { timeout: 5000 });
+    await expect(firstCell).toHaveText('Eve', { timeout: 5000 });
   });
 });
 
@@ -228,7 +218,7 @@ test.describe('/load API', () => {
     });
     expect(resp.status()).toBe(404);
     const body = await resp.json();
-    expect(body.error).toContain("not found");
+    expect(body.message).toContain("not found");
   });
 
   test('400 on unsupported file extension', async ({ request }) => {
@@ -240,7 +230,7 @@ test.describe('/load API', () => {
       });
       expect(resp.status()).toBe(400);
       const body = await resp.json();
-      expect(body.error).toContain("Unsupported");
+      expect(body.message).toContain("Unsupported");
     } finally {
       cleanupFile(tmpPath);
     }
@@ -263,7 +253,7 @@ test.describe('file format support', () => {
       expect(count).toBe(5);
 
       // Verify a cell value to ensure TSV parsing worked
-      expect(await getCellText(page, 'a', 0)).toBe('Alice');
+      await expect(cellLocator(page, 'a', 0)).toHaveText('Alice');
     } finally {
       cleanupFile(tsvPath);
     }
@@ -281,7 +271,7 @@ test.describe('file format support', () => {
       const count = await getRowCount(page);
       expect(count).toBe(5);
 
-      expect(await getCellText(page, 'a', 0)).toBe('Alice');
+      await expect(cellLocator(page, 'a', 0)).toHaveText('Alice');
     } finally {
       cleanupFile(jsonPath);
     }
@@ -308,10 +298,10 @@ test.describe('numeric column rendering', () => {
     await page.goto(`${BASE}/s/${session}`);
     await waitForGrid(page);
 
-    // age column → col-id "b"
-    expect(await getCellText(page, COL.age, 0)).toBe('30');
-    expect(await getCellText(page, COL.age, 1)).toBe('25');
-    expect(await getCellText(page, COL.age, 2)).toBe('35');
+    // age column → col-id "b" — auto-retry handles render race
+    await expect(cellLocator(page, COL.age, 0)).toHaveText('30');
+    await expect(cellLocator(page, COL.age, 1)).toHaveText('25');
+    await expect(cellLocator(page, COL.age, 2)).toHaveText('35');
   });
 
   test('float column values render correctly', async ({ page, request }) => {
@@ -343,7 +333,7 @@ test.describe('session management', () => {
 
       await page.goto(`${BASE}/s/${session}`);
       await waitForGrid(page);
-      expect(await getRowCount(page)).toBe(3);
+      await expect.poll(() => getRowCount(page), { timeout: 10_000 }).toBe(3);
     } finally {
       cleanupFile(parquetPath);
     }
@@ -356,7 +346,7 @@ test.describe('session management', () => {
       // Refresh the page to pick up the new data
       await page.goto(`${BASE}/s/${session}`);
       await waitForGrid(page);
-      expect(await getRowCount(page)).toBe(5);
+      await expect.poll(() => getRowCount(page), { timeout: 10_000 }).toBe(5);
     } finally {
       cleanupFile(csvPath);
     }
@@ -477,7 +467,7 @@ test.describe('WebSocket data flow', () => {
     expect(count).toBe(5);
 
     // Also verify data actually loaded into cells (proves WS data transfer)
-    expect(await getCellText(page, COL.name, 0)).toBe('Alice');
+    await expect(cellLocator(page, COL.name, 0)).toHaveText('Alice');
   });
 
   test('WebSocket receives data for scrolled rows', async ({ page, request }) => {
@@ -501,7 +491,7 @@ test.describe('WebSocket data flow', () => {
       expect(count).toBe(100);
 
       // Verify first row rendered
-      expect(await getCellText(page, 'a', 0)).toBe('row0');
+      await expect(cellLocator(page, 'a', 0)).toHaveText('row0');
     } finally {
       cleanupFile(bigCsvPath);
     }
