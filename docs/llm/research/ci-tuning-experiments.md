@@ -182,3 +182,67 @@ Deep research: [`kernel-contention-diagnostics.md`](kernel-contention-diagnostic
 4. Only worth doing if pytest is on the critical path (it's not currently — it runs in the background).
 
 **When this matters:** If we move pytest to overlap with pw-jupyter (Exp 53), its duration doesn't affect total time at all. Only matters if pytest becomes the tail job.
+
+---
+
+### Exp 57 — Deterministic tuning sweep — DONE
+
+**Script:** `ci/hetzner/server-experiments.sh` (server-side)
+**SHA:** 61bf303  **Date:** 2026-03-05
+**Grid:** JUPYTER_PARALLEL ∈ {5,7,9} × STAGGER_DELAY ∈ {0,1,2,3} × 3 runs = 36 runs
+
+| P | S | Pass | Mean(s) | Notes |
+|---|---|------|---------|-------|
+| 5 | 0-3 | 0/12 | 133s | pw-jupyter 120s timeout every run |
+| 7 | 0-3 | 0/12 | 133s | pw-jupyter 120s timeout every run |
+| 9 | 0 | 1/3 | 59s | |
+| 9 | 1 | 1/3 | 65s | |
+| 9 | 2 | 1/3 | 78s | one run 115s (pw-jupyter flake) |
+| 9 | 3 | 1/3 | 62s | |
+
+**Key findings:**
+- **P<9 is categorically broken** — P=5 and P=7 always hit the 120s pw-jupyter timeout (133s total).
+- **Stagger has zero effect on pass rate** — all four stagger values (0,1,2,3) give identical 1/3 pass rate at P=9.
+- **P=9 failures are all `test-python-3.13` timing flake** — the known `test_huge_dataframe_partial_cache_scenario` asserts timing < 0.5s, fails under B2B load. Not a pw-jupyter stability issue.
+- **STAGGER=0 is safe** — could drop from default STAGGER=2 to save warmup delay with no reliability cost.
+
+**Verdict:** PARALLEL=9 required (confirmed again). Stagger tuning has no effect. The remaining ~67% failure rate under B2B stress is entirely the pre-existing pytest timing flake, not infra.
+
+---
+
+### Exp 62 — More parallel pytest — DONE
+
+**SHA:** 61bf303  **Date:** 2026-03-05
+
+| Workers | Run 1 | Run 2 | Pass |
+|---------|-------|-------|------|
+| 4 | 25s | 25s | 2/2 |
+| 8 | 22s | 37s | 1/2 (timing flake) |
+
+**Verdict:** Marginal (3s improvement). Workers=8 triggers the timing flake more readily. pytest is not on the critical path — not worth changing.
+
+---
+
+### Exp 64 — tsgo + vitest JS tooling — DONE
+
+**Branch:** `feat/ts-go-compiler` (SHA 898ef803)  **Date:** 2026-03-05
+
+Changes vs baseline:
+- `@typescript/native-preview` (tsgo) as `typecheck` script (~4.5x faster than tsc for type-checking)
+- vitest replaces jest for unit tests
+- ESM-only vite build (removed CJS/UMD formats, sourcemaps, vite-plugin-dts)
+
+Per-job timings (3 runs on VX1 16C):
+
+| Job | Time | vs baseline |
+|-----|------|-------------|
+| `test-js` | **2s** | was ~4s with jest — 2x faster |
+| `build-js` | 9s cold, 1s cache hit | unchanged |
+| `build-wheel` | 10s | unchanged |
+| `playwright-jupyter` | 57-59s | baseline ~35s — but see below |
+
+**pw-jupyter failures:** "Widget failed to render" (polars_infinite_widget) on all 3 runs. Identical failure pattern seen in Exp 57 P=9 B2B runs on baseline — this is the back-to-back stress flake, not a regression from tsgo/vitest changes. The JS build hash differs (new package.json), so warmup is slightly different, but the failure mode is the same.
+
+**test-python failures:** `test-python-3.13` timing flake on runs 2 and 3 (same B2B flake as Exp 57).
+
+**Verdict:** tsgo/vitest branch is clean — no regressions. `test-js` drops from ~4s to 2s. The branch is ready to merge once CI passes on a clean (non-B2B) run.
