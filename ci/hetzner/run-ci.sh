@@ -201,6 +201,7 @@ ci_pkill jupyter-lab
 ci_pkill ipykernel
 ci_pkill "node.*storybook"
 ci_pkill "npm exec serve"
+ci_pkill "npx.*serve"
 ci_pkill esbuild
 ci_pkill 'buckaroo.server'
 # Kill anything on known service ports using /proc/net/tcp (fuser not available in container)
@@ -216,7 +217,7 @@ kill_port() {
         return 0
     done
 }
-for port in 8889 8890 8891 8892 8893 8894 8895 8896 8897 2718 6006 8701; do
+for port in 8889 8890 8891 8892 8893 8894 8895 8896 8897 2718 6006 8701 8765; do
     kill_port $port
 done
 sleep 1  # let processes die before cleaning their files
@@ -537,10 +538,9 @@ job_jupyter_warmup() {
     rm -f ~/.local/share/jupyter/runtime/jpserver-*.json 2>/dev/null || true
     rm -f ~/.local/share/jupyter/runtime/jpserver-*.html 2>/dev/null || true
 
-    # Kill stale processes on target ports
+    # Kill stale processes on target ports (fuser not available; use kill_port)
     for slot in $(seq 0 $((PARALLEL-1))); do
-        port=$((BASE_PORT + slot))
-        fuser -k $port/tcp 2>/dev/null || true
+        kill_port $((BASE_PORT + slot))
     done
 
     # Start all $PARALLEL JupyterLab servers in parallel, then wait for all to be HTTP-ready

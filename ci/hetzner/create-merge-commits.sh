@@ -69,9 +69,14 @@ esac
 OVERLAY_PATHS=(
     ci/hetzner/
     packages/buckaroo-js-core/pw-tests/
+    packages/buckaroo-js-core/playwright.config.marimo.ts
+    packages/buckaroo-js-core/playwright.config.wasm-marimo.ts
+    packages/buckaroo-js-core/playwright.config.server.ts
+    packages/buckaroo-js-core/playwright.config.ts
     scripts/test_playwright_jupyter_parallel.sh
     scripts/test_playwright_marimo.sh
     scripts/test_playwright_screenshots.sh
+    scripts/test_playwright_server.sh
     scripts/test_playwright_wasm_marimo.sh
     scripts/full_build.sh
     scripts/smoke_test.py
