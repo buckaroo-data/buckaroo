@@ -36,6 +36,9 @@ export default defineConfig({
     contextOptions: {
       ignoreHTTPSErrors: true,
     },
+    launchOptions: {
+      args: ['--disable-dev-shm-usage'],
+    },
   },
 
   /* Configure projects for major browsers */
