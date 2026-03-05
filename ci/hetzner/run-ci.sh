@@ -202,8 +202,9 @@ ci_pkill ipykernel
 ci_pkill "node.*storybook"
 ci_pkill "npm exec serve"
 ci_pkill esbuild
-# Kill anything on known service ports (jupyter 8889-8897, marimo 2718, storybook 6006)
-for port in 8889 8890 8891 8892 8893 8894 8895 8896 8897 2718 6006; do
+ci_pkill 'buckaroo.server'
+# Kill anything on known service ports (jupyter 8889-8897, marimo 2718, storybook 6006, buckaroo-server 8701)
+for port in 8889 8890 8891 8892 8893 8894 8895 8896 8897 2718 6006 8701; do
     fuser -k $port/tcp 2>/dev/null || true
 done
 sleep 1  # let processes die before cleaning their files
