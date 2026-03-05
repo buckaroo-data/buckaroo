@@ -357,8 +357,8 @@ job_build_wheel() {
 
 job_test_mcp_wheel() {
     cd /repo
-    # Skip entirely if MCP test files aren't present (old commits predate MCP).
-    if [[ ! -f tests/unit/server/test_mcp_uvx_install.py ]]; then
+    # Skip entirely if MCP integration tests aren't present (old commits predate MCP).
+    if [[ ! -f tests/unit/server/test_mcp_server_integration.py ]]; then
         echo "[skip] MCP tests not present in this commit"
         return 0
     fi
