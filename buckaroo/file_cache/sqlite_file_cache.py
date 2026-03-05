@@ -20,7 +20,10 @@ class SQLiteFileCache(AbstractFileCache):
     """
 
     def __init__(self, db_path: str = ":memory:") -> None:
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
+        if db_path != ":memory:":
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS files (
