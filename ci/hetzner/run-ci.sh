@@ -792,15 +792,12 @@ else
         run_job test-mcp-wheel         job_test_mcp_wheel         & PID_MCP=$!
         maybe_renice -n 10 -p $PID_MCP
 
-        # t+stagger: pw-marimo
+        # pw-marimo + pw-server start together (no stagger between them)
         [[ $stagger -gt 0 ]] && sleep "$stagger"
         run_job playwright-marimo      job_playwright_marimo       & PID_PW_MA=$!
-
-        # t+2*stagger: pw-server
-        [[ $stagger -gt 0 ]] && sleep "$stagger"
         run_job playwright-server      job_playwright_server       & PID_PW_SV=$!
 
-        # t+3*stagger: smoke + pw-wasm-marimo
+        # t+2*stagger: smoke + pw-wasm-marimo
         [[ $stagger -gt 0 ]] && sleep "$stagger"
         run_job smoke-test-extras      job_smoke_test_extras       & PID_SMOKE=$!
         run_job playwright-wasm-marimo job_playwright_wasm_marimo  & PID_PW_WM=$!
