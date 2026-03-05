@@ -208,6 +208,12 @@ def make_image(runs, output_path):
     for pi, (ax, run) in enumerate(zip(axes, runs)):
         setup_ax(ax, is_bottom=(pi == n_panels - 1))
 
+        # ── y-label colours: red for failed jobs ─────────────────────────────
+        for lbl, job_name in zip(ax.get_yticklabels(), ordered):
+            j = run['jobs'].get(job_name)
+            if j and j['status'] == 'FAIL':
+                lbl.set_color(COLORS['FAIL'])
+
         # ── gate lines ───────────────────────────────────────────────────────
         gate_label_y = [0.5, 2.0]
         for gi, (gate_job, (gate_color, gate_label)) in \
