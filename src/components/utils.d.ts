@@ -1,4 +1,3 @@
-import { default as _ } from 'lodash';
 import { DFWhole } from './DFViewerParts/DFWhole';
 import { ColDef } from '@ag-grid-community/core';
 export type setDFFunc = (newDf: DFWhole) => void;
@@ -9,7 +8,7 @@ export declare const sym: (symbolName: string) => {
 export declare function replaceInArr<T>(arr: T[], old: T, subst: T): T[];
 export declare function replaceAtIdx<T>(arr: T[], idx: number, subst: T): T[];
 export declare function replaceAtKey<T>(obj: Record<string, T>, key: string, subst: T): Record<string, T>;
-export declare const objWithoutNull: (obj: Record<string, string>, extraStrips?: string[]) => _.Dictionary<string>;
+export declare const objWithoutNull: (obj: Record<string, string>, extraStrips?: string[]) => Record<string, string>;
 export declare const updateAtMatch: (cols: ColDef[], key: string, subst: Partial<ColDef>, negative: Partial<ColDef>) => {
     colId?: string;
     field?: string | undefined;
