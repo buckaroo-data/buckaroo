@@ -15,6 +15,15 @@ import {
     GridApi,
     GridOptions,
     IDatasource,
+    ModuleRegistry,
+    ClientSideRowModelModule,
+    InfiniteRowModelModule,
+    CellStyleModule,
+    ColumnAutoSizeModule,
+    PinnedRowModule,
+    RowSelectionModule,
+    TooltipModule,
+    TextFilterModule,
     SortChangedEvent,
     CellClassParams,
     RefreshCellsParams,
@@ -28,6 +37,16 @@ import {
 import { getThemeForScheme } from './gridUtils';
 import { useColorScheme } from '../useColorScheme';
 
+ModuleRegistry.registerModules([
+    ClientSideRowModelModule,
+    InfiniteRowModelModule,
+    CellStyleModule,
+    ColumnAutoSizeModule,
+    PinnedRowModule,
+    RowSelectionModule,
+    TooltipModule,
+    TextFilterModule,
+]);
 
 const AccentColor = "#2196F3"
 
