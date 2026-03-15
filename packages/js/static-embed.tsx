@@ -1,6 +1,6 @@
 import * as React from "react";
 import * as ReactDOM from "react-dom/client";
-import { BuckarooStaticTable, resolveDFDataAsync } from "buckaroo-js-core";
+import { BuckarooStaticTable, resolveDFDataAsync, preResolveDFDataDict } from "buckaroo-js-core";
 import "../buckaroo-js-core/dist/style.css";
 
 declare global {
@@ -24,11 +24,23 @@ async function main() {
         resolveDFDataAsync(artifact.summary_stats_data),
     ]);
 
-    const resolved = {
+    const resolved: any = {
+        embed_type: artifact.embed_type || "DFViewer",
         df_data: dfData,
         df_viewer_config: artifact.df_viewer_config,
         summary_stats_data: summaryStatsData,
     };
+
+    // For Buckaroo mode, pre-resolve all parquet_b64 values in df_data_dict
+    if (artifact.embed_type === "Buckaroo" && artifact.df_data_dict) {
+        resolved.df_display_args = artifact.df_display_args;
+        resolved.df_data_dict = await preResolveDFDataDict(artifact.df_data_dict);
+        // Ensure "main" key has the already-resolved data
+        resolved.df_data_dict["main"] = dfData;
+        resolved.df_meta = artifact.df_meta;
+        resolved.buckaroo_options = artifact.buckaroo_options;
+        resolved.buckaroo_state = artifact.buckaroo_state;
+    }
 
     const root = ReactDOM.createRoot(rootEl);
     root.render(

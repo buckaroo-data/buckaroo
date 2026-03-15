@@ -115,6 +115,49 @@ class TestPrepareBuckarooArtifact:
         assert _is_parquet_b64(artifact['df_data'])
 
 
+class TestBuckarooEmbedType:
+    def test_embed_type_dfviewer_default(self):
+        artifact = prepare_buckaroo_artifact(simple_df)
+        assert artifact['embed_type'] == 'DFViewer'
+        assert 'df_display_args' not in artifact
+        assert 'df_data_dict' not in artifact
+
+    def test_embed_type_buckaroo(self):
+        artifact = prepare_buckaroo_artifact(simple_df, embed_type='Buckaroo')
+        assert artifact['embed_type'] == 'Buckaroo'
+        assert 'df_display_args' in artifact
+        assert 'df_data_dict' in artifact
+        assert 'df_meta' in artifact
+        assert 'buckaroo_options' in artifact
+        assert 'buckaroo_state' in artifact
+
+    def test_buckaroo_df_display_args_has_keys(self):
+        artifact = prepare_buckaroo_artifact(simple_df, embed_type='Buckaroo')
+        dda = artifact['df_display_args']
+        assert isinstance(dda, dict)
+        assert len(dda) > 0
+        for key, val in dda.items():
+            assert 'df_viewer_config' in val
+            assert 'data_key' in val
+            assert 'summary_stats_key' in val
+
+    def test_buckaroo_df_data_dict_has_main(self):
+        artifact = prepare_buckaroo_artifact(simple_df, embed_type='Buckaroo')
+        assert 'main' in artifact['df_data_dict']
+        assert _is_parquet_b64(artifact['df_data_dict']['main'])
+
+    def test_buckaroo_json_serializable(self):
+        artifact = prepare_buckaroo_artifact(simple_df, embed_type='Buckaroo')
+        json_str = artifact_to_json(artifact)
+        roundtripped = json.loads(json_str)
+        assert roundtripped['embed_type'] == 'Buckaroo'
+        assert 'df_display_args' in roundtripped
+
+    def test_invalid_embed_type_raises(self):
+        with pytest.raises(ValueError, match="embed_type"):
+            prepare_buckaroo_artifact(simple_df, embed_type='Invalid')
+
+
 class TestToHtml:
     def test_returns_html_string(self):
         html = to_html(simple_df)

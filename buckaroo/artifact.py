@@ -57,7 +57,8 @@ def _df_to_parquet_b64_tagged(df: pd.DataFrame) -> dict:
 def prepare_buckaroo_artifact(df, column_config_overrides=None,
                                extra_pinned_rows=None, pinned_rows=None,
                                extra_analysis_klasses=None,
-                               analysis_klasses=None):
+                               analysis_klasses=None,
+                               embed_type="DFViewer"):
     """Generate a static artifact dict from a DataFrame.
 
     The artifact contains all data needed to render a buckaroo table
@@ -74,14 +75,22 @@ def prepare_buckaroo_artifact(df, column_config_overrides=None,
         Additional or replacement pinned summary rows.
     extra_analysis_klasses, analysis_klasses : list, optional
         Additional or replacement analysis classes.
+    embed_type : str, optional
+        ``"DFViewer"`` (default) for a plain table, or ``"Buckaroo"`` for the
+        full buckaroo experience with the summary_stats/main display switcher.
 
     Returns
     -------
     dict
-        Artifact with keys 'df_data', 'df_viewer_config', 'summary_stats_data'.
-        df_data and summary_stats_data are ``{format: 'parquet_b64', data: '...'}``
-        tagged dicts.
+        Artifact dict. Always includes ``embed_type``.
+        When ``embed_type="DFViewer"``: ``df_data``, ``df_viewer_config``,
+        ``summary_stats_data``.
+        When ``embed_type="Buckaroo"``: additionally ``df_display_args``,
+        ``df_data_dict``, ``df_meta``, ``buckaroo_options``, ``buckaroo_state``.
     """
+    if embed_type not in ("DFViewer", "Buckaroo"):
+        raise ValueError(f"embed_type must be 'DFViewer' or 'Buckaroo', got {embed_type!r}")
+
     # Handle file paths
     if isinstance(df, (str, Path)):
         df = _read_file(Path(df))
@@ -117,11 +126,29 @@ def prepare_buckaroo_artifact(df, column_config_overrides=None,
         bw.sampling_klass.serialize_sample(processed_df))
     df_data = _df_to_parquet_b64_tagged(serializable_df)
 
-    return {
+    artifact = {
+        'embed_type': embed_type,
         'df_data': df_data,
         'df_viewer_config': df_viewer_config,
         'summary_stats_data': summary_stats_data,
     }
+
+    if embed_type == "Buckaroo":
+        # Include the full widget state for the StatusBar display switcher.
+        # df_data_dict values are already parquet_b64 tagged from the widget.
+        # We also add the main data under its expected key.
+        df_data_dict = dict(bw.df_data_dict)
+        # The widget's df_data_dict has summary stats keyed by name,
+        # but the main data needs to be keyed as "main" for the switcher.
+        df_data_dict['main'] = df_data
+
+        artifact['df_display_args'] = dict(bw.df_display_args)
+        artifact['df_data_dict'] = df_data_dict
+        artifact['df_meta'] = dict(bw.df_meta)
+        artifact['buckaroo_options'] = dict(bw.buckaroo_options)
+        artifact['buckaroo_state'] = dict(bw.buckaroo_state)
+
+    return artifact
 
 
 def _read_file(path: Path):
@@ -175,7 +202,7 @@ _HTML_TEMPLATE = """\
 """
 
 
-def to_html(df, title="Buckaroo", **kwargs) -> str:
+def to_html(df, title="Buckaroo", embed_type="DFViewer", **kwargs) -> str:
     """Generate an HTML string that renders a buckaroo table.
 
     The HTML references ``static-embed.js`` and ``static-embed.css``
@@ -187,6 +214,9 @@ def to_html(df, title="Buckaroo", **kwargs) -> str:
         The data source.
     title : str
         HTML page title.
+    embed_type : str, optional
+        ``"DFViewer"`` (default) for a plain table, or ``"Buckaroo"`` for
+        the full experience with summary_stats/main display switcher.
     **kwargs
         Passed through to prepare_buckaroo_artifact().
 
@@ -195,7 +225,7 @@ def to_html(df, title="Buckaroo", **kwargs) -> str:
     str
         Complete HTML document string.
     """
-    artifact = prepare_buckaroo_artifact(df, **kwargs)
+    artifact = prepare_buckaroo_artifact(df, embed_type=embed_type, **kwargs)
     return _HTML_TEMPLATE.format(
         title=title,
         artifact_json=artifact_to_json(artifact),
