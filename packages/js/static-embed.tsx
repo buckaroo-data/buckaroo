@@ -3,17 +3,12 @@ import * as ReactDOM from "react-dom/client";
 import { BuckarooStaticTable, resolveDFDataAsync, preResolveDFDataDict } from "buckaroo-js-core";
 import "../buckaroo-js-core/dist/style.css";
 
-declare global {
-    interface Window {
-        __BUCKAROO_ARTIFACT__?: any;
-    }
-}
-
 async function main() {
-    const artifact = window.__BUCKAROO_ARTIFACT__;
-    if (!artifact) {
-        throw new Error("No __BUCKAROO_ARTIFACT__ found on window");
+    const dataEl = document.getElementById("buckaroo-data");
+    if (!dataEl?.textContent) {
+        throw new Error("No #buckaroo-data script block found");
     }
+    const artifact = JSON.parse(dataEl.textContent);
 
     const rootEl = document.getElementById("root");
     if (!rootEl) throw new Error("No #root element found");

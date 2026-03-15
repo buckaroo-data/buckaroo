@@ -414,43 +414,31 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: 9.10.0
-      - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
+      - working-directory: packages
         run: pnpm install --frozen-lockfile
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           python-version: "3.13"
-      - name: Install Python dependencies
-        run: uv sync --all-extras --dev
-      - name: Build JS core + static-embed
-        run: |
-          cd packages
-          pnpm --filter buckaroo-js-core run build
-          cp buckaroo-js-core/dist/style.css ../buckaroo/static/compiled.css
-          pnpm --filter buckaroo-widget run build:static
-      - name: Generate test HTML
-        run: uv run python scripts/generate_static_test_html.py
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
+      - run: uv sync --all-extras --dev
+      - run: uv run python scripts/generate_static_test_html.py
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
-      - name: Install Playwright browsers
-        working-directory: packages/buckaroo-js-core
+      - working-directory: packages/buckaroo-js-core
         run: pnpm exec playwright install chromium
-      - name: Run Static Embed Playwright Tests
-        working-directory: packages/buckaroo-js-core
+      - working-directory: packages/buckaroo-js-core
         run: pnpm run test:static-embed
 
   StylingScreenshots:

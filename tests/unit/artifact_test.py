@@ -162,7 +162,8 @@ class TestToHtml:
     def test_returns_html_string(self):
         html = to_html(simple_df)
         assert '<!DOCTYPE html>' in html
-        assert '__BUCKAROO_ARTIFACT__' in html
+        assert 'buckaroo-data' in html
+        assert 'application/json' in html
         assert 'static-embed.js' in html
 
     def test_custom_title(self):
