@@ -87,3 +87,23 @@ test.describe('Static embed renders', () => {
         expect(body).not.toContain('Failed to render');
     });
 });
+
+test.describe('BigInt precision', () => {
+    test('INT64 values above MAX_SAFE_INTEGER render correctly', async ({ page }) => {
+        await page.goto('/bigint-test.html');
+        await waitForCells(page);
+
+        // The test DataFrame has big_id values:
+        //   9007199254740993, 9007199254740994, 9007199254740995
+        // If BigInt→Number conversion loses precision, they'd render as:
+        //   9007199254740992, 9007199254740994, 9007199254740996
+        const body = await page.locator('.ag-body-viewport').innerText();
+
+        // Check that the exact values appear (AG-Grid formats with commas)
+        expect(body).toContain('9,007,199,254,740,993');
+        expect(body).toContain('9,007,199,254,740,995');
+        // These rounded values should NOT appear
+        expect(body).not.toContain('9,007,199,254,740,992');
+        expect(body).not.toContain('9,007,199,254,740,996');
+    });
+});
