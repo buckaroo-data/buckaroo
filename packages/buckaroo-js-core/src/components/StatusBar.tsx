@@ -1,20 +1,18 @@
 // https://plnkr.co/edit/QTNwBb2VEn81lf4t?open=index.tsx
 import React, { useRef, useCallback, useState, memo, useEffect, useMemo } from "react";
 import * as _ from "lodash-es";
-import { AgGridReact } from "@ag-grid-community/react"; // the AG Grid React Component
-import { ColDef, GridApi, GridOptions, ModuleRegistry } from "@ag-grid-community/core";
+import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
+import { ColDef, GridApi, GridOptions } from "ag-grid-community";
 import { basicIntFormatter } from "./DFViewerParts/Displayer";
 import { DFMeta } from "./WidgetTypes";
 import { BuckarooOptions } from "./WidgetTypes";
 import { BuckarooState, BKeys } from "./WidgetTypes";
-import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-model";
-import { CustomCellEditorProps } from '@ag-grid-community/react';
+import { CustomCellEditorProps } from 'ag-grid-react';
 import { getThemeForScheme } from "./DFViewerParts/gridUtils";
-import { Theme } from "@ag-grid-community/theming";
+import { Theme } from "ag-grid-community";
 import { useColorScheme } from "./useColorScheme";
 
 export type setColumFunc = (newCol: string) => void;
-ModuleRegistry.registerModules([ClientSideRowModelModule]);
 const helpCell = function (_params: any) {
     return (
         <a

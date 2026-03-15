@@ -1,6 +1,6 @@
 import {
     CellClassParams,
-} from "@ag-grid-community/core";
+} from "ag-grid-community";
 
 import { BLUE_TO_YELLOW, DIVERGING_RED_WHITE_BLUE } from "../../baked_data/colorMap";
 import {
