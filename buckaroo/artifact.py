@@ -160,8 +160,10 @@ def _read_file(path: Path):
             return pl.read_parquet(path)
         elif suffix == '.csv':
             return pl.read_csv(path)
-        elif suffix in ('.json', '.jsonl', '.ndjson'):
+        elif suffix in ('.jsonl', '.ndjson'):
             return pl.read_ndjson(path)
+        elif suffix == '.json':
+            return pl.read_json(path)
         else:
             return pl.read_csv(path)
     except ImportError:
@@ -195,7 +197,7 @@ _HTML_TEMPLATE = """\
 </head>
 <body>
 <div id="root"></div>
-<script>window.__BUCKAROO_ARTIFACT__ = {artifact_json};</script>
+<script id="buckaroo-data" type="application/json">{artifact_json}</script>
 <script type="module" src="static-embed.js"></script>
 </body>
 </html>
