@@ -6,7 +6,7 @@ import { CommandConfigT } from './CommandUtils';
 import { Operation } from './OperationUtils';
 import { IDisplayArgs } from './DFViewerParts/gridUtils';
 import { DatasourceOrRaw } from './DFViewerParts/DFViewerInfinite';
-import { IDatasource } from '@ag-grid-community/core';
+import { IDatasource } from 'ag-grid-community';
 import { KeyAwareSmartRowCache } from './DFViewerParts/SmartRowCache';
 export declare const getDataWrapper: (data_key: string, df_data_dict: Record<string, DFDataOrPayload>, ds: IDatasource, total_rows?: number) => DatasourceOrRaw;
 export declare const getKeySmartRowCache: (model: any, setRespError: any) => KeyAwareSmartRowCache;

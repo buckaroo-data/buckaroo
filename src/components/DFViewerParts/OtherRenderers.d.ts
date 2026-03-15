@@ -1,4 +1,4 @@
-import { ValueFormatterFunc } from '@ag-grid-community/core';
+import { ValueFormatterFunc } from 'ag-grid-community';
 export declare const getTextCellRenderer: (formatter: ValueFormatterFunc<any>) => (props: any) => import("react/jsx-runtime").JSX.Element;
 export declare const LinkCellRenderer: (props: any) => import("react/jsx-runtime").JSX.Element;
 export declare const Base64PNGDisplayer: (props: any) => import("react/jsx-runtime").JSX.Element;

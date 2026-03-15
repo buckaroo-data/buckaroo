@@ -1,5 +1,5 @@
 import { DFData, DFViewerConfig } from './DFWhole';
-import { IDatasource } from '@ag-grid-community/core';
+import { IDatasource } from 'ag-grid-community';
 import { HeightStyleI, SetColumnFunc } from './gridUtils';
 export interface DatasourceWrapper {
     datasource: IDatasource;
