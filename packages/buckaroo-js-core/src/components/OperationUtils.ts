@@ -1,7 +1,7 @@
 /*
   used for manipulating the JSON Flavored lisp of operations and commands
   */
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { SymbolT, ColEnumArgs, SymbolDf, symDf } from "./CommandUtils";
 
 export const sym = (symbolName: string) => {

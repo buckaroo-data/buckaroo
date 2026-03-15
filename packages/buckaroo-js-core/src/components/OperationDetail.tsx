@@ -1,4 +1,4 @@
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { Operation, SettableArg, OperationEventFunc } from "./OperationUtils";
 import { ActualArg, CommandArgSpec } from "./CommandUtils";
 import { objWithoutNull, replaceAtIdx, replaceAtKey } from "./utils";

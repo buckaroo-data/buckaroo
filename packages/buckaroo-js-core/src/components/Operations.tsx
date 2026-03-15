@@ -1,5 +1,5 @@
 import { useState } from "react";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { Operation, SetOperationsFunc, OperationEventFunc } from "./OperationUtils";
 import { CommandConfigT } from "./CommandUtils";
 import { replaceInArr } from "./utils";

@@ -159,6 +159,7 @@ ipydatagrid/nbextension/*
 buckaroo/nbextension/*
 buckaroo/labextension/*
 buckaroo/static/*.js
+buckaroo/static/*.js.map
 buckaroo/static/*.css
 docs/*.js
 docs/*.js.map

@@ -11,7 +11,7 @@ import {
 } from "./gridUtils";
 //import { InfiniteViewer } from "./InfiniteViewerImpl";
 import { Operation } from "../OperationUtils";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { PayloadResponse } from "./SmartRowCache";
 
 const data: [string, Operation[]][] = [

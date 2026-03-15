@@ -1,4 +1,4 @@
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { DFWhole } from "./DFViewerParts/DFWhole";
 import { ColDef } from "@ag-grid-community/core";
 
@@ -30,8 +30,8 @@ export function replaceAtKey<T>(obj: Record<string, T>, key: string, subst: T): 
     return objCopy;
 }
 
-export const objWithoutNull = (obj: Record<string, string>, extraStrips: string[] = []) =>
-    _.pickBy(obj, (x) => ![null, undefined, ...extraStrips].includes(x));
+export const objWithoutNull = (obj: Record<string, string>, extraStrips: string[] = []): Record<string, string> =>
+    _.pickBy(obj, (x) => ![null, undefined, ...extraStrips].includes(x)) as Record<string, string>;
 export const updateAtMatch = (
     cols: ColDef[],
     key: string,
