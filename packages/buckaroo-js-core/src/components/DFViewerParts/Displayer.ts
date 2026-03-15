@@ -1,4 +1,4 @@
-import { ValueFormatterFunc, ValueFormatterParams } from "@ag-grid-community/core";
+import { ValueFormatterFunc, ValueFormatterParams } from "ag-grid-community";
 import {
     DisplayerArgs,
     cellRendererDisplayers,
@@ -8,7 +8,7 @@ import {
     StringDisplayerA,
     ObjDisplayerA,
 } from "./DFWhole";
-import * as _ from "lodash";
+import * as _ from "lodash-es";
 
 import { HistogramCell } from "./HistogramCell";
 import { Base64PNGDisplayer, LinkCellRenderer, SVGDisplayer } from "./OtherRenderers";

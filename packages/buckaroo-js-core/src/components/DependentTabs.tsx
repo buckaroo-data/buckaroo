@@ -1,6 +1,6 @@
 import React, { useState, CSSProperties, Dispatch, SetStateAction } from "react";
 import { DFWhole, EmptyDf } from "./DFViewerParts/DFWhole";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { Operation } from "./OperationUtils";
 
 export function OperationDisplayer({

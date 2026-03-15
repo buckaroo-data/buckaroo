@@ -1,10 +1,10 @@
-import _ from "lodash";
+import * as _ from "lodash-es";
 import React from "react";
 import { createPortal } from "react-dom";
 
 import { Bar, BarChart, Tooltip } from "recharts";
 import { getChartColors } from "./ChartCell";
-import { ColDef, Column, Context, GridApi } from "@ag-grid-community/core";
+import { ColDef, Column, Context, GridApi } from "ag-grid-community";
 import { useColorScheme } from "../useColorScheme";
 
 export interface HistogramNode {

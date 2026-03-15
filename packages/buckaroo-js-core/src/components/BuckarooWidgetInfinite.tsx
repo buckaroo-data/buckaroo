@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
 
@@ -16,7 +16,7 @@ import {
     IDisplayArgs
 } from "./DFViewerParts/gridUtils";
 import { DatasourceOrRaw, DFViewerInfinite } from "./DFViewerParts/DFViewerInfinite";
-import { IDatasource } from "@ag-grid-community/core";
+import { IDatasource } from "ag-grid-community";
 import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "./DFViewerParts/SmartRowCache";
 import { parquetRead, parquetMetadata } from 'hyparquet'
 import { MessageBox } from "./MessageBox";

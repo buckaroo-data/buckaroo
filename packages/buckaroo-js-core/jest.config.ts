@@ -2,7 +2,9 @@ export default {
   testEnvironment: "jsdom",
   transform: {
     "^.+\\.tsx?$": "ts-jest",
+    "lodash-es.+\\.js$": "ts-jest",
   },
+  transformIgnorePatterns: ["node_modules/(?!.*lodash-es)"],
 
   moduleNameMapper: {
     "\\.(css|less|sass|scss)$": "identity-obj-proxy",
