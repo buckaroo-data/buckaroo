@@ -10,7 +10,6 @@ export default {
     "\\.(css|less|sass|scss)$": "identity-obj-proxy",
     "^.+\\.svg$": "jest-transformer-svg",
     "^@/(.*)$": "<rootDir>/src/$1",
-    "^lodash-es$": "lodash",
   },
 
   testMatch: ["!**/*.spec.ts", "**/*.test.ts", "**/*.test.tsx"],

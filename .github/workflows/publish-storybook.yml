@@ -1,6 +1,6 @@
 # Workflow name
 name: Build and Publish Storybook to GitHub Pages
- 
+
 on:
   push:
     branches:
@@ -14,7 +14,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
- 
+
 # List of jobs
 jobs:
   TestPython:
@@ -24,20 +24,16 @@ jobs:
     runs-on: depot-ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: 9.10.0
-      - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
-      - name: Install pnpm dependencies
-        working-directory: packages
-        run: pnpm install --frozen-lockfile
+      - run: cd packages && pnpm install --frozen-lockfile
       - uses: astral-sh/setup-uv@v7
-      - name: Build storybook
+      - name: Run tests
         working-directory: ./packages/buckaroo-js-core
         run: |
           pnpm build-storybook
