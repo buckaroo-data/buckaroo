@@ -4,23 +4,14 @@ import { DFData } from "../components/DFViewerParts/DFWhole";
 import { createDatasourceWrapper, DatasourceWrapper } from "../components/DFViewerParts/DFViewerDataHelper";
 
 import {SelectBox } from './StoryUtils'
-import { AgGridReact } from "@ag-grid-community/react"; // the AG Grid React Component
+import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
 import {
     GridOptions,
-    //IDatasource,
-    ModuleRegistry,
     ColDef,
-    CellClassParams
-} from "@ag-grid-community/core";
-
-import { themeAlpine} from '@ag-grid-community/theming';
-import { colorSchemeDark } from '@ag-grid-community/theming';
-
-import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-model";
-import { InfiniteRowModelModule } from "@ag-grid-community/infinite-row-model";
-
-ModuleRegistry.registerModules([ClientSideRowModelModule]);
-ModuleRegistry.registerModules([InfiniteRowModelModule]);
+    CellClassParams,
+    themeAlpine,
+    colorSchemeDark,
+} from "ag-grid-community";
 
 const myTheme = themeAlpine.withPart(colorSchemeDark).withParams({
     spacing:5,

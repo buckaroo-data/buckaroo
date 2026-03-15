@@ -1,4 +1,4 @@
-import { IDatasource, IGetRowsParams } from "@ag-grid-community/core";
+import { IDatasource, IGetRowsParams } from "ag-grid-community";
 import * as _ from "lodash-es";
 
 export type RawDataWrapper = {

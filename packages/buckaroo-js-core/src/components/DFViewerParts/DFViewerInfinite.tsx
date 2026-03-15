@@ -9,21 +9,25 @@ import { DFData, DFDataRow, DFViewerConfig, SDFT } from "./DFWhole";
 
 import { getCellRendererSelector, dfToAgrid, extractPinnedRows, extractSDFT } from "./gridUtils";
 
-import { AgGridReact } from "@ag-grid-community/react"; // the AG Grid React Component
+import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
 import {
     GetRowIdParams,
     GridApi,
     GridOptions,
     IDatasource,
     ModuleRegistry,
+    ClientSideRowModelModule,
+    InfiniteRowModelModule,
+    CellStyleModule,
+    ColumnAutoSizeModule,
+    PinnedRowModule,
+    RowSelectionModule,
+    TooltipModule,
+    TextFilterModule,
     SortChangedEvent,
     CellClassParams,
     RefreshCellsParams,
-    //ColDef,
-} from "@ag-grid-community/core";
-import { ClientSideRowModelModule } from "@ag-grid-community/client-side-row-model";
-import { InfiniteRowModelModule } from "@ag-grid-community/infinite-row-model";
-
+} from "ag-grid-community";
 import {
     getAutoSize,
     getHeightStyle2,
@@ -33,9 +37,16 @@ import {
 import { getThemeForScheme } from './gridUtils';
 import { useColorScheme } from '../useColorScheme';
 
-ModuleRegistry.registerModules([ClientSideRowModelModule]);
-ModuleRegistry.registerModules([InfiniteRowModelModule]);
-
+ModuleRegistry.registerModules([
+    ClientSideRowModelModule,
+    InfiniteRowModelModule,
+    CellStyleModule,
+    ColumnAutoSizeModule,
+    PinnedRowModule,
+    RowSelectionModule,
+    TooltipModule,
+    TextFilterModule,
+]);
 
 const AccentColor = "#2196F3"
 
