@@ -54,13 +54,17 @@ function parseParquetRow(row: Record<string, any>): DFDataRow {
     for (const [key, val] of Object.entries(row)) {
         if (key === 'index' || key === 'level_0') {
             // index/level_0 columns are stat names — keep as-is
-            parsed[key] = val;
+            // BigInt from hyparquet INT64 columns must be converted to Number
+            parsed[key] = typeof val === 'bigint' ? Number(val) : val;
         } else if (typeof val === 'string') {
             try {
                 parsed[key] = JSON.parse(val);
             } catch {
                 parsed[key] = val;
             }
+        } else if (typeof val === 'bigint') {
+            // hyparquet decodes INT64 as BigInt; convert to Number for JSON compat
+            parsed[key] = Number(val);
         } else {
             parsed[key] = val;
         }

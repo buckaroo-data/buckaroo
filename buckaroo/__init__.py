@@ -4,6 +4,7 @@ import platform
 from ._version import __version__
 from .buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, AutocleaningBuckaroo
 from .dataflow.widget_extension_utils import DFViewer
+from .artifact import prepare_buckaroo_artifact, to_html, artifact_to_json
 from .widget_utils import is_in_ipython, is_in_marimo, enable, disable, determine_jupter_env
 from .read_utils import read
 try:
