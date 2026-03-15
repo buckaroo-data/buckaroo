@@ -13,13 +13,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
         with:
-          run_install: true
-          package_json_file: packages/package.json
+          version: 9.10.0
+      - uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - run: cd packages && pnpm install --frozen-lockfile
       - uses: astral-sh/setup-uv@v7
       - name: Run tests
         working-directory: ./packages/buckaroo-js-core

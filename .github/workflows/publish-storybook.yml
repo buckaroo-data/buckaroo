@@ -1,6 +1,6 @@
 # Workflow name
 name: Build and Publish Storybook to GitHub Pages
- 
+
 on:
   push:
     branches:
@@ -14,7 +14,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
- 
+
 # List of jobs
 jobs:
   TestPython:
@@ -26,14 +26,19 @@ jobs:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
         with:
-          run_install: true
-          package_json_file: packages/package.json
+          version: 9.10.0
+      - uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - run: cd packages && pnpm install --frozen-lockfile
       - uses: astral-sh/setup-uv@v7
       - name: Run tests
         working-directory: ./packages/buckaroo-js-core
         run: |
           pnpm build-storybook
       - name: Deploy
+        if: github.ref == 'refs/heads/main'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
