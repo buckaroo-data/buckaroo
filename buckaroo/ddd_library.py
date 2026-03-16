@@ -186,7 +186,7 @@ def pl_df_with_weird_types():
         'categorical': pl.Series(['red', 'green', 'blue', 'red', 'green']).cast(pl.Categorical),
         'decimal': pl.Series(['100.50', '200.75', '0.01',
                               '99999.99', '3.14']).cast(pl.Decimal(10, 2)),
-        'binary': [b'hello', b'world', b'abc', b'test', b'data'],
+        'binary': [b'hello', b'world', b'\x00\x01\x02', b'test', b'\xff\xfe'],
         'int_col': [10, 20, 30, 40, 50],
     })
 
