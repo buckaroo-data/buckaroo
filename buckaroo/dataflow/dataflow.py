@@ -408,7 +408,9 @@ class CustomizableDataflow(DataFlow):
             if self.debug:
                 raise Exception("Error executing analysis")
             else:
-                return {}, stats.errs
+                # Return partial results — non-critical errors (e.g. histogram
+                # failure for Decimal) shouldn't discard all stats
+                return sdf, stats.errs
         else:
             return sdf, {}
 
