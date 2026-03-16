@@ -75,6 +75,36 @@ class TestTypingStats:
         assert result['is_datetime'] is False
         assert result['is_numeric'] is False
 
+    def test_categorical_string(self):
+        pipeline = StatPipeline([typing_stats], unit_test=False)
+        ser = pd.Series(pd.Categorical(['a', 'b', 'c']))
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_categorical'] is True
+
+    def test_categorical_numeric(self):
+        pipeline = StatPipeline([typing_stats], unit_test=False)
+        ser = pd.Series(pd.Categorical([1, 2, 3]))
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_categorical'] is True
+        assert result['is_numeric'] is False  # categorical is not numeric in pandas
+
+    def test_period(self):
+        pipeline = StatPipeline([typing_stats], unit_test=False)
+        ser = pd.Series(pd.period_range('2021-01', periods=3, freq='M'))
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_period'] is True
+        assert result['is_datetime'] is False
+
+    def test_interval(self):
+        pipeline = StatPipeline([typing_stats], unit_test=False)
+        ser = pd.Series(pd.arrays.IntervalArray.from_breaks([0, 1, 2, 3]))
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_interval'] is True
+
     def test_memory_usage(self):
         pipeline = StatPipeline([typing_stats], unit_test=False)
         ser = pd.Series([1, 2, 3])
@@ -109,6 +139,15 @@ class TestTypeComputed:
 
     def test_timedelta(self):
         assert self._run(pd.Series(pd.to_timedelta(['1 days', '2 days']))) == 'duration'
+
+    def test_categorical(self):
+        assert self._run(pd.Series(pd.Categorical(['a', 'b', 'c']))) == 'categorical'
+
+    def test_period(self):
+        assert self._run(pd.Series(pd.period_range('2021-01', periods=3, freq='M'))) == 'period'
+
+    def test_interval(self):
+        assert self._run(pd.Series(pd.arrays.IntervalArray.from_breaks([0, 1, 2]))) == 'interval'
 
 
 # ============================================================================

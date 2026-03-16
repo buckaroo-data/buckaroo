@@ -3,6 +3,7 @@
 Mirrors test_pd_stats_v2.py structure for polars-native stat functions.
 """
 import math
+import datetime as dt
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -83,6 +84,45 @@ class TestPlTypingStats:
         assert result['is_timedelta'] is True
         assert result['is_datetime'] is False
 
+    def test_categorical(self):
+        pipeline = StatPipeline([pl_typing_stats], unit_test=False)
+        ser = pl.Series('test', ['a', 'b', 'c']).cast(pl.Categorical)
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_categorical'] is True
+        assert result['is_string'] is False
+        assert result['is_numeric'] is False
+
+    def test_enum(self):
+        pipeline = StatPipeline([pl_typing_stats], unit_test=False)
+        ser = pl.Series('test', ['a', 'b', 'c']).cast(pl.Enum(['a', 'b', 'c']))
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_categorical'] is True
+
+    def test_time(self):
+        pipeline = StatPipeline([pl_typing_stats], unit_test=False)
+        ser = pl.Series('test', [dt.time(14, 30), dt.time(9, 15)])
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_time'] is True
+        assert result['is_datetime'] is False
+
+    def test_decimal(self):
+        pipeline = StatPipeline([pl_typing_stats], unit_test=False)
+        ser = pl.Series('test', ['100.50', '200.75']).cast(pl.Decimal(10, 2))
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_decimal'] is True
+        assert result['is_numeric'] is False  # excluded from numeric to avoid "integer" misclass
+
+    def test_binary(self):
+        pipeline = StatPipeline([pl_typing_stats], unit_test=False)
+        ser = pl.Series('test', [b'hello', b'world'])
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_binary'] is True
+
     def test_memory_usage(self):
         pipeline = StatPipeline([pl_typing_stats], unit_test=False)
         ser = pl.Series('test', [1, 2, 3])
@@ -123,6 +163,18 @@ class TestPlTypeComputed:
         """Duration created via pl.Duration schema (as in issue #622)."""
         df = pl.DataFrame({"d": [100, 200, 125, 500]}, schema={"d": pl.Duration()})
         assert self._run(df["d"]) == 'duration'
+
+    def test_categorical(self):
+        assert self._run(pl.Series('test', ['a', 'b', 'c']).cast(pl.Categorical)) == 'categorical'
+
+    def test_time(self):
+        assert self._run(pl.Series('test', [dt.time(14, 30), dt.time(9, 15)])) == 'time'
+
+    def test_decimal(self):
+        assert self._run(pl.Series('test', ['100.50']).cast(pl.Decimal(10, 2))) == 'decimal'
+
+    def test_binary(self):
+        assert self._run(pl.Series('test', [b'hello', b'world'])) == 'binary'
 
 
 # ============================================================================
@@ -350,7 +402,51 @@ class TestPlFullPipeline:
         pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
         df = pl.DataFrame({"d": [100, 200, 125, 500]}, schema={"d": pl.Duration()})
         result, _ = pipeline.process_df(df)
-        # result has rewritten column names (a, b, c...)
         col_stats = list(result.values())[0]
         style = DefaultMainStyling.style_column('a', col_stats)
         assert style['displayer_args']['displayer'] == 'string'
+
+    def test_all_polars_types_classified(self):
+        """All common polars types should get a specific _type, not 'obj'."""
+        df = pl.DataFrame({
+            'int_col': [1, 2, 3],
+            'float_col': [1.0, 2.0, 3.0],
+            'str_col': ['a', 'b', 'c'],
+            'bool_col': [True, False, True],
+            'dt_col': [datetime(2021, 1, 1), datetime(2021, 1, 2), datetime(2021, 1, 3)],
+            'dur_col': pl.Series([100, 200, 300], dtype=pl.Duration()),
+            'time_col': [dt.time(14, 30), dt.time(9, 15), dt.time(12, 0)],
+            'cat_col': pl.Series(['x', 'y', 'z']).cast(pl.Categorical),
+            'dec_col': pl.Series(['1.50', '2.75', '3.00']).cast(pl.Decimal(10, 2)),
+            'bin_col': [b'aa', b'bb', b'cc'],
+        })
+        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        result, _ = pipeline.process_df(df)
+
+        types = {col_stats['_type'] for col_stats in result.values()}
+        # None should be 'obj'
+        assert 'obj' not in types
+        assert types == {
+            'integer', 'float', 'string', 'boolean',
+            'datetime', 'duration', 'time', 'categorical', 'decimal', 'binary',
+        }
+
+    def test_styling_for_new_types(self):
+        """Verify correct displayer for each new type."""
+        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+
+        test_cases = [
+            (pl.Series('t', [dt.time(14, 30)]), 'string'),
+            (pl.Series('c', ['a', 'b']).cast(pl.Categorical), 'string'),
+            (pl.Series('d', ['1.50']).cast(pl.Decimal(10, 2)), 'float'),
+            (pl.Series('b', [b'hello']), 'obj'),
+        ]
+        for ser, expected_displayer in test_cases:
+            df = pl.DataFrame({ser.name: ser})
+            result, _ = pipeline.process_df(df)
+            col_stats = list(result.values())[0]
+            style = DefaultMainStyling.style_column('a', col_stats)
+            actual = style['displayer_args']['displayer']
+            assert actual == expected_displayer, (
+                f"{ser.dtype}: expected {expected_displayer!r}, got {actual!r}"
+            )
