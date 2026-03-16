@@ -11,6 +11,12 @@ export declare const booleanFormatter: (params: ValueFormatterParams) => string;
 export declare const getFloatFormatter: (hint: FloatDisplayerA) => (params: ValueFormatterParams) => string;
 export declare const getDatetimeFormatter: (colHint: DatetimeLocaleDisplayerA) => (params: ValueFormatterParams) => string;
 export declare const getCompactNumberFormatter: () => (params: ValueFormatterParams) => string;
+/**
+ * Format an ISO 8601 duration string (e.g. "P1DT2H3M4.5S") into a
+ * human-readable representation like "1d 2h 3m 4.5s".
+ */
+export declare const formatIsoDuration: (iso: string) => string;
+export declare const getDurationFormatter: () => (params: ValueFormatterParams) => string;
 export declare const defaultDatetimeFormatter: (params: ValueFormatterParams) => string;
 export declare function getFormatter(fArgs: FormatterArgs): ValueFormatterFunc<unknown>;
 export declare function getCellRenderer(crArgs: CellRendererArgs): "agCheckboxCellRenderer" | ((props: {
