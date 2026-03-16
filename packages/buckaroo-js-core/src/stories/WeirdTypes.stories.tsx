@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useState } from "react";
 import { DFData, DFViewerConfig, NormalColumnConfig } from "../components/DFViewerParts/DFWhole";
-import { SetColumnFunc } from "../components/DFViewerParts/gridUtils";
 import { DFViewer } from "../components/DFViewerParts/DFViewerInfinite";
 import "../style/dcf-npm.css";
 
