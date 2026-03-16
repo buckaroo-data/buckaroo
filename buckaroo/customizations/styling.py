@@ -79,6 +79,9 @@ class DefaultMainStyling(StylingAnalysis):
             disp = {'displayer': 'float', 'min_fraction_digits':digits, 'max_fraction_digits':digits}
         elif t == 'datetime':
             disp = {'displayer': 'datetimeLocaleString','locale': 'en-US',  'args': {}}
+        elif t == 'duration':
+            disp = {'displayer': 'string', 'max_length': 35}
+            base_config['tooltip_config'] = {'tooltip_type':'simple', 'val_column': str(col)}
         elif t == 'string':
             disp = {'displayer': 'string', 'max_length': 35}
             base_config['tooltip_config'] = {'tooltip_type':'simple', 'val_column': str(col)}

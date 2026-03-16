@@ -62,6 +62,7 @@ TypingResult = TypedDict('TypingResult', {
     'is_numeric': bool,
     'is_integer': bool,
     'is_datetime': bool,
+    'is_timedelta': bool,
     'is_bool': bool,
     'is_float': bool,
     'is_string': bool,
@@ -77,6 +78,7 @@ def typing_stats(ser: RawSeries) -> TypingResult:
         'is_numeric': pd.api.types.is_numeric_dtype(ser),
         'is_integer': pd.api.types.is_integer_dtype(ser),
         'is_datetime': pd.api.types.is_datetime64_any_dtype(ser),
+        'is_timedelta': pd.api.types.is_timedelta64_dtype(ser),
         'is_bool': pd.api.types.is_bool_dtype(ser),
         'is_float': pd.api.types.is_float_dtype(ser),
         'is_string': pd.api.types.is_string_dtype(ser),
@@ -86,7 +88,7 @@ def typing_stats(ser: RawSeries) -> TypingResult:
 
 @stat()
 def _type(is_bool: bool, is_numeric: bool, is_float: bool,
-          is_datetime: bool, is_string: bool) -> str:
+          is_datetime: bool, is_timedelta: bool, is_string: bool) -> str:
     """Derive the human-readable column type string."""
     if is_bool:
         return "boolean"
@@ -94,6 +96,8 @@ def _type(is_bool: bool, is_numeric: bool, is_float: bool,
         if is_float:
             return "float"
         return "integer"
+    elif is_timedelta:
+        return "duration"
     elif is_datetime:
         return "datetime"
     elif is_string:
