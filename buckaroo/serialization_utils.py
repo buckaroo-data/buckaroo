@@ -194,6 +194,14 @@ def to_parquet(df):
         if pd.api.types.is_string_dtype(df2[col].dtype) and not pd.api.types.is_object_dtype(df2[col].dtype):
             df2[col] = df2[col].astype('object')
 
+    # Convert dtypes that fastparquet can't handle to string/object
+    for col in df2.columns:
+        dtype = df2[col].dtype
+        if isinstance(dtype, (pd.PeriodDtype, pd.IntervalDtype)):
+            df2[col] = df2[col].astype(str)
+        elif pd.api.types.is_timedelta64_dtype(dtype):
+            df2[col] = df2[col].astype(str)
+
     obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
     encodings = {k:'json' for k in obj_columns}
 
