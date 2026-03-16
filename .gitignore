@@ -17,6 +17,7 @@ eggs/
 .eggs/
 lib/
 lib64/
+!ci/hetzner/lib/
 parts/
 sdist/
 var/
@@ -167,6 +168,9 @@ docs/*js*
 docs/source/_static/*woff*
 
 packages/buckaroo-js-core/tsconfig.tsbuildinfo
+
+# Downloaded CI logs (stress-test analysis)
+ci-logs/
 
 # Large data files - should not be in repo
 *.parq

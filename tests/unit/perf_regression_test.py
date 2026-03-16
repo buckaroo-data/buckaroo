@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import pytest
 import buckaroo
 import time
 
@@ -25,6 +26,7 @@ def bw_do_stuff(df, **kwargs):
 # %timeit bw_do_stuff2(float_df(100_000, 5)) 150ms on my laptop
 
 
+@pytest.mark.timing_dependent
 def test_basic_instantiation():
     t_start = time.time()
     float_df(100_000, 20)

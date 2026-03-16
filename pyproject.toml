@@ -90,6 +90,7 @@ test = [
     "pandas; python_version >= '3.13'",      # Python 3.13+
     "pytest-cov>=3",
     "pytest>=6",
+    "pytest-xdist>=3",
     "hypothesis>=6.88.1",
     "pydantic>=2.5.2",
     #"pyarrow",
@@ -137,6 +138,7 @@ installer = "uv"
 [tool.pytest.ini_options]
 markers = [
     "slow: marks tests as slow (hit the network, e.g. uvx integration tests)",
+    "timing_dependent: tests with hard wall-clock assertions; run with high CPU priority and no parallelism",
 ]
 
 [tool.basedpyright]
