@@ -276,6 +276,7 @@ def test_partial_cache_shows_cached_immediately_computes_rest(tmp_path):
             os.environ['HOME'] = original_home
 
 
+@pytest.mark.timing_dependent
 def test_huge_dataframe_partial_cache_scenario(tmp_path):
     """
     Simulate scenario with huge dataframe and 300 columns:

@@ -35,23 +35,27 @@ echo "🧪 Starting Storybook Playwright Tests"
 
 cd packages/buckaroo-js-core
 
-# Install npm dependencies
-log_message "Installing npm dependencies..."
-if command -v pnpm &> /dev/null; then
-    pnpm install
+if [ "${SKIP_INSTALL:-0}" = "1" ]; then
+    log_message "SKIP_INSTALL=1 — skipping pnpm install + playwright install"
 else
-    npm install
-fi
+    # Install npm dependencies
+    log_message "Installing npm dependencies..."
+    if command -v pnpm &> /dev/null; then
+        pnpm install
+    else
+        npm install
+    fi
 
-# Install Playwright browsers if needed
-log_message "Ensuring Playwright browsers are installed..."
-if command -v pnpm &> /dev/null; then
-    pnpm exec playwright install chromium
-else
-    npx playwright install chromium
-fi
+    # Install Playwright browsers if needed
+    log_message "Ensuring Playwright browsers are installed..."
+    if command -v pnpm &> /dev/null; then
+        pnpm exec playwright install chromium
+    else
+        npx playwright install chromium
+    fi
 
-success "Dependencies ready"
+    success "Dependencies ready"
+fi
 
 # Kill any existing storybook on port 6006
 log_message "Cleaning up port 6006..."
@@ -104,7 +108,7 @@ log_message "━━━━━━━━━━━━━━━━━━━━━━�
 for test_file in "${STORYBOOK_TESTS[@]}"; do
     if [ -f "$test_file" ]; then
         log_message "Running $test_file..."
-        if npx playwright test "$test_file" --reporter=line; then
+        if npx playwright test "$test_file" --reporter=line ${PW_GREP:+--grep "$PW_GREP"}; then
             success "$test_file passed!"
         else
             error "$test_file failed!"

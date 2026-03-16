@@ -1,5 +1,6 @@
 import time
 import polars as pl
+import pytest
 
 from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget
 from buckaroo.file_cache.paf_column_executor import PAFColumnExecutor
@@ -18,6 +19,7 @@ def _wide_df(num_cols: int, num_rows: int) -> pl.DataFrame:
     return pl.DataFrame(data)
 
 
+@pytest.mark.timing_dependent
 def test_lazy_widget_init_should_not_block_but_does_with_mp_and_slow_exec():
     """
     Expectation: LazyInfinitePolarsBuckarooWidget should display schema/empty data immediately
