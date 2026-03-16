@@ -115,7 +115,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: buckaroo-build
           path: artifacts
@@ -190,7 +190,7 @@ jobs:
           python-version: "3.13"
           prune-cache: false
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: buckaroo-build
       - name: Install wheel with MCP extras
@@ -232,7 +232,7 @@ jobs:
           python-version: "3.13"
           prune-cache: false
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: buckaroo-build
       - name: Smoke test — base install
@@ -387,7 +387,7 @@ jobs:
         working-directory: packages
         run: pnpm install --frozen-lockfile
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: buckaroo-build
       - name: Cache Playwright browsers
@@ -423,7 +423,7 @@ jobs:
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - working-directory: packages
         run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: buckaroo-build
       - uses: astral-sh/setup-uv@v7
@@ -567,7 +567,7 @@ jobs:
         working-directory: packages
         run: pnpm install --frozen-lockfile
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: buckaroo-build
       - name: Cache Playwright browsers
@@ -604,7 +604,7 @@ jobs:
         working-directory: packages
         run: pnpm install --frozen-lockfile
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: buckaroo-build
       - name: Install the project
@@ -643,7 +643,7 @@ jobs:
         working-directory: packages
         run: pnpm install --frozen-lockfile
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: buckaroo-build
       - name: Install the project
@@ -716,7 +716,7 @@ jobs:
         working-directory: packages
         run: pnpm install --frozen-lockfile
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: buckaroo-build
       - name: Install the project
