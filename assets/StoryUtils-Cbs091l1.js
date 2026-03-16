@@ -58,8 +58,8 @@ import{j as r}from"./jsx-runtime-DiklIkkE.js";import{r as d,R as s}from"./index-
   font-size: 0.95em;
 }
 .dependent-tabs ul.tabs li.active {
-  background: var(--ag-range-selection-background-color);
-  color: var(--ag-accent-color);
+  background: var(--ag-range-selection-background-color-3);
+  color: var(--ag-alpine-active-color);
 }
 .dependent-tabs .output-area {
   clear: both;
@@ -366,7 +366,7 @@ import{j as r}from"./jsx-runtime-DiklIkkE.js";import{r as d,R as s}from"./index-
 }
 
 .ag-theme-alpine-dark, .ag-theme-alpine  {
-    --ag-spacing:3px;
+    --ag-grid-size:3px;
     --ag-list-item-height: 20px;
  }
 
