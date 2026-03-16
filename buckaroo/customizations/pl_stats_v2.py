@@ -54,6 +54,12 @@ PlTypingResult = TypedDict('PlTypingResult', {
     'is_datetime': bool,
     'is_timedelta': bool,
     'is_string': bool,
+    'is_categorical': bool,
+    'is_period': bool,
+    'is_interval': bool,
+    'is_time': bool,
+    'is_decimal': bool,
+    'is_binary': bool,
     'memory_usage': int,
 })
 
@@ -64,13 +70,19 @@ def pl_typing_stats(ser: RawSeries) -> PlTypingResult:
     dt = ser.dtype
     return {
         'dtype': str(dt),
-        'is_numeric': dt.is_numeric(),
+        'is_numeric': dt.is_numeric() and not dt.base_type() is pl.Decimal,
         'is_integer': dt.is_integer(),
         'is_float': dt.is_float(),
         'is_bool': dt == pl.Boolean,
-        'is_datetime': dt.is_temporal() and dt != pl.Duration,
+        'is_datetime': dt.is_temporal() and dt not in (pl.Duration, pl.Time),
         'is_timedelta': dt == pl.Duration,
         'is_string': dt in (pl.Utf8, pl.String),
+        'is_categorical': dt == pl.Categorical or isinstance(dt, pl.Enum),
+        'is_period': False,
+        'is_interval': False,
+        'is_time': dt == pl.Time,
+        'is_decimal': dt.base_type() is pl.Decimal,
+        'is_binary': dt == pl.Binary,
         'memory_usage': ser.estimated_size(),
     }
 
