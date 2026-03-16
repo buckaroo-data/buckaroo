@@ -172,6 +172,76 @@ export const getCompactNumberFormatter = () => {
     };
 };
 
+/**
+ * Format an ISO 8601 duration string (e.g. "P1DT2H3M4.5S") into a
+ * human-readable representation like "1d 2h 3m 4.5s".
+ */
+export const formatIsoDuration = (iso: string): string => {
+    const m = iso.match(
+        /^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/
+    );
+    if (!m) return iso; // fallback to raw string
+
+    const days = parseInt(m[1] || "0", 10);
+    const hours = parseInt(m[2] || "0", 10);
+    const minutes = parseInt(m[3] || "0", 10);
+    const seconds = parseFloat(m[4] || "0");
+
+    if (days === 0 && hours === 0 && minutes === 0 && seconds === 0)
+        return "0s";
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (seconds > 0) {
+        if (seconds < 0.001) {
+            parts.push(`${Math.round(seconds * 1e6)}µs`);
+        } else if (seconds < 1) {
+            const ms = seconds * 1000;
+            parts.push(ms === Math.floor(ms) ? `${ms}ms` : `${ms.toFixed(1)}ms`);
+        } else {
+            parts.push(
+                seconds === Math.floor(seconds)
+                    ? `${seconds}s`
+                    : `${seconds}s`
+            );
+        }
+    }
+    return parts.join(" ");
+};
+
+export const getDurationFormatter = () => {
+    return (params: ValueFormatterParams): string => {
+        const val = params.value;
+        if (val === null || val === undefined) return "";
+        if (typeof val === "string") return formatIsoDuration(val);
+        // If it's a number (milliseconds), format directly
+        if (typeof val === "number") {
+            const totalMs = Math.abs(val);
+            if (totalMs === 0) return "0s";
+            const sign = val < 0 ? "-" : "";
+            const days = Math.floor(totalMs / 86400000);
+            const hours = Math.floor((totalMs % 86400000) / 3600000);
+            const mins = Math.floor((totalMs % 3600000) / 60000);
+            const secs = (totalMs % 60000) / 1000;
+            const parts: string[] = [];
+            if (days > 0) parts.push(`${days}d`);
+            if (hours > 0) parts.push(`${hours}h`);
+            if (mins > 0) parts.push(`${mins}m`);
+            if (secs > 0) {
+                parts.push(
+                    secs === Math.floor(secs)
+                        ? `${secs}s`
+                        : `${secs.toFixed(3)}s`
+                );
+            }
+            return sign + parts.join(" ");
+        }
+        return String(val);
+    };
+};
+
 export const defaultDatetimeFormatter = (params: ValueFormatterParams): string => {
     const val = params.value;
     if (val === null || val === undefined) {
@@ -202,6 +272,8 @@ export function getFormatter(fArgs: FormatterArgs): ValueFormatterFunc<unknown> 
             return getObjectFormatter(fArgs);
         case "compact_number":
             return getCompactNumberFormatter();
+        case "duration":
+            return getDurationFormatter();
         default:
             return getStringFormatter({ displayer: "string" });
     }

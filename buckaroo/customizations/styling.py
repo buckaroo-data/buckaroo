@@ -41,6 +41,9 @@ def _formatted_char_count(displayer_args, column_metadata):
     if d in ('datetimeLocaleString', 'datetimeDefault'):
         return 18  # "12/31/2024, 11:59 PM"
 
+    if d == 'duration':
+        return 14  # e.g. "365d 23h 59m 59s"
+
     return 8  # obj / fallback
 
 
@@ -81,7 +84,9 @@ class DefaultMainStyling(StylingAnalysis):
             disp = {'displayer': 'datetimeLocaleString','locale': 'en-US',  'args': {}}
         elif t == 'decimal':
             disp = {'displayer': 'float', 'min_fraction_digits':digits, 'max_fraction_digits':digits}
-        elif t in ('duration', 'time', 'categorical', 'period', 'interval'):
+        elif t == 'duration':
+            disp = {'displayer': 'duration'}
+        elif t in ('time', 'categorical', 'period', 'interval'):
             disp = {'displayer': 'string', 'max_length': 35}
             base_config['tooltip_config'] = {'tooltip_type':'simple', 'val_column': str(col)}
         elif t == 'binary':

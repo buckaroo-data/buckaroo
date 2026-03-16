@@ -397,14 +397,14 @@ class TestPlFullPipeline:
         assert 'duration' in types
         assert 'integer' in types
 
-    def test_duration_column_styled_as_string(self):
-        """Duration columns should be styled with 'string' displayer, not 'datetimeLocaleString' (issue #622)."""
+    def test_duration_column_styled_with_duration_displayer(self):
+        """Duration columns should use 'duration' displayer, not 'datetimeLocaleString' (issue #622)."""
         pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
         df = pl.DataFrame({"d": [100, 200, 125, 500]}, schema={"d": pl.Duration()})
         result, _ = pipeline.process_df(df)
         col_stats = list(result.values())[0]
         style = DefaultMainStyling.style_column('a', col_stats)
-        assert style['displayer_args']['displayer'] == 'string'
+        assert style['displayer_args']['displayer'] == 'duration'
 
     def test_all_polars_types_classified(self):
         """All common polars types should get a specific _type, not 'obj'."""
