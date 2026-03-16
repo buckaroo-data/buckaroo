@@ -64,6 +64,16 @@ class TestTypingStats:
         ser = pd.Series(pd.to_datetime(['2021-01-01', '2021-01-02']))
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['is_datetime'] is True
+        assert result['is_timedelta'] is False
+
+    def test_timedelta(self):
+        pipeline = StatPipeline([typing_stats], unit_test=False)
+        ser = pd.Series(pd.to_timedelta(['1 days', '2 days', '3 days']))
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_timedelta'] is True
+        assert result['is_datetime'] is False
+        assert result['is_numeric'] is False
 
     def test_memory_usage(self):
         pipeline = StatPipeline([typing_stats], unit_test=False)
@@ -96,6 +106,9 @@ class TestTypeComputed:
 
     def test_datetime(self):
         assert self._run(pd.Series(pd.to_datetime(['2021-01-01']))) == 'datetime'
+
+    def test_timedelta(self):
+        assert self._run(pd.Series(pd.to_timedelta(['1 days', '2 days']))) == 'duration'
 
 
 # ============================================================================

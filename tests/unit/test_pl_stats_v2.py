@@ -3,7 +3,7 @@
 Mirrors test_pd_stats_v2.py structure for polars-native stat functions.
 """
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,7 @@ from buckaroo.customizations.pl_stats_v2 import (
     pl_histogram_series, histogram,
     PL_ANALYSIS_V2,
 )
+from buckaroo.customizations.styling import DefaultMainStyling
 
 
 # ============================================================================
@@ -61,6 +62,26 @@ class TestPlTypingStats:
         ser = pl.Series('test', [datetime(2021, 1, 1), datetime(2021, 1, 2)])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['is_datetime'] is True
+        assert result['is_timedelta'] is False
+
+    def test_duration(self):
+        pipeline = StatPipeline([pl_typing_stats], unit_test=False)
+        ser = pl.Series('test', [timedelta(seconds=1), timedelta(seconds=2)])
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_timedelta'] is True
+        assert result['is_datetime'] is False
+        assert result['is_numeric'] is False
+
+    def test_duration_from_schema(self):
+        """Duration created via pl.Duration schema (as in issue #622)."""
+        pipeline = StatPipeline([pl_typing_stats], unit_test=False)
+        df = pl.DataFrame({"d": [100, 200, 125, 500]}, schema={"d": pl.Duration()})
+        ser = df["d"]
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['is_timedelta'] is True
+        assert result['is_datetime'] is False
 
     def test_memory_usage(self):
         pipeline = StatPipeline([pl_typing_stats], unit_test=False)
@@ -93,6 +114,15 @@ class TestPlTypeComputed:
 
     def test_datetime(self):
         assert self._run(pl.Series('test', [datetime(2021, 1, 1)])) == 'datetime'
+
+    def test_duration(self):
+        ser = pl.Series('test', [timedelta(seconds=1), timedelta(seconds=2)])
+        assert self._run(ser) == 'duration'
+
+    def test_duration_from_schema(self):
+        """Duration created via pl.Duration schema (as in issue #622)."""
+        df = pl.DataFrame({"d": [100, 200, 125, 500]}, schema={"d": pl.Duration()})
+        assert self._run(df["d"]) == 'duration'
 
 
 # ============================================================================
@@ -298,3 +328,29 @@ class TestPlFullPipeline:
         # Collect _type values
         types = {col_stats['_type'] for col_stats in result.values()}
         assert types == {'integer', 'float', 'string', 'boolean'}
+
+    def test_duration_column_in_full_pipeline(self):
+        """Duration columns should be classified as 'duration', not 'datetime' (issue #622)."""
+        df = pl.DataFrame({
+            'duration': [100, 200, 125, 500],
+            'ints': [1, 2, 3, 4],
+        }, schema={
+            'duration': pl.Duration(),
+            'ints': pl.Int64,
+        })
+        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        result, errors = pipeline.process_df(df)
+
+        types = {col_stats['_type'] for col_stats in result.values()}
+        assert 'duration' in types
+        assert 'integer' in types
+
+    def test_duration_column_styled_as_string(self):
+        """Duration columns should be styled with 'string' displayer, not 'datetimeLocaleString' (issue #622)."""
+        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        df = pl.DataFrame({"d": [100, 200, 125, 500]}, schema={"d": pl.Duration()})
+        result, _ = pipeline.process_df(df)
+        # result has rewritten column names (a, b, c...)
+        col_stats = list(result.values())[0]
+        style = DefaultMainStyling.style_column('a', col_stats)
+        assert style['displayer_args']['displayer'] == 'string'
