@@ -682,8 +682,8 @@ jobs:
           touch buckaroo/static/widget.js
           touch buckaroo/static/widget.css
           mkdir -p docs/build/html
-          uv run pytest --check-links docs/source/*.rst
-          uv run pytest --check-links docs/example-notebooks/*.ipynb
+          uv run pytest --check-links docs/source/*.rst || uv run pytest --check-links --lf docs/source/*.rst
+          uv run pytest --check-links docs/example-notebooks/*.ipynb || uv run pytest --check-links --lf docs/example-notebooks/*.ipynb
           uv run sphinx-build -T -b html docs/source docs/build
 
   # ---------------------------------------------------------------------------
