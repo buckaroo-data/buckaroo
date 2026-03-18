@@ -29,7 +29,7 @@ from buckaroo.pluggable_analysis_framework.utils import json_postfix
 from buckaroo.styling_helpers import obj_, pinned_histogram
 from .pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
 from .df_util import old_col_new_col
-from .serialization_utils import pd_to_obj
+from .serialization_utils import sd_to_parquet_b64
 from buckaroo.file_cache.base import AbstractFileCache, Executor as _SyncExec, ExecutorLog  # type: ignore
 from buckaroo.file_cache.multiprocessing_executor import MultiprocessingExecutor as _ParExec
 from buckaroo.file_cache.cache_utils import get_global_file_cache, get_global_executor_log
@@ -483,7 +483,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         self,
         all_cols: List[str],
         summary_sd: Dict[str, Dict[str, Any]],
-        summary_rows: List[Dict[str, Any]]
+        summary_rows: Any
     ) -> None:
         """
         Ensure that df_display_args and df_data_dict are set up for the widget.
@@ -494,7 +494,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         Args:
             all_cols: List of all column names in the LazyFrame
             summary_sd: Summary dictionary with column statistics
-            summary_rows: List of summary rows for display
+            summary_rows: Serialized summary stats (parquet_b64 payload or JSON list)
         """
         # Build initial column_config: fall back to schema so raw data appears immediately.
         def _schema_column_config() -> list[dict[str, object]]:
@@ -718,11 +718,14 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         # Ensure summary is ready for initial display (checks if computation completed synchronously)
         summary_sd = self.ensure_initial_summary_for_display(initial_summary_sd)
         summary_rows = self._summary_to_rows(summary_sd)
-        logger.info(
-            "Initial all_stats prepared: len=%s sample=%s",
-            len(summary_rows),
-            (summary_rows[0] if summary_rows else None),
-        )
+        if isinstance(summary_rows, dict) and summary_rows.get('format') == 'parquet_b64':
+            logger.info("Initial all_stats prepared as parquet_b64, b64_len=%s", len(summary_rows.get('data', '')))
+        else:
+            logger.info(
+                "Initial all_stats prepared: len=%s sample=%s",
+                len(summary_rows),
+                (summary_rows[0] if summary_rows else None),
+            )
         # Check if __status__ is in the summary stats (check summary_sd dict directly)
         has_status = any(
             '__status__' in col_stats
@@ -759,11 +762,10 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
     # no schema-only column config helper needed for sync path
 
     def _summary_to_rows(self, summary: Dict[str, Dict[str, Any]]):
-        """Convert summary dict to JSON rows."""
+        """Convert summary dict to parquet-b64 tagged payload (or JSON fallback)."""
         if not summary:
             return []
-        import pandas as pd
-        return pd_to_obj(pd.DataFrame(summary))
+        return sd_to_parquet_b64(summary)
 
     # selection and retry now delegated to dataflow
     def _build_column_config(self, summary: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:

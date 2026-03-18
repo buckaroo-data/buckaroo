@@ -83,12 +83,12 @@ describe('resolveDFData', () => {
         expect(typeof parsed[0].name).toBe('string');
     });
 
-    it('sync resolveDFData returns [] for parquet_b64 (known async limitation)', () => {
-        // Documents #630: parquetRead is async so the sync wrapper returns [].
-        // The widget path avoids this by sending JSON arrays instead of parquet_b64.
-        // The static embed path uses resolveDFDataAsync which works correctly.
+    it('sync resolveDFData returns non-empty result for parquet_b64', () => {
+        // Critical regression test for #630: if parquetRead's onComplete
+        // fires asynchronously, the sync resolveDFData returns [] because
+        // the callback hasn't executed yet when the function returns.
         const result = resolveDFData(parquetPayload);
-        expect(result.length).toBe(0);
+        expect(result.length).toBeGreaterThan(0);
     });
 
     it('async resolveDFDataAsync returns non-empty result for parquet_b64', async () => {

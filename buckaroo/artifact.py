@@ -116,7 +116,7 @@ def prepare_buckaroo_artifact(df, column_config_overrides=None,
     bw = BuckarooKls(df, column_config_overrides=column_config_overrides)
 
     df_viewer_config = bw.df_display_args['dfviewer_special']['df_viewer_config']
-    summary_stats_data = bw.df_data_dict['all_stats']  # JSON list from pd_to_obj
+    summary_stats_data = bw.df_data_dict['all_stats']  # already parquet b64 tagged
 
     # Serialize the main data as parquet b64.
     # The widget stores processed data on its inner dataflow object.
