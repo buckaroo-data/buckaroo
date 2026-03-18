@@ -4,7 +4,6 @@ import { WidgetDCFCell } from './components/DCFCell';
 import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from './components/BuckarooWidgetInfinite';
 import { parquetRead, parquetMetadata } from 'hyparquet';
 import { resolveDFData, resolveDFDataAsync, preResolveDFDataDict } from './components/DFViewerParts/resolveDFData';
-import { useResolvedDFDataDict } from './components/DFViewerParts/useResolvedDFDataDict';
 import { BuckarooStaticTable } from './components/BuckarooStaticTable';
 import { HistogramCell } from './components/DFViewerParts/HistogramCell';
 import { InfiniteEx } from './components/DFViewerParts/TableInfinite';
@@ -54,8 +53,7 @@ declare const _default: {
     resolveDFData: typeof resolveDFData;
     resolveDFDataAsync: typeof resolveDFDataAsync;
     preResolveDFDataDict: typeof preResolveDFDataDict;
-    useResolvedDFDataDict: typeof useResolvedDFDataDict;
     BuckarooStaticTable: typeof BuckarooStaticTable;
 };
 export default _default;
-export { ColumnsEditor, DependentTabs, OperationViewer, WidgetDCFCell, DFViewer, DFViewerInfinite, DFViewerInfiniteDS, StatusBar, HistogramCell, CommandUtils, utils, BuckarooInfiniteWidget, getKeySmartRowCache, InfiniteEx, widgetUtils, SampleButton, HeaderNoArgs, Counter, parquetRead, parquetMetadata, resolveDFData, resolveDFDataAsync, preResolveDFDataDict, useResolvedDFDataDict, BuckarooStaticTable, };
+export { ColumnsEditor, DependentTabs, OperationViewer, WidgetDCFCell, DFViewer, DFViewerInfinite, DFViewerInfiniteDS, StatusBar, HistogramCell, CommandUtils, utils, BuckarooInfiniteWidget, getKeySmartRowCache, InfiniteEx, widgetUtils, SampleButton, HeaderNoArgs, Counter, parquetRead, parquetMetadata, resolveDFData, resolveDFDataAsync, preResolveDFDataDict, BuckarooStaticTable, };
