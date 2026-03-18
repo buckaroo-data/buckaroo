@@ -234,12 +234,54 @@ function createRender(Widget) {
 	};
 }
 
+/**
+ * Pre-decode all parquet_b64 values in a df_data_dict and re-render
+ * the React tree whenever the decoded data changes.
+ *
+ * This runs once at mount and on every model change, BEFORE React
+ * renders, so components always receive plain DFData arrays.
+ */
+function createPredecodingRender(Widget) {
+	return ({ el, model, experimental }) => {
+		let root = ReactDOM.createRoot(el);
+		let unmounted = false;
+
+		const doRender = (resolvedDict) => {
+			if (unmounted) return;
+			root.render(
+				React.createElement(
+					RenderContext.Provider,
+					{ value: { model, experimental } },
+					React.createElement(Widget, { resolvedDFDataDict: resolvedDict }),
+				),
+			);
+		};
+
+		const decodeAndRender = async () => {
+			const raw = model.get('df_data_dict');
+			const resolved = await srt.preResolveDFDataDict(raw);
+			doRender(resolved);
+		};
+
+		// Initial decode + render
+		decodeAndRender();
+
+		// Re-decode when df_data_dict changes (e.g. new summary stats from Python)
+		model.on('change:df_data_dict', decodeAndRender);
+
+		return () => {
+			unmounted = true;
+			model.off('change:df_data_dict', decodeAndRender);
+			root.unmount();
+		};
+	};
+}
+
 const renderDFV = createRender(() => {
 	console.log("renderDFV");
 	const [df_data, _set_df_meta] = useModelState("df_data");
 	const [df_viewer_config, _set_dfvc] = useModelState("df_viewer_config");
-	const [summary_stats_raw, _set_ssd] = useModelState("summary_stats_data");
-	const summary_stats_data = srt.resolveDFData(summary_stats_raw);
+	const [summary_stats_data, _set_ssd] = useModelState("summary_stats_data");
 	console.log("df_data", df_data);
 	console.log("df_viewer_config", df_viewer_config);
 	console.log("summary_stats_data", summary_stats_data);
@@ -254,8 +296,7 @@ const renderDFV = createRender(() => {
 	);
 });
 
-const renderBuckarooWidget = createRender(() => {
-	const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
+const renderBuckarooWidget = createPredecodingRender(({ resolvedDFDataDict }) => {
 	const [df_display_args, _set_dda] = useModelState("df_display_args");
 	const [df_meta, _set_df_meta] = useModelState("df_meta");
 
@@ -268,7 +309,7 @@ const renderBuckarooWidget = createRender(() => {
 	return (
 		<div className="buckaroo_anywidget">
 			<srt.WidgetDCFCell
-				df_data_dict={df_data_dict}
+				df_data_dict={resolvedDFDataDict}
 				df_display_args={df_display_args}
 				df_meta={df_meta}
 				operations={operations}
@@ -284,8 +325,7 @@ const renderBuckarooWidget = createRender(() => {
 });
 
 const srcClosureRBI = (src) => {
-    const renderBuckarooInfiniteWidget = createRender((a,b,c) => {
-	const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
+    const renderBuckarooInfiniteWidget = createPredecodingRender(({ resolvedDFDataDict }) => {
 	const [df_display_args, _set_dda] = useModelState("df_display_args");
 	const [df_meta, _set_df_meta] = useModelState("df_meta");
 
@@ -298,7 +338,7 @@ const srcClosureRBI = (src) => {
 	return (
 	    <div className="buckaroo_anywidget">
 	    <srt.BuckarooInfiniteWidget
-	    df_data_dict={df_data_dict}
+	    df_data_dict={resolvedDFDataDict}
 	    df_display_args={df_display_args}
 	    df_meta={df_meta}
 	    operations={operations}
@@ -314,10 +354,8 @@ const srcClosureRBI = (src) => {
 	);
     });
 
-    const renderDFViewerInfiniteWidget = createRender((a,b,c) => {
+    const renderDFViewerInfiniteWidget = createPredecodingRender(({ resolvedDFDataDict }) => {
 	const [df_meta, _set_df_meta] = useModelState("df_meta");
-	  const [df_data_dict, _set_df_data_dict] = useModelState("df_data_dict");
-      // df_data_dict ready
 	const [df_display_args, _set_dda] = useModelState("df_display_args");
         const [df_id, _set_df_id] = useModelState("df_id");
 	const [message_log, _set_message_log] = useModelState("message_log");
@@ -326,7 +364,7 @@ const srcClosureRBI = (src) => {
 	    <div className="buckaroo_anywidget">
 		<srt.DFViewerInfiniteDS
                     df_meta={df_meta}
-                    df_data_dict={df_data_dict}
+                    df_data_dict={resolvedDFDataDict}
                     df_display_args={df_display_args}
                     df_id={df_id}
 	            src={src}
