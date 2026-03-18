@@ -10,9 +10,7 @@ import base64
 from io import BytesIO
 
 import numpy as np
-import pandas as pd
 import pyarrow.parquet as pq
-import pytest
 
 from buckaroo.serialization_utils import sd_to_parquet_b64
 
