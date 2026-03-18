@@ -130,8 +130,14 @@ class Histogram(ColAnalysis):
         meat = vals[low_pass & high_pass]
         if len(meat) == 0:
             return dict(histogram_args={})
-   
-        meat_histogram=np.histogram(meat, 10)
+
+        try:
+            meat_histogram=np.histogram(meat, 10)
+        except ValueError:
+            # Can happen when float64 precision is insufficient to create
+            # 10 distinct bin edges (e.g. large integers near 2^53 where
+            # np.spacing > bin width).
+            return dict(histogram_args={})
         populations, _ = meat_histogram
         return dict(
             histogram_bins = meat_histogram[1],

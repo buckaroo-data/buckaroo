@@ -24,13 +24,10 @@ with open(out_path, 'w') as f:
     f.write(html)
 print(f"Generated {out_path}")
 
-# BigInt precision test: INT64 values above Number.MAX_SAFE_INTEGER (2^53-1).
-# The DataFrame needs enough rows and a normal column so the widget fully
-# initializes (histogram computation fails on tiny all-bigint DataFrames).
+# BigInt precision test: INT64 values above Number.MAX_SAFE_INTEGER (2^53-1)
 bigint_df = pd.DataFrame({
-    'big_id': [9007199254740993, 9007199254740994, 9007199254740995] + list(range(7)),
-    'label': [f'row_{i}' for i in range(10)],
-    'value': list(range(10)),
+    'big_id': [9007199254740993, 9007199254740994, 9007199254740995],
+    'label': ['a', 'b', 'c'],
 })
 bigint_html = to_html(bigint_df, title="BigInt Precision Test")
 bigint_path = os.path.join(os.path.dirname(__file__), '..', 'buckaroo', 'static', 'bigint-test.html')
