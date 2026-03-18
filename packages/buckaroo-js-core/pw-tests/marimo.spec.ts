@@ -118,4 +118,20 @@ test.describe('Buckaroo in marimo', () => {
     expect(await getCellText(secondWidget, 'b', 0)).toBe('0');
     expect(await getCellText(secondWidget, 'c', 0)).toBe('row_0');
   });
+
+  test('summary stats histograms render', async ({ page }) => {
+    await page.goto('/');
+    await waitForGrid(page);
+
+    // The large DataFrame (200 rows, numeric columns) should produce histograms.
+    // Histograms are rendered as pinned summary rows with .histogram-component divs
+    // containing Recharts BarChart SVGs.
+    const widgets = page.locator('.buckaroo_anywidget');
+    await widgets.nth(1).locator('.ag-cell').first().waitFor({ state: 'visible', timeout: 30_000 });
+
+    const secondWidget = widgets.nth(1);
+    const histograms = secondWidget.locator('.histogram-component');
+    await expect(histograms.first()).toBeVisible({ timeout: 10_000 });
+    expect(await histograms.count()).toBeGreaterThan(0);
+  });
 });
