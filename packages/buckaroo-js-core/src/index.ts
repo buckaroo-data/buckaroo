@@ -14,7 +14,6 @@ import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from 
 // Re-export hyparquet functions for transcript parsing in widget.tsx
 import { parquetRead, parquetMetadata } from 'hyparquet';
 import { resolveDFData, resolveDFDataAsync, preResolveDFDataDict } from './components/DFViewerParts/resolveDFData';
-import { useResolvedDFDataDict } from './components/DFViewerParts/useResolvedDFDataDict';
 import { BuckarooStaticTable } from './components/BuckarooStaticTable';
 
 import { HistogramCell } from "./components/DFViewerParts/HistogramCell";
@@ -54,7 +53,6 @@ export default {
     resolveDFData,
     resolveDFDataAsync,
     preResolveDFDataDict,
-    useResolvedDFDataDict,
     BuckarooStaticTable,
 };
 
@@ -81,6 +79,5 @@ export {
     resolveDFData,
     resolveDFDataAsync,
     preResolveDFDataDict,
-    useResolvedDFDataDict,
     BuckarooStaticTable,
 };

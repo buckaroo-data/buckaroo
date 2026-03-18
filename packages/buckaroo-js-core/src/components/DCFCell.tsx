@@ -3,8 +3,7 @@ import * as _ from "lodash-es";
 import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
 
-import { DFDataOrPayload } from "./DFViewerParts/DFWhole";
-import { useResolvedDFDataDict } from "./DFViewerParts/useResolvedDFDataDict";
+import { DFData } from "./DFViewerParts/DFWhole";
 import { DFViewer } from "./DFViewerParts/DFViewerInfinite";
 import { StatusBar } from "./StatusBar";
 import { BuckarooState } from "./WidgetTypes";
@@ -27,7 +26,7 @@ export function WidgetDCFCell({
     buckaroo_options,
 }: {
     df_meta: DFMeta;
-    df_data_dict: Record<string, DFDataOrPayload>;
+    df_data_dict: Record<string, DFData>;
     df_display_args: Record<string, IDisplayArgs>;
     operations: Operation[];
     on_operations: (ops: Operation[]) => void;
@@ -38,7 +37,6 @@ export function WidgetDCFCell({
     buckaroo_options: BuckarooOptions;
 }) {
   const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
-    const resolved = useResolvedDFDataDict(df_data_dict);
 
     const cDisp = df_display_args[buckaroo_state.df_display];
     if (cDisp === undefined) {
@@ -46,8 +44,8 @@ export function WidgetDCFCell({
     } else {
         //  console.log("cDisp", cDisp);
     }
-    const dfData = resolved[cDisp.data_key];
-    const summaryStatsData = resolved[cDisp.summary_stats_key];
+    const dfData = df_data_dict[cDisp.data_key];
+    const summaryStatsData = df_data_dict[cDisp.summary_stats_key];
 
     return (
         <div className="dcf-root flex flex-col buckaroo-widget" style={{ width: "100%", height: "100%" }}>
