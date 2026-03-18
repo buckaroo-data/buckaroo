@@ -4,7 +4,7 @@ import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
 
 import { DFDataOrPayload } from "./DFViewerParts/DFWhole";
-import { resolveDFData } from "./DFViewerParts/resolveDFData";
+import { useResolvedDFDataDict } from "./DFViewerParts/useResolvedDFDataDict";
 import { DFViewer } from "./DFViewerParts/DFViewerInfinite";
 import { StatusBar } from "./StatusBar";
 import { BuckarooState } from "./WidgetTypes";
@@ -38,6 +38,7 @@ export function WidgetDCFCell({
     buckaroo_options: BuckarooOptions;
 }) {
   const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
+    const resolved = useResolvedDFDataDict(df_data_dict);
 
     const cDisp = df_display_args[buckaroo_state.df_display];
     if (cDisp === undefined) {
@@ -45,8 +46,8 @@ export function WidgetDCFCell({
     } else {
         //  console.log("cDisp", cDisp);
     }
-    const dfData = resolveDFData(df_data_dict[cDisp.data_key]);
-    const summaryStatsData = resolveDFData(df_data_dict[cDisp.summary_stats_key]);
+    const dfData = resolved[cDisp.data_key] ?? [];
+    const summaryStatsData = resolved[cDisp.summary_stats_key] ?? [];
 
     return (
         <div className="dcf-root flex flex-col buckaroo-widget" style={{ width: "100%", height: "100%" }}>

@@ -4,7 +4,7 @@ import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
 
 import { DFData, DFDataOrPayload } from "./DFViewerParts/DFWhole";
-import { resolveDFData } from "./DFViewerParts/resolveDFData";
+import { useResolvedDFDataDict } from "./DFViewerParts/useResolvedDFDataDict";
 import { StatusBar } from "./StatusBar";
 import { BuckarooState } from "./WidgetTypes";
 import { BuckarooOptions } from "./WidgetTypes";
@@ -23,7 +23,7 @@ import { MessageBox } from "./MessageBox";
 
 export const getDataWrapper = (
     data_key: string,
-    df_data_dict: Record<string, DFDataOrPayload>,
+    resolved_dict: Record<string, DFData>,
     ds: IDatasource,
     total_rows?: number
 ): DatasourceOrRaw => {
@@ -34,7 +34,7 @@ export const getDataWrapper = (
             length: total_rows || 50,
         };
     } else {
-        const resolved = resolveDFData(df_data_dict[data_key]);
+        const resolved = resolved_dict[data_key] ?? [];
         return {
             data_type: "Raw",
             data: resolved,
@@ -154,15 +154,16 @@ export function BuckarooInfiniteWidget({
         //}, [operations, buckaroo_state]);
         }, [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, JSON.stringify(buckaroo_state.quick_command_args)]);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
+        const resolved = useResolvedDFDataDict(df_data_dict);
 
         const cDisp = df_display_args[buckaroo_state.df_display];
 
         const [data_wrapper, summaryStatsData] = useMemo(
             () => [
-                getDataWrapper(cDisp.data_key, df_data_dict, mainDs, df_meta.total_rows),
-                resolveDFData(df_data_dict[cDisp.summary_stats_key]),
+                getDataWrapper(cDisp.data_key, resolved, mainDs, df_meta.total_rows),
+                resolved[cDisp.summary_stats_key] ?? [],
             ],
-            [cDisp, operations, buckaroo_state],
+            [cDisp, operations, buckaroo_state, resolved],
         );
 
         //used to denote "this dataframe has been transformed", This is
@@ -245,15 +246,16 @@ export function DFViewerInfiniteDS({
             // putting buckaroo_state.post_processing doesn't work properly
         }, []);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
+        const resolved = useResolvedDFDataDict(df_data_dict);
 
         const cDisp = df_display_args["main"];
 
         const [data_wrapper, summaryStatsData] = useMemo(
             () => [
-                getDataWrapper(cDisp.data_key, df_data_dict, mainDs, df_meta.total_rows),
-                resolveDFData(df_data_dict[cDisp.summary_stats_key]),
+                getDataWrapper(cDisp.data_key, resolved, mainDs, df_meta.total_rows),
+                resolved[cDisp.summary_stats_key] ?? [],
             ],
-            [cDisp, df_data_dict, mainDs, df_meta.total_rows]
+            [cDisp, resolved, mainDs, df_meta.total_rows]
         );
         
         //used to denote "this dataframe has been transformed", This is
