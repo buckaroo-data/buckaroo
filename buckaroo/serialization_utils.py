@@ -126,7 +126,7 @@ def _coerce_for_json(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].astype(str)
         elif pd.api.types.is_timedelta64_dtype(dtype):
             df[col] = df[col].astype(str)
-        elif dtype == object:
+        elif dtype == object:  # noqa: E721 — np.dtype('O') != builtin object via `is`
             # Check if any values are raw bytes (e.g. from pl.Binary)
             sample = df[col].dropna().head(1)
             if len(sample) > 0 and isinstance(sample.iloc[0], bytes):
@@ -218,7 +218,7 @@ def to_parquet(df):
             df2[col] = df2[col].astype(str)
         elif pd.api.types.is_timedelta64_dtype(dtype):
             df2[col] = df2[col].astype(str)
-        elif dtype == object:
+        elif dtype == object:  # noqa: E721 — np.dtype('O') != builtin object via `is`
             sample = df2[col].dropna().head(1)
             if len(sample) > 0 and isinstance(sample.iloc[0], bytes):
                 df2[col] = df2[col].apply(lambda x: x.hex() if isinstance(x, bytes) else x)

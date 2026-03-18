@@ -70,7 +70,7 @@ def pl_typing_stats(ser: RawSeries) -> PlTypingResult:
     dt = ser.dtype
     return {
         'dtype': str(dt),
-        'is_numeric': dt.is_numeric() and not dt.base_type() is pl.Decimal,
+        'is_numeric': dt.is_numeric() and dt.base_type() is not pl.Decimal,
         'is_integer': dt.is_integer(),
         'is_float': dt.is_float(),
         'is_bool': dt == pl.Boolean,
