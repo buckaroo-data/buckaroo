@@ -239,7 +239,7 @@ const renderDFV = createRender(() => {
 	const [df_data, _set_df_meta] = useModelState("df_data");
 	const [df_viewer_config, _set_dfvc] = useModelState("df_viewer_config");
 	const [summary_stats_raw, _set_ssd] = useModelState("summary_stats_data");
-	const summary_stats_data = srt.useResolvedDFDataDict({'_': summary_stats_raw})['_'] ?? [];
+	const summary_stats_data = srt.useResolvedDFDataDict({'_': summary_stats_raw})['_'];
 	console.log("df_data", df_data);
 	console.log("df_viewer_config", df_viewer_config);
 	console.log("summary_stats_data", summary_stats_data);

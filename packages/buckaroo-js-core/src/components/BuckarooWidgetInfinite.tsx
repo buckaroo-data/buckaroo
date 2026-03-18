@@ -34,7 +34,7 @@ export const getDataWrapper = (
             length: total_rows || 50,
         };
     } else {
-        const resolved = resolved_dict[data_key] ?? [];
+        const resolved = resolved_dict[data_key];
         return {
             data_type: "Raw",
             data: resolved,
@@ -161,7 +161,7 @@ export function BuckarooInfiniteWidget({
         const [data_wrapper, summaryStatsData] = useMemo(
             () => [
                 getDataWrapper(cDisp.data_key, resolved, mainDs, df_meta.total_rows),
-                resolved[cDisp.summary_stats_key] ?? [],
+                resolved[cDisp.summary_stats_key],
             ],
             [cDisp, operations, buckaroo_state, resolved],
         );
@@ -253,7 +253,7 @@ export function DFViewerInfiniteDS({
         const [data_wrapper, summaryStatsData] = useMemo(
             () => [
                 getDataWrapper(cDisp.data_key, resolved, mainDs, df_meta.total_rows),
-                resolved[cDisp.summary_stats_key] ?? [],
+                resolved[cDisp.summary_stats_key],
             ],
             [cDisp, resolved, mainDs, df_meta.total_rows]
         );
