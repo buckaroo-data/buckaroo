@@ -186,6 +186,13 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     await expect(ageCell).toBeVisible();
     await expect(scoreCell).toBeVisible();
 
+    // Summary stats histograms should render in pinned rows.
+    // The test notebook has numeric columns (age, score) that produce histogram bars.
+    const histograms = page.locator('.histogram-component');
+    await expect(histograms.first()).toBeVisible({ timeout: 10_000 });
+    expect(await histograms.count()).toBeGreaterThan(0);
+    console.log(`✅ Found ${await histograms.count()} histogram(s)`);
+
     console.log(`🎉 SUCCESS: Widget from ${notebookName} rendered ag-grid with ${rowCount} rows, ${headerCount} columns, and ${cellCount} cells`);
     console.log('📊 Verified data: Alice (age 25, score 85.5)');
   });
