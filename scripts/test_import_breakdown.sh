@@ -2,12 +2,17 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-VENV_DIR="./.venv-pyc-test"
-RESULTS_DIR="./pyc-test-results"
+VENV_DIR="./.venv-import-test"
+RESULTS_DIR="./import-test-results"
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 
 PACKAGES="polars pyarrow pandas numpy jupyterlab buckaroo"
+
+cleanup() {
+    [ -n "${LOGPID:-}" ] && kill "$LOGPID" 2>/dev/null || true
+}
+trap cleanup EXIT
 
 delete_venv() {
     echo "--- Removing $VENV_DIR ---"
@@ -20,19 +25,8 @@ create_venv() {
     VIRTUAL_ENV="$VENV_DIR" uv pip install $PACKAGES 2>&1 | tail -1
 }
 
-# Time a single import in a fresh venv (first execution = cold syspolicyd)
-time_cold_import() {
-    local pkg="$1"
-    local start end elapsed
-    start=$(python3 -c 'import time; print(time.time())')
-    "$VENV_DIR/bin/python" -c "import $pkg" 2>/dev/null
-    end=$(python3 -c 'import time; print(time.time())')
-    elapsed=$(printf '%.2f' "$(echo "$end - $start" | bc)")
-    echo "$elapsed"
-}
-
-# Time a single import (second execution = warm syspolicyd)
-time_warm_import() {
+# Time a python import and echo the elapsed seconds
+time_import() {
     local pkg="$1"
     local start end elapsed
     start=$(python3 -c 'import time; print(time.time())')
@@ -46,23 +40,21 @@ time_warm_import() {
 so_stats() {
     local pkg="$1"
     local site="$VENV_DIR/lib/python3.13/site-packages"
-    local files size_bytes
+    local dirs
 
     # Some packages have top-level .so files (e.g. _polars_runtime_32)
-    # Map package names to their known directories
     case "$pkg" in
-        polars)  dirs="$site/polars $site/_polars_runtime_32*" ;;
-        pyarrow) dirs="$site/pyarrow" ;;
-        pandas)  dirs="$site/pandas" ;;
-        numpy)   dirs="$site/numpy" ;;
-        buckaroo) dirs="$site/buckaroo" ;;
+        polars)     dirs="$site/polars $site/_polars_runtime_32*" ;;
+        pyarrow)    dirs="$site/pyarrow" ;;
+        pandas)     dirs="$site/pandas" ;;
+        numpy)      dirs="$site/numpy" ;;
+        buckaroo)   dirs="$site/buckaroo" ;;
         jupyterlab) dirs="$site/jupyterlab" ;;
-        *)       dirs="$site/$pkg" ;;
+        *)          dirs="$site/$pkg" ;;
     esac
 
-    # Count .so/.dylib files across all dirs for this package
-    files=0
-    size_bytes=0
+    local files=0
+    local size_bytes=0
     for d in $dirs; do
         if [ -e "$d" ]; then
             local f s
@@ -99,8 +91,8 @@ for pkg in $PACKAGES; do
     echo "--- Testing: $pkg ---"
     create_venv
 
-    cold=$(time_cold_import "$pkg")
-    warm=$(time_warm_import "$pkg")
+    cold=$(time_import "$pkg")
+    warm=$(time_import "$pkg")
     delta=$(printf '%.2f' "$(echo "$cold - $warm" | bc)")
 
     stats=$(so_stats "$pkg")
@@ -122,15 +114,8 @@ echo "--- Testing: all packages together ---"
 create_venv
 
 IMPORT_ALL=$(printf '%s\n' $PACKAGES | paste -sd',' -)
-start=$(python3 -c 'import time; print(time.time())')
-"$VENV_DIR/bin/python" -c "import $IMPORT_ALL" 2>/dev/null
-end=$(python3 -c 'import time; print(time.time())')
-all_cold=$(printf '%.2f' "$(echo "$end - $start" | bc)")
-
-start=$(python3 -c 'import time; print(time.time())')
-"$VENV_DIR/bin/python" -c "import $IMPORT_ALL" 2>/dev/null
-end=$(python3 -c 'import time; print(time.time())')
-all_warm=$(printf '%.2f' "$(echo "$end - $start" | bc)")
+all_cold=$(time_import "$IMPORT_ALL")
+all_warm=$(time_import "$IMPORT_ALL")
 all_delta=$(printf '%.2f' "$(echo "$all_cold - $all_warm" | bc)")
 
 echo "  cold: ${all_cold}s  warm: ${all_warm}s  delta: ${all_delta}s"

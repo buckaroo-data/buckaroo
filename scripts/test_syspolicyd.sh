@@ -2,13 +2,13 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-VENV_DIR="./.venv-pyc-test"
-RESULTS_DIR="./pyc-test-results"
+VENV_DIR="./.venv-syspolicyd-test"
+RESULTS_DIR="./syspolicyd-test-results"
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 
 # Simple import script
-IMPORT_SCRIPT=$(mktemp /tmp/pyc_test_XXXXX.py)
+IMPORT_SCRIPT=$(mktemp /tmp/syspolicyd_test_XXXXX.py)
 cat > "$IMPORT_SCRIPT" << 'PYEOF'
 import jupyterlab
 import buckaroo
@@ -25,12 +25,6 @@ trap cleanup EXIT
 delete_venv() {
     echo "--- Removing $VENV_DIR ---"
     rm -rf "$VENV_DIR"
-}
-
-delete_pyc() {
-    echo "--- Deleting all .pyc files and __pycache__ dirs ---"
-    find "$VENV_DIR" -name '*.pyc' -delete
-    find "$VENV_DIR" -type d -name '__pycache__' -delete
 }
 
 # Run a command and capture wall-clock seconds to a file
