@@ -87,6 +87,40 @@ This means `UV_LINK_MODE=hardlink` (or `--link-mode hardlink`) eliminates the
 ~12s syspolicyd overhead on all reinstalls after the first, as long as the uv
 cache is warm.
 
+## Per-Package Breakdown
+
+Tested each package in a fresh venv (cold syspolicyd) then immediately
+re-tested (warm). Delta = syspolicyd overhead only.
+
+```
+Package             Cold     Warm    Delta     .so#   .so Size
+-------             ----     ----    -----     ----   --------
+polars             1.99s    0.07s    1.92s        1     147.1M
+pyarrow            2.03s    0.07s    1.96s       37     105.3M
+pandas             7.55s    0.18s    7.55s       45      16.2M
+numpy              0.43s    0.05s    0.38s       19       6.9M
+jupyterlab         2.38s    0.56s    1.82s        0         0B
+buckaroo          11.72s    0.41s   11.31s        0         0B
+ALL TOGETHER      15.63s    1.06s   14.57s
+```
+
+### Key findings
+
+- **pandas is the biggest offender (7.55s / 52%)** despite having only 16MB
+  of `.so` files. It has **45 individual `.so` files**, each triggering a
+  separate syspolicyd round-trip (network call to Apple + YARA scan).
+- **Number of `.so` files matters more than total size.** Each `dlopen()`
+  has a fixed per-scan overhead for the syspolicyd assessment. pandas (45
+  files, 16MB) costs 4x more than polars (1 file, 147MB).
+- **polars and pyarrow cost ~2s each** despite very different profiles
+  (1 file/147MB vs 37 files/105MB).
+- **jupyterlab has 0 `.so` files itself** but 1.82s delta — its deps (zmq,
+  tornado, etc.) have native extensions.
+- **buckaroo has 0 `.so` files itself** but 11.31s delta — it transitively
+  imports pandas, polars, and pyarrow.
+- Individual deltas sum to ~13.6s, close to the 14.57s all-together delta,
+  confirming most packages have distinct `.so` files with little overlap.
+
 ## Related Issues & Prior Art
 
 ### Two overlapping problems in uv
@@ -146,6 +180,8 @@ that `dlopen()` of `.so` files in site-packages also triggers the scan.
 
 - `scripts/test_syspolicyd.sh` — creates a fresh venv, installs packages,
   times imports while monitoring syspolicyd, and prints a summary.
+- `scripts/test_import_breakdown.sh` — tests each package individually in
+  a fresh venv, correlating import time with `.so` file count and size.
 - `scripts/test_hardlink_vs_clone.sh` — compares clone (default) vs hardlink
   link modes across reinstalls, tracking inodes and syspolicyd activity to
   verify that hardlink mode avoids rescans.
