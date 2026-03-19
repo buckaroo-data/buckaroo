@@ -96,6 +96,11 @@ def output_full_reproduce(errs, summary_df, df_name):
     try:
         for ser_name, err_kls in errs.items():
             err, kls = err_kls
+            if kls is None:
+                # v2 stat functions don't have a v1 ColAnalysis class
+                col, stat = ser_name if isinstance(ser_name, tuple) else (ser_name, '?')
+                print(f"# {col}:{stat} — {err}")
+                continue
             reproduce_summary(ser_name, kls, summary_df, err, df_name)
     except Exception:
         #this is tricky stuff that shouldn't error, I want these stack traces to escape being caught

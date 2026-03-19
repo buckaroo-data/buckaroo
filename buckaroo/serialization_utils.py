@@ -118,8 +118,25 @@ def force_to_pandas(df_pd_or_pl) -> pd.DataFrame:
 
 
     
+def _coerce_for_json(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert columns with types that pd.to_json can't handle."""
+    for col in df.columns:
+        dtype = df[col].dtype
+        if isinstance(dtype, (pd.PeriodDtype, pd.IntervalDtype)):
+            df[col] = df[col].astype(str)
+        elif pd.api.types.is_timedelta64_dtype(dtype):
+            df[col] = df[col].astype(str)
+        elif dtype == object:  # noqa: E721 — np.dtype('O') != builtin object via `is`
+            # Check if any values are raw bytes (e.g. from pl.Binary)
+            sample = df[col].dropna().head(1)
+            if len(sample) > 0 and isinstance(sample.iloc[0], bytes):
+                df[col] = df[col].apply(lambda x: x.hex() if isinstance(x, bytes) else x)
+    return df
+
+
 def pd_to_obj(df:pd.DataFrame) -> Dict[str, Any]:
     df2 = prepare_df_for_serialization(df)
+    df2 = _coerce_for_json(df2)
     # Add level_0 for JSON serialization to maintain backwards compatibility
     # This is only needed for JSON, not for Parquet serialization
     if not isinstance(df.index, pd.MultiIndex):
@@ -193,6 +210,18 @@ def to_parquet(df):
     for col in df2.columns:
         if pd.api.types.is_string_dtype(df2[col].dtype) and not pd.api.types.is_object_dtype(df2[col].dtype):
             df2[col] = df2[col].astype('object')
+
+    # Convert dtypes that fastparquet can't handle to string/object
+    for col in df2.columns:
+        dtype = df2[col].dtype
+        if isinstance(dtype, (pd.PeriodDtype, pd.IntervalDtype)):
+            df2[col] = df2[col].astype(str)
+        elif pd.api.types.is_timedelta64_dtype(dtype):
+            df2[col] = df2[col].astype(str)
+        elif dtype == object:  # noqa: E721 — np.dtype('O') != builtin object via `is`
+            sample = df2[col].dropna().head(1)
+            if len(sample) > 0 and isinstance(sample.iloc[0], bytes):
+                df2[col] = df2[col].apply(lambda x: x.hex() if isinstance(x, bytes) else x)
 
     obj_columns = df2.select_dtypes([pd.CategoricalDtype(), 'object']).columns.to_list()
     encodings = {k:'json' for k in obj_columns}

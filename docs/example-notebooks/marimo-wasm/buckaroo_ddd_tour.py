@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.13.15"
+__generated_with = "0.20.1"
 app = marimo.App(width="medium")
 
 
@@ -12,14 +12,14 @@ def _():
     from buckaroo.marimo_utils import marimo_unmonkeypatch
 
     marimo_unmonkeypatch()
-
-    return mo, buckaroo, ddd, marimo_unmonkeypatch
+    return buckaroo, ddd, marimo_unmonkeypatch, mo
 
 
 @app.cell
 def _(buckaroo, mo):
     from great_tables import GT
     from itables.widget import ITable
+
     def plain_disp(df):
         return mo.plain(df)
     def default_disp(df):
@@ -50,7 +50,6 @@ def _(buckaroo, mo):
     options=disp_options,
     value='buckaroo',
     label='choose display widget')
-
     return (disp_func_dropdown,)
 
 
@@ -60,6 +59,7 @@ def _(disp_func_dropdown, dropdown_dict, marimo_unmonkeypatch, mo):
 
     # Give Marimo and this gallery a little bit of time to load. The rest of the app and explanatory text will load in about 30 seconds. A lot is going on, python is being downloaded to run via Web Assembly in your browser.
     marimo_unmonkeypatch()
+
     disp_func = disp_func_dropdown.value 
     mo.vstack(
         [
@@ -279,6 +279,32 @@ def _(ddd):
     return (df_with_named_index_config,)
 
 
+@app.cell(hide_code=True)
+def _(ddd):
+
+    _df = ddd.df_with_weird_types()
+
+    _explain_md = """
+    ##  df_with_weird_types (pandas)
+     Exercises categorical, timedelta, period, and interval dtypes
+    """
+    df_with_weird_types_config = (_df, _explain_md)
+    return (df_with_weird_types_config,)
+
+
+@app.cell(hide_code=True)
+def _(ddd):
+
+    _df = ddd.pl_df_with_weird_types_as_pandas()
+
+    _explain_md = """
+    ##  pl_df_with_weird_types (polars→pandas)
+     Exercises Duration (#622), Time, Categorical, Decimal, and Binary dtypes (converted to pandas for widget compat)
+    """
+    pl_df_with_weird_types_config = (_df, _explain_md)
+    return (pl_df_with_weird_types_config,)
+
+
 @app.cell
 def _(
     basic_df2_config,
@@ -288,6 +314,7 @@ def _(
     df_with_infinity_config,
     df_with_named_index_config,
     df_with_really_big_number_config,
+    df_with_weird_types_config,
     mo,
     multiindex3_index_df_config,
     multiindex_index_df_config,
@@ -295,6 +322,7 @@ def _(
     multiindex_index_with_names_multiindex_cols_df_config,
     multiindex_with_names_both_config,
     multiindex_with_names_cols_df_config,
+    pl_df_with_weird_types_config,
     tuple_cols_df_config,
 ):
     # The DFs and configs are defined in the above hidden cells.  Unhide them for details
@@ -316,6 +344,8 @@ def _(
         'df_with_really_big_number': df_with_really_big_number_config,
         'df_with_col_named_index_config': df_with_col_named_index_config,
         'df_with_named_index_config': df_with_named_index_config,
+        'df_with_weird_types': df_with_weird_types_config,
+        'pl_df_with_weird_types': pl_df_with_weird_types_config,
     }
 
     dropdown_dict = mo.ui.dropdown(
@@ -323,13 +353,17 @@ def _(
         value="df_with_infinity_config",
         label="Choose the config",
     )
-
     return (dropdown_dict,)
+
+
+@app.cell
+def _():
+    return
 
 
 @app.cell(hide_code=True)
 async def _():
-    import marimo as mo
+    #import marimo as mo
     import pandas as pd
     import sys
 
@@ -340,7 +374,7 @@ async def _():
         # and install what it can. Buckaroo will work without fastparquet in WASM.
         await micropip.install("buckaroo", keep_going=True)
 
-    import buckaroo
+    #import buckaroo
     from buckaroo import BuckarooInfiniteWidget
 
 
@@ -365,7 +399,8 @@ async def _():
         formatted_string = re.sub(r"\s+}", "}", json_string)
         # formatted_string = json_string
         return formatted_string
-    return buckaroo, mo
+
+    return
 
 
 if __name__ == "__main__":

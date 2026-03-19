@@ -154,6 +154,48 @@ def get_df_with_named_index() -> pd.DataFrame:
                         index=pd.Index([10,20,30,40,50], name='foo'))
 
 
+def df_with_weird_types() -> pd.DataFrame:
+    """DataFrame with unusual dtypes that historically broke rendering.
+
+    Exercises: categorical, timedelta, period, interval.
+    """
+    return pd.DataFrame({
+        'categorical': pd.Categorical(['red', 'green', 'blue', 'red', 'green']),
+        'timedelta': pd.to_timedelta(['1 days 02:03:04', '0 days 00:00:01',
+                                       '365 days', '0 days 00:00:00.001',
+                                       '0 days 00:00:00.000100']),
+        'period': pd.Series(pd.period_range('2021-01', periods=5, freq='M')),
+        'interval': pd.Series(pd.arrays.IntervalArray.from_breaks([0, 1, 2, 3, 4, 5])),
+        'int_col': [10, 20, 30, 40, 50],
+    })
+
+
+def pl_df_with_weird_types():
+    """Polars DataFrame with unusual dtypes that historically broke rendering.
+
+    Exercises: Duration (issue #622), Time, Categorical, Decimal, Binary.
+    Must be displayed with PolarsBuckarooWidget, not the default pandas widget.
+    """
+    import datetime as dt
+    import polars as pl
+    return pl.DataFrame({
+        'duration': pl.Series([100_000, 3_723_000_000, 86_400_000_000,
+                               500, 60_000_000], dtype=pl.Duration('us')),
+        'time': [dt.time(14, 30), dt.time(9, 15, 30),
+                 dt.time(0, 0, 1), dt.time(23, 59, 59), dt.time(12, 0)],
+        'categorical': pl.Series(['red', 'green', 'blue', 'red', 'green']).cast(pl.Categorical),
+        'decimal': pl.Series(['100.50', '200.75', '0.01',
+                              '99999.99', '3.14']).cast(pl.Decimal(10, 2)),
+        'binary': [b'hello', b'world', b'\x00\x01\x02', b'test', b'\xff\xfe'],
+        'int_col': [10, 20, 30, 40, 50],
+    })
+
+
+def pl_df_with_weird_types_as_pandas():
+    """Polars weird types converted to pandas for use with pandas-based widgets."""
+    return pl_df_with_weird_types().to_pandas()
+
+
 """
 Mkae a duplicate column dataframe
 

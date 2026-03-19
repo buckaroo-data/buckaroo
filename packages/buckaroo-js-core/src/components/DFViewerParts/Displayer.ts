@@ -172,6 +172,97 @@ export const getCompactNumberFormatter = () => {
     };
 };
 
+/**
+ * Format a duration string into a human-readable representation like "1d 2h 3m 4.5s".
+ * Accepts:
+ *   - ISO 8601: "P1DT2H3M4.5S"
+ *   - Pandas timedelta: "1 days 02:03:04", "0 days 00:30:00.500000"
+ */
+export const formatDuration = (raw: string): string => {
+    let days = 0, hours = 0, minutes = 0, seconds = 0;
+
+    // Try ISO 8601 first: P1DT2H3M4.5S
+    const iso = raw.match(
+        /^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/
+    );
+    if (iso) {
+        days = parseInt(iso[1] || "0", 10);
+        hours = parseInt(iso[2] || "0", 10);
+        minutes = parseInt(iso[3] || "0", 10);
+        seconds = parseFloat(iso[4] || "0");
+    } else {
+        // Try pandas timedelta: "N days HH:MM:SS" or "N days HH:MM:SS.ffffff"
+        const pd = raw.match(
+            /^(-?\d+)\s+days?\s+(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)$/
+        );
+        if (pd) {
+            days = Math.abs(parseInt(pd[1], 10));
+            hours = parseInt(pd[2], 10);
+            minutes = parseInt(pd[3], 10);
+            seconds = parseFloat(pd[4]);
+        } else {
+            return raw; // unrecognized format
+        }
+    }
+
+    if (days === 0 && hours === 0 && minutes === 0 && seconds === 0)
+        return "0s";
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (seconds > 0) {
+        if (seconds < 0.001) {
+            parts.push(`${Math.round(seconds * 1e6)}µs`);
+        } else if (seconds < 1) {
+            const ms = seconds * 1000;
+            parts.push(ms === Math.floor(ms) ? `${ms}ms` : `${ms.toFixed(1)}ms`);
+        } else {
+            parts.push(
+                seconds === Math.floor(seconds)
+                    ? `${seconds}s`
+                    : `${seconds.toFixed(3)}s`
+            );
+        }
+    }
+    return parts.join(" ");
+};
+
+/** @deprecated Use formatDuration instead */
+export const formatIsoDuration = formatDuration;
+
+export const getDurationFormatter = () => {
+    return (params: ValueFormatterParams): string => {
+        const val = params.value;
+        if (val === null || val === undefined) return "";
+        if (typeof val === "string") return formatDuration(val);
+        // If it's a number (milliseconds), format directly
+        if (typeof val === "number") {
+            const totalMs = Math.abs(val);
+            if (totalMs === 0) return "0s";
+            const sign = val < 0 ? "-" : "";
+            const days = Math.floor(totalMs / 86400000);
+            const hours = Math.floor((totalMs % 86400000) / 3600000);
+            const mins = Math.floor((totalMs % 3600000) / 60000);
+            const secs = (totalMs % 60000) / 1000;
+            const parts: string[] = [];
+            if (days > 0) parts.push(`${days}d`);
+            if (hours > 0) parts.push(`${hours}h`);
+            if (mins > 0) parts.push(`${mins}m`);
+            if (secs > 0) {
+                parts.push(
+                    secs === Math.floor(secs)
+                        ? `${secs}s`
+                        : `${secs.toFixed(3)}s`
+                );
+            }
+            return sign + parts.join(" ");
+        }
+        return String(val);
+    };
+};
+
 export const defaultDatetimeFormatter = (params: ValueFormatterParams): string => {
     const val = params.value;
     if (val === null || val === undefined) {
@@ -202,6 +293,8 @@ export function getFormatter(fArgs: FormatterArgs): ValueFormatterFunc<unknown> 
             return getObjectFormatter(fArgs);
         case "compact_number":
             return getCompactNumberFormatter();
+        case "duration":
+            return getDurationFormatter();
         default:
             return getStringFormatter({ displayer: "string" });
     }

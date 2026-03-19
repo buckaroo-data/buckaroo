@@ -76,7 +76,10 @@ class TypingStats(ColAnalysis):
 
     provides_defaults = {
         'dtype':'asdf', 'is_numeric':False, 'is_integer':False,
-        'is_datetime':False, 'is_bool':False, 'is_float':False, '_type':'asdf'}
+        'is_datetime':False, 'is_timedelta':False, 'is_bool':False,
+        'is_float':False, 'is_categorical':False, 'is_period':False,
+        'is_interval':False, 'is_time':False, 'is_decimal':False,
+        'is_binary':False, '_type':'asdf'}
 
     @staticmethod
     def series_summary(sampled_ser, ser):
@@ -85,9 +88,13 @@ class TypingStats(ColAnalysis):
             is_numeric=pd.api.types.is_numeric_dtype(ser),
             is_integer=pd.api.types.is_integer_dtype(ser),
             is_datetime=pd.api.types.is_datetime64_any_dtype(ser),
+            is_timedelta=pd.api.types.is_timedelta64_dtype(ser),
             is_bool=pd.api.types.is_bool_dtype(ser),
             is_float=pd.api.types.is_float_dtype(ser),
             is_string=pd.api.types.is_string_dtype(ser),
+            is_categorical=isinstance(ser.dtype, pd.CategoricalDtype),
+            is_period=isinstance(ser.dtype, pd.PeriodDtype),
+            is_interval=isinstance(ser.dtype, pd.IntervalDtype),
             memory_usage=ser.memory_usage())
 
     @staticmethod
@@ -100,9 +107,16 @@ class TypingStats(ColAnalysis):
                 _type = "float"
             else:
                 _type = "integer"
-        #elif pd.api.types.is_datetime64_any_dtype(ser):
+        elif summary_dict.get('is_timedelta'):
+            _type = 'duration'
         elif summary_dict['is_datetime']:
             _type = 'datetime'
+        elif summary_dict.get('is_categorical'):
+            _type = 'categorical'
+        elif summary_dict.get('is_period'):
+            _type = 'period'
+        elif summary_dict.get('is_interval'):
+            _type = 'interval'
         elif summary_dict['is_string']:
             _type = "string"
         return dict(_type=_type)

@@ -36,6 +36,10 @@ export interface CompactNumberDisplayerA {
     displayer: "compact_number";
 }
 
+export interface DurationDisplayerA {
+    displayer: "duration";
+}
+
 export interface InheritDisplayerA {
     displayer: "inherit";
 }
@@ -56,7 +60,8 @@ export type FormatterArgs =
     | DatetimeDefaultDisplayerA
     | DatetimeLocaleDisplayerA
     | IntegerDisplayerA
-    | CompactNumberDisplayerA;
+    | CompactNumberDisplayerA
+    | DurationDisplayerA;
 
 export interface HistogramDisplayerA {
     displayer: "histogram";
