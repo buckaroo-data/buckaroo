@@ -186,12 +186,17 @@ test.describe('Buckaroo Widget JupyterLab Integration', () => {
     await expect(ageCell).toBeVisible();
     await expect(scoreCell).toBeVisible();
 
-    // Summary stats histograms should render in pinned rows.
-    // The test notebook has numeric columns (age, score) that produce histogram bars.
-    const histograms = page.locator('.histogram-component');
-    await expect(histograms.first()).toBeVisible({ timeout: 10_000 });
-    expect(await histograms.count()).toBeGreaterThan(0);
-    console.log(`✅ Found ${await histograms.count()} histogram(s)`);
+    // Summary stats histograms render in pinned rows for full Buckaroo widgets,
+    // but not for DFViewer which skips the analysis pipeline.
+    const isDFViewer = notebookName.includes('dfviewer');
+    if (!isDFViewer) {
+      const histograms = page.locator('.histogram-component');
+      await expect(histograms.first()).toBeVisible({ timeout: 10_000 });
+      expect(await histograms.count()).toBeGreaterThan(0);
+      console.log(`✅ Found ${await histograms.count()} histogram(s)`);
+    } else {
+      console.log(`⏭️ Skipping histogram check for DFViewer notebook: ${notebookName}`);
+    }
 
     console.log(`🎉 SUCCESS: Widget from ${notebookName} rendered ag-grid with ${rowCount} rows, ${headerCount} columns, and ${cellCount} cells`);
     console.log('📊 Verified data: Alice (age 25, score 85.5)');
