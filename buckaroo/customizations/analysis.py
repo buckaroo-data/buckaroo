@@ -76,7 +76,10 @@ class TypingStats(ColAnalysis):
 
     provides_defaults = {
         'dtype':'asdf', 'is_numeric':False, 'is_integer':False,
-        'is_datetime':False, 'is_bool':False, 'is_float':False, '_type':'asdf'}
+        'is_datetime':False, 'is_timedelta':False, 'is_bool':False,
+        'is_float':False, 'is_categorical':False, 'is_period':False,
+        'is_interval':False, 'is_time':False, 'is_decimal':False,
+        'is_binary':False, '_type':'asdf'}
 
     @staticmethod
     def series_summary(sampled_ser, ser):

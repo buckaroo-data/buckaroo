@@ -158,10 +158,39 @@ class TestPolarsWeirdTypesWidget:
         cc = _get_column_configs(bw)
         assert len(cc) == 6
 
-    # NOTE: test_column_types_correct, test_displayers_correct, and
-    # test_histograms_present_for_non_decimal require pl_stats_v2 type
-    # detection (duration, time, categorical, etc.) which is not yet on main.
-    # Add those tests when the v2 Polars stats pipeline lands.
+    def test_column_types_correct(self):
+        bw = PolarsBuckarooWidget(pl_df_with_weird_types(), record_transcript=False)
+        sd = _get_merged_sd(bw)
+        types = {stats['_type'] for stats in sd.values()}
+        assert 'duration' in types
+        assert 'time' in types
+        assert 'categorical' in types
+        assert 'decimal' in types
+        assert 'binary' in types
+        assert 'integer' in types
+
+    def test_displayers_correct(self):
+        bw = PolarsBuckarooWidget(pl_df_with_weird_types(), record_transcript=False)
+        cc = _get_column_configs(bw)
+        displayers = {c['col_name']: c['displayer_args']['displayer'] for c in cc}
+        assert displayers['a'] == 'duration'
+        assert displayers['b'] == 'string'   # time
+        assert displayers['c'] == 'string'   # categorical
+        assert displayers['d'] == 'float'    # decimal
+        assert displayers['e'] == 'obj'      # binary
+        assert displayers['f'] == 'float'    # integer
+
+    def test_histograms_present_for_non_decimal(self):
+        """Decimal histogram errors, but all other columns should still have histograms."""
+        bw = PolarsBuckarooWidget(pl_df_with_weird_types(), record_transcript=False)
+        sd = _get_merged_sd(bw)
+        for col, stats in sd.items():
+            if stats['_type'] == 'decimal':
+                continue  # Decimal histogram is expected to fail
+            h = stats.get('histogram')
+            assert h is not None and len(h) > 0, (
+                f"Column {col} ({stats['_type']}) missing histogram"
+            )
 
     def test_df_data_dict_has_main_and_all_stats(self):
         """Regression: df_data_dict only had ['empty'] when stats errored."""
