@@ -62,16 +62,61 @@ From `time` output on first run: `real 14.5s, user 2.6s, sys 0.5s`.
 5. Results are cached per-inode — subsequent loads are instant
 6. A fresh install creates new inodes, resetting the cache
 
+## Related Issues & Prior Art
+
+### Two overlapping problems in uv
+
+1. **Bytecode compilation** — uv doesn't compile `.pyc` files by default
+   (unlike pip). This accounts for ~1.3s of first-run overhead. Fix:
+   `uv pip install --compile-bytecode`.
+   - [uv #9666](https://github.com/astral-sh/uv/issues/9666) — first
+     `import pandas` ~19.7s vs ~0.4s, attributed to missing bytecache.
+   - [uv #12904](https://github.com/astral-sh/uv/issues/12904) — even with
+     `--compile-bytecode`, first run still slow, suggesting additional overhead.
+
+2. **macOS Gatekeeper / code signing** — unsigned binaries from
+   python-build-standalone get rejected or scanned by syspolicyd.
+   - [uv #16726](https://github.com/astral-sh/uv/issues/16726) — SIGKILL on
+     first execution due to `com.apple.provenance` xattr + adhoc signing.
+   - [uv #16003](https://github.com/astral-sh/uv/issues/16003) — same issue,
+     workaround: `codesign --force -s - <binary>`.
+   - [uv PR #18280](https://github.com/astral-sh/uv/pull/18280) — proper
+     Apple Developer ID signing of release binaries (in progress).
+
+### macOS syspolicyd scanning behavior
+
+- syspolicyd uses YARA rules to scan executables and linked libraries on
+  first launch ([lapcatsoftware.com, 2024](https://lapcatsoftware.com/articles/2024/2/3.html)).
+- Results cached per-inode; new files (fresh install) reset the cache.
+- `spctl --master-disable` does NOT help — syspolicyd still performs checks.
+- Adding your terminal to Developer Tools in System Settings bypasses the
+  checks ([HN discussion](https://news.ycombinator.com/item?id=23273247)).
+
+### What's novel in our findings
+
+No existing issue documents syspolicyd scanning individual `.so` extension
+modules within Python site-packages at `dlopen()` time. The known scanning
+behavior targets executables and their statically-linked libraries. Our
+syspolicyd log capture (~3,300 entries during first import) is direct evidence
+that `dlopen()` of `.so` files in site-packages also triggers the scan.
+
 ## Practical Implications
 
 - **Not a buckaroo bug.** Any Python environment with native extensions
   (polars, numpy, pandas, etc.) will have this on macOS.
 - **One-time cost.** Only happens once per install, not per kernel restart.
 - **Linux unaffected.** No Gatekeeper on Linux — CI/servers won't see this.
-- **Mitigation**: Run a throwaway `python -c "import polars, buckaroo"` after
-  install to pre-warm the syspolicyd cache before opening JupyterLab.
+
+### Workarounds
+
+| Workaround | Effect |
+|---|---|
+| Add terminal to Developer Tools (System Settings > Privacy & Security) | Bypasses syspolicyd checks entirely. **Best option for developers.** |
+| `uv pip install --compile-bytecode` | Eliminates ~1.3s pyc compilation overhead (not the ~12s syspolicyd part) |
+| `python -c "import polars, buckaroo"` after install | Pre-warms syspolicyd cache before opening JupyterLab |
+| `codesign --force -s - <binary>` | Fixes SIGKILL; must be done per-binary after every install |
 
 ## Test Script
 
-`scripts/test_pyc_impact.sh` — creates a fresh venv, installs packages,
+`scripts/test_syspolicyd.sh` — creates a fresh venv, installs packages,
 times imports while monitoring syspolicyd, and prints a summary.
