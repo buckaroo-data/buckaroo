@@ -54,13 +54,38 @@ From `time` output on first run: `real 14.5s, user 2.6s, sys 0.5s`.
 
 ## Why It Happens
 
-1. `uv pip install` writes `.so` files with new inodes
+1. `uv pip install` writes `.so` files — by default as APFS clones (new inodes)
 2. Python imports trigger `dlopen()` on native extensions
 3. macOS syspolicyd intercepts each `dlopen()` of an unseen inode
 4. Since pip packages aren't code-signed, syspolicyd logs `errSecCSUnsigned`
    and performs full assessment
 5. Results are cached per-inode — subsequent loads are instant
 6. A fresh install creates new inodes, resetting the cache
+
+### The uv link-mode factor
+
+uv supports four `--link-mode` values: `clone` (default), `copy`, `hardlink`,
+`symlink`. On macOS APFS, the default `clone` uses `clonefile()` — this shares
+underlying storage blocks but **creates a new inode** for each file. Since
+syspolicyd caches per-inode, every reinstall with clone mode triggers a full
+rescan of all `.so` files.
+
+**Hardlink mode preserves inodes.** With `--link-mode hardlink`, the venv's
+`.so` files are hardlinks to uv's global cache. Deleting and recreating the
+venv reuses the same cache entry and the same inodes — so syspolicyd sees them
+as already scanned.
+
+Verified experimentally:
+
+```
+Link mode   Reinstall inode matches original?   syspolicyd rescan?
+clone       NO  (new inode each time)            YES — full scan every install
+hardlink    YES (same inode as cache)             NO — cached as already scanned
+```
+
+This means `UV_LINK_MODE=hardlink` (or `--link-mode hardlink`) eliminates the
+~12s syspolicyd overhead on all reinstalls after the first, as long as the uv
+cache is warm.
 
 ## Related Issues & Prior Art
 
@@ -111,12 +136,16 @@ that `dlopen()` of `.so` files in site-packages also triggers the scan.
 
 | Workaround | Effect |
 |---|---|
-| Add terminal to Developer Tools (System Settings > Privacy & Security) | Bypasses syspolicyd checks entirely. **Best option for developers.** |
+| `UV_LINK_MODE=hardlink` or `--link-mode hardlink` | Preserves inodes across reinstalls — syspolicyd only scans once. **Best option for uv users.** |
+| Add terminal to Developer Tools (System Settings > Privacy & Security) | Bypasses syspolicyd checks entirely. Best option if you can change system settings. |
 | `uv pip install --compile-bytecode` | Eliminates ~1.3s pyc compilation overhead (not the ~12s syspolicyd part) |
 | `python -c "import polars, buckaroo"` after install | Pre-warms syspolicyd cache before opening JupyterLab |
 | `codesign --force -s - <binary>` | Fixes SIGKILL; must be done per-binary after every install |
 
-## Test Script
+## Test Scripts
 
-`scripts/test_syspolicyd.sh` — creates a fresh venv, installs packages,
-times imports while monitoring syspolicyd, and prints a summary.
+- `scripts/test_syspolicyd.sh` — creates a fresh venv, installs packages,
+  times imports while monitoring syspolicyd, and prints a summary.
+- `scripts/test_hardlink_vs_clone.sh` — compares clone (default) vs hardlink
+  link modes across reinstalls, tracking inodes and syspolicyd activity to
+  verify that hardlink mode avoids rescans.
