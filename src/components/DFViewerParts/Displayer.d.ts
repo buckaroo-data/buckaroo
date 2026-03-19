@@ -12,10 +12,14 @@ export declare const getFloatFormatter: (hint: FloatDisplayerA) => (params: Valu
 export declare const getDatetimeFormatter: (colHint: DatetimeLocaleDisplayerA) => (params: ValueFormatterParams) => string;
 export declare const getCompactNumberFormatter: () => (params: ValueFormatterParams) => string;
 /**
- * Format an ISO 8601 duration string (e.g. "P1DT2H3M4.5S") into a
- * human-readable representation like "1d 2h 3m 4.5s".
+ * Format a duration string into a human-readable representation like "1d 2h 3m 4.5s".
+ * Accepts:
+ *   - ISO 8601: "P1DT2H3M4.5S"
+ *   - Pandas timedelta: "1 days 02:03:04", "0 days 00:30:00.500000"
  */
-export declare const formatIsoDuration: (iso: string) => string;
+export declare const formatDuration: (raw: string) => string;
+/** @deprecated Use formatDuration instead */
+export declare const formatIsoDuration: (raw: string) => string;
 export declare const getDurationFormatter: () => (params: ValueFormatterParams) => string;
 export declare const defaultDatetimeFormatter: (params: ValueFormatterParams) => string;
 export declare function getFormatter(fArgs: FormatterArgs): ValueFormatterFunc<unknown>;
