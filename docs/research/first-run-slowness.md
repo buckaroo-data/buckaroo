@@ -5,102 +5,73 @@
 When running buckaroo in JupyterLab, the first cell execution after a fresh
 install takes 5–15 seconds. Killing the kernel and re-executing takes <1s.
 
-## Test Setup
+## Root Cause: macOS Gatekeeper / syspolicyd
 
-Script: `scripts/test_pyc_impact.sh`
+**Confirmed.** macOS scans every unsigned `.so`/`.dylib` the first time it's
+loaded via `dlopen()`. The scan is performed by `syspolicyd` and the result is
+cached per-inode. This is a macOS platform behavior, not a buckaroo bug.
 
-Imports `jupyterlab`, `buckaroo`, and `polars` under controlled conditions,
-varying whether pyc files exist, whether the OS filesystem cache is warm,
-and whether the venv is freshly installed.
+### Proof
 
-## Results
+Monitoring `syspolicyd` during import runs:
 
 ```
-Run 1: cold fs + no pyc (first ever)                  14.39s
-Run 2: warm fs + pyc                                   1.11s
-Run 3: warm fs + no pyc (pyc deleted)                  2.43s
-Run 4: warm fs + pyc (confirmation)                    0.97s
-Run 5: purged fs + no pyc                              2.99s
-Run 6: warm fs + pyc (confirmation)                    0.97s
-cat prime: read all files into fs cache                1.54s
-Run 7: fresh venv, cat-primed fs + no pyc             13.75s
-Run 8: warm fs + pyc (confirmation)                    0.97s
+Run A: fresh install, first execution                      16.19s   (3307 syspolicyd log lines)
+Run B: second execution (warm baseline)                     0.98s   (1 syspolicyd log line)
+Run C: fresh install again (confirmation)                  14.99s   (3306 syspolicyd log lines)
 ```
 
-Non-pyc file count was **identical** (12,138) across all steps. No extra
-files are being created on first run. Venv size: 522M without pyc, 552M with.
+The slow runs produce ~3,300 syspolicyd log entries. The fast run produces 1.
+The logs contain `errSecCSUnsigned` (`-67062`) — the native extensions from
+pip packages are not code-signed, so syspolicyd performs a full assessment
+on each one.
 
-## Hypotheses Eliminated
+## How We Got Here
 
-### 1. PYC file creation — NOT the primary cause
+### Hypotheses eliminated
 
-- Run 3 (warm fs, no pyc) = 2.43s vs Run 2 (warm fs, pyc) = 1.11s
-- PYC creation adds ~1.3s, not ~13s
-- Confirms pyc is a minor factor
+| Hypothesis | Test | Result |
+|---|---|---|
+| PYC file creation | Delete pyc, re-run (warm cache) | 2.4s, not 14s. PYC adds ~1.3s |
+| OS filesystem cache | Purge cache, re-run same venv | 3s, not 14s. Cache irrelevant |
+| Hidden file creation | Diff non-pyc file listings | 12,138 files at every step, identical |
+| Filesystem cache (primed) | Fresh venv, cat all files, then run | 13.75s — still slow |
 
-### 2. OS filesystem cache — NOT the cause
+### Key observation
 
-- **Run 5 (purged fs cache + no pyc) = 2.99s** — If cold fs cache caused the
-  14s, this should also be ~14s. It's 3s.
-- **Run 7 (fresh venv + cat-primed fs cache) = 13.75s** — If fs cache was the
-  cause, pre-reading all files should fix it. It didn't.
-- The fs cache is irrelevant to the 14s penalty.
+The critical test was comparing two runs with identical file contents:
 
-### 3. Extra file creation on first run — NOT the cause
+- **Same venv** (executed before), pyc deleted, fs cache purged → **3s**
+- **Fresh venv** (never executed), fs cache primed with cat → **14s**
 
-- Non-pyc file count is exactly 12,138 at every step
-- No hidden files, caches, or configs are being generated
+Same files, same cache state — but one had been `dlopen()`'d before
+(syspolicyd cache warm) and one hadn't.
 
-## What the Data Shows
+### Wall time vs CPU time
 
-The slowness is **specific to the first Python process in a freshly-installed
-venv**. Key observations:
+From `time` output on first run: `real 14.5s, user 2.6s, sys 0.5s`.
+~11 seconds blocked waiting on syspolicyd, not doing CPU work.
 
-| Condition | Time | Notes |
-|-----------|------|-------|
-| Fresh install, first run | ~14s | Always slow |
-| Same venv, purged fs cache, no pyc | ~3s | Fast! Same files, different venv "age" |
-| Fresh install, cat-primed cache | ~14s | Still slow despite warm cache |
-| Any subsequent run | ~1s | Fast once "broken in" |
+## Why It Happens
 
-The critical difference is between Run 5 and Run 7:
-- **Run 5**: Same venv (already executed once), pyc deleted, fs cache purged → 3s
-- **Run 7**: Fresh venv (never executed), fs cache primed → 14s
-- Same file contents, same file count — but one has been executed before.
-
-From the original `time` output (Run 1): `real 14.5s, user 2.6s, sys 0.5s`.
-~11 seconds are unaccounted for — the process is **blocked waiting on
-something external**, not doing CPU work.
-
-## Leading Theory: macOS Code Signing / Gatekeeper Scanning
-
-macOS scans new executable code (`.so`, `.dylib` files) the first time they're
-loaded via `dlopen()`. This scan is performed by XProtect/Gatekeeper and the
-result is cached per-inode. This fits every observation:
-
-- **Fresh install → slow**: New `.so` files have never been scanned. macOS
-  scans each one on first `dlopen()`. Polars alone has large native libraries.
-- **Same venv after purge → fast**: The `.so` inodes haven't changed. macOS
-  remembers they were already scanned.
-- **Cat priming doesn't help**: `cat` reads file contents but doesn't trigger
-  `dlopen()`, so macOS doesn't scan them as executable code.
-- **~11s wall time with only ~3s CPU**: Process is blocked waiting on the
-  security daemon, not doing computation.
-- **Fresh venv = new inodes**: Even with identical content, `uv pip install`
-  creates new files with new inodes, so macOS treats them as unseen.
-
-## Next Steps to Confirm
-
-1. **Count `.so`/`.dylib` files in the venv** and estimate scan overhead
-2. **Test with `PYTHONDONTWRITEBYTECODE=1`** to isolate pyc from the equation
-3. **Monitor `syspolicyd`** during first run: `log stream --predicate 'process == "syspolicyd"'`
-4. **Test with SIP assessment disabled** (if possible in test env): `spctl --master-disable`
-5. **Pre-import just polars** (largest native dep) to see if it accounts for most of the 14s
-6. **Try `python -B -S -c "import polars"`** to skip site.py and pyc, isolating native load time
+1. `uv pip install` writes `.so` files with new inodes
+2. Python imports trigger `dlopen()` on native extensions
+3. macOS syspolicyd intercepts each `dlopen()` of an unseen inode
+4. Since pip packages aren't code-signed, syspolicyd logs `errSecCSUnsigned`
+   and performs full assessment
+5. Results are cached per-inode — subsequent loads are instant
+6. A fresh install creates new inodes, resetting the cache
 
 ## Practical Implications
 
-If confirmed, this is a macOS platform issue, not a buckaroo bug. Mitigations:
-- Users only pay this cost once per install (not per kernel restart)
-- Pre-warming: run a throwaway `python -c "import polars, buckaroo"` after install
-- This may not affect Linux CI/servers at all (no Gatekeeper)
+- **Not a buckaroo bug.** Any Python environment with native extensions
+  (polars, numpy, pandas, etc.) will have this on macOS.
+- **One-time cost.** Only happens once per install, not per kernel restart.
+- **Linux unaffected.** No Gatekeeper on Linux — CI/servers won't see this.
+- **Mitigation**: Run a throwaway `python -c "import polars, buckaroo"` after
+  install to pre-warm the syspolicyd cache before opening JupyterLab.
+
+## Test Script
+
+`scripts/test_pyc_impact.sh` — creates a fresh venv, installs packages,
+times imports while monitoring syspolicyd, and prints a summary.
