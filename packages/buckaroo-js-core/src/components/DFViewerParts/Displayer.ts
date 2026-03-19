@@ -173,19 +173,37 @@ export const getCompactNumberFormatter = () => {
 };
 
 /**
- * Format an ISO 8601 duration string (e.g. "P1DT2H3M4.5S") into a
- * human-readable representation like "1d 2h 3m 4.5s".
+ * Format a duration string into a human-readable representation like "1d 2h 3m 4.5s".
+ * Accepts:
+ *   - ISO 8601: "P1DT2H3M4.5S"
+ *   - Pandas timedelta: "1 days 02:03:04", "0 days 00:30:00.500000"
  */
-export const formatIsoDuration = (iso: string): string => {
-    const m = iso.match(
+export const formatDuration = (raw: string): string => {
+    let days = 0, hours = 0, minutes = 0, seconds = 0;
+
+    // Try ISO 8601 first: P1DT2H3M4.5S
+    const iso = raw.match(
         /^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/
     );
-    if (!m) return iso; // fallback to raw string
-
-    const days = parseInt(m[1] || "0", 10);
-    const hours = parseInt(m[2] || "0", 10);
-    const minutes = parseInt(m[3] || "0", 10);
-    const seconds = parseFloat(m[4] || "0");
+    if (iso) {
+        days = parseInt(iso[1] || "0", 10);
+        hours = parseInt(iso[2] || "0", 10);
+        minutes = parseInt(iso[3] || "0", 10);
+        seconds = parseFloat(iso[4] || "0");
+    } else {
+        // Try pandas timedelta: "N days HH:MM:SS" or "N days HH:MM:SS.ffffff"
+        const pd = raw.match(
+            /^(-?\d+)\s+days?\s+(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)$/
+        );
+        if (pd) {
+            days = Math.abs(parseInt(pd[1], 10));
+            hours = parseInt(pd[2], 10);
+            minutes = parseInt(pd[3], 10);
+            seconds = parseFloat(pd[4]);
+        } else {
+            return raw; // unrecognized format
+        }
+    }
 
     if (days === 0 && hours === 0 && minutes === 0 && seconds === 0)
         return "0s";
@@ -204,18 +222,21 @@ export const formatIsoDuration = (iso: string): string => {
             parts.push(
                 seconds === Math.floor(seconds)
                     ? `${seconds}s`
-                    : `${seconds}s`
+                    : `${seconds.toFixed(3)}s`
             );
         }
     }
     return parts.join(" ");
 };
 
+/** @deprecated Use formatDuration instead */
+export const formatIsoDuration = formatDuration;
+
 export const getDurationFormatter = () => {
     return (params: ValueFormatterParams): string => {
         const val = params.value;
         if (val === null || val === undefined) return "";
-        if (typeof val === "string") return formatIsoDuration(val);
+        if (typeof val === "string") return formatDuration(val);
         // If it's a number (milliseconds), format directly
         if (typeof val === "number") {
             const totalMs = Math.abs(val);

@@ -13,7 +13,7 @@ import {
 } from './gridUtils';
 import * as _ from "lodash-es";
 import { DFData, DFViewerConfig, NormalColumnConfig, MultiIndexColumnConfig, PinnedRowConfig, ColumnConfig } from "./DFWhole";
-import { getFloatFormatter, getCompactNumberFormatter, formatIsoDuration, getDurationFormatter } from './Displayer';
+import { getFloatFormatter, getCompactNumberFormatter, formatDuration, formatIsoDuration, getDurationFormatter } from './Displayer';
 import { ColDef, ValueFormatterParams } from 'ag-grid-community';
 
 describe("testing utility functions in gridUtils ", () => {
@@ -51,9 +51,21 @@ describe("testing utility functions in gridUtils ", () => {
     expect(formatIsoDuration("not-a-duration")).toBe("not-a-duration");
   });
 
+  it("should format pandas timedelta strings", () => {
+    expect(formatDuration("1 days 02:03:04")).toBe("1d 2h 3m 4s");
+    expect(formatDuration("0 days 00:30:00")).toBe("30m");
+    expect(formatDuration("5 days 00:00:00")).toBe("5d");
+    expect(formatDuration("0 days 00:00:01")).toBe("1s");
+    expect(formatDuration("0 days 01:02:03")).toBe("1h 2m 3s");
+    expect(formatDuration("0 days 00:00:00.500000")).toBe("500ms");
+    expect(formatDuration("0 days 00:00:00.000100")).toBe("100µs");
+    expect(formatDuration("0 days 00:00:00")).toBe("0s");
+  });
+
   it("should format durations via getDurationFormatter", () => {
     const formatter = getDurationFormatter();
     expect(formatter({'value': "P1DT2H3M4S"} as ValueFormatterParams)).toBe("1d 2h 3m 4s");
+    expect(formatter({'value': "1 days 02:03:04"} as ValueFormatterParams)).toBe("1d 2h 3m 4s");
     expect(formatter({'value': null} as ValueFormatterParams)).toBe("");
     expect(formatter({'value': undefined} as ValueFormatterParams)).toBe("");
   });
