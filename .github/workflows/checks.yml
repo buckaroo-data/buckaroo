@@ -62,6 +62,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -80,15 +82,14 @@ jobs:
       - name: Install pnpm dependencies
         working-directory: packages
         run: pnpm install --frozen-lockfile
-      - name: Install the project
-        run: uv sync --all-extras --dev
       - name: Patch version for TestPyPI
         if: github.event_name == 'pull_request'
         run: |
-          BASE=$(grep -Po '^version = "\K[^"]+' pyproject.toml)
-          DEV="${BASE}.dev${{ github.run_id }}"
-          sed -i "s/^version = \".*\"/version = \"${DEV}\"/" pyproject.toml
-          echo "Published version: ${DEV}"
+          BASE=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          echo "SETUPTOOLS_SCM_PRETEND_VERSION=${BASE}.dev${{ github.run_id }}" >> "$GITHUB_ENV"
+          echo "Published version: ${BASE}.dev${{ github.run_id }}"
+      - name: Install the project
+        run: uv sync --all-extras --dev
       - name: Build JS extension + Python wheel
         run: ./scripts/full_build.sh
       - name: Upload build artifacts

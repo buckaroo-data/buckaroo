@@ -64,17 +64,19 @@ jobs:
           # `|| true` prevents pipefail exit when no tags match the pattern.
           LATEST_TAG=$(git tag --sort=-creatordate | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
           if [ -z "$LATEST_TAG" ]; then
-            CURRENT=$(grep -Po '^version = "\K[^"]+' pyproject.toml)
-            echo "No semver tags found; falling back to pyproject.toml: $CURRENT"
+            CURRENT="0.0.0"
+            echo "No semver tags found; starting from $CURRENT"
           else
             # If the latest tag has no GitHub release, a prior run failed
             # after tagging. Retry that version instead of bumping again.
             if ! gh release view "$LATEST_TAG" &>/dev/null; then
               PREV_TAG=$(git tag --sort=-creatordate | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p' || true)
               echo "::warning::Tag $LATEST_TAG exists without a release — retrying incomplete release."
-              echo "new=$LATEST_TAG" >> "$GITHUB_OUTPUT"
-              echo "prev_tag=${PREV_TAG:-$LATEST_TAG}" >> "$GITHUB_OUTPUT"
-              echo "retry=true" >> "$GITHUB_OUTPUT"
+              {
+                echo "new=$LATEST_TAG"
+                echo "prev_tag=${PREV_TAG:-$LATEST_TAG}"
+                echo "retry=true"
+              } >> "$GITHUB_OUTPUT"
               exit 0
             fi
             CURRENT="$LATEST_TAG"
@@ -91,9 +93,11 @@ jobs:
             echo "::error::Tag $NEW already exists — this release may have already run. Aborting."
             exit 1
           fi
-          echo "new=$NEW" >> "$GITHUB_OUTPUT"
-          echo "prev_tag=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "retry=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "new=$NEW"
+            echo "prev_tag=$CURRENT"
+            echo "retry=false"
+          } >> "$GITHUB_OUTPUT"
           echo "Bumping $CURRENT → $NEW (${{ inputs.bump }})"
 
       - name: Generate release notes
@@ -106,18 +110,11 @@ jobs:
             --date "$(date +%Y-%m-%d)" \
             --output-dir /tmp
 
-      - name: Bump version, commit, tag, and push
+      - name: Tag and push
         run: |
-          sed -i 's/^version = ".*"/version = "${{ steps.versions.outputs.new }}"/' pyproject.toml
           if [ "${{ steps.versions.outputs.retry }}" = "true" ]; then
             echo "Retry mode — tag ${{ steps.versions.outputs.new }} already exists, skipping."
           else
-            # Commit the version bump so the tag points to correct source.
-            # Only the tag is pushed — not the branch (branch protection).
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add pyproject.toml
-            git commit -m "chore: release ${{ steps.versions.outputs.new }}"
             git tag "${{ steps.versions.outputs.new }}"
             git push origin "${{ steps.versions.outputs.new }}"
           fi
