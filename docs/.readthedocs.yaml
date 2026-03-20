@@ -29,11 +29,11 @@ build:
         - uv venv
         - pnpm -C packages/buckaroo-js-core run build
         - pnpm -C packages/js run build:static
+        - touch buckaroo/static/compiled.css buckaroo/static/widget.js buckaroo/static/widget.css
         - uv run sphinx-build -T -b html docs/source  $READTHEDOCS_OUTPUT/html
         - ./scripts/marimo_wasm_output.sh buckaroo_ddd_tour.py run
         - ./scripts/marimo_wasm_output.sh buckaroo_compare.py edit
         - ./scripts/marimo_wasm_output.sh full_tour.py edit
-        - touch buckaroo/static/compiled.css buckaroo/static/widget.js buckaroo/static/widget.css buckaroo/static/static-embed.js buckaroo/static/static-embed.css buckaroo/static/standalone.css
         - uv run python scripts/generate_ddd_static_html.py
         - pnpm -C packages/buckaroo-js-core run build-storybook
         - cp -r packages/buckaroo-js-core/dist/storybook docs/extra-html/
