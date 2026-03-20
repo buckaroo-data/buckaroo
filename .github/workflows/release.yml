@@ -113,11 +113,14 @@ jobs:
       - name: Tag and push
         run: |
           if [ "${{ steps.versions.outputs.retry }}" = "true" ]; then
-            echo "Retry mode — tag ${{ steps.versions.outputs.new }} already exists, skipping."
+            echo "Retry mode — tag ${{ steps.versions.outputs.new }} already exists, checking out tagged commit."
+            git checkout "${{ steps.versions.outputs.new }}"
           else
             git tag "${{ steps.versions.outputs.new }}"
             git push origin "${{ steps.versions.outputs.new }}"
           fi
+          # Pin hatch-vcs to the exact release version for the build step
+          echo "SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.versions.outputs.new }}" >> "$GITHUB_ENV"
 
       - name: Create GitHub release
         env:
