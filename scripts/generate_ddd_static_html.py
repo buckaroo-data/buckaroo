@@ -10,18 +10,21 @@ import os
 # Ensure the repo root is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+import pandas as pd
+import numpy as np
 from buckaroo.artifact import to_html
 from buckaroo.ddd_library import (
     df_with_infinity,
     df_with_really_big_number,
     df_with_col_named_index,
     get_df_with_named_index,
+    get_multiindex_cols_df,
     get_multiindex_with_names_cols_df,
     get_multiindex_index_df,
     get_multiindex3_index_df,
     get_multiindex_with_names_both,
     df_with_weird_types,
-    pl_df_with_weird_types,
+    pl_df_with_weird_types_as_pandas,
 )
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'extra-html', 'ddd')
@@ -65,15 +68,15 @@ DDD_ENTRIES = [
      df_with_weird_types(),
      'Categorical, timedelta, period, and interval dtypes.'),
 
-    ('weird-types-polars', 'Weird Types (Polars)',
-     pl_df_with_weird_types(),
-     'Duration, time, categorical, decimal, and binary dtypes — native polars DataFrame.'),
+    ('weird-types-polars', 'Weird Types (Polars → Pandas)',
+     pl_df_with_weird_types_as_pandas(),
+     'Duration, time, categorical, decimal, and binary dtypes from polars.'),
 ]
 
 
 def generate_embed(filename, title, df, description):
     """Generate a single static embed HTML file."""
-    html = to_html(df, title=title, embed_type="Buckaroo")
+    html = to_html(df, title=title, embed_type="DFViewer")
     path = os.path.join(OUT_DIR, f'{filename}.html')
     with open(path, 'w') as f:
         f.write(html)
