@@ -61,20 +61,20 @@ includes React, AG-Grid, hyparquet, recharts (for histograms), and lodash-es.
 
 How does this compare to the data industry?
 
-======================== ==================
-Site                     Total page weight
-======================== ==================
-MongoDB                  11.5 MB
-Confluent                10.7 MB
-Snowflake                8.4 MB
-Elastic                  6.1 MB
-dbt Labs                 5.0 MB
-Fivetran                 3.4 MB
-Datadog                  2.3 MB
-Palantir                 2.0 MB
-Databricks               1.6 MB
-**Buckaroo static embed** **~1.3 MB + data**
-======================== ==================
+========================== ==================
+Site                       Total page weight
+========================== ==================
+MongoDB                    11.5 MB
+Confluent                  10.7 MB
+Snowflake                  8.4 MB
+Elastic                    6.1 MB
+dbt Labs                   5.0 MB
+Fivetran                   3.4 MB
+Datadog                    2.3 MB
+Palantir                   2.0 MB
+Databricks                 1.6 MB
+**Buckaroo static embed**  **~1.3 MB + data**
+========================== ==================
 
 Confluent ships 9.2 MB of JavaScript to show you a marketing page. MongoDB
 loads a 1.7 MB Optimizely tracking script before you see a single word of
