@@ -668,6 +668,47 @@ jobs:
           uv run pytest --check-links docs/source/*.rst || uv run pytest --check-links --lf docs/source/*.rst
           uv run pytest --check-links docs/example-notebooks/*.ipynb || uv run pytest --check-links --lf docs/example-notebooks/*.ipynb
           uv run sphinx-build -T -b html docs/source docs/build
+      - name: Comment on PR with docs preview link
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const pr = context.issue.number;
+            const rtdSlug = 'buckaroo-data';
+            const body = [
+              '## :book: Docs preview',
+              '',
+              `https://${rtdSlug}.readthedocs.io/en/${pr}/`,
+              '',
+              'Key pages on this branch:',
+              `- [Dastardly DataFrame Dataset](https://${rtdSlug}.readthedocs.io/en/${pr}/articles/dastardly-dataframe-dataset.html)`,
+              `- [Static Embedding](https://${rtdSlug}.readthedocs.io/en/${pr}/articles/static-embedding.html)`,
+              `- [Embedding Guide](https://${rtdSlug}.readthedocs.io/en/${pr}/articles/embedding-guide.html)`,
+              `- [BuckarooCompare](https://${rtdSlug}.readthedocs.io/en/${pr}/articles/buckaroo-compare.html)`,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr,
+            });
+            const marker = '## :book: Docs preview';
+            const existing = comments.find(c => c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr,
+                body,
+              });
+            }
 
   # ---------------------------------------------------------------------------
   # JupyterLab integration tests
