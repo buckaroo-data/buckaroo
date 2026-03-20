@@ -73,7 +73,7 @@ DDD_ENTRIES = [
 
 def generate_embed(filename, title, df, description):
     """Generate a single static embed HTML file."""
-    html = to_html(df, title=title, embed_type="DFViewer")
+    html = to_html(df, title=title, embed_type="Buckaroo")
     path = os.path.join(OUT_DIR, f'{filename}.html')
     with open(path, 'w') as f:
         f.write(html)
