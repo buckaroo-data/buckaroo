@@ -175,6 +175,58 @@ class TestToHtml:
         assert 'parquet_b64' in html
 
 
+class TestWeirdTypesParquetRoundtrip:
+    """Parquet b64 encoding must produce standard types that hyparquet can decode.
+
+    Period, Interval, and Timedelta are pandas-specific Arrow extension types
+    that hyparquet (the JS parquet reader) doesn't understand. They must be
+    coerced to strings before parquet serialization.
+    """
+
+    def test_period_coerced_to_string(self):
+        df = pd.DataFrame({
+            'period': pd.Series(pd.period_range('2021-01', periods=3, freq='M')),
+        })
+        result = _df_to_parquet_b64_tagged(df)
+        decoded = _decode_parquet_b64(result)
+        # Column 'a' (renamed from 'period') should be string, not PeriodDtype
+        assert not isinstance(decoded['a'].dtype, pd.PeriodDtype), \
+            f"period column was not coerced: dtype={decoded['a'].dtype}"
+
+    def test_interval_coerced_to_string(self):
+        df = pd.DataFrame({
+            'interval': pd.Series(
+                pd.arrays.IntervalArray.from_breaks([0, 1, 2, 3])),
+        })
+        result = _df_to_parquet_b64_tagged(df)
+        decoded = _decode_parquet_b64(result)
+        assert not isinstance(decoded['a'].dtype, pd.IntervalDtype), \
+            f"interval column was not coerced: dtype={decoded['a'].dtype}"
+
+    def test_timedelta_coerced_to_string(self):
+        df = pd.DataFrame({
+            'td': pd.to_timedelta(['1 days', '2 days', '3 days']),
+        })
+        result = _df_to_parquet_b64_tagged(df)
+        decoded = _decode_parquet_b64(result)
+        # Should not be timedelta64 — hyparquet reads duration[ns] as raw ints
+        assert not pd.api.types.is_timedelta64_dtype(decoded['a'].dtype), \
+            f"timedelta column was not coerced: dtype={decoded['a'].dtype}"
+
+    def test_weird_types_df_full_roundtrip(self):
+        """The full DDD weird types DataFrame should serialize without extension types."""
+        from buckaroo.ddd_library import df_with_weird_types
+        df = df_with_weird_types()
+        artifact = prepare_buckaroo_artifact(df, embed_type='Buckaroo')
+        decoded = _decode_parquet_b64(artifact['df_data'])
+        for col in decoded.columns:
+            dtype = decoded[col].dtype
+            assert not isinstance(dtype, (pd.PeriodDtype, pd.IntervalDtype)), \
+                f"column {col} has non-standard dtype: {dtype}"
+            assert not pd.api.types.is_timedelta64_dtype(dtype), \
+                f"column {col} has timedelta dtype: {dtype}"
+
+
 class TestPolarsSupport:
     def test_polars_dataframe(self):
         pl = pytest.importorskip("polars")
