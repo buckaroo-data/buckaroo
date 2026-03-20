@@ -405,6 +405,7 @@ Try it yourself
 Or in a Jupyter notebook, just::
 
     import buckaroo
+    from buckaroo.ddd_library import df_with_weird_types
     df_with_weird_types()  # renders inline
 
 The Dastardly DataFrame Dataset is also available as an interactive tour
