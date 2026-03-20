@@ -10,15 +10,12 @@ import os
 # Ensure the repo root is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-import pandas as pd
-import numpy as np
 from buckaroo.artifact import to_html
 from buckaroo.ddd_library import (
     df_with_infinity,
     df_with_really_big_number,
     df_with_col_named_index,
     get_df_with_named_index,
-    get_multiindex_cols_df,
     get_multiindex_with_names_cols_df,
     get_multiindex_index_df,
     get_multiindex3_index_df,
