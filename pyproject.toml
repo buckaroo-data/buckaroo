@@ -127,7 +127,7 @@ fallback-version = "0.0.0+unknown"
 
 [tool.hatch.build]
 only-packages = true
-artifacts = ["buckaroo/static/*.js", "buckaroo/static/*.css", "scripts/hatch_build.py"]
+artifacts = ["buckaroo/static/widget.js", "buckaroo/static/compiled.css", "buckaroo/static/standalone.js", "buckaroo/static/standalone.css", "buckaroo/static/static-embed.js", "buckaroo/static/static-embed.css", "scripts/hatch_build.py"]
 
 [tool.hatch.build.force-include]
 "buckaroo_mcp_tool.py" = "buckaroo_mcp_tool.py"

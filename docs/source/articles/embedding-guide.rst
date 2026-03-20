@@ -74,8 +74,13 @@ Generate a static embed
         f.write(html)
 
 The HTML file references ``static-embed.js`` and ``static-embed.css``.
-These are included in the buckaroo package under ``buckaroo/static/`` —
-copy them alongside your HTML or serve them from a web server.
+These are shipped in the buckaroo wheel under ``buckaroo/static/``.
+Copy them alongside your generated HTML:
+
+.. code-block:: bash
+
+    STATIC=$(python -c "from pathlib import Path; import buckaroo; print(Path(buckaroo.__file__).parent / 'static')")
+    cp "$STATIC/static-embed.js" "$STATIC/static-embed.css" ./
 
 **With polars:**
 

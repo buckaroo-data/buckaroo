@@ -21,7 +21,7 @@ from buckaroo.ddd_library import (
     get_multiindex3_index_df,
     get_multiindex_with_names_both,
     df_with_weird_types,
-    pl_df_with_weird_types_as_pandas,
+    pl_df_with_weird_types,
 )
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'extra-html', 'ddd')
@@ -65,9 +65,9 @@ DDD_ENTRIES = [
      df_with_weird_types(),
      'Categorical, timedelta, period, and interval dtypes.'),
 
-    ('weird-types-polars', 'Weird Types (Polars → Pandas)',
-     pl_df_with_weird_types_as_pandas(),
-     'Duration, time, categorical, decimal, and binary dtypes from polars.'),
+    ('weird-types-polars', 'Weird Types (Polars)',
+     pl_df_with_weird_types(),
+     'Duration, time, categorical, decimal, and binary dtypes — native polars DataFrame.'),
 ]
 
 
