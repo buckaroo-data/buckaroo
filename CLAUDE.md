@@ -58,6 +58,5 @@ Runs on push to main and PRs. Key jobs: LintPython, TestJS, BuildWheel, TestPyth
 ## Release Process
 
 1. Update CHANGELOG.md
-2. Tag (no 'v' prefix): `git tag 0.12.13`
-3. Push tag: `git push origin tag 0.12.13`
-4. Release workflow generates notes and publishes to PyPI
+2. Trigger the **Release** workflow via GitHub Actions (`workflow_dispatch`), choosing `patch`, `minor`, or `major`
+3. The workflow bumps the version in `pyproject.toml`, creates the tag, builds, publishes to PyPI, and creates a GitHub release
