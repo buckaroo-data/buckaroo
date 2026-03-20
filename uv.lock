@@ -209,7 +209,6 @@ wheels = [
 
 [[package]]
 name = "buckaroo"
-version = "0.12.12"
 source = { editable = "." }
 dependencies = [
     { name = "anywidget" },
@@ -376,7 +375,7 @@ requires-dist = [
     { name = "twine", marker = "extra == 'packaging-tools'" },
     { name = "watchfiles", marker = "extra == 'dev'" },
 ]
-provides-extras = ["dev", "polars", "test", "mcp", "marimo", "jupyterlab", "notebook", "packaging-tools"]
+provides-extras = ["dev", "jupyterlab", "marimo", "mcp", "notebook", "packaging-tools", "polars", "test"]
 
 [package.metadata.requires-dev]
 datacompy = [{ name = "datacompy", specifier = ">=0.15.0" }]

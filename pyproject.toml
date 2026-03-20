@@ -1,6 +1,7 @@
 [build-system]
 requires = [
     "hatchling",
+    "hatch-vcs",
     "jupyterlab~=4.0",
 ]
 build-backend = "hatchling.build"
@@ -41,7 +42,7 @@ dependencies = [
     "numpy >= 2.2.5; python_version >= '3.13'",
 ]
 
-version = "0.12.12"
+dynamic = ["version"]
 
 
 [project.license]
@@ -120,6 +121,10 @@ buckaroo-table = "buckaroo_mcp_tool:main"
 [project.urls]
 Homepage = "https://github.com/paddymul/buckaroo"
 
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0+unknown"
+
 [tool.hatch.build]
 only-packages = true
 artifacts = ["buckaroo/static/widget.js", "buckaroo/static/compiled.css", "buckaroo/static/standalone.js", "buckaroo/static/standalone.css","scripts/hatch_build.py"]
@@ -172,6 +177,7 @@ line_length = 80
 # Exclude a variety of commonly ignored directories.
 exclude = [
     ".bzr",
+    ".claude",
     ".direnv",
     ".eggs",
     ".git",

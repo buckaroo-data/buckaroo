@@ -5,12 +5,12 @@
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
-import toml
+from importlib import metadata
 
 project = 'Buckaroo'
 copyright = '2023-2025, Paddy Mullen'
 author = 'Paddy Mullen'
-release = toml.load(open("../../pyproject.toml"))['project']['version']
+release = metadata.version('buckaroo')
 
 
 # -- General configuration ---------------------------------------------------
