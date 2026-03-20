@@ -16,6 +16,7 @@ import pandas as pd
 from buckaroo.serialization_utils import (
     prepare_df_for_serialization,
     _json_encode_cell,
+    _coerce_for_json,
 )
 from buckaroo.dataflow.widget_extension_utils import configure_buckaroo
 from buckaroo.buckaroo_widget import BuckarooWidget
@@ -33,6 +34,9 @@ def _df_to_parquet_b64_tagged(df: pd.DataFrame) -> dict:
     df2 = prepare_df_for_serialization(df)
     if not isinstance(df.index, pd.MultiIndex):
         df2['level_0'] = df2['index']
+
+    # Coerce types that hyparquet can't decode (Period, Interval, Timedelta, bytes)
+    df2 = _coerce_for_json(df2)
 
     # Convert PyArrow-backed string columns to object dtype (pandas 3.0+)
     for col in df2.columns:
