@@ -297,12 +297,6 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
           prune-cache: false
-      - name: setup js files
-        run: |
-          mkdir buckaroo/static || true
-          touch buckaroo/static/compiled.css
-          touch buckaroo/static/widget.js
-          touch buckaroo/static/widget.css
       - name: Install the project
         run: uv sync --all-extras --dev
       - name: Run tests
@@ -325,12 +319,6 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
           prune-cache: false
-      - name: setup js files
-        run: |
-          mkdir buckaroo/static || true
-          touch buckaroo/static/compiled.css
-          touch buckaroo/static/widget.js
-          touch buckaroo/static/widget.css
       - name: Install the project with maximum versions
         run: |
           rm -f uv.lock
@@ -357,13 +345,6 @@ jobs:
           enable-cache: true
           python-version: "3.13"
           prune-cache: false
-      - name: setup js files
-        shell: bash
-        run: |
-          mkdir -p buckaroo/static
-          touch buckaroo/static/compiled.css
-          touch buckaroo/static/widget.js
-          touch buckaroo/static/widget.css
       - name: Install the project
         run: uv sync --all-extras --dev
       - name: Run tests
@@ -683,10 +664,6 @@ jobs:
         run: uv sync --locked --all-extras --dev
       - name: Check docs build and links
         run: |
-          mkdir -p buckaroo/static || true
-          touch buckaroo/static/compiled.css
-          touch buckaroo/static/widget.js
-          touch buckaroo/static/widget.css
           mkdir -p docs/build/html
           uv run pytest --check-links docs/source/*.rst || uv run pytest --check-links --lf docs/source/*.rst
           uv run pytest --check-links docs/example-notebooks/*.ipynb || uv run pytest --check-links --lf docs/example-notebooks/*.ipynb
