@@ -225,7 +225,7 @@ jobs:
     runs-on: depot-ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -345,7 +345,7 @@ jobs:
     timeout-minutes: 15
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
