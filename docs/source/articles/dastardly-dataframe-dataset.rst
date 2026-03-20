@@ -43,6 +43,10 @@ Infinity and NaN
 
 .. code-block:: python
 
+    # DDD: Infinity and NaN
+    # Three values that look similar but are completely different:
+    # NaN (missing), +inf (positive infinity), -inf (negative infinity).
+    # Most viewers show all three as blank. Buckaroo distinguishes them.
     pd.DataFrame({'a': [np.nan, np.inf, np.inf * -1]})
 
 Three values, three completely different things: a missing value, positive
@@ -65,6 +69,10 @@ Really Big Numbers
 
 .. code-block:: python
 
+    # DDD: Really Big Numbers
+    # 9999999999999999999 exceeds JavaScript's Number.MAX_SAFE_INTEGER (2^53-1).
+    # Naive JS conversion silently rounds to 10000000000000000000.
+    # Buckaroo preserves exact precision by keeping unsafe integers as strings.
     pd.DataFrame({"col1": [9999999999999999999, 1]})
 
 Python integers have arbitrary precision. JavaScript's ``Number`` type has
@@ -88,6 +96,10 @@ Column Named "index"
 
 .. code-block:: python
 
+    # DDD: Column Named "index"
+    # df.reset_index() creates a column called "index", which collides
+    # with the DataFrame's actual index. Many widgets break on this.
+    # Buckaroo handles it via internal column renaming (a, b, c...).
     pd.DataFrame({
         'a':     ["asdf", "foo_b", "bar_a", "bar_b", "bar_c"],
         'index': ["7777", "ooooo", "--- -", "33333", "assdf"]
@@ -110,6 +122,10 @@ Named Index
 
 .. code-block:: python
 
+    # DDD: Named Index
+    # The index has a name ("foo") that carries semantic meaning —
+    # a join key, time series frequency, or categorical grouping.
+    # Buckaroo displays it as a distinct pinned column.
     pd.DataFrame(
         {'a': ["asdf", "foo_b", "bar_a", "bar_b", "bar_c"]},
         index=pd.Index([10, 20, 30, 40, 50], name='foo')
@@ -132,6 +148,10 @@ MultiIndex Columns
 
 .. code-block:: python
 
+    # DDD: MultiIndex Columns
+    # Hierarchical column headers from .pivot_table() or .groupby().agg().
+    # Most viewers crash or show ugly tuple strings like ('foo', 'a').
+    # Buckaroo flattens them into readable headers.
     cols = pd.MultiIndex.from_tuples(
         [('foo', 'a'), ('foo', 'b'), ('bar', 'a'), ('bar', 'b'), ('bar', 'c')],
         names=['level_a', 'level_b'])
@@ -155,6 +175,10 @@ MultiIndex on Rows
 
 .. code-block:: python
 
+    # DDD: MultiIndex on Rows
+    # Two-level row index plus a None in the last row of bar_col —
+    # a missing string mixed with non-missing strings.
+    # Each index level becomes an extra column without breaking the layout.
     row_index = pd.MultiIndex.from_tuples([
         ('foo', 'a'), ('foo', 'b'),
         ('bar', 'a'), ('bar', 'b'), ('bar', 'c'),
@@ -184,6 +208,9 @@ Three-Level MultiIndex
 
 .. code-block:: python
 
+    # DDD: Three-Level MultiIndex
+    # Three levels of row hierarchy. Tests that column renaming handles
+    # an arbitrary number of index levels without name collisions.
     row_index = pd.MultiIndex.from_tuples([
         ('foo', 'a', 3), ('foo', 'b', 2),
         ('bar', 'a', 1), ('bar', 'b', 3), ('bar', 'c', 5),
@@ -208,7 +235,10 @@ MultiIndex on Both Axes
 
 .. code-block:: python
 
-    # MultiIndex on both rows and columns, both with names
+    # DDD: MultiIndex on Both Axes (the boss fight)
+    # Hierarchical headers on both rows and columns, both with named levels.
+    # This is what pd.pivot_table() produces on complex groupings.
+    # Tests column counting, index handling, and header rendering simultaneously.
     row_index = pd.MultiIndex.from_tuples(
         [('foo', 'a'), ('foo', 'b'), ('bar', 'a'),
          ('bar', 'b'), ('bar', 'c'), ('baz', 'a')],
@@ -237,6 +267,12 @@ Weird Types (Pandas)
 
 .. code-block:: python
 
+    # DDD: Weird Types (Pandas)
+    # Four types most viewers ignore entirely:
+    # - Categorical: fixed set of allowed values, not a string
+    # - Timedelta: a duration ("1d 2h 3m 4s"), not a timestamp
+    # - Period: a span of time ("January 2021"), not a point in time
+    # - Interval: a range like (0, 1], common in pd.cut() output
     pd.DataFrame({
         'categorical': pd.Categorical(
             ['red', 'green', 'blue', 'red', 'green']),
@@ -275,6 +311,12 @@ Weird Types (Polars)
 
 .. code-block:: python
 
+    # DDD: Weird Types (Polars)
+    # Polars-specific types that historically broke rendering:
+    # - Duration: microsecond-precision, was blank before issue #622
+    # - Time: time-of-day without a date component
+    # - Decimal: fixed-precision (not float), important for financial data
+    # - Binary: raw bytes, displayed as hex strings
     import polars as pl
     import datetime as dt
 
@@ -315,8 +357,8 @@ you're migrating from pandas to polars, buckaroo moves with you.
 What's happening under the hood
 --------------------------------
 
-Every table on this page is a **static embedding** of the buckaroo DFViewer.
-There is no Python kernel running. Here's what happened:
+Every table on this page is a **static embedding** of the full buckaroo
+widget. There is no Python kernel running. Here's what happened:
 
 1. A Python script called ``buckaroo.artifact.to_html()`` on each DataFrame
 2. The function serialized the data to base64-encoded Parquet (compact binary)
