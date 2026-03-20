@@ -85,7 +85,7 @@ jobs:
       - name: Patch version for TestPyPI
         if: github.event_name == 'pull_request'
         run: |
-          BASE=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          BASE=$(git tag --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "0.0.0")
           echo "SETUPTOOLS_SCM_PRETEND_VERSION=${BASE}.dev${{ github.run_id }}" >> "$GITHUB_ENV"
           echo "Published version: ${BASE}.dev${{ github.run_id }}"
       - name: Install the project
