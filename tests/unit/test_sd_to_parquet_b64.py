@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from buckaroo.serialization_utils import sd_to_parquet_b64, _to_python_native
+from buckaroo.serialization_utils import sd_to_parquet_b64
 
 
 def _decode_parquet_b64(result):
@@ -144,14 +144,14 @@ def test_sd_to_parquet_b64_multiple_columns():
     assert row['b__dtype'] == ['int64']
 
 
-def test_sd_to_parquet_b64_nan_becomes_null():
-    """NaN values should become parquet nulls."""
+def test_sd_to_parquet_b64_nan_preserved():
+    """NaN values should survive the parquet round-trip."""
     sd = {'col': {'mean': np.nan, 'dtype': 'float64'}}
     result = sd_to_parquet_b64(sd)
     table = _decode_parquet_b64(result)
     row = table.to_pydict()
 
-    assert row['a__mean'] == [None]
+    assert np.isnan(row['a__mean'][0])
     assert row['a__dtype'] == ['float64']
 
 
@@ -173,22 +173,23 @@ def test_sd_to_parquet_b64_value_counts_series():
     assert parsed == {'foo': 10, 'bar': 5}
 
 
-def test_to_python_native_conversions():
-    assert _to_python_native(np.float64(3.14)) == 3.14
-    assert isinstance(_to_python_native(np.float64(3.14)), float)
+def test_numpy_scalars_handled_natively_by_pyarrow():
+    """pyarrow handles numpy scalars without manual conversion."""
+    sd = {
+        'col': {
+            'mean': np.float64(3.14),
+            'count': np.int64(42),
+            'is_numeric': np.bool_(True),
+            'nan_val': np.nan,
+        },
+    }
+    result = sd_to_parquet_b64(sd)
+    table = _decode_parquet_b64(result)
+    row = table.to_pydict()
 
-    assert _to_python_native(np.int64(42)) == 42
-    assert isinstance(_to_python_native(np.int64(42)), int)
-
-    assert _to_python_native(np.bool_(True)) is True
-    assert isinstance(_to_python_native(np.bool_(True)), bool)
-
-    assert _to_python_native(np.nan) is None
-
-    arr = np.array([1, 2, 3])
-    assert _to_python_native(arr) == [1, 2, 3]
-
-    assert _to_python_native("hello") == "hello"
-    assert _to_python_native(None) is None
+    assert row['a__mean'] == [3.14]
+    assert row['a__count'] == [42]
+    assert row['a__is_numeric'] == [True]
+    assert np.isnan(row['a__nan_val'][0])
 
 

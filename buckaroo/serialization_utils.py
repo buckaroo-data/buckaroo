@@ -268,24 +268,16 @@ def _json_encode_cell(val):
     return json.dumps(_make_json_safe(val), default=str)
 
 
-def _to_python_native(val):
-    """Convert numpy scalars to Python builtins for pyarrow."""
+def _is_complex_for_parquet(val):
+    """Return True if val needs JSON encoding for parquet (not a scalar)."""
     import numpy as np
-    if isinstance(val, np.bool_):
-        return bool(val)
-    if isinstance(val, np.integer):
-        return int(val)
-    if isinstance(val, np.floating):
-        if np.isnan(val):
-            return None
-        return float(val)
-    if isinstance(val, float) and np.isnan(val):
-        return None
-    if isinstance(val, np.ndarray):
-        return val.tolist()
     if isinstance(val, pd.Series):
-        return val.to_dict()
-    return val
+        return True
+    if isinstance(val, np.ndarray):
+        return True
+    if isinstance(val, (list, dict, tuple)):
+        return True
+    return False
 
 
 def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
@@ -310,8 +302,12 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
             continue
         for stat_name, val in stats.items():
             parquet_col = f"{short_col}__{stat_name}"
-            val = _to_python_native(val)
-            if isinstance(val, (list, dict, tuple)):
+            if isinstance(val, pd.Series):
+                try:
+                    val = val.to_dict()
+                except TypeError:
+                    val = val.to_list()
+            if _is_complex_for_parquet(val):
                 val = json.dumps(_make_json_safe(val), default=str)
             wide_data[parquet_col] = [val]
 
