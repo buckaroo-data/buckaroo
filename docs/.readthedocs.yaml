@@ -29,7 +29,6 @@ build:
         - uv venv
         - pnpm -C packages/buckaroo-js-core run build
         - pnpm -C packages/js run build:static
-        - touch buckaroo/static/compiled.css buckaroo/static/widget.js buckaroo/static/widget.css
         - uv run sphinx-build -T -b html docs/source  $READTHEDOCS_OUTPUT/html
         - ./scripts/marimo_wasm_output.sh buckaroo_ddd_tour.py run
         - ./scripts/marimo_wasm_output.sh buckaroo_compare.py edit

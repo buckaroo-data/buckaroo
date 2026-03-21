@@ -4,24 +4,48 @@ The Dastardly DataFrame Dataset
 Every DataFrame viewer works fine on ``pd.DataFrame({'a': [1, 2, 3]})``.
 The question is what happens when the data gets weird.
 
-Buckaroo ships a collection of deliberately tricky DataFrames called the
-**Dastardly DataFrame Dataset** (DDD). These are the DataFrames that break
-other viewers — the ones with MultiIndex columns, NaN mixed with infinity,
-columns literally named ``index``, integers too large for JavaScript, and
-types that most tools pretend don't exist.
+Displaying DataFrames in all their wonderfully variant splendor is quite a
+challenge. DataFrames come in many forms and there is little you can depend
+on when you want to serialize or display them. Through building Buckaroo I
+have tripped across many types of bugs from DataFrames that I didn't expect.
 
-This page shows each one rendered live in buckaroo's static embed. No
-Jupyter kernel, no server — just HTML and JavaScript. If you can see the
-tables below, the static embedding system is working.
+So I compiled a set of the weirdest DataFrames I have seen in the wild — the
+ones that caused hard to debug errors, the ones that were hard to support —
+and reduced them to limited test cases. I call this the `Dastardly DataFrame
+Dataset <https://github.com/buckaroo-data/buckaroo/blob/main/buckaroo/ddd_library.py>`_
+(DDD). MultiIndex columns, NaN mixed with infinity, columns
+literally named ``index``, integers too large for JavaScript, types that most
+tools pretend don't exist. Through hard fought experience, Buckaroo has dealt
+with bugs or edge cases related to each one.
+
+The naming and early shape of the DDD was heavily influenced by an exchange
+with `Cecil Curry <https://github.com/leycec>`_, the author of
+`beartype <https://github.com/beartype/beartype>`_, on
+`beartype#529 <https://github.com/beartype/beartype/issues/529>`_. That guy
+is awesome. Be more like that guy. Seriously the most enjoyable bug report
+interaction I have ever had.
+
+This page shows each DDD member rendered live in buckaroo's static embed. No
+Jupyter kernel, no server — just HTML and JavaScript.
 
 Why this matters
 ----------------
+
+Buckaroo has the philosophy that every DataFrame should be displayable, at
+least in some form. Capabilities can be reduced — it's fine for ``mean`` to
+fail if there is a ``NaN`` in a column — but that failure can't cause
+Buckaroo to display nothing.
 
 If you build dashboards, you choose what data goes into your table. You
 control the types, the column names, the index. But if you're doing
 exploratory data analysis — loading CSVs from vendors, joining tables from
 different systems, debugging a pipeline that produces unexpected output —
-you don't control any of that. The data is what it is.
+you don't control any of that. The data is what it is. And who knows
+what an LLM will produce — code-generating agents can create DataFrames
+with column types you've never seen in your own code. Same goes for
+inherited data pipelines: someone else built it, you're debugging it,
+and the DataFrame you're staring at has types and structures you didn't
+choose.
 
 ``df.head()`` hides the problem. It shows you 5 rows and lets you believe
 everything is fine. Buckaroo is built for the opposite workflow: show you
@@ -29,6 +53,11 @@ everything, especially the parts that are surprising.
 
 The Dastardly DataFrames
 ------------------------
+
+The DDD is used extensively in Buckaroo's unit test suite. At a minimum,
+all DataFrames display in some way unless otherwise noted. Most display with
+full features — there are a couple of rough edges, but having a comprehensive
+test set is a very helpful start.
 
 Each section below shows the exact function from ``buckaroo.ddd_library``
 that creates the DataFrame, explains why it's tricky, and renders it live
@@ -54,7 +83,7 @@ Infinity and NaN
 
     df_with_infinity()
 
-Three values, three completely different things: a missing value, positive
+Three non-numeric values that pop up in numeric columns: a missing value, positive
 infinity, and negative infinity. Many viewers display all three as blank or
 "NaN". Buckaroo distinguishes them.
 
@@ -201,9 +230,6 @@ data from hierarchical sources. The tricky part: each index level becomes
 an additional column that has to be displayed alongside the data columns
 without breaking the column count.
 
-This DataFrame also has a ``None`` in the last row of ``bar_col`` — a missing
-string value mixed with non-missing strings.
-
 .. raw:: html
 
    <iframe src="../ddd/multiindex-rows.html"
@@ -265,7 +291,9 @@ MultiIndex on Both Axes
 The boss fight: hierarchical headers on both axes, with named levels on
 both sides. This is what ``pd.pivot_table()`` produces on complex groupings.
 Everything about column counting, index handling, and header rendering gets
-tested simultaneously.
+tested simultaneously. There are still improvements planned here — the
+spacing is odd, the thick borders aren't in the correct place — but it
+displays, which is more than most viewers manage.
 
 .. raw:: html
 
@@ -368,8 +396,242 @@ you're migrating from pandas to polars, buckaroo moves with you.
    </iframe>
 
 
-What's happening under the hood
---------------------------------
+Full dtype coverage
+-------------------
+
+The DDD focuses on the types that cause trouble, but how does buckaroo
+handle *every* dtype? Here's the full picture across all three engines [1]_:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 12 12 12 14 14 18
+
+   * - Dtype
+     - Pandas
+     - Pandas (Arrow)
+     - Polars
+     - Parquet type
+     - JS type
+     - Buckaroo display
+   * - int8–int32
+     - Yes
+     - Yes
+     - Yes
+     - INT32
+     - Number
+     - ``1,234``
+   * - int64
+     - Yes
+     - Yes
+     - Yes
+     - INT64
+     - Number [2]_
+     - ``1,234,567``
+   * - uint8–uint64
+     - Yes
+     - Yes
+     - Yes
+     - INT32/INT64
+     - Number [2]_
+     - ``65,535``
+   * - BigInt (>2\ :sup:`53`)
+     - Yes
+     - Yes
+     - —
+     - INT64
+     - String [2]_
+     - ``9999999999999999999`` [5]_
+   * - float32
+     - Yes
+     - Yes
+     - Yes
+     - FLOAT
+     - Number
+     - ``2.500``
+   * - float64 (incl. inf/NaN)
+     - Yes
+     - Yes
+     - Yes
+     - DOUBLE
+     - Number
+     - ``Infinity``
+   * - complex128
+     - Fail [3]_
+     - —
+     - —
+     - —
+     - —
+     - —
+   * - bool
+     - Yes
+     - Yes
+     - Yes
+     - BOOLEAN
+     - boolean
+     - ``True``
+   * - string / object
+     - Yes
+     - Yes
+     - Yes
+     - BYTE_ARRAY
+     - String
+     - ``hello world``
+   * - mixed-type object
+     - Yes
+     - —
+     - —
+     - BYTE_ARRAY
+     - String
+     - ``{ 'a': 1, 'b': None }``
+   * - datetime
+     - Yes
+     - Yes
+     - Yes
+     - TIMESTAMP
+     - Date
+     - ``2021-01-15 14:30:00``
+   * - datetime + tz
+     - Not tested
+     - Yes
+     - Yes
+     - TIMESTAMP+tz
+     - Date
+     - ``2021-01-15 14:30:00``
+   * - timedelta / duration
+     - Yes
+     - Yes
+     - Yes
+     - → String [4]_
+     - String
+     - ``1d 2h 3m 4s``
+   * - date
+     - —
+     - Yes
+     - Not tested
+     - DATE (INT32)
+     - Date
+     - ``2021-01-15 00:00:00``
+   * - time
+     - —
+     - Yes
+     - Yes
+     - TIME (INT64)
+     - String
+     - ``14:30:00``
+   * - Categorical
+     - Yes
+     - Yes
+     - Yes
+     - DICT encoding
+     - String
+     - ``red``
+   * - Enum
+     - —
+     - —
+     - Not tested
+     - DICT encoding
+     - String
+     - ``red``
+   * - Period (time span)
+     - Yes
+     - —
+     - —
+     - → String [4]_
+     - String
+     - ``2021-01`` [6]_
+   * - Interval
+     - Yes
+     - —
+     - —
+     - → String [4]_
+     - String
+     - ``(0, 1]``
+   * - Decimal
+     - —
+     - Yes
+     - Yes
+     - DECIMAL
+     - Number
+     - ``100.50``
+   * - Binary
+     - —
+     - Yes
+     - Yes
+     - BYTE_ARRAY
+     - String (hex)
+     - ``68656c6c6f``
+   * - Sparse
+     - Fail [3]_
+     - —
+     - —
+     - —
+     - —
+     - —
+   * - Nullable int/float/bool
+     - Not tested
+     - —
+     - —
+     - INT32/INT64/BOOLEAN
+     - Number/boolean
+     - ``1,234`` / ``True``
+   * - List / Array
+     - —
+     - Yes
+     - Not tested
+     - LIST
+     - Array
+     - ``[ 1, 2, 3]``
+   * - Struct
+     - —
+     - Yes
+     - Not tested
+     - STRUCT
+     - Object
+     - ``{ 'a': 1, 'b': x }``
+   * - Null (all-null column)
+     - —
+     - —
+     - Not tested
+     - BYTE_ARRAY
+     - null
+     - ``(empty)``
+
+"Yes" means the dtype serializes and displays correctly. "Not tested" means
+serialization succeeds but there is no DDD test case exercising it through
+the full widget. "—" means the dtype does not exist in that engine.
+
+.. [1] Putting together this table exposed areas that still need work.
+   The interaction between Python dtype, Parquet physical type, JS
+   decoding, and display formatter has enough nuance for its own blog
+   post. Expect one soon.
+
+.. [2] hyparquet decodes INT64 as BigInt. Buckaroo converts to Number if
+   the value is ≤ ``Number.MAX_SAFE_INTEGER`` (2\ :sup:`53` - 1), otherwise
+   stringifies to preserve precision.
+
+.. [3] ``complex128`` and ``SparseDtype`` fail the Parquet path — Arrow
+   has no complex number type and can't convert sparse arrays. The JSON
+   path works with string fallback, but that path is being phased out.
+
+.. [4] ``→ String`` means the type has no native Parquet equivalent.
+   Buckaroo coerces it to a string before writing Parquet. Period becomes
+   ``'2021-01'``, Interval becomes ``'(0, 1]'``, timedelta becomes
+   ``'1 days 02:03:04'`` (pandas path only — Polars Duration is native).
+
+.. [5] Values above ``Number.MAX_SAFE_INTEGER`` are stringified on the JS
+   side to preserve exact precision, so they display without commas. The
+   value ``1`` in the same column still gets the integer formatter: ``1``.
+   This means a single column can show two different display styles depending
+   on whether each value fits in 53 bits.
+
+.. [6] A pandas ``Period`` is a *time span*, not a range between two dates.
+   ``Period('2021-01', 'M')`` means "the month of January 2021". Buckaroo
+   stringifies it because Parquet has no Period type. Don't confuse it with
+   ``Interval``, which is a numeric range like ``(0, 1]``.
+
+
+How this demo was built
+-----------------------
 
 Every table on this page is a **static embedding** of the full buckaroo
 widget. There is no Python kernel running. Here's what happened:
@@ -396,11 +658,18 @@ Try it yourself
 
     from buckaroo.ddd_library import *
     from buckaroo.artifact import to_html
+    from pathlib import Path
+    import shutil, buckaroo
 
     # Generate a static HTML page for any DataFrame
     html = to_html(df_with_weird_types(), title="Weird Types Demo")
     with open('weird-types.html', 'w') as f:
         f.write(html)
+
+    # Copy the JS/CSS assets alongside the HTML (see #643 for self-contained mode)
+    static = Path(buckaroo.__file__).parent / 'static'
+    for name in ('static-embed.js', 'static-embed.css'):
+        shutil.copy(static / name, '.')
 
 Or in a Jupyter notebook, just::
 
