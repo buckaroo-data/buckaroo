@@ -218,39 +218,39 @@ Comparison of open source DataFrame viewers
      - Dynamic
      - Table Viewer
      - Built on Anywidget?
-   * - Buckaroo
+   * - `Buckaroo <https://github.com/buckaroo-data/buckaroo>`_
      - Server
      - Numeric
-     - No
+     - Yes
      - Yes
      - Yes
      - AG-Grid
      - Yes
-   * - IPYdatagrid
+   * - `ipydatagrid <https://github.com/jupyter-widgets/ipydatagrid>`_
      - Server
      - JSON
-     - No?
+     - No
+     - Yes
+     - Yes
+     - Lumino DataGrid (canvas)
+     - No
+   * - `Perspective <https://github.com/finos/perspective>`_
+     - Both
+     - Arrow
+     - Yes
      - Yes
      - Yes
      - Custom
      - No
-   * - Perspective
-     - Browser
-     - Numeric
-     - Yes
-     - No?
-     - Yes
-     - Custom
-     - No
-   * - iTables
+   * - `iTables <https://github.com/mwouts/itables>`_
      - Browser
      - JSON
      - Yes
      - Yes
      - No
      - datatables (jQuery based)
-     - No
-   * - Great Tables
+     - Optional
+   * - `Great Tables <https://github.com/posit-dev/great-tables>`_
      - Browser
      - HTML
      - Yes
@@ -258,27 +258,35 @@ Comparison of open source DataFrame viewers
      - No
      - HTML
      - No
-   * - DTale
-     - Server
-     - JSON?
-     - No?
-     - Yes
-     - Yes
-     - Custom
-     - No
-   * - Mito
+   * - `DTale <https://github.com/man-group/dtale>`_
      - Server
      - JSON
      - No
      - Yes
      - Yes
-     - Custom
+     - react-virtualized
      - No
-   * - Marimo
+   * - `Mito <https://github.com/mito-ds/mito>`_
      - Server
-     - JSON?
+     - JSON
+     - No
+     - Yes
+     - Yes
+     - Endo (custom)
+     - No
+   * - `Marimo <https://github.com/marimo-team/marimo>`_
+     - Server
+     - JSON
      - Yes
      - No
      - Yes
      - tanstack-table
+     - No
+   * - `quak <https://github.com/manzt/quak>`_
+     - Server
+     - Arrow
+     - No
+     - Yes
+     - Yes
+     - Custom HTML
      - Yes
