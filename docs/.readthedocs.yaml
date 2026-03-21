@@ -22,11 +22,11 @@ build:
     install:
       - uv sync  --all-extras --group dev
       - uv tree
+      - pnpm -C packages install
     build:
       html:
         - uv tree
         - uv venv
-        - pnpm -C packages install
         - pnpm -C packages/buckaroo-js-core run build
         - pnpm -C packages/js run build:static
         - uv run sphinx-build -T -b html docs/source  $READTHEDOCS_OUTPUT/html
