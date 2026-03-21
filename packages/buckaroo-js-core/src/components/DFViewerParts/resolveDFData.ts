@@ -94,6 +94,35 @@ export function pivotWideSummaryStats(wideRow: Record<string, any>): DFData {
 }
 
 /**
+ * JSON-parse each cell value in a row from parquet-decoded data.
+ *
+ * For non-wide parquet data (e.g. main DataFrame), object/category columns
+ * are JSON-encoded on the Python side and need to be parsed back.
+ * The 'index' and 'level_0' columns are kept as-is.
+ */
+function parseParquetRow(row: Record<string, any>): DFDataRow {
+    const parsed: DFDataRow = {};
+    for (const [key, val] of Object.entries(row)) {
+        if (key === 'index' || key === 'level_0') {
+            parsed[key] = typeof val === 'bigint' ? Number(val) : val;
+        } else if (typeof val === 'string') {
+            try {
+                parsed[key] = JSON.parse(val);
+            } catch {
+                parsed[key] = val;
+            }
+        } else if (typeof val === 'bigint') {
+            const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+            parsed[key] = val >= -MAX_SAFE && val <= MAX_SAFE
+                ? Number(val) : String(val);
+        } else {
+            parsed[key] = val;
+        }
+    }
+    return parsed;
+}
+
+/**
  * Detect wide-column format: single row where column names contain '__'.
  */
 function isWideFormat(rows: any[]): boolean {
@@ -136,7 +165,7 @@ export function resolveDFData(val: DFDataOrPayload | undefined | null): DFData {
                     if (isWideFormat(data)) {
                         result = pivotWideSummaryStats(data[0] as Record<string, any>);
                     } else {
-                        result = data as DFData;
+                        result = (data as DFDataRow[]).map(parseParquetRow);
                     }
                     cacheSet(val.data, result);
                 },
