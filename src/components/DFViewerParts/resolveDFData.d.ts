@@ -1,13 +1,5 @@
 import { DFData, DFDataOrPayload } from './DFWhole';
 /**
- * Pivot a wide single-row parquet result (col__stat columns) back to
- * row-based DFData that downstream consumers expect.
- *
- * Input: single row object like {a__mean: 42, a__dtype: "float64", b__mean: 10, ...}
- * Output: DFData rows like [{index: "mean", level_0: "mean", a: 42, b: 10}, ...]
- */
-export declare function pivotWideSummaryStats(wideRow: Record<string, any>): DFData;
-/**
  * Synchronously resolve a DFDataOrPayload to DFData.
  *
  * - If the input is already a plain DFData array, return it as-is.
