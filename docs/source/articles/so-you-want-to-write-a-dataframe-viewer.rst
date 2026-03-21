@@ -8,10 +8,18 @@ their potential side effects, along with projects that chose different
 routes. There are many closed source data table viewers with various
 levels of capability. It seems like every new notebook hosting
 environment feels compelled to build their own dataframe viewer. In this
-article I will draw on my own experience creating Buckaroo, as well as
+article I will draw on my own experience creating
+`Buckaroo <https://github.com/buckaroo-data/buckaroo>`__, as well as
 observations from looking at popular open source table viewers like
-Perspective, Great Tables, DTale, Hytable, marimo, iTables, and
-iPydatagrid.
+`Perspective <https://github.com/finos/perspective>`__,
+`Great Tables <https://github.com/posit-dev/great-tables>`__,
+`DTale <https://github.com/man-group/dtale>`__,
+`Marimo <https://github.com/marimo-team/marimo>`__,
+`iTables <https://github.com/mwouts/itables>`__,
+`ipydatagrid <https://github.com/jupyter-widgets/ipydatagrid>`__,
+`Panel Tabulator <https://panel.holoviz.org/reference/widgets/Tabulator.html>`__,
+and Streamlit's
+`st.dataframe <https://docs.streamlit.io/develop/api-reference/data/st.dataframe>`__.
 
 I have run into each one of these issues while building buckaroo.
 
@@ -128,30 +136,38 @@ for static export to the widest list of targets. jQuery-based libraries
 complexity — previously they were much easier to package into the Jupyter
 frontend environment than full JS build chains.
 
-Then there are modern table libraries that aren't AG-Grid. React-data-grid,
-angular-grid, tanstack-table, handsome-table. These libraries might be
-familiar. They have a straightforward licensing story. They also tend to
-have rough edges, limited adoption, and they tend to be abandoned. I
-haven't investigated these packages as much.
+Then there are modern table libraries that aren't AG-Grid.
+`React-data-grid <https://github.com/adazzle/react-data-grid>`_,
+angular-grid,
+`tanstack-table <https://github.com/TanStack/table>`_,
+`handsome-table <https://github.com/nicenemo/handsome-table>`_.
+These libraries might be familiar. They have a straightforward licensing
+story. They also tend to have rough edges, limited adoption, and they
+tend to be abandoned. I haven't investigated these packages as much.
 
-Next up is AG-Grid. AG-Grid is the reliable gold standard for tables,
-under active development for over a decade. AG-Grid has a full
-commercial company behind it, along with a permissively licensed
-community edition. From my experience they haven't kneecapped the
-community edition in favor of the commercial edition, and aim to have
-the community edition as the best free table widget on the market. The
-tool is extensively documented with working examples. The company is
-completely unresponsive to bug reports from non-paying users in my
-experience. I chose AG-Grid after listening to an interview with their
-founder on the JS Jabber podcast.
+Next up is `AG-Grid <https://github.com/ag-grid/ag-grid>`_. AG-Grid is
+the reliable gold standard for tables, under active development for over
+a decade. AG-Grid has a full commercial company behind it, along with a
+permissively licensed community edition. From my experience they haven't
+kneecapped the community edition in favor of the commercial edition, and
+aim to have the community edition as the best free table widget on the
+market. The tool is extensively documented with working examples. The
+company is completely unresponsive to bug reports from non-paying users
+in my experience. I chose AG-Grid after listening to
+`an interview with their founder
+<https://topenddevs.com/podcasts/javascript-jabber/episodes/ag-grid-with-niall-crosby-jsj-412>`_
+on the JS Jabber podcast.
 
-Then there are custom table widgets like Perspective, glide-data-grid,
+Then there are custom table widgets like
+`Perspective <https://github.com/finos/perspective>`__,
+`glide-data-grid <https://github.com/glideapps/glide-data-grid>`__,
 and whatever you cooked up yourself. Perspective has a very impressive
 table, and I suspect it has better performance than AG-Grid. It is
 minimally documented and doesn't have the wide community adoption that
 generates Stack Overflow guidance. glide-data-grid is an impressive
-piece of software, rendering to canvas. It also looks like it is falling
-into non-maintenance with no commits in the last 10 months.
+piece of software, rendering to canvas. It is solo-maintained by its
+creator at Glide Apps — actively developed but quietly, with Streamlit
+as its biggest downstream consumer.
 
 If you are writing your own table, congrats. You will have ultimate
 control over your user experience. You won't have to worry about
@@ -168,8 +184,9 @@ Colab, VSCode notebooks, classic notebooks (before Notebook 7.0),
 Marimo, Jupyter running on WASM (JupyterLite). All have slight
 differences that become especially significant for frontend code.
 Styling works differently, loading JavaScript is a bit different.
-Anywidget was developed to make all of this easier, and it does. Before
-anywidget, this section would have been much longer.
+`Anywidget <https://anywidget.dev/>`_ was developed to make all of this
+easier, and it does. Before anywidget, this section would have been much
+longer.
 
 Even determining what environment you are running in is challenging.
 This will come up when users file bugs. `widget_utils.py
@@ -281,6 +298,22 @@ Comparison of open source DataFrame viewers
      - No
      - Yes
      - tanstack-table
+     - No
+   * - `Panel Tabulator <https://github.com/holoviz/panel>`_
+     - Both
+     - JSON
+     - Yes
+     - Yes
+     - Yes
+     - Tabulator.js
+     - No
+   * - `Streamlit <https://github.com/streamlit/streamlit>`_
+     - Server
+     - Arrow
+     - No
+     - No
+     - Yes
+     - glide-data-grid (canvas)
      - No
    * - `quak <https://github.com/manzt/quak>`_
      - Server
