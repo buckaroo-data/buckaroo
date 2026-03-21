@@ -23,8 +23,7 @@ with `Cecil Curry <https://github.com/leycec>`_, the author of
 `beartype <https://github.com/beartype/beartype>`_, on
 `beartype#529 <https://github.com/beartype/beartype/issues/529>`_. That guy
 is awesome. Be more like that guy. Seriously the most enjoyable bug report
-interaction I have ever had — the kind of exchange that makes open source
-worth doing.
+interaction I have ever had.
 
 This page shows each DDD member rendered live in buckaroo's static embed. No
 Jupyter kernel, no server — just HTML and JavaScript.
@@ -41,7 +40,12 @@ If you build dashboards, you choose what data goes into your table. You
 control the types, the column names, the index. But if you're doing
 exploratory data analysis — loading CSVs from vendors, joining tables from
 different systems, debugging a pipeline that produces unexpected output —
-you don't control any of that. The data is what it is.
+you don't control any of that. The data is what it is. And who knows
+what an LLM will produce — code-generating agents can create DataFrames
+with column types you've never seen in your own code. Same goes for
+inherited data pipelines: someone else built it, you're debugging it,
+and the DataFrame you're staring at has types and structures you didn't
+choose.
 
 ``df.head()`` hides the problem. It shows you 5 rows and lets you believe
 everything is fine. Buckaroo is built for the opposite workflow: show you
@@ -79,7 +83,7 @@ Infinity and NaN
 
     df_with_infinity()
 
-Three values, three completely different things: a missing value, positive
+Three non-numeric values that pop up in numeric columns: a missing value, positive
 infinity, and negative infinity. Many viewers display all three as blank or
 "NaN". Buckaroo distinguishes them.
 
@@ -226,9 +230,6 @@ data from hierarchical sources. The tricky part: each index level becomes
 an additional column that has to be displayed alongside the data columns
 without breaking the column count.
 
-This DataFrame also has a ``None`` in the last row of ``bar_col`` — a missing
-string value mixed with non-missing strings.
-
 .. raw:: html
 
    <iframe src="../ddd/multiindex-rows.html"
@@ -290,7 +291,9 @@ MultiIndex on Both Axes
 The boss fight: hierarchical headers on both axes, with named levels on
 both sides. This is what ``pd.pivot_table()`` produces on complex groupings.
 Everything about column counting, index handling, and header rendering gets
-tested simultaneously.
+tested simultaneously. There are still improvements planned here — the
+spacing is odd, the thick borders aren't in the correct place — but it
+displays, which is more than most viewers manage.
 
 .. raw:: html
 
@@ -597,9 +600,10 @@ handle *every* dtype? Here's the full picture across all three engines [1]_:
 serialization succeeds but there is no DDD test case exercising it through
 the full widget. "—" means the dtype does not exist in that engine.
 
-.. [1] A footnote alone won't cover the complexity here — the interaction
-   between Python dtype, Parquet physical type, JS decoding, and display
-   formatter has enough nuance for its own blog post. Expect one soon.
+.. [1] Putting together this table exposed areas that still need work.
+   The interaction between Python dtype, Parquet physical type, JS
+   decoding, and display formatter has enough nuance for its own blog
+   post. Expect one soon.
 
 .. [2] hyparquet decodes INT64 as BigInt. Buckaroo converts to Number if
    the value is ≤ ``Number.MAX_SAFE_INTEGER`` (2\ :sup:`53` - 1), otherwise
