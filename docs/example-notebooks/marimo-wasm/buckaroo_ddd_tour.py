@@ -293,13 +293,16 @@ def _(ddd):
 
 
 @app.cell(hide_code=True)
-def _(ddd):
+def _():
+    import pandas as pd
 
-    _df = ddd.pl_df_with_weird_types_as_pandas()
+    _df = pd.DataFrame()
 
     _explain_md = """
     ##  pl_df_with_weird_types (polars→pandas)
-     Exercises Duration (#622), Time, Categorical, Decimal, and Binary dtypes (converted to pandas for widget compat)
+     **Not available in WASM/Pyodide.** Polars does not provide WebAssembly wheels,
+     so this dataset cannot be generated in the browser. Run the notebook locally
+     with `marimo run` to see Duration (#622), Time, Categorical, Decimal, and Binary dtypes.
     """
     pl_df_with_weird_types_config = (_df, _explain_md)
     return (pl_df_with_weird_types_config,)
