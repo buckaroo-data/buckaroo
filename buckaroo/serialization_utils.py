@@ -291,8 +291,6 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
     Returns {'format': 'parquet_b64', 'data': '<base64 string>'}
     Falls back to JSON if parquet serialization fails.
     """
-    import pyarrow as pa
-
     col_mapping = [(orig, to_chars(i)) for i, orig in enumerate(sd.keys())]
     wide_data: Dict[str, List] = {}
 
@@ -312,10 +310,9 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
             wide_data[parquet_col] = [val]
 
     try:
-        table = pa.table(wide_data)
+        df = pd.DataFrame(wide_data)
         data = BytesIO()
-        import pyarrow.parquet as pq
-        pq.write_table(table, data)
+        df.to_parquet(data, engine='pyarrow', index=False)
         data.seek(0)
         raw_bytes = data.read()
         b64 = base64.b64encode(raw_bytes).decode('ascii')

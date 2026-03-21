@@ -144,14 +144,14 @@ def test_sd_to_parquet_b64_multiple_columns():
     assert row['b__dtype'] == ['int64']
 
 
-def test_sd_to_parquet_b64_nan_preserved():
-    """NaN values should survive the parquet round-trip."""
+def test_sd_to_parquet_b64_nan_becomes_null():
+    """NaN values become null through parquet round-trip."""
     sd = {'col': {'mean': np.nan, 'dtype': 'float64'}}
     result = sd_to_parquet_b64(sd)
     table = _decode_parquet_b64(result)
     row = table.to_pydict()
 
-    assert np.isnan(row['a__mean'][0])
+    assert row['a__mean'] == [None]
     assert row['a__dtype'] == ['float64']
 
 
@@ -190,6 +190,6 @@ def test_numpy_scalars_handled_natively_by_pyarrow():
     assert row['a__mean'] == [3.14]
     assert row['a__count'] == [42]
     assert row['a__is_numeric'] == [True]
-    assert np.isnan(row['a__nan_val'][0])
+    assert row['a__nan_val'] == [None]
 
 
