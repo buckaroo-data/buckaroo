@@ -60,14 +60,10 @@ export function pivotWideSummaryStats(wideRow: Record<string, any>): DFData {
         allCols.add(col);
         if (!statCols[stat]) statCols[stat] = {};
 
-        // JSON-parse string values that are JSON arrays/objects
+        // JSON-parse all string values (cells are JSON-encoded in parquet)
         if (typeof val === 'string') {
             try {
-                const parsed = JSON.parse(val);
-                if (typeof parsed === 'object' && parsed !== null) {
-                    statCols[stat][col] = parsed;
-                    continue;
-                }
+                val = JSON.parse(val);
             } catch {
                 // not JSON, keep as string
             }

@@ -51,9 +51,7 @@ def _resolve_all_stats(all_stats):
                 val = row_dict[key][0]
                 if isinstance(val, str):
                     try:
-                        parsed = json.loads(val)
-                        if isinstance(parsed, (list, dict)):
-                            val = parsed
+                        val = json.loads(val)
                     except (json.JSONDecodeError, ValueError):
                         pass
                 stat_cols[stat][col] = val

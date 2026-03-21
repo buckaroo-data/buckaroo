@@ -268,18 +268,6 @@ def _json_encode_cell(val):
     return json.dumps(_make_json_safe(val), default=str)
 
 
-def _is_complex_for_parquet(val):
-    """Return True if val needs JSON encoding for parquet (not a scalar)."""
-    import numpy as np
-    if isinstance(val, pd.Series):
-        return True
-    if isinstance(val, np.ndarray):
-        return True
-    if isinstance(val, (list, dict, tuple)):
-        return True
-    return False
-
-
 def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
     """Convert a summary stats dict to a tagged parquet-b64 payload.
 
@@ -294,20 +282,26 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
     col_mapping = [(orig, to_chars(i)) for i, orig in enumerate(sd.keys())]
     wide_data: Dict[str, List] = {}
 
+    import numpy as np
     for orig_col, short_col in col_mapping:
         stats = sd[orig_col]
         if not isinstance(stats, dict):
             continue
         for stat_name, val in stats.items():
             parquet_col = f"{short_col}__{stat_name}"
+            # Pre-convert types that json.dumps can't handle with default=str
             if isinstance(val, pd.Series):
                 try:
                     val = val.to_dict()
                 except TypeError:
                     val = val.to_list()
-            if _is_complex_for_parquet(val):
-                val = json.dumps(_make_json_safe(val), default=str)
-            wide_data[parquet_col] = [val]
+            elif isinstance(val, np.ndarray):
+                val = val.tolist()
+            elif isinstance(val, float) and np.isnan(val):
+                val = None
+            elif isinstance(val, np.floating) and np.isnan(val):
+                val = None
+            wide_data[parquet_col] = [_json_encode_cell(val)]
 
     try:
         df = pd.DataFrame(wide_data)
