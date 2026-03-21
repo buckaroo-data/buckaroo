@@ -268,34 +268,58 @@ def _json_encode_cell(val):
     return json.dumps(_make_json_safe(val), default=str)
 
 
+def _to_python_native(val):
+    """Convert numpy scalars to Python builtins for pyarrow."""
+    import numpy as np
+    if isinstance(val, np.bool_):
+        return bool(val)
+    if isinstance(val, np.integer):
+        return int(val)
+    if isinstance(val, np.floating):
+        if np.isnan(val):
+            return None
+        return float(val)
+    if isinstance(val, float) and np.isnan(val):
+        return None
+    if isinstance(val, np.ndarray):
+        return val.tolist()
+    if isinstance(val, pd.Series):
+        return val.to_dict()
+    return val
+
+
 def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
     """Convert a summary stats dict to a tagged parquet-b64 payload.
 
-    Summary stats DataFrames have mixed-type columns (strings, numbers, lists)
-    which fastparquet can't handle directly. We JSON-encode every cell value
-    first so each column becomes a pure string column, then use pyarrow for
-    parquet serialization. The JS side decodes parquet then JSON.parse's each cell.
+    Uses a wide-column layout: one parquet column per (col, stat) pair.
+    Column names are ``{short_col}__{stat_name}`` (e.g. ``a__mean``).
+    The parquet file has a single row. Scalars (numbers, strings, bools)
+    go through parquet natively. Lists/dicts are JSON-encoded.
 
     Returns {'format': 'parquet_b64', 'data': '<base64 string>'}
     Falls back to JSON if parquet serialization fails.
     """
-    # JSON-encode every value so parquet sees only string columns
-    json_sd: Dict[str, Any] = {}
-    for col, stats in sd.items():
-        if isinstance(stats, dict):
-            json_sd[col] = {k: _json_encode_cell(v) for k, v in stats.items()}
-        else:
-            json_sd[col] = stats
+    import pyarrow as pa
 
-    df = pd.DataFrame(json_sd)
-    df2 = prepare_df_for_serialization(df)
-    # Add level_0 for backwards compatibility with JSON path (pd_to_obj adds it)
-    if not isinstance(df.index, pd.MultiIndex):
-        df2['level_0'] = df2['index']
+    col_mapping = [(orig, to_chars(i)) for i, orig in enumerate(sd.keys())]
+    wide_data: Dict[str, List] = {}
+
+    for orig_col, short_col in col_mapping:
+        stats = sd[orig_col]
+        if not isinstance(stats, dict):
+            continue
+        for stat_name, val in stats.items():
+            parquet_col = f"{short_col}__{stat_name}"
+            val = _to_python_native(val)
+            if isinstance(val, (list, dict, tuple)):
+                val = json.dumps(_make_json_safe(val), default=str)
+            wide_data[parquet_col] = [val]
 
     try:
+        table = pa.table(wide_data)
         data = BytesIO()
-        df2.to_parquet(data, engine='pyarrow')
+        import pyarrow.parquet as pq
+        pq.write_table(table, data)
         data.seek(0)
         raw_bytes = data.read()
         b64 = base64.b64encode(raw_bytes).decode('ascii')

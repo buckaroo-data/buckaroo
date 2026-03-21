@@ -1,26 +1,25 @@
-"""Tests for sd_to_parquet_b64 summary stats serialization.
+"""Tests for sd_to_parquet_b64 wide-column summary stats serialization.
 
 These verify the Python side of the parquet_b64 transport: encoding
-summary stats (including histograms) to parquet and verifying the
-round-trip through pyarrow produces correct data that the JS side's
-resolveDFData/JSON.parse can consume.
+summary stats using one parquet column per (col, stat) pair.
 """
 import json
 import base64
 from io import BytesIO
 
 import numpy as np
+import pandas as pd
 import pyarrow.parquet as pq
 
-from buckaroo.serialization_utils import sd_to_parquet_b64
+from buckaroo.serialization_utils import sd_to_parquet_b64, _to_python_native
 
 
 def _decode_parquet_b64(result):
-    """Decode a parquet_b64 payload back to a DataFrame."""
+    """Decode a parquet_b64 payload back to a pyarrow Table."""
     assert isinstance(result, dict)
     assert result['format'] == 'parquet_b64'
     raw = base64.b64decode(result['data'])
-    return pq.read_table(BytesIO(raw)).to_pandas()
+    return pq.read_table(BytesIO(raw))
 
 
 def test_sd_to_parquet_b64_returns_tagged_dict():
@@ -30,31 +29,61 @@ def test_sd_to_parquet_b64_returns_tagged_dict():
     assert isinstance(result['data'], str)
 
 
-def test_sd_to_parquet_b64_round_trip_scalars():
+def test_sd_to_parquet_b64_wide_column_layout():
+    """Verify the wide-column layout: one column per (col, stat) pair."""
+    sd = {
+        'col_a': {
+            'dtype': 'float64',
+            'mean': np.float64(42.0),
+        },
+    }
+    result = sd_to_parquet_b64(sd)
+    table = _decode_parquet_b64(result)
+
+    # Should be single row
+    assert table.num_rows == 1
+
+    # Column names should be short_col__stat
+    col_names = table.column_names
+    assert 'a__dtype' in col_names
+    assert 'a__mean' in col_names
+
+
+def test_sd_to_parquet_b64_scalars_are_native():
+    """Scalars should be native parquet types, not JSON strings."""
     sd = {
         'col_a': {
             'dtype': 'float64',
             'mean': np.float64(42.0),
             'min': np.float64(0.0),
             'max': np.float64(100.0),
+            'is_numeric': True,
+            'length': 50,
         },
     }
     result = sd_to_parquet_b64(sd)
-    df = _decode_parquet_b64(result)
+    table = _decode_parquet_b64(result)
+    row = table.to_pydict()
 
-    # Find the mean row and verify the value round-trips
-    mean_row = df[df['index'] == 'mean']
-    assert len(mean_row) == 1
-    cell = mean_row.iloc[0]['a']  # column 'col_a' becomes 'a'
-    assert json.loads(cell) == 42.0
+    # Float values are native floats
+    assert row['a__mean'] == [42.0]
+    assert isinstance(row['a__mean'][0], float)
+
+    # String values are native strings
+    assert row['a__dtype'] == ['float64']
+    assert isinstance(row['a__dtype'][0], str)
+
+    # Bool values are native bools
+    assert row['a__is_numeric'] == [True]
+    assert isinstance(row['a__is_numeric'][0], bool)
+
+    # Int values are native ints
+    assert row['a__length'] == [50]
+    assert isinstance(row['a__length'][0], int)
 
 
-def test_sd_to_parquet_b64_histogram_round_trip():
-    """Verify histogram arrays survive the parquet_b64 round-trip.
-
-    This is the key test for #630: histogram data must be JSON-decodable
-    from the parquet payload with correct types (numbers, not strings).
-    """
+def test_sd_to_parquet_b64_histogram_is_json_string():
+    """Lists/dicts should be JSON-encoded strings in parquet."""
     histogram = [
         {'name': '0.0 - 1.0', 'tail': 1},
         {'name': '1-20', 'population': np.float64(15.0)},
@@ -68,23 +97,16 @@ def test_sd_to_parquet_b64_histogram_round_trip():
         },
     }
     result = sd_to_parquet_b64(sd)
-    df = _decode_parquet_b64(result)
+    table = _decode_parquet_b64(result)
+    row = table.to_pydict()
 
-    hist_row = df[df['index'] == 'histogram']
-    assert len(hist_row) == 1
-
-    cell = hist_row.iloc[0]['a']
-    assert isinstance(cell, str), "histogram cell should be a JSON string in parquet"
+    cell = row['a__histogram'][0]
+    assert isinstance(cell, str), "histogram should be a JSON string in parquet"
 
     parsed = json.loads(cell)
-    assert isinstance(parsed, list), "histogram should parse as a list"
+    assert isinstance(parsed, list)
     assert len(parsed) == 4
-
-    # Verify types: numbers must be numbers, not strings
     assert parsed[0] == {'name': '0.0 - 1.0', 'tail': 1}
-    assert isinstance(parsed[0]['tail'], int)
-
-    assert parsed[1]['name'] == '1-20'
     assert isinstance(parsed[1]['population'], float)
     assert parsed[1]['population'] == 15.0
 
@@ -98,11 +120,10 @@ def test_sd_to_parquet_b64_categorical_histogram():
     ]
     sd = {'col': {'histogram': histogram, 'dtype': 'object'}}
     result = sd_to_parquet_b64(sd)
-    df = _decode_parquet_b64(result)
+    table = _decode_parquet_b64(result)
+    row = table.to_pydict()
 
-    hist_row = df[df['index'] == 'histogram']
-    parsed = json.loads(hist_row.iloc[0]['a'])
-
+    parsed = json.loads(row['a__histogram'][0])
     assert parsed[0] == {'name': 'foo', 'cat_pop': 40.0}
     assert isinstance(parsed[0]['cat_pop'], float)
     assert parsed[2] == {'name': 'longtail', 'longtail': 15.0}
@@ -114,9 +135,60 @@ def test_sd_to_parquet_b64_multiple_columns():
         'y': {'mean': np.float64(2.0), 'dtype': 'int64'},
     }
     result = sd_to_parquet_b64(sd)
-    df = _decode_parquet_b64(result)
+    table = _decode_parquet_b64(result)
+    row = table.to_pydict()
 
-    # Columns are rewritten to 'a', 'b' by prepare_df_for_serialization
-    mean_row = df[df['index'] == 'mean']
-    assert json.loads(mean_row.iloc[0]['a']) == 1.0
-    assert json.loads(mean_row.iloc[0]['b']) == 2.0
+    assert row['a__mean'] == [1.0]
+    assert row['b__mean'] == [2.0]
+    assert row['a__dtype'] == ['float64']
+    assert row['b__dtype'] == ['int64']
+
+
+def test_sd_to_parquet_b64_nan_becomes_null():
+    """NaN values should become parquet nulls."""
+    sd = {'col': {'mean': np.nan, 'dtype': 'float64'}}
+    result = sd_to_parquet_b64(sd)
+    table = _decode_parquet_b64(result)
+    row = table.to_pydict()
+
+    assert row['a__mean'] == [None]
+    assert row['a__dtype'] == ['float64']
+
+
+def test_sd_to_parquet_b64_value_counts_series():
+    """pd.Series values should be converted to dicts (JSON-encoded)."""
+    sd = {
+        'col': {
+            'value_counts': pd.Series({'foo': 10, 'bar': 5}),
+            'dtype': 'object',
+        },
+    }
+    result = sd_to_parquet_b64(sd)
+    table = _decode_parquet_b64(result)
+    row = table.to_pydict()
+
+    cell = row['a__value_counts'][0]
+    assert isinstance(cell, str)
+    parsed = json.loads(cell)
+    assert parsed == {'foo': 10, 'bar': 5}
+
+
+def test_to_python_native_conversions():
+    assert _to_python_native(np.float64(3.14)) == 3.14
+    assert isinstance(_to_python_native(np.float64(3.14)), float)
+
+    assert _to_python_native(np.int64(42)) == 42
+    assert isinstance(_to_python_native(np.int64(42)), int)
+
+    assert _to_python_native(np.bool_(True)) is True
+    assert isinstance(_to_python_native(np.bool_(True)), bool)
+
+    assert _to_python_native(np.nan) is None
+
+    arr = np.array([1, 2, 3])
+    assert _to_python_native(arr) == [1, 2, 3]
+
+    assert _to_python_native("hello") == "hello"
+    assert _to_python_native(None) is None
+
+
