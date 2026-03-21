@@ -11,8 +11,9 @@ have tripped across many types of bugs from DataFrames that I didn't expect.
 
 So I compiled a set of the weirdest DataFrames I have seen in the wild — the
 ones that caused hard to debug errors, the ones that were hard to support —
-and reduced them to limited test cases. I call this the **Dastardly DataFrame
-Dataset** (DDD). MultiIndex columns, NaN mixed with infinity, columns
+and reduced them to limited test cases. I call this the `Dastardly DataFrame
+Dataset <https://github.com/buckaroo-data/buckaroo/blob/main/buckaroo/ddd_library.py>`_
+(DDD). MultiIndex columns, NaN mixed with infinity, columns
 literally named ``index``, integers too large for JavaScript, types that most
 tools pretend don't exist. Through hard fought experience, Buckaroo has dealt
 with bugs or edge cases related to each one.
