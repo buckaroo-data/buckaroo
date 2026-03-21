@@ -8,7 +8,7 @@
 from importlib import metadata
 
 project = 'Buckaroo'
-copyright = '2023-2025, Paddy Mullen'
+copyright = '2023-2026, Paddy Mullen'
 author = 'Paddy Mullen'
 release = metadata.version('buckaroo')
 
