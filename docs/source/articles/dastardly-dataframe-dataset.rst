@@ -392,128 +392,218 @@ handle *every* dtype? Here's the full picture across all three engines [1]_:
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 20 20 20
+   :widths: 18 12 12 12 14 14 18
 
    * - Dtype
-     - Pandas (classic)
+     - Pandas
      - Pandas (Arrow)
      - Polars
-   * - int8 / int16 / int32
+     - Parquet type
+     - JS type
+     - Buckaroo display
+   * - int8–int32
      - Yes
      - Yes
      - Yes
+     - INT32
+     - Number
+     - integer
    * - int64
      - Yes
      - Yes
      - Yes
+     - INT64
+     - Number [2]_
+     - integer
    * - uint8–uint64
      - Yes
      - Yes
      - Yes
+     - INT32/INT64
+     - Number [2]_
+     - integer
    * - BigInt (>2\ :sup:`53`)
      - Yes
      - Yes
      -
+     - INT64
+     - String [2]_
+     - string
    * - float32
      - Yes
      - Yes
      - Yes
+     - FLOAT
+     - Number
+     - float
    * - float64 (incl. inf/NaN)
      - Yes
      - Yes
      - Yes
+     - DOUBLE
+     - Number
+     - float
    * - complex128
-     - Yes (JSON only) [2]_
+     - Fail [3]_
      -
      -
-   * - bool / boolean
+     - —
+     - —
+     - —
+   * - bool
      - Yes
      - Yes
      - Yes
+     - BOOLEAN
+     - boolean
+     - True/False
    * - string / object
      - Yes
      - Yes
      - Yes
+     - BYTE_ARRAY
+     - String
+     - string
    * - mixed-type object
      - Yes
      - —
      - —
+     - BYTE_ARRAY
+     - String
+     - obj
    * - datetime
      - Yes
      - Yes
      - Yes
-   * - datetime + timezone
+     - TIMESTAMP
+     - Date
+     - datetime
+   * - datetime + tz
      - Not tested
      - Yes
      - Yes
+     - TIMESTAMP+tz
+     - Date
+     - datetime
    * - timedelta / duration
      - Yes
      - Yes
      - Yes
+     - → String [4]_
+     - String
+     - duration (1d 2h 3m)
    * - date
      - —
      - Yes
      - Not tested
+     - DATE (INT32)
+     - Date
+     - datetime
    * - time
      - —
      - Yes
      - Yes
+     - TIME (INT64)
+     - String
+     - string
    * - Categorical
      - Yes
-     - Yes (dictionary)
      - Yes
+     - Yes
+     - DICT encoding
+     - String
+     - string
    * - Enum
      - —
      - —
      - Not tested
+     - DICT encoding
+     - String
+     - string
    * - Period
      - Yes
      - —
      - —
+     - → String [4]_
+     - String
+     - string
    * - Interval
      - Yes
      - —
      - —
+     - → String [4]_
+     - String
+     - string
    * - Decimal
      - —
      - Yes
      - Yes
+     - DECIMAL
+     - Number
+     - float
    * - Binary
      - —
      - Yes
      - Yes
+     - BYTE_ARRAY
+     - String (hex)
+     - string
    * - Sparse
-     - Yes (JSON only) [2]_
+     - Fail [3]_
+     - —
+     - —
+     - —
      - —
      - —
    * - Nullable int/float/bool
      - Not tested
      - —
      - —
+     - same as above
+     - same as above
+     - same as above
    * - List / Array
      - —
      - Yes
      - Not tested
+     - LIST
+     - Array
+     - obj
    * - Struct
      - —
      - Yes
      - Not tested
+     - STRUCT
+     - Object
+     - obj
    * - Null (all-null column)
      - —
      - —
      - Not tested
+     - BYTE_ARRAY
+     - null
+     - (empty)
 
 "Yes" means the dtype serializes and displays correctly. "Not tested" means
 serialization succeeds but there is no DDD test case exercising it through
 the full widget. "—" means the dtype does not exist in that engine.
 
 .. [1] A footnote alone won't cover the complexity here — the interaction
-   between dtype, serialization format (JSON vs Parquet), and JS-side
-   decoding has enough nuance for its own blog post. Expect one soon.
+   between Python dtype, Parquet physical type, JS decoding, and display
+   formatter has enough nuance for its own blog post. Expect one soon.
 
-.. [2] ``complex128`` and ``SparseDtype`` fail the Parquet serialization
-   path (Arrow has no complex number type; sparse arrays can't be converted).
-   Both work through the JSON path with string fallback.
+.. [2] hyparquet decodes INT64 as BigInt. Buckaroo converts to Number if
+   the value is ≤ ``Number.MAX_SAFE_INTEGER`` (2\ :sup:`53` - 1), otherwise
+   stringifies to preserve precision.
+
+.. [3] ``complex128`` and ``SparseDtype`` fail the Parquet path — Arrow
+   has no complex number type and can't convert sparse arrays. The JSON
+   path works with string fallback, but that path is being phased out.
+
+.. [4] ``→ String`` means the type has no native Parquet equivalent.
+   Buckaroo coerces it to a string before writing Parquet. Period becomes
+   ``'2021-01'``, Interval becomes ``'(0, 1]'``, timedelta becomes
+   ``'1 days 02:03:04'`` (pandas path only — Polars Duration is native).
 
 
 What's happening under the hood
