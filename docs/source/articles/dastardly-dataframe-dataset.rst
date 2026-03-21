@@ -384,6 +384,138 @@ you're migrating from pandas to polars, buckaroo moves with you.
    </iframe>
 
 
+Full dtype coverage
+-------------------
+
+The DDD focuses on the types that cause trouble, but how does buckaroo
+handle *every* dtype? Here's the full picture across all three engines [1]_:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 20 20 20
+
+   * - Dtype
+     - Pandas (classic)
+     - Pandas (Arrow)
+     - Polars
+   * - int8 / int16 / int32
+     - Yes
+     - Yes
+     - Yes
+   * - int64
+     - Yes
+     - Yes
+     - Yes
+   * - uint8–uint64
+     - Yes
+     - Yes
+     - Yes
+   * - BigInt (>2\ :sup:`53`)
+     - Yes
+     - Yes
+     -
+   * - float32
+     - Yes
+     - Yes
+     - Yes
+   * - float64 (incl. inf/NaN)
+     - Yes
+     - Yes
+     - Yes
+   * - complex128
+     - Yes (JSON only) [2]_
+     -
+     -
+   * - bool / boolean
+     - Yes
+     - Yes
+     - Yes
+   * - string / object
+     - Yes
+     - Yes
+     - Yes
+   * - mixed-type object
+     - Yes
+     - —
+     - —
+   * - datetime
+     - Yes
+     - Yes
+     - Yes
+   * - datetime + timezone
+     - Not tested
+     - Yes
+     - Yes
+   * - timedelta / duration
+     - Yes
+     - Yes
+     - Yes
+   * - date
+     - —
+     - Yes
+     - Not tested
+   * - time
+     - —
+     - Yes
+     - Yes
+   * - Categorical
+     - Yes
+     - Yes (dictionary)
+     - Yes
+   * - Enum
+     - —
+     - —
+     - Not tested
+   * - Period
+     - Yes
+     - —
+     - —
+   * - Interval
+     - Yes
+     - —
+     - —
+   * - Decimal
+     - —
+     - Yes
+     - Yes
+   * - Binary
+     - —
+     - Yes
+     - Yes
+   * - Sparse
+     - Yes (JSON only) [2]_
+     - —
+     - —
+   * - Nullable int/float/bool
+     - Not tested
+     - —
+     - —
+   * - List / Array
+     - —
+     - Yes
+     - Not tested
+   * - Struct
+     - —
+     - Yes
+     - Not tested
+   * - Null (all-null column)
+     - —
+     - —
+     - Not tested
+
+"Yes" means the dtype serializes and displays correctly. "Not tested" means
+serialization succeeds but there is no DDD test case exercising it through
+the full widget. "—" means the dtype does not exist in that engine.
+
+.. [1] A footnote alone won't cover the complexity here — the interaction
+   between dtype, serialization format (JSON vs Parquet), and JS-side
+   decoding has enough nuance for its own blog post. Expect one soon.
+
+.. [2] ``complex128`` and ``SparseDtype`` fail the Parquet serialization
+   path (Arrow has no complex number type; sparse arrays can't be converted).
+   Both work through the JSON path with string fallback.
+
+
 What's happening under the hood
 --------------------------------
 
