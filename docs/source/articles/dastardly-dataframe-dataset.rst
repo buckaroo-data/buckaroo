@@ -17,6 +17,14 @@ literally named ``index``, integers too large for JavaScript, types that most
 tools pretend don't exist. Through hard fought experience, Buckaroo has dealt
 with bugs or edge cases related to each one.
 
+The naming and early shape of the DDD was heavily influenced by an exchange
+with `Cecil Curry <https://github.com/leycec>`_, the author of
+`beartype <https://github.com/beartype/beartype>`_, on
+`beartype#529 <https://github.com/beartype/beartype/issues/529>`_. That guy
+is awesome. Be more like that guy. Seriously the most enjoyable bug report
+interaction I have ever had — the kind of exchange that makes open source
+worth doing.
+
 This page shows each DDD member rendered live in buckaroo's static embed. No
 Jupyter kernel, no server — just HTML and JavaScript.
 
