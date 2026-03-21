@@ -19,17 +19,7 @@ rename every column. The original column ``"revenue"`` becomes ``a``.
 ``"cost"`` becomes ``b``. The 27th column becomes ``aa``, then ``ab``,
 ``ac``, and so on — base-26 using lowercase ASCII.
 
-.. code-block:: python
-
-    # buckaroo/df_util.py
-    def to_chars(n: int) -> str:
-        digits = to_digits(n, 26)
-        return "".join(map(lambda x: chr(x + 97), digits))
-
-    def old_col_new_col(df):
-        return [(orig, to_chars(i)) for i, orig in enumerate(df.columns)]
-
-Why? Three reasons:
+Why? Two reasons:
 
 1. **Column names can be anything.** Tuples (from MultiIndex), integers,
    strings with spaces and special characters, even a column literally
@@ -42,10 +32,6 @@ Why? Three reasons:
    too, there's a name collision. Renaming to short opaque names means
    the index columns (``index``, ``index_a``, ``index_b`` for
    MultiIndex levels) never collide with data columns.
-
-3. **Smaller payloads.** The column name is repeated in every row of the
-   JSON/Parquet output. ``"a"`` is smaller than
-   ``"quarterly_revenue_usd"``.
 
 The original name is preserved in the ``column_config`` that travels
 alongside the data. On the JS side, each column's ``header_name``
@@ -176,8 +162,24 @@ doesn't:
    stringified to preserve precision — this is why
    ``9999999999999999999`` displays correctly instead of silently rounding.
 
-Results are cached (LRU, 8 entries) so switching between summary
-stats views doesn't re-decode the same Parquet bytes.
+Buckaroo caches decoded results in its own LRU cache (8 entries) in
+``resolveDFData.ts`` — hyparquet itself doesn't cache. When you switch
+between the "main" and "summary stats" views, the parquet bytes don't
+get re-decoded if they're still in the cache.
+
+The type journey through this layer looks like:
+
+.. code-block:: text
+
+    Python sends:  string (base64)
+         ↓
+    b64ToArrayBuffer():  ArrayBuffer (raw bytes)
+         ↓
+    parquetRead():  Array<Record<string, unknown>>
+         ↓
+    parseParquetRow():  DFData (Array<DFDataRow>)
+         ↓
+    AG-Grid receives: typed cell values (number | string | boolean | object)
 
 
 Displayers and formatters: the last mile
@@ -299,3 +301,34 @@ encoding, the BigInt handling — is invisible.
 That's the point. The pipeline exists so that every type, every edge
 case, every weird DataFrame gets displayed correctly without the user
 having to think about it.
+
+
+Why it ended up this way
+-------------------------
+
+Buckaroo originally relied on default AG-Grid behavior and pandas'
+built-in JSON serialization. That worked for simple DataFrames, but
+edge cases kept appearing — and Python's JSON encoding turned out to be
+very, very slow. Moving to Parquet solved the performance problem and
+brought type preservation for free.
+
+A few examples of how the pipeline handles specific types:
+
+**BigInts (>2^53):** On the Python side, these are just regular int64
+values — they get written to Parquet as INT64, no conversion needed,
+full speed. The complexity lives entirely on the JS side: hyparquet
+decodes INT64 as JavaScript ``BigInt``, and buckaroo's
+``parseParquetRow()`` checks whether each value fits in
+``Number.MAX_SAFE_INTEGER``. If it does, it becomes a regular
+``Number`` (so the integer formatter works). If not, it's stringified
+to preserve precision. This means Python doesn't have to know or care
+about JavaScript's numeric limitations.
+
+**Durations / Timedeltas:** These are coerced to strings on the Python
+side — the entire column becomes string values like
+``"1 days 02:03:04"`` before Parquet encoding. Parquet has no native
+duration type, and fastparquet can't encode timedeltas directly. The JS
+side then parses these strings back into human-readable format
+(``"1d 2h 3m 4s"``) via the duration formatter. The round-trip through
+strings is lossy in theory but lossless in practice — pandas timedelta
+string repr preserves full precision down to microseconds.
