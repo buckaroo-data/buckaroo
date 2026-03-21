@@ -626,8 +626,8 @@ the full widget. "—" means the dtype does not exist in that engine.
    ``Interval``, which is a numeric range like ``(0, 1]``.
 
 
-What's happening under the hood
---------------------------------
+How this demo was built
+-----------------------
 
 Every table on this page is a **static embedding** of the full buckaroo
 widget. There is no Python kernel running. Here's what happened:
