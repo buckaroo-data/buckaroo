@@ -4,18 +4,29 @@ The Dastardly DataFrame Dataset
 Every DataFrame viewer works fine on ``pd.DataFrame({'a': [1, 2, 3]})``.
 The question is what happens when the data gets weird.
 
-Buckaroo ships a collection of deliberately tricky DataFrames called the
-**Dastardly DataFrame Dataset** (DDD). These are the DataFrames that break
-other viewers — the ones with MultiIndex columns, NaN mixed with infinity,
-columns literally named ``index``, integers too large for JavaScript, and
-types that most tools pretend don't exist.
+Displaying DataFrames in all their wonderfully variant splendor is quite a
+challenge. DataFrames come in many forms and there is little you can depend
+on when you want to serialize or display them. Through building Buckaroo I
+have tripped across many types of bugs from DataFrames that I didn't expect.
 
-This page shows each one rendered live in buckaroo's static embed. No
-Jupyter kernel, no server — just HTML and JavaScript. If you can see the
-tables below, the static embedding system is working.
+So I compiled a set of the weirdest DataFrames I have seen in the wild — the
+ones that caused hard to debug errors, the ones that were hard to support —
+and reduced them to limited test cases. I call this the **Dastardly DataFrame
+Dataset** (DDD). MultiIndex columns, NaN mixed with infinity, columns
+literally named ``index``, integers too large for JavaScript, types that most
+tools pretend don't exist. Through hard fought experience, Buckaroo has dealt
+with bugs or edge cases related to each one.
+
+This page shows each DDD member rendered live in buckaroo's static embed. No
+Jupyter kernel, no server — just HTML and JavaScript.
 
 Why this matters
 ----------------
+
+Buckaroo has the philosophy that every DataFrame should be displayable, at
+least in some form. Capabilities can be reduced — it's fine for ``mean`` to
+fail if there is a ``NaN`` in a column — but that failure can't cause
+Buckaroo to display nothing.
 
 If you build dashboards, you choose what data goes into your table. You
 control the types, the column names, the index. But if you're doing
@@ -29,6 +40,11 @@ everything, especially the parts that are surprising.
 
 The Dastardly DataFrames
 ------------------------
+
+The DDD is used extensively in Buckaroo's unit test suite. At a minimum,
+all DataFrames display in some way unless otherwise noted. Most display with
+full features — there are a couple of rough edges, but having a comprehensive
+test set is a very helpful start.
 
 Each section below shows the exact function from ``buckaroo.ddd_library``
 that creates the DataFrame, explains why it's tricky, and renders it live
