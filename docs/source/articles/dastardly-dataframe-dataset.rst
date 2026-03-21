@@ -416,42 +416,42 @@ handle *every* dtype? Here's the full picture across all three engines [1]_:
      - Yes
      - INT32
      - Number
-     - integer
+     - ``1,234``
    * - int64
      - Yes
      - Yes
      - Yes
      - INT64
      - Number [2]_
-     - integer
+     - ``1,234,567``
    * - uint8–uint64
      - Yes
      - Yes
      - Yes
      - INT32/INT64
      - Number [2]_
-     - integer
+     - ``65,535``
    * - BigInt (>2\ :sup:`53`)
      - Yes
      - Yes
      -
      - INT64
      - String [2]_
-     - string
+     - ``9999999999999999999``
    * - float32
      - Yes
      - Yes
      - Yes
      - FLOAT
      - Number
-     - float
+     - ``2.500``
    * - float64 (incl. inf/NaN)
      - Yes
      - Yes
      - Yes
      - DOUBLE
      - Number
-     - float
+     - ``Infinity``
    * - complex128
      - Fail [3]_
      -
@@ -465,98 +465,98 @@ handle *every* dtype? Here's the full picture across all three engines [1]_:
      - Yes
      - BOOLEAN
      - boolean
-     - True/False
+     - ``True``
    * - string / object
      - Yes
      - Yes
      - Yes
      - BYTE_ARRAY
      - String
-     - string
+     - ``hello world``
    * - mixed-type object
      - Yes
      - —
      - —
      - BYTE_ARRAY
      - String
-     - obj
+     - ``{ 'a': 1, 'b': None }``
    * - datetime
      - Yes
      - Yes
      - Yes
      - TIMESTAMP
      - Date
-     - datetime
+     - ``2021-01-15 14:30:00``
    * - datetime + tz
      - Not tested
      - Yes
      - Yes
      - TIMESTAMP+tz
      - Date
-     - datetime
+     - ``2021-01-15 14:30:00``
    * - timedelta / duration
      - Yes
      - Yes
      - Yes
      - → String [4]_
      - String
-     - duration (1d 2h 3m)
+     - ``1d 2h 3m 4s``
    * - date
      - —
      - Yes
      - Not tested
      - DATE (INT32)
      - Date
-     - datetime
+     - ``2021-01-15 00:00:00``
    * - time
      - —
      - Yes
      - Yes
      - TIME (INT64)
      - String
-     - string
+     - ``14:30:00``
    * - Categorical
      - Yes
      - Yes
      - Yes
      - DICT encoding
      - String
-     - string
+     - ``red``
    * - Enum
      - —
      - —
      - Not tested
      - DICT encoding
      - String
-     - string
+     - ``red``
    * - Period
      - Yes
      - —
      - —
      - → String [4]_
      - String
-     - string
+     - ``2021-01``
    * - Interval
      - Yes
      - —
      - —
      - → String [4]_
      - String
-     - string
+     - ``(0, 1]``
    * - Decimal
      - —
      - Yes
      - Yes
      - DECIMAL
      - Number
-     - float
+     - ``100.50``
    * - Binary
      - —
      - Yes
      - Yes
      - BYTE_ARRAY
      - String (hex)
-     - string
+     - ``68656c6c6f``
    * - Sparse
      - Fail [3]_
      - —
@@ -577,21 +577,21 @@ handle *every* dtype? Here's the full picture across all three engines [1]_:
      - Not tested
      - LIST
      - Array
-     - obj
+     - ``[ 1, 2, 3]``
    * - Struct
      - —
      - Yes
      - Not tested
      - STRUCT
      - Object
-     - obj
+     - ``{ 'a': 1, 'b': x }``
    * - Null (all-null column)
      - —
      - —
      - Not tested
      - BYTE_ARRAY
      - null
-     - (empty)
+     - ``(empty)``
 
 "Yes" means the dtype serializes and displays correctly. "Not tested" means
 serialization succeeds but there is no DDD test case exercising it through
