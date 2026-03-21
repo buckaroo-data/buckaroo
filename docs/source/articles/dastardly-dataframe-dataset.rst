@@ -434,10 +434,10 @@ handle *every* dtype? Here's the full picture across all three engines [1]_:
    * - BigInt (>2\ :sup:`53`)
      - Yes
      - Yes
-     -
+     - —
      - INT64
      - String [2]_
-     - ``9999999999999999999``
+     - ``9999999999999999999`` [5]_
    * - float32
      - Yes
      - Yes
@@ -454,8 +454,8 @@ handle *every* dtype? Here's the full picture across all three engines [1]_:
      - ``Infinity``
    * - complex128
      - Fail [3]_
-     -
-     -
+     - —
+     - —
      - —
      - —
      - —
@@ -529,13 +529,13 @@ handle *every* dtype? Here's the full picture across all three engines [1]_:
      - DICT encoding
      - String
      - ``red``
-   * - Period
+   * - Period (time span)
      - Yes
      - —
      - —
      - → String [4]_
      - String
-     - ``2021-01``
+     - ``2021-01`` [6]_
    * - Interval
      - Yes
      - —
@@ -568,9 +568,9 @@ handle *every* dtype? Here's the full picture across all three engines [1]_:
      - Not tested
      - —
      - —
-     - same as above
-     - same as above
-     - same as above
+     - INT32/INT64/BOOLEAN
+     - Number/boolean
+     - ``1,234`` / ``True``
    * - List / Array
      - —
      - Yes
@@ -613,6 +613,17 @@ the full widget. "—" means the dtype does not exist in that engine.
    Buckaroo coerces it to a string before writing Parquet. Period becomes
    ``'2021-01'``, Interval becomes ``'(0, 1]'``, timedelta becomes
    ``'1 days 02:03:04'`` (pandas path only — Polars Duration is native).
+
+.. [5] Values above ``Number.MAX_SAFE_INTEGER`` are stringified on the JS
+   side to preserve exact precision, so they display without commas. The
+   value ``1`` in the same column still gets the integer formatter: ``1``.
+   This means a single column can show two different display styles depending
+   on whether each value fits in 53 bits.
+
+.. [6] A pandas ``Period`` is a *time span*, not a range between two dates.
+   ``Period('2021-01', 'M')`` means "the month of January 2021". Buckaroo
+   stringifies it because Parquet has no Period type. Don't confuse it with
+   ``Interval``, which is a numeric range like ``(0, 1]``.
 
 
 What's happening under the hood
