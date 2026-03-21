@@ -42,14 +42,27 @@ class BuckarooBuildHook(BuildHookInterface):
         # available.  full_build.sh normally handles this before calling
         # uv build, but this is a safety net for bare `uv build`.
         if version == "standard" and shutil.which("pnpm"):
-            bjs_core_root = ROOT / "packages" / "buckaroo-js-core"
+            packages_root = ROOT / "packages"
+            bjs_core_root = packages_root / "buckaroo-js-core"
             if not (bjs_core_root / "dist" / "index.esm.js").exists():
                 subprocess.check_call(["pnpm", "install"], cwd=bjs_core_root)
                 subprocess.check_call(["pnpm", "run", "build"], cwd=bjs_core_root)
-            subprocess.check_call(["pnpm", "install"], cwd=ROOT / "packages")
+            # compiled.css is a copy of the core style sheet
+            style_css = bjs_core_root / "dist" / "style.css"
+            if style_css.exists():
+                shutil.copy(style_css, STATIC_DIR / "compiled.css")
+            subprocess.check_call(["pnpm", "install"], cwd=packages_root)
             subprocess.check_call(
                 ["pnpm", "--filter", "buckaroo-widget", "run", "build"],
-                cwd=ROOT / "packages",
+                cwd=packages_root,
+            )
+            subprocess.check_call(
+                ["pnpm", "--filter", "buckaroo-widget", "run", "build:standalone"],
+                cwd=packages_root,
+            )
+            subprocess.check_call(
+                ["pnpm", "-C", str(packages_root / "js"), "run", "build:static"],
+                cwd=ROOT,
             )
             return
 
