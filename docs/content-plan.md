@@ -51,6 +51,12 @@ sponsored by cloudflare?
 
 
 
+# How types and data move from engine to browser
+
+Column renaming (a,b,c..z,aa,ab), type coercion before parquet, fastparquet encoding, base64 transport, hyparquet decode in browser, displayer/formatter dispatch. Full pipeline trace for a single cell value.
+
+See `docs/source/articles/types-to-display.rst`
+
 ## Help me work through a content plan.
 
 what other features have I recently released that desereve blog posts?
