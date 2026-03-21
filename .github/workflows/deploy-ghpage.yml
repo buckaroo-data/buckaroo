@@ -44,7 +44,7 @@ jobs:
       #     jupyter lite build --contents ./example-notebooks --output-dir ./_output
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: ./packages/buckaroo-js-core/dist/storybook
 
