@@ -279,34 +279,25 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
     Returns {'format': 'parquet_b64', 'data': '<base64 string>'}
     Falls back to JSON if parquet serialization fails.
     """
-    col_mapping = [(orig, to_chars(i)) for i, orig in enumerate(sd.keys())]
-    wide_data: Dict[str, List] = {}
+    import pyarrow as pa
+    import pyarrow.parquet as pq
 
-    import numpy as np
+    col_mapping = [(orig, to_chars(i)) for i, orig in enumerate(sd.keys())]
+    names: List[str] = []
+    arrays: List = []
+
     for orig_col, short_col in col_mapping:
         stats = sd[orig_col]
         if not isinstance(stats, dict):
             continue
         for stat_name, val in stats.items():
-            parquet_col = f"{short_col}__{stat_name}"
-            # Pre-convert types that json.dumps can't handle with default=str
-            if isinstance(val, pd.Series):
-                try:
-                    val = val.to_dict()
-                except TypeError:
-                    val = val.to_list()
-            elif isinstance(val, np.ndarray):
-                val = val.tolist()
-            elif isinstance(val, float) and np.isnan(val):
-                val = None
-            elif isinstance(val, np.floating) and np.isnan(val):
-                val = None
-            wide_data[parquet_col] = [_json_encode_cell(val)]
+            names.append(f"{short_col}__{stat_name}")
+            arrays.append(pa.array([_json_encode_cell(val)]))
 
     try:
-        df = pd.DataFrame(wide_data)
+        table = pa.table(dict(zip(names, arrays)))
         data = BytesIO()
-        df.to_parquet(data, engine='pyarrow', index=False)
+        pq.write_table(table, data)
         data.seek(0)
         raw_bytes = data.read()
         b64 = base64.b64encode(raw_bytes).decode('ascii')

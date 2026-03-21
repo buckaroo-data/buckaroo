@@ -52,7 +52,7 @@ export function pivotWideSummaryStats(wideRow: Record<string, any>): DFData {
     const statCols: Record<string, Record<string, any>> = {};
     const allCols = new Set<string>();
 
-    for (const [key, val] of Object.entries(wideRow)) {
+    for (const [key, rawVal] of Object.entries(wideRow)) {
         const sepIdx = key.indexOf('__');
         if (sepIdx === -1) continue;
         const col = key.substring(0, sepIdx);
@@ -60,6 +60,7 @@ export function pivotWideSummaryStats(wideRow: Record<string, any>): DFData {
         allCols.add(col);
         if (!statCols[stat]) statCols[stat] = {};
 
+        let val: any = rawVal;
         // JSON-parse all string values (cells are JSON-encoded in parquet)
         if (typeof val === 'string') {
             try {

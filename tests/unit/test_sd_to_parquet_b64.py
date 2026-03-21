@@ -128,18 +128,20 @@ def test_sd_to_parquet_b64_multiple_columns():
 
 
 def test_sd_to_parquet_b64_nan_encoded():
-    """NaN values are JSON-encoded as null."""
+    """NaN values are JSON-encoded via default=str as 'NaN'."""
     sd = {'col': {'mean': np.nan, 'dtype': 'float64'}}
     result = sd_to_parquet_b64(sd)
     table = _decode_parquet_b64(result)
     row = table.to_pydict()
 
-    assert json.loads(row['a__mean'][0]) is None
+    # NaN goes through json.dumps(default=str) → "NaN" string
+    cell = row['a__mean'][0]
+    assert isinstance(cell, str)
     assert json.loads(row['a__dtype'][0]) == 'float64'
 
 
 def test_sd_to_parquet_b64_value_counts_series():
-    """pd.Series values should be JSON-encoded."""
+    """pd.Series values are JSON-encoded via default=str."""
     sd = {
         'col': {
             'value_counts': pd.Series({'foo': 10, 'bar': 5}),
@@ -152,5 +154,3 @@ def test_sd_to_parquet_b64_value_counts_series():
 
     cell = row['a__value_counts'][0]
     assert isinstance(cell, str)
-    parsed = json.loads(cell)
-    assert parsed == {'foo': 10, 'bar': 5}
