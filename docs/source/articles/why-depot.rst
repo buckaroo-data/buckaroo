@@ -147,7 +147,7 @@ Since then I've added **20 new jobs**:
 - **6 Playwright integration suites** — Storybook, JupyterLab, Marimo,
   WASM Marimo, Server, and Static Embed. These are the tests that
   actually catch real bugs — "it renders in Jupyter but is blank in
-  Marimo" is the kind of thing I can't eyeball.
+  Marimo" is the kind of thing I don't want to eyeball on every PR.
 - **Python tests across 4 versions** with two dependency strategies
   (min pinned + max latest) — 8 matrix jobs total
 - **MCP integration tests** — verifying the MCP server works against
@@ -158,8 +158,10 @@ Since then I've added **20 new jobs**:
 - **TestPyPI publish** on every PR with an install command in the PR
   comment
 
-The pipeline now runs **23 jobs** and completes in about **7 minutes**.
-Before Depot, 3 jobs took about 6 minutes on GitHub Actions runners.
+The pipeline now runs **23 jobs** and the critical path completes in
+about **3.5 minutes** (the Windows job runs longer but is non-blocking
+— ``continue-on-error: true``). Before Depot, 3 jobs took about 5
+minutes on GitHub Actions runners.
 
 The fast runners didn't just make existing tests faster — they made it
 practical to keep adding tests. If each new Playwright suite added 5
