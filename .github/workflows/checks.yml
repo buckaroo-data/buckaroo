@@ -327,7 +327,7 @@ jobs:
           cat >> pyproject.toml << 'PYEOF'
 
           [tool.uv]
-          override-dependencies = ["pandas"]
+          override-dependencies = ["pandas", "starlette<1.0.0"]
           PYEOF
           uv sync --resolution=highest --all-extras --dev --no-group datacompy
           uv pip list | grep -i pandas
