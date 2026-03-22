@@ -65,9 +65,8 @@ What Depot changed
 The CTO responded to my request for open source sponsorship on
 Christmas Eve. Since then:
 
-- **Critical path: ~3.5 minutes.** From push to all-green (ignoring
-  the non-blocking Windows job). 22 jobs, 3.5 minutes. That's fast
-  enough that I don't context-switch away.
+- **Critical path: ~3.5 minutes.** From push to all-green. 22 jobs,
+  3.5 minutes. That's fast enough that I don't context-switch away.
 - **Commit to first step running: ~30 seconds** on Linux. GitHub adds
   about 6 seconds of latency. Depot provisions a runner in ~18 seconds.
   On GitHub's own runners this used to be minutes.
@@ -114,14 +113,10 @@ Here's what the pipeline looks like on Depot 2-CPU runners:
    * - JS / Build + Test
      - 0m 53s
      - —
-   * - Windows (non-blocking)
-     - 8m 02s
-     - 28%
 
 The "% Useful Work" column is actual test/build time vs. setup overhead
 (checkout, install dependencies, provision). Most jobs are 70–84%
-useful, which is good. Windows is 28% useful because ``uv install``
-takes 3m29s on Windows vs. 3 seconds on Linux.
+useful.
 
 
 Before and after
@@ -130,11 +125,11 @@ Before and after
 Before Depot, Buckaroo's CI had **4 jobs**: lint and Python tests on 3
 versions. That took about 6 minutes on GitHub Actions runners.
 
-Today Buckaroo's CI has **23 jobs**: lint, JS build + test, wheel build,
+Today Buckaroo's CI has **22 jobs**: lint, JS build + test, wheel build,
 Python tests across 4 versions with two dependency strategies, 6
 Playwright integration suites, MCP integration, smoke tests, docs build,
-styling screenshots, TestPyPI publish, and Windows. That takes about
-**7 minutes** on Depot.
+styling screenshots, and TestPyPI publish. That takes about **7 minutes**
+on Depot.
 
 Six times more jobs in roughly the same wall-clock time. The fast
 runners made it practical to add all of those integration tests — if
