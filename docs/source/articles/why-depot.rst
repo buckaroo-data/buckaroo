@@ -122,18 +122,32 @@ useful.
 Before and after
 -----------------
 
-Before Depot, Buckaroo's CI had **4 jobs**: lint and Python tests on 3
-versions. That took about 6 minutes on GitHub Actions runners.
+On December 24, 2025 — the day Depot's CTO responded to my sponsorship
+request — Buckaroo's CI had **3 jobs**: lint, Python tests, and a
+wheel build. That was it.
 
-Today Buckaroo's CI has **22 jobs**: lint, JS build + test, wheel build,
-Python tests across 4 versions with two dependency strategies, 6
-Playwright integration suites, MCP integration, smoke tests, docs build,
-styling screenshots, and TestPyPI publish. That takes about **7 minutes**
-on Depot.
+Since then I've added **20 new jobs**:
 
-Six times more jobs in roughly the same wall-clock time. The fast
-runners made it practical to add all of those integration tests — if
-each new test suite added 5 minutes, I never would have added them.
+- **6 Playwright integration suites** — Storybook, JupyterLab, Marimo,
+  WASM Marimo, Server, and Static Embed. These are the tests that
+  actually catch real bugs — "it renders in Jupyter but is blank in
+  Marimo" is the kind of thing I can't eyeball.
+- **Python tests across 4 versions** with two dependency strategies
+  (min pinned + max latest) — 8 matrix jobs total
+- **MCP integration tests** — verifying the MCP server works against
+  the built wheel
+- **Smoke tests** for each optional extras group
+- **Styling screenshot comparisons** — before/after captures on every PR
+- **Docs build + link checker**
+- **TestPyPI publish** on every PR with an install command in the PR
+  comment
+
+The pipeline now runs **23 jobs** and completes in about **7 minutes**.
+Before Depot, 3 jobs took about 6 minutes on GitHub Actions runners.
+
+The fast runners didn't just make existing tests faster — they made it
+practical to keep adding tests. If each new Playwright suite added 5
+minutes of wall-clock time, I never would have added 6 of them.
 
 
 Testing against dependency versions
