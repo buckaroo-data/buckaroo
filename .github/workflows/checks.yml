@@ -1,4 +1,5 @@
 name: Checks
+# cold-cache test run — all caches deleted
 on:
   push:
     branches: [main]
