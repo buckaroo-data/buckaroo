@@ -307,3 +307,6 @@ dev = [
     "toml",
     "marimo>=0.19.7"
 ]
+
+[tool.uv]
+constraint-dependencies = ["starlette<1.0.0"]
