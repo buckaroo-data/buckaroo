@@ -157,6 +157,8 @@ jobs:
               '```',
               '',
               `### :book: [Docs preview](${docsUrl})`,
+              '',
+              `### :art: [Storybook preview](${docsUrl}storybook/)`,
             ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
