@@ -28,6 +28,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
       - name: Install the project
         run: uv sync --locked --dev --no-install-project
       - name: Run ruff
@@ -46,7 +47,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''  # disabled for cold-cache test
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -69,6 +70,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
@@ -78,7 +80,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''  # disabled for cold-cache test
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -196,6 +198,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: "3.13"
           prune-cache: false
       - name: Download build artifacts
@@ -238,6 +241,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: "3.13"
           prune-cache: false
       - name: Download build artifacts
@@ -298,6 +302,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: ${{ matrix.python-version }}
           prune-cache: false
       - name: Install the project
@@ -320,6 +325,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: ${{ matrix.python-version }}
           prune-cache: false
       - name: Install the project with maximum versions
@@ -342,6 +348,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: "3.13"
           prune-cache: false
       - name: Install the project
@@ -367,7 +374,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''  # disabled for cold-cache test
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -380,7 +387,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-test-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run Storybook Playwright Tests
         run: bash scripts/test_playwright_storybook.sh
       - name: Capture Theme Screenshots
@@ -405,7 +412,7 @@ jobs:
           version: 9.10.0
       - uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''  # disabled for cold-cache test
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - working-directory: packages
         run: pnpm install --frozen-lockfile
@@ -415,13 +422,14 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: "3.13"
       - run: uv sync --all-extras --dev
       - run: uv run python scripts/generate_static_test_html.py
       - uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-test-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - working-directory: packages/buckaroo-js-core
         run: pnpm exec playwright install chromium
       - working-directory: packages/buckaroo-js-core
@@ -443,13 +451,13 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''  # disabled for cold-cache test
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Cache Playwright browsers
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-test-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
 
       # Save story + spec from current branch (baseline commit won't have them)
       - name: Save story and spec files
@@ -538,6 +546,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
@@ -547,7 +556,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''  # disabled for cold-cache test
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -560,7 +569,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-test-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run Server Playwright Tests
         run: bash scripts/test_playwright_server.sh
 
@@ -575,6 +584,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
@@ -584,7 +594,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''  # disabled for cold-cache test
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -599,7 +609,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-test-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run Marimo Playwright Tests
         run: bash scripts/test_playwright_marimo.sh
 
@@ -614,6 +624,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
@@ -623,7 +634,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''  # disabled for cold-cache test
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -638,7 +649,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-test-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run WASM Marimo Playwright Tests
         run: bash scripts/test_playwright_wasm_marimo.sh
 
@@ -656,6 +667,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: pandoc graphviz
@@ -683,6 +695,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-test
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
@@ -692,7 +705,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''  # disabled for cold-cache test
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -710,6 +723,6 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-test-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run JupyterLab Playwright Tests
         run: bash scripts/test_playwright_jupyter.sh --venv-location=".venv"
