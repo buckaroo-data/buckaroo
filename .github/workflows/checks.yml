@@ -324,11 +324,7 @@ jobs:
       - name: Install the project with maximum versions
         run: |
           rm -f uv.lock
-          cat >> pyproject.toml << 'PYEOF'
-
-          [tool.uv]
-          override-dependencies = ["pandas"]
-          PYEOF
+          sed -i 's/\[tool\.uv\]/[tool.uv]\noverride-dependencies = ["pandas"]/' pyproject.toml
           uv sync --resolution=highest --all-extras --dev --no-group datacompy
           uv pip list | grep -i pandas
       - name: Run tests
