@@ -41,20 +41,69 @@ function b64ToArrayBuffer(b64: string): ArrayBuffer {
 }
 
 /**
+ * Pivot a wide single-row parquet result (col__stat columns) back to
+ * row-based DFData that downstream consumers expect.
+ *
+ * Input: single row object like {a__mean: 42, a__dtype: "float64", b__mean: 10, ...}
+ * Output: DFData rows like [{index: "mean", level_0: "mean", a: 42, b: 10}, ...]
+ */
+export function pivotWideSummaryStats(wideRow: Record<string, any>): DFData {
+    // Group values by stat name: stat -> {col -> value}
+    const statCols: Record<string, Record<string, any>> = {};
+    const allCols = new Set<string>();
+
+    for (const [key, rawVal] of Object.entries(wideRow)) {
+        const sepIdx = key.indexOf('__');
+        if (sepIdx === -1) continue;
+        const col = key.substring(0, sepIdx);
+        const stat = key.substring(sepIdx + 2);
+        allCols.add(col);
+        if (!statCols[stat]) statCols[stat] = {};
+
+        let val: any = rawVal;
+        // JSON-parse all string values (cells are JSON-encoded in parquet)
+        if (typeof val === 'string') {
+            try {
+                val = JSON.parse(val);
+            } catch {
+                // not JSON, keep as string
+            }
+        }
+        // BigInt conversion (hyparquet INT64)
+        if (typeof val === 'bigint') {
+            const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+            statCols[stat][col] = val >= -MAX_SAFE && val <= MAX_SAFE
+                ? Number(val) : String(val);
+            continue;
+        }
+        statCols[stat][col] = val;
+    }
+
+    // Build DFData: one row per stat
+    const colList = Array.from(allCols);
+    const rows: DFData = [];
+    for (const [stat, cols] of Object.entries(statCols)) {
+        const row: DFDataRow = { index: stat, level_0: stat };
+        for (let i = 0; i < colList.length; i++) {
+            const col = colList[i];
+            row[col] = cols[col] ?? null;
+        }
+        rows.push(row);
+    }
+    return rows;
+}
+
+/**
  * JSON-parse each cell value in a row from parquet-decoded data.
  *
- * The Python side JSON-encodes every cell before writing to parquet
- * (because summary stats have mixed types per column). We need to
- * JSON.parse each value back to its original type.
- *
- * The 'index' column is left as a plain string (stat name like 'mean', 'dtype').
+ * For non-wide parquet data (e.g. main DataFrame), object/category columns
+ * are JSON-encoded on the Python side and need to be parsed back.
+ * The 'index' and 'level_0' columns are kept as-is.
  */
 function parseParquetRow(row: Record<string, any>): DFDataRow {
     const parsed: DFDataRow = {};
     for (const [key, val] of Object.entries(row)) {
         if (key === 'index' || key === 'level_0') {
-            // index/level_0 columns are stat names — keep as-is
-            // BigInt from hyparquet INT64 columns must be converted to Number
             parsed[key] = typeof val === 'bigint' ? Number(val) : val;
         } else if (typeof val === 'string') {
             try {
@@ -63,8 +112,6 @@ function parseParquetRow(row: Record<string, any>): DFDataRow {
                 parsed[key] = val;
             }
         } else if (typeof val === 'bigint') {
-            // hyparquet decodes INT64 as BigInt; use Number only if safe,
-            // otherwise stringify to preserve precision (fixes #627)
             const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
             parsed[key] = val >= -MAX_SAFE && val <= MAX_SAFE
                 ? Number(val) : String(val);
@@ -73,6 +120,20 @@ function parseParquetRow(row: Record<string, any>): DFDataRow {
         }
     }
     return parsed;
+}
+
+/**
+ * Detect wide-column format using the payload's layout tag, falling back
+ * to a heuristic (single row with '__' in column names) for payloads
+ * that predate the layout field.
+ */
+function isWideFormat(rows: any[], layout?: 'wide' | 'row'): boolean {
+    if (layout === 'wide') return true;
+    if (layout === 'row') return false;
+    // Fallback heuristic for old payloads without layout tag
+    if (rows.length !== 1) return false;
+    const keys = Object.keys(rows[0]);
+    return keys.some(k => k.indexOf('__') !== -1);
 }
 
 /**
@@ -106,8 +167,11 @@ export function resolveDFData(val: DFDataOrPayload | undefined | null): DFData {
                 metadata,
                 rowFormat: 'object',
                 onComplete: (data: any[]) => {
-                    // JSON-parse each cell to recover typed values
-                    result = (data as DFDataRow[]).map(parseParquetRow);
+                    if (isWideFormat(data, val.layout)) {
+                        result = pivotWideSummaryStats(data[0] as Record<string, any>);
+                    } else {
+                        result = (data as DFDataRow[]).map(parseParquetRow);
+                    }
                     cacheSet(val.data, result);
                 },
             });
@@ -156,7 +220,12 @@ export async function resolveDFDataAsync(val: DFDataOrPayload | undefined | null
                     reject(e);
                 }
             });
-            const result = (data as DFDataRow[]).map(parseParquetRow);
+            let result: DFData;
+            if (isWideFormat(data, val.layout)) {
+                result = pivotWideSummaryStats(data[0] as Record<string, any>);
+            } else {
+                result = (data as DFDataRow[]).map(parseParquetRow);
+            }
             cacheSet(val.data, result);
             return result;
         } catch (e) {

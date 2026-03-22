@@ -15,7 +15,20 @@ import { waitForCells, getRowCount } from './ag-pw-utils';
 test.describe('Static embed renders', () => {
 
     test('AG-Grid table appears with data rows', async ({ page }) => {
+        // Capture all console messages for debugging
+        const logs: string[] = [];
+        page.on('console', msg => logs.push(`[${msg.type()}] ${msg.text()}`));
+        page.on('pageerror', err => logs.push(`[PAGE_ERROR] ${err.message}`));
+
         await page.goto('/static-test.html');
+
+        // Give 5s for initial load, then dump console
+        await page.waitForTimeout(5000);
+        console.log('--- Browser console output ---');
+        for (const log of logs) console.log(log);
+        console.log('--- End browser console ---');
+        console.log('Page title:', await page.title());
+        console.log('Body text (first 500):', (await page.locator('body').innerText()).slice(0, 500));
 
         // Wait for the AG-Grid cells to render (parquet decode + React mount)
         await waitForCells(page);

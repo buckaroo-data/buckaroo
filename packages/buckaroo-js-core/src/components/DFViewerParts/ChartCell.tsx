@@ -19,7 +19,7 @@ export const formatter = (value: any, name: any, props: any) => {
     }
 };
 
-export function FloatingTooltip({ items, x, y }: any) {
+export function FloatingTooltip({ items, x, y }: any): React.ReactPortal {
     const offset = 30;
     const renderedItems = items.map((name: [string, number], _value: number | string) => {
         const [realName, realValue] = name;

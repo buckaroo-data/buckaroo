@@ -14,10 +14,17 @@ async function main() {
     if (!rootEl) throw new Error("No #root element found");
 
     // Pre-resolve parquet_b64 payloads before React render
+    console.log("[static-embed] artifact keys:", Object.keys(artifact));
+    console.log("[static-embed] df_data format:", artifact.df_data?.format, "type:", typeof artifact.df_data, "isArray:", Array.isArray(artifact.df_data));
+    console.log("[static-embed] summary_stats format:", artifact.summary_stats_data?.format, "type:", typeof artifact.summary_stats_data);
+
     const [dfData, summaryStatsData] = await Promise.all([
         resolveDFDataAsync(artifact.df_data),
         resolveDFDataAsync(artifact.summary_stats_data),
     ]);
+
+    console.log("[static-embed] dfData rows:", dfData.length, "first:", JSON.stringify(dfData[0])?.slice(0, 200));
+    console.log("[static-embed] summaryStats rows:", summaryStatsData.length, "first:", JSON.stringify(summaryStatsData[0])?.slice(0, 200));
 
     const resolved: any = {
         embed_type: artifact.embed_type || "DFViewer",
