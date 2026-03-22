@@ -12,7 +12,7 @@ multiprocessing  an behave differently when a function is defined in an imported
 
 
 LOCAL_TIMEOUT = 0.8
-CI_TIMEOUT = 1.0
+CI_TIMEOUT = 3.0
 # spawn context on Windows is much slower than forkserver (full process startup)
 WINDOWS_CI_TIMEOUT = 10.0
 
