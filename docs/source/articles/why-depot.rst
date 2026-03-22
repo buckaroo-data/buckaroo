@@ -63,19 +63,35 @@ What Depot changed
 -------------------
 
 The CTO responded to my request for open source sponsorship on
-Christmas Eve. Since then:
+Christmas Eve.
 
-- **Critical path: ~3.5 minutes.** From push to all-green. 22 jobs,
-  3.5 minutes. That's fast enough that I don't context-switch away.
-- **Commit to first step running: ~30 seconds** on Linux. GitHub adds
-  about 6 seconds of latency. Depot provisions a runner in ~18 seconds.
-  On GitHub's own runners this used to be minutes.
-- **Cost: ~$0.18 per run** on 2-CPU runners. I tested 4-CPU and 8-CPU
-  runners too — no measurable speedup. The workload is I/O-bound
-  (package installs, Playwright browser launches), not CPU-bound.
-  Bigger runners just cost more for the same wall-clock time.
-- **~$9–18/month** at my typical push cadence. The Developer plan
-  ($20/month, 2,000 included minutes) covers about 52 full CI runs.
+I'll be honest: Depot's runners aren't measurably faster than GitHub's
+for this workload. I ran the same 23-job pipeline on both and the
+per-job times are within noise. The work is I/O-bound — package
+installs, Playwright browser launches, artifact transfers — not
+CPU-bound.
+
+What Depot actually gave me was two things:
+
+- **Consistent provisioning.** Depot provisions a runner in ~18 seconds,
+  every time. GitHub Actions runners can be just as fast on a Saturday
+  night, but on a Monday afternoon they queue for minutes. When you're
+  pushing 10 times a day and iterating with an LLM, unpredictable queue
+  times kill your flow. Depot removed that variance.
+
+- **No minute quotas to worry about.** With Depot's open source
+  sponsorship, I stopped thinking about whether adding another test
+  suite was "worth the minutes." That sounds small, but it changed my
+  behavior completely. I went from 3 CI jobs to 23 in three months.
+
+The second point is the one I didn't expect. Because I knew the
+infrastructure was solid — reliable runners, no quota pressure — I
+actually invested in making CI better. I removed pnpm from Python test
+jobs that didn't need it. I parallelized the pipeline into two waves.
+I tuned the setup steps. Those optimizations dropped the critical path
+from 5 minutes to 3.5 minutes, but I only made them because I knew
+Depot was doing its part. When your CI infrastructure feels like a
+liability, you don't invest in it — you avoid it.
 
 The numbers
 ------------
