@@ -219,7 +219,7 @@ export async function resolveDFDataAsync(val: DFDataOrPayload | undefined | null
             if (isWideFormat(data)) {
                 result = pivotWideSummaryStats(data[0] as Record<string, any>);
             } else {
-                result = data as DFData;
+                result = (data as DFDataRow[]).map(parseParquetRow);
             }
             cacheSet(val.data, result);
             return result;
