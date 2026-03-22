@@ -139,6 +139,7 @@ export type DFData = DFDataRow[];
 export interface ParquetB64Payload {
     format: 'parquet_b64';
     data: string;
+    layout?: 'wide' | 'row';
 }
 export type DFDataOrPayload = DFData | ParquetB64Payload;
 export interface DFWhole {
