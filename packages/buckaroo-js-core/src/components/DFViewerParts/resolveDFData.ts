@@ -123,9 +123,14 @@ function parseParquetRow(row: Record<string, any>): DFDataRow {
 }
 
 /**
- * Detect wide-column format: single row where column names contain '__'.
+ * Detect wide-column format using the payload's layout tag, falling back
+ * to a heuristic (single row with '__' in column names) for payloads
+ * that predate the layout field.
  */
-function isWideFormat(rows: any[]): boolean {
+function isWideFormat(rows: any[], layout?: 'wide' | 'row'): boolean {
+    if (layout === 'wide') return true;
+    if (layout === 'row') return false;
+    // Fallback heuristic for old payloads without layout tag
     if (rows.length !== 1) return false;
     const keys = Object.keys(rows[0]);
     return keys.some(k => k.indexOf('__') !== -1);
@@ -162,7 +167,7 @@ export function resolveDFData(val: DFDataOrPayload | undefined | null): DFData {
                 metadata,
                 rowFormat: 'object',
                 onComplete: (data: any[]) => {
-                    if (isWideFormat(data)) {
+                    if (isWideFormat(data, val.layout)) {
                         result = pivotWideSummaryStats(data[0] as Record<string, any>);
                     } else {
                         result = (data as DFDataRow[]).map(parseParquetRow);
@@ -216,7 +221,7 @@ export async function resolveDFDataAsync(val: DFDataOrPayload | undefined | null
                 }
             });
             let result: DFData;
-            if (isWideFormat(data)) {
+            if (isWideFormat(data, val.layout)) {
                 result = pivotWideSummaryStats(data[0] as Record<string, any>);
             } else {
                 result = (data as DFDataRow[]).map(parseParquetRow);

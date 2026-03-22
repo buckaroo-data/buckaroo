@@ -273,10 +273,10 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
 
     Uses a wide-column layout: one parquet column per (col, stat) pair.
     Column names are ``{short_col}__{stat_name}`` (e.g. ``a__mean``).
-    The parquet file has a single row. Scalars (numbers, strings, bools)
-    go through parquet natively. Lists/dicts are JSON-encoded.
+    The parquet file has a single row. All cell values are JSON-encoded
+    via ``_json_encode_cell()`` so the JS side can ``JSON.parse`` each one.
 
-    Returns {'format': 'parquet_b64', 'data': '<base64 string>'}
+    Returns ``{'format': 'parquet_b64', 'layout': 'wide', 'data': '<base64>'}``
     Falls back to JSON if parquet serialization fails.
     """
     import pyarrow as pa
@@ -301,7 +301,7 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
         data.seek(0)
         raw_bytes = data.read()
         b64 = base64.b64encode(raw_bytes).decode('ascii')
-        return {'format': 'parquet_b64', 'data': b64}
+        return {'format': 'parquet_b64', 'layout': 'wide', 'data': b64}
     except Exception as e:
         logger.warning("Failed to serialize summary stats as parquet, falling back to JSON: %r", e)
         return pd_to_obj(pd.DataFrame(sd))
