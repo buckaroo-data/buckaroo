@@ -61,7 +61,7 @@ jobs:
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main' || github.head_ref == 'feat/release-screenshots-ghpages'
+    if: github.ref == 'refs/heads/main'
     permissions:
       pages: write
       id-token: write
