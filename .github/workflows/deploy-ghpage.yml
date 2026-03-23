@@ -15,7 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           run_install: true
@@ -42,6 +43,16 @@ jobs:
       #   run: |
       #     cd docs
       #     jupyter lite build --contents ./example-notebooks --output-dir ./_output
+
+      - name: Merge screenshots into Storybook output
+        run: |
+          git fetch origin gh-pages || true
+          if git rev-parse origin/gh-pages &>/dev/null; then
+            git checkout origin/gh-pages -- screenshots/ 2>/dev/null || true
+            if [ -d screenshots ]; then
+              cp -r screenshots/ ./packages/buckaroo-js-core/dist/storybook/screenshots/
+            fi
+          fi
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
