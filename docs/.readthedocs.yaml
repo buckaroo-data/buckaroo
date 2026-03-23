@@ -36,6 +36,8 @@ build:
         - uv run python scripts/generate_ddd_static_html.py
         - pnpm -C packages/buckaroo-js-core run build-storybook
         - cp -r packages/buckaroo-js-core/dist/storybook docs/extra-html/
+        - cd packages/buckaroo-js-core && npx playwright install chromium --with-deps && npx playwright test pw-tests/theme-screenshots.spec.ts --reporter=line || true
+        - LATEST_RELEASE=$(git tag --sort=-creatordate | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "0.13.2") && uv run python scripts/generate_screenshot_compare_page.py packages/buckaroo-js-core/screenshots "$LATEST_RELEASE"
         - cp -r docs/extra-html/* $READTHEDOCS_OUTPUT/html
 
 # Build documentation in the docs/ directory with Sphinx
