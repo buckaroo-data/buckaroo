@@ -19,7 +19,7 @@ concurrency:
 jobs:
   LintPython:
     name: Python / Lint
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
@@ -34,7 +34,7 @@ jobs:
 
   TestJS:
     name: JS / Build + Test
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -58,7 +58,7 @@ jobs:
 
   BuildWheel:
     name: Build JS + Python Wheel
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -108,7 +108,7 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: testpypi
     permissions:
@@ -185,7 +185,7 @@ jobs:
   TestMCPWheel:
     name: MCP / Integration (wheel)
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -227,7 +227,7 @@ jobs:
   SmokeTestExtras:
     name: Smoke / Optional Extras
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -283,7 +283,7 @@ jobs:
 
   TestPython:
     name: Python / Test
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -305,7 +305,7 @@ jobs:
 
   TestPythonMaxVersions:
     name: Python / Test (Max Versions)
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -334,7 +334,7 @@ jobs:
 
   TestPythonWindows:
     name: Python / Test (Windows)
-    runs-on: depot-windows-2025
+    runs-on: windows-latest
     timeout-minutes: 15
     continue-on-error: true
     steps:
@@ -357,7 +357,7 @@ jobs:
   TestStorybook:
     name: Storybook Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -397,7 +397,7 @@ jobs:
   TestStaticEmbed:
     name: Static Embed Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -430,7 +430,7 @@ jobs:
 
   StylingScreenshots:
     name: Styling Screenshots (Before / After)
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
@@ -531,7 +531,7 @@ jobs:
   TestServer:
     name: Server Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -568,7 +568,7 @@ jobs:
   TestMarimo:
     name: Marimo Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
       - uses: actions/checkout@v6
@@ -607,7 +607,7 @@ jobs:
   TestWASMMarimo:
     name: WASM Marimo Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
       - uses: actions/checkout@v6
@@ -649,7 +649,7 @@ jobs:
 
   CheckDocs:
     name: Docs / Build + Check Links
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
@@ -676,7 +676,7 @@ jobs:
   TestJupyterLab:
     name: JupyterLab Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
