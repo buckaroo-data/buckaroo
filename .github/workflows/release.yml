@@ -154,3 +154,32 @@ jobs:
           name: changelog-${{ steps.versions.outputs.new }}
           path: /tmp/changelog_entry.md
           if-no-files-found: ignore
+
+      - name: Capture release screenshots
+        run: |
+          cd packages/buckaroo-js-core
+          npx playwright install chromium
+          npx playwright test pw-tests/theme-screenshots.spec.ts --reporter=line || true
+          VERSION="${{ steps.versions.outputs.new }}"
+          mkdir -p /tmp/screenshots-staging/"$VERSION"
+          for f in screenshots/*.png; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f" .png)
+            cp "$f" /tmp/screenshots-staging/"$VERSION"/"${base}--${VERSION}.png"
+          done
+
+      - name: Publish screenshots to GitHub Pages
+        run: |
+          VERSION="${{ steps.versions.outputs.new }}"
+          git fetch origin gh-pages
+          git worktree add /tmp/gh-pages gh-pages
+          mkdir -p /tmp/gh-pages/screenshots/"$VERSION"
+          cp /tmp/screenshots-staging/"$VERSION"/*.png /tmp/gh-pages/screenshots/"$VERSION"/
+          python scripts/generate_screenshots_index.py /tmp/gh-pages/screenshots
+          cd /tmp/gh-pages
+          git add screenshots/
+          git diff --cached --quiet && echo "No screenshot changes" && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "screenshots: add release $VERSION screenshots"
+          git push origin gh-pages
