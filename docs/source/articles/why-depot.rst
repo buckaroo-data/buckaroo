@@ -65,17 +65,54 @@ What Depot changed
 The CTO responded to my request for open source sponsorship on
 Christmas Eve.
 
-I'll be honest: Depot's runners aren't measurably faster than GitHub's
-for this workload. I ran the same 23-job pipeline on both and the
-per-job times are within noise. The work is I/O-bound — package
-installs, Playwright browser launches, artifact transfers — not
-CPU-bound.
+I benchmarked the same 23-job pipeline on both Depot and GitHub
+Actions runners — 3 parallel runs of each, on a Monday morning. Here's
+what I found:
 
-What Depot actually gave me was two things:
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 20 20
 
-- **Consistent provisioning.** Depot provisions a runner in ~18 seconds,
-  every time. GitHub Actions runners can be just as fast on a Saturday
-  night, but on a Monday afternoon they queue for minutes. When you're
+   * - Scenario
+     - Critical Path (mean)
+     - Wave 1 Stagger
+     - Variance
+   * - GitHub, Sunday night, 1 PR
+     - 3m15s
+     - 0s
+     - —
+   * - GitHub, Monday AM, sequential
+     - 5m19s
+     - 90s
+     - 4m25s – 6m28s
+   * - GitHub, Monday AM, 3 parallel
+     - 5m58s
+     - 114s
+     - 5m06s – 6m38s
+   * - Depot, Monday AM, 3 parallel
+     - 4m18s
+     - 19s
+     - 4m02s – 4m31s
+
+"Wave 1 stagger" is the time between the first and last Wave 1 job
+starting. On GitHub, Wave 1 jobs trickle in over 1–3 minutes as runners
+become available. On Depot, they all start within 20 seconds.
+
+The per-job times are actually slightly slower on Depot — every
+individual job takes a few seconds longer. But it doesn't matter
+because Depot starts all jobs simultaneously. GitHub's queueing delay
+dwarfs any per-job difference.
+
+The critical insight: **GitHub's performance ranges from 3m15s to
+6m38s** depending on time of day and how many other repos are competing
+for runners. **Depot is 4m02s–4m31s regardless.** That consistency is
+worth more than raw speed.
+
+What Depot actually gave me was three things:
+
+- **Consistent provisioning.** Depot provisions a runner in ~20 seconds,
+  every time. GitHub Actions runners can be just as fast on a Sunday
+  night, but on a Monday morning they queue for minutes. When you're
   pushing 10 times a day and iterating with an LLM, unpredictable queue
   times kill your flow. Depot removed that variance.
 
@@ -84,14 +121,12 @@ What Depot actually gave me was two things:
   suite was "worth the minutes." That sounds small, but it changed my
   behavior completely. I went from 3 CI jobs to 23 in three months.
 
-The second point is the one I didn't expect. Because I knew the
-infrastructure was solid — reliable runners, no quota pressure — I
-actually invested in making CI better. I removed pnpm from Python test
-jobs that didn't need it. I parallelized the pipeline into two waves.
-I tuned the setup steps. Those optimizations dropped the critical path
-from 5 minutes to 3.5 minutes, but I only made them because I knew
-Depot was doing its part. When your CI infrastructure feels like a
-liability, you don't invest in it — you avoid it.
+- **Confidence to invest in CI.** Because I knew the infrastructure was
+  solid — reliable runners, no quota pressure — I actually spent time
+  making CI better. I removed pnpm from Python test jobs that didn't
+  need it. I parallelized the pipeline into two waves. I tuned the
+  setup steps. When your CI infrastructure feels like a liability, you
+  don't invest in it — you avoid it.
 
 The numbers
 ------------
