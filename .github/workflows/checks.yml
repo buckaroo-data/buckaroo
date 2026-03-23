@@ -19,7 +19,7 @@ concurrency:
 jobs:
   LintPython:
     name: Python / Lint
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
@@ -27,6 +27,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
       - name: Install the project
         run: uv sync --locked --dev --no-install-project
       - name: Run ruff
@@ -34,7 +35,7 @@ jobs:
 
   TestJS:
     name: JS / Build + Test
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -45,7 +46,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -58,7 +59,7 @@ jobs:
 
   BuildWheel:
     name: Build JS + Python Wheel
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -68,6 +69,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
@@ -77,7 +79,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -108,7 +110,7 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: testpypi
     permissions:
@@ -185,7 +187,7 @@ jobs:
   TestMCPWheel:
     name: MCP / Integration (wheel)
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -193,6 +195,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: "3.13"
           prune-cache: false
       - name: Download build artifacts
@@ -227,7 +230,7 @@ jobs:
   SmokeTestExtras:
     name: Smoke / Optional Extras
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -235,6 +238,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: "3.13"
           prune-cache: false
       - name: Download build artifacts
@@ -283,7 +287,7 @@ jobs:
 
   TestPython:
     name: Python / Test
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -295,6 +299,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: ${{ matrix.python-version }}
           prune-cache: false
       - name: Install the project
@@ -305,7 +310,7 @@ jobs:
 
   TestPythonMaxVersions:
     name: Python / Test (Max Versions)
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -317,6 +322,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: ${{ matrix.python-version }}
           prune-cache: false
       - name: Install the project with maximum versions
@@ -334,7 +340,7 @@ jobs:
 
   TestPythonWindows:
     name: Python / Test (Windows)
-    runs-on: depot-windows-2025
+    runs-on: windows-latest
     timeout-minutes: 15
     continue-on-error: true
     steps:
@@ -343,6 +349,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: "3.13"
           prune-cache: false
       - name: Install the project
@@ -357,7 +364,7 @@ jobs:
   TestStorybook:
     name: Storybook Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -368,7 +375,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -381,7 +388,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-1774273849-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run Storybook Playwright Tests
         run: bash scripts/test_playwright_storybook.sh
       - name: Capture Theme Screenshots
@@ -397,7 +404,7 @@ jobs:
   TestStaticEmbed:
     name: Static Embed Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -406,7 +413,7 @@ jobs:
           version: 9.10.0
       - uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - working-directory: packages
         run: pnpm install --frozen-lockfile
@@ -416,13 +423,14 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: "3.13"
       - run: uv sync --all-extras --dev
       - run: uv run python scripts/generate_static_test_html.py
       - uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-1774273849-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - working-directory: packages/buckaroo-js-core
         run: pnpm exec playwright install chromium
       - working-directory: packages/buckaroo-js-core
@@ -430,7 +438,7 @@ jobs:
 
   StylingScreenshots:
     name: Styling Screenshots (Before / After)
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
@@ -444,13 +452,13 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Cache Playwright browsers
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-1774273849-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
 
       # Save story + spec from current branch (baseline commit won't have them)
       - name: Save story and spec files
@@ -531,7 +539,7 @@ jobs:
   TestServer:
     name: Server Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -539,6 +547,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
@@ -548,7 +557,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -561,14 +570,14 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-1774273849-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run Server Playwright Tests
         run: bash scripts/test_playwright_server.sh
 
   TestMarimo:
     name: Marimo Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
       - uses: actions/checkout@v6
@@ -576,6 +585,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
@@ -585,7 +595,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -600,14 +610,14 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-1774273849-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run Marimo Playwright Tests
         run: bash scripts/test_playwright_marimo.sh
 
   TestWASMMarimo:
     name: WASM Marimo Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
       - uses: actions/checkout@v6
@@ -615,6 +625,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
@@ -624,7 +635,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -639,7 +650,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-1774273849-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run WASM Marimo Playwright Tests
         run: bash scripts/test_playwright_wasm_marimo.sh
 
@@ -649,7 +660,7 @@ jobs:
 
   CheckDocs:
     name: Docs / Build + Check Links
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
@@ -657,6 +668,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: pandoc graphviz
@@ -676,7 +688,7 @@ jobs:
   TestJupyterLab:
     name: JupyterLab Playwright Tests
     needs: [BuildWheel]
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -684,6 +696,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          cache-suffix: cold-1774273849
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
@@ -693,7 +706,7 @@ jobs:
       - name: Setup Node.js with pnpm cache
         uses: actions/setup-node@v6
         with:
-          cache: 'pnpm'
+          cache: ''
           cache-dependency-path: 'packages/pnpm-lock.yaml'
       - name: Install pnpm dependencies
         working-directory: packages
@@ -711,6 +724,6 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+          key: cold-1774273849-playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
       - name: Run JupyterLab Playwright Tests
         run: bash scripts/test_playwright_jupyter.sh --venv-location=".venv"
