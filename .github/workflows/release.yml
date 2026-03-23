@@ -135,26 +135,6 @@ jobs:
           ./scripts/full_build.sh
           uv build --sdist
 
-      - name: Upload release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ steps.versions.outputs.new }}" dist/*.whl dist/*.tar.gz
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-
-      - name: Upload changelog entry artifact
-        # Download this artifact and apply it in your next dev PR:
-        #   python scripts/update_changelog.py changelog_entry.md
-        #   sed -i 's/^version = ".*"/version = "NEW"/' pyproject.toml
-        #   uv lock
-        uses: actions/upload-artifact@v4
-        with:
-          name: changelog-${{ steps.versions.outputs.new }}
-          path: /tmp/changelog_entry.md
-          if-no-files-found: ignore
-
       - name: Capture release screenshots
         run: |
           cd packages/buckaroo-js-core
@@ -183,3 +163,31 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -m "screenshots: add release $VERSION screenshots"
           git push origin gh-pages
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.versions.outputs.new }}" \
+            --title "${{ steps.versions.outputs.new }}" \
+            --notes-file /tmp/release_notes.md
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.versions.outputs.new }}" dist/*.whl dist/*.tar.gz
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Upload changelog entry artifact
+        # Download this artifact and apply it in your next dev PR:
+        #   python scripts/update_changelog.py changelog_entry.md
+        #   sed -i 's/^version = ".*"/version = "NEW"/' pyproject.toml
+        #   uv lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog-${{ steps.versions.outputs.new }}
+          path: /tmp/changelog_entry.md
+          if-no-files-found: ignore
