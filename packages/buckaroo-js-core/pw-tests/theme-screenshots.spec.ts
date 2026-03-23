@@ -16,6 +16,10 @@ const STORIES = [
   { id: 'buckaroo-dfviewer-dfviewerinfiniteshadow--color-map-example', name: 'InfiniteShadow-ColorMap' },
   { id: 'buckaroo-dfviewer-dfviewerinfiniteshadow--multi-index', name: 'InfiniteShadow-MultiIndex' },
   { id: 'buckaroo-dfviewer-dfviewerinfiniteshadow--three-level-column-index', name: 'InfiniteShadow-ThreeLevelCol' },
+  { id: 'buckaroo-dfviewer-dfviewerinfiniteshadow--get-multiindex-with-names-index-df', name: 'InfiniteShadow-MultiIndexRowNamed' },
+  { id: 'buckaroo-dfviewer-dfviewerinfiniteshadow--get-multiindex-index-df', name: 'InfiniteShadow-MultiIndexRow' },
+  { id: 'buckaroo-dfviewer-dfviewerinfiniteshadow--get-multiindex-index-multiindex-with-names-cols-df', name: 'InfiniteShadow-MultiIndexRowAndCol' },
+  { id: 'buckaroo-dfviewer-dfviewerinfiniteshadow--get-multiindex-3-index-df', name: 'InfiniteShadow-MultiIndex3Row' },
 
   // Non-infinite DFViewer
   { id: 'buckaroo-dfviewer-dfviewer--primary', name: 'DFViewer-Primary' },
