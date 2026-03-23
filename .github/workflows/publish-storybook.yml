@@ -38,6 +38,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./packages/buckaroo-js-core/dist/storybook
+          keep_files: true
       # - name: Setup Pages
       #   uses: actions/configure-pages@v3
       # - name: Upload Artifact
