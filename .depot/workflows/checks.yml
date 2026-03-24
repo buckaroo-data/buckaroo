@@ -1,0 +1,685 @@
+# Depot CI Migration
+# Source: .github/workflows/checks.yml
+#
+# No changes were necessary.
+
+name: Checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: "*"
+  merge_group:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  LintPython:
+    name: Python / Lint
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install the project
+        run: uv sync --locked --dev --no-install-project
+      - name: Run ruff
+        run: uv run ruff check
+  TestJS:
+    name: JS / Build + Test
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Build and test JS
+        run: |
+          cd packages/buckaroo-js-core
+          pnpm install && pnpm run build
+          pnpm run test
+  BuildWheel:
+    name: Build JS + Python Wheel
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Patch version for TestPyPI
+        if: github.event_name == 'pull_request'
+        run: |
+          BASE=$(git tag --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "0.0.0")
+          echo "SETUPTOOLS_SCM_PRETEND_VERSION=${BASE}.dev${{ github.run_id }}" >> "$GITHUB_ENV"
+          echo "Published version: ${BASE}.dev${{ github.run_id }}"
+      - name: Install the project
+        run: uv sync --all-extras --dev
+      - name: Build JS extension + Python wheel
+        run: ./scripts/full_build.sh
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: buckaroo-build
+          path: |
+            ./dist
+            ./buckaroo/static/
+            ./packages/buckaroo-js-core/dist/
+            ./packages/buckaroo-widget/dist/
+  PublishTestPyPI:
+    name: Publish to TestPyPI
+    if: >-
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 5
+    environment: testpypi
+    permissions:
+      id-token: write
+      pull-requests: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+          path: artifacts
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: artifacts/dist/
+      - name: Comment on PR with install command
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const distFiles = fs.readdirSync('artifacts/dist');
+            const wheel = distFiles.find(f => f.endsWith('.whl'));
+            const version = wheel.match(/buckaroo-(.+?)-/)[1];
+            const idx = `--index-strategy unsafe-best-match --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/`;
+            const pr = context.issue.number;
+            const rtdSlug = 'buckaroo-data';
+            const docsUrl = `https://${rtdSlug}--${pr}.org.readthedocs.build/en/${pr}/`;
+            const body = [
+              '## :package: TestPyPI package published',
+              '',
+              '```bash',
+              `pip install ${idx} buckaroo==${version}`,
+              '```',
+              '',
+              'or with uv:',
+              '',
+              '```bash',
+              `uv pip install ${idx} buckaroo==${version}`,
+              '```',
+              '',
+              '### MCP server for Claude Code',
+              '',
+              '```bash',
+              `claude mcp add buckaroo-table -- uvx --from "buckaroo[mcp]==${version}" ${idx} buckaroo-table`,
+              '```',
+              '',
+              `### :book: [Docs preview](${docsUrl})`,
+              '',
+              `### :art: [Storybook preview](${docsUrl}storybook/)`,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const marker = '## :package: TestPyPI package published';
+            const existing = comments.find(c => c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+  TestMCPWheel:
+    name: MCP / Integration (wheel)
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Install wheel with MCP extras
+        run: |
+          uv venv .venv-wheel
+          WHEEL=$(ls dist/buckaroo-*.whl)
+          uv pip install --python .venv-wheel/bin/python "${WHEEL}[mcp]" pytest
+      - name: Verify entry point
+        run: .venv-wheel/bin/buckaroo-table --help || true
+      - name: Run MCP integration tests
+        env:
+          BUCKAROO_MCP_CMD: .venv-wheel/bin/buckaroo-table
+        run: >-
+          .venv-wheel/bin/pytest tests/unit/server/test_mcp_uvx_install.py tests/unit/server/test_mcp_server_integration.py -v --color=yes -m slow
+      - name: Run uvx failure mode tests
+        run: >-
+          .venv-wheel/bin/pytest tests/unit/server/test_mcp_uvx_install.py::TestUvxFailureModes -v --color=yes -m slow
+  # ---------------------------------------------------------------------------
+  # Smoke tests — install the wheel with each optional extra in an isolated venv
+  # ---------------------------------------------------------------------------
+  SmokeTestExtras:
+    name: Smoke / Optional Extras
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Smoke test — base install
+        run: |
+          uv venv /tmp/smoke-base
+          uv pip install --python /tmp/smoke-base dist/*.whl
+          /tmp/smoke-base/bin/python scripts/smoke_test.py base
+      - name: Smoke test — polars
+        run: |
+          uv venv /tmp/smoke-polars
+          WHEEL=$(ls dist/*.whl)
+          uv pip install --python /tmp/smoke-polars "${WHEEL}[polars]"
+          /tmp/smoke-polars/bin/python scripts/smoke_test.py polars
+      - name: Smoke test — mcp
+        run: |
+          uv venv /tmp/smoke-mcp
+          WHEEL=$(ls dist/*.whl)
+          uv pip install --python /tmp/smoke-mcp "${WHEEL}[mcp]"
+          /tmp/smoke-mcp/bin/python scripts/smoke_test.py mcp
+      - name: Smoke test — marimo
+        run: |
+          uv venv /tmp/smoke-marimo
+          WHEEL=$(ls dist/*.whl)
+          uv pip install --python /tmp/smoke-marimo "${WHEEL}[marimo]"
+          /tmp/smoke-marimo/bin/python scripts/smoke_test.py marimo
+      - name: Smoke test — jupyterlab
+        run: |
+          uv venv /tmp/smoke-jupyterlab
+          WHEEL=$(ls dist/*.whl)
+          uv pip install --python /tmp/smoke-jupyterlab "${WHEEL}[jupyterlab]"
+          /tmp/smoke-jupyterlab/bin/python scripts/smoke_test.py jupyterlab
+      - name: Smoke test — notebook
+        run: |
+          uv venv /tmp/smoke-notebook
+          WHEEL=$(ls dist/*.whl)
+          uv pip install --python /tmp/smoke-notebook "${WHEEL}[notebook]"
+          /tmp/smoke-notebook/bin/python scripts/smoke_test.py notebook
+  # ---------------------------------------------------------------------------
+  # Source-level tests — operate on the codebase, no wheel needed
+  # ---------------------------------------------------------------------------
+  TestPython:
+    name: Python / Test
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+          prune-cache: false
+      - name: Install the project
+        run: uv sync --all-extras --dev
+      - name: Run tests
+        run: uv run --with pytest-cov pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
+      - uses: codecov/codecov-action@v5
+  TestPythonMaxVersions:
+    name: Python / Test (Max Versions)
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+          prune-cache: false
+      - name: Install the project with maximum versions
+        run: |
+          rm -f uv.lock
+          sed -i 's/\[tool\.uv\]/[tool.uv]\noverride-dependencies = ["pandas"]/' pyproject.toml
+          uv sync --resolution=highest --all-extras --dev --no-group datacompy
+          uv pip list | grep -i pandas
+      - name: Run tests
+        run: .venv/bin/python -m pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
+  TestPythonWindows:
+    name: Python / Test (Windows)
+    runs-on: depot-windows-2025
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Install the project
+        run: uv sync --all-extras --dev
+      - name: Run tests
+        run: uv run pytest ./tests/unit -m "not slow" --color=yes
+  # ---------------------------------------------------------------------------
+  # Integration tests — install the pre-built wheel, simulate end-user install
+  # ---------------------------------------------------------------------------
+  TestStorybook:
+    name: Storybook Playwright Tests
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+      - name: Run Storybook Playwright Tests
+        run: bash scripts/test_playwright_storybook.sh
+      - name: Capture Theme Screenshots
+        run: bash scripts/test_playwright_screenshots.sh
+      - name: Upload Theme Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-screenshots
+          path: packages/buckaroo-js-core/screenshots/
+          if-no-files-found: ignore
+  TestStaticEmbed:
+    name: Static Embed Playwright Tests
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv sync --all-extras --dev
+      - run: uv run python scripts/generate_static_test_html.py
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+      - working-directory: packages/buckaroo-js-core
+        run: pnpm exec playwright install chromium
+      - working-directory: packages/buckaroo-js-core
+        run: pnpm run test:static-embed
+  StylingScreenshots:
+    name: Styling Screenshots (Before / After)
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+      # Save story + spec from current branch (baseline commit won't have them)
+      - name: Save story and spec files
+        run: |
+          mkdir -p /tmp/styling-stories
+          cp packages/buckaroo-js-core/src/stories/StylingIssues.stories.tsx /tmp/styling-stories/
+          cp packages/buckaroo-js-core/pw-tests/styling-issues-screenshots.spec.ts /tmp/styling-stories/
+      # ── Before screenshots (baseline b7956f8, pre-#587) ──
+      - name: Checkout baseline (b7956f8)
+        run: git checkout b7956f8
+      - name: Copy stories to baseline
+        run: |
+          cp /tmp/styling-stories/StylingIssues.stories.tsx packages/buckaroo-js-core/src/stories/
+          cp /tmp/styling-stories/styling-issues-screenshots.spec.ts packages/buckaroo-js-core/pw-tests/
+      - name: Install pnpm deps (baseline)
+        working-directory: packages
+        run: pnpm install --no-frozen-lockfile
+      - name: Install Playwright browsers
+        working-directory: packages/buckaroo-js-core
+        run: pnpm exec playwright install chromium
+      - name: Capture before screenshots
+        working-directory: packages/buckaroo-js-core
+        env:
+          SCREENSHOT_DIR: screenshots/before
+        run: |
+          pnpm storybook --no-open &
+          SB_PID=$!
+          timeout=60; elapsed=0
+          while ! curl -sf http://localhost:6006 > /dev/null 2>&1; do
+            sleep 2; elapsed=$((elapsed + 2))
+            if [ $elapsed -ge $timeout ]; then echo "Storybook failed to start"; exit 1; fi
+          done
+          pnpm exec playwright test pw-tests/styling-issues-screenshots.spec.ts --reporter=line || true
+          kill $SB_PID 2>/dev/null || true
+          lsof -ti:6006 | xargs kill -9 2>/dev/null || true
+      # ── After screenshots (current branch) ──
+      - name: Checkout current branch
+        run: |
+          git checkout -f ${{ github.event.pull_request.head.sha || github.sha }}
+          git clean -fd packages/
+      - name: Install pnpm deps (current)
+        working-directory: packages
+        run: pnpm install --no-frozen-lockfile
+      - name: Capture after screenshots
+        working-directory: packages/buckaroo-js-core
+        env:
+          SCREENSHOT_DIR: screenshots/after
+        run: |
+          pnpm storybook --no-open &
+          SB_PID=$!
+          timeout=60; elapsed=0
+          while ! curl -sf http://localhost:6006 > /dev/null 2>&1; do
+            sleep 2; elapsed=$((elapsed + 2))
+            if [ $elapsed -ge $timeout ]; then echo "Storybook failed to start"; exit 1; fi
+          done
+          pnpm exec playwright test pw-tests/styling-issues-screenshots.spec.ts --reporter=line
+          kill $SB_PID 2>/dev/null || true
+          lsof -ti:6006 | xargs kill -9 2>/dev/null || true
+      # ── Upload artifacts ──
+      - name: Upload before screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: styling-screenshots-before
+          path: packages/buckaroo-js-core/screenshots/before/
+          if-no-files-found: ignore
+      - name: Upload after screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: styling-screenshots-after
+          path: packages/buckaroo-js-core/screenshots/after/
+          if-no-files-found: ignore
+  TestServer:
+    name: Server Playwright Tests
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+      - name: Run Server Playwright Tests
+        run: bash scripts/test_playwright_server.sh
+  TestMarimo:
+    name: Marimo Playwright Tests
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Install the project
+        run: uv sync --all-extras --dev
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+      - name: Run Marimo Playwright Tests
+        run: bash scripts/test_playwright_marimo.sh
+  TestWASMMarimo:
+    name: WASM Marimo Playwright Tests
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Install the project
+        run: uv sync --all-extras --dev
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+      - name: Run WASM Marimo Playwright Tests
+        run: bash scripts/test_playwright_wasm_marimo.sh
+  # ---------------------------------------------------------------------------
+  # Docs — build documentation and check links
+  # ---------------------------------------------------------------------------
+  CheckDocs:
+    name: Docs / Build + Check Links
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: pandoc graphviz
+      - name: Install the project
+        run: uv sync --locked --all-extras --dev
+      - name: Check docs build and links
+        run: |
+          mkdir -p docs/build/html
+          uv run pytest --check-links docs/source/*.rst || uv run pytest --check-links --lf docs/source/*.rst
+          uv run pytest --check-links docs/example-notebooks/*.ipynb || uv run pytest --check-links --lf docs/example-notebooks/*.ipynb
+          uv run sphinx-build -T -b html docs/source docs/build
+  # ---------------------------------------------------------------------------
+  # JupyterLab integration tests
+  # ---------------------------------------------------------------------------
+  TestJupyterLab:
+    name: JupyterLab Playwright Tests
+    needs: [BuildWheel]
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - name: Setup Node.js with pnpm cache
+        uses: actions/setup-node@v6
+        with:
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: buckaroo-build
+      - name: Install the project
+        run: |
+          uv sync --all-extras --dev
+          uv pip install --force-reinstall dist/*.whl
+          uv pip install polars jupyterlab
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('packages/buckaroo-js-core/package.json') }}
+      - name: Run JupyterLab Playwright Tests
+        run: bash scripts/test_playwright_jupyter.sh --venv-location=".venv"
