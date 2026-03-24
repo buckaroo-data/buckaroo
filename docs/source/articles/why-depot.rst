@@ -8,6 +8,7 @@ understand exactly what that sponsorship buys. The results surprised me.
 The problem with GitHub Actions
 --------------------------------
 
+
 GitHub Actions is slow, but not in the way I expected. The jobs
 themselves are fine — the runners are fast enough. The problem is
 queueing. When you have a 23-job pipeline and GitHub is busy, your jobs
@@ -161,9 +162,12 @@ Aggregated across all Monday runs:
 What's actually happening
 --------------------------
 
-The per-job times are slightly *slower* on Depot — every individual job
-takes a few seconds longer. But it doesn't matter because Depot starts
-all jobs simultaneously.
+Each Depot runner takes a few seconds longer to provision than a GitHub
+runner that's already available — there's a fixed overhead per machine
+spin-up. That makes individual job durations slightly longer on Depot.
+But it doesn't matter because Depot provisions all runners in parallel.
+GitHub provisions them sequentially from a shared pool, so you wait
+for each one.
 
 "Wave 1 stagger" is the time between the first and last Wave 1 job
 starting — it measures how long the runner takes to provision all the
@@ -174,12 +178,13 @@ parallel jobs:
   1.5–7 minutes as runners become available.
 
 On a Sunday night with one PR, GitHub's stagger was 1 second — identical
-to Depot. The difference only shows up under load.
+to Depot. The difference only shows up under load on Monday morning.
 
 Cache performance is close. Depot reads caches ~30% faster (2.8s vs 4.1s
-per step), but GitHub writes caches ~3x faster (0.6s vs 2.2s per step).
-Cache writes happen post-job and don't affect the critical path. Neither
-cache difference materially changes the overall timing.
+per step), but GitHub writes caches ~3x faster (0.8s vs 2.1s per step on
+Monday). Cache writes happen in post-job cleanup steps and don't affect
+the critical path. Neither difference materially changes the overall
+timing.
 
 
 What Depot actually gave me
@@ -192,16 +197,11 @@ Three things, in order of importance:
    on load. When you're pushing 10 times a day and iterating with an LLM,
    unpredictable queue times kill your flow.
 
-2. **No minute quotas.** With Depot's open source sponsorship, I stopped
-   thinking about whether adding another test suite was "worth the
-   minutes." I went from 3 CI jobs to 23 in three months.
-
-3. **Confidence to invest in CI.** Because I knew the infrastructure was
+2. **Confidence to invest in CI.** Because I knew the infrastructure was
    solid, I actually spent time making CI better — removing unnecessary
    setup steps, parallelizing into two waves, tuning the pipeline. When
    your CI infrastructure feels like a liability, you don't invest in
    it — you avoid it.
-
 
 Before and after
 -----------------
