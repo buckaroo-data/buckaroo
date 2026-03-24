@@ -249,6 +249,29 @@ configurations on every push. On slow CI, you'd run one and hope for
 the best.
 
 
+The scariest part
+-------------------
+
+The scariest part of switching to Depot wasn't Depot itself — it was
+that their open source program requires a GitHub organization. Buckaroo
+lived at ``paddymul/buckaroo`` under my personal account. To use Depot I
+had to create the ``buckaroo-data`` organization and **transfer** the
+repository there.
+
+I was terrified of losing my GitHub stars. That sounds vain, but stars
+are the main signal to potential users that a project is real. Losing
+them would set the project back.
+
+It turns out GitHub's repository transfer preserves everything — stars,
+issues, pull requests, forks, watchers. It even sets up URL redirects
+from the old path. The transfer itself took seconds. But I didn't know
+that going in, and I spent more time worrying about it than about any
+technical aspect of the Depot migration.
+
+If you're in the same situation: do the transfer. You won't lose
+anything.
+
+
 What I'd tell other open source maintainers
 ---------------------------------------------
 
@@ -256,7 +279,9 @@ If your CI takes more than 5 minutes and you've been meaning to fix it
 but haven't, Depot's `open source sponsorship program
 <https://depot.dev/open-source>`_ is worth applying to. The switch is
 straightforward — change the ``runs-on`` label in your workflow YAML,
-everything else stays the same.
+everything else stays the same. If you need to create an organization
+and transfer your repo, that's painless too — stars and all metadata
+carry over.
 
 The real value isn't raw speed — individual jobs run at about the same
 pace. It's that your jobs all start at once instead of queueing. That
