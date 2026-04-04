@@ -130,4 +130,101 @@ describe("DFViewerInfinite", () => {
     expect(latestAgGridProps.gridOptions.rowModelType).toBe("infinite");
     expect(latestAgGridProps.datasource.rowCount).toBe(50);
   });
+
+  it("pins multiple stat rows when config requests them", () => {
+    const multiPinConfig: DFViewerConfig = {
+      pinned_rows: [
+        { primary_key_val: "mean", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "dtype", displayer_args: { displayer: "obj" } },
+      ],
+      left_col_configs: [],
+      column_config: [
+        { col_name: "index", header_name: "index", displayer_args: { displayer: "obj" } },
+        { col_name: "a", header_name: "a", displayer_args: { displayer: "obj" } },
+        { col_name: "b", header_name: "b", displayer_args: { displayer: "obj" } },
+      ],
+      component_config: {},
+    };
+    const statsData = [
+      { index: "mean", a: 42.5, b: 10.1 },
+      { index: "dtype", a: "float64", b: "int64" },
+      { index: "histogram_bins", a: [0, 25, 50, 75, 100], b: [0, 5, 10] },
+    ];
+
+    render(
+      <DFViewerInfinite
+        data_wrapper={{ data_type: "Raw", data: [{ index: 0, a: 1, b: 2 }], length: 1 }}
+        df_viewer_config={multiPinConfig}
+        summary_stats_data={statsData}
+        setActiveCol={jest.fn()}
+      />,
+    );
+
+    expect(setGridOptionMock).toHaveBeenCalledWith("pinnedTopRowData", [
+      { index: "mean", a: 42.5, b: 10.1 },
+      { index: "dtype", a: "float64", b: "int64" },
+    ]);
+  });
+
+  it("passes histogram_stats in context for color mapping", () => {
+    const statsData = [
+      { index: "histogram_bins", a: [0, 25, 50, 75, 100] },
+      { index: "histogram_log_bins", a: [1, 10, 100] },
+      { index: "mean", a: 50 },
+    ];
+
+    render(
+      <DFViewerInfinite
+        data_wrapper={{ data_type: "Raw", data: [{ index: 0, a: 1 }], length: 1 }}
+        df_viewer_config={baseConfig}
+        summary_stats_data={statsData}
+        setActiveCol={jest.fn()}
+      />,
+    );
+
+    // The context passed to AG-Grid should include histogram_stats
+    const context = latestAgGridProps.context;
+    expect(context.histogram_stats).toBeDefined();
+    expect(context.histogram_stats.a).toEqual({
+      histogram_bins: [0, 25, 50, 75, 100],
+      histogram_log_bins: [1, 10, 100],
+    });
+  });
+
+  it("handles empty summary stats gracefully", () => {
+    render(
+      <DFViewerInfinite
+        data_wrapper={{ data_type: "Raw", data: [{ index: 0, a: 1 }], length: 1 }}
+        df_viewer_config={baseConfig}
+        summary_stats_data={[]}
+        setActiveCol={jest.fn()}
+      />,
+    );
+
+    // Should not crash, pinned rows should be empty
+    expect(setGridOptionMock).toHaveBeenCalledWith("pinnedTopRowData", [undefined]);
+    // histogram_stats should be empty object
+    const context = latestAgGridProps.context;
+    expect(context.histogram_stats).toEqual({});
+  });
+
+  it("handles summary stats with null values in columns", () => {
+    const statsData = [
+      { index: "mean", a: 42.5, b: null },
+      { index: "dtype", a: "float64", b: "object" },
+    ];
+
+    render(
+      <DFViewerInfinite
+        data_wrapper={{ data_type: "Raw", data: [{ index: 0, a: 1, b: "x" }], length: 1 }}
+        df_viewer_config={baseConfig}
+        summary_stats_data={statsData}
+        setActiveCol={jest.fn()}
+      />,
+    );
+
+    expect(setGridOptionMock).toHaveBeenCalledWith("pinnedTopRowData", [
+      { index: "mean", a: 42.5, b: null },
+    ]);
+  });
 });
