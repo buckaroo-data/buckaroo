@@ -516,9 +516,9 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
     //console.log("maxRowsWithoutScrolling", maxRowsWithoutScrolling, belowMinRows, numRows, dfvHeight, rowHeight);
     const shortMode = compC?.shortMode || (belowMinRows && rowHeight === undefined);
     console.log("shortMode", shortMode, compC?.shortMode, belowMinRows, rowHeight);
-    const inIframeClass = inIframe ? "inIframe" : "";
+    const inIframeClass = inIframe ? "in-iframe" : "";
     //console.log("gridUtils 350 heightstyle", dfvHeight)
-    if (isGoogleColab || inVSCcode() ) {
+    if (isGoogleColab || inVSCcode() || (inIframe && window.innerHeight < 300)) {
         return {
             classMode: "regular-mode",
             domLayout: "normal",
