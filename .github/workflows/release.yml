@@ -122,14 +122,6 @@ jobs:
           # Pin hatch-vcs to the exact release version for the build step
           echo "SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.versions.outputs.new }}" >> "$GITHUB_ENV"
 
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${{ steps.versions.outputs.new }}" \
-            --title "${{ steps.versions.outputs.new }}" \
-            --notes-file /tmp/release_notes.md
-
       - name: Build wheel + sdist
         run: |
           ./scripts/full_build.sh
