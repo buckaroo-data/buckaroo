@@ -33,8 +33,37 @@ def _resolve_all_stats(all_stats):
     if isinstance(all_stats, list):
         return all_stats
     if isinstance(all_stats, dict) and all_stats.get('format') == 'parquet_b64':
+        import pyarrow.parquet as pq
         raw = base64.b64decode(all_stats['data'])
-        df = pd.read_parquet(BytesIO(raw), engine='pyarrow')
+        table = pq.read_table(BytesIO(raw))
+        col_names = table.column_names
+
+        if any('__' in c for c in col_names):
+            row_dict = table.to_pydict()
+            stat_cols = {}
+            all_cols = set()
+            for key in col_names:
+                sep = key.index('__')
+                col, stat = key[:sep], key[sep+2:]
+                all_cols.add(col)
+                if stat not in stat_cols:
+                    stat_cols[stat] = {}
+                val = row_dict[key][0]
+                if isinstance(val, str):
+                    try:
+                        val = json.loads(val)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                stat_cols[stat][col] = val
+            rows = []
+            for stat, cols in stat_cols.items():
+                row = {'index': stat, 'level_0': stat}
+                for c in sorted(all_cols):
+                    row[c] = cols.get(c)
+                rows.append(row)
+            return rows
+
+        df = table.to_pandas()
         rows = json.loads(df.to_json(orient='records'))
         parsed_rows = []
         for row in rows:

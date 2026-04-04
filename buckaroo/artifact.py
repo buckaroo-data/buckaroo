@@ -29,7 +29,7 @@ def _df_to_parquet_b64_tagged(df: pd.DataFrame) -> dict:
     JSON-encoded per cell (same convention as sd_to_parquet_b64) so the
     JS side can decode them uniformly via parseParquetRow().
 
-    Returns {'format': 'parquet_b64', 'data': '<base64 string>'}
+    Returns {'format': 'parquet_b64', 'layout': 'row', 'data': '<base64 string>'}
     """
     df2 = prepare_df_for_serialization(df)
     if not isinstance(df.index, pd.MultiIndex):
@@ -55,7 +55,7 @@ def _df_to_parquet_b64_tagged(df: pd.DataFrame) -> dict:
     df2.to_parquet(buf, engine='pyarrow')
     buf.seek(0)
     b64 = base64.b64encode(buf.read()).decode('ascii')
-    return {'format': 'parquet_b64', 'data': b64}
+    return {'format': 'parquet_b64', 'layout': 'row', 'data': b64}
 
 
 def prepare_buckaroo_artifact(df, column_config_overrides=None,
