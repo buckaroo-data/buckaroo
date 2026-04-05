@@ -58,6 +58,7 @@ export type ThemeColorConfig = {
     oddRowBackgroundColor?: string;
     borderColor?: string;
     headerBorderColor?: string;
+    headerBackgroundColor?: string;
     spacing?: number;
     cellHorizontalPaddingScale?: number;
     rowVerticalPaddingScale?: number;
