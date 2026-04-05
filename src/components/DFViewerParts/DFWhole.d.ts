@@ -119,14 +119,22 @@ export type PinnedRowConfig = {
     displayer_args: DisplayerArgs;
     default_renderer_columns?: string[];
 };
-export type ThemeConfig = {
-    colorScheme?: 'light' | 'dark' | 'auto';
+export type ThemeColorConfig = {
     accentColor?: string;
     accentHoverColor?: string;
     backgroundColor?: string;
     foregroundColor?: string;
     oddRowBackgroundColor?: string;
     borderColor?: string;
+    headerBorderColor?: string;
+    spacing?: number;
+    cellHorizontalPaddingScale?: number;
+    rowVerticalPaddingScale?: number;
+};
+export type ThemeConfig = ThemeColorConfig & {
+    colorScheme?: 'light' | 'dark' | 'auto';
+    light?: ThemeColorConfig;
+    dark?: ThemeColorConfig;
 };
 export type ComponentConfig = {
     height_fraction?: number;
