@@ -4,6 +4,7 @@ The formatter takes Python source where closing brackets dangle on their own
 line (Black/ruff style) and rewrites them to stack on the previous line
 (lisp style). It's idempotent: running twice produces the same output.
 """
+
 from __future__ import annotations
 
 import sys
@@ -219,7 +220,9 @@ def test_idempotent():
     )
     once = paddy_format(src)
     twice = paddy_format(once)
-    assert once == twice, f"not idempotent:\n--- once ---\n{once}\n--- twice ---\n{twice}"
+    assert (
+        once == twice
+    ), f"not idempotent:\n--- once ---\n{once}\n--- twice ---\n{twice}"
 
 
 def test_preserves_comment_before_close():

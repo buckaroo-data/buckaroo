@@ -8,6 +8,7 @@ Usage:
     uv run python scripts/paddy_format.py <files...>           # rewrite in place
     uv run python scripts/paddy_format.py --check <files...>   # exit 1 if changes needed
 """
+
 from __future__ import annotations
 
 import sys
