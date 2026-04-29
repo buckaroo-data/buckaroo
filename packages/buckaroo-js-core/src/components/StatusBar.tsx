@@ -8,7 +8,8 @@ import { DFMeta } from "./WidgetTypes";
 import { BuckarooOptions } from "./WidgetTypes";
 import { BuckarooState, BKeys } from "./WidgetTypes";
 import { CustomCellEditorProps } from 'ag-grid-react';
-import { getThemeForScheme } from "./DFViewerParts/gridUtils";
+import { getThemeForScheme, resolveColorScheme, resolveThemeColors } from "./DFViewerParts/gridUtils";
+import type { ThemeConfig } from "./DFViewerParts/gridUtils";
 import { Theme } from "ag-grid-community";
 import { useColorScheme } from "./useColorScheme";
 
@@ -200,13 +201,15 @@ export function StatusBar({
     buckarooState,
     setBuckarooState,
     buckarooOptions,
-    heightOverride
+    heightOverride,
+    themeConfig
 }: {
     dfMeta: DFMeta;
     buckarooState: BuckarooState;
     setBuckarooState: React.Dispatch<React.SetStateAction<BuckarooState>>;
     buckarooOptions: BuckarooOptions;
     heightOverride?: number;
+    themeConfig?: ThemeConfig;
 }) {
     if (false) {
 	console.log("heightOverride", heightOverride);
@@ -362,12 +365,14 @@ export function StatusBar({
         cellStyle: { textAlign: "left" },
     };
 
-    const colorScheme = useColorScheme();
-    const statusTheme: Theme = useMemo(()=> getThemeForScheme(colorScheme).withParams({
+    const osColorScheme = useColorScheme();
+    const effectiveScheme = resolveColorScheme(osColorScheme, themeConfig);
+    const resolvedTheme = resolveThemeColors(effectiveScheme, themeConfig);
+    const statusTheme: Theme = useMemo(()=> getThemeForScheme(effectiveScheme, resolvedTheme).withParams({
         headerFontSize: 14,
         rowVerticalPaddingScale: 0.8,
-    }), [colorScheme]);
-    const themeClass = colorScheme === 'light' ? 'ag-theme-alpine' : 'ag-theme-alpine-dark';
+    }), [effectiveScheme, resolvedTheme]);
+    const themeClass = effectiveScheme === 'light' ? 'ag-theme-alpine' : 'ag-theme-alpine-dark';
     return (
         <div className="status-bar">
             <div

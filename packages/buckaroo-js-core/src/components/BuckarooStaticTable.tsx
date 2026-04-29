@@ -113,6 +113,7 @@ function BuckarooStaticWidget({
                     buckarooState={buckarooState}
                     setBuckarooState={setBuckarooState}
                     buckarooOptions={artifact.buckaroo_options!}
+                    themeConfig={cDisp.df_viewer_config?.component_config?.theme}
                 />
                 <DFViewerInfinite
                     data_wrapper={dataWrapper}

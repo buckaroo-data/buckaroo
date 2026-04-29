@@ -586,6 +586,69 @@ export const myThemeLight: Theme = themeAlpine.withPart(colorSchemeLight).withPa
 /** @deprecated Use getThemeForScheme() instead */
 export const myTheme: Theme = myThemeDark;
 
-export function getThemeForScheme(scheme: 'light' | 'dark'): Theme {
-    return scheme === 'light' ? myThemeLight : myThemeDark;
+export type ThemeColorConfig = {
+    accentColor?: string;
+    accentHoverColor?: string;
+    backgroundColor?: string;
+    foregroundColor?: string;
+    oddRowBackgroundColor?: string;
+    borderColor?: string;
+    headerBorderColor?: string;
+    headerBackgroundColor?: string;
+    spacing?: number;
+    cellHorizontalPaddingScale?: number;
+    rowVerticalPaddingScale?: number;
+};
+
+export type ThemeConfig = ThemeColorConfig & {
+    colorScheme?: 'light' | 'dark' | 'auto';
+    light?: ThemeColorConfig;
+    dark?: ThemeColorConfig;
+};
+
+export function resolveColorScheme(
+    osScheme: 'light' | 'dark',
+    themeConfig?: ThemeConfig
+): 'light' | 'dark' {
+    const override = themeConfig?.colorScheme;
+    if (override && override !== 'auto') {
+        return override;
+    }
+    return osScheme;
+}
+
+/**
+ * Merge scheme-specific color overrides (light/dark sub-dicts) with
+ * top-level color properties.  Returns a flat ThemeConfig suitable for
+ * passing to getThemeForScheme and CSS variable injection.
+ *
+ * Priority: scheme-specific override > top-level color > defaults.
+ */
+export function resolveThemeColors(
+    effectiveScheme: 'light' | 'dark',
+    themeConfig?: ThemeConfig
+): ThemeConfig | undefined {
+    if (!themeConfig) return undefined;
+    const schemeOverrides = effectiveScheme === 'light' ? themeConfig.light : themeConfig.dark;
+    if (!schemeOverrides) return themeConfig;
+    return { ...themeConfig, ...schemeOverrides };
+}
+
+export function getThemeForScheme(scheme: 'light' | 'dark', themeConfig?: ThemeConfig): Theme {
+    const base = scheme === 'light' ? myThemeLight : myThemeDark;
+    if (!themeConfig) return base;
+
+    const overrides: Record<string, any> = {};
+    if (themeConfig.backgroundColor) overrides.backgroundColor = themeConfig.backgroundColor;
+    if (themeConfig.foregroundColor) overrides.foregroundColor = themeConfig.foregroundColor;
+    if (themeConfig.oddRowBackgroundColor) overrides.oddRowBackgroundColor = themeConfig.oddRowBackgroundColor;
+    if (themeConfig.borderColor) overrides.borderColor = themeConfig.borderColor;
+    if (themeConfig.headerBorderColor) overrides.headerColumnBorderColor = themeConfig.headerBorderColor;
+    if (themeConfig.headerBackgroundColor) overrides.headerBackgroundColor = themeConfig.headerBackgroundColor;
+    if (themeConfig.spacing != null) overrides.spacing = themeConfig.spacing;
+    if (themeConfig.cellHorizontalPaddingScale != null) overrides.cellHorizontalPaddingScale = themeConfig.cellHorizontalPaddingScale;
+    if (themeConfig.rowVerticalPaddingScale != null) overrides.rowVerticalPaddingScale = themeConfig.rowVerticalPaddingScale;
+
+    if (Object.keys(overrides).length === 0) return base;
+    return base.withParams(overrides);
 }
