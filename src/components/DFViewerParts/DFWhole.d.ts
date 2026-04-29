@@ -119,24 +119,6 @@ export type PinnedRowConfig = {
     displayer_args: DisplayerArgs;
     default_renderer_columns?: string[];
 };
-export type ThemeColorConfig = {
-    accentColor?: string;
-    accentHoverColor?: string;
-    backgroundColor?: string;
-    foregroundColor?: string;
-    oddRowBackgroundColor?: string;
-    borderColor?: string;
-    headerBorderColor?: string;
-    headerBackgroundColor?: string;
-    spacing?: number;
-    cellHorizontalPaddingScale?: number;
-    rowVerticalPaddingScale?: number;
-};
-export type ThemeConfig = ThemeColorConfig & {
-    colorScheme?: 'light' | 'dark' | 'auto';
-    light?: ThemeColorConfig;
-    dark?: ThemeColorConfig;
-};
 export type ComponentConfig = {
     height_fraction?: number;
     dfvHeight?: number;
@@ -144,7 +126,6 @@ export type ComponentConfig = {
     shortMode?: boolean;
     selectionBackground?: string;
     className?: string;
-    theme?: ThemeConfig;
 };
 export interface DFViewerConfig {
     pinned_rows: PinnedRowConfig[];
