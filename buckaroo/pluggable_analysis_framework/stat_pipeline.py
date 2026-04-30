@@ -19,6 +19,7 @@ from .stat_func import (
     SampledSeries,
     RawDataFrame,
     XorqTable,
+    XorqExecute,
     RAW_MARKER_TYPES,
     MISSING,
     collect_stat_funcs,
@@ -80,6 +81,7 @@ def _execute_stat_func(
     sampled_series=None,
     raw_dataframe=None,
     xorq_table=None,
+    xorq_execute=None,
 ) -> None:
     """Execute a single StatFunc, updating the accumulator in place.
 
@@ -137,6 +139,9 @@ def _execute_stat_func(
             continue
         if req.type is XorqTable:
             kwargs[req.name] = xorq_table
+            continue
+        if req.type is XorqExecute:
+            kwargs[req.name] = xorq_execute
             continue
 
         # Look up in accumulator

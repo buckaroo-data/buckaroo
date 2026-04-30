@@ -22,13 +22,13 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 from .col_analysis import ErrDict, SDType
-from .stat_func import XorqColumn, XorqTable, RAW_MARKER_TYPES, StatFunc
+from .stat_func import XorqColumn, XorqTable, XorqExecute, RAW_MARKER_TYPES, StatFunc
 from .stat_pipeline import _execute_stat_func, _find_v1_class, _normalize_inputs
 from .stat_result import Err, Ok, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_column_dag, build_typed_dag
 
 # Re-export marker types so users only need to import from this module.
-__all__ = ["XorqStatPipeline", "XorqColumn", "XorqTable"]
+__all__ = ["XorqStatPipeline", "XorqColumn", "XorqTable", "XorqExecute"]
 
 try:
     import ibis  # noqa: F401
@@ -225,6 +225,7 @@ class XorqStatPipeline:
                     sampled_series=None,
                     raw_dataframe=None,
                     xorq_table=table,
+                    xorq_execute=self._execute,
                 )
 
             col_key_to_func: Dict[str, StatFunc] = {}

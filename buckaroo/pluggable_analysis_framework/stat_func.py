@@ -81,7 +81,28 @@ class XorqTable:
     pass
 
 
-RAW_MARKER_TYPES = (RawSeries, SampledSeries, RawDataFrame, XorqColumn, XorqTable)
+class XorqExecute:
+    """Marker type: 'give me a callable that executes ibis expressions via the
+    pipeline's backend'.
+
+    The injected value is ``pipeline._execute``: a 1-arg callable that runs
+    ``backend.execute(query)`` if a backend was passed to the pipeline, or
+    falls back to ``query.execute()`` otherwise. Stats that issue their own
+    queries (histograms, etc.) must use this instead of calling
+    ``query.execute()`` directly so a user-supplied backend isn't bypassed.
+    """
+
+    pass
+
+
+RAW_MARKER_TYPES = (
+    RawSeries,
+    SampledSeries,
+    RawDataFrame,
+    XorqColumn,
+    XorqTable,
+    XorqExecute,
+)
 
 
 # ---------------------------------------------------------------------------

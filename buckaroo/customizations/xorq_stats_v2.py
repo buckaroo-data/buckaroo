@@ -31,6 +31,7 @@ from typing import TypedDict
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (
     XorqColumn,
     XorqTable,
+    XorqExecute,
 )
 from buckaroo.pluggable_analysis_framework.stat_func import stat
 
@@ -225,7 +226,7 @@ def distinct_per(length: int, distinct_count: int) -> float:
 # ============================================================
 
 
-def _numeric_histogram(table, col, min_val, max_val, total_rows):
+def _numeric_histogram(execute, table, col, min_val, max_val, total_rows):
     if min_val is None or max_val is None:
         return []
     if (isinstance(min_val, float) and math.isnan(min_val)) or (
@@ -246,7 +247,7 @@ def _numeric_histogram(table, col, min_val, max_val, total_rows):
         .aggregate(__count=lambda t: t.count())
         .order_by("__bucket")
     )
-    df = query.execute()
+    df = execute(query)
     if len(df) == 0:
         return []
     total = float(df["__count"].sum())
@@ -268,14 +269,14 @@ def _numeric_histogram(table, col, min_val, max_val, total_rows):
     return out
 
 
-def _categorical_histogram(table, col):
+def _categorical_histogram(execute, table, col):
     query = (
         table.group_by(col)
         .aggregate(__count=lambda t: t.count())
         .order_by(ibis.desc("__count"))
         .limit(10)
     )
-    df = query.execute()
+    df = execute(query)
     if len(df) == 0:
         return []
     total = float(df["__count"].sum())
@@ -295,6 +296,7 @@ def _categorical_histogram(table, col):
 @stat(default=[])
 def histogram(
     table: XorqTable,
+    execute: XorqExecute,
     orig_col_name: str,
     is_numeric: bool,
     is_bool: bool,
@@ -307,24 +309,35 @@ def histogram(
     cascade-remove this stat from string columns). For the numeric path
     we recompute them as part of the histogram query.
 
+    All queries go through the injected ``execute`` callable so a
+    pipeline-supplied backend isn't bypassed (see issue #687 follow-up
+    for the related default=[] silent-swallow behavior).
+
     ``default=[]`` provides a graceful fallback if the histogram query
-    fails (e.g. backend rejects the GROUP BY). The error is still
-    surfaced via the StatError mechanism.
+    fails (e.g. backend rejects the GROUP BY). NB: until #687 is fixed,
+    the error is silently replaced by ``[]``.
     """
     if length == 0:
         return []
     if is_numeric and not is_bool:
         col = table[orig_col_name]
-        bounds = table.aggregate(
-            __mn=col.min().cast("float64"),
-            __mx=col.max().cast("float64"),
-        ).execute()
+        bounds = execute(
+            table.aggregate(
+                __mn=col.min().cast("float64"),
+                __mx=col.max().cast("float64"),
+            )
+        )
         if len(bounds) == 0:
             return []
         return _numeric_histogram(
-            table, orig_col_name, bounds["__mn"].iloc[0], bounds["__mx"].iloc[0], length
+            execute,
+            table,
+            orig_col_name,
+            bounds["__mn"].iloc[0],
+            bounds["__mx"].iloc[0],
+            length,
         )
-    return _categorical_histogram(table, orig_col_name)
+    return _categorical_histogram(execute, table, orig_col_name)
 
 
 # ============================================================
