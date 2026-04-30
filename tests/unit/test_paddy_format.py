@@ -174,6 +174,35 @@ def dedent(s: str) -> str:
             "class C:\n    def f(self, ser):\n        return dict(str_bool_frac=str_bool_frac(ser),\n            regular_int_parse_frac=regular_int_parse_frac(ser))\n",
         ),
         (
+            "reindent_skipped_when_group_has_blank_line_subgroups",
+            # Real case from buckaroo/customizations/pandas_commands.py
+            # AGG_METHODS_WITH_HELP. The list groups its tuples into
+            # visual subgroups separated by blank lines. Today the
+            # re-indent pass half-applies: `_reindent_pw` skips any
+            # whitespace with `empty_lines`, so elements right after a
+            # blank line stay at col 0 (the user's chosen indent), but
+            # elements with a plain `,\n` before them get bumped to
+            # line_indent + 4. The result is mixed indentation. When
+            # the user has used blank lines to structure the group,
+            # leave the WHOLE group's continuation alone.
+            """
+            data = [
+            ('a', 1),
+            ('b', 2),
+
+            ('c', 3),
+            ('d', 4)]
+            """,
+            """
+            data = [
+            ('a', 1),
+            ('b', 2),
+
+            ('c', 3),
+            ('d', 4)]
+            """,
+        ),
+        (
             "reindent_preserves_hanging_indent_aligned_with_first_element",
             # Real case from buckaroo/customizations/all_transforms.py.
             # The `[` opens with item 1 inline on the same line; items 2-3
@@ -536,6 +565,86 @@ def test_paddy_format_golden(name, src, expected):
     )
     # Idempotency: a second pass over `got` must be a no-op.
     again = paddy_format(got)
+    assert again == got, (
+        f"\n--- not idempotent for {name} ---"
+        f"\n--- once ---\n{got}"
+        f"\n--- twice ---\n{again}"
+    )
+
+
+@pytest.mark.parametrize(
+    "name,src,expected",
+    [
+        (
+            "one_per_line_dict_call_kwargs",
+            # Real case from buckaroo/customizations/pd_fracs.py. Collapsed
+            # form is 158 chars — over budget. With wrap_mode="one_per_line",
+            # each kwarg goes on its own line at line_indent + 4; close
+            # bracket stacks on last item.
+            """
+            class C:
+                def f(self, ser):
+                    return dict(
+                        str_bool_frac=str_bool_frac(ser),
+                        regular_int_parse_frac=regular_int_parse_frac(ser),
+                        strip_int_parse_frac=strip_int_parse_frac(ser),
+                        us_dates_frac=us_dates_frac(ser),
+                    )
+            """,
+            """
+            class C:
+                def f(self, ser):
+                    return dict(
+                        str_bool_frac=str_bool_frac(ser),
+                        regular_int_parse_frac=regular_int_parse_frac(ser),
+                        strip_int_parse_frac=strip_int_parse_frac(ser),
+                        us_dates_frac=us_dates_frac(ser))
+            """,
+        ),
+        (
+            "one_per_line_dict_literal_overlong",
+            # Dict literal collapsed exceeds 120 → one item per line.
+            """
+            frac_name_to_command = {
+                "str_bool_frac": "str_bool",
+                "regular_int_parse_frac": "regular_int_parse",
+                "strip_int_parse_frac": "strip_int_parse",
+                "us_dates_frac": "us_date",
+            }
+            """,
+            """
+            frac_name_to_command = {
+                "str_bool_frac": "str_bool",
+                "regular_int_parse_frac": "regular_int_parse",
+                "strip_int_parse_frac": "strip_int_parse",
+                "us_dates_frac": "us_date"}
+            """,
+        ),
+        (
+            "one_per_line_short_call_collapses_to_single_line",
+            # Collapsed form fits in 120 → still single-line, mode is a
+            # no-op (parity with greedy mode for short cases).
+            """
+            result = some_function_name(
+                arg1,
+                arg2,
+                arg3,
+            )
+            """,
+            """
+            result = some_function_name(arg1, arg2, arg3)
+            """,
+        ),
+    ],
+)
+def test_paddy_format_one_per_line(name, src, expected):
+    got = paddy_format(dedent(src), wrap_mode="one_per_line")
+    assert got == dedent(expected), (
+        f"\n--- input ---\n{dedent(src)}"
+        f"\n--- expected ---\n{dedent(expected)}"
+        f"\n--- got ---\n{got}"
+    )
+    again = paddy_format(got, wrap_mode="one_per_line")
     assert again == got, (
         f"\n--- not idempotent for {name} ---"
         f"\n--- once ---\n{got}"
