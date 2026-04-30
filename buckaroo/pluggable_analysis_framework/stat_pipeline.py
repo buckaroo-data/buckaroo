@@ -344,7 +344,10 @@ class StatPipeline:
             (summary_dict, all_errors) where summary_dict is SDType-compatible
             (column_name -> {stat_name -> value}).
         """
-        if len(df) == 0:
+        # Only short-circuit when there are no columns. An empty-but-typed
+        # df (0 rows, n columns) still gets per-column entries computed —
+        # most stats handle empty series natively (count=0, sum=NaN, etc.).
+        if len(df.columns) == 0:
             return {}, []
 
         summary: SDType = {}

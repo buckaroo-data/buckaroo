@@ -153,3 +153,21 @@ class XorqDfStatsV2:
         self.stat_errors = []
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)
+
+    def add_analysis(self, a_obj):
+        """Add an analysis class/stat func and reprocess the table.
+
+        Matches the contract of DfStatsV2.add_analysis / PlDfStatsV2.add_analysis
+        so DataFlow.add_analysis works against an ibis-backed stats wrapper.
+        """
+        passed, errors = self.ap.add_stat(a_obj)
+        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
+        _, self.stat_errors = self.ap.process_table(self.table)
+        if not passed:
+            print("DAG validation failed")
+        if self.errs:
+            print("Errors on original table")
+        if errors or self.stat_errors:
+            for err in errors + self.stat_errors:
+                if err.stat_func is not None:
+                    print(err.reproduce_code())

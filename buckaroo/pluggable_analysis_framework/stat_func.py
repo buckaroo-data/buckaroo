@@ -205,13 +205,19 @@ def _get_requires_from_params(sig: inspect.Signature, hints: dict) -> tuple:
 # ---------------------------------------------------------------------------
 
 
-def stat(column_filter=None, quiet=False, default=MISSING):
+def stat(column_filter=None, quiet=False, default=MISSING, provides=None):
     """Decorator that converts a function into a StatFunc.
 
     The function signature IS the contract:
       - Parameter names/types become `requires`
       - Return type becomes `provides`
       - RawSeries/SampledSeries params indicate raw data needs
+
+    ``provides='key'`` (or ``['k1', 'k2']``) overrides the auto-derived
+    name(s). Useful when the function name and the provided key need to
+    differ — e.g., batch-eligible xorq @stat funcs that return ibis.Expr
+    at runtime but want to keep readable names like ``base_min`` while
+    providing the ``min`` key.
 
     Usage::
 
@@ -226,6 +232,10 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         @stat(default=0)
         def safe_ratio(a: int, b: int) -> float:
             return a / b
+
+        @stat(provides='min', column_filter=is_numeric)
+        def base_min(col: XorqColumn) -> float:
+            return col.min().cast('float64')
     """
 
     def decorator(func):
@@ -238,13 +248,20 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         return_type = hints.get("return", inspect.Parameter.empty)
 
         requires, needs_raw = _get_requires_from_params(sig, hints)
-        provides = _get_provides_from_return_type(func.__name__, return_type)
+        if provides is not None:
+            key_type = (
+                return_type if return_type is not inspect.Parameter.empty else Any
+            )
+            keys = [provides] if isinstance(provides, str) else list(provides)
+            provides_keys = [StatKey(k, key_type) for k in keys]
+        else:
+            provides_keys = _get_provides_from_return_type(func.__name__, return_type)
 
         stat_func = StatFunc(
             name=func.__name__,
             func=func,
             requires=requires,
-            provides=provides,
+            provides=provides_keys,
             needs_raw=needs_raw,
             column_filter=column_filter,
             quiet=quiet,

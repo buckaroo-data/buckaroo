@@ -118,82 +118,44 @@ def _type(
 # ============================================================
 # Batched aggregates — one ibis.Expr each, folded into the batch query
 # ============================================================
-# Each function below uses a single-key TypedDict return so the StatKey
-# name matches buckaroo's existing stat naming (``min``, ``max``, ``mean``,
-# …) without shadowing Python builtins at the function level.
+# These functions return ``ibis.Expr`` at runtime; the batch executor
+# folds them into a single ``table.aggregate(...)`` call and the resulting
+# scalar lands in the accumulator under the key named by ``provides=``.
+# Type annotations describe the *eventual scalar type* in the accumulator.
 
 
-class _LengthResult(TypedDict):
-    length: int
-
-
-@stat()
-def base_length(col: XorqColumn) -> _LengthResult:
-    # `SUM` over an empty column returns NULL, not 0 — coalesce so an
-    # empty table reports length=0 instead of None.
-    return (col.count() + col.isnull().sum().coalesce(0)).cast("int64")
-
-
-class _NullCountResult(TypedDict):
-    null_count: int
-
-
-@stat()
-def base_null_count(col: XorqColumn) -> _NullCountResult:
+@stat(provides="null_count")
+def base_null_count(col: XorqColumn) -> int:
     return col.isnull().sum().coalesce(0).cast("int64")
 
 
-class _MinResult(TypedDict):
-    min: float
-
-
-@stat(column_filter=_is_numeric_ibis)
-def base_min(col: XorqColumn) -> _MinResult:
+@stat(provides="min", column_filter=_is_numeric_ibis)
+def base_min(col: XorqColumn) -> float:
     return col.min().cast("float64")
 
 
-class _MaxResult(TypedDict):
-    max: float
-
-
-@stat(column_filter=_is_numeric_ibis)
-def base_max(col: XorqColumn) -> _MaxResult:
+@stat(provides="max", column_filter=_is_numeric_ibis)
+def base_max(col: XorqColumn) -> float:
     return col.max().cast("float64")
 
 
-class _DistinctResult(TypedDict):
-    distinct_count: int
-
-
-@stat()
-def base_distinct_count(col: XorqColumn) -> _DistinctResult:
+@stat(provides="distinct_count")
+def base_distinct_count(col: XorqColumn) -> int:
     return col.nunique().cast("int64")
 
 
-class _MeanResult(TypedDict):
-    mean: float
-
-
-@stat(column_filter=_is_numeric_not_bool)
-def base_mean(col: XorqColumn) -> _MeanResult:
+@stat(provides="mean", column_filter=_is_numeric_not_bool)
+def base_mean(col: XorqColumn) -> float:
     return col.mean().cast("float64")
 
 
-class _StdResult(TypedDict):
-    std: float
-
-
-@stat(column_filter=_is_numeric_not_bool)
-def base_std(col: XorqColumn) -> _StdResult:
+@stat(provides="std", column_filter=_is_numeric_not_bool)
+def base_std(col: XorqColumn) -> float:
     return col.std().cast("float64")
 
 
-class _MedianResult(TypedDict):
-    median: float
-
-
-@stat(column_filter=_is_numeric_not_bool)
-def base_median(col: XorqColumn) -> _MedianResult:
+@stat(provides="median", column_filter=_is_numeric_not_bool)
+def base_median(col: XorqColumn) -> float:
     return col.approx_median().cast("float64")
 
 
@@ -301,17 +263,18 @@ def histogram(
     is_numeric: bool,
     is_bool: bool,
     length: int,
+    min: float,
+    max: float,
 ) -> list:
     """10-bucket numeric histogram or top-10 categorical histogram.
 
-    ``min`` / ``max`` are not declared as deps because they aren't computed
-    for non-numeric columns (column_filter excludes them, which would
-    cascade-remove this stat from string columns). For the numeric path
-    we recompute them as part of the histogram query.
+    ``min`` and ``max`` come from the batch aggregate. The pipeline
+    pre-populates them as ``None`` for every column so non-numeric cols
+    (where ``base_min``/``base_max`` are filtered out) don't cascade-
+    exclude this stat — the categorical branch ignores them.
 
     All queries go through the injected ``execute`` callable so a
-    pipeline-supplied backend isn't bypassed (see issue #687 follow-up
-    for the related default=[] silent-swallow behavior).
+    pipeline-supplied backend isn't bypassed.
 
     ``default=[]`` provides a graceful fallback if the histogram query
     fails (e.g. backend rejects the GROUP BY). NB: until #687 is fixed,
@@ -320,22 +283,8 @@ def histogram(
     if length == 0:
         return []
     if is_numeric and not is_bool:
-        col = table[orig_col_name]
-        bounds = execute(
-            table.aggregate(
-                __mn=col.min().cast("float64"),
-                __mx=col.max().cast("float64"),
-            )
-        )
-        if len(bounds) == 0:
-            return []
         return _numeric_histogram(
-            execute,
-            table,
-            orig_col_name,
-            bounds["__mn"].iloc[0],
-            bounds["__mx"].iloc[0],
-            length,
+            execute, table, orig_col_name, min, max, length
         )
     return _categorical_histogram(execute, table, orig_col_name)
 
@@ -347,7 +296,6 @@ def histogram(
 XORQ_STATS_V2 = [
     typing_stats,
     _type,
-    base_length,
     base_null_count,
     base_min,
     base_max,

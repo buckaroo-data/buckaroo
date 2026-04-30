@@ -86,7 +86,14 @@ class XorqStatPipeline:
     ``(SDType, List[StatError])``.
     """
 
-    EXTERNAL_KEYS = frozenset({"orig_col_name", "rewritten_col_name", "dtype"})
+    # Keys that the pipeline pre-populates per column. Listed as external
+    # so the DAG validator doesn't require a stat to provide them, and so
+    # that build_column_dag treats dependents as satisfied even when the
+    # actual provider stat (e.g. base_min for numeric cols) is filtered
+    # out by column_filter.
+    EXTERNAL_KEYS = frozenset(
+        {"orig_col_name", "rewritten_col_name", "dtype", "length", "min", "max"}
+    )
 
     def __init__(self, stat_funcs: list, backend: Any = None):
         if not HAS_IBIS:
@@ -123,15 +130,27 @@ class XorqStatPipeline:
         schema = table.schema()
         columns = list(table.columns)
 
+        # Pre-populate every column accumulator with the externally-provided
+        # keys. ``length`` is filled in by the batch query below. ``min`` /
+        # ``max`` start as None so dependents (histogram) don't cascade-
+        # exclude on non-numeric columns; base_min / base_max overwrite for
+        # numeric cols.
         accumulators: Dict[str, Dict[str, StatResult]] = {}
         for col in columns:
             accumulators[col] = {
                 "orig_col_name": Ok(col),
                 "rewritten_col_name": Ok(col),
                 "dtype": Ok(str(schema[col])),
+                "length": Ok(0),
+                "min": Ok(None),
+                "max": Ok(None),
             }
 
         # ---- Phase 1: batch aggregate ----------------------------------
+        # ``length`` is a table-level scalar (same value for every column),
+        # so it goes in once as ``__total_length__`` rather than as N
+        # per-column expressions.
+        TOTAL_LENGTH_KEY = "__total_length__"
         batch_items: List[Tuple[str, StatFunc, Any]] = []
         for sf in self.ordered_stat_funcs:
             if not _is_batch_func(sf):
@@ -168,36 +187,43 @@ class XorqStatPipeline:
                     continue
                 batch_items.append((col, sf, expr))
 
-        if batch_items:
-            agg_exprs = [e for _, _, e in batch_items]
-            try:
-                result_df = self._execute(table.aggregate(agg_exprs))
-            except Exception as e:
-                # Whole batch query failed — every batched stat reports the same root cause.
-                for col, sf, _ in batch_items:
-                    for sk in sf.provides:
-                        accumulators[col][sk.name] = Err(
-                            error=e,
-                            stat_func_name=sf.name,
-                            column_name=col,
-                            inputs={},
-                        )
-            else:
-                for col, sf, _ in batch_items:
-                    stat_name = sf.provides[0].name
-                    col_stat = f"{col}|{stat_name}"
-                    if col_stat in result_df.columns:
-                        raw_val = result_df[col_stat].iloc[0]
-                        accumulators[col][stat_name] = Ok(_to_python_scalar(raw_val))
-                    else:
-                        accumulators[col][stat_name] = Err(
-                            error=KeyError(
-                                f"missing aggregate column {col_stat!r} in result"
-                            ),
-                            stat_func_name=sf.name,
-                            column_name=col,
-                            inputs={},
-                        )
+        agg_exprs = [table.count().name(TOTAL_LENGTH_KEY)]
+        agg_exprs.extend(e for _, _, e in batch_items)
+
+        try:
+            result_df = self._execute(table.aggregate(agg_exprs))
+        except Exception as e:
+            # Whole batch query failed — every batched stat reports the same root cause.
+            # length stays at the prepopulated 0 so consumers still see something.
+            for col, sf, _ in batch_items:
+                for sk in sf.provides:
+                    accumulators[col][sk.name] = Err(
+                        error=e,
+                        stat_func_name=sf.name,
+                        column_name=col,
+                        inputs={},
+                    )
+        else:
+            total_length = _to_python_scalar(result_df[TOTAL_LENGTH_KEY].iloc[0])
+            if total_length is None:
+                total_length = 0
+            for col in columns:
+                accumulators[col]["length"] = Ok(total_length)
+            for col, sf, _ in batch_items:
+                stat_name = sf.provides[0].name
+                col_stat = f"{col}|{stat_name}"
+                if col_stat in result_df.columns:
+                    raw_val = result_df[col_stat].iloc[0]
+                    accumulators[col][stat_name] = Ok(_to_python_scalar(raw_val))
+                else:
+                    accumulators[col][stat_name] = Err(
+                        error=KeyError(
+                            f"missing aggregate column {col_stat!r} in result"
+                        ),
+                        stat_func_name=sf.name,
+                        column_name=col,
+                        inputs={},
+                    )
 
         # ---- Phase 2: per-column post-batch ----------------------------
         all_errors: List[StatError] = []
@@ -238,6 +264,51 @@ class XorqStatPipeline:
             all_errors.extend(errors)
 
         return summary, all_errors
+
+    def add_stat(self, stat_func_or_class) -> Tuple[bool, List[StatError]]:
+        """Add a stat function or ColAnalysis class interactively.
+
+        Mirrors ``StatPipeline.add_stat`` for parity with the v1-compat
+        DfStats surface, but skips the PERVERSE_DF unit-test (no ibis
+        equivalent yet — there's no perverse ibis.Table to validate
+        against). Validates the DAG; returns ``(True, [])`` on success
+        or ``(False, [config_error])`` if the DAG can't be built.
+        """
+        new_inputs = list(self._original_inputs)
+
+        if isinstance(stat_func_or_class, type):
+            new_inputs = [
+                inp
+                for inp in new_inputs
+                if not (
+                    isinstance(inp, type)
+                    and inp.__name__ == stat_func_or_class.__name__
+                )
+            ]
+        new_inputs.append(stat_func_or_class)
+
+        try:
+            new_funcs = _normalize_inputs(new_inputs)
+            new_ordered = build_typed_dag(new_funcs, external_keys=self.EXTERNAL_KEYS)
+        except Exception as e:
+            return False, [
+                StatError(
+                    column="<dag>",
+                    stat_key="<config>",
+                    error=e,
+                    stat_func=None,
+                )
+            ]
+
+        self.all_stat_funcs = new_funcs
+        self.ordered_stat_funcs = new_ordered
+        self._original_inputs = new_inputs
+        self._key_to_func = {}
+        for sf in self.ordered_stat_funcs:
+            for sk in sf.provides:
+                self._key_to_func[sk.name] = sf
+
+        return True, []
 
     def process_table_v1_compat(self, table) -> Tuple[SDType, ErrDict]:
         """Run process_table and convert errors to v1 ErrDict shape.
