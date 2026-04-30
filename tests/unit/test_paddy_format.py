@@ -559,3 +559,92 @@ def test_handles_syntax_error_gracefully():
     """Invalid Python should not crash — return input unchanged."""
     src = "this is not python ((("
     assert paddy_format(src) == src
+
+
+def test_table_format_directive_outside_top_level_is_ignored():
+    """The `# table-format` directive only fires for Assign/AnnAssign in
+    a module body or IndentedBlock. A directive sitting in front of a
+    list inside a function-call argument is intentionally not picked up
+    by `_find_directive_lists` — the list goes through the normal wrap
+    path. Regression-pin this so future "directive everywhere" changes
+    have to update the test deliberately."""
+    src = dedent(
+        """
+        func(
+            # table-format
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        )
+        """
+    )
+    out = paddy_format(src)
+    assert "table-format" in out  # directive comment preserved
+    # Result is whatever the normal collapse / wrap produces — the key
+    # property is that it is NOT the row-per-element table layout.
+    assert "],\n" not in out or out.count("\n") <= 4
+
+
+def test_cli_check_returns_1_when_changes_needed(tmp_path):
+    """`paddy_format --check <file>` exits 1 when the file would change,
+    and does NOT rewrite the file."""
+    from paddy_format import main
+
+    p = tmp_path / "a.py"
+    original = "xs = [\n    1,\n    2,\n]\n"
+    p.write_text(original)
+    rc = main(["--check", str(p)])
+    assert rc == 1
+    assert p.read_text() == original  # untouched
+
+
+def test_cli_check_returns_0_when_no_changes_needed(tmp_path):
+    from paddy_format import main
+
+    p = tmp_path / "a.py"
+    p.write_text("xs = [1, 2]\n")
+    rc = main(["--check", str(p)])
+    assert rc == 0
+
+
+def test_cli_rewrites_in_place(tmp_path):
+    from paddy_format import main
+
+    p = tmp_path / "a.py"
+    p.write_text("xs = [\n    1,\n    2,\n]\n")
+    rc = main([str(p)])
+    assert rc == 0
+    assert p.read_text() == "xs = [1, 2]\n"
+
+
+def test_cli_multi_file_run(tmp_path):
+    """A single CLI invocation handles each file independently."""
+    from paddy_format import main
+
+    a = tmp_path / "a.py"
+    b = tmp_path / "b.py"
+    a.write_text("xs = [\n    1,\n    2,\n]\n")
+    b.write_text("ys = (\n    3,\n    4,\n)\n")
+    rc = main([str(a), str(b)])
+    assert rc == 0
+    assert a.read_text() == "xs = [1, 2]\n"
+    assert b.read_text() == "ys = (3, 4)\n"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "path",
+    sorted((REPO_ROOT / "buckaroo").rglob("*.py")),
+    ids=lambda p: str(p.relative_to(REPO_ROOT)),
+)
+def test_paddy_format_smoke_on_buckaroo(path):
+    """Round-trip every file under `buckaroo/`: format, re-parse, and
+    re-format. Catches regressions where paddy produces invalid Python
+    or a non-idempotent result on real code. Marked `slow` because
+    formatting ~90 files takes ~25s; CI's `-m "not slow"` skips it.
+    Run locally with `pytest -m slow tests/unit/test_paddy_format.py`."""
+    import ast
+
+    src = path.read_text()
+    out = paddy_format(src)
+    ast.parse(out)  # output must still be valid Python
+    again = paddy_format(out)
+    assert again == out, f"non-idempotent: {path}"
