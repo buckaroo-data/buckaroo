@@ -12,6 +12,7 @@ Usage::
     stats.sdf  # -> SDType
     stats.errs  # -> ErrDict (v1 compatible)
 """
+
 from __future__ import annotations
 
 from typing import Type
@@ -118,3 +119,37 @@ class PlDfStatsV2:
             print("Errors on original dataframe")
         if errors or self.stat_errors:
             self.ap.print_errors(errors + self.stat_errors)
+
+
+class IbisDfStatsV2:
+    """Drop-in DfStats wrapper for ``ibis.Table`` inputs.
+
+    Mirrors the ``DfStatsV2`` / ``PlDfStatsV2`` surface (``.sdf``, ``.errs``,
+    ``.ap.ordered_a_objs``, ``verify_analysis_objects``) so DataFlow,
+    ``CustomizableDataflow`` and any other DfStats consumer can run
+    against an ibis Table without changes.
+
+    Stats execute through ``IbisStatPipeline`` — a single batched
+    ``table.aggregate(...)`` query plus per-column histogram queries —
+    pushing computation to the backend instead of materialising the
+    entire table.
+    """
+
+    @classmethod
+    def verify_analysis_objects(cls, objs):
+        # Lazy import so the rest of df_stats_v2 doesn't require ibis.
+        from .ibis_stat_pipeline import IbisStatPipeline
+
+        IbisStatPipeline(objs)
+
+    def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False):
+        from .ibis_stat_pipeline import IbisStatPipeline
+
+        self.table = table
+        self.ap = IbisStatPipeline(col_analysis_objs)
+        self.operating_df_name = operating_df_name
+        self.debug = debug
+        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
+        self.stat_errors = []
+        if self.errs:
+            output_full_reproduce(self.errs, self.sdf, operating_df_name)

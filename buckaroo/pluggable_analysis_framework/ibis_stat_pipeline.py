@@ -21,9 +21,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-from .col_analysis import SDType
+from .col_analysis import ErrDict, SDType
 from .stat_func import IbisColumn, IbisTable, RAW_MARKER_TYPES, StatFunc
-from .stat_pipeline import _execute_stat_func, _normalize_inputs
+from .stat_pipeline import _execute_stat_func, _find_v1_class, _normalize_inputs
 from .stat_result import Err, Ok, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_column_dag, build_typed_dag
 
@@ -108,6 +108,11 @@ class IbisStatPipeline:
         for sf in self.ordered_stat_funcs:
             for sk in sf.provides:
                 self._key_to_func[sk.name] = sf
+
+    @property
+    def ordered_a_objs(self):
+        """The original input list, preserved for DataFlow.add_analysis."""
+        return list(self._original_inputs)
 
     def _execute(self, query):
         if self.backend is not None:
@@ -232,3 +237,22 @@ class IbisStatPipeline:
             all_errors.extend(errors)
 
         return summary, all_errors
+
+    def process_table_v1_compat(self, table) -> Tuple[SDType, ErrDict]:
+        """Run process_table and convert errors to v1 ErrDict shape.
+
+        Used by IbisDfStatsV2 / DataFlow consumers expecting the same
+        ``{(col, stat): (Exception, kls)}`` shape that AnalysisPipeline
+        produced.
+        """
+        summary, errors = self.process_table(table)
+        errs: ErrDict = {}
+        for se in errors:
+            kls = (
+                _find_v1_class(se.stat_func, self._original_inputs)
+                if se.stat_func
+                else None
+            )
+            err_key = (se.column, se.stat_func.name if se.stat_func else "unknown")
+            errs[err_key] = (se.error, kls)
+        return summary, errs
