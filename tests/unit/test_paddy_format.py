@@ -165,6 +165,16 @@ def dedent(s: str) -> str:
             "long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5,\n    very_long_value_6, very_long_value_7, very_long_value_8]\n",
         ),
         (
+            "long_funcdef_greedy_wrap",
+            # Real case from buckaroo/dataflow/column_executor_dataflow.py
+            # compute_summary_with_executor — collapsed form is 400+ chars.
+            # Today the wrap pass only covers Call/List/Set/Dict, so
+            # function signatures stay on one massive line. Wrap params
+            # at line_indent + 4 just like Call args.
+            "def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None, progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None, planning_function: Optional[\"PlanningFunction\"] = None, timeout_secs: Optional[float] = None, cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:\n    pass\n",
+            "def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None, progress_listener: Optional[ProgressListener] = None,\n    file_path: MaybeFilepathLike = None, planning_function: Optional[\"PlanningFunction\"] = None, timeout_secs: Optional[float] = None,\n    cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:\n    pass\n",
+        ),
+        (
             "reindent_continuation_to_indent_plus_4",
             # Continuation line of a multi-line call sits at column 0 (legal
             # inside parens, but visually broken). Re-indent it to
@@ -618,6 +628,25 @@ def test_paddy_format_golden(name, src, expected):
                 "regular_int_parse_frac": "regular_int_parse",
                 "strip_int_parse_frac": "strip_int_parse",
                 "us_dates_frac": "us_date"}
+            """,
+        ),
+        (
+            "one_per_line_funcdef_overlong",
+            # Long function signature — each param on its own line at
+            # line_indent + 4 in one_per_line mode.
+            """
+            def compute_summary_with_executor(self, file_cache=None, progress_listener=None, file_path=None, planning_function=None, timeout_secs=None) -> None:
+                pass
+            """,
+            """
+            def compute_summary_with_executor(
+                self,
+                file_cache=None,
+                progress_listener=None,
+                file_path=None,
+                planning_function=None,
+                timeout_secs=None) -> None:
+                pass
             """,
         ),
         (
