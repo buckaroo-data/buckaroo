@@ -62,10 +62,7 @@ def dedent(s: str) -> str:
             ]
             """,
             """
-            xs = [
-                1,
-                2,
-                3]
+            xs = [1, 2, 3]
             """,
         ),
         (
@@ -77,9 +74,7 @@ def dedent(s: str) -> str:
             }
             """,
             """
-            d = {
-                'a': 1,
-                'b': 2}
+            d = {'a': 1, 'b': 2}
             """,
         ),
         (
@@ -92,10 +87,7 @@ def dedent(s: str) -> str:
             )
             """,
             """
-            t = (
-                1,
-                2,
-                3)
+            t = (1, 2, 3)
             """,
         ),
         (
@@ -108,10 +100,7 @@ def dedent(s: str) -> str:
             }
             """,
             """
-            s = {
-                1,
-                2,
-                3}
+            s = {1, 2, 3}
             """,
         ),
         (
@@ -125,10 +114,7 @@ def dedent(s: str) -> str:
             )
             """,
             """
-            func(
-                [
-                    1,
-                    2])
+            func([1, 2])
             """,
         ),
         (
@@ -142,10 +128,7 @@ def dedent(s: str) -> str:
                 return a
             """,
             """
-            def f(
-                a,
-                b,
-                c):
+            def f(a, b, c):
                 return a
             """,
         ),
@@ -158,9 +141,7 @@ def dedent(s: str) -> str:
             )
             """,
             """
-            from x import (
-                foo,
-                bar)
+            from x import (foo, bar)
             """,
         ),
         (
