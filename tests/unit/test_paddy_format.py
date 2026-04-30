@@ -35,9 +35,7 @@ def dedent(s: str) -> str:
             )
             """,
             """
-            func(
-                a,
-                b)
+            func(a, b)
             """,
         ),
         (
