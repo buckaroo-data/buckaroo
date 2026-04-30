@@ -264,6 +264,63 @@ def dedent(s: str) -> str:
             """,
         ),
         (
+            "idempotent_outer_call_continuation_shifts_inner_dict",
+            # Minimal repro from buckaroo/pluggable_analysis_framework/
+            # safe_summary_df.py. The outer Call has its continuation line
+            # at col 23; the inner Dict's second key sits at col 24 (just
+            # past the `{`). On the first pass, the outer Call's
+            # continuation gets re-indented to col 8 (line_indent + 4),
+            # but the inner Dict's continuation stays at col 24 because
+            # _line_indent_plus_4 reads the *current* line indent of the
+            # Dict's `{` line, which still points at col 23. On the
+            # second pass, the Dict's `{` line is now at col 8, so the
+            # inner key gets re-indented to col 12. Two passes to settle.
+            """
+            def f(dct):
+                cleaned_dct = val_replace(dct,
+                                   {pd.NA: UnquotedString("pd.NA"),
+                                    np.nan: UnquotedString("np.nan")})
+                return cleaned_dct
+            """,
+            """
+            def f(dct):
+                cleaned_dct = val_replace(dct,
+                    {pd.NA: UnquotedString("pd.NA"),
+                        np.nan: UnquotedString("np.nan")})
+                return cleaned_dct
+            """,
+        ),
+        (
+            "idempotent_nested_list_inside_dict_value",
+            # Minimal repro from buckaroo/ddd_library.py. After Pass 1
+            # collapses the outer Dict's trailing-comma multiline form,
+            # the 'timedelta' key's value (a multi-line List) sits at a
+            # new line indent. The inner List's continuation lines were
+            # at col 39 in the original; on run 1 they get re-indented to
+            # col 8 (line_indent + 4 of the OUTER dict's row). On run 2,
+            # they shift to col 12 (line_indent + 4 of the inner Call's
+            # row, which is now at col 8). Same root cause as the case
+            # above.
+            """
+            def f():
+                return pd.DataFrame({
+                    'categorical': pd.Categorical(['red', 'green', 'blue', 'red', 'green']),
+                    'timedelta': pd.to_timedelta(['1 days 02:03:04', '0 days 00:00:01',
+                                                   '365 days', '0 days 00:00:00.001',
+                                                   '0 days 00:00:00.000100']),
+                    'int_col': [10, 20, 30, 40, 50],
+                })
+            """,
+            """
+            def f():
+                return pd.DataFrame({'categorical': pd.Categorical(['red', 'green', 'blue', 'red', 'green']),
+                    'timedelta': pd.to_timedelta(['1 days 02:03:04', '0 days 00:00:01',
+                        '365 days', '0 days 00:00:00.001',
+                        '0 days 00:00:00.000100']),
+                    'int_col': [10, 20, 30, 40, 50]})
+            """,
+        ),
+        (
             "unsplittable_single_arg_overflows",
             # Single arg > 120 chars; nothing to break on, stays as-is.
             "result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)\n",
