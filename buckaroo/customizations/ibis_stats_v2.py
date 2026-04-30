@@ -1,23 +1,38 @@
-"""Ibis-based analysis classes for the pluggable analysis framework.
+"""v2 ibis stat functions for the pluggable analysis framework.
 
-Provides IbisAnalysis subclasses that mirror the pandas/polars stat classes
-but using ibis expressions. Executed via IbisAnalysisPipeline as a single
-batch aggregation query, followed by computed_summary and histogram phases.
+Mirrors ``pd_stats_v2`` but using ibis expressions executed via
+``IbisStatPipeline`` against an ``ibis.Table`` (DuckDB, Postgres, Snowflake,
+etc.) — typically through xorq for cross-backend compute.
+
+Stat layout:
+  - **Typing**: derived from the schema dtype string (no query).
+  - **Batched aggregates** (``IbisColumn`` parameter, return ibis.Expr):
+    ``length``, ``null_count``, ``min``, ``max``, ``distinct_count``,
+    ``mean``, ``std``, ``median``. Folded into one ``table.aggregate()``.
+  - **Computed**: ``non_null_count``, ``nan_per``, ``distinct_per``.
+  - **Histogram**: per-column query against the ``IbisTable``.
 
 Usage::
 
-    from buckaroo.customizations.ibis_stats_v2 import IBIS_ANALYSIS
-    from buckaroo.pluggable_analysis_framework.ibis_analysis import IbisAnalysisPipeline
+    from buckaroo.customizations.ibis_stats_v2 import IBIS_STATS_V2
+    from buckaroo.pluggable_analysis_framework.ibis_stat_pipeline import (
+        IbisStatPipeline,
+    )
 
-    pipeline = IbisAnalysisPipeline(IBIS_ANALYSIS)
-    stats, errors = pipeline.process_df(ibis_table)
+    pipeline = IbisStatPipeline(IBIS_STATS_V2)
+    stats, errors = pipeline.process_table(ibis_table)
 """
 
 from __future__ import annotations
 
-from typing import Any, List
+import math
+from typing import TypedDict
 
-from buckaroo.pluggable_analysis_framework.ibis_analysis import IbisAnalysis
+from buckaroo.pluggable_analysis_framework.ibis_stat_pipeline import (
+    IbisColumn,
+    IbisTable,
+)
+from buckaroo.pluggable_analysis_framework.stat_func import stat
 
 try:
     import ibis
@@ -28,223 +43,307 @@ except ImportError:
 
 
 # ============================================================
-# Expression functions: (table, col) -> ibis.Expr | None
+# Column filters
 # ============================================================
 
 
-def _ibis_null_count(table, col):
-    return table[col].isnull().sum().cast("int64").name(f"{col}|null_count")
+def _is_numeric_ibis(dtype) -> bool:
+    """True for numeric (incl. boolean — matches ibis's own definition)."""
+    return dtype.is_numeric()
 
 
-def _ibis_length(table, col):
-    return table.count().cast("int64").name(f"{col}|length")
-
-
-def _ibis_min(table, col):
-    if not table.schema()[col].is_numeric():
-        return None
-    return table[col].min().cast("float64").name(f"{col}|min")
-
-
-def _ibis_max(table, col):
-    if not table.schema()[col].is_numeric():
-        return None
-    return table[col].max().cast("float64").name(f"{col}|max")
-
-
-def _ibis_mean(table, col):
-    dt = table.schema()[col]
-    if not dt.is_numeric() or dt.is_boolean():
-        return None
-    return table[col].mean().name(f"{col}|mean")
-
-
-def _ibis_std(table, col):
-    dt = table.schema()[col]
-    if not dt.is_numeric() or dt.is_boolean():
-        return None
-    return table[col].std().name(f"{col}|std")
-
-
-def _ibis_approx_median(table, col):
-    dt = table.schema()[col]
-    if not dt.is_numeric() or dt.is_boolean():
-        return None
-    return table[col].approx_median().name(f"{col}|median")
-
-
-def _ibis_distinct_count(table, col):
-    return table[col].nunique().cast("int64").name(f"{col}|distinct_count")
+def _is_numeric_not_bool(dtype) -> bool:
+    return dtype.is_numeric() and not dtype.is_boolean()
 
 
 # ============================================================
-# IbisAnalysis subclasses
+# Typing — derive type flags from the schema dtype string
 # ============================================================
 
-
-class IbisTypingStats(IbisAnalysis):
-    """Derive type flags from the pre-seeded ibis dtype string.
-
-    No ibis expressions — everything is computed from the schema dtype
-    that IbisAnalysisPipeline pre-seeds into column_metadata['dtype'].
-    """
-
-    ibis_expressions: List[Any] = []
-    provides_defaults = {
-        "is_numeric": False,
-        "is_integer": False,
-        "is_float": False,
-        "is_bool": False,
-        "is_datetime": False,
-        "is_string": False,
-        "_type": "obj",
-    }
-
-    @staticmethod
-    def computed_summary(column_metadata):
-        dt = column_metadata.get("dtype", "")
-        is_bool = dt == "boolean"
-        is_int = any(dt.startswith(p) for p in ("int", "uint"))
-        is_float = any(dt.startswith(p) for p in ("float", "double", "decimal"))
-        is_numeric = is_int or is_float or is_bool
-        is_datetime = any(s in dt for s in ("timestamp", "date", "time"))
-        is_string = dt in ("string", "large_string", "varchar", "utf8")
-
-        if is_bool:
-            _type = "boolean"
-        elif is_int:
-            _type = "integer"
-        elif is_float:
-            _type = "float"
-        elif is_datetime:
-            _type = "datetime"
-        elif is_string:
-            _type = "string"
-        else:
-            _type = "obj"
-
-        return {
-            "is_numeric": is_numeric,
-            "is_integer": is_int,
-            "is_float": is_float,
-            "is_bool": is_bool,
-            "is_datetime": is_datetime,
-            "is_string": is_string,
-            "_type": _type,
-        }
+TypingResult = TypedDict(
+    "TypingResult",
+    {
+        "is_numeric": bool,
+        "is_integer": bool,
+        "is_float": bool,
+        "is_bool": bool,
+        "is_datetime": bool,
+        "is_string": bool,
+    },
+)
 
 
-class IbisBaseSummaryStats(IbisAnalysis):
-    """Base scalar aggregation stats: null_count, length, min, max, distinct_count."""
-
-    ibis_expressions = [
-        _ibis_null_count,
-        _ibis_length,
-        _ibis_min,
-        _ibis_max,
-        _ibis_distinct_count,
-    ]
-    provides_defaults = {
-        "null_count": 0,
-        "length": 0,
-        "min": float("nan"),
-        "max": float("nan"),
-        "distinct_count": 0,
+@stat()
+def typing_stats(dtype: str) -> TypingResult:
+    """Derive type flags from the ibis schema dtype string."""
+    is_bool = dtype == "boolean"
+    is_int = any(dtype.startswith(p) for p in ("int", "uint"))
+    is_float = any(dtype.startswith(p) for p in ("float", "double", "decimal"))
+    is_numeric = is_int or is_float or is_bool
+    is_datetime = any(s in dtype for s in ("timestamp", "date", "time"))
+    is_string = dtype in ("string", "large_string", "varchar", "utf8")
+    return {
+        "is_numeric": is_numeric,
+        "is_integer": is_int,
+        "is_float": is_float,
+        "is_bool": is_bool,
+        "is_datetime": is_datetime,
+        "is_string": is_string,
     }
 
 
-class IbisNumericStats(IbisAnalysis):
-    """Numeric-only stats: mean, std, median.
-
-    Expression functions return None for non-numeric / boolean columns,
-    so these stats are only present for numeric columns.
-    """
-
-    ibis_expressions = [_ibis_mean, _ibis_std, _ibis_approx_median]
-    provides_defaults = {}
-
-
-class IbisComputedSummaryStats(IbisAnalysis):
-    """Derived stats from already-computed keys."""
-
-    ibis_expressions: List[Any] = []
-    requires_summary = ["length", "null_count", "distinct_count"]
-
-    @staticmethod
-    def computed_summary(column_metadata):
-        length = column_metadata.get("length", 0)
-        if not length:
-            return {}
-        null_count = column_metadata.get("null_count", 0)
-        distinct_count = column_metadata.get("distinct_count", 0)
-        return {
-            "non_null_count": length - null_count,
-            "nan_per": null_count / length,
-            "distinct_per": distinct_count / length,
-        }
+@stat()
+def _type(
+    is_bool: bool,
+    is_integer: bool,
+    is_float: bool,
+    is_datetime: bool,
+    is_string: bool,
+) -> str:
+    """Human-readable column type string."""
+    if is_bool:
+        return "boolean"
+    if is_integer:
+        return "integer"
+    if is_float:
+        return "float"
+    if is_datetime:
+        return "datetime"
+    if is_string:
+        return "string"
+    return "obj"
 
 
 # ============================================================
-# Histogram support
+# Batched aggregates — one ibis.Expr each, folded into the batch query
+# ============================================================
+# Each function below uses a single-key TypedDict return so the StatKey
+# name matches buckaroo's existing stat naming (``min``, ``max``, ``mean``,
+# …) without shadowing Python builtins at the function level.
+
+
+class _LengthResult(TypedDict):
+    length: int
+
+
+@stat()
+def base_length(col: IbisColumn) -> _LengthResult:
+    # `SUM` over an empty column returns NULL, not 0 — coalesce so an
+    # empty table reports length=0 instead of None.
+    return (col.count() + col.isnull().sum().coalesce(0)).cast("int64")
+
+
+class _NullCountResult(TypedDict):
+    null_count: int
+
+
+@stat()
+def base_null_count(col: IbisColumn) -> _NullCountResult:
+    return col.isnull().sum().coalesce(0).cast("int64")
+
+
+class _MinResult(TypedDict):
+    min: float
+
+
+@stat(column_filter=_is_numeric_ibis)
+def base_min(col: IbisColumn) -> _MinResult:
+    return col.min().cast("float64")
+
+
+class _MaxResult(TypedDict):
+    max: float
+
+
+@stat(column_filter=_is_numeric_ibis)
+def base_max(col: IbisColumn) -> _MaxResult:
+    return col.max().cast("float64")
+
+
+class _DistinctResult(TypedDict):
+    distinct_count: int
+
+
+@stat()
+def base_distinct_count(col: IbisColumn) -> _DistinctResult:
+    return col.nunique().cast("int64")
+
+
+class _MeanResult(TypedDict):
+    mean: float
+
+
+@stat(column_filter=_is_numeric_not_bool)
+def base_mean(col: IbisColumn) -> _MeanResult:
+    return col.mean().cast("float64")
+
+
+class _StdResult(TypedDict):
+    std: float
+
+
+@stat(column_filter=_is_numeric_not_bool)
+def base_std(col: IbisColumn) -> _StdResult:
+    return col.std().cast("float64")
+
+
+class _MedianResult(TypedDict):
+    median: float
+
+
+@stat(column_filter=_is_numeric_not_bool)
+def base_median(col: IbisColumn) -> _MedianResult:
+    return col.approx_median().cast("float64")
+
+
+# ============================================================
+# Computed (no IbisColumn dep) — derive from already-resolved scalars
 # ============================================================
 
 
-def _ibis_histogram_query(table, col, col_stats):
-    """Returns an ibis Table expr for the histogram, or None.
+@stat()
+def non_null_count(length: int, null_count: int) -> int:
+    return length - null_count
 
-    Numeric columns: 10-bucket equal-width histogram between min and max.
-    Categorical columns: top-10 by count.
+
+@stat()
+def nan_per(length: int, null_count: int) -> float:
+    if not length:
+        return 0.0
+    return null_count / length
+
+
+@stat()
+def distinct_per(length: int, distinct_count: int) -> float:
+    if not length:
+        return 0.0
+    return distinct_count / length
+
+
+# ============================================================
+# Histogram — per-column GROUP BY query against the ibis Table
+# ============================================================
+
+
+def _numeric_histogram(table, col, min_val, max_val, total_rows):
+    if min_val is None or max_val is None:
+        return []
+    if (isinstance(min_val, float) and math.isnan(min_val)) or (
+        isinstance(max_val, float) and math.isnan(max_val)
+    ):
+        return []
+    if min_val == max_val:
+        return []
+
+    bucket = (
+        ((table[col].cast("float64") - min_val) / (max_val - min_val) * 10)
+        .cast("int64")
+        .clip(lower=0, upper=9)
+    )
+    query = (
+        table.mutate(__bucket=bucket)
+        .group_by("__bucket")
+        .aggregate(__count=lambda t: t.count())
+        .order_by("__bucket")
+    )
+    df = query.execute()
+    if len(df) == 0:
+        return []
+    total = float(df["__count"].sum())
+    if total == 0:
+        return []
+
+    bucket_width = (max_val - min_val) / 10
+    out = []
+    for _, row in df.iterrows():
+        idx = int(row["__bucket"])
+        low = min_val + idx * bucket_width
+        high = low + bucket_width
+        out.append(
+            {
+                "name": f"{low:.3g}-{high:.3g}",
+                "cat_pop": float(row["__count"]) / total,
+            }
+        )
+    return out
+
+
+def _categorical_histogram(table, col):
+    query = (
+        table.group_by(col)
+        .aggregate(__count=lambda t: t.count())
+        .order_by(ibis.desc("__count"))
+        .limit(10)
+    )
+    df = query.execute()
+    if len(df) == 0:
+        return []
+    total = float(df["__count"].sum())
+    if total == 0:
+        return []
+    out = []
+    for _, row in df.iterrows():
+        out.append(
+            {
+                "name": str(row[col]),
+                "cat_pop": float(row["__count"]) / total,
+            }
+        )
+    return out
+
+
+@stat(default=[])
+def histogram(
+    table: IbisTable,
+    orig_col_name: str,
+    is_numeric: bool,
+    is_bool: bool,
+    length: int,
+) -> list:
+    """10-bucket numeric histogram or top-10 categorical histogram.
+
+    ``min`` / ``max`` are not declared as deps because they aren't computed
+    for non-numeric columns (column_filter excludes them, which would
+    cascade-remove this stat from string columns). For the numeric path
+    we recompute them as part of the histogram query.
+
+    ``default=[]`` provides a graceful fallback if the histogram query
+    fails (e.g. backend rejects the GROUP BY). The error is still
+    surfaced via the StatError mechanism.
     """
-    if not HAS_IBIS:
-        return None
-
-    is_numeric = col_stats.get("is_numeric", False)
-    is_bool = col_stats.get("is_bool", False)
-
+    if length == 0:
+        return []
     if is_numeric and not is_bool:
-        min_val = col_stats.get("min")
-        max_val = col_stats.get("max")
-        if min_val is None or max_val is None:
-            return None
-        import math
-
-        if math.isnan(min_val) or math.isnan(max_val) or min_val == max_val:
-            return None
-        bucket = (
-            ((table[col].cast("float64") - min_val) / (max_val - min_val) * 10)
-            .cast("int64")
-            .clip(lower=0, upper=9)
+        col = table[orig_col_name]
+        bounds = table.aggregate(
+            __mn=col.min().cast("float64"),
+            __mx=col.max().cast("float64"),
+        ).execute()
+        if len(bounds) == 0:
+            return []
+        return _numeric_histogram(
+            table, orig_col_name, bounds["__mn"].iloc[0], bounds["__mx"].iloc[0], length
         )
-        return (
-            table.mutate(bucket=bucket)
-            .group_by("bucket")
-            .aggregate(count=lambda t: t.count())
-            .order_by("bucket")
-        )
-    else:
-        return (
-            table.group_by(col)
-            .aggregate(count=lambda t: t.count())
-            .order_by(ibis.desc("count"))
-            .limit(10)
-        )
-
-
-class IbisHistogramStats(IbisAnalysis):
-    """Histogram stats via GROUP BY queries (run after scalar aggregation)."""
-
-    ibis_expressions: List[Any] = []
-    histogram_query_fns = [_ibis_histogram_query]
-    provides_defaults = {"histogram": []}
+    return _categorical_histogram(table, orig_col_name)
 
 
 # ============================================================
-# Convenience list
+# Convenience list — drop into IbisStatPipeline(IBIS_STATS_V2)
 # ============================================================
 
-IBIS_ANALYSIS = [
-    IbisTypingStats,
-    IbisBaseSummaryStats,
-    IbisNumericStats,
-    IbisComputedSummaryStats,
+IBIS_STATS_V2 = [
+    typing_stats,
+    _type,
+    base_length,
+    base_null_count,
+    base_min,
+    base_max,
+    base_distinct_count,
+    base_mean,
+    base_std,
+    base_median,
+    non_null_count,
+    nan_per,
+    distinct_per,
+    histogram,
 ]
