@@ -185,12 +185,26 @@ def dedent(s: str) -> str:
             """,
             """
             # table-format
-            data = [
-                  1.23,
-                 45.6,
-                  7.89,
-                100.5,
-            ]
+            data = [1.23, 45.6, 7.89, 100.5]
+            """,
+        ),
+        (
+            "table_format_single_col_floats_wrap",
+            # When the single-line form exceeds 120 chars, table-format
+            # wraps using strict uniform cells: each cell is
+            # max_int_width + 1 + max_frac_width chars wide (left-pad int,
+            # right-pad frac). Continuation indent = position right after
+            # the open bracket, so decimals align across rows at fixed
+            # 8-column strides. Trailing spaces inside cells before commas
+            # are accepted as the cost of strict alignment.
+            """
+            # table-format
+            data = [1.23, 45.6, 7.89, 100.5, 1.23, 45.6, 7.89, 100.5, 1.23, 45.6, 7.89, 100.5, 1.23, 45.6, 7.89, 100.5, 1.23, 45.6, 7.89, 100.5, 1.23, 45.6, 7.89, 100.5]
+            """,
+            """
+            # table-format
+            data = [  1.23,  45.6 ,   7.89, 100.5 ,   1.23,  45.6 ,   7.89, 100.5 ,   1.23,  45.6 ,   7.89, 100.5 ,   1.23,  45.6 ,
+                      7.89, 100.5 ,   1.23,  45.6 ,   7.89, 100.5 ,   1.23,  45.6 ,   7.89, 100.5 ]
             """,
         ),
         (
@@ -204,13 +218,7 @@ def dedent(s: str) -> str:
             """,
             """
             # table-format
-            data = [
-                    1,
-                    2.5,
-                   30,
-                    4.567,
-                50000,
-            ]
+            data = [1, 2.5, 30, 4.567, 50000]
             """,
         ),
         (
