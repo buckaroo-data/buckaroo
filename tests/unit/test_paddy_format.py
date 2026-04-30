@@ -145,6 +145,33 @@ def dedent(s: str) -> str:
             """,
         ),
         (
+            "long_call_greedy_wrap",
+            # 203 chars on one line — should wrap greedily at 120
+            "result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4, very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)\n",
+            # Greedy: pack until adding the next arg would push over 120,
+            # break, indent continuation to one column past the open paren.
+            "result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,\n                            very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)\n",
+        ),
+        (
+            "multiline_collapse_target_too_long_wraps_instead",
+            # Trailing-comma multiline; collapsed form would be 203 chars.
+            # Don't collapse — wrap greedily instead. Trailing comma is dropped.
+            "result = some_function_name(\n    very_long_argument_1,\n    very_long_argument_2,\n    very_long_argument_3,\n    very_long_argument_4,\n    very_long_argument_5,\n    very_long_argument_6,\n    very_long_argument_7,\n    very_long_argument_8,\n)\n",
+            "result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,\n                            very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)\n",
+        ),
+        (
+            "long_list_greedy_wrap",
+            # 162 chars on one line — wrap greedily.
+            "long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5, very_long_value_6, very_long_value_7, very_long_value_8]\n",
+            "long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5,\n           very_long_value_6, very_long_value_7, very_long_value_8]\n",
+        ),
+        (
+            "unsplittable_single_arg_overflows",
+            # Single arg > 120 chars; nothing to break on, stays as-is.
+            "result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)\n",
+            "result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)\n",
+        ),
+        (
             "single_line_unchanged",
             """
             func(a, b, c)
