@@ -705,6 +705,35 @@ class _Reindenter(cst.CSTTransformer):
         return self._leave_collection(original, updated)
 
 
+def _has_aligned_hanging_indent(node, positions) -> bool:
+    """True iff the bracket group has its first child inline with the
+    opening bracket AND every subsequent child starts a new line at the
+    same column as the first child. This is the "hanging indent aligned
+    with item 1" pattern — re-indent should leave it alone instead of
+    shifting items 2..N to line_indent + 4 (which would offset them from
+    item 1)."""
+    pos = positions[node]
+    if isinstance(node, cst.Call):
+        children = node.args
+    else:
+        children = node.elements
+    if len(children) < 2:
+        return False
+    first_pos = positions[children[0].value]
+    if first_pos.start.line != pos.start.line:
+        return False
+    target_col = first_pos.start.column
+    prev_line = first_pos.start.line
+    for c in children[1:]:
+        cpos = positions[c.value]
+        if cpos.start.line == prev_line:
+            return False
+        if cpos.start.column != target_col:
+            return False
+        prev_line = cpos.start.line
+    return True
+
+
 def _reindent_pass_once(src: str) -> str:
     """Single sweep: for each multi-line bracket group, re-indent
     continuation lines to line_indent + 4 based on the *current* source.
@@ -724,6 +753,8 @@ def _reindent_pass_once(src: str) -> str:
         if not isinstance(node, (cst.Call, cst.List, cst.Set, cst.Dict)):
             continue
         if pos.start.line == pos.end.line:
+            continue
+        if _has_aligned_hanging_indent(node, positions):
             continue
         indent = _line_indent_plus_4(node, positions, lines)
         if indent is None:
