@@ -174,6 +174,31 @@ def dedent(s: str) -> str:
             "class C:\n    def f(self, ser):\n        return dict(str_bool_frac=str_bool_frac(ser),\n            regular_int_parse_frac=regular_int_parse_frac(ser))\n",
         ),
         (
+            "table_format_single_col_floats",
+            # `# table-format` directive on the line above forces a column
+            # table layout — each element on its own line, decimal points
+            # right-aligned. Other paddy rules (collapse / stack) are
+            # overridden when the directive is present.
+            "# table-format\ndata = [1.23, 45.6, 7.89, 100.5]\n",
+            "# table-format\ndata = [\n      1.23,\n     45.6,\n      7.89,\n    100.5,\n]\n",
+        ),
+        (
+            "table_format_mixed_ints_floats",
+            # Mixed ints and floats: ints align by least-significant digit
+            # (the position the decimal point would occupy). Decimal column
+            # = max integer-part width across all items.
+            "# table-format\ndata = [1, 2.5, 30, 4.567, 50000]\n",
+            "# table-format\ndata = [\n        1,\n        2.5,\n       30,\n        4.567,\n    50000,\n]\n",
+        ),
+        (
+            "table_format_multi_col_tuples",
+            # Each tuple position is treated as an independent column.
+            # Col 0 here (floats) all share the same width; col 1 (ints)
+            # is right-aligned to the widest element.
+            "# table-format\ndata = [(1.23, 5), (4.56, 600), (7.89, 70)]\n",
+            "# table-format\ndata = [\n    (1.23,   5),\n    (4.56, 600),\n    (7.89,  70),\n]\n",
+        ),
+        (
             "unsplittable_single_arg_overflows",
             # Single arg > 120 chars; nothing to break on, stays as-is.
             "result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)\n",
