@@ -172,7 +172,7 @@ def dedent(s: str) -> str:
             # function signatures stay on one massive line. Wrap params
             # at line_indent + 4 just like Call args.
             "def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None, progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None, planning_function: Optional[\"PlanningFunction\"] = None, timeout_secs: Optional[float] = None, cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:\n    pass\n",
-            "def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None, progress_listener: Optional[ProgressListener] = None,\n    file_path: MaybeFilepathLike = None, planning_function: Optional[\"PlanningFunction\"] = None, timeout_secs: Optional[float] = None,\n    cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:\n    pass\n",
+            "def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None,\n    progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None,\n    planning_function: Optional[\"PlanningFunction\"] = None, timeout_secs: Optional[float] = None,\n    cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:\n    pass\n",
         ),
         (
             "reindent_continuation_to_indent_plus_4",
