@@ -169,8 +169,7 @@ def dedent(s: str) -> str:
             )
             """,
             """
-            func(
-            )
+            func()
             """,
         ),
     ],
