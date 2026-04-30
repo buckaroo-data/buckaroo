@@ -1,7 +1,7 @@
-"""Tests for ibis-based analysis classes.
+"""Tests for the v2 ibis stat pipeline.
 
-All tests use ibis.memtable(pd.DataFrame(...)) — no xorq or remote backend
-required. Tests are skipped if ibis is not installed.
+Uses ibis.memtable (DuckDB-backed) — no xorq or remote backend required.
+Skipped if ibis is not installed.
 """
 
 import pandas as pd
@@ -9,25 +9,17 @@ import pytest
 
 ibis = pytest.importorskip("ibis")
 
-from buckaroo.pluggable_analysis_framework.ibis_analysis import (  # noqa: E402
-    IbisAnalysisPipeline,
+from buckaroo.pluggable_analysis_framework.ibis_stat_pipeline import (  # noqa: E402
+    IbisStatPipeline,
+    IbisColumn,
 )
+from buckaroo.pluggable_analysis_framework.stat_func import stat  # noqa: E402
 from buckaroo.customizations.ibis_stats_v2 import (  # noqa: E402
-    IbisTypingStats,
-    IbisBaseSummaryStats,
-    IbisNumericStats,
-    IbisComputedSummaryStats,
-    IBIS_ANALYSIS,
+    IBIS_STATS_V2,
 )
-
-
-# ============================================================
-# Helpers
-# ============================================================
 
 
 def _make_table():
-    """Mixed-type test table."""
     return ibis.memtable(
         pd.DataFrame(
             {
@@ -41,7 +33,6 @@ def _make_table():
 
 
 def _make_table_with_nulls():
-    """Table with null values."""
     return ibis.memtable(
         pd.DataFrame(
             {
@@ -52,258 +43,267 @@ def _make_table_with_nulls():
     )
 
 
+def _make_table_categorical():
+    return ibis.memtable(
+        pd.DataFrame(
+            {
+                "cat": ["a", "a", "a", "b", "b", "c", "d", "e", "f", "g", "h"],
+            }
+        )
+    )
+
+
 # ============================================================
-# TestIbisTypingStats
+# Typing stats
 # ============================================================
 
 
-class TestIbisTypingStats:
-    def test_int_column(self):
-        pipeline = IbisAnalysisPipeline([IbisTypingStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["ints"])
+class TestTyping:
+    def test_int(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, errors = pipeline.process_table(_make_table())
+        assert errors == []
         assert stats["ints"]["is_numeric"] is True
         assert stats["ints"]["is_integer"] is True
         assert stats["ints"]["is_float"] is False
         assert stats["ints"]["_type"] == "integer"
 
-    def test_float_column(self):
-        pipeline = IbisAnalysisPipeline([IbisTypingStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["floats"])
-        assert stats["floats"]["is_numeric"] is True
+    def test_float(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
         assert stats["floats"]["is_float"] is True
+        assert stats["floats"]["is_integer"] is False
         assert stats["floats"]["_type"] == "float"
 
-    def test_string_column(self):
-        pipeline = IbisAnalysisPipeline([IbisTypingStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["strs"])
+    def test_string(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
         assert stats["strs"]["is_string"] is True
         assert stats["strs"]["is_numeric"] is False
         assert stats["strs"]["_type"] == "string"
 
-    def test_bool_column(self):
-        pipeline = IbisAnalysisPipeline([IbisTypingStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["bools"])
+    def test_bool(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
         assert stats["bools"]["is_bool"] is True
         assert stats["bools"]["_type"] == "boolean"
 
-    def test_datetime_column(self):
+    def test_datetime(self):
         table = ibis.memtable(
             pd.DataFrame(
-                {
-                    "ts": pd.to_datetime(["2021-01-01", "2021-01-02", "2021-01-03"]),
-                }
+                {"ts": pd.to_datetime(["2021-01-01", "2021-01-02", "2021-01-03"])}
             )
         )
-        pipeline = IbisAnalysisPipeline([IbisTypingStats])
-        stats = pipeline.execute(table, ["ts"])
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(table)
         assert stats["ts"]["is_datetime"] is True
         assert stats["ts"]["_type"] == "datetime"
 
 
 # ============================================================
-# TestIbisBaseSummaryStats
+# Batched aggregate stats: length, null_count, min, max, distinct_count
 # ============================================================
 
 
-class TestIbisBaseSummaryStats:
-    def test_numeric_column(self):
-        pipeline = IbisAnalysisPipeline([IbisBaseSummaryStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["ints"])
+class TestBatchAggregate:
+    def test_length_and_null_count(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
         assert stats["ints"]["length"] == 5
         assert stats["ints"]["null_count"] == 0
-        assert stats["ints"]["min"] == 1.0
-        assert stats["ints"]["max"] == 5.0
-        assert stats["ints"]["distinct_count"] == 5
-
-    def test_string_column_no_min_max(self):
-        pipeline = IbisAnalysisPipeline([IbisBaseSummaryStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["strs"])
-        assert stats["strs"]["length"] == 5
-        assert stats["strs"]["null_count"] == 0
-        assert stats["strs"]["distinct_count"] == 5
-        # min/max not present for strings (expression returns None)
-        assert "min" not in stats["strs"]
-        assert "max" not in stats["strs"]
 
     def test_with_nulls(self):
-        pipeline = IbisAnalysisPipeline([IbisBaseSummaryStats])
-        table = _make_table_with_nulls()
-        stats = pipeline.execute(table, ["vals"])
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table_with_nulls())
         assert stats["vals"]["null_count"] == 2
         assert stats["vals"]["length"] == 5
+        assert stats["strs"]["null_count"] == 2
 
-    def test_bool_column_no_min_max(self):
-        """Bool columns: ibis boolean.is_numeric() is False, so no min/max."""
-        pipeline = IbisAnalysisPipeline([IbisBaseSummaryStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["bools"])
-        assert stats["bools"]["length"] == 5
-        # ibis boolean.is_numeric() returns False
-        assert "min" not in stats["bools"]
-        assert "max" not in stats["bools"]
+    def test_min_max_numeric(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
+        assert stats["ints"]["min"] == 1.0
+        assert stats["ints"]["max"] == 5.0
+
+    def test_min_max_skipped_for_string(self):
+        """String columns: column_filter excludes the min/max stats."""
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
+        # Either absent or None — both signal "not computed"
+        assert stats["strs"].get("min") is None
+        assert stats["strs"].get("max") is None
+
+    def test_distinct_count(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
+        assert stats["ints"]["distinct_count"] == 5
+        assert stats["strs"]["distinct_count"] == 5
 
 
 # ============================================================
-# TestIbisNumericStats
+# Numeric-only stats: mean, std, median
 # ============================================================
 
 
-class TestIbisNumericStats:
-    def test_int_column(self):
-        pipeline = IbisAnalysisPipeline([IbisNumericStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["ints"])
+class TestNumericStats:
+    def test_int_column_has_mean(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
         assert "mean" in stats["ints"]
         assert abs(stats["ints"]["mean"] - 3.0) < 0.01
 
-    def test_float_column(self):
-        pipeline = IbisAnalysisPipeline([IbisNumericStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["floats"])
+    def test_float_column_full_numeric(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
         assert "mean" in stats["floats"]
         assert "std" in stats["floats"]
         assert "median" in stats["floats"]
 
-    def test_string_column_excluded(self):
-        pipeline = IbisAnalysisPipeline([IbisNumericStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["strs"])
-        assert "mean" not in stats["strs"]
-        assert "std" not in stats["strs"]
-        assert "median" not in stats["strs"]
+    def test_string_excluded(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
+        assert stats["strs"].get("mean") is None
+        assert stats["strs"].get("std") is None
+        assert stats["strs"].get("median") is None
 
-    def test_bool_column_excluded(self):
-        pipeline = IbisAnalysisPipeline([IbisNumericStats])
-        table = _make_table()
-        stats = pipeline.execute(table, ["bools"])
-        assert "mean" not in stats["bools"]
-        assert "std" not in stats["bools"]
+    def test_bool_excluded(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
+        assert stats["bools"].get("mean") is None
+        assert stats["bools"].get("std") is None
 
 
 # ============================================================
-# TestIbisComputedSummaryStats
+# Computed (DAG-derived) stats
 # ============================================================
 
 
-class TestIbisComputedSummaryStats:
-    def test_derived_stats(self):
-        pipeline = IbisAnalysisPipeline(
-            [
-                IbisBaseSummaryStats,
-                IbisComputedSummaryStats,
-            ]
-        )
-        table = _make_table()
-        stats = pipeline.execute(table, ["ints"])
+class TestComputedStats:
+    def test_no_nulls(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
         assert stats["ints"]["non_null_count"] == 5
         assert stats["ints"]["nan_per"] == 0.0
         assert stats["ints"]["distinct_per"] == 1.0
 
     def test_with_nulls(self):
-        pipeline = IbisAnalysisPipeline(
-            [
-                IbisBaseSummaryStats,
-                IbisComputedSummaryStats,
-            ]
-        )
-        table = _make_table_with_nulls()
-        stats = pipeline.execute(table, ["vals"])
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table_with_nulls())
         assert stats["vals"]["nan_per"] == 2 / 5
         assert stats["vals"]["non_null_count"] == 3
 
 
 # ============================================================
-# TestIbisFullPipeline
+# Histogram — must be live (not dead code)
 # ============================================================
 
 
-class TestIbisFullPipeline:
-    def test_mixed_type_df(self):
-        pipeline = IbisAnalysisPipeline(IBIS_ANALYSIS)
-        table = _make_table()
-        stats = pipeline.execute(table, table.columns)
+class TestHistogram:
+    def test_numeric_histogram_present(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, errors = pipeline.process_table(_make_table())
+        assert errors == []
+        h = stats["ints"]["histogram"]
+        assert isinstance(h, list)
+        assert len(h) > 0
+        assert "name" in h[0]
+        assert "cat_pop" in h[0]
+        # cat_pops should sum to ~1.0
+        total_pop = sum(b["cat_pop"] for b in h)
+        assert abs(total_pop - 1.0) < 1e-6
 
-        # All columns have base stats
-        for col in table.columns:
+    def test_categorical_histogram_present(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, errors = pipeline.process_table(_make_table_categorical())
+        assert errors == []
+        h = stats["cat"]["histogram"]
+        assert isinstance(h, list)
+        assert 0 < len(h) <= 10  # top-10 cap
+        # 'a' appears 3 times — should be present
+        names = [b["name"] for b in h]
+        assert "a" in names
+
+    def test_histogram_constant_column_empty(self):
+        """Constant numeric column (min == max) → empty histogram, not crash."""
+        table = ibis.memtable(pd.DataFrame({"const": [7, 7, 7, 7]}))
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, errors = pipeline.process_table(table)
+        assert errors == []
+        # Empty list is fine; the key being present is what matters
+        assert "histogram" in stats["const"]
+
+
+# ============================================================
+# Structured error capture — silent excepts must be gone
+# ============================================================
+
+
+class TestErrorCapture:
+    def test_bad_expression_surfaces_as_error(self):
+        """An intentionally broken @stat must produce a StatError, not silent loss."""
+
+        class _Boom(Exception):
+            pass
+
+        @stat()
+        def will_fail(col: IbisColumn) -> int:
+            raise _Boom("intentional")
+
+        pipeline = IbisStatPipeline([*IBIS_STATS_V2, will_fail])
+        stats, errors = pipeline.process_table(_make_table())
+        # At least one error must have been captured
+        assert len(errors) > 0
+        assert any(isinstance(e.error, _Boom) for e in errors)
+        # And the rest of the pipeline should still work
+        assert stats["ints"]["length"] == 5
+
+    def test_bad_aggregate_execution_surfaces(self):
+        """If a stat raises while building the expression, the error is reported."""
+
+        @stat()
+        def bad_agg(col: IbisColumn) -> int:
+            # Building the expression itself raises.
+            return col.cast("does_not_exist")
+
+        pipeline = IbisStatPipeline([*IBIS_STATS_V2, bad_agg])
+        stats, errors = pipeline.process_table(_make_table())
+        assert any(e.stat_key == "bad_agg" for e in errors)
+        # Other stats unaffected
+        assert stats["ints"]["length"] == 5
+
+
+# ============================================================
+# Full pipeline + edges
+# ============================================================
+
+
+class TestFullPipeline:
+    def test_mixed_types(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, errors = pipeline.process_table(_make_table())
+        assert errors == []
+        for col in ("ints", "floats", "strs", "bools"):
             assert "length" in stats[col]
             assert "null_count" in stats[col]
             assert "_type" in stats[col]
             assert "distinct_count" in stats[col]
 
-        # Numeric columns have mean
         assert "mean" in stats["ints"]
         assert "mean" in stats["floats"]
+        assert stats["strs"].get("mean") is None
+        assert stats["bools"].get("mean") is None
 
-        # Non-numeric don't
-        assert "mean" not in stats["strs"]
-        assert "mean" not in stats["bools"]
-
-        # Type classification
-        assert stats["ints"]["_type"] == "integer"
-        assert stats["floats"]["_type"] == "float"
-        assert stats["strs"]["_type"] == "string"
-        assert stats["bools"]["_type"] == "boolean"
-
-    def test_with_nulls(self):
-        pipeline = IbisAnalysisPipeline(IBIS_ANALYSIS)
-        table = _make_table_with_nulls()
-        stats = pipeline.execute(table, table.columns)
-
-        assert stats["vals"]["nan_per"] == 2 / 5
-        assert stats["strs"]["nan_per"] == 2 / 5
-
-    def test_process_df_interface(self):
-        pipeline = IbisAnalysisPipeline(IBIS_ANALYSIS)
-        table = _make_table()
-        stats, errors = pipeline.process_df(table)
-        assert errors == {}
-        assert len(stats) == 4
-
-    def test_single_column(self):
-        pipeline = IbisAnalysisPipeline(IBIS_ANALYSIS)
-        table = _make_table()
-        stats = pipeline.execute(table, ["ints"])
-        assert len(stats) == 1
-        assert "ints" in stats
-
-    def test_computed_stats_present(self):
-        pipeline = IbisAnalysisPipeline(IBIS_ANALYSIS)
-        table = _make_table()
-        stats = pipeline.execute(table, ["ints"])
-        assert "non_null_count" in stats["ints"]
-        assert "nan_per" in stats["ints"]
-        assert "distinct_per" in stats["ints"]
-
-
-# ============================================================
-# TestIbisAnalysisPipelineWithoutXorq
-# ============================================================
-
-
-class TestIbisAnalysisPipelineWithoutXorq:
-    def test_pipeline_works_without_xorq(self):
-        """IbisAnalysisPipeline should work if ibis is installed but xorq is not."""
-        pipeline = IbisAnalysisPipeline(IBIS_ANALYSIS)
-        table = _make_table()
-        stats, errors = pipeline.process_df(table)
-        assert errors == {}
-        assert len(stats) == 4
-
-    def test_pipeline_with_empty_table(self):
+    def test_empty_table(self):
         table = ibis.memtable(pd.DataFrame({"a": pd.Series([], dtype="int64")}))
-        pipeline = IbisAnalysisPipeline(IBIS_ANALYSIS)
-        stats = pipeline.execute(table, ["a"])
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(table)
         assert stats["a"]["length"] == 0
 
-    def test_pipeline_default_columns(self):
-        """process_df with no columns arg defaults to all columns."""
-        pipeline = IbisAnalysisPipeline(IBIS_ANALYSIS)
-        table = _make_table()
-        stats, errors = pipeline.process_df(table)
-        assert set(stats.keys()) == set(table.columns)
+    def test_orig_col_name_pass_through(self):
+        pipeline = IbisStatPipeline(IBIS_STATS_V2)
+        stats, _ = pipeline.process_table(_make_table())
+        assert stats["ints"]["orig_col_name"] == "ints"
+
+    def test_dag_validates_at_construction(self):
+        """Constructing the pipeline should validate the DAG (no DAGConfigError)."""
+        IbisStatPipeline(IBIS_STATS_V2)
