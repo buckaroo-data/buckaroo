@@ -43,13 +43,14 @@ class ServerDataflow(CustomizableDataflow):
     DFStatsClass = DfStatsV2
     autoclean_conf = tuple([CleaningConf, NoCleaningConf])
     analysis_klasses = [
-        TypingStats, DefaultSummaryStats,
+        TypingStats,
+        DefaultSummaryStats,
         Histogram,
         ComputedDefaultSummaryStats,
         StylingAnalysis,
         DefaultSummaryStats,
-        DefaultSummaryStatsStyling, DefaultMainStyling,
-    ]
+        DefaultSummaryStatsStyling,
+        DefaultMainStyling]
 
     def _df_to_obj(self, df):
         # No sampling — matches BuckarooInfiniteWidget._df_to_obj
@@ -75,15 +76,12 @@ def get_buckaroo_display_state(dataflow: ServerDataflow) -> dict:
             "show_commands": False,
             "df_display": "main",
             "search_string": "",
-            "quick_command_args": {},
-        },
+            "quick_command_args": {}},
         "command_config": dataflow.command_config,
         "operation_results": {
             "transformed_df": {"schema": {"fields": []}, "data": []},
-            "generated_py_code": "# server mode",
-        },
-        "operations": [],
-    }
+            "generated_py_code": "# server mode"},
+        "operations": []}
 
 
 def handle_infinite_request_buckaroo(
@@ -94,10 +92,7 @@ def handle_infinite_request_buckaroo(
     end = payload_args["end"]
     _unused, processed_df, merged_sd = dataflow.widget_args_tuple
     if processed_df is None:
-        return (
-            {"type": "infinite_resp", "key": payload_args, "data": [], "length": 0},
-            b"",
-        )
+        return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0}, b"")
 
     try:
         sort = payload_args.get("sort")
@@ -106,31 +101,21 @@ def handle_infinite_request_buckaroo(
             # merged_sd maps renamed col -> stats dict with 'orig_col_name'
             converted_sort_column = merged_sd[sort]["orig_col_name"]
             sorted_df = processed_df.sort_values(
-                by=[converted_sort_column], ascending=ascending
-            )
+                by=[converted_sort_column], ascending=ascending)
             slice_df = sorted_df[start:end]
         else:
             slice_df = processed_df[start:end]
 
         parquet_bytes = to_parquet(slice_df)
-        msg = {
+        msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": len(processed_df)}
+        return msg, parquet_bytes
+    except Exception:
+        return ({
             "type": "infinite_resp",
             "key": payload_args,
             "data": [],
-            "length": len(processed_df),
-        }
-        return msg, parquet_bytes
-    except Exception:
-        return (
-            {
-                "type": "infinite_resp",
-                "key": payload_args,
-                "data": [],
-                "length": 0,
-                "error_info": traceback.format_exc(),
-            },
-            b"",
-        )
+            "length": 0,
+            "error_info": traceback.format_exc()}, b"")
 
 
 def load_file_lazy(path: str) -> pl.LazyFrame:
@@ -171,19 +156,12 @@ def get_display_state_lazy(ldf: pl.LazyFrame) -> tuple[dict, dict, dict]:
     df_viewer_config = {
         "pinned_rows": [],
         "column_config": column_config,
-        "left_col_configs": [{"col_name": "index", "header_name": "", "displayer_args": {"displayer": "obj"}}],
-    }
+        "left_col_configs": [{"col_name": "index", "header_name": "", "displayer_args": {"displayer": "obj"}}]}
     display_state = {
         "df_meta": {"total_rows": 0},  # filled in after row count
         "df_data_dict": {"main": [], "all_stats": [], "empty": []},
         "df_display_args": {
-            "main": {
-                "data_key": "main",
-                "df_viewer_config": df_viewer_config,
-                "summary_stats_key": "all_stats",
-            }
-        },
-    }
+            "main": {"data_key": "main", "df_viewer_config": df_viewer_config, "summary_stats_key": "all_stats"}}}
     return display_state, orig_to_rw, rw_to_orig
 
 
@@ -192,8 +170,7 @@ def handle_infinite_request_lazy(
     orig_to_rw: dict,
     rw_to_orig: dict,
     total_rows: int,
-    payload_args: dict,
-) -> tuple[dict, bytes]:
+    payload_args: dict) -> tuple[dict, bytes]:
     """Serve an infinite-scroll slice from a Polars LazyFrame."""
     start = int(payload_args.get("start", 0))
     end = int(payload_args.get("end", 0))
@@ -267,21 +244,15 @@ def get_df_viewer_config(df: pd.DataFrame) -> dict:
         column_config.append({
             "col_name": renamed,
             "header_name": str(orig_name),
-            "displayer_args": _dtype_to_displayer(df[orig_name].dtype),
-        })
+            "displayer_args": _dtype_to_displayer(df[orig_name].dtype)})
 
     # Index column shown on the left
     left_col_configs = [{
         "col_name": "index",
         "header_name": "",
-        "displayer_args": {"displayer": "integer", "min_digits": 1, "max_digits": 12},
-    }]
+        "displayer_args": {"displayer": "integer", "min_digits": 1, "max_digits": 12}}]
 
-    return {
-        "pinned_rows": [],
-        "column_config": column_config,
-        "left_col_configs": left_col_configs,
-    }
+    return {"pinned_rows": [], "column_config": column_config, "left_col_configs": left_col_configs}
 
 
 def get_display_state(df: pd.DataFrame, path: str) -> dict:
@@ -291,27 +262,14 @@ def get_display_state(df: pd.DataFrame, path: str) -> dict:
         "df_meta": {"total_rows": len(df)},
         "df_data_dict": {"main": [], "all_stats": [], "empty": []},
         "df_display_args": {
-            "main": {
-                "data_key": "main",
-                "df_viewer_config": df_viewer_config,
-                "summary_stats_key": "all_stats",
-            }
-        },
-    }
+            "main": {"data_key": "main", "df_viewer_config": df_viewer_config, "summary_stats_key": "all_stats"}}}
 
 
 def get_metadata(df: pd.DataFrame, path: str) -> dict:
     columns = []
     for col in df.columns:
-        columns.append({
-            "name": str(col),
-            "dtype": str(df[col].dtype),
-        })
-    return {
-        "path": path,
-        "rows": len(df),
-        "columns": columns,
-    }
+        columns.append({"name": str(col), "dtype": str(df[col].dtype)})
+    return {"path": path, "rows": len(df), "columns": columns}
 
 
 def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[dict, bytes]:
@@ -336,10 +294,5 @@ def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[dict,
         slice_df = df[start:end]
 
     parquet_bytes = to_parquet(slice_df)
-    msg = {
-        "type": "infinite_resp",
-        "key": payload_args,
-        "data": [],
-        "length": len(df),
-    }
+    msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": len(df)}
     return msg, parquet_bytes

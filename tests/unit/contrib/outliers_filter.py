@@ -44,7 +44,6 @@ def test_outliers_filter():
         "A": range(100),
         "B": np.random.normal(0, 1, 100),
         "C": ["text"] * 100,  # non-numeric column will be ignored
-        }
-    )
+        })
     filtered_df = filter_outliers(df)
     assert filtered_df

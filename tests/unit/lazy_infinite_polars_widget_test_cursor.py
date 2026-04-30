@@ -44,8 +44,7 @@ def test_lazy_widget_sync_executor_populates_stats():
     df = pl.DataFrame({
         'int_col': [1, 2, 3, 4, 5],
         'str_col': ['a', 'b', 'c', 'd', 'e'],
-        'float_col': [1.1, 2.2, 3.3, 4.4, 5.5]
-    })
+        'float_col': [1.1, 2.2, 3.3, 4.4, 5.5]})
     ldf = df.lazy()
     
     widget = LazyInfinitePolarsBuckarooWidget(
@@ -99,8 +98,7 @@ def test_lazy_widget_multiprocessing_executor_populates_stats():
     df = pl.DataFrame({
         'int_col': [1, 2, 3, 4, 5] * 100,  # Make it larger to trigger parallel path
         'str_col': ['a', 'b', 'c', 'd', 'e'] * 100,
-        'float_col': [1.1, 2.2, 3.3, 4.4, 5.5] * 100
-    })
+        'float_col': [1.1, 2.2, 3.3, 4.4, 5.5] * 100})
     ldf = df.lazy()
     
     from buckaroo.file_cache.multiprocessing_executor import MultiprocessingExecutor
@@ -108,8 +106,7 @@ def test_lazy_widget_multiprocessing_executor_populates_stats():
     widget = LazyInfinitePolarsBuckarooWidget(
         ldf,
         sync_executor_class=SyncExecutor,
-        parallel_executor_class=MultiprocessingExecutor,
-    )
+        parallel_executor_class=MultiprocessingExecutor)
     
     # Wait longer for multiprocessing executor (it runs in background thread with async_mode=True)
     import time
@@ -147,6 +144,5 @@ def test_lazy_widget_multiprocessing_executor_populates_stats():
             has_stats = any(
                 length_row.get(k, 0) > 0
                 for k in ['a', 'b', 'c']
-                if k in length_row
-            )
+                if k in length_row)
             assert has_stats, f"Length row has no stats: {length_row}"

@@ -364,8 +364,7 @@ class GroupBy(Command):
     def transform_to_py(df, col, col_spec):
         commands = [
             "    grps = df.groupby('%s')" % col,
-            "    df_contents = {}"
-        ]
+            "    df_contents = {}"]
         for k, v in col_spec.items():
             if v == "null":
                 continue
@@ -399,8 +398,7 @@ class GroupByTransform(Command):
     @staticmethod 
     def transform_to_py(df, col, col_spec):
         commands = [
-            f"    grps = df.groupby('{col}')"
-        ]
+            f"    grps = df.groupby('{col}')"]
         for k, v in col_spec.items():
             new_col_name = k + "_" + v
             if v == "null":
@@ -544,8 +542,7 @@ class DropDuplicates(Command):
 class Rank(Command):
     command_default = [s("rank"), s('df'), 'col', "None", False]
     command_pattern = [[3, 'method', 'enum', ["None", "min", "dense"]],
-                       [4, 'new_col', 'bool']
-                       ]
+                       [4, 'new_col', 'bool']]
     
 
     @staticmethod 
@@ -577,8 +574,7 @@ class Rank(Command):
 class Replace(Command):
     command_default = [s("replace"), s('df'), 'col', "", ""]
     command_pattern = [[3, 'old', 'type', 'string'],
-                       [4, 'new_', 'type', 'string']
-                       ]
+                       [4, 'new_', 'type', 'string']]
 
     @staticmethod 
     def transform(df, col, prev, new_):

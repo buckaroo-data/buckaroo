@@ -23,5 +23,4 @@ mostly_phone_numbers = [
     ["(424) 335 7275",  True, "space seperators, no country code"],
     ["+1(424)335-7275", True, "regular seperators, international +, leading US Code"],
     ["+1 424 335 7275", True, "space seperators, interntaional +, leading US Code"],
-    ["+49 69 1234 5678", True, "space seperators, interntaional +, leading German Code"],
-]
+    ["+49 69 1234 5678", True, "space seperators, interntaional +, leading German Code"]]

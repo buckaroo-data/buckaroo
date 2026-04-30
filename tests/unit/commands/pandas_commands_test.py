@@ -260,8 +260,7 @@ def test_remove_outliers():
     # Create data with clear outliers
     base_df = pd.DataFrame({
         'a': [1, 2, 3, 4, 5, 100, 200],  # 100 and 200 are outliers
-        'b': list(range(7))
-    })
+        'b': list(range(7))})
     result = RemoveOutliers.transform(base_df.copy(), 'a', 10)  # 10% tail
     # Should have fewer rows after removing outliers
     assert len(result) < len(base_df)
@@ -290,8 +289,7 @@ def test_only_outliers():
     # Create data with values at different positions
     base_df = pd.DataFrame({
         'a': [1, 50, 50, 50, 50, 50, 100],
-        'b': list(range(7))
-    })
+        'b': list(range(7))})
     result = OnlyOutliers.transform(base_df.copy(), 'a', 0.2)
     # Should return only rows with outlier values
     assert len(result) <= len(base_df)
@@ -308,8 +306,7 @@ def test_only_outliers_integer_mean():
     """Test OnlyOutliers uses int mean for integer columns."""
     base_df = pd.DataFrame({
         'a': pd.Series([1, 50, 50, 50, 100], dtype='Int64'),
-        'b': list(range(5))
-    })
+        'b': list(range(5))})
     # Should not raise - mean should be calculated as int
     result = OnlyOutliers.transform(base_df.copy(), 'a', 0.2)
     assert isinstance(result, pd.DataFrame)
@@ -331,8 +328,7 @@ def test_to_datetime():
     """Test ToDatetime converts column to datetime."""
     base_df = pd.DataFrame({
         'date_str': ['2024-01-01', '2024-06-15', '2024-12-31'],
-        'b': [1, 2, 3]
-    })
+        'b': [1, 2, 3]})
     result = ToDatetime.transform(base_df.copy(), 'date_str')
     assert pd.api.types.is_datetime64_any_dtype(result['date_str'])
 
@@ -352,8 +348,7 @@ def test_search_df_str():
     """Test search_df_str finds matching rows."""
     df = pd.DataFrame({
         'name': ['Alice', 'Bob', 'Charlie', 'David'],
-        'city': ['New York', 'Boston', 'Chicago', 'Denver']
-    })
+        'city': ['New York', 'Boston', 'Chicago', 'Denver']})
     result = search_df_str(df, 'Bob')
     assert len(result) == 1
     assert result.iloc[0]['name'] == 'Bob'
@@ -363,8 +358,7 @@ def test_search_df_str_multiple_matches():
     """Test search_df_str finds all matching rows."""
     df = pd.DataFrame({
         'name': ['Alice', 'Bob', 'Charlie'],
-        'note': ['likes Bob', 'is Bob', 'knows Bob']
-    })
+        'note': ['likes Bob', 'is Bob', 'knows Bob']})
     result = search_df_str(df, 'Bob')
     assert len(result) == 3
 
@@ -387,8 +381,7 @@ def test_search_with_match():
     """Test Search filters rows containing the needle."""
     base_df = pd.DataFrame({
         'name': pd.Series(['Alice', 'Bob', 'Charlie'], dtype='object'),
-        'b': [1, 2, 3]
-    })
+        'b': [1, 2, 3]})
     result = Search.transform(base_df.copy(), 'name', 'Bob')
     assert len(result) == 1
 
@@ -408,8 +401,7 @@ def test_search_col_str():
     """Test search_col_str finds matching rows in specific column."""
     df = pd.DataFrame({
         'name': pd.Series(['Alice', 'Bob', 'Charlie'], dtype='object'),
-        'city': pd.Series(['Boston', 'New York', 'Chicago'], dtype='object')
-    })
+        'city': pd.Series(['Boston', 'New York', 'Chicago'], dtype='object')})
     result = search_col_str(df, 'name', 'Bob')
     assert len(result) == 1
     assert result.iloc[0]['name'] == 'Bob'
@@ -426,8 +418,7 @@ def test_search_col_with_match():
     """Test SearchCol filters rows containing the needle in specific column."""
     base_df = pd.DataFrame({
         'name': pd.Series(['Alice', 'Bob', 'Charlie'], dtype='object'),
-        'b': [1, 2, 3]
-    })
+        'b': [1, 2, 3]})
     result = SearchCol.transform(base_df.copy(), 'name', 'Bob')
     assert len(result) == 1
 
@@ -546,8 +537,7 @@ def test_groupby_transform_mean():
     """Test GroupByTransform with mean aggregation."""
     base_df = pd.DataFrame({
         'group': ['A', 'A', 'B', 'B'],
-        'value': [10, 20, 30, 40]
-    })
+        'value': [10, 20, 30, 40]})
     result = GroupByTransform.transform(base_df.copy(), 'group', {'value': 'mean'})
     assert 'value_mean' in result.columns
     # Group A mean = 15, Group B mean = 35
@@ -559,8 +549,7 @@ def test_groupby_transform_count_null():
     """Test GroupByTransform with count_null aggregation."""
     base_df = pd.DataFrame({
         'group': ['A', 'A', 'B', 'B'],
-        'value': [10, None, 30, None]
-    })
+        'value': [10, None, 30, None]})
     result = GroupByTransform.transform(base_df.copy(), 'group', {'value': 'count_null'})
     assert 'value_count_null' in result.columns
     # Each group has 1 null
@@ -571,8 +560,7 @@ def test_groupby_transform_null_skip():
     """Test GroupByTransform skips columns with 'null' value."""
     base_df = pd.DataFrame({
         'group': ['A', 'A', 'B', 'B'],
-        'value': [10, 20, 30, 40]
-    })
+        'value': [10, 20, 30, 40]})
     result = GroupByTransform.transform(base_df.copy(), 'group', {'value': 'null'})
     assert 'value_null' not in result.columns
 

@@ -14,16 +14,13 @@ BASIC_DF_JSON_DATA = [
 BASIC_DF = pl.DataFrame({'foo_col': [10, 20, 20], 'bar_col':['foo', 'bar', 'baz']})
 
 
-DFVIEWER_CONFIG_DEFAULT = {
-                   'pinned_rows': [],
-                   'column_config':  [
+DFVIEWER_CONFIG_DEFAULT = {'pinned_rows': [], 'column_config':  [
                        {'col_name':'a', 'header_name':'int_col', 'displayer_args': {'displayer': 'obj'}},
-                       {'col_name':'b', 'header_name':'str_col', 'displayer_args': {'displayer': 'obj'}}],
-                   'left_col_configs': [{'col_name': 'index', 'header_name':'index',
-                       'displayer_args': {'displayer': 'obj'}}],
-                   'component_config' : {},
-                   'extra_grid_config': {},
-}
+    {
+        'col_name':'b',
+        'header_name':'str_col',
+        'displayer_args': {'displayer': 'obj'}}], 'left_col_configs': [{'col_name': 'index', 'header_name':'index',
+            'displayer_args': {'displayer': 'obj'}}], 'component_config' : {}, 'extra_grid_config': {}}
 
 
 class BasicStyling(StylingAnalysis):
@@ -67,16 +64,13 @@ def test_custom_dataflow():
     cdfc = TwoStyleDFC(simple_df)
     assert_frame_equal(cdfc.dataflow.widget_args_tuple[1], simple_df)
     assert cdfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
-    DFVIEWER_CONFIG_INT = {
-                   'pinned_rows': [],
-                   'column_config':  [
+    DFVIEWER_CONFIG_INT = {'pinned_rows': [], 'column_config':  [
                        {'col_name':'a', 'header_name':'int_col', 'displayer_args': {'displayer': 'int'}},
-                       {'col_name':'b', 'header_name':'str_col', 'displayer_args': {'displayer': 'int'}}],
-                   'left_col_configs': [{'col_name': 'index', 'header_name':'index',
-                       'displayer_args': {'displayer': 'obj'}}],
-                   'component_config' : {},
-                   'extra_grid_config': {},
-    }
+        {
+            'col_name':'b',
+            'header_name':'str_col',
+            'displayer_args': {'displayer': 'int'}}], 'left_col_configs': [{'col_name': 'index', 'header_name':'index',
+                'displayer_args': {'displayer': 'obj'}}], 'component_config' : {}, 'extra_grid_config': {}}
     
     assert cdfc.df_display_args['int_styles']['df_viewer_config'] == DFVIEWER_CONFIG_INT
 
@@ -127,8 +121,8 @@ def test_transpose_error():
     ROWS = 5
     typed_df = pl.DataFrame(
         {'int_col': [1] * ROWS,
-         'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS})
+            'float_col': [.5] * ROWS,
+            "str_col": ["foobar"]* ROWS})
 
     base_a_klasses = PolarsBuckarooWidget.analysis_klasses.copy()
     base_a_klasses.extend([TransposeProcessing])
@@ -167,8 +161,8 @@ def test_always_error_post_processing():
     ROWS = 5
     typed_df = pl.DataFrame(
         {'int_col': [1] * ROWS,
-         'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS})
+            'float_col': [.5] * ROWS,
+            "str_col": ["foobar"]* ROWS})
     bw = PolarsBuckarooWidget(typed_df, debug=False)
 
     bw.add_analysis(AlwaysErrorPostProcessing)

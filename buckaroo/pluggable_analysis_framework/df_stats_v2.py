@@ -44,8 +44,7 @@ class DfStatsV2:
         df_stats_df: pd.DataFrame,
         col_analysis_objs: AObjs,
         operating_df_name: str = None,
-        debug: bool = False,
-    ) -> None:
+        debug: bool = False) -> None:
         self.df = self.get_operating_df(df_stats_df, force_full_eval=False)
         self.col_order = self.df.columns
         self.ap = self.ap_class(col_analysis_objs)

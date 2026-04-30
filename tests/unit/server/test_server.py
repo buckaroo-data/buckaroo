@@ -12,10 +12,7 @@ import tornado.websocket
 from buckaroo.server.app import make_app as _make_app
 
 # Temp file cleanup fails on Windows due to file locking (WinError 32)
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Temp file locking prevents cleanup on Windows",
-)
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Temp file locking prevents cleanup on Windows")
 
 
 def make_app():
@@ -26,8 +23,7 @@ def _write_test_csv(path):
     df = pd.DataFrame({
         "name": ["Alice", "Bob", "Charlie", "Diana", "Eve"],
         "age": [30, 25, 35, 28, 32],
-        "score": [88.5, 92.3, 76.1, 95.0, 81.7],
-    })
+        "score": [88.5, 92.3, 76.1, 95.0, 81.7]})
     df.to_csv(path, index=False)
     return df
 
@@ -175,9 +171,7 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                     "type": "infinite_request",
                     "payload_args": {
                         "start": 0, "end": 3,
-                        "sourceName": "default", "origEnd": 3
-                    }
-                }))
+                        "sourceName": "default", "origEnd": 3}}))
 
                 # Should get JSON text frame
                 json_frame = await ws.read_message()
@@ -216,9 +210,7 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                     "payload_args": {
                         "start": 0, "end": 5,
                         "sourceName": "sorted", "origEnd": 5,
-                        "sort": "b", "sort_direction": "asc"
-                    }
-                }))
+                        "sort": "b", "sort_direction": "asc"}}))
 
                 json_frame = await ws.read_message()
                 resp = json.loads(json_frame)
@@ -239,8 +231,7 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
 
         ws.write_message(json.dumps({
             "type": "infinite_request",
-            "payload_args": {"start": 0, "end": 10, "sourceName": "x", "origEnd": 10}
-        }))
+            "payload_args": {"start": 0, "end": 10, "sourceName": "x", "origEnd": 10}}))
 
         json_frame = await ws.read_message()
         resp = json.loads(json_frame)

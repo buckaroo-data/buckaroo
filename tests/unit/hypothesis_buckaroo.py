@@ -21,14 +21,7 @@ from hypothesis.extra.pandas import data_frames, column
     showCommands=st.booleans(),
     postProcessingF=st.none(),
 )
-def test_fuzz_BuckarooWidget(
-        df,
-        sampled,
-        summaryStats,
-        reorderdColumns,
-        showCommands,
-        postProcessingF,
-):
+def test_fuzz_BuckarooWidget(df, sampled, summaryStats, reorderdColumns, showCommands, postProcessingF):
 
     #debug=True will cause an analysis error to throw an error,
     #auto_clean is tempermental and not turned on by default
@@ -40,5 +33,4 @@ def test_fuzz_BuckarooWidget(
         showCommands=showCommands,
         auto_clean=False,
         postProcessingF=postProcessingF,
-        debug=True
-    )
+        debug=True)

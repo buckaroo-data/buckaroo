@@ -3,11 +3,7 @@ Test that smart planner doesn't oscillate after backing down.
 """
 from datetime import timedelta
 
-from buckaroo.file_cache.batch_planning import (
-    ExecutionResult,
-    PlanningContext,
-    smart_planning_function,
-)
+from buckaroo.file_cache.batch_planning import (ExecutionResult, PlanningContext, smart_planning_function)
 
 
 def test_stays_at_backed_down_size():
@@ -19,16 +15,43 @@ def test_stays_at_backed_down_size():
         baseline_overhead=timedelta(seconds=0.1),
         timeout_secs=10.0,
         execution_history=[
-            ExecutionResult(columns=['a'] * 10, success=False, execution_time=timedelta(seconds=10.0), timed_out=True),  # Half batch timeout
-            ExecutionResult(columns=['a'], success=True, execution_time=timedelta(seconds=1.0), timed_out=False),  # 1 success
-            ExecutionResult(columns=['a'] * 2, success=True, execution_time=timedelta(seconds=2.0), timed_out=False),  # 2 success
-            ExecutionResult(columns=['a'] * 4, success=True, execution_time=timedelta(seconds=3.0), timed_out=False),  # 4 success
-            ExecutionResult(columns=['a'] * 8, success=True, execution_time=timedelta(seconds=4.0), timed_out=False),  # 8 success (first time)
-            ExecutionResult(columns=['a'] * 16, success=False, execution_time=timedelta(seconds=10.0), timed_out=True),  # 16 failed
-            ExecutionResult(columns=['a'] * 8, success=False, execution_time=timedelta(seconds=10.0), timed_out=True),  # 8 now failing!
+            ExecutionResult(
+                columns=['a'] * 10,
+                success=False,
+                execution_time=timedelta(seconds=10.0),
+                timed_out=True),  # Half batch timeout
+            ExecutionResult(
+                columns=['a'],
+                success=True,
+                execution_time=timedelta(seconds=1.0),
+                timed_out=False),  # 1 success
+            ExecutionResult(
+                columns=['a'] * 2,
+                success=True,
+                execution_time=timedelta(seconds=2.0),
+                timed_out=False),  # 2 success
+            ExecutionResult(
+                columns=['a'] * 4,
+                success=True,
+                execution_time=timedelta(seconds=3.0),
+                timed_out=False),  # 4 success
+            ExecutionResult(
+                columns=['a'] * 8,
+                success=True,
+                execution_time=timedelta(seconds=4.0),
+                timed_out=False),  # 8 success (first time)
+            ExecutionResult(
+                columns=['a'] * 16,
+                success=False,
+                execution_time=timedelta(seconds=10.0),
+                timed_out=True),  # 16 failed
+            ExecutionResult(
+                columns=['a'] * 8,
+                success=False,
+                execution_time=timedelta(seconds=10.0),
+                timed_out=True),  # 8 now failing!
         ],
-        remaining_columns=['a'] * 12
-    )
+        remaining_columns=['a'] * 12)
     
     result = smart_planning_function(context)
     
@@ -55,10 +78,13 @@ def test_stays_at_backed_down_size_on_subsequent_calls():
             ExecutionResult(columns=['a'] * 4, success=True, execution_time=timedelta(seconds=3.0), timed_out=False),
             ExecutionResult(columns=['a'] * 8, success=True, execution_time=timedelta(seconds=4.0), timed_out=False),
             ExecutionResult(columns=['a'] * 16, success=False, execution_time=timedelta(seconds=10.0), timed_out=True),
-            ExecutionResult(columns=['a'] * 8, success=False, execution_time=timedelta(seconds=10.0), timed_out=True),  # 8 failing
+            ExecutionResult(
+                columns=['a'] * 8,
+                success=False,
+                execution_time=timedelta(seconds=10.0),
+                timed_out=True),  # 8 failing
         ],
-        remaining_columns=['a'] * 12
-    )
+        remaining_columns=['a'] * 12)
     
     result1 = smart_planning_function(context1)
     assert result1.phase == "optimized"
@@ -77,11 +103,18 @@ def test_stays_at_backed_down_size_on_subsequent_calls():
             ExecutionResult(columns=['a'] * 4, success=True, execution_time=timedelta(seconds=3.0), timed_out=False),
             ExecutionResult(columns=['a'] * 8, success=True, execution_time=timedelta(seconds=4.0), timed_out=False),
             ExecutionResult(columns=['a'] * 16, success=False, execution_time=timedelta(seconds=10.0), timed_out=True),
-            ExecutionResult(columns=['a'] * 8, success=False, execution_time=timedelta(seconds=10.0), timed_out=True),  # 8 still failing
-            ExecutionResult(columns=['a'] * 4, success=True, execution_time=timedelta(seconds=3.0), timed_out=False),  # 4 succeeded
+            ExecutionResult(
+                columns=['a'] * 8,
+                success=False,
+                execution_time=timedelta(seconds=10.0),
+                timed_out=True),  # 8 still failing
+            ExecutionResult(
+                columns=['a'] * 4,
+                success=True,
+                execution_time=timedelta(seconds=3.0),
+                timed_out=False),  # 4 succeeded
         ],
-        remaining_columns=['a'] * 8
-    )
+        remaining_columns=['a'] * 8)
     
     result2 = smart_planning_function(context2)
     # Should still use 4, not try to grow to 8 again

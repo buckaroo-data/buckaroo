@@ -51,11 +51,11 @@ def test_multiprocessing_executor_with_default_planning_function_processes_colum
     
     # Use default_planning_function (smart planner) which returns empty batch for baseline
     exc = MultiprocessingExecutor(
-        ldf, 
-        SimpleColumnExecutor(), 
-        listener, 
-        fc, 
-        timeout_secs=5.0, 
+        ldf,
+        SimpleColumnExecutor(),
+        listener,
+        fc,
+        timeout_secs=5.0,
         async_mode=False,  # Use sync mode for test determinism
         planning_function=default_planning_function  # This is the key - uses smart planner
     )
@@ -212,8 +212,7 @@ def test_multiprocessing_executor_skips_cached_columns(tmp_path):
             executor_log=executor_log,
             file_path=test_file,
             timeout_secs=5.0,
-            async_mode=False
-        )
+            async_mode=False)
         exc1.run()
         
         # First execution should send notifications for both columns
@@ -239,8 +238,7 @@ def test_multiprocessing_executor_skips_cached_columns(tmp_path):
             executor_log=executor_log,
             file_path=test_file,
             timeout_secs=5.0,
-            async_mode=False
-        )
+            async_mode=False)
         exc2.run()
         
         # Second execution should NOT send notifications (columns are cached and skipped)

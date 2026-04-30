@@ -192,8 +192,7 @@ def stat(column_filter=None, quiet=False, default=MISSING):
             needs_raw=needs_raw,
             column_filter=column_filter,
             quiet=quiet,
-            default=default,
-        )
+            default=default)
 
         # Attach metadata to the function so pipeline can find it
         func._stat_func = stat_func

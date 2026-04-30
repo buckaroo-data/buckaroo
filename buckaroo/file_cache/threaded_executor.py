@@ -5,16 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import polars as pl
 
-from .base import (
-    Executor as BaseExecutor,
-    ColumnExecutor,
-    ColumnGroup,
-    FileCache,
-    ProgressNotification,
-    ProgressListener,
-    SimpleExecutorLog,
-    MaybeFilepathLike,
-)
+from .base import (Executor as BaseExecutor, ColumnExecutor, ColumnGroup, FileCache, ProgressNotification, ProgressListener, SimpleExecutorLog, MaybeFilepathLike)
 
 
 class ThreadedExecutor(BaseExecutor):
@@ -32,9 +23,16 @@ class ThreadedExecutor(BaseExecutor):
         file_path: MaybeFilepathLike = None,
         max_workers: Optional[int] = None,
         cached_merged_sd: dict[str, dict[str, Any]] | None = None,
-        orig_to_rw_map: dict[str, str] | None = None,
-    ) -> None:
-        super().__init__(ldf, column_executor, listener, fc, executor_log, file_path=file_path, cached_merged_sd=cached_merged_sd, orig_to_rw_map=orig_to_rw_map)
+        orig_to_rw_map: dict[str, str] | None = None) -> None:
+        super().__init__(
+            ldf,
+            column_executor,
+            listener,
+            fc,
+            executor_log,
+            file_path=file_path,
+            cached_merged_sd=cached_merged_sd,
+            orig_to_rw_map=orig_to_rw_map)
         self.max_workers = max_workers
 
     def run(self) -> None:
@@ -83,8 +81,7 @@ class ThreadedExecutor(BaseExecutor):
                         execution_args=ex_args,
                         result=res,
                         execution_time=0,
-                        failure_message=None
-                    ))
+                        failure_message=None))
                     self.executor_log.log_end_col_group(self.dfi, ex_args)
                 except Exception as e:
                     self.listener(ProgressNotification(
@@ -93,8 +90,7 @@ class ThreadedExecutor(BaseExecutor):
                         execution_args=ex_args,
                         result=None,
                         execution_time=0,
-                        failure_message=str(e)
-                    ))
+                        failure_message=str(e)))
                     continue
 
 

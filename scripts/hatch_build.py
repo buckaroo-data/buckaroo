@@ -20,8 +20,7 @@ REQUIRED_STUBS = [
     "standalone.js",
     "standalone.css",
     "static-embed.js",
-    "static-embed.css",
-]
+    "static-embed.css"]
 
 
 class BuckarooBuildHook(BuildHookInterface):
@@ -52,18 +51,9 @@ class BuckarooBuildHook(BuildHookInterface):
             if style_css.exists():
                 shutil.copy(style_css, STATIC_DIR / "compiled.css")
             subprocess.check_call(["pnpm", "install"], cwd=packages_root)
-            subprocess.check_call(
-                ["pnpm", "--filter", "buckaroo-widget", "run", "build"],
-                cwd=packages_root,
-            )
-            subprocess.check_call(
-                ["pnpm", "--filter", "buckaroo-widget", "run", "build:standalone"],
-                cwd=packages_root,
-            )
-            subprocess.check_call(
-                ["pnpm", "-C", str(packages_root / "js"), "run", "build:static"],
-                cwd=ROOT,
-            )
+            subprocess.check_call(["pnpm", "--filter", "buckaroo-widget", "run", "build"], cwd=packages_root)
+            subprocess.check_call(["pnpm", "--filter", "buckaroo-widget", "run", "build:standalone"], cwd=packages_root)
+            subprocess.check_call(["pnpm", "-C", str(packages_root / "js"), "run", "build:static"], cwd=ROOT)
             return
 
         # Otherwise (editable installs, or pnpm not available), create

@@ -26,8 +26,7 @@ def test_full_theme_config_roundtrips():
         "backgroundColor": "#1a1a2e",
         "foregroundColor": "#e0e0e0",
         "oddRowBackgroundColor": "#16213e",
-        "borderColor": "#0f3460",
-    }
+        "borderColor": "#0f3460"}
     w = BuckarooWidget(simple_df, component_config={"theme": theme})
     cc = w.df_display_args["main"]["df_viewer_config"].get("component_config", {})
     assert cc["theme"] == theme
@@ -37,8 +36,7 @@ def test_theme_with_other_component_config():
     """Theme coexists with other component_config properties."""
     theme = {"accentColor": "#ff6600"}
     w = BuckarooWidget(
-        simple_df, component_config={"theme": theme, "className": "my-class"}
-    )
+        simple_df, component_config={"theme": theme, "className": "my-class"})
     cc = w.df_display_args["main"]["df_viewer_config"].get("component_config", {})
     assert cc["theme"] == theme
     assert cc["className"] == "my-class"

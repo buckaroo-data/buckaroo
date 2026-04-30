@@ -20,13 +20,11 @@ _CHROMIUM_BROWSERS = [
     ("Google Chrome", "/Applications/Google Chrome.app"),
     ("Google Chrome Canary", "/Applications/Google Chrome Canary.app"),
     ("Chromium", "/Applications/Chromium.app"),
-    ("Arc", "/Applications/Arc.app"),
-]
+    ("Arc", "/Applications/Arc.app")]
 
 _CHROME_BINARY = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 _BUCKAROO_CHROME_PROFILE = os.path.join(
-    os.path.expanduser("~"), ".buckaroo", "chrome-profile"
-)
+    os.path.expanduser("~"), ".buckaroo", "chrome-profile")
 
 
 def _session_url(session_id: str, port: int) -> str:
@@ -80,10 +78,7 @@ def _applescript_find_and_focus(browser: str, session_id: str, port: int, reload
     end tell
     '''
     try:
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=5,
-        )
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
         found = result.stdout.strip() == "found"
         log.debug("AppleScript find session=%s browser=%s → %s", session_id, browser, found)
         return found
@@ -102,10 +97,7 @@ def _applescript_create_window(browser: str, url: str) -> bool:
     end tell
     '''
     try:
-        subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True, timeout=5,
-        )
+        subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
         log.info("Created new %s window → %s", browser, url)
         return True
     except Exception as e:
@@ -131,11 +123,9 @@ def _open_chrome_app_mode(url: str) -> bool:
                 f"--app={url}",
                 f"--user-data-dir={_BUCKAROO_CHROME_PROFILE}",
                 "--no-first-run",
-                "--no-default-browser-check",
-            ],
+                "--no-default-browser-check"],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+            stderr=subprocess.DEVNULL)
         log.info("Opened Chrome app-mode window → %s", url)
         return True
     except Exception as e:
@@ -166,10 +156,7 @@ def _app_mode_find_and_focus(session_id: str) -> bool:
     end tell
     '''
     try:
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=5,
-        )
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
         found = result.stdout.strip() == "found"
         log.debug("App-mode find session=%s → %s", session_id, found)
         return found

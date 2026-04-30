@@ -12,15 +12,7 @@ import pandas as pd
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 
-from buckaroo.customizations.pd_stats_v2 import (
-    typing_stats, _type,
-    base_summary_stats, numeric_stats,
-    computed_default_summary_stats,
-    histogram_series, histogram,
-    pd_cleaning_stats, heuristic_fracs,
-    orig_col_name,
-    PD_ANALYSIS_V2,
-)
+from buckaroo.customizations.pd_stats_v2 import (typing_stats, _type, base_summary_stats, numeric_stats, computed_default_summary_stats, histogram_series, histogram, pd_cleaning_stats, heuristic_fracs, orig_col_name, PD_ANALYSIS_V2)
 
 
 # ============================================================================
@@ -255,10 +247,7 @@ class TestNumericStats:
 
 class TestComputedDefaultSummaryStats:
     def test_basic_computed(self):
-        pipeline = StatPipeline(
-            [base_summary_stats, computed_default_summary_stats],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([base_summary_stats, computed_default_summary_stats], unit_test=False)
         ser = pd.Series([1, 2, 3, 1, 2])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert errors == []
@@ -269,20 +258,14 @@ class TestComputedDefaultSummaryStats:
         assert result['most_freq'] == 1  # most common value
 
     def test_with_nulls(self):
-        pipeline = StatPipeline(
-            [base_summary_stats, computed_default_summary_stats],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([base_summary_stats, computed_default_summary_stats], unit_test=False)
         ser = pd.Series([1, None, 2, None, 1])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['nan_per'] == 2 / 5
         assert result['non_null_count'] == 3
 
     def test_freq_values(self):
-        pipeline = StatPipeline(
-            [base_summary_stats, computed_default_summary_stats],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([base_summary_stats, computed_default_summary_stats], unit_test=False)
         ser = pd.Series(['a', 'b', 'c', 'd', 'e', 'f'])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['most_freq'] is not None
@@ -297,12 +280,9 @@ class TestComputedDefaultSummaryStats:
 
 class TestHistogram:
     def _make_pipeline(self):
-        return StatPipeline(
-            [typing_stats, base_summary_stats, numeric_stats,
-             computed_default_summary_stats,
-             histogram_series, histogram],
-            unit_test=False,
-        )
+        return StatPipeline([typing_stats, base_summary_stats, numeric_stats,
+            computed_default_summary_stats,
+            histogram_series, histogram], unit_test=False)
 
     def test_numeric_histogram(self):
         pipeline = self._make_pipeline()
@@ -341,10 +321,7 @@ class TestHistogram:
 
 class TestPdCleaningStats:
     def test_numeric_column(self):
-        pipeline = StatPipeline(
-            [base_summary_stats, pd_cleaning_stats],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([base_summary_stats, pd_cleaning_stats], unit_test=False)
         ser = pd.Series([1, 2, 3, 4, 5])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert 'int_parse' in result
@@ -352,10 +329,7 @@ class TestPdCleaningStats:
         assert result['int_parse'] == 1.0  # All values are parseable
 
     def test_string_column(self):
-        pipeline = StatPipeline(
-            [base_summary_stats, pd_cleaning_stats],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([base_summary_stats, pd_cleaning_stats], unit_test=False)
         ser = pd.Series(['abc', 'def', '123', '456'])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['int_parse'] > 0
@@ -424,8 +398,7 @@ class TestFullPipeline:
             'ints': [1, 2, 3, 4, 5],
             'floats': [1.1, 2.2, 3.3, 4.4, 5.5],
             'strs': ['a', 'b', 'c', 'd', 'e'],
-            'bools': [True, False, True, False, True],
-        })
+            'bools': [True, False, True, False, True]})
         pipeline = StatPipeline(PD_ANALYSIS_V2, unit_test=False)
         result, errors = pipeline.process_df(df)
         assert len(result) == 4
@@ -511,10 +484,7 @@ class TestBackwardCompat:
         from buckaroo.customizations.analysis import ComputedDefaultSummaryStats
 
         v1_keys = set(ComputedDefaultSummaryStats.provides_defaults.keys())
-        v2_pipeline = StatPipeline(
-            [base_summary_stats, computed_default_summary_stats],
-            unit_test=False,
-        )
+        v2_pipeline = StatPipeline([base_summary_stats, computed_default_summary_stats], unit_test=False)
 
         ser = pd.Series([1, 2, 3, 1, 2])
         v2_result, _ = v2_pipeline.process_column('test', ser.dtype, raw_series=ser)
@@ -524,12 +494,9 @@ class TestBackwardCompat:
 
     def test_histogram_keys(self):
         """v2 histogram functions produce the histogram key."""
-        v2_pipeline = StatPipeline(
-            [typing_stats, base_summary_stats,
-             computed_default_summary_stats,
-             histogram_series, histogram],
-            unit_test=False,
-        )
+        v2_pipeline = StatPipeline([typing_stats, base_summary_stats,
+            computed_default_summary_stats,
+            histogram_series, histogram], unit_test=False)
 
         ser = pd.Series([1, 2, 3, 4, 5])
         v2_result, _ = v2_pipeline.process_column('test', ser.dtype, raw_series=ser)
@@ -548,8 +515,7 @@ class TestBackwardCompat:
             pd.Series([1, 2, 3], name='ints'),
             pd.Series([1.0, 2.0], name='floats'),
             pd.Series(['a', 'b'], name='strs'),
-            pd.Series([True, False], name='bools'),
-        ]
+            pd.Series([True, False], name='bools')]
 
         for ser in test_series:
             v1_result, _ = v1_pipeline.process_column(
@@ -558,7 +524,7 @@ class TestBackwardCompat:
                 'test', ser.dtype, raw_series=ser)
 
             for key in ['dtype', 'is_numeric', 'is_integer', 'is_bool',
-                        'is_float', 'is_datetime']:
+                'is_float', 'is_datetime']:
                 assert v1_result.get(key) == v2_result.get(key), \
                     f"Mismatch on {key} for {ser.name}: " \
                     f"v1={v1_result.get(key)} v2={v2_result.get(key)}"

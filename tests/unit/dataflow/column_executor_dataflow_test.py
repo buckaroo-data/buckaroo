@@ -14,8 +14,7 @@ class SelectOnlyAnalysis(PolarsAnalysis):
     select_clauses = [
         F.all().null_count().name.map(json_postfix('null_count')),
         F.all().mean().name.map(json_postfix('mean')),
-        F.all().quantile(.99).name.map(json_postfix('quin99')),
-    ]
+        F.all().quantile(.99).name.map(json_postfix('quin99'))]
 
 
 def test_init_and_df_meta_lazy():

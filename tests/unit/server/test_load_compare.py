@@ -9,10 +9,7 @@ import tornado.testing
 
 from buckaroo.server.app import make_app as _make_app
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Temp file locking prevents cleanup on Windows",
-)
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Temp file locking prevents cleanup on Windows")
 
 
 def make_app():
@@ -38,8 +35,7 @@ class TestLoadCompare(tornado.testing.AsyncHTTPTestCase):
             "/load_compare",
             method="POST",
             body=json.dumps(body),
-            headers={"Content-Type": "application/json"},
-        )
+            headers={"Content-Type": "application/json"})
 
     def test_basic_compare(self):
         df1 = pd.DataFrame({"id": [1, 2, 3], "name": ["a", "b", "c"], "val": [10, 20, 30]})
@@ -54,8 +50,7 @@ class TestLoadCompare(tornado.testing.AsyncHTTPTestCase):
                     "session": "cmp-1",
                     "path1": f1.name,
                     "path2": f2.name,
-                    "join_columns": ["id"],
-                })
+                    "join_columns": ["id"]})
                 self.assertEqual(resp.code, 200)
                 body = json.loads(resp.body)
                 self.assertEqual(body["session"], "cmp-1")
@@ -85,8 +80,7 @@ class TestLoadCompare(tornado.testing.AsyncHTTPTestCase):
                     "session": "cmp-style",
                     "path1": f1.name,
                     "path2": f2.name,
-                    "join_columns": ["id"],
-                })
+                    "join_columns": ["id"]})
                 self.assertEqual(resp.code, 200)
 
                 sessions = self._app.settings["sessions"]
@@ -124,8 +118,7 @@ class TestLoadCompare(tornado.testing.AsyncHTTPTestCase):
                     "session": "cmp-eqs",
                     "path1": f1.name,
                     "path2": f2.name,
-                    "join_columns": ["k"],
-                })
+                    "join_columns": ["k"]})
                 self.assertEqual(resp.code, 200)
                 body = json.loads(resp.body)
                 self.assertEqual(body["eqs"]["v"]["diff_count"], 1)
@@ -145,19 +138,13 @@ class TestLoadCompare(tornado.testing.AsyncHTTPTestCase):
                     "session": "cmp-miss",
                     "path1": f1.name,
                     "path2": "/nonexistent.csv",
-                    "join_columns": ["id"],
-                })
+                    "join_columns": ["id"]})
                 self.assertEqual(resp.code, 404)
             finally:
                 os.unlink(f1.name)
 
     def test_bad_json(self):
-        resp = self.fetch(
-            "/load_compare",
-            method="POST",
-            body="not json",
-            headers={"Content-Type": "application/json"},
-        )
+        resp = self.fetch("/load_compare", method="POST", body="not json", headers={"Content-Type": "application/json"})
         self.assertEqual(resp.code, 400)
 
     def test_duplicate_join_keys(self):
@@ -173,8 +160,7 @@ class TestLoadCompare(tornado.testing.AsyncHTTPTestCase):
                     "session": "cmp-dup",
                     "path1": f1.name,
                     "path2": f2.name,
-                    "join_columns": ["id"],
-                })
+                    "join_columns": ["id"]})
                 self.assertEqual(resp.code, 400)
                 body = json.loads(resp.body)
                 self.assertEqual(body["error_code"], "compare_error")
@@ -195,8 +181,7 @@ class TestLoadCompare(tornado.testing.AsyncHTTPTestCase):
                     "session": "cmp-pq",
                     "path1": f1.name,
                     "path2": f2.name,
-                    "join_columns": ["id"],
-                })
+                    "join_columns": ["id"]})
                 self.assertEqual(resp.code, 200)
                 body = json.loads(resp.body)
                 self.assertEqual(body["rows"], 2)
@@ -218,8 +203,7 @@ class TestLoadCompare(tornado.testing.AsyncHTTPTestCase):
                     "path1": f1.name,
                     "path2": f2.name,
                     "join_columns": ["id"],
-                    "how": "inner",
-                })
+                    "how": "inner"})
                 self.assertEqual(resp.code, 200)
                 body = json.loads(resp.body)
                 # Inner join: only 2,3 → 2 rows

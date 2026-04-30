@@ -5,14 +5,7 @@ import itertools
 from typing import Any, Optional, Callable
 import polars as pl
 
-from .base import (
-    ExecutorLogEvent,
-    ExecutorLog,
-    ColumnExecutor,
-    ExecutorArgs,
-    now,
-    SimpleExecutorLog,
-)
+from .base import (ExecutorLogEvent, ExecutorLog, ColumnExecutor, ExecutorArgs, now, SimpleExecutorLog)
 
 
 class BaseBisector(ABC):
@@ -51,10 +44,10 @@ class BaseBisector(ABC):
             ev = self.executor_log.find_event(self.dfi, args)
             if ev is None:
                 ev = ExecutorLogEvent(dfi=self.dfi,
-                                      args=args,
-                                      start_time=now(),
-                                      end_time=None,
-                                      completed=False)
+                    args=args,
+                    start_time=now(),
+                    end_time=None,
+                    completed=False)
             return False, ev
         self.executor_log.log_end_col_group(self.dfi, args)
         ev = self.executor_log.find_event(self.dfi, args)
@@ -169,8 +162,7 @@ class ExpressionBisector(BaseBisector):
             expressions=list(expressions),
             row_start=src.row_start,
             row_end=src.row_end,
-            extra=src.extra,
-        )
+            extra=src.extra)
 
     def try_execute_with_expressions(self, expressions: list[pl.Expr]) -> tuple[bool, ExecutorLogEvent]:
         expr_to_index = {id(expr): idx for idx, expr in enumerate(self._base_expressions)}
@@ -249,8 +241,7 @@ class RowRangeBisector:
             expressions=list(src.expressions),
             row_start=row_start,
             row_end=row_end,
-            extra=src.extra,
-        )
+            extra=src.extra)
 
     def _try_execute(self, row_start: int | None, row_end: int | None) -> tuple[bool, ExecutorLogEvent]:
         args = self.build_args_with_range(row_start, row_end)
@@ -261,10 +252,10 @@ class RowRangeBisector:
             ev = self.executor_log.find_event(self.dfi, args)
             if ev is None:
                 ev = ExecutorLogEvent(dfi=self.dfi,
-                                      args=args,
-                                      start_time=now(),
-                                      end_time=None,
-                                      completed=False)
+                    args=args,
+                    start_time=now(),
+                    end_time=None,
+                    completed=False)
             return False, ev
         self.executor_log.log_end_col_group(self.dfi, args)
         ev = self.executor_log.find_event(self.dfi, args)
@@ -350,8 +341,7 @@ class SamplingRowBisector(BaseBisector):
             expressions=list(src.expressions),
             row_start=None,
             row_end=None,
-            extra=extra,
-        )
+            extra=extra)
 
     def build_args_from_indices(self, indices: list[int]) -> ExecutorArgs:
         return self.build_args_with_row_indices(indices)
@@ -381,10 +371,10 @@ class SamplingRowBisector(BaseBisector):
             ev = self.executor_log.find_event(self.dfi, args)
             if ev is None:
                 ev = ExecutorLogEvent(dfi=self.dfi,
-                                      args=args,
-                                      start_time=now(),
-                                      end_time=None,
-                                      completed=False)
+                    args=args,
+                    start_time=now(),
+                    end_time=None,
+                    completed=False)
             return False, ev
         self.executor_log.log_end_col_group(self.dfi, args)
         ev = self.executor_log.find_event(self.dfi, args)
@@ -490,7 +480,12 @@ def full_bisect_pipeline(ldf: pl.LazyFrame,
     # Recompute args via get_execution_args for the full set
     existing_stats_full = {col: {} for col in all_columns}
     starting_args = column_executor.get_execution_args(existing_stats_full)
-    starting_event = ExecutorLogEvent(dfi=(id(ldf), ''), args=starting_args, start_time=now(), end_time=None, completed=False)
+    starting_event = ExecutorLogEvent(
+        dfi=(id(ldf), ''),
+        args=starting_args,
+        start_time=now(),
+        end_time=None,
+        completed=False)
 
     # 1) Split columns
     cb = ColumnBisector(starting_event, log, column_executor, ldf)
@@ -502,7 +497,12 @@ def full_bisect_pipeline(ldf: pl.LazyFrame,
     # 2) Split expressions on the failing columns set
     failing_stats = {col: {} for col in failing_columns}
     failing_args = column_executor.get_execution_args(failing_stats)
-    expr_start_event = ExecutorLogEvent(dfi=(id(ldf), ''), args=failing_args, start_time=now(), end_time=None, completed=False)
+    expr_start_event = ExecutorLogEvent(
+        dfi=(id(ldf), ''),
+        args=failing_args,
+        start_time=now(),
+        end_time=None,
+        completed=False)
     eb = ExpressionBisector(expr_start_event, log, column_executor, ldf)
     expr_fail_ev, expr_success_ev = eb.run()
 
@@ -516,8 +516,7 @@ def full_bisect_pipeline(ldf: pl.LazyFrame,
         expressions=list(expr_success_ev.args.expressions),
         row_start=0,
         row_end=total_rows,
-        extra={},
-    )
+        extra={})
     log.log_start_col_group((id(ldf), ''), success_args)
     try:
         column_executor.execute(ldf, success_args)
@@ -535,9 +534,13 @@ def full_bisect_pipeline(ldf: pl.LazyFrame,
             expressions=list(expr_fail_ev.args.expressions),
             row_start=None,
             row_end=None,
-            extra={},
-        )
-        row_event_for_success = ExecutorLogEvent(dfi=(id(ldf), ''), args=failing_expr_args, start_time=now(), end_time=None, completed=False)
+            extra={})
+        row_event_for_success = ExecutorLogEvent(
+            dfi=(id(ldf), ''),
+            args=failing_expr_args,
+            start_time=now(),
+            end_time=None,
+            completed=False)
         rrb0 = RowRangeBisector(row_event_for_success, log, column_executor, ldf)
         rr_fail_ev0, _ = rrb0.run()
         s0, e0 = rr_fail_ev0.args.row_start or 0, rr_fail_ev0.args.row_end or total_rows
@@ -567,9 +570,13 @@ def full_bisect_pipeline(ldf: pl.LazyFrame,
         expressions=list(expr_fail_ev.args.expressions),
         row_start=None,
         row_end=None,
-        extra={},
-    )
-    row_event = ExecutorLogEvent(dfi=(id(ldf), ''), args=minimal_fail_expr_args, start_time=now(), end_time=None, completed=False)
+        extra={})
+    row_event = ExecutorLogEvent(
+        dfi=(id(ldf), ''),
+        args=minimal_fail_expr_args,
+        start_time=now(),
+        end_time=None,
+        completed=False)
     rrb = RowRangeBisector(row_event, log, column_executor, ldf)
     rr_fail_ev, _ = rrb.run()
 

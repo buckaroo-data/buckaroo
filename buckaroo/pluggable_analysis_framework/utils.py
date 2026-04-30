@@ -18,8 +18,7 @@ PERVERSE_DF = pd.DataFrame({
     'int': [8] *10,
     'negative': [-1]*10,
     'UInt32': pd.Series([5]*10, dtype='UInt32'),
-    'UInt8None':pd.Series([None] * 10, dtype='UInt8')
-    })
+    'UInt8None':pd.Series([None] * 10, dtype='UInt8')})
 
 
 class NonExistentSummaryRowException(Exception):

@@ -21,10 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # These tests use SIGKILL/SIGTERM extensively — Unix-only
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Unix signal-based process lifecycle tests",
-)
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Unix signal-based process lifecycle tests")
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +68,7 @@ def _spawn_sleep():
     return subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(600)"],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+        stderr=subprocess.DEVNULL)
 
 
 def _is_alive(pid: int) -> bool:
@@ -253,8 +249,7 @@ sys.stdin.buffer.read()
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            cwd=REPO_ROOT,
-        )
+            cwd=REPO_ROOT)
 
         server_pid = None
         try:
@@ -444,8 +439,7 @@ sys.stdin.buffer.read()
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            cwd=REPO_ROOT,
-        )
+            cwd=REPO_ROOT)
 
         server_pid = None
         try:
@@ -514,12 +508,7 @@ class TestStdoutSafety:
             "sys.modules['mcp.server.fastmcp'] = mcp_fastmcp\n"
             "import buckaroo_mcp_tool\n"
         )
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            cwd=REPO_ROOT,
-            timeout=10,
-        )
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, cwd=REPO_ROOT, timeout=10)
         assert result.stdout == b"", (
             f"buckaroo_mcp_tool wrote to stdout during import "
             f"({len(result.stdout)} bytes):\n"

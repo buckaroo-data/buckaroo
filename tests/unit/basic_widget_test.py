@@ -45,8 +45,7 @@ class KitchenSinkWidget(BuckarooWidget):
     Histogram, ComputedDefaultSummaryStats,
     # default buckaroo styling
     DefaultSummaryStatsStyling, DefaultMainStyling,
-    EverythingStyling
-    ]
+    EverythingStyling]
 
 def test_styling_instantiation():
     
@@ -167,12 +166,12 @@ def test_quick_commands_run():
     df = pd.DataFrame({'a': ["30", "40"], 'b': ['aa', 'bb']})
     bw = BuckarooWidget(df)
     bw.buckaroo_state = {'cleaning_method': '',
-                         'post_processing': '',
-                         'sampled': False,
-                         'show_commands': False,
-                         'df_display': 'main',
-                         'search_string': '',
-                         'quick_command_args': {'search': ['aa']}}
+        'post_processing': '',
+        'sampled': False,
+        'show_commands': False,
+        'df_display': 'main',
+        'search_string': '',
+        'quick_command_args': {'search': ['aa']}}
 
     expected = pd.DataFrame({
         'a': ["30"],
@@ -234,13 +233,22 @@ def test_auto_clean_preserve_error():
     dirty_df = pd.DataFrame(
         {
         "a": [10, 20, 30, 40, 10, 20.3, None, 8, 9, 10, 11, 20, None],
-        "b": ["3", "4", "a", "5", "5", "b9", None, " 9", "9-", 11, "867-5309", "-9", None, ],
-        "us_dates": ["", "07/10/1982", "07/15/1982", "7/10/1982", "17/10/1982", "03/04/1982",
-            "03/02/2002", "12/09/1968", "03/04/1982", "", "06/22/2024","07/4/1776", "07/20/1969",
-        ],
-        "mostly_bool": [
-            True, "True", "Yes", "On", "false", False, "1", "Off","0",
-            " 0", "No",1, None,]})
+            "b": ["3", "4", "a", "5", "5", "b9", None, " 9", "9-", 11, "867-5309", "-9", None],
+            "us_dates": [
+                "",
+                "07/10/1982",
+                "07/15/1982",
+                "7/10/1982",
+                "17/10/1982",
+                "03/04/1982",
+                "03/02/2002",
+                "12/09/1968",
+                "03/04/1982",
+                "",
+                "06/22/2024",
+                "07/4/1776",
+                "07/20/1969"],
+            "mostly_bool": [True, "True", "Yes", "On", "false", False, "1", "Off", "0", " 0", "No", 1, None]})
 
     bw = AutocleaningBuckaroo(dirty_df)
     bw.buckaroo_state = {
@@ -254,20 +262,18 @@ def test_auto_clean_preserve_error():
     assert len(bw.operations) == 3
     bw.operations = [
         [{ "symbol": "us_date",
-        "meta": { "clean_strategy": "AggresiveCleaningGenOps",
-                  "clean_col": "us_dates", "auto_clean": True }},
-      {"symbol": "df" }, "us_dates" ],
-  [{"symbol": "str_bool", "meta": { "clean_strategy": "AggresiveCleaningGenOps",
-                                    "clean_col": "mostly_bool",
-                                    "auto_clean": True}},
-    {"symbol": "df"},"mostly_bool"],
-  [{"symbol": "strip_int_parse",
-      "meta": {
+            "meta": { "clean_strategy": "AggresiveCleaningGenOps",
+                "clean_col": "us_dates", "auto_clean": True }},
+            {"symbol": "df" }, "us_dates" ],
+        [{"symbol": "str_bool", "meta": { "clean_strategy": "AggresiveCleaningGenOps",
+            "clean_col": "mostly_bool",
+            "auto_clean": True}},
+            {"symbol": "df"},"mostly_bool"],
+        [{"symbol": "strip_int_parse",
+            "meta": {
         "clean_strategy": "AggresiveCleaningGenOps",
-        "clean_col": "b"
-      }
-    },
-    { "symbol": "df" }, "b" ]]
+                "clean_col": "b"}},
+            { "symbol": "df" }, "b" ]]
     
     bw.buckaroo_state = {
         "cleaning_method": "conservative", #aggressive, that's the change that throws the error

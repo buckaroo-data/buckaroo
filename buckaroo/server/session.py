@@ -60,8 +60,7 @@ def build_state_message(session: "SessionState", metadata: dict | None = None) -
         "df_display_args": session.df_display_args,
         "df_data_dict": session.df_data_dict,
         "df_meta": session.df_meta,
-        "mode": session.mode,
-    }
+        "mode": session.mode}
     if session.mode == "buckaroo":
         msg["buckaroo_state"] = session.buckaroo_state
         msg["buckaroo_options"] = session.buckaroo_options
@@ -84,8 +83,7 @@ class SessionManager:
     def __init__(
         self,
         ttl_s: float = _DEFAULT_SESSION_TTL_S,
-        eviction_interval_s: float = _DEFAULT_EVICTION_INTERVAL_S,
-    ) -> None:
+        eviction_interval_s: float = _DEFAULT_EVICTION_INTERVAL_S) -> None:
         self.sessions: dict[str, SessionState] = {}
         self._ttl_s = ttl_s
         self._eviction_interval_s = eviction_interval_s
@@ -101,8 +99,7 @@ class SessionManager:
         try:
             import tornado.ioloop
             tornado.ioloop.IOLoop.current().call_later(
-                self._eviction_interval_s, self._evict_and_reschedule
-            )
+                self._eviction_interval_s, self._evict_and_reschedule)
         except RuntimeError:
             # No IOLoop running (e.g. unit tests without an IOLoop).
             pass
@@ -132,8 +129,7 @@ class SessionManager:
                 "Evicted %d idle session(s); total_evicted=%d active=%d",
                 len(to_evict),
                 self._evicted_count,
-                len(self.sessions),
-            )
+                len(self.sessions))
         return len(to_evict)
 
     # ------------------------------------------------------------------

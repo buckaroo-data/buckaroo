@@ -55,7 +55,7 @@ def Xtest_groupby():
       foregot what this test does
       """
     base_df = pl.DataFrame({
-        'a':['cc', 'cc', 'cc', 'ee', 'ff'], 'b': [None, 2, 2, 2, None], 
+        'a':['cc', 'cc', 'cc', 'ee', 'ff'], 'b': [None, 2, 2, 2, None],
         'c': [10, 20, 30, 40, 50]})
     
     output_df = same(GroupBy, [[s('groupby'), s('df'), "a", {'b':'count', 'c': 'sum'}]], base_df)
@@ -63,8 +63,7 @@ def Xtest_groupby():
         {'a':        ["ff", "ee",  "cc"],
          'b(count)': [   0,    1,    2],
          'c(sum)':   [  50,   40,   60]},
-        schema=OrderedDict([('a', pl.Utf8), ('b(count)', pl.UInt32), ('c(sum)', pl.Int64)])
-    )
+        schema=OrderedDict([('a', pl.Utf8), ('b(count)', pl.UInt32), ('c(sum)', pl.Int64)]))
     assert_frame_equal(output_df, expected)
 
 

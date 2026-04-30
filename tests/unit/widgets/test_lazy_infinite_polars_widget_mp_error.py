@@ -13,9 +13,7 @@ class FailingRenameAnalysis(PolarsAnalysis):
     under the multiprocessing executor.
     """
     provides_defaults = {'null_count': 0}
-    select_clauses = [
-        F.all().null_count().name.map(json_postfix('null_count')),
-    ]
+    select_clauses = [F.all().null_count().name.map(json_postfix('null_count'))]
 
 
 def _wide_df(num_cols: int, num_rows: int) -> pl.DataFrame:
@@ -34,11 +32,7 @@ def Xtest_lazy_widget_multiprocessing_renaming_serialization_failure():
     df = _wide_df(num_cols=51, num_rows=2)
     ldf = df.lazy()
 
-    w = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        analysis_klasses=[FailingRenameAnalysis],
-        debug=True,
-    )
+    w = LazyInfinitePolarsBuckarooWidget(ldf, analysis_klasses=[FailingRenameAnalysis], debug=True)
 
     # The widget emits minimal progress via 'executor_progress' trait.
     ep = dict(w.executor_progress or {})

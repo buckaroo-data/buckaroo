@@ -1,10 +1,6 @@
 import polars as pl
 
-from buckaroo.file_cache.base import (
-    FileCache,
-    Executor,
-    ProgressNotification,
-)
+from buckaroo.file_cache.base import (FileCache, Executor, ProgressNotification)
 from buckaroo.file_cache.batch_planning import simple_one_column_planning
 from buckaroo.file_cache.sqlite_log import SQLiteExecutorLog
 from tests.unit.file_cache.bisector_test import SimpleColumnExecutor, FailOnSumExecutor  # reuse helpers
@@ -19,7 +15,13 @@ def test_sqlite_executor_log_success_in_memory():
     def listener(p:ProgressNotification) -> None:
         calls.append(p)
 
-    ex = Executor(ldf, SimpleColumnExecutor(), listener, fc, executor_log=log, planning_function=simple_one_column_planning)
+    ex = Executor(
+        ldf,
+        SimpleColumnExecutor(),
+        listener,
+        fc,
+        executor_log=log,
+        planning_function=simple_one_column_planning)
     ex.run()
 
     events = log.get_log_events()
@@ -41,7 +43,13 @@ def test_sqlite_executor_log_failure_and_previous_failure_check(tmp_path):
     def listener(p:ProgressNotification) -> None:
         pass
 
-    ex = Executor(ldf, FailOnSumExecutor(), listener, fc, executor_log=log, planning_function=simple_one_column_planning)
+    ex = Executor(
+        ldf,
+        FailOnSumExecutor(),
+        listener,
+        fc,
+        executor_log=log,
+        planning_function=simple_one_column_planning)
     ex.run()
 
     # Persisted events

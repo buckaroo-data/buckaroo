@@ -5,15 +5,7 @@ from tempfile import NamedTemporaryFile
 from pathlib import Path
 from typing import cast
 
-from buckaroo.file_cache.base import (
-    ColumnExecutor,
-    ExecutorArgs,
-    ColumnResults,
-    ColumnResult,
-    FileCache,
-    Executor,
-    ProgressNotification,
-)
+from buckaroo.file_cache.base import (ColumnExecutor, ExecutorArgs, ColumnResults, ColumnResult, FileCache, Executor, ProgressNotification)
 from buckaroo.file_cache.batch_planning import simple_one_column_planning
 import polars as pl
 import polars.selectors as cs
@@ -117,12 +109,10 @@ class SimpleColumnExecutor(ColumnExecutor[ExecutorArgs]):
             expressions=[
                 pl.all().pl_series_hash.hash_xx().name.suffix("_hash"),
                 cs.numeric().sum().name.suffix("_sum"),
-                pl.all().len().name.suffix("_len"),
-            ],
+                pl.all().len().name.suffix("_len")],
             row_start=None,
             row_end=None,
-            extra=None,
-        )
+            extra=None)
 
     def execute(self, ldf:pl.LazyFrame, execution_args:ExecutorArgs) -> ColumnResults:
         cols = execution_args.columns
@@ -136,12 +126,7 @@ class SimpleColumnExecutor(ColumnExecutor[ExecutorArgs]):
                 actual_result = {"len": res[col+"_len"][0], "sum": res[col+"_sum"][0]}
             else:
                 actual_result = {"len": res[col+"_len"][0]}
-            cr = ColumnResult(
-                series_hash=hash_,
-                column_name=col,
-                expressions=[],
-                result=actual_result,
-            )
+            cr = ColumnResult(series_hash=hash_, column_name=col, expressions=[], result=actual_result)
             col_results[col] = cr
         return col_results
 
@@ -167,12 +152,7 @@ class FailOnHashExecutor(SimpleColumnExecutor):
             actual_result = {"len": len_val}
             if col+"_sum" in res.columns:
                 actual_result["sum"] = res[col+"_sum"][0]
-            cr = ColumnResult(
-                series_hash=int(hash_val),
-                column_name=col,
-                expressions=[],
-                result=actual_result,
-            )
+            cr = ColumnResult(series_hash=int(hash_val), column_name=col, expressions=[], result=actual_result)
             col_results[col] = cr
         return col_results
 
@@ -196,12 +176,7 @@ class FailOnHashOrSumExecutor(SimpleColumnExecutor):
             actual_result = {"len": len_val}
             if col+"_sum" in res.columns:
                 actual_result["sum"] = res[col+"_sum"][0]
-            cr = ColumnResult(
-                series_hash=int(hash_val),
-                column_name=col,
-                expressions=[],
-                result=actual_result,
-            )
+            cr = ColumnResult(series_hash=int(hash_val), column_name=col, expressions=[], result=actual_result)
             col_results[col] = cr
         return col_results
 
@@ -227,20 +202,14 @@ class FailOnSumExecutor(SimpleColumnExecutor):
             actual_result = {"len": len_val}
             if col+"_sum" in res.columns:
                 actual_result["sum"] = res[col+"_sum"][0]
-            cr = ColumnResult(
-                series_hash=int(hash_val),
-                column_name=col,
-                expressions=[],
-                result=actual_result,
-            )
+            cr = ColumnResult(series_hash=int(hash_val), column_name=col, expressions=[], result=actual_result)
             col_results[col] = cr
         return col_results
 
     
 df = pl.DataFrame({
     'a1': [10,20,30],
-    'b2': ["foo", "bar", "baz"]
-    })
+    'b2': ["foo", "bar", "baz"]})
 ldf = df.lazy()
 
 def test_simple_executor():
@@ -323,8 +292,7 @@ def Xtest_in_memory_cache():
       """
     df = pl.DataFrame({
         'a1': [10,20,30],
-        'b2': [50,60,80]
-        })
+        'b2': [50,60,80]})
     #ldf = df.lazy()
 
     fc = FileCache()

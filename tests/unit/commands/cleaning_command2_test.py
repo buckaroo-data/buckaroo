@@ -11,21 +11,7 @@ same = assert_to_py_same_transform_df
 dirty_df = pd.DataFrame(
     {
         "untouched_a": [10, 20, 30, 40, 10, 20.3, None, 8, 9, 10, 11, 20, None],
-        "mostly_ints": [
-            "3",
-            "4",
-            "a",
-            "5",
-            "5",
-            "b9",
-            None,
-            " 9",
-            "9-",
-            11,
-            "867-5309",
-            "-9",
-            None,
-        ],
+        "mostly_ints": ["3", "4", "a", "5", "5", "b9", None, " 9", "9-", 11, "867-5309", "-9", None],
         "us_dates": [
             "",
             "07/10/1982",
@@ -39,44 +25,13 @@ dirty_df = pd.DataFrame(
             "",
             "06/22/2024",
             "07/4/1776",
-            "07/20/1969",
-        ],
-        "mostly_bool": [
-            True,
-            "True",
-            "Yes",
-            "On",
-            "false",
-            False,
-            "1",
-            "Off",
-            "0",
-            " 0",
-            "No",
-            1,
-            None,
-        ],
-    }
-)
+            "07/20/1969"],
+        "mostly_bool": [True, "True", "Yes", "On", "false", False, "1", "Off", "0", " 0", "No", 1, None]})
 
 expected_df = pd.DataFrame({
     'untouched_a': dirty_df['untouched_a'],
     'mostly_ints': pd.Series(
-[
-  3,
-  4,
-  None,
-  5,
-  5,
-  9,
-  None,
-  9,
-  9,
-  11,
-  8675309,
-  -9,
-  None,
-]
+        [3, 4, None, 5, 5, 9, None, 9, 9, 11, 8675309, -9, None]
 , dtype='Int64'),
     'mostly_ints_orig': dirty_df['mostly_ints'],
     'us_dates' : pd.to_datetime([
@@ -92,13 +47,12 @@ expected_df = pd.DataFrame({
         "NaT",
         "2024-06-22 00:00:00",
         "1776-07-04 00:00:00",
-        "1969-07-20 00:00:00"
-    ]),  # Use pd.to_datetime to get the default datetime resolution for the pandas version
+        "1969-07-20 00:00:00"]),  # Use pd.to_datetime to get the default datetime resolution for the pandas version
     'us_dates_orig': dirty_df['us_dates'],
     'mostly_bool': pd.Series([
         True,
-        True, 
-        True, 
+        True,
+        True,
         True,
         False,
         False,
@@ -108,10 +62,8 @@ expected_df = pd.DataFrame({
         False,
         False,
         True,
-        None
-    ], dtype='boolean'),
-    'mostly_bool_orig':dirty_df['mostly_bool']
-})
+        None], dtype='boolean'),
+    'mostly_bool_orig':dirty_df['mostly_bool']})
 
 def test_str_bool():
     base_df = pd.DataFrame({'mostly_bool': dirty_df['mostly_bool']})
@@ -132,8 +84,7 @@ def test_full_autoclean():
         "show_commands": False,
         "df_display": "main",
         "search_string": "",
-        "quick_command_args": {}
-    }
+        "quick_command_args": {}}
 
     result =  abw.dataflow.processed_df
 

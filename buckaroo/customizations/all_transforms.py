@@ -55,8 +55,8 @@ class OneHot(Command):
         return "\n".join(commands)
 
 group_df = pd.DataFrame({'a':[10,20,30,40,50,60],
-                   'b':[1,2,3,4,5,6],
-                   'c':['q', 'q', 'q', 'q', 'w', 'w']})
+    'b':[1,2,3,4,5,6],
+    'c':['q', 'q', 'q', 'q', 'w', 'w']})
 
 def safe_int(x):
     try:
@@ -107,8 +107,7 @@ class GroupBy(Command):
     def transform_to_py(df, col, col_spec):
         commands = [
             "    grps = df.groupby('%s')" % col,
-            "    df_contents = {}"
-        ]
+            "    df_contents = {}"]
         for k, v in col_spec.items():
             if v == "sum":
                 commands.append("    df_contents['%s'] = grps['%s'].apply(lambda x: x.sum())" % (k, k))
@@ -157,6 +156,6 @@ class reindex(Command):
              "    df.index = old_col.values"])
 
 DefaultCommandKlsList = [DropCol, SafeInt, FillNA, reindex, OneHot, GroupBy,
-                         to_bool, to_datetime, to_int, to_float, to_string]
+    to_bool, to_datetime, to_int, to_float, to_string]
 command_defaults, command_patterns, buckaroo_transform, buckaroo_to_py_core = configure_buckaroo(DefaultCommandKlsList)
 

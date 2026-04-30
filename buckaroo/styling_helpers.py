@@ -4,7 +4,7 @@ def obj_(pkey):
 
 def float_(pkey, digits=3):
     return {'primary_key_val': pkey,
-            'displayer_args': {
+        'displayer_args': {
                 'displayer': 'float', 'min_fraction_digits':digits, 'max_fraction_digits':digits}}
 
 def inherit_(pkey):

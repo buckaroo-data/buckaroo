@@ -68,32 +68,32 @@ def test_merge_sds():
     sd_base = {
         'Volume' : {
             'a':10,
-	    'column_config_override': {
+            'column_config_override': {
                 'color_map_config' : {'color_rule': 'color_from_column',
-	                              'col_name': 'Volume_colors'}}},
+                    'col_name': 'Volume_colors'}}},
         'Volume_colors' : {
             'a': 30,
-	    'column_config_override': { 'displayer': 'hidden'}},
+            'column_config_override': { 'displayer': 'hidden'}},
         'only_in_base': {'f':77}}
 
     sd_second = {
         'Volume' : {
             'a': 999,
             'b': "foo",
-	    'column_config_override': {
+            'column_config_override': {
                 'tooltip_config': {'tooltip_type' : 'summary_series'}}},
         'Volume_colors' : {
             'd':111,
-	    'column_config_override': { 'displayer': 'string'}},
+            'column_config_override': { 'displayer': 'string'}},
         'completely_new_column': {'k':90}}
 
     expected = {
         'Volume' : {
             'a': 999,
             'b': "foo",
-	    'column_config_override': {
+            'column_config_override': {
                 'color_map_config' : {'color_rule': 'color_from_column',
-	                              'col_name': 'Volume_colors'},
+                    'col_name': 'Volume_colors'},
                 #note that column_config_override is merged, not just overwritten
                 'tooltip_config': {'tooltip_type' : 'summary_series'}}},
         'Volume_colors' : {
@@ -115,19 +115,19 @@ def test_merge_column_config():
     overrides = {
         'bar' : {'displayer_args':  {'displayer': 'int'}},
         'foo' : {'color_map_config' : {'color_rule': 'color_from_column',
-	                               'col_name': 'Volume_colors'}}}
+            'col_name': 'Volume_colors'}}}
 
     computed_column_config =     [
             {'header_name':'foo', 'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
-            {'header_name':'bar', 'col_name':'b', 'displayer_args': {'displayer': 'obj'}}]
+        {'header_name':'bar', 'col_name':'b', 'displayer_args': {'displayer': 'obj'}}]
     temp_df=pd.DataFrame({'foo':[], 'bar':[], 'volume_colors':[]})
     merged = dft.merge_column_config(computed_column_config, temp_df, overrides)
 
     expected = [
             {'header_name':'foo', 'col_name': 'a', 'displayer_args': {'displayer': 'obj'},
-             'color_map_config' : {'color_rule': 'color_from_column',
-	                               'col_name': 'Volume_colors'}},
-            {'header_name':'bar', 'col_name': 'b', 'displayer_args': {'displayer': 'int'}}]
+                'color_map_config' : {'color_rule': 'color_from_column',
+                    'col_name': 'Volume_colors'}},
+        {'header_name':'bar', 'col_name': 'b', 'displayer_args': {'displayer': 'int'}}]
     assert expected == merged
         
 
@@ -136,7 +136,7 @@ def test_merge_column_config_hide():
         'bar' : {'merge_rule':'hidden'}}
     computed_column_config =     [
             {'header_name':'foo', 'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
-            {'header_name':'bar', 'col_name':'b', 'displayer_args': {'displayer': 'obj'}}]
+        {'header_name':'bar', 'col_name':'b', 'displayer_args': {'displayer': 'obj'}}]
     temp_df=pd.DataFrame({'foo':[], 'bar':[], 'volume_colors':[]})
     merged = dft.merge_column_config(
         computed_column_config, temp_df, overrides)

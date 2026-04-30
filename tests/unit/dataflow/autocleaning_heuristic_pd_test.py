@@ -33,7 +33,7 @@ class CleaningGenOps(ColAnalysis):
     def computed_summary(kls, column_metadata):
         if column_metadata['int_parse'] > kls.int_parse_threshhold:
             return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}],
-                    'add_orig': True}
+                'add_orig': True}
         else:
             return {'cleaning_ops': []}
 
@@ -142,7 +142,7 @@ class HeuristicCleaningGenOps(ColAnalysis):
         else:
             ops = [
                 {'symbol': kls.rules_op_names.get(cleaning_op_name, cleaning_op_name),
-                 'meta':{ 'auto_clean': True, 'clean_strategy': kls.__name__}},
+                    'meta':{ 'auto_clean': True, 'clean_strategy': kls.__name__}},
                 {'symbol': 'df'}]
             print("ops", ops)
 

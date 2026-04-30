@@ -15,34 +15,27 @@ EMPTY_DF_JSON = {
             'dfviewer_config': {
                 'pinned_rows': [],
                 'column_config': []},
-            'data': []}
+    'data': []}
 
 
 BASIC_DF_JSON_DATA = [
                         {'index':0, 'a':10, 'b':'foo', 'level_0':0},
-                        {'index':1, 'a':20, 'b':'bar', 'level_0':1},
-                        {'index':2, 'a':20, 'b':'baz', 'level_0':2}]
-DFVIEWER_CONFIG_DEFAULT = {
-                   'pinned_rows': [],
-                   'column_config':  [
+    {'index':1, 'a':20, 'b':'bar', 'level_0':1},
+    {'index':2, 'a':20, 'b':'baz', 'level_0':2}]
+DFVIEWER_CONFIG_DEFAULT = {'pinned_rows': [], 'column_config':  [
                        {'col_name':'a', 'header_name':'foo_col', 'displayer_args': {'displayer': 'obj'}},
-                       {'col_name':'b', 'header_name':'bar_col', 'displayer_args': {'displayer': 'obj'}}],
-                   'left_col_configs': [{'header_name': 'index', 'col_name':'index',
-                       'displayer_args': {'displayer': 'obj'}}],
-                    'component_config': {},
-                    'extra_grid_config': {},
-}
-DFVIEWER_CONFIG_WITHOUT_B = {
-    'pinned_rows': [],
-    'column_config':  [
+    {
+        'col_name':'b',
+        'header_name':'bar_col',
+        'displayer_args': {'displayer': 'obj'}}], 'left_col_configs': [{'header_name': 'index', 'col_name':'index',
+            'displayer_args': {'displayer': 'obj'}}], 'component_config': {}, 'extra_grid_config': {}}
+DFVIEWER_CONFIG_WITHOUT_B = {'pinned_rows': [], 'column_config':  [
         ## note that col_name:'b' isn't present because of the merge rule
-        {'col_name':'a', 'header_name':'foo_col', 'displayer_args': {'displayer': 'obj'}},
-    ],
-    'left_col_configs': [{'col_name': 'index', 'header_name':'index',
-                         'displayer_args': {'displayer': 'obj'}}],
-    'component_config': {},
-    'extra_grid_config': {},
-}
+        {
+            'col_name':'a',
+            'header_name':'foo_col',
+            'displayer_args': {'displayer': 'obj'}}], 'left_col_configs': [{'col_name': 'index', 'header_name':'index',
+                'displayer_args': {'displayer': 'obj'}}], 'component_config': {}, 'extra_grid_config': {}}
 
 class ACDFC(CustomizableDataflow):
     autocleaning_klass = PandasAutocleaning
@@ -93,16 +86,13 @@ def test_custom_dataflow():
     pd.testing.assert_frame_equal(cdfc.widget_args_tuple[1], BASIC_DF)
     pd.testing.assert_frame_equal(cdfc.widget_args_tuple[1], BASIC_DF)
     assert cdfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
-    DFVIEWER_CONFIG_INT = {
-                   'pinned_rows': [],
-                   'column_config':  [
+    DFVIEWER_CONFIG_INT = {'pinned_rows': [], 'column_config':  [
                        {'header_name':'foo_col', 'col_name':'a', 'displayer_args': {'displayer': 'int'}},
-                       {'header_name':'bar_col', 'col_name':'b', 'displayer_args': {'displayer': 'int'}}],
-                   'left_col_configs': [{'col_name': 'index', 'header_name':'index',
-                       'displayer_args': {'displayer': 'obj'}}],
-                    'component_config': {},
-                    'extra_grid_config': {},
-    }
+        {
+            'header_name':'bar_col',
+            'col_name':'b',
+            'displayer_args': {'displayer': 'int'}}], 'left_col_configs': [{'col_name': 'index', 'header_name':'index',
+                'displayer_args': {'displayer': 'obj'}}], 'component_config': {}, 'extra_grid_config': {}}
     
     assert cdfc.df_display_args['int_styles']['df_viewer_config'] == DFVIEWER_CONFIG_INT
 
@@ -115,8 +105,7 @@ def test_hide_column_config_overrides():
     assert cdfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
 
     cdfc2 = ACDFC(BASIC_DF,
-                      column_config_overrides={'bar_col': {'merge_rule': 'hidden'}}
-                      )
+        column_config_overrides={'bar_col': {'merge_rule': 'hidden'}})
 
     assert cdfc2.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_WITHOUT_B
 
@@ -129,8 +118,8 @@ def test_custom_summary_stats():
 
     summary_sd = dc_dfc.widget_args_tuple[2]
     assert summary_sd == {
-                          'a': {'distinct_count':2, 'rewritten_col_name':'a', 'orig_col_name':'foo_col', },
-                          'b': {'distinct_count':3, 'rewritten_col_name':'b', 'orig_col_name':'bar_col', }}
+                          'a': {'distinct_count':2, 'rewritten_col_name':'a', 'orig_col_name':'foo_col'},
+        'b': {'distinct_count':3, 'rewritten_col_name':'b', 'orig_col_name':'bar_col'}}
     assert list(summary_sd.keys()) == ['a', 'b']
 
 def test_init_sd():
@@ -203,14 +192,11 @@ class HidePostProcessingAnalysis(ColAnalysis):
 
 SENTINEL_CONFIG_WITHOUT_INT = {
     'pinned_rows': [],
-    'column_config':  [
-        {'col_name': 'b', 'header_name':'sent_str_col', 'displayer_args': {'displayer': 'obj'}},
-    ],
+    'column_config':  [{'col_name': 'b', 'header_name':'sent_str_col', 'displayer_args': {'displayer': 'obj'}}],
     'left_col_configs': [{'col_name': 'index', 'header_name':'index',
-                         'displayer_args': {'displayer': 'obj'}}],
+        'displayer_args': {'displayer': 'obj'}}],
     'component_config': {},
-    'extra_grid_config': {},
-}
+    'extra_grid_config': {}}
 
 #FIXME, this used to be {}, but some change tot eh autcleaning ops,
 #and now I'm getting this probably equivalent structure, dig to the
@@ -339,10 +325,10 @@ def test_column_config_override_widget():
     ROWS = 200
     typed_df = pd.DataFrame(
         {'int_col': [1] * ROWS,
-         'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS})
+            'float_col': [.5] * ROWS,
+            "str_col": ["foobar"]* ROWS})
     bw2 = BuckarooWidget(
-        typed_df, 
+        typed_df,
         column_config_overrides={
             'float_col':
             {'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 }}})
@@ -357,10 +343,10 @@ def test_column_config_override_rewrite():
     ROWS = 200
     typed_df = pd.DataFrame(
         {'int_col': [1] * ROWS,
-         'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS})
+            'float_col': [.5] * ROWS,
+            "str_col": ["foobar"]* ROWS})
     bw2 = BuckarooWidget(
-        typed_df, 
+        typed_df,
         column_config_overrides={
             'float_col': {
                 'tooltip_config': {'tooltip_type': 'simple', 'val_column': 'str_col'}}})
@@ -380,8 +366,8 @@ def test_pinned_rows_override_widget():
     ROWS = 200
     typed_df = pd.DataFrame(
         {'int_col': [1] * ROWS,
-         'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS})
+            'float_col': [.5] * ROWS,
+            "str_col": ["foobar"]* ROWS})
     HIST_ROW = {'primary_key_val': 'histogram', 'displayer_args': { 'displayer': 'histogram' }}
     bw2 = BuckarooWidget(typed_df, pinned_rows=[HIST_ROW])
     pinned_rows = bw2.df_display_args['main']['df_viewer_config']['pinned_rows']
@@ -414,8 +400,8 @@ def test_transpose_error():
     ROWS = 5
     typed_df = pd.DataFrame(
         {'int_col': [1] * ROWS,
-         'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS})
+            'float_col': [.5] * ROWS,
+            "str_col": ["foobar"]* ROWS})
 
     base_a_klasses = BuckarooWidget.analysis_klasses.copy()
     base_a_klasses.extend([TransposeProcessing])
@@ -450,8 +436,8 @@ def test_df_meta_update():
     ROWS = 5
     typed_df = pd.DataFrame(
         {'int_col': [1] * ROWS,
-         'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS})
+            'float_col': [.5] * ROWS,
+            "str_col": ["foobar"]* ROWS})
 
     base_a_klasses = BuckarooWidget.analysis_klasses.copy()
     base_a_klasses.extend([SliceProcessing])
@@ -475,11 +461,9 @@ def test_bstate_commands():
     ROWS = 5
     typed_df = pd.DataFrame(
         {'int_col': [1] * ROWS,
-         'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS,
-         "other": ["foo", "foo", "needle", "needle", "foo"]
-
-         })
+            'float_col': [.5] * ROWS,
+            "str_col": ["foobar"]* ROWS,
+            "other": ["foo", "foo", "needle", "needle", "foo"]})
 
     base_a_klasses = BuckarooWidget.analysis_klasses.copy()
     base_a_klasses.extend([TransposeProcessing])
@@ -513,11 +497,9 @@ def test_bstate_commands2():
     ROWS = 5
     typed_df = pd.DataFrame(
         {'int_col': [1] * ROWS,
-         'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS,
-         "other": ["foo", "foo", "needle", "needle", "foo"]
-
-         })
+            'float_col': [.5] * ROWS,
+            "str_col": ["foobar"]* ROWS,
+            "other": ["foo", "foo", "needle", "needle", "foo"]})
 
     base_a_klasses = BuckarooWidget.analysis_klasses.copy()
     base_a_klasses.extend([TransposeProcessing])
@@ -559,11 +541,9 @@ def test_bstate_commands3():
     ROWS = 5
     typed_df = pd.DataFrame(
         {'int_col': [1] * ROWS,
-         'float_col': [.5] * ROWS,
-         "str_col": ["foobar"]* ROWS,
-         "other": ["foo", "foo", "needle", "needle", "foo"]
-
-         })
+            'float_col': [.5] * ROWS,
+            "str_col": ["foobar"]* ROWS,
+            "other": ["foo", "foo", "needle", "needle", "foo"]})
 
     base_a_klasses = BuckarooInfiniteWidget.analysis_klasses.copy()
     base_a_klasses.extend([TransposeProcessing])

@@ -4,15 +4,7 @@ import time
 from pathlib import Path
 from typing import Callable, Union, TYPE_CHECKING
 
-from buckaroo.file_cache.base import (
-    ColumnExecutor,
-    ExecutorArgs,
-    ColumnResults,
-    ColumnResult,
-    FileCache,
-    ProgressNotification,
-    Executor,
-)
+from buckaroo.file_cache.base import (ColumnExecutor, ExecutorArgs, ColumnResults, ColumnResult, FileCache, ProgressNotification, Executor)
 
 if TYPE_CHECKING:
     from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget
@@ -26,14 +18,10 @@ class SimpleColumnExecutor(ColumnExecutor[ExecutorArgs]):
             columns=columns,
             column_specific_expressions=False,
             include_hash=True,
-            expressions=[
-                cs.numeric().sum().name.suffix("_sum"),
-                pl.len().name.suffix("_len"),
-            ],
+            expressions=[cs.numeric().sum().name.suffix("_sum"), pl.len().name.suffix("_len")],
             row_start=None,
             row_end=None,
-            extra=None,
-        )
+            extra=None)
 
     def execute(self, ldf:pl.LazyFrame, execution_args:ExecutorArgs) -> ColumnResults:
         cols = execution_args.columns
@@ -47,12 +35,7 @@ class SimpleColumnExecutor(ColumnExecutor[ExecutorArgs]):
             actual_result = {"len": res[col+"_len"][0] if col+"_len" in res.columns else 0}
             if col+"_sum" in res.columns:
                 actual_result["sum"] = res[col+"_sum"][0]
-            cr = ColumnResult(
-                series_hash=hash_,
-                column_name=col,
-                expressions=[],
-                result=actual_result,
-            )
+            cr = ColumnResult(series_hash=hash_, column_name=col, expressions=[], result=actual_result)
             col_results[col] = cr
         return col_results
 
@@ -127,11 +110,7 @@ def assert_stats_present(results: dict, column: str, expected: list, unexpected:
             assert not has_stat(results, column, stat), f"{stat} should not be present for {column}"
 
 
-def wait_for_executor_finish(
-    executor: Executor,
-    timeout_secs: float = 30.0,
-    check_interval_secs: float = 0.1,
-) -> None:
+def wait_for_executor_finish(executor: Executor, timeout_secs: float = 30.0, check_interval_secs: float = 0.1) -> None:
     """
     Wait for an executor to finish running.
     
@@ -155,16 +134,14 @@ def wait_for_executor_finish(
         if executor._work_thread is None:
             raise AssertionError(
                 "MultiprocessingExecutor with async_mode=True has run() called but _work_thread is None. "
-                "This indicates the executor's run() method did not start the background thread as expected."
-            )
+                "This indicates the executor's run() method did not start the background thread as expected.")
         
         # Wait for thread to complete
         start_time = time.time()
         while executor._work_thread.is_alive():
             if time.time() - start_time > timeout_secs:
                 raise TimeoutError(
-                    f"Executor did not finish within {timeout_secs} seconds"
-                )
+                    f"Executor did not finish within {timeout_secs} seconds")
             time.sleep(check_interval_secs)
         return
     
@@ -176,8 +153,7 @@ def wait_for_executor_finish(
 def wait_for_nested_executor_finish(
     obj: Union["LazyInfinitePolarsBuckarooWidget", "ColumnExecutorDataflow", Executor],
     timeout_secs: float = 30.0,
-    check_interval_secs: float = 0.1,
-) -> None:
+    check_interval_secs: float = 0.1) -> None:
     """
     Convenience function to wait for executor to finish from various object types.
     
@@ -223,8 +199,7 @@ def wait_for_nested_executor_finish(
             if time.time() - start_time > timeout_secs:
                 raise TimeoutError(
                     f"Widget computation did not appear complete within {timeout_secs} seconds. "
-                    f"Expected {expected_cols} columns, got {len(merged_sd)}"
-                )
+                    f"Expected {expected_cols} columns, got {len(merged_sd)}")
             time.sleep(check_interval_secs)
     
     elif isinstance(obj, ColumnExecutorDataflow):
@@ -247,13 +222,11 @@ def wait_for_nested_executor_finish(
             if time.time() - start_time > timeout_secs:
                 raise TimeoutError(
                     f"Dataflow computation did not appear complete within {timeout_secs} seconds. "
-                    f"Expected {expected_cols} columns, got {len(merged_sd)}"
-                )
+                    f"Expected {expected_cols} columns, got {len(merged_sd)}")
             time.sleep(check_interval_secs)
     
     else:
         raise TypeError(
             f"Object type {type(obj)} not supported. "
-            f"Expected LazyInfinitePolarsBuckarooWidget, ColumnExecutorDataflow, or Executor"
-        )
+            f"Expected LazyInfinitePolarsBuckarooWidget, ColumnExecutorDataflow, or Executor")
 

@@ -91,11 +91,11 @@ class to_string(Command):
 
 
 
-cleaning_classes = [to_bool, to_datetime, to_int, to_float, to_string,]
+cleaning_classes = [to_bool, to_datetime, to_int, to_float, to_string]
 
 def auto_type_df2(df):
     _command_defaults, _command_patterns, transform, buckaroo_to_py_core = configure_buckaroo(
-            cleaning_classes)
+        cleaning_classes)
 
     cleaning_operations = get_auto_type_operations(df)
 

@@ -227,8 +227,7 @@ def test_synchronous_populates_immediately():
 def test_cache_short_circuit_populates_immediately(tmp_path):
     # Prepare a fake cached merged_sd
     cached_sd = {
-        'a': {'orig_col_name': 'v', 'rewritten_col_name': 'a', 'mean': 2.0, 'null_count': 0}
-    }
+        'a': {'orig_col_name': 'v', 'rewritten_col_name': 'a', 'mean': 2.0, 'null_count': 0}}
     fc = FileCache()
     fpath = tmp_path / "fake.parq"
     fpath.write_text("placeholder")
@@ -283,7 +282,10 @@ def test_executor_selection_thresholds_and_fallback():
             WorkingPar.used = True
             return super().run()
 
-    w2 = LazyInfinitePolarsBuckarooWidget(small_ldf, sync_executor_class=FailingSync, parallel_executor_class=WorkingPar)
+    w2 = LazyInfinitePolarsBuckarooWidget(
+        small_ldf,
+        sync_executor_class=FailingSync,
+        parallel_executor_class=WorkingPar)
     assert WorkingPar.used is True
     assert w2.df_data_dict['all_stats'] != []
 
@@ -315,8 +317,7 @@ def test_column_subset_filters_cached_columns(tmp_path):
         'col_b': [10, 20, 30],
         'col_c': [100, 200, 300],
         'col_d': [1000, 2000, 3000],
-        'col_e': [10000, 20000, 30000],
-    })
+        'col_e': [10000, 20000, 30000]})
     
     test_file = tmp_path / "test_subset.parquet"
     df_full.write_parquet(test_file)
@@ -328,8 +329,8 @@ def test_column_subset_filters_cached_columns(tmp_path):
     ldf_full = read_df(file_path_str)
     # Use sync executor for both to avoid multiprocessing overhead (fast test)
     bw1 = LazyInfinitePolarsBuckarooWidget(
-        ldf_full, 
-        timeout_secs=10, 
+        ldf_full,
+        timeout_secs=10,
         file_path=file_path_str,
         file_cache=fc,
         sync_executor_class=_Exec,

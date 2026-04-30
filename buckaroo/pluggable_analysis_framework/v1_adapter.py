@@ -88,8 +88,7 @@ def col_analysis_to_stat_funcs(kls: Type[ColAnalysis]) -> List[StatFunc]:
             provides=series_provides,
             needs_raw=True,
             quiet=kls.quiet,
-            spread_dict_result=True,
-        ))
+            spread_dict_result=True))
 
     if has_computed:
         # Computed phase: uses v1_computed mode to receive full accumulator
@@ -123,8 +122,7 @@ def col_analysis_to_stat_funcs(kls: Type[ColAnalysis]) -> List[StatFunc]:
             needs_raw=False,
             quiet=kls.quiet,
             v1_computed=True,
-            spread_dict_result=True,
-        ))
+            spread_dict_result=True))
 
     elif not has_series and not has_computed:
         # Class only has provides_defaults (pure defaults, no computation)
@@ -147,7 +145,6 @@ def col_analysis_to_stat_funcs(kls: Type[ColAnalysis]) -> List[StatFunc]:
                 requires=[],
                 provides=provide_keys,
                 needs_raw=False,
-                quiet=kls.quiet,
-            ))
+                quiet=kls.quiet))
 
     return funcs

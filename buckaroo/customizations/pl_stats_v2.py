@@ -21,14 +21,7 @@ from buckaroo.pluggable_analysis_framework.stat_func import stat, RawSeries
 from buckaroo.pluggable_analysis_framework.column_filters import is_numeric_not_bool
 
 # Reused unchanged from pd_stats_v2 — operate on stat dict, not raw series
-from buckaroo.customizations.pd_stats_v2 import (
-    _type,
-    computed_default_summary_stats,
-    histogram,
-    BaseSummaryResult,
-    NumericStatsResult,
-    HistogramSeriesResult,
-)
+from buckaroo.customizations.pd_stats_v2 import (_type, computed_default_summary_stats, histogram, BaseSummaryResult, NumericStatsResult, HistogramSeriesResult)
 
 
 # ============================================================
@@ -45,23 +38,24 @@ def pl_orig_col_name(ser: RawSeries) -> Any:
 # Typing Stats (polars dtype API)
 # ============================================================
 
-PlTypingResult = TypedDict('PlTypingResult', {
-    'dtype': str,
-    'is_numeric': bool,
-    'is_integer': bool,
-    'is_float': bool,
-    'is_bool': bool,
-    'is_datetime': bool,
-    'is_timedelta': bool,
-    'is_string': bool,
-    'is_categorical': bool,
-    'is_period': bool,
-    'is_interval': bool,
-    'is_time': bool,
-    'is_decimal': bool,
-    'is_binary': bool,
-    'memory_usage': int,
-})
+PlTypingResult = TypedDict(
+    'PlTypingResult',
+    {
+        'dtype': str,
+        'is_numeric': bool,
+        'is_integer': bool,
+        'is_float': bool,
+        'is_bool': bool,
+        'is_datetime': bool,
+        'is_timedelta': bool,
+        'is_string': bool,
+        'is_categorical': bool,
+        'is_period': bool,
+        'is_interval': bool,
+        'is_time': bool,
+        'is_decimal': bool,
+        'is_binary': bool,
+        'memory_usage': int})
 
 
 @stat()
@@ -83,8 +77,7 @@ def pl_typing_stats(ser: RawSeries) -> PlTypingResult:
         'is_time': dt == pl.Time,
         'is_decimal': dt.base_type() is pl.Decimal,
         'is_binary': dt == pl.Binary,
-        'memory_usage': ser.estimated_size(),
-    }
+        'memory_usage': ser.estimated_size()}
 
 
 # ============================================================
@@ -99,10 +92,7 @@ def _pl_vc_to_pd(ser: pl.Series) -> pd.Series:
     """
     vc = ser.drop_nulls().value_counts(sort=True)
     col_name = ser.name
-    return pd.Series(
-        vc['count'].to_list(),
-        index=vc[col_name].to_list(),
-    )
+    return pd.Series(vc['count'].to_list(), index=vc[col_name].to_list())
 
 
 @stat()
@@ -119,8 +109,7 @@ def pl_base_summary_stats(ser: RawSeries) -> BaseSummaryResult:
         'value_counts': _pl_vc_to_pd(ser),
         'mode': ser.drop_nulls().mode().item(0) if null_count < length else None,
         'min': float('nan'),
-        'max': float('nan'),
-    }
+        'max': float('nan')}
 
     if is_numeric and not is_bool and null_count < length:
         non_null = ser.drop_nulls()
@@ -143,8 +132,7 @@ def pl_numeric_stats(ser: RawSeries) -> NumericStatsResult:
     return {
         'mean': float(mean) if mean is not None else float('nan'),
         'std': float(std) if std is not None else float('nan'),
-        'median': float(median) if median is not None else float('nan'),
-    }
+        'median': float(median) if median is not None else float('nan')}
 
 
 # ============================================================
@@ -180,9 +168,7 @@ def pl_histogram_series(ser: RawSeries) -> HistogramSeriesResult:
             meat_histogram=meat_histogram,
             normalized_populations=(populations / populations.sum()).tolist(),
             low_tail=low_tail,
-            high_tail=high_tail,
-        ),
-    }
+            high_tail=high_tail)}
 
 
 # ============================================================
@@ -190,9 +176,10 @@ def pl_histogram_series(ser: RawSeries) -> HistogramSeriesResult:
 # ============================================================
 
 PL_ANALYSIS_V2 = [
-    pl_typing_stats, _type,
+    pl_typing_stats,
+    _type,
     pl_base_summary_stats,
     pl_numeric_stats,
     computed_default_summary_stats,
-    pl_histogram_series, histogram,
-]
+    pl_histogram_series,
+    histogram]

@@ -160,16 +160,14 @@ def mp_timeout(timeout_secs: float):
                 process = ctx.Process(
                     target=_execute_and_report_fork,
                     args=(f, args, kwargs, result_queue),
-                    daemon=True,
-                )
+                    daemon=True)
             else:
                 func_bytes = _cloudpickle.dumps(f)
                 args_bytes = _cloudpickle.dumps((args, kwargs))
                 process = ctx.Process(
                     target=_execute_and_report,
                     args=(func_bytes, args_bytes, result_queue),
-                    daemon=True,
-                )
+                    daemon=True)
             process.start()
 
             status: Any = None

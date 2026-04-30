@@ -73,8 +73,7 @@ class IbisAnalysisPipeline:
         if not HAS_XORQ:
             raise ImportError(
                 "xorq is required for IbisAnalysisPipeline. "
-                "Install with: pip install buckaroo[xorq]"
-            )
+                "Install with: pip install buckaroo[xorq]")
 
         self.analysis_objects = analysis_objects
         self.backend = backend

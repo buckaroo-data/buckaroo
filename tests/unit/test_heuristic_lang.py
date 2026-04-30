@@ -84,7 +84,7 @@ def test_heuristic_rule():
     assert eval_heuristic_rule([s('begin'),
                                 [s('display'), s('measure')],
                                 s('measure')],
-                                .7) == .7
+        .7) == .7
     assert eval_heuristic_rule('(f> .7)', .8)  == .8
     assert eval_heuristic_rule('(f> .7)', .5)  == False
     assert eval_heuristic_rule([s('f>'), .7], .8) == .8

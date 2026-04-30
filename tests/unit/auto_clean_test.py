@@ -6,28 +6,78 @@ from numpy import nan
 from pandas.testing import assert_series_equal
 
 
-DATETIME_META = {'datetime': 0.75, 'datetime_error': 0.25, 'int': 0.25, 'int_error': 0.75, 'float': 0.25, 'float_error': 0.75, 'bool': 0, 'bool_error':1}
+DATETIME_META = {
+    'datetime': 0.75,
+    'datetime_error': 0.25,
+    'int': 0.25,
+    'int_error': 0.75,
+    'float': 0.25,
+    'float_error': 0.75,
+    'bool': 0,
+    'bool_error':1}
 
-INT_META = {'datetime': 0.0, 'datetime_error': 1.0, 'int': 0.75, 'int_error': 0.25, 'float': 0.75, 'float_error': 0.25, 'bool': 0.0, 'bool_error': 1.0}
+INT_META = {
+    'datetime': 0.0,
+    'datetime_error': 1.0,
+    'int': 0.75,
+    'int_error': 0.25,
+    'float': 0.75,
+    'float_error': 0.25,
+    'bool': 0.0,
+    'bool_error': 1.0}
 
-FULL_INT_META = {'datetime': 0.0, 'datetime_error': 0, 'int': 1, 'int_error': 0, 'float': 0, 'float_error': 0, 'bool': 0.0, 'bool_error': 0, 'exact_type': 'UInt32', 'general_type':'int'}
+FULL_INT_META = {
+    'datetime': 0.0,
+    'datetime_error': 0,
+    'int': 1,
+    'int_error': 0,
+    'float': 0,
+    'float_error': 0,
+    'bool': 0.0,
+    'bool_error': 0,
+    'exact_type': 'UInt32',
+    'general_type':'int'}
 
-FLOAT_META = {'datetime': 0.0, 'datetime_error': 1.0, 'int': 0.25, 'int_error': 0.75, 'float': 0.75, 'float_error': 0.25, 'bool': 0.0, 'bool_error': 1.0}
+FLOAT_META = {
+    'datetime': 0.0,
+    'datetime_error': 1.0,
+    'int': 0.25,
+    'int_error': 0.75,
+    'float': 0.75,
+    'float_error': 0.25,
+    'bool': 0.0,
+    'bool_error': 1.0}
 
-STRING_META =  {'datetime': 0.0, 'datetime_error': 1.0, 'int': 0.0, 'int_error': 1.0, 'float': 0.25, 'float_error': 0.75, 'bool': 0.0, 'bool_error': 1.0}
+STRING_META =  {
+    'datetime': 0.0,
+    'datetime_error': 1.0,
+    'int': 0.0,
+    'int_error': 1.0,
+    'float': 0.25,
+    'float_error': 0.75,
+    'bool': 0.0,
+    'bool_error': 1.0}
 
-DATETIME_EDGECASE_META = {'datetime': 1.0, 'datetime_error': 1.0, 'int': 0.0, 'int_error': 1.0, 'float': 0.0, 'float_error': 1, 'bool': 0.0, 'bool_error': 1.0}
+DATETIME_EDGECASE_META = {
+    'datetime': 1.0,
+    'datetime_error': 1.0,
+    'int': 0.0,
+    'int_error': 1.0,
+    'float': 0.0,
+    'float_error': 1,
+    'bool': 0.0,
+    'bool_error': 1.0}
 
 BOOL_META = {'bool': .6, 'bool_error': 0.4,
-             'datetime': 0.0, 'datetime_error': 1.0,
-             'float': 0.6, 'float_error': 0.4,
-             'int': 0.6, 'int_error': 0.4}
+    'datetime': 0.0, 'datetime_error': 1.0,
+    'float': 0.6, 'float_error': 0.4,
+    'int': 0.6, 'int_error': 0.4}
 
 
 MIXED_NUMERIC_META = {'bool': 0.0, 'bool_error': 1.0,
-                      'datetime': 0.0, 'datetime_error': 1.0,
-                      'float': (2/3), 'float_error': (1/3),
-                      'int': (2/3), 'int_error': (1/3)}
+    'datetime': 0.0, 'datetime_error': 1.0,
+    'float': (2/3), 'float_error': (1/3),
+    'int': (2/3), 'int_error': (1/3)}
 
 def assign_values(d, new_values):
     d2 = d.copy()
@@ -39,7 +89,15 @@ DATETIME_DTYPE_META = assign_values(ac.default_type_dict,
 
 MIXED_EXACT = assign_values(ac.default_type_dict, {'exact_type': 'Int64', 'general_type': 'int', 'int':1})
 
-ONLY_NANS_META = {'datetime': 0, 'datetime_error': 0, 'int': 0, 'int_error': 0, 'float': 0, 'float_error': 0, 'bool': 0, 'bool_error': 0}
+ONLY_NANS_META = {
+    'datetime': 0,
+    'datetime_error': 0,
+    'int': 0,
+    'int_error': 0,
+    'float': 0,
+    'float_error': 0,
+    'bool': 0,
+    'bool_error': 0}
 
 # WEIRD_INT = {'bool': 0.0, 'bool_error': 1.0,
 #                       'datetime': 0.0, 'datetime_error': 1.0,

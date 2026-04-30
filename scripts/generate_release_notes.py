@@ -25,8 +25,7 @@ CATEGORY_ORDER = [
     ("ci", "CI/CD"),
     ("chore", "Chores"),
     ("deps", "Dependencies"),
-    ("other", "Other"),
-]
+    ("other", "Other")]
 
 CATEGORY_MAP = {label: display for label, display in CATEGORY_ORDER}
 
@@ -42,8 +41,7 @@ def get_tag_timestamp(tag: str) -> str:
         ["git", "tag", "-l", tag, "--format=%(creatordate:iso-strict)"],
         capture_output=True,
         text=True,
-        check=True,
-    )
+        check=True)
     date_str = result.stdout.strip()
     if not date_str:
         print(f"Error: tag '{tag}' not found", file=sys.stderr)
@@ -55,16 +53,20 @@ def gather_prs(since_timestamp: str) -> list[dict]:
     """Fetch merged PRs since a timestamp using gh CLI."""
     result = subprocess.run(
         [
-            "gh", "pr", "list",
-            "--state", "merged",
-            "--search", f"merged:>{since_timestamp}",
-            "--json", "number,title,body,labels,mergedAt",
-            "--limit", "200",
-        ],
+            "gh",
+            "pr",
+            "list",
+            "--state",
+            "merged",
+            "--search",
+            f"merged:>{since_timestamp}",
+            "--json",
+            "number,title,body,labels,mergedAt",
+            "--limit",
+            "200"],
         capture_output=True,
         text=True,
-        check=True,
-    )
+        check=True)
     return json.loads(result.stdout)
 
 
@@ -156,8 +158,7 @@ def call_claude(prompt: str) -> str:
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-    )
+        messages=[{"role": "user", "content": prompt}])
     return message.content[0].text
 
 

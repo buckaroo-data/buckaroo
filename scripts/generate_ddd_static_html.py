@@ -11,64 +11,33 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from buckaroo.artifact import to_html
-from buckaroo.ddd_library import (
-    df_with_infinity,
-    df_with_really_big_number,
-    df_with_col_named_index,
-    get_df_with_named_index,
-    get_multiindex_with_names_cols_df,
-    get_multiindex_index_df,
-    get_multiindex3_index_df,
-    get_multiindex_with_names_both,
-    df_with_weird_types,
-    pl_df_with_weird_types,
-)
+from buckaroo.ddd_library import (df_with_infinity, df_with_really_big_number, df_with_col_named_index, get_df_with_named_index, get_multiindex_with_names_cols_df, get_multiindex_index_df, get_multiindex3_index_df, get_multiindex_with_names_both, df_with_weird_types, pl_df_with_weird_types)
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'extra-html', 'ddd')
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # Each entry: (filename, title, DataFrame, description)
-DDD_ENTRIES = [
-    ('infinity', 'Infinity and NaN',
+DDD_ENTRIES = [('infinity', 'Infinity and NaN',
      df_with_infinity(),
-     'NaN, positive infinity, and negative infinity — three different things.'),
-
-    ('big-numbers', 'Really Big Numbers',
+     'NaN, positive infinity, and negative infinity — three different things.'), ('big-numbers', 'Really Big Numbers',
      df_with_really_big_number(),
-     'Integer exceeding JavaScript MAX_SAFE_INTEGER. Buckaroo preserves exact precision.'),
-
-    ('col-named-index', 'Column Named "index"',
+     'Integer exceeding JavaScript MAX_SAFE_INTEGER. Buckaroo preserves exact precision.'), ('col-named-index', 'Column Named "index"',
      df_with_col_named_index(),
-     'A column literally named "index" — ambiguous with the DataFrame index.'),
-
-    ('named-index', 'Named Index',
+     'A column literally named "index" — ambiguous with the DataFrame index.'), ('named-index', 'Named Index',
      get_df_with_named_index(),
-     'Index with a name ("foo") that should be visible in the display.'),
-
-    ('multiindex-cols', 'MultiIndex Columns',
+     'Index with a name ("foo") that should be visible in the display.'), ('multiindex-cols', 'MultiIndex Columns',
      get_multiindex_with_names_cols_df(rows=6),
-     'Hierarchical column headers with named levels.'),
-
-    ('multiindex-rows', 'MultiIndex on Rows',
+     'Hierarchical column headers with named levels.'), ('multiindex-rows', 'MultiIndex on Rows',
      get_multiindex_index_df(),
-     'Two-level row index with a None value in the data.'),
-
-    ('multiindex-3-level', 'Three-Level MultiIndex',
+     'Two-level row index with a None value in the data.'), ('multiindex-3-level', 'Three-Level MultiIndex',
      get_multiindex3_index_df(),
-     'Three-level row index — tests arbitrary index depth.'),
-
-    ('multiindex-both', 'MultiIndex on Both Axes',
+     'Three-level row index — tests arbitrary index depth.'), ('multiindex-both', 'MultiIndex on Both Axes',
      get_multiindex_with_names_both(),
-     'Hierarchical headers on both rows and columns with named levels.'),
-
-    ('weird-types-pandas', 'Weird Types (Pandas)',
+     'Hierarchical headers on both rows and columns with named levels.'), ('weird-types-pandas', 'Weird Types (Pandas)',
      df_with_weird_types(),
-     'Categorical, timedelta, period, and interval dtypes.'),
-
-    ('weird-types-polars', 'Weird Types (Polars)',
+     'Categorical, timedelta, period, and interval dtypes.'), ('weird-types-polars', 'Weird Types (Polars)',
      pl_df_with_weird_types(),
-     'Duration, time, categorical, decimal, and binary dtypes — native polars DataFrame.'),
-]
+     'Duration, time, categorical, decimal, and binary dtypes — native polars DataFrame.')]
 
 
 def generate_embed(filename, title, df, description):

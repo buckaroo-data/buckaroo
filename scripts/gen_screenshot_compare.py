@@ -38,37 +38,30 @@ STORIES = [
         ("A6_ManyCols_ShortHdr_LongData",  "#596 data contention","no-diff"),
         ("A7_ManyCols_LongHdr_ShortData",  "#596 hdr contention", "no-diff"),
         ("A8_ManyCols_LongHdr_LongData",   "#596 worst case",     "no-diff"),
-        ("A9_ManyCols_LongHdr_YearData",  "#595 primary repro",  "diff"),
-    ]),
+        ("A9_ManyCols_LongHdr_YearData",  "#595 primary repro",  "diff")]),
     # Section B — compact_number displayer shows clear before/after difference
     ("B – Large Numbers / compact_number  (#597, #602)", [
         ("B9_LargeNumbers_Float",         "#597 – float",           "no-diff"),
         ("B10_LargeNumbers_Compact",      "#597 – compact_number",  "diff"),
         ("B11_ClusteredBillions_Float",   "#602 – clustered float", "no-diff"),
-        ("B12_ClusteredBillions_Compact", "#602 – clustered compact","diff"),
-    ]),
+        ("B12_ClusteredBillions_Compact", "#602 – clustered compact","diff")]),
     # Section C — index column pinned vs scrolled away (#587)
     ("C – Pinned Row / Index Alignment  (#587)", [
         ("C13_PinnedIndex_FewCols",  "#587 – 10 cols scrolled", "diff"),
-        ("C14_PinnedIndex_ManyCols", "#587 – 20 cols scrolled", "diff"),
-    ]),
+        ("C14_PinnedIndex_ManyCols", "#587 – 20 cols scrolled", "diff")]),
     # Section D — mixed pinned + width contention
     ("D – Mixed Scenarios", [
         ("D15_Mixed_ManyNarrow_WithPinned", "#595 #587 #599", "diff"),
-        ("D16_Mixed_FewWide_WithPinned",    "#587 baseline",  "diff"),
-    ]),
+        ("D16_Mixed_FewWide_WithPinned",    "#587 baseline",  "diff")]),
     # Section E — Python-computed ag_grid_specs.minWidth
     ("E – Python-Computed minWidth", [
         ("E17_PythonMinWidth_NarrowInts",  "minWidth lever",  "wip"),
         ("E18_PythonMinWidth_LongHeaders", "minWidth lever",  "wip"),
-        ("E19_PythonMinWidth_MixedTypes",  "minWidth lever",  "wip"),
-    ]),
+        ("E19_PythonMinWidth_MixedTypes",  "minWidth lever",  "wip")]),
     # Section F — Histogram + narrow columns
     ("F – Histogram + Narrow Columns", [
         ("F20_Histogram_NarrowCols",           "histogram 100px min", "wip"),
-        ("F21_Histogram_NarrowCols_NoHistMin", "histogram crushed",   "wip"),
-    ]),
-]
+        ("F21_Histogram_NarrowCols_NoHistMin", "histogram crushed",   "wip")])]
 
 
 def img_data_uri(path: Path) -> str:
@@ -89,8 +82,7 @@ def build_html() -> str:
                 "status": status,
                 "section": section_title,
                 "before": img_data_uri(BEFORE_DIR / f"{name}.png"),
-                "after":  img_data_uri(AFTER_DIR  / f"{name}.png"),
-            })
+                "after":  img_data_uri(AFTER_DIR  / f"{name}.png")})
 
     stories_json = json.dumps(flat)
 
@@ -101,8 +93,7 @@ def build_html() -> str:
         if entry["section"] != current_section:
             current_section = entry["section"]
             nav_items.append(
-                f'<div class="nav-section">{current_section}</div>'
-            )
+                f'<div class="nav-section">{current_section}</div>')
         short = entry["name"].split("_", 1)[1].replace("_", " ") if "_" in entry["name"] else entry["name"]
         status = entry["status"]
         status_class = f"status-{status}"
@@ -113,8 +104,7 @@ def build_html() -> str:
             f'<span class="nav-tag tag-{status}">{status_label}</span>'
             f'<span class="nav-label">{short}</span>'
             f'<span class="nav-issue">{entry["label"]}</span>'
-            f'</div>'
-        )
+            f'</div>')
     nav_html = "\n".join(nav_items)
 
     return f"""<!DOCTYPE html>
@@ -594,15 +584,12 @@ loadFromHash();
 
 if __name__ == "__main__":
     if not BEFORE_DIR.exists() and not AFTER_DIR.exists():
-        print(
-            "No screenshots found.\n"
+        print("No screenshots found.\n"
             "Run:\n"
             "  ./scripts/download_styling_screenshots.sh\n"
             "or capture locally with:\n"
             "  cd packages/buckaroo-js-core && "
-            "SCREENSHOT_DIR=screenshots/after npx playwright test pw-tests/styling-issues-screenshots.spec.ts",
-            file=sys.stderr,
-        )
+            "SCREENSHOT_DIR=screenshots/after npx playwright test pw-tests/styling-issues-screenshots.spec.ts", file=sys.stderr)
         sys.exit(1)
 
     html = build_html()

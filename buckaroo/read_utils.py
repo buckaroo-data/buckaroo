@@ -45,40 +45,29 @@ def read_df(file_path: str | Path, **kwargs): # -> "pl.LazyFrame":
     readers = []
     
     if extension == '.csv':
-        readers = [
-            ('csv', lambda: pl.scan_csv(file_path, **kwargs)),
-        ]
+        readers = [('csv', lambda: pl.scan_csv(file_path, **kwargs))]
     elif extension == '.tsv':
-        readers = [
-            ('csv', lambda: pl.scan_csv(file_path, separator="\t", **kwargs)),
-        ]
+        readers = [('csv', lambda: pl.scan_csv(file_path, separator="\t", **kwargs))]
     elif extension == '.parquet':
-        readers = [
-            ('parquet', lambda: pl.scan_parquet(file_path, **kwargs)),
-        ]
+        readers = [('parquet', lambda: pl.scan_parquet(file_path, **kwargs))]
     elif extension == '.avro':
         readers = [
             ('avro', lambda: pl.scan_ipc(file_path, **kwargs)),
-            ('avro (as parquet)', lambda: pl.scan_parquet(file_path, **kwargs)),
-        ]
+            ('avro (as parquet)', lambda: pl.scan_parquet(file_path, **kwargs))]
     elif extension in ['.json', '.jsonl', '.ndjson']:
         # Try JSON first, then JSONL
         readers = [
             ('json', lambda: pl.scan_ndjson(file_path, **kwargs)),
-            ('json (as json)', lambda: pl.read_json(file_path, **kwargs).lazy()),
-        ]
+            ('json (as json)', lambda: pl.read_json(file_path, **kwargs).lazy())]
     elif extension == '.ipc' or extension == '.arrow':
-        readers = [
-            ('ipc', lambda: pl.scan_ipc(file_path, **kwargs)),
-        ]
+        readers = [('ipc', lambda: pl.scan_ipc(file_path, **kwargs))]
     else:
         # Try common formats in order
         readers = [
             ('parquet', lambda: pl.scan_parquet(file_path, **kwargs)),
             ('csv', lambda: pl.scan_csv(file_path, **kwargs)),
             ('json', lambda: pl.scan_ndjson(file_path, **kwargs)),
-            ('ipc', lambda: pl.scan_ipc(file_path, **kwargs)),
-        ]
+            ('ipc', lambda: pl.scan_ipc(file_path, **kwargs))]
     
     last_error: Optional[Exception] = None
     
@@ -92,8 +81,7 @@ def read_df(file_path: str | Path, **kwargs): # -> "pl.LazyFrame":
     # If all readers failed, raise an informative error
     raise ValueError(
         f"Could not read file {file_path} with any supported format. "
-        f"Extension: {extension}. Last error: {last_error}"
-    ) from last_error
+        f"Extension: {extension}. Last error: {last_error}") from last_error
 
 def read(file_path: str | Path, **kwargs) -> Any:
     from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget

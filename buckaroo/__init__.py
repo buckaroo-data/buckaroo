@@ -8,16 +8,7 @@ from .artifact import prepare_buckaroo_artifact, to_html, artifact_to_json
 from .widget_utils import is_in_ipython, is_in_marimo, enable, disable, determine_jupter_env
 from .read_utils import read
 try:
-    from .file_cache.cache_utils import (
-        get_global_file_cache,
-        get_global_executor_log,
-        ensure_executor_sqlite,
-        get_cache_size,
-        clear_file_cache,
-        clear_executor_log,
-        clear_oldest_cache_entries,
-        format_cache_size,
-    )
+    from .file_cache.cache_utils import (get_global_file_cache, get_global_executor_log, ensure_executor_sqlite, get_cache_size, clear_file_cache, clear_executor_log, clear_oldest_cache_entries, format_cache_size)
 except ImportError:
     # file_cache requires polars; make these available only when polars is installed
     pass
@@ -51,23 +42,22 @@ def debug_packages():
     jupyter_env = determine_jupter_env()
     print("executing in %s " % jupyter_env)
     packages = [
-            "buckaroo",
-            "jupyterlab",
-            "notebook",
-            "ipywidgets",
-            "traitlets",
-            "jupyter_core",
-            "pandas",
-            "numpy",
-            "IPython",
-            "ipykernel",
-            "jupyter_client",
-            "jupyter_server",
-            "nbclient",
-            "nbconvert",
-            "nbformat",
-            "qtconsole",
-    ]
+        "buckaroo",
+        "jupyterlab",
+        "notebook",
+        "ipywidgets",
+        "traitlets",
+        "jupyter_core",
+        "pandas",
+        "numpy",
+        "IPython",
+        "ipykernel",
+        "jupyter_client",
+        "jupyter_server",
+        "nbclient",
+        "nbconvert",
+        "nbformat",
+        "qtconsole"]
     
     for package in packages:
         try:

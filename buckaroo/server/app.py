@@ -10,7 +10,10 @@ from buckaroo.server.session import SessionManager
 SERVER_START_TIME = time.time()
 
 
-def make_app(sessions: SessionManager | None = None, port: int = 8888, open_browser: bool = True) -> tornado.web.Application:
+def make_app(
+    sessions: SessionManager | None = None,
+    port: int = 8888,
+    open_browser: bool = True) -> tornado.web.Application:
     if sessions is None:
         sessions = SessionManager()
 
@@ -23,11 +26,9 @@ def make_app(sessions: SessionManager | None = None, port: int = 8888, open_brow
             (r"/load", LoadHandler),
             (r"/load_compare", LoadCompareHandler),
             (r"/s/([^/]+)", SessionPageHandler),
-            (r"/ws/([^/]+)", DataStreamHandler),
-        ],
+            (r"/ws/([^/]+)", DataStreamHandler)],
         sessions=sessions,
         port=port,
         open_browser=open_browser,
         static_path=os.path.abspath(static_path),
-        server_start_time=SERVER_START_TIME,
-    )
+        server_start_time=SERVER_START_TIME)

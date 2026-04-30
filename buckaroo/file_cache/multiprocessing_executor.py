@@ -8,16 +8,7 @@ import logging
 
 import polars as pl
 
-from .base import (
-    Executor as BaseExecutor,
-    ColumnExecutor,
-    ExecutorArgs,
-    FileCache,
-    ProgressNotification,
-    ProgressListener,
-    SimpleExecutorLog,
-    MaybeFilepathLike,
-)
+from .base import (Executor as BaseExecutor, ColumnExecutor, ExecutorArgs, FileCache, ProgressNotification, ProgressListener, SimpleExecutorLog, MaybeFilepathLike)
 from .mp_timeout_decorator import mp_timeout, TimeoutException, ExecutionFailed
 from .batch_planning import PlanningFunction, simple_one_column_planning
 
@@ -43,14 +34,13 @@ class MultiprocessingExecutor(BaseExecutor):
         async_mode: bool = True,
         cached_merged_sd: dict[str, dict[str, Any]] | None = None,
         orig_to_rw_map: dict[str, str] | None = None,
-        planning_function: Optional[PlanningFunction] = None,
-    ) -> None:
+        planning_function: Optional[PlanningFunction] = None) -> None:
         # Use simple_one_column_planning by default for backward compatibility
         # Can be overridden with default_planning_function for batch optimization
         planning_func = planning_function or simple_one_column_planning
-        super().__init__(ldf, column_executor, listener, fc, executor_log, file_path=file_path, 
-                        cached_merged_sd=cached_merged_sd, orig_to_rw_map=orig_to_rw_map,
-                        planning_function=planning_func)
+        super().__init__(ldf, column_executor, listener, fc, executor_log, file_path=file_path,
+            cached_merged_sd=cached_merged_sd, orig_to_rw_map=orig_to_rw_map,
+            planning_function=planning_func)
         self.timeout_secs = timeout_secs
         self.async_mode = async_mode
         # Track thread for async mode (for testing utilities)
@@ -109,8 +99,7 @@ class MultiprocessingExecutor(BaseExecutor):
                     row_start=ex_args.row_start,
                     row_end=ex_args.row_end,
                     extra=ex_args.extra,
-                    no_exec=False
-                )
+                    no_exec=False)
                 
                 if self.executor_log.check_log_for_completed(self.dfi, original_group_args):
                     log_msg = f"MultiprocessingExecutor._work() SKIPPING group {group} - already completed (found in executor log)"
@@ -162,8 +151,7 @@ class MultiprocessingExecutor(BaseExecutor):
                         execution_args=ex_args,
                         result=res,
                         execution_time=t2-t1,  # timedelta
-                        failure_message=None
-                    ))
+                        failure_message=None))
                     self.executor_log.log_end_col_group(self.dfi, ex_args)
                     # Update planning state after successful execution
                     executed_columns = list(res.keys())

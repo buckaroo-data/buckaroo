@@ -29,8 +29,14 @@ def test_find_most_specific_styling():
     assert find_most_specific_styling([CustomStyling, DefaultMainStyling]) == CustomStyling
     assert find_most_specific_styling([DefaultMainStyling, CustomStyling]) == CustomStyling
 
-    assert find_most_specific_styling([ExtendedCustomStyling, CustomStyling, DefaultMainStyling]) == ExtendedCustomStyling
-    assert find_most_specific_styling([DefaultMainStyling, CustomStyling, ExtendedCustomStyling]) == ExtendedCustomStyling
+    assert find_most_specific_styling([
+        ExtendedCustomStyling,
+        CustomStyling,
+        DefaultMainStyling]) == ExtendedCustomStyling
+    assert find_most_specific_styling([
+        DefaultMainStyling,
+        CustomStyling,
+        ExtendedCustomStyling]) == ExtendedCustomStyling
 
 def test_analysis_extend():
     #Custom_1 doesn't extend BaseStylingKlass, so it won't work

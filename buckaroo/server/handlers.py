@@ -8,11 +8,7 @@ import traceback
 
 import tornado.web
 
-from buckaroo.server.data_loading import (
-    load_file, get_metadata, get_display_state,
-    create_dataflow, get_buckaroo_display_state,
-    load_file_lazy, get_metadata_lazy, get_display_state_lazy,
-)
+from buckaroo.server.data_loading import (load_file, get_metadata, get_display_state, create_dataflow, get_buckaroo_display_state, load_file_lazy, get_metadata_lazy, get_display_state_lazy)
 from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
@@ -32,12 +28,7 @@ def _parse_startup_timeout() -> float:
         log.warning("BUCKAROO_STARTUP_TIMEOUT is not a valid number; using default 5.0s")
         return 5.0
 
-CRITICAL_STATIC_FILES = [
-    "standalone.js",
-    "standalone.css",
-    "compiled.css",
-    "widget.js",
-]
+CRITICAL_STATIC_FILES = ["standalone.js", "standalone.css", "compiled.css", "widget.js"]
 
 
 def _get_static_file_info(static_path: str) -> dict:
@@ -71,8 +62,7 @@ class HealthHandler(tornado.web.RequestHandler):
             "pid": os.getpid(),
             "started": start_time,
             "uptime_s": round(time.time() - start_time, 1),
-            "static_files": _get_static_file_info(static_path),
-        })
+            "static_files": _get_static_file_info(static_path)})
 
 
 class DiagnosticsHandler(tornado.web.RequestHandler):
@@ -90,8 +80,7 @@ class DiagnosticsHandler(tornado.web.RequestHandler):
                 "active": sessions.active_session_count,
                 "total_evicted": sessions.total_evicted_count,
                 "ttl_s": sessions._ttl_s,
-                "eviction_interval_s": sessions._eviction_interval_s,
-            }
+                "eviction_interval_s": sessions._eviction_interval_s}
 
         self.write({
             "status": "ok",
@@ -114,9 +103,7 @@ class DiagnosticsHandler(tornado.web.RequestHandler):
                 "pyarrow": _check_dependency("pyarrow"),
                 "fastparquet": _check_dependency("fastparquet"),
                 "mcp": _check_dependency("mcp"),
-                "polars": _check_dependency("polars"),
-            },
-        })
+                "polars": _check_dependency("polars")}})
 
 
 def _list_log_files() -> list:
@@ -282,10 +269,7 @@ class LoadHandler(tornado.web.RequestHandler):
             for key in session.df_display_args:
                 dvc = session.df_display_args[key].get("df_viewer_config")
                 if dvc is not None:
-                    dvc["component_config"] = {
-                        **dvc.get("component_config", {}),
-                        **component_config,
-                    }
+                    dvc["component_config"] = {**dvc.get("component_config", {}), **component_config}
 
         # Notify connected clients and open browser
         self._push_state_to_clients(session, metadata)
@@ -293,12 +277,7 @@ class LoadHandler(tornado.web.RequestHandler):
 
         log.info("load session=%s path=%s rows=%d browser=%s", session_id, path, metadata["rows"], browser_action)
 
-        self.write({
-            "session": session_id,
-            "server_pid": os.getpid(),
-            "browser_action": browser_action,
-            **metadata,
-        })
+        self.write({"session": session_id, "server_pid": os.getpid(), "browser_action": browser_action, **metadata})
 
 
 class LoadCompareHandler(tornado.web.RequestHandler):
@@ -409,8 +388,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
                     translated = dict(value)
                     if "val_column" in translated:
                         translated["val_column"] = orig_to_renamed.get(
-                            translated["val_column"], translated["val_column"]
-                        )
+                            translated["val_column"], translated["val_column"])
                     cc_entry[key] = translated
                 else:
                     cc_entry[key] = value
@@ -420,7 +398,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         session = sessions.get_or_create(session_id, path1)
         session.df = merged_df
         session.metadata = {"path": path1, "path2": path2, "rows": len(merged_df),
-                            "columns": [{"name": str(c), "dtype": str(merged_df[c].dtype)} for c in merged_df.columns]}
+            "columns": [{"name": str(c), "dtype": str(merged_df[c].dtype)} for c in merged_df.columns]}
         session.df_display_args = display_state["df_display_args"]
         session.df_data_dict = display_state["df_data_dict"]
         session.df_meta = display_state["df_meta"]
@@ -443,7 +421,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
             browser_action = find_or_create_session_window(session_id, port, reload_if_found=True)
 
         log.info("load_compare session=%s path1=%s path2=%s rows=%d",
-                 session_id, path1, path2, len(merged_df))
+            session_id, path1, path2, len(merged_df))
 
         self.write({
             "session": session_id,
@@ -451,8 +429,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
             "browser_action": browser_action,
             "rows": len(merged_df),
             "columns": [str(c) for c in merged_df.columns],
-            "eqs": eqs,
-        })
+            "eqs": eqs})
 
 
 class SessionPageHandler(tornado.web.RequestHandler):

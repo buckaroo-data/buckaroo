@@ -129,7 +129,7 @@ def test_column_hints():
         ColumnStringHint(type="string", histogram=[errant_histogram_entry])
     assert exc_info.value.errors(include_url=False) == [
         {'type': 'missing', 'loc': ('histogram', 0, 'population'),
-         'msg': 'Field required','input': errant_histogram_entry}]
+            'msg': 'Field required','input': errant_histogram_entry}]
     
     ColumnBooleanHint(type="boolean", histogram=[])
 
@@ -139,13 +139,13 @@ def test_column_hint_extra():
 
 def test_dfwhole():
     temp = {'schema': {'fields':[{'name':'foo', 'type':'integer'}],
-                       'primaryKey':['foo'], 'pandas_version':'1.4.0'},
-            'table_hints': {'foo':{'type':'string', 'histogram':[]},
-                            'bar':{'type':'integer', 'min_digits':2, 'max_digits':4, 'histogram':[]},
-                            'baz':{'type':'obj', 'histogram':[]},
-                            },
-            'data': [{'foo': 'hello', 'bar':8},
-                     {'foo': 'world', 'bar':10}]}
+        'primaryKey':['foo'], 'pandas_version':'1.4.0'},
+        'table_hints': {
+            'foo':{'type':'string', 'histogram':[]},
+            'bar':{'type':'integer', 'min_digits':2, 'max_digits':4, 'histogram':[]},
+            'baz':{'type':'obj', 'histogram':[]}},
+        'data': [{'foo': 'hello', 'bar':8},
+            {'foo': 'world', 'bar':10}]}
     DFWhole(**temp)
 
 def test_df_to_obj_pydantic():
@@ -204,7 +204,12 @@ def _test_df_to_obj_timing():
         'exponential' :  np.random.exponential(1.0, N) * 10 ,
         'increasing':[i for i in range(N)],
         'one': [1]*N,
-        'dominant_categories':     random_categorical({'foo': .6, 'bar': .25, 'baz':.15}, unique_per=0, na_per=0, longtail_per=0, N=N),
+        'dominant_categories':     random_categorical(
+            {'foo': .6, 'bar': .25, 'baz':.15},
+            unique_per=0,
+            na_per=0,
+            longtail_per=0,
+            N=N),
         'all_unique_cat': random_categorical({}, unique_per=1, na_per=0, longtail_per=0, N=N),
         'all_NA' :          pd.Series([pd.NA] * N, dtype='UInt8'),
         'half_NA' :         random_categorical({1: .55}, unique_per=0,   na_per=.45, longtail_per=.0, N=N),

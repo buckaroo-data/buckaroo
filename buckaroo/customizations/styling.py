@@ -104,8 +104,7 @@ class DefaultMainStyling(StylingAnalysis):
         header_name = column_metadata.get('orig_col_name', col)
         has_histogram = any(
             pr.get('displayer_args', {}).get('displayer') == 'histogram'
-            for pr in kls.pinned_rows
-        )
+            for pr in kls.pinned_rows)
         min_w = estimate_min_width_px(disp, header_name, column_metadata, has_histogram)
         base_config['ag_grid_specs'] = {'minWidth': min_w}
 
@@ -135,8 +134,7 @@ class DefaultSummaryStatsStyling(DefaultMainStyling):
         inherit_('2nd_freq'),
         inherit_('3rd_freq'),
         inherit_('4th_freq'),
-        inherit_('5th_freq')
-    ]
+        inherit_('5th_freq')]
 
     df_display_name = "summary"
     data_key = "empty"
@@ -152,5 +150,4 @@ class CleaningDetailStyling(DefaultMainStyling):
         float_("strip_int_parse_frac"),
         float_("us_dates_frac"),
         obj_("cleaning_name"),
-        obj_("null_count"),
-    ]
+        obj_("null_count")]
