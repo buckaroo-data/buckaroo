@@ -103,6 +103,14 @@ test = [
     "codecov"
 ]
 
+# Minimal install for the XorqStatPipeline against an ibis.Table.
+# Sufficient for a single-backend (typically DuckDB) workflow.
+ibis = [
+    "ibis-framework[duckdb]>=9.0.0",
+]
+# Full xorq stack — adds cross-backend compute on top of the ibis layer.
+# Only needed if you actually use xorq's multi-backend features; the
+# pipeline itself only imports ibis.
 xorq = [
     "ibis-framework[duckdb]>=9.0.0",
     "xorq>=0.1.0",

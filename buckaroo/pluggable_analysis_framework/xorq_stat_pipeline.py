@@ -26,6 +26,7 @@ from .stat_func import XorqColumn, XorqTable, XorqExecute, RAW_MARKER_TYPES, Sta
 from .stat_pipeline import _execute_stat_func, _find_v1_class, _normalize_inputs
 from .stat_result import Err, Ok, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_column_dag, build_typed_dag
+from .utils import PERVERSE_DF
 
 # Re-export marker types so users only need to import from this module.
 __all__ = ["XorqStatPipeline", "XorqColumn", "XorqTable", "XorqExecute"]
@@ -95,11 +96,14 @@ class XorqStatPipeline:
         {"orig_col_name", "rewritten_col_name", "dtype", "length", "min", "max"}
     )
 
-    def __init__(self, stat_funcs: list, backend: Any = None):
+    def __init__(
+        self, stat_funcs: list, backend: Any = None, unit_test: bool = True
+    ):
         if not HAS_IBIS:
             raise ImportError(
                 "ibis-framework is required for XorqStatPipeline. "
-                "Install with: pip install buckaroo[xorq]"
+                "Install with: pip install buckaroo[ibis] (minimal) "
+                "or buckaroo[xorq] (full xorq stack)"
             )
 
         self.all_stat_funcs = _normalize_inputs(stat_funcs)
@@ -116,6 +120,12 @@ class XorqStatPipeline:
             for sk in sf.provides:
                 self._key_to_func[sk.name] = sf
 
+        # Smoke-test against an ibis.memtable wrapping PERVERSE_DF — catches
+        # dumb stat bugs (typos, wrong dtype assumptions) at construction
+        # time. Result is captured, never raised, mirroring StatPipeline.
+        if unit_test:
+            self._unit_test_result = self.unit_test()
+
     @property
     def ordered_a_objs(self):
         """The original input list, preserved for DataFlow.add_analysis."""
@@ -125,6 +135,33 @@ class XorqStatPipeline:
         if self.backend is not None:
             return self.backend.execute(query)
         return query.execute()
+
+    def unit_test(self) -> Tuple[bool, List[StatError]]:
+        """Run pipeline against PERVERSE_DF wrapped as an ibis memtable.
+
+        Mirrors ``StatPipeline.unit_test``. Returns ``(True, [])`` on a clean
+        run; ``(False, errors)`` if any stat raised. A construction-time
+        check that catches typos / wrong-dtype assumptions before real data
+        hits the pipeline.
+
+        Internal validation runs against the in-memory backend bound to
+        ``ibis.memtable`` regardless of whatever ``backend=`` the caller
+        passed in — the user's backend is for their queries, not ours.
+        """
+        saved_backend = self.backend
+        self.backend = None
+        try:
+            import ibis
+
+            table = ibis.memtable(PERVERSE_DF)
+            _, errors = self.process_table(table)
+            if not errors:
+                return True, []
+            return False, errors
+        except Exception:
+            return False, []
+        finally:
+            self.backend = saved_backend
 
     def process_table(self, table) -> Tuple[SDType, List[StatError]]:
         schema = table.schema()
