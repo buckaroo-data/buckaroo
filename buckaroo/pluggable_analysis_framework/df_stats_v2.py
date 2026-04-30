@@ -121,7 +121,7 @@ class PlDfStatsV2:
             self.ap.print_errors(errors + self.stat_errors)
 
 
-class IbisDfStatsV2:
+class XorqDfStatsV2:
     """Drop-in DfStats wrapper for ``ibis.Table`` inputs.
 
     Mirrors the ``DfStatsV2`` / ``PlDfStatsV2`` surface (``.sdf``, ``.errs``,
@@ -129,7 +129,7 @@ class IbisDfStatsV2:
     ``CustomizableDataflow`` and any other DfStats consumer can run
     against an ibis Table without changes.
 
-    Stats execute through ``IbisStatPipeline`` — a single batched
+    Stats execute through ``XorqStatPipeline`` — a single batched
     ``table.aggregate(...)`` query plus per-column histogram queries —
     pushing computation to the backend instead of materialising the
     entire table.
@@ -138,15 +138,15 @@ class IbisDfStatsV2:
     @classmethod
     def verify_analysis_objects(cls, objs):
         # Lazy import so the rest of df_stats_v2 doesn't require ibis.
-        from .ibis_stat_pipeline import IbisStatPipeline
+        from .xorq_stat_pipeline import XorqStatPipeline
 
-        IbisStatPipeline(objs)
+        XorqStatPipeline(objs)
 
     def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False):
-        from .ibis_stat_pipeline import IbisStatPipeline
+        from .xorq_stat_pipeline import XorqStatPipeline
 
         self.table = table
-        self.ap = IbisStatPipeline(col_analysis_objs)
+        self.ap = XorqStatPipeline(col_analysis_objs)
         self.operating_df_name = operating_df_name
         self.debug = debug
         self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)

@@ -1,25 +1,25 @@
-"""v2 ibis stat functions for the pluggable analysis framework.
+"""v2 xorq/ibis stat functions for the pluggable analysis framework.
 
 Mirrors ``pd_stats_v2`` but using ibis expressions executed via
-``IbisStatPipeline`` against an ``ibis.Table`` (DuckDB, Postgres, Snowflake,
+``XorqStatPipeline`` against an ``ibis.Table`` (DuckDB, Postgres, Snowflake,
 etc.) — typically through xorq for cross-backend compute.
 
 Stat layout:
   - **Typing**: derived from the schema dtype string (no query).
-  - **Batched aggregates** (``IbisColumn`` parameter, return ibis.Expr):
+  - **Batched aggregates** (``XorqColumn`` parameter, return ibis.Expr):
     ``length``, ``null_count``, ``min``, ``max``, ``distinct_count``,
     ``mean``, ``std``, ``median``. Folded into one ``table.aggregate()``.
   - **Computed**: ``non_null_count``, ``nan_per``, ``distinct_per``.
-  - **Histogram**: per-column query against the ``IbisTable``.
+  - **Histogram**: per-column query against the ``XorqTable``.
 
 Usage::
 
-    from buckaroo.customizations.ibis_stats_v2 import IBIS_STATS_V2
-    from buckaroo.pluggable_analysis_framework.ibis_stat_pipeline import (
-        IbisStatPipeline,
+    from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2
+    from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (
+        XorqStatPipeline,
     )
 
-    pipeline = IbisStatPipeline(IBIS_STATS_V2)
+    pipeline = XorqStatPipeline(XORQ_STATS_V2)
     stats, errors = pipeline.process_table(ibis_table)
 """
 
@@ -28,9 +28,9 @@ from __future__ import annotations
 import math
 from typing import TypedDict
 
-from buckaroo.pluggable_analysis_framework.ibis_stat_pipeline import (
-    IbisColumn,
-    IbisTable,
+from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (
+    XorqColumn,
+    XorqTable,
 )
 from buckaroo.pluggable_analysis_framework.stat_func import stat
 
@@ -127,7 +127,7 @@ class _LengthResult(TypedDict):
 
 
 @stat()
-def base_length(col: IbisColumn) -> _LengthResult:
+def base_length(col: XorqColumn) -> _LengthResult:
     # `SUM` over an empty column returns NULL, not 0 — coalesce so an
     # empty table reports length=0 instead of None.
     return (col.count() + col.isnull().sum().coalesce(0)).cast("int64")
@@ -138,7 +138,7 @@ class _NullCountResult(TypedDict):
 
 
 @stat()
-def base_null_count(col: IbisColumn) -> _NullCountResult:
+def base_null_count(col: XorqColumn) -> _NullCountResult:
     return col.isnull().sum().coalesce(0).cast("int64")
 
 
@@ -147,7 +147,7 @@ class _MinResult(TypedDict):
 
 
 @stat(column_filter=_is_numeric_ibis)
-def base_min(col: IbisColumn) -> _MinResult:
+def base_min(col: XorqColumn) -> _MinResult:
     return col.min().cast("float64")
 
 
@@ -156,7 +156,7 @@ class _MaxResult(TypedDict):
 
 
 @stat(column_filter=_is_numeric_ibis)
-def base_max(col: IbisColumn) -> _MaxResult:
+def base_max(col: XorqColumn) -> _MaxResult:
     return col.max().cast("float64")
 
 
@@ -165,7 +165,7 @@ class _DistinctResult(TypedDict):
 
 
 @stat()
-def base_distinct_count(col: IbisColumn) -> _DistinctResult:
+def base_distinct_count(col: XorqColumn) -> _DistinctResult:
     return col.nunique().cast("int64")
 
 
@@ -174,7 +174,7 @@ class _MeanResult(TypedDict):
 
 
 @stat(column_filter=_is_numeric_not_bool)
-def base_mean(col: IbisColumn) -> _MeanResult:
+def base_mean(col: XorqColumn) -> _MeanResult:
     return col.mean().cast("float64")
 
 
@@ -183,7 +183,7 @@ class _StdResult(TypedDict):
 
 
 @stat(column_filter=_is_numeric_not_bool)
-def base_std(col: IbisColumn) -> _StdResult:
+def base_std(col: XorqColumn) -> _StdResult:
     return col.std().cast("float64")
 
 
@@ -192,12 +192,12 @@ class _MedianResult(TypedDict):
 
 
 @stat(column_filter=_is_numeric_not_bool)
-def base_median(col: IbisColumn) -> _MedianResult:
+def base_median(col: XorqColumn) -> _MedianResult:
     return col.approx_median().cast("float64")
 
 
 # ============================================================
-# Computed (no IbisColumn dep) — derive from already-resolved scalars
+# Computed (no XorqColumn dep) — derive from already-resolved scalars
 # ============================================================
 
 
@@ -294,7 +294,7 @@ def _categorical_histogram(table, col):
 
 @stat(default=[])
 def histogram(
-    table: IbisTable,
+    table: XorqTable,
     orig_col_name: str,
     is_numeric: bool,
     is_bool: bool,
@@ -328,10 +328,10 @@ def histogram(
 
 
 # ============================================================
-# Convenience list — drop into IbisStatPipeline(IBIS_STATS_V2)
+# Convenience list — drop into XorqStatPipeline(XORQ_STATS_V2)
 # ============================================================
 
-IBIS_STATS_V2 = [
+XORQ_STATS_V2 = [
     typing_stats,
     _type,
     base_length,

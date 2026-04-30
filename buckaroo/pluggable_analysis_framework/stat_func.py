@@ -59,21 +59,21 @@ class RawDataFrame:
     pass
 
 
-class IbisColumn:
+class XorqColumn:
     """Marker type: 'give me table[col] as an ibis column expression'.
 
-    Used by IbisStatPipeline's batch-aggregate phase. Functions taking an
-    IbisColumn are expected to return an ibis.Expr that the pipeline folds
+    Used by XorqStatPipeline's batch-aggregate phase. Functions taking an
+    XorqColumn are expected to return an ibis.Expr that the pipeline folds
     into a single table.aggregate() query.
     """
 
     pass
 
 
-class IbisTable:
+class XorqTable:
     """Marker type: 'give me the full ibis.Table'.
 
-    Used by IbisStatPipeline for stats that need to run their own per-column
+    Used by XorqStatPipeline for stats that need to run their own per-column
     query (e.g. histograms — group_by + aggregate cannot be folded into the
     main batch).
     """
@@ -81,7 +81,7 @@ class IbisTable:
     pass
 
 
-RAW_MARKER_TYPES = (RawSeries, SampledSeries, RawDataFrame, IbisColumn, IbisTable)
+RAW_MARKER_TYPES = (RawSeries, SampledSeries, RawDataFrame, XorqColumn, XorqTable)
 
 
 # ---------------------------------------------------------------------------

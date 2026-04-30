@@ -18,7 +18,7 @@ from .stat_func import (
     RawSeries,
     SampledSeries,
     RawDataFrame,
-    IbisTable,
+    XorqTable,
     RAW_MARKER_TYPES,
     MISSING,
     collect_stat_funcs,
@@ -79,7 +79,7 @@ def _execute_stat_func(
     raw_series=None,
     sampled_series=None,
     raw_dataframe=None,
-    ibis_table=None,
+    xorq_table=None,
 ) -> None:
     """Execute a single StatFunc, updating the accumulator in place.
 
@@ -135,8 +135,8 @@ def _execute_stat_func(
         if req.type is RawDataFrame:
             kwargs[req.name] = raw_dataframe
             continue
-        if req.type is IbisTable:
-            kwargs[req.name] = ibis_table
+        if req.type is XorqTable:
+            kwargs[req.name] = xorq_table
             continue
 
         # Look up in accumulator

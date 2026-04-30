@@ -1,12 +1,12 @@
-"""Ibis-backed stat pipeline for the v2 framework.
+"""Xorq-backed stat pipeline for the v2 framework.
 
 Two-phase execution:
-  1. Batch aggregate — every @stat with an IbisColumn parameter contributes
+  1. Batch aggregate — every @stat with an XorqColumn parameter contributes
      one ibis scalar expression. All such expressions across all columns
      are folded into a single ``table.aggregate(...)`` query and executed
      once.
   2. Per-column post-batch — computed stats (deps only on other stats) and
-     IbisTable-param stats (e.g. histograms that need their own query)
+     XorqTable-param stats (e.g. histograms that need their own query)
      run through the standard typed-DAG executor with results written into
      the per-column accumulator.
 
@@ -22,13 +22,13 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 from .col_analysis import ErrDict, SDType
-from .stat_func import IbisColumn, IbisTable, RAW_MARKER_TYPES, StatFunc
+from .stat_func import XorqColumn, XorqTable, RAW_MARKER_TYPES, StatFunc
 from .stat_pipeline import _execute_stat_func, _find_v1_class, _normalize_inputs
 from .stat_result import Err, Ok, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_column_dag, build_typed_dag
 
 # Re-export marker types so users only need to import from this module.
-__all__ = ["IbisStatPipeline", "IbisColumn", "IbisTable"]
+__all__ = ["XorqStatPipeline", "XorqColumn", "XorqTable"]
 
 try:
     import ibis  # noqa: F401
@@ -57,13 +57,13 @@ def _to_python_scalar(val):
 
 
 def _is_batch_func(sf: StatFunc) -> bool:
-    """A batch-phase func has an IbisColumn parameter and only raw/external deps.
+    """A batch-phase func has an XorqColumn parameter and only raw/external deps.
 
     Such a function returns an ibis.Expr that the pipeline can fold into a
     single ``table.aggregate(...)`` call.
     """
-    has_ibis_col = any(r.type is IbisColumn for r in sf.requires)
-    if not has_ibis_col:
+    has_xorq_col = any(r.type is XorqColumn for r in sf.requires)
+    if not has_xorq_col:
         return False
     for r in sf.requires:
         if r.type in RAW_MARKER_TYPES:
@@ -73,7 +73,7 @@ def _is_batch_func(sf: StatFunc) -> bool:
     return True
 
 
-class IbisStatPipeline:
+class XorqStatPipeline:
     """v2 stat pipeline for ``ibis.Table`` inputs.
 
     Accepts the same kinds of inputs as ``StatPipeline``:
@@ -91,7 +91,7 @@ class IbisStatPipeline:
     def __init__(self, stat_funcs: list, backend: Any = None):
         if not HAS_IBIS:
             raise ImportError(
-                "ibis-framework is required for IbisStatPipeline. "
+                "ibis-framework is required for XorqStatPipeline. "
                 "Install with: pip install buckaroo[xorq]"
             )
 
@@ -136,13 +136,13 @@ class IbisStatPipeline:
         for sf in self.ordered_stat_funcs:
             if not _is_batch_func(sf):
                 continue
-            ibis_col_param = next(r.name for r in sf.requires if r.type is IbisColumn)
+            xorq_col_param = next(r.name for r in sf.requires if r.type is XorqColumn)
             for col in columns:
                 col_dtype = schema[col]
                 if sf.column_filter is not None and not sf.column_filter(col_dtype):
                     continue
                 try:
-                    expr = sf.func(**{ibis_col_param: table[col]})
+                    expr = sf.func(**{xorq_col_param: table[col]})
                 except Exception as e:
                     for sk in sf.provides:
                         accumulators[col][sk.name] = Err(
@@ -224,7 +224,7 @@ class IbisStatPipeline:
                     raw_series=None,
                     sampled_series=None,
                     raw_dataframe=None,
-                    ibis_table=table,
+                    xorq_table=table,
                 )
 
             col_key_to_func: Dict[str, StatFunc] = {}
@@ -241,7 +241,7 @@ class IbisStatPipeline:
     def process_table_v1_compat(self, table) -> Tuple[SDType, ErrDict]:
         """Run process_table and convert errors to v1 ErrDict shape.
 
-        Used by IbisDfStatsV2 / DataFlow consumers expecting the same
+        Used by XorqDfStatsV2 / DataFlow consumers expecting the same
         ``{(col, stat): (Exception, kls)}`` shape that AnalysisPipeline
         produced.
         """
