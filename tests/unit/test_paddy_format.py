@@ -386,6 +386,88 @@ def dedent(s: str) -> str:
             """,
         ),
         (
+            "comment_in_args_blocks_collapse_close_stays_at_col0",
+            # A comment in mid-args whitespace blocks the collapse rule.
+            # The close bracket sat at col 0 in the source — re-indent
+            # must NOT drift it to col 4. Today it does (reindent runs
+            # over the last arg's clean comma.whitespace_after even when
+            # an earlier arg's comma carries a comment). The PR docstring
+            # promises "we never eat a comment"; widening that to "we
+            # don't relocate the close when a comment blocked collapse"
+            # is the fix.
+            """
+            func(
+                a,  # note
+                b,
+            )
+            """,
+            """
+            func(
+                a,  # note
+                b,
+            )
+            """,
+        ),
+        (
+            "kwonly_only_multiline_collapses",
+            # _collapse_funcdef only walks Parameters.params today, so
+            # `*, a, b,` (where a/b live in kwonly_params and the `*`
+            # marker lives in star_arg) is left untouched. Should
+            # collapse to a single line.
+            """
+            def f(
+                *,
+                a,
+                b,
+            ):
+                pass
+            """,
+            """
+            def f(*, a, b):
+                pass
+            """,
+        ),
+        (
+            "kwonly_after_regular_multiline_collapses",
+            # Mixed regular + kwonly: today produces a half-collapsed
+            # `def f(a, b, *,\n    c,\n):` because only `params.params`
+            # gets touched, leaving kwonly_params + their separator on
+            # their own lines.
+            """
+            def f(
+                a,
+                b,
+                *,
+                c,
+            ):
+                pass
+            """,
+            """
+            def f(a, b, *, c):
+                pass
+            """,
+        ),
+        (
+            "posonly_multiline_collapses",
+            # posonly_params (a, b) are in their own field; today they
+            # get left multi-line while the regular param `c` collapses
+            # next to `/`, producing the bizarre
+            # `def f(a,\n    b,\n    /,\n    c):`.
+            """
+            def f(
+                a,
+                b,
+                /,
+                c,
+            ):
+                pass
+            """,
+            """
+            def f(a, b, /, c):
+                pass
+            """,
+        ),
+        (
             "unsplittable_single_arg_overflows",
             # Single arg > 120 chars; nothing to break on, stays as-is.
             "result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)\n",
