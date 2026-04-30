@@ -753,9 +753,9 @@ def _reindent_pass(src: str) -> str:
 
 
 def _atom_text(node) -> str | None:
-    """Render a value node (Integer / Float / negated number / Tuple of those)
-    to its source-text form. Returns None if the node is not a recognised
-    atom we can table-format."""
+    """Render a value node (Integer / Float / negated number / Tuple / Dict /
+    SimpleString / Name) to its source-text form. Returns None if the node
+    is not a recognised atom we can table-format."""
     if isinstance(node, (cst.Integer, cst.Float)):
         return node.value
     if isinstance(node, cst.UnaryOperation) and isinstance(
@@ -771,6 +771,21 @@ def _atom_text(node) -> str | None:
         if any(x is None for x in items):
             return None
         return "(" + ", ".join(items) + ")"
+    if isinstance(node, cst.SimpleString):
+        return node.value
+    if isinstance(node, cst.Name):
+        return node.value
+    if isinstance(node, cst.Dict):
+        items = []
+        for de in node.elements:
+            if not isinstance(de, cst.DictElement):
+                return None
+            k = _atom_text(de.key)
+            v = _atom_text(de.value)
+            if k is None or v is None:
+                return None
+            items.append(f"{k}: {v}")
+        return "{" + ", ".join(items) + "}"
     return None
 
 
@@ -1011,6 +1026,87 @@ def _table_format_multi_col(node: cst.List, line_indent: int) -> "cst.List | Non
     )
 
 
+def _table_format_dict_rows(node: cst.List, line_indent: int) -> "cst.List | None":
+    """Build a new List where each Dict element occupies its own line, with
+    value columns aligned across rows. All dicts must share the same keys
+    in the same order; values must be atom-rendered. Returns None otherwise."""
+    elements = list(node.elements)
+    dicts = [e.value for e in elements]
+    if not all(isinstance(d, cst.Dict) for d in dicts):
+        return None
+
+    keys_per_dict: list[tuple[str, ...]] = []
+    for d in dicts:
+        keys: list[str] = []
+        for de in d.elements:
+            if not isinstance(de, cst.DictElement):
+                return None
+            k = _atom_text(de.key)
+            if k is None:
+                return None
+            keys.append(k)
+        keys_per_dict.append(tuple(keys))
+    if len(set(keys_per_dict)) != 1:
+        return None  # mismatched keys
+    n_cols = len(keys_per_dict[0])
+    if n_cols == 0:
+        return None
+
+    col_values: list[list[str]] = [[] for _ in range(n_cols)]
+    for d in dicts:
+        for c, de in enumerate(d.elements):
+            atom = _atom_text(de.value)
+            if atom is None:
+                return None
+            col_values[c].append(atom)
+    col_pads = [_column_padding(vs) for vs in col_values]
+
+    cont_col = line_indent + 4
+    new_elements = []
+    for r_idx, (el, d) in enumerate(zip(elements, dicts)):
+        is_last = r_idx == len(elements) - 1
+        new_d_elems = []
+        for c, de in enumerate(d.elements):
+            leading, trailing = col_pads[c][r_idx]
+            is_last_col = c == n_cols - 1
+            # Value's leading pad lives in whitespace_after_colon (after
+            # the standard one space).
+            new_ws_after_colon = cst.SimpleWhitespace(" " + " " * leading)
+            if is_last_col:
+                inner_comma = cst.MaybeSentinel.DEFAULT
+            else:
+                inner_comma = cst.Comma(
+                    whitespace_before=cst.SimpleWhitespace(" " * trailing),
+                    whitespace_after=cst.SimpleWhitespace(" "),
+                )
+            new_d_elems.append(
+                de.with_changes(
+                    whitespace_before_colon=cst.SimpleWhitespace(""),
+                    whitespace_after_colon=new_ws_after_colon,
+                    comma=inner_comma,
+                )
+            )
+        last_trailing = col_pads[-1][r_idx][1]
+        new_d = d.with_changes(
+            elements=new_d_elems,
+            lbrace=d.lbrace.with_changes(whitespace_after=cst.SimpleWhitespace("")),
+            rbrace=d.rbrace.with_changes(
+                whitespace_before=cst.SimpleWhitespace(" " * last_trailing)
+            ),
+        )
+        outer_comma = cst.Comma(
+            whitespace_before=cst.SimpleWhitespace(""),
+            whitespace_after=_row_break_ws(line_indent if is_last else cont_col),
+        )
+        new_elements.append(el.with_changes(value=new_d, comma=outer_comma))
+
+    return node.with_changes(
+        elements=new_elements,
+        lbracket=node.lbracket.with_changes(whitespace_after=_row_break_ws(cont_col)),
+        rbracket=node.rbracket.with_changes(whitespace_before=cst.SimpleWhitespace("")),
+    )
+
+
 class _TableFormatter(cst.CSTTransformer):
     def __init__(self, targets, positions, lines, budget):
         super().__init__()
@@ -1040,7 +1136,11 @@ class _TableFormatter(cst.CSTTransformer):
 
         elements = updated.elements
         if all(_atom_text(e.value) is not None for e in elements):
-            if all(isinstance(e.value, cst.Tuple) for e in elements):
+            if all(isinstance(e.value, cst.Dict) for e in elements):
+                rows = _table_format_dict_rows(updated, line_indent)
+                if rows is not None:
+                    return rows
+            elif all(isinstance(e.value, cst.Tuple) for e in elements):
                 multi = _table_format_multi_col(updated, line_indent)
                 if multi is not None:
                     return multi
