@@ -76,6 +76,26 @@ def _items_collapsible(items, open_ws, post_attr) -> bool:
     return True
 
 
+def _iter_param_slots(params: cst.Parameters):
+    """Yield (kind, item) over every comma-bearing slot in a Parameters
+    node, in source order: posonly_params, posonly_ind (`/`), params,
+    star_arg (`*` or `*args`), kwonly_params, star_kwarg (`**kwargs`).
+    Each slot has a `comma` field; only Param has `whitespace_after_param`.
+    Empty / MaybeSentinel.DEFAULT slots are skipped."""
+    for p in params.posonly_params:
+        yield "posonly", p
+    if isinstance(params.posonly_ind, cst.ParamSlash):
+        yield "posslash", params.posonly_ind
+    for p in params.params:
+        yield "param", p
+    if isinstance(params.star_arg, (cst.ParamStar, cst.Param)):
+        yield "star", params.star_arg
+    for p in params.kwonly_params:
+        yield "kwonly", p
+    if params.star_kwarg is not None:
+        yield "starkwarg", params.star_kwarg
+
+
 def _collapse_items(items, post_attr, preserve_singleton_comma: bool = False):
     """Rebuild items as a single-line sequence: every non-last comma
     becomes `, `, last comma drops to MaybeSentinel.DEFAULT.
@@ -147,19 +167,57 @@ class _PaddyTransformer(cst.CSTTransformer):
 
     def _collapse_funcdef(self, updated):
         params = updated.params
-        plist = list(params.params)
-        if not plist:
+        slots = list(_iter_param_slots(params))
+        if not slots:
             if _is_clean_pw(updated.whitespace_before_params):
                 return updated.with_changes(whitespace_before_params=_empty())
             return None
-        if not _items_collapsible(
-            plist, updated.whitespace_before_params, "whitespace_after_param"
-        ):
+        # Need a trailing comma on the very last slot to trigger collapse.
+        last_kind, last_item = slots[-1]
+        if not isinstance(last_item.comma, cst.Comma):
             return None
-        return updated.with_changes(
-            params=params.with_changes(
-                params=_collapse_items(plist, "whitespace_after_param")
+        if not _is_clean_ws(updated.whitespace_before_params):
+            return None
+        for _, it in slots:
+            if isinstance(it.comma, cst.Comma) and not _is_clean_ws(
+                it.comma.whitespace_after
+            ):
+                return None
+            if isinstance(it, cst.Param) and not _is_clean_ws(
+                it.whitespace_after_param
+            ):
+                return None
+        new_slots = []
+        for i, (kind, it) in enumerate(slots):
+            is_last = i == len(slots) - 1
+            if is_last:
+                changes = {"comma": cst.MaybeSentinel.DEFAULT}
+            else:
+                new_comma = (
+                    it.comma.with_changes(whitespace_after=_space())
+                    if isinstance(it.comma, cst.Comma)
+                    else it.comma
+                )
+                changes = {"comma": new_comma}
+            if isinstance(it, cst.Param):
+                changes["whitespace_after_param"] = _empty()
+            new_slots.append((kind, it.with_changes(**changes)))
+        new_params = params.with_changes(
+            posonly_params=tuple(it for k, it in new_slots if k == "posonly"),
+            posonly_ind=next(
+                (it for k, it in new_slots if k == "posslash"), params.posonly_ind
             ),
+            params=tuple(it for k, it in new_slots if k == "param"),
+            star_arg=next(
+                (it for k, it in new_slots if k == "star"), params.star_arg
+            ),
+            kwonly_params=tuple(it for k, it in new_slots if k == "kwonly"),
+            star_kwarg=next(
+                (it for k, it in new_slots if k == "starkwarg"), params.star_kwarg
+            ),
+        )
+        return updated.with_changes(
+            params=new_params,
             whitespace_before_params=_empty(),
         )
 
@@ -597,9 +655,14 @@ class _Reindenter(cst.CSTTransformer):
         if indent is None:
             return updated
         new_args = []
-        for arg in updated.args:
+        last_idx = len(updated.args) - 1
+        for i, arg in enumerate(updated.args):
             new_arg = arg
-            if isinstance(arg.comma, cst.Comma):
+            # Skip the last arg's comma: its whitespace_after sits before
+            # the close bracket, not before another arg. When a comment
+            # blocked collapse and left the close on its own line at the
+            # user's chosen indent, reindenting here would relocate it.
+            if isinstance(arg.comma, cst.Comma) and i != last_idx:
                 new_arg = new_arg.with_changes(
                     comma=arg.comma.with_changes(
                         whitespace_after=_reindent_pw(
@@ -622,9 +685,10 @@ class _Reindenter(cst.CSTTransformer):
         if indent is None:
             return updated
         new_elements = []
-        for el in updated.elements:
+        last_idx = len(updated.elements) - 1
+        for i, el in enumerate(updated.elements):
             new_el = el
-            if isinstance(el.comma, cst.Comma):
+            if isinstance(el.comma, cst.Comma) and i != last_idx:
                 new_el = el.with_changes(
                     comma=el.comma.with_changes(
                         whitespace_after=_reindent_pw(el.comma.whitespace_after, indent)
