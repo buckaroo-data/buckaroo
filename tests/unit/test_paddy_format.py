@@ -208,6 +208,42 @@ def dedent(s: str) -> str:
             """,
         ),
         (
+            "table_format_ints_only_wrap",
+            # Int-only column: max_int_width = 5 (for 40000), max_frac = 0,
+            # so each cell is 5 chars right-aligned. Sep is ", " (2 chars),
+            # decimal-equivalent stride is 7. 24 items = 16 on row 1 + 8 on
+            # row 2. The "least significant digit" (rightmost char of each
+            # int) lines up across rows at fixed columns.
+            """
+            # table-format
+            data = [10, 200, 3000, 40000, 10, 200, 3000, 40000, 10, 200, 3000, 40000, 10, 200, 3000, 40000, 10, 200, 3000, 40000, 10, 200, 3000, 40000]
+            """,
+            """
+            # table-format
+            data = [   10,   200,  3000, 40000,    10,   200,  3000, 40000,    10,   200,  3000, 40000,    10,   200,  3000, 40000,
+                       10,   200,  3000, 40000,    10,   200,  3000, 40000]
+            """,
+        ),
+        (
+            "table_format_mixed_ints_floats_wrap",
+            # Mixed ints and floats long enough to wrap: max_int_width = 2
+            # (for 30), max_frac_width = 3 (for 4.567). Cell width = 6.
+            # Ints sitting in a column with floats get trailing padding to
+            # fill the cell (so "1" renders as " 1    " — 1 leading +
+            # "1" + 4 trailing for the missing ".XXX"). Decimal column
+            # is at offset 2 within each cell, lined up across rows at
+            # an 8-char stride.
+            """
+            # table-format
+            data = [1, 2.5, 30, 4.567, 1, 2.5, 30, 4.567, 1, 2.5, 30, 4.567, 1, 2.5, 30, 4.567, 1, 2.5, 30, 4.567, 1, 2.5, 30, 4.567]
+            """,
+            """
+            # table-format
+            data = [ 1    ,  2.5  , 30    ,  4.567,  1    ,  2.5  , 30    ,  4.567,  1    ,  2.5  , 30    ,  4.567,  1    ,  2.5  ,
+                    30    ,  4.567,  1    ,  2.5  , 30    ,  4.567,  1    ,  2.5  , 30    ,  4.567]
+            """,
+        ),
+        (
             "table_format_mixed_ints_floats",
             # Mixed ints and floats: ints align by least-significant digit
             # (the position the decimal point would occupy). Decimal column
