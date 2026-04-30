@@ -33,7 +33,9 @@ def _python_sources():
 def test_no_raw_ibis_imports_in_source():
     offenders: list[tuple[Path, int, str]] = []
     for path in _python_sources():
-        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
             if _FORBIDDEN.match(line):
                 offenders.append((path.relative_to(_PKG_ROOT.parent), lineno, line))
     if offenders:
