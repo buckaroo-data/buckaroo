@@ -53,6 +53,56 @@ def _space():
     return cst.SimpleWhitespace(" ")
 
 
+def _items_collapsible(items, open_ws, post_attr) -> bool:
+    """Whether a comma-separated item list (Args, Params, Elements, or
+    ImportAliases) can be collapsed to a single line: trailing comma
+    present and no comments anywhere in the open-side whitespace, the
+    per-item comma whitespace, or the per-item post whitespace (when the
+    item type carries one — Arg.whitespace_after_arg /
+    Param.whitespace_after_param)."""
+    if not items:
+        return False
+    if not isinstance(items[-1].comma, cst.Comma):
+        return False
+    if not _is_clean_ws(open_ws):
+        return False
+    for it in items:
+        if isinstance(it.comma, cst.Comma) and not _is_clean_ws(
+            it.comma.whitespace_after
+        ):
+            return False
+        if post_attr is not None and not _is_clean_ws(getattr(it, post_attr)):
+            return False
+    return True
+
+
+def _collapse_items(items, post_attr, preserve_singleton_comma: bool = False):
+    """Rebuild items as a single-line sequence: every non-last comma
+    becomes `, `, last comma drops to MaybeSentinel.DEFAULT.
+    `post_attr`, when given, is cleared on every item.
+    `preserve_singleton_comma` keeps the trailing comma on a length-1
+    sequence — required for tuples (`(x,)` vs `(x)` differ in meaning)."""
+    new_items = []
+    for i, it in enumerate(items):
+        is_last = i == len(items) - 1
+        if is_last and preserve_singleton_comma and len(items) == 1:
+            new_items.append(it)
+            continue
+        if is_last:
+            changes = {"comma": cst.MaybeSentinel.DEFAULT}
+        else:
+            new_comma = (
+                it.comma.with_changes(whitespace_after=_space())
+                if isinstance(it.comma, cst.Comma)
+                else it.comma
+            )
+            changes = {"comma": new_comma}
+        if post_attr is not None:
+            changes[post_attr] = _empty()
+        new_items.append(it.with_changes(**changes))
+    return new_items
+
+
 class _PaddyTransformer(cst.CSTTransformer):
     # ----- Call -----
 
@@ -67,41 +117,12 @@ class _PaddyTransformer(cst.CSTTransformer):
             if _is_clean_pw(updated.whitespace_before_args):
                 return updated.with_changes(whitespace_before_args=_empty())
             return None
-        last = updated.args[-1]
-        if not isinstance(last.comma, cst.Comma):
+        if not _items_collapsible(
+            updated.args, updated.whitespace_before_args, "whitespace_after_arg"
+        ):
             return None
-        if not _is_clean_ws(updated.whitespace_before_args):
-            return None
-        for a in updated.args:
-            if isinstance(a.comma, cst.Comma) and not _is_clean_ws(
-                a.comma.whitespace_after
-            ):
-                return None
-            if not _is_clean_ws(a.whitespace_after_arg):
-                return None
-        new_args = []
-        for i, a in enumerate(updated.args):
-            if i == len(updated.args) - 1:
-                new_args.append(
-                    a.with_changes(
-                        comma=cst.MaybeSentinel.DEFAULT,
-                        whitespace_after_arg=_empty(),
-                    )
-                )
-            else:
-                new_comma = (
-                    a.comma.with_changes(whitespace_after=_space())
-                    if isinstance(a.comma, cst.Comma)
-                    else a.comma
-                )
-                new_args.append(
-                    a.with_changes(
-                        comma=new_comma,
-                        whitespace_after_arg=_empty(),
-                    )
-                )
         return updated.with_changes(
-            args=new_args,
+            args=_collapse_items(updated.args, "whitespace_after_arg"),
             whitespace_before_args=_empty(),
         )
 
@@ -131,41 +152,14 @@ class _PaddyTransformer(cst.CSTTransformer):
             if _is_clean_pw(updated.whitespace_before_params):
                 return updated.with_changes(whitespace_before_params=_empty())
             return None
-        last = plist[-1]
-        if not isinstance(last.comma, cst.Comma):
+        if not _items_collapsible(
+            plist, updated.whitespace_before_params, "whitespace_after_param"
+        ):
             return None
-        if not _is_clean_ws(updated.whitespace_before_params):
-            return None
-        for p in plist:
-            if isinstance(p.comma, cst.Comma) and not _is_clean_ws(
-                p.comma.whitespace_after
-            ):
-                return None
-            if not _is_clean_ws(p.whitespace_after_param):
-                return None
-        new_plist = []
-        for i, p in enumerate(plist):
-            if i == len(plist) - 1:
-                new_plist.append(
-                    p.with_changes(
-                        comma=cst.MaybeSentinel.DEFAULT,
-                        whitespace_after_param=_empty(),
-                    )
-                )
-            else:
-                new_comma = (
-                    p.comma.with_changes(whitespace_after=_space())
-                    if isinstance(p.comma, cst.Comma)
-                    else p.comma
-                )
-                new_plist.append(
-                    p.with_changes(
-                        comma=new_comma,
-                        whitespace_after_param=_empty(),
-                    )
-                )
         return updated.with_changes(
-            params=params.with_changes(params=new_plist),
+            params=params.with_changes(
+                params=_collapse_items(plist, "whitespace_after_param")
+            ),
             whitespace_before_params=_empty(),
         )
 
@@ -207,29 +201,12 @@ class _PaddyTransformer(cst.CSTTransformer):
         return updated
 
     def _collapse_importfrom(self, updated):
-        names = list(updated.names)
-        if not _is_clean_ws(updated.lpar.whitespace_after):
-            return None
         if not _is_clean_ws(updated.rpar.whitespace_before):
             return None
-        for n in names:
-            if isinstance(n.comma, cst.Comma) and not _is_clean_ws(
-                n.comma.whitespace_after
-            ):
-                return None
-        new_names = []
-        for i, n in enumerate(names):
-            if i == len(names) - 1:
-                new_names.append(n.with_changes(comma=cst.MaybeSentinel.DEFAULT))
-            else:
-                new_comma = (
-                    n.comma.with_changes(whitespace_after=_space())
-                    if isinstance(n.comma, cst.Comma)
-                    else n.comma
-                )
-                new_names.append(n.with_changes(comma=new_comma))
+        if not _items_collapsible(updated.names, updated.lpar.whitespace_after, None):
+            return None
         return updated.with_changes(
-            names=tuple(new_names),
+            names=tuple(_collapse_items(updated.names, None)),
             lpar=updated.lpar.with_changes(whitespace_after=_empty()),
             rpar=updated.rpar.with_changes(whitespace_before=_empty()),
         )
@@ -273,29 +250,12 @@ class _PaddyTransformer(cst.CSTTransformer):
     def _collapse_collection(
         self, updated, open_attr, close_attr, open_node, close_node
     ):
-        elements = list(updated.elements)
-        if not _is_clean_ws(open_node.whitespace_after):
-            return None
         if not _is_clean_ws(close_node.whitespace_before):
             return None
-        for el in elements:
-            if isinstance(el.comma, cst.Comma) and not _is_clean_ws(
-                el.comma.whitespace_after
-            ):
-                return None
-        new_elements = []
-        for i, el in enumerate(elements):
-            if i == len(elements) - 1:
-                new_elements.append(el.with_changes(comma=cst.MaybeSentinel.DEFAULT))
-            else:
-                new_comma = (
-                    el.comma.with_changes(whitespace_after=_space())
-                    if isinstance(el.comma, cst.Comma)
-                    else el.comma
-                )
-                new_elements.append(el.with_changes(comma=new_comma))
+        if not _items_collapsible(updated.elements, open_node.whitespace_after, None):
+            return None
         return updated.with_changes(
-            elements=new_elements,
+            elements=_collapse_items(updated.elements, None),
             **{
                 open_attr: open_node.with_changes(whitespace_after=_empty()),
                 close_attr: close_node.with_changes(whitespace_before=_empty()),
@@ -324,35 +284,14 @@ class _PaddyTransformer(cst.CSTTransformer):
         return updated
 
     def _collapse_tuple(self, updated, lp, rp):
-        elements = list(updated.elements)
-        if not _is_clean_ws(lp.whitespace_after):
-            return None
         if not _is_clean_ws(rp.whitespace_before):
             return None
-        for el in elements:
-            if isinstance(el.comma, cst.Comma) and not _is_clean_ws(
-                el.comma.whitespace_after
-            ):
-                return None
-        new_elements = []
-        for i, el in enumerate(elements):
-            if i == len(elements) - 1:
-                # Single-element tuple: keep trailing comma (semantic).
-                if len(elements) == 1:
-                    new_elements.append(el)
-                else:
-                    new_elements.append(
-                        el.with_changes(comma=cst.MaybeSentinel.DEFAULT)
-                    )
-            else:
-                new_comma = (
-                    el.comma.with_changes(whitespace_after=_space())
-                    if isinstance(el.comma, cst.Comma)
-                    else el.comma
-                )
-                new_elements.append(el.with_changes(comma=new_comma))
+        if not _items_collapsible(updated.elements, lp.whitespace_after, None):
+            return None
         return updated.with_changes(
-            elements=new_elements,
+            elements=_collapse_items(
+                updated.elements, None, preserve_singleton_comma=True
+            ),
             lpar=[lp.with_changes(whitespace_after=_empty())],
             rpar=[rp.with_changes(whitespace_before=_empty())],
         )
