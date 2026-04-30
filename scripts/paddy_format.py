@@ -64,6 +64,8 @@ class _PaddyTransformer(cst.CSTTransformer):
 
     def _collapse_call(self, updated):
         if not updated.args:
+            if _is_clean_pw(updated.whitespace_before_args):
+                return updated.with_changes(whitespace_before_args=_empty())
             return None
         last = updated.args[-1]
         if not isinstance(last.comma, cst.Comma):
@@ -126,6 +128,8 @@ class _PaddyTransformer(cst.CSTTransformer):
         params = updated.params
         plist = list(params.params)
         if not plist:
+            if _is_clean_pw(updated.whitespace_before_params):
+                return updated.with_changes(whitespace_before_params=_empty())
             return None
         last = plist[-1]
         if not isinstance(last.comma, cst.Comma):
@@ -244,6 +248,10 @@ class _PaddyTransformer(cst.CSTTransformer):
     def _handle_collection(self, updated, open_attr, close_attr):
         open_node = getattr(updated, open_attr)
         close_node = getattr(updated, close_attr)
+        if not updated.elements and _is_clean_pw(open_node.whitespace_after):
+            return updated.with_changes(
+                **{open_attr: open_node.with_changes(whitespace_after=_empty())}
+            )
         if updated.elements and isinstance(updated.elements[-1].comma, cst.Comma):
             c = self._collapse_collection(
                 updated, open_attr, close_attr, open_node, close_node
