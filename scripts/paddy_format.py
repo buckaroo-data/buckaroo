@@ -704,10 +704,11 @@ class _Reindenter(cst.CSTTransformer):
         return self._leave_collection(original, updated)
 
 
-def _reindent_pass(src: str) -> str:
-    """For each multi-line bracket group, re-indent continuation lines to
-    line_indent + 4. Skips groups containing comments in their inner
-    whitespace (handled in _reindent_pw)."""
+def _reindent_pass_once(src: str) -> str:
+    """Single sweep: for each multi-line bracket group, re-indent
+    continuation lines to line_indent + 4 based on the *current* source.
+    Outer groups can shift the line a nested group sits on; that's why
+    `_reindent_pass` wraps this in a fixed-point loop."""
     try:
         module = cst.parse_module(src)
     except cst.ParserSyntaxError:
@@ -732,6 +733,18 @@ def _reindent_pass(src: str) -> str:
         return src
     new_module = module.visit(_Reindenter(targets))
     return new_module.code
+
+
+def _reindent_pass(src: str) -> str:
+    """Re-indent multi-line bracket groups to line_indent + 4. Iterates
+    until the source stops changing — when an outer group's continuation
+    is re-indented, an inner group's reference line shifts, so a single
+    sweep can leave the inner group pointing at the old position."""
+    last = None
+    while src != last:
+        last = src
+        src = _reindent_pass_once(src)
+    return src
 
 
 # ---------------------------------------------------------------------------
@@ -1069,9 +1082,17 @@ def paddy_format(src: str) -> str:
     except cst.ParserSyntaxError:
         return src
     src = module.visit(_PaddyTransformer()).code
-    src = _reindent_pass(src)
-    src = _wrap_pass(src, _LINE_BUDGET)
-    src = _table_format_pass(src, _LINE_BUDGET)
+    # Re-indent and wrap interact: when wrap moves an outer bracket to a
+    # multi-line form, an inner group's reference line shifts and its
+    # continuation indent (line_indent + 4) needs to be re-derived.
+    # Loop until the source stops changing. Table-format is applied last
+    # inside the loop so a directive-marked list always gets the final word.
+    last = None
+    while src != last:
+        last = src
+        src = _reindent_pass(src)
+        src = _wrap_pass(src, _LINE_BUDGET)
+        src = _table_format_pass(src, _LINE_BUDGET)
     return src
 
 
