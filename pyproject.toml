@@ -38,7 +38,8 @@ dependencies = [
     "fastparquet>=2024.5.0,<2026.3.0",  # 2026.3.0 missing x86_64 Linux wheels
     "cloudpickle>=3.1.1",
     "pyarrow>=18.0.0 ; python_version < '3.13'",
-    "pyarrow ; python_version >= '3.13'",
+    "pyarrow ; python_version == '3.13'",
+    "pyarrow>=22.0.0 ; python_version >= '3.14'",  # 21.0.0 has no cp314 wheel
     "numpy >= 2.2.5; python_version >= '3.13'",
 ]
 
