@@ -216,6 +216,13 @@ def test_paddy_format_golden(name, src, expected):
         f"\n--- expected ---\n{dedent(expected)}"
         f"\n--- got ---\n{got}"
     )
+    # Idempotency: a second pass over `got` must be a no-op.
+    again = paddy_format(got)
+    assert again == got, (
+        f"\n--- not idempotent for {name} ---"
+        f"\n--- once ---\n{got}"
+        f"\n--- twice ---\n{again}"
+    )
 
 
 def test_idempotent():

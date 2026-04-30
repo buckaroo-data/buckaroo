@@ -374,18 +374,22 @@ def _newline_indent(col: int):
     )
 
 
-def _greedy_pack(lens: list[int], start_col: int, budget: int) -> list[list[int]]:
+def _greedy_pack(
+    lens: list[int], first_col: int, continuation_col: int, budget: int
+) -> list[list[int]]:
     """Pack item indices into lines. Each non-final line ends with a comma,
-    the final line ends with the close bracket. start_col is the column where
-    the first item is placed (right after the open bracket) and the
-    continuation indent for subsequent lines.
+    the final line ends with the close bracket.
+
+    first_col: column where the first item starts on the first line (right
+    after the open bracket).
+    continuation_col: column where items start on continuation lines.
 
     Returns list of lists of item indices."""
     if not lens:
         return []
     lines: list[list[int]] = []
     cur: list[int] = []
-    col = start_col
+    col = first_col
     for i, alen in enumerate(lens):
         is_last = i == len(lens) - 1
         sep = 0 if not cur else 2  # ", " between items
@@ -395,7 +399,7 @@ def _greedy_pack(lens: list[int], start_col: int, budget: int) -> list[list[int]
         if cur and proposed > budget:
             lines.append(cur)
             cur = [i]
-            col = start_col + alen + (1 if is_last else 0)
+            col = continuation_col + alen + (1 if is_last else 0)
         else:
             cur.append(i)
             col += sep + alen + (1 if is_last else 0)
@@ -465,10 +469,18 @@ def _build_wrapped_elements(elements, groups, indent_col):
 class _NodeWrapper(cst.CSTTransformer):
     """Wraps a single target node (matched by identity) using greedy pack."""
 
-    def __init__(self, target, indent_col: int, module: cst.Module, budget: int):
+    def __init__(
+        self,
+        target,
+        first_col: int,
+        continuation_col: int,
+        module: cst.Module,
+        budget: int,
+    ):
         super().__init__()
         self.target = target
-        self.indent_col = indent_col
+        self.first_col = first_col
+        self.continuation_col = continuation_col
         self.module = module
         self.budget = budget
         self.applied = False
@@ -476,10 +488,10 @@ class _NodeWrapper(cst.CSTTransformer):
     def _wrap_call(self, updated):
         args = list(updated.args)
         lens = [_arg_render_len(self.module, a) for a in args]
-        groups = _greedy_pack(lens, self.indent_col, self.budget)
+        groups = _greedy_pack(lens, self.first_col, self.continuation_col, self.budget)
         if len(groups) <= 1:
             return None
-        new_args = _build_wrapped_args(args, groups, self.indent_col)
+        new_args = _build_wrapped_args(args, groups, self.continuation_col)
         return updated.with_changes(
             args=new_args,
             whitespace_before_args=cst.SimpleWhitespace(""),
@@ -488,10 +500,10 @@ class _NodeWrapper(cst.CSTTransformer):
     def _wrap_collection(self, updated, open_attr, close_attr):
         elements = list(updated.elements)
         lens = [_element_render_len(self.module, e) for e in elements]
-        groups = _greedy_pack(lens, self.indent_col, self.budget)
+        groups = _greedy_pack(lens, self.first_col, self.continuation_col, self.budget)
         if len(groups) <= 1:
             return None
-        new_elements = _build_wrapped_elements(elements, groups, self.indent_col)
+        new_elements = _build_wrapped_elements(elements, groups, self.continuation_col)
         open_node = getattr(updated, open_attr)
         close_node = getattr(updated, close_attr)
         return updated.with_changes(
@@ -543,13 +555,23 @@ class _NodeWrapper(cst.CSTTransformer):
         return wrapped
 
 
-def _open_bracket_col(node, positions) -> int | None:
-    """Column right after the opening bracket of node, in 0-indexed columns."""
+def _open_bracket_first_col(node, positions) -> int | None:
+    """Column where first item starts on the first line (right after `(`)."""
     if isinstance(node, cst.Call):
         return positions[node.func].end.column + 1
     if isinstance(node, (cst.List, cst.Set, cst.Dict)):
         return positions[node].start.column + 1
     return None
+
+
+def _line_indent_plus_4(node, positions, lines) -> int | None:
+    """Continuation indent: the leading whitespace count of the line where
+    the bracket starts, plus 4."""
+    line_idx = positions[node].start.line - 1
+    if line_idx < 0 or line_idx >= len(lines):
+        return None
+    line = lines[line_idx]
+    return (len(line) - len(line.lstrip())) + 4
 
 
 def _is_wrappable(node) -> bool:
@@ -582,10 +604,11 @@ def _wrap_pass(src: str, budget: int) -> str:
                 continue
             if len(lines[line_idx]) <= budget:
                 continue
-            open_col = _open_bracket_col(node, positions)
-            if open_col is None:
+            first_col = _open_bracket_first_col(node, positions)
+            cont_col = _line_indent_plus_4(node, positions, lines)
+            if first_col is None or cont_col is None:
                 continue
-            candidates.append((node, pos, open_col))
+            candidates.append((node, pos, first_col, cont_col))
 
         if not candidates:
             return src
@@ -593,8 +616,8 @@ def _wrap_pass(src: str, budget: int) -> str:
         # Outermost first (leftmost start column, then earliest line)
         candidates.sort(key=lambda x: (x[1].start.line, x[1].start.column))
         progressed = False
-        for target, pos, open_col in candidates:
-            wrapper_t = _NodeWrapper(target, open_col, module, budget)
+        for target, pos, first_col, cont_col in candidates:
+            wrapper_t = _NodeWrapper(target, first_col, cont_col, module, budget)
             new_module = module.visit(wrapper_t)
             if not wrapper_t.applied:
                 continue
@@ -607,6 +630,110 @@ def _wrap_pass(src: str, budget: int) -> str:
             return src
 
 
+def _reindent_pw(ws, indent: int):
+    """Replace the last_line of a clean ParenthesizedWhitespace with `indent`
+    spaces. Skips PWs with comments or empty_lines (don't touch annotated
+    blank-space). Returns ws unchanged if not a clean PW."""
+    if not _is_clean_pw(ws):
+        return ws
+    if ws.empty_lines:
+        return ws
+    return ws.with_changes(
+        first_line=ws.first_line.with_changes(whitespace=cst.SimpleWhitespace("")),
+        indent=False,
+        last_line=cst.SimpleWhitespace(" " * indent),
+    )
+
+
+class _Reindenter(cst.CSTTransformer):
+    """Re-indents continuation lines of pre-marked multi-line bracket groups
+    to a fixed `indent` column. Targets are matched by id() of original nodes."""
+
+    def __init__(self, targets: dict[int, int]):
+        super().__init__()
+        self.targets = targets
+
+    def leave_Call(self, original, updated):
+        indent = self.targets.get(id(original))
+        if indent is None:
+            return updated
+        new_args = []
+        for arg in updated.args:
+            new_arg = arg
+            if isinstance(arg.comma, cst.Comma):
+                new_arg = new_arg.with_changes(
+                    comma=arg.comma.with_changes(
+                        whitespace_after=_reindent_pw(
+                            arg.comma.whitespace_after, indent
+                        )
+                    )
+                )
+            if isinstance(arg.whitespace_after_arg, cst.ParenthesizedWhitespace):
+                new_arg = new_arg.with_changes(
+                    whitespace_after_arg=_reindent_pw(arg.whitespace_after_arg, indent)
+                )
+            new_args.append(new_arg)
+        return updated.with_changes(
+            args=new_args,
+            whitespace_before_args=_reindent_pw(updated.whitespace_before_args, indent),
+        )
+
+    def _leave_collection(self, original, updated):
+        indent = self.targets.get(id(original))
+        if indent is None:
+            return updated
+        new_elements = []
+        for el in updated.elements:
+            new_el = el
+            if isinstance(el.comma, cst.Comma):
+                new_el = el.with_changes(
+                    comma=el.comma.with_changes(
+                        whitespace_after=_reindent_pw(el.comma.whitespace_after, indent)
+                    )
+                )
+            new_elements.append(new_el)
+        return updated.with_changes(elements=new_elements)
+
+    def leave_List(self, original, updated):
+        return self._leave_collection(original, updated)
+
+    def leave_Set(self, original, updated):
+        return self._leave_collection(original, updated)
+
+    def leave_Dict(self, original, updated):
+        return self._leave_collection(original, updated)
+
+
+def _reindent_pass(src: str) -> str:
+    """For each multi-line bracket group, re-indent continuation lines to
+    line_indent + 4. Skips groups containing comments in their inner
+    whitespace (handled in _reindent_pw)."""
+    try:
+        module = cst.parse_module(src)
+    except cst.ParserSyntaxError:
+        return src
+    wrapper = cst.metadata.MetadataWrapper(module)
+    positions = wrapper.resolve(cst.metadata.PositionProvider)
+    module = wrapper.module
+    lines = src.splitlines()
+
+    targets: dict[int, int] = {}
+    for node, pos in positions.items():
+        if not isinstance(node, (cst.Call, cst.List, cst.Set, cst.Dict)):
+            continue
+        if pos.start.line == pos.end.line:
+            continue
+        indent = _line_indent_plus_4(node, positions, lines)
+        if indent is None:
+            continue
+        targets[id(node)] = indent
+
+    if not targets:
+        return src
+    new_module = module.visit(_Reindenter(targets))
+    return new_module.code
+
+
 def paddy_format(src: str) -> str:
     """Rewrite Python source to lisp-style brackets.
 
@@ -616,6 +743,7 @@ def paddy_format(src: str) -> str:
     except cst.ParserSyntaxError:
         return src
     src = module.visit(_PaddyTransformer()).code
+    src = _reindent_pass(src)
     src = _wrap_pass(src, _LINE_BUDGET)
     return src
 
