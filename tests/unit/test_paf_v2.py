@@ -189,6 +189,26 @@ class TestStatDecorator:
         sf = distinct_per._stat_func
         assert sf.default is MISSING
 
+    def test_explicit_provides_kwarg(self):
+        """@stat(provides='foo') should override the auto-derived key.
+
+        Use case: batch-eligible xorq @stat funcs return ibis.Expr at runtime
+        but want their key named differently than the function. The TypedDict
+        single-key trick currently lies about the return type; provides= is
+        the clean replacement.
+        """
+        from buckaroo.pluggable_analysis_framework.stat_func import stat
+
+        @stat(provides='length')
+        def base_length() -> int:
+            return 42
+
+        sf = base_length._stat_func
+        assert sf.name == 'base_length'
+        assert len(sf.provides) == 1
+        assert sf.provides[0].name == 'length'
+        assert sf.provides[0].type is int
+
 
 class TestStatKey:
     def test_frozen(self):

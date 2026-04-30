@@ -461,6 +461,24 @@ class TestFullPipeline:
         assert result == {}
         assert errors == []
 
+    def test_empty_df_with_columns_keeps_column_keys(self):
+        """An empty-but-typed DataFrame must produce per-column entries.
+
+        The pandas pipeline historically returned ``({}, [])`` for any df with
+        ``len(df) == 0``, losing the column schema. The xorq pipeline does the
+        right thing (column keys with stats); this test brings the pandas path
+        in line.
+        """
+        pipeline = StatPipeline(PD_ANALYSIS_V2, unit_test=False)
+        df = pd.DataFrame({
+            'a': pd.Series([], dtype='int64'),
+            'b': pd.Series([], dtype='object'),
+        })
+        result, _ = pipeline.process_df(df)
+        assert 'a' in result
+        assert 'b' in result
+        assert result['a'].get('length') == 0
+
     def test_unit_test_runs(self):
         """StatPipeline.unit_test should not crash."""
         pipeline = StatPipeline(PD_ANALYSIS_V2, unit_test=True)

@@ -61,3 +61,20 @@ class TestXorqDfStatsV2:
         """DataFlow.add_analysis reads stats.ap.ordered_a_objs after add."""
         stats = XorqDfStatsV2(_table(), XORQ_STATS_V2)
         assert list(stats.ap.ordered_a_objs) == list(XORQ_STATS_V2)
+
+    def test_add_analysis_appends_and_reprocesses(self):
+        """add_analysis must rebuild the DAG and surface the new key in sdf.
+
+        DfStatsV2 / PlDfStatsV2 implement this for interactive stat injection;
+        XorqDfStatsV2 needs to match the contract.
+        """
+        from buckaroo.pluggable_analysis_framework.stat_func import stat
+
+        @stat()
+        def double_length(length: int) -> int:
+            return length * 2
+
+        stats = XorqDfStatsV2(_table(), XORQ_STATS_V2)
+        stats.add_analysis(double_length)
+        assert stats.sdf['ints']['double_length'] == 10
+        assert stats.sdf['strs']['double_length'] == 10

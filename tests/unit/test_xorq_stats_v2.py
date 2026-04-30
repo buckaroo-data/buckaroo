@@ -341,3 +341,31 @@ class TestBackendThreading:
         assert backend.calls > 1, (
             f"histogram bypasses pipeline backend; saw only {backend.calls} call"
         )
+
+    def test_histogram_does_not_recompute_min_max(self):
+        """Histogram must not issue its own bounds query — min/max already in batch.
+
+        With 4 columns (2 numeric: ints/floats, 2 non-numeric: strs/bools), an
+        optimal pipeline issues:
+            1 batch aggregate (all batched stats incl. min/max)
+            + 2 numeric histogram bucket queries
+            + 2 categorical histogram queries (strs, bools)
+            = 5 total
+
+        Prior code added 2 redundant bounds queries (one per numeric col) for 7.
+        """
+
+        class TrackingBackend:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, query):
+                self.calls += 1
+                return query.execute()
+
+        backend = TrackingBackend()
+        pipeline = XorqStatPipeline(XORQ_STATS_V2, backend=backend)
+        pipeline.process_table(_make_table())
+        assert backend.calls <= 5, (
+            f"histogram is recomputing min/max; saw {backend.calls} queries"
+        )
