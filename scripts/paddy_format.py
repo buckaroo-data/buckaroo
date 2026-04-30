@@ -208,9 +208,7 @@ class _PaddyTransformer(cst.CSTTransformer):
                 (it for k, it in new_slots if k == "posslash"), params.posonly_ind
             ),
             params=tuple(it for k, it in new_slots if k == "param"),
-            star_arg=next(
-                (it for k, it in new_slots if k == "star"), params.star_arg
-            ),
+            star_arg=next((it for k, it in new_slots if k == "star"), params.star_arg),
             kwonly_params=tuple(it for k, it in new_slots if k == "kwonly"),
             star_kwarg=next(
                 (it for k, it in new_slots if k == "starkwarg"), params.star_kwarg
