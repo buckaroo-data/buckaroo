@@ -269,6 +269,9 @@ dev = [
     { name = "watchfiles", version = "1.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "watchfiles", version = "1.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
 ]
+ibis = [
+    { name = "ibis-framework", extra = ["duckdb"] },
+]
 jupyterlab = [
     { name = "jupyterlab" },
 ]
@@ -356,6 +359,7 @@ requires-dist = [
     { name = "graphviz", marker = "extra == 'dev'", specifier = ">=0.20.1" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.88.1" },
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.88.1" },
+    { name = "ibis-framework", extras = ["duckdb"], marker = "extra == 'ibis'", specifier = ">=9.0.0" },
     { name = "ibis-framework", extras = ["duckdb"], marker = "extra == 'xorq'", specifier = ">=9.0.0" },
     { name = "jupyterlab", marker = "extra == 'dev'", specifier = ">=4.2.5" },
     { name = "jupyterlab", marker = "extra == 'jupyterlab'", specifier = ">=3.6.0" },
@@ -406,7 +410,7 @@ requires-dist = [
     { name = "watchfiles", marker = "extra == 'dev'" },
     { name = "xorq", marker = "extra == 'xorq'", specifier = ">=0.1.0" },
 ]
-provides-extras = ["dev", "jupyterlab", "marimo", "mcp", "notebook", "packaging-tools", "polars", "test", "xorq"]
+provides-extras = ["dev", "ibis", "jupyterlab", "marimo", "mcp", "notebook", "packaging-tools", "polars", "test", "xorq"]
 
 [package.metadata.requires-dev]
 datacompy = [{ name = "datacompy", specifier = ">=0.15.0" }]

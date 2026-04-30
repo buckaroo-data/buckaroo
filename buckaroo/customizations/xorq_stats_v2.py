@@ -291,9 +291,7 @@ def histogram(
     if length == 0:
         return []
     if is_numeric and not is_bool:
-        return _numeric_histogram(
-            execute, table, orig_col_name, min, max, length
-        )
+        return _numeric_histogram(execute, table, orig_col_name, min, max, length)
     return _categorical_histogram(execute, table, orig_col_name)
 
 

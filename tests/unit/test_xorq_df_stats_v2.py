@@ -76,5 +76,5 @@ class TestXorqDfStatsV2:
 
         stats = XorqDfStatsV2(_table(), XORQ_STATS_V2)
         stats.add_analysis(double_length)
-        assert stats.sdf['ints']['double_length'] == 10
-        assert stats.sdf['strs']['double_length'] == 10
+        assert stats.sdf["ints"]["double_length"] == 10
+        assert stats.sdf["strs"]["double_length"] == 10

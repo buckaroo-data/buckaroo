@@ -104,9 +104,7 @@ class XorqStatPipeline:
         {"orig_col_name", "rewritten_col_name", "dtype", "length", "min", "max"}
     )
 
-    def __init__(
-        self, stat_funcs: list, backend: Any = None, unit_test: bool = True
-    ):
+    def __init__(self, stat_funcs: list, backend: Any = None, unit_test: bool = True):
         if not HAS_IBIS:
             raise ImportError(
                 "ibis-framework is required for XorqStatPipeline. "
