@@ -307,3 +307,37 @@ class TestFullPipeline:
     def test_dag_validates_at_construction(self):
         """Constructing the pipeline should validate the DAG (no DAGConfigError)."""
         XorqStatPipeline(XORQ_STATS_V2)
+
+
+# ============================================================
+# Backend threading — every query must route through pipeline backend
+# ============================================================
+
+
+class TestBackendThreading:
+    def test_histogram_uses_passed_in_backend(self):
+        """All ibis queries (batch + histogram) must go through the pipeline's backend.
+
+        Regression: histogram path called ``query.execute()`` directly, bypassing
+        ``self._execute`` and any user-supplied backend.
+        """
+
+        class TrackingBackend:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, query):
+                self.calls += 1
+                return query.execute()
+
+        backend = TrackingBackend()
+        pipeline = XorqStatPipeline(XORQ_STATS_V2, backend=backend)
+        pipeline.process_table(_make_table())
+
+        # _make_table() has 4 columns: ints, floats (numeric → 2 histogram queries
+        # each: bounds + bucket), strs, bools (categorical → 1 query each).
+        # Plus 1 batch aggregate. So with full threading we expect well over 1.
+        # Without the fix, only the batch query (1) goes through the backend.
+        assert backend.calls > 1, (
+            f"histogram bypasses pipeline backend; saw only {backend.calls} call"
+        )
