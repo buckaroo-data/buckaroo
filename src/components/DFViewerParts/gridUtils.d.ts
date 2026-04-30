@@ -50,32 +50,5 @@ export declare const myThemeDark: Theme;
 export declare const myThemeLight: Theme;
 /** @deprecated Use getThemeForScheme() instead */
 export declare const myTheme: Theme;
-export type ThemeColorConfig = {
-    accentColor?: string;
-    accentHoverColor?: string;
-    backgroundColor?: string;
-    foregroundColor?: string;
-    oddRowBackgroundColor?: string;
-    borderColor?: string;
-    headerBorderColor?: string;
-    headerBackgroundColor?: string;
-    spacing?: number;
-    cellHorizontalPaddingScale?: number;
-    rowVerticalPaddingScale?: number;
-};
-export type ThemeConfig = ThemeColorConfig & {
-    colorScheme?: 'light' | 'dark' | 'auto';
-    light?: ThemeColorConfig;
-    dark?: ThemeColorConfig;
-};
-export declare function resolveColorScheme(osScheme: 'light' | 'dark', themeConfig?: ThemeConfig): 'light' | 'dark';
-/**
- * Merge scheme-specific color overrides (light/dark sub-dicts) with
- * top-level color properties.  Returns a flat ThemeConfig suitable for
- * passing to getThemeForScheme and CSS variable injection.
- *
- * Priority: scheme-specific override > top-level color > defaults.
- */
-export declare function resolveThemeColors(effectiveScheme: 'light' | 'dark', themeConfig?: ThemeConfig): ThemeConfig | undefined;
-export declare function getThemeForScheme(scheme: 'light' | 'dark', themeConfig?: ThemeConfig): Theme;
+export declare function getThemeForScheme(scheme: 'light' | 'dark'): Theme;
 export {};
