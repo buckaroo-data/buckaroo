@@ -734,6 +734,332 @@ def _reindent_pass(src: str) -> str:
     return new_module.code
 
 
+# ---------------------------------------------------------------------------
+# `# table-format` directive
+# ---------------------------------------------------------------------------
+
+
+def _atom_text(node) -> str | None:
+    """Render a value node (Integer / Float / negated number / Tuple of those)
+    to its source-text form. Returns None if the node is not a recognised
+    atom we can table-format."""
+    if isinstance(node, (cst.Integer, cst.Float)):
+        return node.value
+    if isinstance(node, cst.UnaryOperation) and isinstance(
+        node.operator, (cst.Plus, cst.Minus)
+    ):
+        inner = _atom_text(node.expression)
+        if inner is None:
+            return None
+        sign = "-" if isinstance(node.operator, cst.Minus) else "+"
+        return sign + inner
+    if isinstance(node, cst.Tuple):
+        items = [_atom_text(e.value) for e in node.elements]
+        if any(x is None for x in items):
+            return None
+        return "(" + ", ".join(items) + ")"
+    return None
+
+
+def _list_compact_length(node: "cst.List") -> int | None:
+    """Length of `[a, b, c]` as a single line. None if any element is not
+    a recognised atom."""
+    items = [_atom_text(e.value) for e in node.elements]
+    if not items or any(x is None for x in items):
+        return None
+    return 1 + len(", ".join(items)) + 1
+
+
+def _is_directive_comment(comment) -> bool:
+    if comment is None:
+        return False
+    text = comment.value.strip()
+    return text in ("# table-format", "#table-format")
+
+
+def _has_directive_in(lines) -> bool:
+    return any(_is_directive_comment(line.comment) for line in lines)
+
+
+def _list_in_stmt(stmt) -> "cst.List | None":
+    """Find a `cst.List` value inside an Assign / AnnAssign in a
+    SimpleStatementLine. Returns None otherwise."""
+    if not isinstance(stmt, cst.SimpleStatementLine):
+        return None
+    for s in stmt.body:
+        if isinstance(s, cst.Assign) and isinstance(s.value, cst.List):
+            return s.value
+        if isinstance(s, cst.AnnAssign) and isinstance(s.value, cst.List):
+            return s.value
+    return None
+
+
+def _find_directive_lists(module: cst.Module) -> list[cst.List]:
+    """Walk module body (and nested IndentedBlocks) and return List nodes
+    whose immediately preceding line carries a `# table-format` comment."""
+    targets: list[cst.List] = []
+
+    def visit_block(stmts, header_lines):
+        prev_marked = _has_directive_in(header_lines)
+        for stmt in stmts:
+            marked = prev_marked
+            if hasattr(stmt, "leading_lines"):
+                marked = marked or _has_directive_in(stmt.leading_lines)
+            if marked:
+                lst = _list_in_stmt(stmt)
+                if lst is not None:
+                    targets.append(lst)
+            prev_marked = False
+            inner = getattr(stmt, "body", None)
+            if isinstance(inner, cst.IndentedBlock):
+                visit_block(inner.body, ())
+
+    visit_block(module.body, module.header)
+    return targets
+
+
+def _column_padding(values: list[str]) -> list[tuple[int, int]]:
+    """For a column of value strings, return (leading_pad, trailing_pad) per
+    value so that decimals (or least-significant digits) line up."""
+    parts: list[tuple[str, str, bool]] = []
+    for v in values:
+        if "." in v:
+            i, f = v.split(".", 1)
+            parts.append((i, f, True))
+        else:
+            parts.append((v, "", False))
+    max_int = max(len(p[0]) for p in parts)
+    max_frac = max(len(p[1]) for p in parts)
+    has_any_dec = any(p[2] for p in parts)
+    pads: list[tuple[int, int]] = []
+    for i_part, f_part, this_has_dec in parts:
+        leading = max_int - len(i_part)
+        if this_has_dec:
+            trailing = max_frac - len(f_part)
+        elif has_any_dec:
+            # Int sitting in a column with floats — pad to fill the cell.
+            trailing = 1 + max_frac
+        else:
+            trailing = 0
+        pads.append((leading, trailing))
+    return pads
+
+
+def _row_break_ws(indent_col: int) -> cst.ParenthesizedWhitespace:
+    return cst.ParenthesizedWhitespace(
+        first_line=cst.TrailingWhitespace(
+            whitespace=cst.SimpleWhitespace(""),
+            comment=None,
+            newline=cst.Newline(),
+        ),
+        empty_lines=[],
+        indent=False,
+        last_line=cst.SimpleWhitespace(" " * indent_col),
+    )
+
+
+def _table_format_single_col(
+    node: cst.List, values: list[str], cont_col: int, budget: int
+) -> cst.List:
+    """Build a new List with strict uniform cells, greedily packed into rows.
+    cont_col is the column where the first item starts (right after `[`)
+    AND where each continuation row begins, so decimals line up across rows."""
+    pads = _column_padding(values)
+    parts = [v.split(".", 1) if "." in v else (v, "") for v in values]
+    max_int = max(len(p[0]) for p in parts)
+    max_frac = max(len(p[1]) for p in parts)
+    cell_w = max_int + (1 if max_frac else 0) + max_frac
+
+    # Greedy pack into rows of indices.
+    rows: list[list[int]] = [[]]
+    col = cont_col
+    for i in range(len(values)):
+        is_last = i == len(values) - 1
+        sep = 0 if not rows[-1] else 2
+        proposed = col + sep + cell_w + 1
+        if rows[-1] and proposed > budget:
+            rows.append([i])
+            col = cont_col + cell_w + (1 if is_last else 0)
+        else:
+            rows[-1].append(i)
+            col += sep + cell_w + (1 if is_last else 0)
+
+    # Rebuild element comma whitespace to encode pads + sep + breaks.
+    new_elements = []
+    n = len(values)
+    for r_idx, row in enumerate(rows):
+        for in_row, i in enumerate(row):
+            el = node.elements[i]
+            leading_i, trailing_i = pads[i]
+            is_last_overall = i == n - 1
+            is_last_in_row = in_row == len(row) - 1
+            if is_last_overall:
+                new_el = el.with_changes(comma=cst.MaybeSentinel.DEFAULT)
+            elif is_last_in_row:
+                # End-of-row comma: newline + (cont_col + leading-of-next)
+                next_leading = pads[i + 1][0]
+                comma = cst.Comma(
+                    whitespace_before=cst.SimpleWhitespace(" " * trailing_i),
+                    whitespace_after=_row_break_ws(cont_col + next_leading),
+                )
+                new_el = el.with_changes(comma=comma)
+            else:
+                # Mid-row comma: ", " + leading-of-next
+                next_leading = pads[i + 1][0]
+                comma = cst.Comma(
+                    whitespace_before=cst.SimpleWhitespace(" " * trailing_i),
+                    whitespace_after=cst.SimpleWhitespace(" " + " " * next_leading),
+                )
+                new_el = el.with_changes(comma=comma)
+            new_elements.append(new_el)
+
+    return node.with_changes(
+        elements=new_elements,
+        lbracket=node.lbracket.with_changes(
+            whitespace_after=cst.SimpleWhitespace(" " * pads[0][0])
+        ),
+        rbracket=node.rbracket.with_changes(
+            whitespace_before=cst.SimpleWhitespace(" " * pads[-1][1])
+        ),
+    )
+
+
+def _table_format_multi_col(node: cst.List, line_indent: int) -> "cst.List | None":
+    """Build a new List where each Tuple element occupies its own line,
+    columns aligned across rows. Returns None if any element isn't a Tuple
+    or the tuples have mismatched arity."""
+    elements = list(node.elements)
+    tuples = [e.value for e in elements]
+    if not all(isinstance(t, cst.Tuple) for t in tuples):
+        return None
+    n_cols = len(tuples[0].elements)
+    if any(len(t.elements) != n_cols for t in tuples):
+        return None
+    col_values: list[list[str]] = [[] for _ in range(n_cols)]
+    for t in tuples:
+        for c, te in enumerate(t.elements):
+            atom = _atom_text(te.value)
+            if atom is None:
+                return None
+            col_values[c].append(atom)
+    col_pads = [_column_padding(vs) for vs in col_values]
+
+    cont_col = line_indent + 4
+    new_elements = []
+    for r_idx, (el, t) in enumerate(zip(elements, tuples)):
+        is_last = r_idx == len(elements) - 1
+        # Rebuild tuple's inner elements with cell padding.
+        new_t_elems = []
+        for c, te in enumerate(t.elements):
+            leading, trailing = col_pads[c][r_idx]
+            is_last_col = c == n_cols - 1
+            if is_last_col:
+                inner_comma = cst.MaybeSentinel.DEFAULT
+            else:
+                next_leading = col_pads[c + 1][r_idx][0]
+                inner_comma = cst.Comma(
+                    whitespace_before=cst.SimpleWhitespace(" " * trailing),
+                    whitespace_after=cst.SimpleWhitespace(" " + " " * next_leading),
+                )
+            new_t_elems.append(te.with_changes(comma=inner_comma))
+        first_leading = col_pads[0][r_idx][0]
+        last_trailing = col_pads[-1][r_idx][1]
+        new_lpar = (
+            [
+                t.lpar[0].with_changes(
+                    whitespace_after=cst.SimpleWhitespace(" " * first_leading)
+                )
+            ]
+            if t.lpar
+            else t.lpar
+        )
+        new_rpar = (
+            [
+                t.rpar[0].with_changes(
+                    whitespace_before=cst.SimpleWhitespace(" " * last_trailing)
+                )
+            ]
+            if t.rpar
+            else t.rpar
+        )
+        new_t = t.with_changes(elements=new_t_elems, lpar=new_lpar, rpar=new_rpar)
+        # Data-block style: trailing comma after every tuple, including the
+        # last; close bracket sits on its own line at the original indent.
+        outer_comma = cst.Comma(
+            whitespace_before=cst.SimpleWhitespace(""),
+            whitespace_after=_row_break_ws(line_indent if is_last else cont_col),
+        )
+        new_elements.append(el.with_changes(value=new_t, comma=outer_comma))
+
+    return node.with_changes(
+        elements=new_elements,
+        lbracket=node.lbracket.with_changes(whitespace_after=_row_break_ws(cont_col)),
+        rbracket=node.rbracket.with_changes(whitespace_before=cst.SimpleWhitespace("")),
+    )
+
+
+class _TableFormatter(cst.CSTTransformer):
+    def __init__(self, targets, positions, lines, budget):
+        super().__init__()
+        self.targets = targets  # set of id(node)
+        self.positions = positions
+        self.lines = lines
+        self.budget = budget
+
+    def leave_List(self, original, updated):
+        if id(original) not in self.targets:
+            return updated
+        pos = self.positions.get(original)
+        if pos is None:
+            return updated
+        compact_len = _list_compact_length(updated)
+        if compact_len is None:
+            return updated
+        # Total length on the original line if list were rendered single-line.
+        if pos.start.column + compact_len <= self.budget:
+            return updated  # fits — directive is a no-op
+
+        line_idx = pos.start.line - 1
+        if line_idx < 0 or line_idx >= len(self.lines):
+            return updated
+        line = self.lines[line_idx]
+        line_indent = len(line) - len(line.lstrip())
+
+        elements = updated.elements
+        if all(_atom_text(e.value) is not None for e in elements):
+            if all(isinstance(e.value, cst.Tuple) for e in elements):
+                multi = _table_format_multi_col(updated, line_indent)
+                if multi is not None:
+                    return multi
+            elif all(
+                isinstance(e.value, (cst.Integer, cst.Float, cst.UnaryOperation))
+                for e in elements
+            ):
+                values = [_atom_text(e.value) for e in elements]
+                cont_col = pos.start.column + 1
+                return _table_format_single_col(updated, values, cont_col, self.budget)
+        return updated
+
+
+def _table_format_pass(src: str, budget: int) -> str:
+    try:
+        module = cst.parse_module(src)
+    except cst.ParserSyntaxError:
+        return src
+    targets_pre = _find_directive_lists(module)
+    if not targets_pre:
+        return src
+    wrapper = cst.metadata.MetadataWrapper(module)
+    positions = wrapper.resolve(cst.metadata.PositionProvider)
+    module = wrapper.module
+    target_ids = {id(t) for t in _find_directive_lists(module)}
+    if not target_ids:
+        return src
+    lines = src.splitlines()
+    new_module = module.visit(_TableFormatter(target_ids, positions, lines, budget))
+    return new_module.code
+
+
 def paddy_format(src: str) -> str:
     """Rewrite Python source to lisp-style brackets.
 
@@ -745,6 +1071,7 @@ def paddy_format(src: str) -> str:
     src = module.visit(_PaddyTransformer()).code
     src = _reindent_pass(src)
     src = _wrap_pass(src, _LINE_BUDGET)
+    src = _table_format_pass(src, _LINE_BUDGET)
     return src
 
 
