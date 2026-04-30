@@ -34,11 +34,12 @@ from .utils import PERVERSE_DF
 __all__ = ["XorqStatPipeline", "XorqColumn", "XorqTable", "XorqExecute"]
 
 try:
-    import ibis  # noqa: F401
+    import xorq.api as xo
 
-    HAS_IBIS = True
+    HAS_XORQ = True
 except ImportError:
-    HAS_IBIS = False
+    xo = None
+    HAS_XORQ = False
 
 
 def _to_python_scalar(val):
@@ -105,11 +106,10 @@ class XorqStatPipeline:
     )
 
     def __init__(self, stat_funcs: list, backend: Any = None, unit_test: bool = True):
-        if not HAS_IBIS:
+        if not HAS_XORQ:
             raise ImportError(
-                "ibis-framework is required for XorqStatPipeline. "
-                "Install with: pip install buckaroo[ibis] (minimal) "
-                "or buckaroo[xorq] (full xorq stack)"
+                "xorq is required for XorqStatPipeline. "
+                "Install with: pip install buckaroo[xorq]"
             )
 
         self.all_stat_funcs = _normalize_inputs(stat_funcs)
@@ -143,7 +143,7 @@ class XorqStatPipeline:
         return query.execute()
 
     def unit_test(self) -> Tuple[bool, List[StatError]]:
-        """Run pipeline against PERVERSE_DF wrapped as an ibis memtable.
+        """Run pipeline against PERVERSE_DF wrapped as a xorq memtable.
 
         Mirrors ``StatPipeline.unit_test``. Returns ``(True, [])`` on a clean
         run; ``(False, errors)`` if any stat raised. A construction-time
@@ -151,15 +151,13 @@ class XorqStatPipeline:
         hits the pipeline.
 
         Internal validation runs against the in-memory backend bound to
-        ``ibis.memtable`` regardless of whatever ``backend=`` the caller
+        ``xo.memtable`` regardless of whatever ``backend=`` the caller
         passed in — the user's backend is for their queries, not ours.
         """
         saved_backend = self.backend
         self.backend = None
         try:
-            import ibis
-
-            table = ibis.memtable(PERVERSE_DF)
+            table = xo.memtable(PERVERSE_DF)
             _, errors = self.process_table(table)
             if not errors:
                 return True, []

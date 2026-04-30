@@ -1,7 +1,8 @@
 """Tests for the v2 xorq stat pipeline.
 
-Uses ibis.memtable (DuckDB-backed) — no xorq or remote backend required.
-Skipped if ibis is not installed.
+Uses ``xo.memtable`` (xorq's vendored ibis, datafusion-backed) — no raw
+ibis-framework or remote backend required. Skipped if xorq is not
+installed.
 """
 
 import math
@@ -9,7 +10,7 @@ import math
 import pandas as pd
 import pytest
 
-ibis = pytest.importorskip("ibis")
+xo = pytest.importorskip("xorq.api")
 
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (  # noqa: E402
     XorqStatPipeline,
@@ -22,7 +23,7 @@ from buckaroo.customizations.xorq_stats_v2 import (  # noqa: E402
 
 
 def _make_table():
-    return ibis.memtable(
+    return xo.memtable(
         pd.DataFrame(
             {
                 "ints": [1, 2, 3, 4, 5],
@@ -35,7 +36,7 @@ def _make_table():
 
 
 def _make_table_with_nulls():
-    return ibis.memtable(
+    return xo.memtable(
         pd.DataFrame(
             {
                 "vals": [1.0, None, 3.0, None, 5.0],
@@ -46,7 +47,7 @@ def _make_table_with_nulls():
 
 
 def _make_table_categorical():
-    return ibis.memtable(
+    return xo.memtable(
         pd.DataFrame(
             {
                 "cat": ["a", "a", "a", "b", "b", "c", "d", "e", "f", "g", "h"],
@@ -91,7 +92,7 @@ class TestTyping:
         assert stats["bools"]["_type"] == "boolean"
 
     def test_datetime(self):
-        table = ibis.memtable(
+        table = xo.memtable(
             pd.DataFrame(
                 {"ts": pd.to_datetime(["2021-01-01", "2021-01-02", "2021-01-03"])}
             )
@@ -227,7 +228,7 @@ class TestHistogram:
 
     def test_histogram_constant_column_empty(self):
         """Constant numeric column (min == max) → empty histogram, not crash."""
-        table = ibis.memtable(pd.DataFrame({"const": [7, 7, 7, 7]}))
+        table = xo.memtable(pd.DataFrame({"const": [7, 7, 7, 7]}))
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
         stats, errors = pipeline.process_table(table)
         assert errors == []
@@ -296,7 +297,7 @@ class TestFullPipeline:
         assert stats["bools"].get("mean") is None
 
     def test_empty_table(self):
-        table = ibis.memtable(pd.DataFrame({"a": pd.Series([], dtype="int64")}))
+        table = xo.memtable(pd.DataFrame({"a": pd.Series([], dtype="int64")}))
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
         stats, _ = pipeline.process_table(table)
         assert stats["a"]["length"] == 0

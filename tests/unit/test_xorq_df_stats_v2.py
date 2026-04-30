@@ -8,7 +8,7 @@ Asserts the same surface contract as DfStatsV2: ``.sdf`` (SDType),
 import pandas as pd
 import pytest
 
-ibis = pytest.importorskip("ibis")
+xo = pytest.importorskip("xorq.api")
 
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import (  # noqa: E402
     XorqDfStatsV2,
@@ -17,7 +17,7 @@ from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2  # noqa: E402
 
 
 def _table():
-    return ibis.memtable(
+    return xo.memtable(
         pd.DataFrame(
             {
                 "ints": [1, 2, 3, 4, 5],

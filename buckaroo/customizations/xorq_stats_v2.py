@@ -36,11 +36,11 @@ from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (
 from buckaroo.pluggable_analysis_framework.stat_func import stat
 
 try:
-    import ibis
+    import xorq.api as xo
 
-    HAS_IBIS = True
+    HAS_XORQ = True
 except ImportError:
-    HAS_IBIS = False
+    HAS_XORQ = False
 
 
 # ============================================================
@@ -243,7 +243,7 @@ def _categorical_histogram(execute, table, col):
     query = (
         table.group_by(col)
         .aggregate(__count=lambda t: t.count())
-        .order_by(ibis.desc("__count"))
+        .order_by(xo.desc("__count"))
         .limit(10)
     )
     df = execute(query)
