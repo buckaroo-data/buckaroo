@@ -310,6 +310,36 @@ class TestFullPipeline:
 
 
 # ============================================================
+# Smoke check — PERVERSE_DF-equivalent at construction time
+# ============================================================
+
+
+class TestUnitTestSmokeCheck:
+    def test_passes_on_default_stats(self):
+        """XorqStatPipeline must run an automatic smoke check at construction.
+
+        Mirrors StatPipeline._unit_test_result — catches dumb stat bugs (e.g.
+        a typo, a wrong dtype assumption) at pipeline construction rather
+        than later when real data hits the pipeline.
+        """
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        passed, errors = pipeline._unit_test_result
+        assert passed, f"smoke check failed unexpectedly: {errors}"
+
+    def test_fails_on_broken_stat(self):
+        """A @stat that always raises must be caught by the smoke check."""
+
+        @stat()
+        def always_breaks(col: XorqColumn) -> int:
+            raise RuntimeError("always broken")
+
+        pipeline = XorqStatPipeline([*XORQ_STATS_V2, always_breaks])
+        passed, errors = pipeline._unit_test_result
+        assert not passed
+        assert errors  # at least one StatError captured
+
+
+# ============================================================
 # Backend threading — every query must route through pipeline backend
 # ============================================================
 
