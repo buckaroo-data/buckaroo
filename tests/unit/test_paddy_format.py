@@ -271,6 +271,35 @@ def dedent(s: str) -> str:
             """,
         ),
         (
+            "table_format_list_of_dicts_wrap",
+            # List of dicts that share the same keys and have numeric
+            # values. Each key becomes a column; values in that column
+            # are decimal-aligned with uniform cell widths so the keys
+            # line up across rows.
+            #
+            # Per-column padding:
+            #   'a': max_int=2, max_frac=3, cell width 6
+            #   'b': max_int=4, max_frac=0, cell width 4
+            #   'c': max_int=2, max_frac=3, cell width 6
+            #
+            # Per the design discussion: each dict is < 100 chars and
+            # has no nested dicts.
+            """
+            # table-format
+            data = [{'a': 1.5, 'b': 100, 'c': 0.001}, {'a': 23.456, 'b': 7, 'c': 99.9}, {'a': 0.5, 'b': 8000, 'c': 1.0}, {'a': 12.34, 'b': 50, 'c': 3.14}, {'a': 7.89, 'b': 1000, 'c': 0.5}]
+            """,
+            """
+            # table-format
+            data = [
+                {'a':  1.5  , 'b':  100, 'c':  0.001},
+                {'a': 23.456, 'b':    7, 'c': 99.9  },
+                {'a':  0.5  , 'b': 8000, 'c':  1.0  },
+                {'a': 12.34 , 'b':   50, 'c':  3.14 },
+                {'a':  7.89 , 'b': 1000, 'c':  0.5  },
+            ]
+            """,
+        ),
+        (
             "table_format_multi_col_tuples_wrap",
             # Long multi-col list — single-line form exceeds 120 chars.
             # Each tuple goes on its own line; cells within tuples are
