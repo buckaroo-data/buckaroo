@@ -557,6 +557,57 @@ class _NodeWrapper(cst.CSTTransformer):
         self.applied = True
         return wrapped
 
+    def _slot_render_len(self, kind, item) -> int:
+        changes = {"comma": cst.MaybeSentinel.DEFAULT}
+        if isinstance(item, cst.Param):
+            changes["whitespace_after_param"] = cst.SimpleWhitespace("")
+        cleaned = item.with_changes(**changes)
+        return len(self.module.code_for_node(cleaned))
+
+    def _wrap_funcdef(self, updated):
+        params = updated.params
+        slots = list(_iter_param_slots(params))
+        if len(slots) < 2:
+            return None
+        lens = [self._slot_render_len(k, it) for k, it in slots]
+        groups = self._pack(lens)
+        if len(groups) <= 1:
+            return None
+        new_slots: list[tuple[str, object]] = []
+        for line_idx, indices in enumerate(groups):
+            for pos_in_line, i in enumerate(indices):
+                kind, it = slots[i]
+                is_last_overall = i == len(slots) - 1
+                is_last_on_line = (
+                    pos_in_line == len(indices) - 1 and line_idx < len(groups) - 1)
+                if is_last_overall:
+                    new_comma = cst.MaybeSentinel.DEFAULT
+                elif is_last_on_line:
+                    new_comma = cst.Comma(whitespace_after=_newline_indent(self.continuation_col))
+                else:
+                    new_comma = cst.Comma(whitespace_after=cst.SimpleWhitespace(" "))
+                changes: dict = {"comma": new_comma}
+                if isinstance(it, cst.Param):
+                    changes["whitespace_after_param"] = cst.SimpleWhitespace("")
+                new_slots.append((kind, it.with_changes(**changes)))
+        new_params = params.with_changes(
+            posonly_params=tuple(it for k, it in new_slots if k == "posonly"),
+            posonly_ind=next((it for k, it in new_slots if k == "posslash"), params.posonly_ind),
+            params=tuple(it for k, it in new_slots if k == "param"),
+            star_arg=next((it for k, it in new_slots if k == "star"), params.star_arg),
+            kwonly_params=tuple(it for k, it in new_slots if k == "kwonly"),
+            star_kwarg=next((it for k, it in new_slots if k == "starkwarg"), params.star_kwarg))
+        return updated.with_changes(params=new_params, whitespace_before_params=self._open_ws())
+
+    def leave_FunctionDef(self, original, updated):
+        if original is not self.target or self.applied:
+            return updated
+        wrapped = self._wrap_funcdef(updated)
+        if wrapped is None:
+            return updated
+        self.applied = True
+        return wrapped
+
 
 def _open_bracket_first_col(node, positions) -> int | None:
     """Column where first item starts on the first line (right after `(`)."""
@@ -564,6 +615,8 @@ def _open_bracket_first_col(node, positions) -> int | None:
         return positions[node.func].end.column + 1
     if isinstance(node, (cst.List, cst.Set, cst.Dict)):
         return positions[node].start.column + 1
+    if isinstance(node, cst.FunctionDef):
+        return positions[node.params].start.column
     return None
 
 
@@ -582,6 +635,8 @@ def _is_wrappable(node) -> bool:
         return len(node.args) >= 2
     if isinstance(node, (cst.List, cst.Set, cst.Dict)):
         return len(node.elements) >= 2
+    if isinstance(node, cst.FunctionDef):
+        return sum(1 for _ in _iter_param_slots(node.params)) >= 2
     return False
 
 
