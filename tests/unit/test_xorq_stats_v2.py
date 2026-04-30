@@ -4,6 +4,8 @@ Uses ibis.memtable (DuckDB-backed) — no xorq or remote backend required.
 Skipped if ibis is not installed.
 """
 
+import math
+
 import pandas as pd
 import pytest
 
@@ -307,6 +309,71 @@ class TestFullPipeline:
     def test_dag_validates_at_construction(self):
         """Constructing the pipeline should validate the DAG (no DAGConfigError)."""
         XorqStatPipeline(XORQ_STATS_V2)
+
+
+# ============================================================
+# Polish — _to_python_scalar handles pandas missing-data singletons
+# ============================================================
+
+
+class TestToPythonScalar:
+    def test_handles_pd_na(self):
+        """pd.NA / pd.NaT must coerce to None.
+
+        These are pandas missing-data singletons that don't have ``.item()``
+        and aren't valid scalar types — they'd fail the framework's
+        isinstance type check downstream with a confusing TypeError.
+        """
+        from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (
+            _to_python_scalar,
+        )
+        assert _to_python_scalar(pd.NA) is None
+        assert _to_python_scalar(pd.NaT) is None
+        assert _to_python_scalar(None) is None
+
+    def test_preserves_real_values(self):
+        """Real scalars / numpy scalars come through unchanged (or coerced
+        to native Python via .item())."""
+        import numpy as np
+
+        from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (
+            _to_python_scalar,
+        )
+        assert _to_python_scalar(np.int64(42)) == 42
+        assert _to_python_scalar(np.float64(3.14)) == 3.14
+        assert _to_python_scalar(0) == 0
+        # NaN is a valid float — must NOT coerce to None
+        assert math.isnan(_to_python_scalar(float("nan")))
+
+
+# ============================================================
+# Polish — typing_stats temporal classification
+# ============================================================
+
+
+class TestTypingStatsClassification:
+    """Direct unit tests of the typing_stats function for edge cases.
+
+    Avoids the per-column DAG plumbing — just exercises the dtype-string
+    classification logic directly.
+    """
+
+    def _classify(self, dtype: str):
+        from buckaroo.customizations.xorq_stats_v2 import typing_stats
+
+        return typing_stats._stat_func.func(dtype=dtype)
+
+    def test_temporal_dtypes_classified(self):
+        for dt in ("timestamp[ns]", "date32", "time", "interval"):
+            assert self._classify(dt)["is_datetime"], (
+                f"{dt!r} should be classified as datetime"
+            )
+
+    def test_non_temporal_dtypes_not_misclassified(self):
+        for dt in ("string", "int64", "boolean", "float64"):
+            assert not self._classify(dt)["is_datetime"], (
+                f"{dt!r} must NOT be classified as datetime"
+            )
 
 
 # ============================================================
