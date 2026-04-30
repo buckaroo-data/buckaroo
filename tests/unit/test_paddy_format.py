@@ -166,6 +166,15 @@ def dedent(s: str) -> str:
             "long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5,\n           very_long_value_6, very_long_value_7, very_long_value_8]\n",
         ),
         (
+            "reindent_continuation_to_indent_plus_4",
+            # Continuation line of a multi-line call sits at column 0 (legal
+            # inside parens, but visually broken). Re-indent it to
+            # original_indent + 4. Trailing space after the comma on line 1
+            # is also cleaned up.
+            "class C:\n    def f(self, ser):\n        return dict(str_bool_frac=str_bool_frac(ser), \nregular_int_parse_frac=regular_int_parse_frac(ser))\n",
+            "class C:\n    def f(self, ser):\n        return dict(str_bool_frac=str_bool_frac(ser),\n            regular_int_parse_frac=regular_int_parse_frac(ser))\n",
+        ),
+        (
             "unsplittable_single_arg_overflows",
             # Single arg > 120 chars; nothing to break on, stays as-is.
             "result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)\n",
