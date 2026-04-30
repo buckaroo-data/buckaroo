@@ -160,13 +160,44 @@ PinnedRowConfig = TypedDict('PinnedRowConfig', {
     'default_renderer_columns': NotRequired[List[str]]  # used to render index column values with string not the specified displayer
 })
 
+ThemeColorConfig = TypedDict('ThemeColorConfig', {
+    'accentColor': NotRequired[str],
+    'accentHoverColor': NotRequired[str],
+    'backgroundColor': NotRequired[str],
+    'foregroundColor': NotRequired[str],
+    'oddRowBackgroundColor': NotRequired[str],
+    'borderColor': NotRequired[str],
+    'headerBorderColor': NotRequired[str],
+    'headerBackgroundColor': NotRequired[str],
+    'spacing': NotRequired[int],
+    'cellHorizontalPaddingScale': NotRequired[float],
+    'rowVerticalPaddingScale': NotRequired[float],
+})
+
+ThemeConfig = TypedDict('ThemeConfig', {
+    'colorScheme': NotRequired[Literal["light", "dark", "auto"]],
+    'accentColor': NotRequired[str],
+    'accentHoverColor': NotRequired[str],
+    'backgroundColor': NotRequired[str],
+    'foregroundColor': NotRequired[str],
+    'oddRowBackgroundColor': NotRequired[str],
+    'borderColor': NotRequired[str],
+    'headerBorderColor': NotRequired[str],
+    'spacing': NotRequired[int],
+    'cellHorizontalPaddingScale': NotRequired[float],
+    'rowVerticalPaddingScale': NotRequired[float],
+    'light': NotRequired[ThemeColorConfig],
+    'dark': NotRequired[ThemeColorConfig],
+})
+
 ComponentConfig = TypedDict('ComponentConfig', {
     'height_fraction': NotRequired[float],
     'dfvHeight': NotRequired[int],  # temporary debugging prop
     'layoutType': NotRequired[Literal["autoHeight", "normal"]],
     'shortMode': NotRequired[bool],
     'selectionBackground': NotRequired[str],
-    'className': NotRequired[str]
+    'className': NotRequired[str],
+    'theme': NotRequired[ThemeConfig]
 })
 
 DFViewerConfig = TypedDict('DFViewerConfig', {

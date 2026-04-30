@@ -35,6 +35,7 @@ class SessionState:
     operation_results: dict = field(default_factory=dict)
     operations: list = field(default_factory=list)
     prompt: str = ""
+    component_config: Optional[dict] = None
     last_accessed: float = field(default_factory=time.time)
 
     def touch(self) -> None:

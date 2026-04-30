@@ -88,6 +88,16 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             session.buckaroo_options = buckaroo_state["buckaroo_options"]
             session.command_config = buckaroo_state["command_config"]
 
+            # Re-apply component_config so theme settings survive state changes
+            if session.component_config and session.df_display_args:
+                for key in session.df_display_args:
+                    dvc = session.df_display_args[key].get("df_viewer_config")
+                    if dvc is not None:
+                        dvc["component_config"] = {
+                            **dvc.get("component_config", {}),
+                            **session.component_config,
+                        }
+
             # Broadcast updated state to all connected clients
             update_payload = json.dumps(build_state_message(session))
             for client in list(session.ws_clients):
