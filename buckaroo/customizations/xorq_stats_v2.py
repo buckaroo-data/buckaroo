@@ -76,12 +76,20 @@ TypingResult = TypedDict(
 
 @stat()
 def typing_stats(dtype: str) -> TypingResult:
-    """Derive type flags from the ibis schema dtype string."""
+    """Derive type flags from the ibis schema dtype string.
+
+    Uses prefix matching rather than substring ``in`` — the latter would
+    false-positive on hypothetical future ibis types containing "time" or
+    "date" buried in their name (e.g. "lifetime"). Today the only
+    temporal repr prefixes ibis emits are timestamp, date, time, interval.
+    """
     is_bool = dtype == "boolean"
     is_int = any(dtype.startswith(p) for p in ("int", "uint"))
     is_float = any(dtype.startswith(p) for p in ("float", "double", "decimal"))
     is_numeric = is_int or is_float or is_bool
-    is_datetime = any(s in dtype for s in ("timestamp", "date", "time"))
+    is_datetime = any(
+        dtype.startswith(p) for p in ("timestamp", "date", "time", "interval")
+    )
     is_string = dtype in ("string", "large_string", "varchar", "utf8")
     return {
         "is_numeric": is_numeric,
@@ -292,6 +300,13 @@ def histogram(
 # ============================================================
 # Convenience list — drop into XorqStatPipeline(XORQ_STATS_V2)
 # ============================================================
+# NOTE: This list is for ``XorqStatPipeline`` only. ``typing_stats``
+# requires ``dtype``, and ``histogram`` requires ``length``, ``min``,
+# ``max`` — all four are externally pre-populated by ``XorqStatPipeline``
+# but are NOT in ``StatPipeline.EXTERNAL_KEYS``, so passing this list to
+# the pandas/polars ``StatPipeline`` raises ``DAGConfigError`` at
+# construction. Use the pandas/polars equivalents (``PD_ANALYSIS_V2`` /
+# ``PL_ANALYSIS_V2``) for those pipelines.
 
 XORQ_STATS_V2 = [
     typing_stats,

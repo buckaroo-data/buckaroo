@@ -24,6 +24,7 @@ from .col_analysis import AObjs, ColAnalysis
 from .stat_pipeline import StatPipeline
 from .utils import FAST_SUMMARY_WHEN_GREATER
 from .safe_summary_df import output_full_reproduce
+from .xorq_stat_pipeline import XorqStatPipeline
 
 
 class DfStatsV2:
@@ -137,14 +138,9 @@ class XorqDfStatsV2:
 
     @classmethod
     def verify_analysis_objects(cls, objs):
-        # Lazy import so the rest of df_stats_v2 doesn't require ibis.
-        from .xorq_stat_pipeline import XorqStatPipeline
-
         XorqStatPipeline(objs)
 
     def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False):
-        from .xorq_stat_pipeline import XorqStatPipeline
-
         self.table = table
         self.ap = XorqStatPipeline(col_analysis_objs)
         self.operating_df_name = operating_df_name

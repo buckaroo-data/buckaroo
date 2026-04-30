@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
+import pandas as pd
+
 from .col_analysis import ErrDict, SDType
 from .stat_func import XorqColumn, XorqTable, XorqExecute, RAW_MARKER_TYPES, StatFunc
 from .stat_pipeline import _execute_stat_func, _find_v1_class, _normalize_inputs
@@ -45,8 +47,14 @@ def _to_python_scalar(val):
     The DAG runs strict ``isinstance`` checks against the declared StatKey
     type. ``numpy.int64`` is not a subclass of ``int`` on NumPy >= 2, so
     aggregate results need coercion before they enter the accumulator.
+
+    Also coalesces pandas missing-data singletons (``pd.NA``, ``pd.NaT``)
+    to ``None`` — they don't have ``.item()`` and aren't valid scalar
+    types, so without this they'd pass through unchanged and fail the
+    isinstance check later. ``np.nan`` is left alone since it's a valid
+    float and ``isinstance(np.nan, float)`` is True.
     """
-    if val is None:
+    if val is None or val is pd.NA or val is pd.NaT:
         return None
     item = getattr(val, "item", None)
     if callable(item):
