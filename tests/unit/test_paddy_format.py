@@ -223,16 +223,40 @@ def dedent(s: str) -> str:
         ),
         (
             "table_format_multi_col_tuples",
-            # Each tuple position is treated as an independent column.
-            # Col 0 here (floats) all share the same width; col 1 (ints)
-            # is right-aligned to the widest element.
+            # Short multi-col list — directive is a no-op when single-line
+            # form already fits in budget.
             """
             # table-format
             data = [(1.23, 5), (4.56, 600), (7.89, 70)]
             """,
             """
             # table-format
+            data = [(1.23, 5), (4.56, 600), (7.89, 70)]
+            """,
+        ),
+        (
+            "table_format_multi_col_tuples_wrap",
+            # Long multi-col list — single-line form exceeds 120 chars.
+            # Each tuple goes on its own line; cells within tuples are
+            # aligned across rows. Continuation = line_indent + 4 (the
+            # standard paddy rule); cross-row decimal alignment is
+            # automatic because every row has the same shape.
+            """
+            # table-format
+            data = [(1.23, 5), (4.56, 600), (7.89, 70), (1.23, 5), (4.56, 600), (7.89, 70), (1.23, 5), (4.56, 600), (7.89, 70), (1.23, 5), (4.56, 600), (7.89, 70)]
+            """,
+            """
+            # table-format
             data = [
+                (1.23,   5),
+                (4.56, 600),
+                (7.89,  70),
+                (1.23,   5),
+                (4.56, 600),
+                (7.89,  70),
+                (1.23,   5),
+                (4.56, 600),
+                (7.89,  70),
                 (1.23,   5),
                 (4.56, 600),
                 (7.89,  70),
