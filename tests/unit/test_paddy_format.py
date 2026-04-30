@@ -174,6 +174,30 @@ def dedent(s: str) -> str:
             "class C:\n    def f(self, ser):\n        return dict(str_bool_frac=str_bool_frac(ser),\n            regular_int_parse_frac=regular_int_parse_frac(ser))\n",
         ),
         (
+            "reindent_preserves_hanging_indent_aligned_with_first_element",
+            # Real case from buckaroo/customizations/all_transforms.py.
+            # The `[` opens with item 1 inline on the same line; items 2-3
+            # are aligned with item 1 (one column past the `[`). That's a
+            # legitimate hanging-indent style — re-indent must NOT shift it
+            # to line_indent+4, which would leave item 1 left of items 2-3.
+            """
+            class C:
+                def transform_to_py(df, col):
+                    return chr(10).join(
+                        ["old_col = df",
+                         "df.drop(col)",
+                         "df.index = old_col.values"])
+            """,
+            """
+            class C:
+                def transform_to_py(df, col):
+                    return chr(10).join(
+                        ["old_col = df",
+                         "df.drop(col)",
+                         "df.index = old_col.values"])
+            """,
+        ),
+        (
             "table_format_single_col_floats",
             # `# table-format` directive on the line above forces a column
             # table layout — each element on its own line, decimal points
