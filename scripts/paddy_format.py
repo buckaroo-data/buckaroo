@@ -462,7 +462,12 @@ def _build_wrapped_elements(elements, groups, indent_col):
 
 
 class _NodeWrapper(cst.CSTTransformer):
-    """Wraps a single target node (matched by identity) using greedy pack."""
+    """Wraps a single target node (matched by identity).
+
+    `wrap_mode` selects the packing strategy:
+      - "greedy": fit as many items per line as the budget allows
+      - "one_per_line": every item on its own line at continuation_col
+    """
 
     def __init__(
         self,
@@ -471,6 +476,7 @@ class _NodeWrapper(cst.CSTTransformer):
         continuation_col: int,
         module: cst.Module,
         budget: int,
+        wrap_mode: str = "greedy",
     ):
         super().__init__()
         self.target = target
@@ -478,40 +484,42 @@ class _NodeWrapper(cst.CSTTransformer):
         self.continuation_col = continuation_col
         self.module = module
         self.budget = budget
+        self.wrap_mode = wrap_mode
         self.applied = False
+
+    def _pack(self, lens):
+        if self.wrap_mode == "one_per_line":
+            return [[i] for i in range(len(lens))]
+        return _greedy_pack(lens, self.first_col, self.continuation_col, self.budget)
+
+    def _open_ws(self):
+        """Whitespace right after the open bracket. In one_per_line mode,
+        even item 1 goes on its own line at continuation_col."""
+        if self.wrap_mode == "one_per_line":
+            return _newline_indent(self.continuation_col)
+        return cst.SimpleWhitespace("")
 
     def _wrap_call(self, updated):
         args = list(updated.args)
         lens = [_arg_render_len(self.module, a) for a in args]
-        groups = _greedy_pack(lens, self.first_col, self.continuation_col, self.budget)
+        groups = self._pack(lens)
         if len(groups) <= 1:
             return None
         new_args = _build_wrapped_args(args, groups, self.continuation_col)
-        return updated.with_changes(
-            args=new_args,
-            whitespace_before_args=cst.SimpleWhitespace(""),
-        )
+        return updated.with_changes(args=new_args, whitespace_before_args=self._open_ws())
 
     def _wrap_collection(self, updated, open_attr, close_attr):
         elements = list(updated.elements)
         lens = [_element_render_len(self.module, e) for e in elements]
-        groups = _greedy_pack(lens, self.first_col, self.continuation_col, self.budget)
+        groups = self._pack(lens)
         if len(groups) <= 1:
             return None
         new_elements = _build_wrapped_elements(elements, groups, self.continuation_col)
         open_node = getattr(updated, open_attr)
         close_node = getattr(updated, close_attr)
-        return updated.with_changes(
-            elements=new_elements,
-            **{
-                open_attr: open_node.with_changes(
-                    whitespace_after=cst.SimpleWhitespace("")
-                ),
-                close_attr: close_node.with_changes(
-                    whitespace_before=cst.SimpleWhitespace("")
-                ),
-            },
-        )
+        return updated.with_changes(elements=new_elements,
+            **{open_attr: open_node.with_changes(whitespace_after=self._open_ws()),
+                close_attr: close_node.with_changes(whitespace_before=cst.SimpleWhitespace(""))})
 
     def leave_Call(self, original, updated):
         if original is not self.target or self.applied:
@@ -577,7 +585,7 @@ def _is_wrappable(node) -> bool:
     return False
 
 
-def _wrap_pass(src: str, budget: int) -> str:
+def _wrap_pass(src: str, budget: int, wrap_mode: str = "greedy") -> str:
     """Iteratively find an over-budget line and wrap the outermost wrappable
     bracket group whose start sits on that line."""
     while True:
@@ -612,7 +620,8 @@ def _wrap_pass(src: str, budget: int) -> str:
         candidates.sort(key=lambda x: (x[1].start.line, x[1].start.column))
         progressed = False
         for target, pos, first_col, cont_col in candidates:
-            wrapper_t = _NodeWrapper(target, first_col, cont_col, module, budget)
+            wrapper_t = _NodeWrapper(target, first_col, cont_col, module, budget,
+                wrap_mode=wrap_mode)
             new_module = module.visit(wrapper_t)
             if not wrapper_t.applied:
                 continue
@@ -734,6 +743,27 @@ def _has_aligned_hanging_indent(node, positions) -> bool:
     return True
 
 
+def _has_blank_line_subgroups(node) -> bool:
+    """True iff any inter-element / inter-arg whitespace inside the bracket
+    group carries empty_lines (= the user has used blank lines to structure
+    the group). `_reindent_pw` already declines to touch such whitespace,
+    which on its own causes the rest of the group to be re-indented while
+    the blank-line-bordered elements stay put — half-formatting. When this
+    pattern is present, leave the whole group's continuation alone."""
+    if isinstance(node, cst.Call):
+        children = node.args
+    elif isinstance(node, (cst.List, cst.Set, cst.Dict)):
+        children = node.elements
+    else:
+        return False
+    for c in children:
+        if isinstance(c.comma, cst.Comma):
+            ws = c.comma.whitespace_after
+            if isinstance(ws, cst.ParenthesizedWhitespace) and ws.empty_lines:
+                return True
+    return False
+
+
 def _reindent_pass_once(src: str) -> str:
     """Single sweep: for each multi-line bracket group, re-indent
     continuation lines to line_indent + 4 based on the *current* source.
@@ -755,6 +785,8 @@ def _reindent_pass_once(src: str) -> str:
         if pos.start.line == pos.end.line:
             continue
         if _has_aligned_hanging_indent(node, positions):
+            continue
+        if _has_blank_line_subgroups(node):
             continue
         indent = _line_indent_plus_4(node, positions, lines)
         if indent is None:
@@ -1205,10 +1237,16 @@ def _table_format_pass(src: str, budget: int) -> str:
     return new_module.code
 
 
-def paddy_format(src: str) -> str:
+def paddy_format(src: str, wrap_mode: str = "greedy") -> str:
     """Rewrite Python source to lisp-style brackets.
 
+    `wrap_mode` controls how over-budget bracket groups are wrapped:
+      - "greedy" (default): pack as many items per line as fit in the budget
+      - "one_per_line": every item on its own line at line_indent + 4
+
     Idempotent. Returns input unchanged on syntax errors."""
+    if wrap_mode not in ("greedy", "one_per_line"):
+        raise ValueError(f"unknown wrap_mode: {wrap_mode!r}")
     try:
         module = cst.parse_module(src)
     except cst.ParserSyntaxError:
@@ -1223,7 +1261,7 @@ def paddy_format(src: str) -> str:
     while src != last:
         last = src
         src = _reindent_pass(src)
-        src = _wrap_pass(src, _LINE_BUDGET)
+        src = _wrap_pass(src, _LINE_BUDGET, wrap_mode=wrap_mode)
         src = _table_format_pass(src, _LINE_BUDGET)
     return src
 
@@ -1236,12 +1274,15 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="exit 1 if any file would be changed; do not write",
     )
+    parser.add_argument("--wrap-mode", choices=("greedy", "one-per-line"), default="greedy",
+        help="how to wrap over-budget bracket groups (default: greedy)")
     args = parser.parse_args(argv)
+    wrap_mode = args.wrap_mode.replace("-", "_")
 
     needs_change: list[Path] = []
     for path in args.files:
         original = path.read_text()
-        formatted = paddy_format(original)
+        formatted = paddy_format(original, wrap_mode=wrap_mode)
         if formatted == original:
             continue
         needs_change.append(path)
