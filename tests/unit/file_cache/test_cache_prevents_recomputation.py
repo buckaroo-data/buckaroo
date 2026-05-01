@@ -55,8 +55,7 @@ def test_cache_prevents_recomputation_on_second_execution(tmp_path):
                 ldf1,
                 file_path=str(test_file),
                 sync_executor_class=Executor,
-                parallel_executor_class=Executor
-            )
+                parallel_executor_class=Executor)
             
             # Wait for computation to complete (sync executor is blocking)
             wait_for_nested_executor_finish(w1, timeout_secs=5.0)
@@ -87,8 +86,7 @@ def test_cache_prevents_recomputation_on_second_execution(tmp_path):
                 ldf2,
                 file_path=str(test_file),
                 sync_executor_class=Executor,
-                parallel_executor_class=Executor
-            )
+                parallel_executor_class=Executor)
             
             # Wait for initialization (sync executor is blocking)
             wait_for_nested_executor_finish(w2, timeout_secs=5.0)

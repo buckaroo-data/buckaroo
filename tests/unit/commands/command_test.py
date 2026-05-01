@@ -3,8 +3,7 @@ import numpy as np
 
 from buckaroo.jlisp.lisp_utils import s
 from buckaroo.jlisp.configure_utils import configure_buckaroo
-from buckaroo.customizations.all_transforms import (
-    DropCol, FillNA, OneHot, GroupBy, reindex,  )
+from buckaroo.customizations.all_transforms import (DropCol, FillNA, OneHot, GroupBy, reindex)
 
 
 def result_from_exec(code_str, df_input):
@@ -62,7 +61,7 @@ def test_groupby():
 
     output_df = same(GroupBy, [[s('groupby'), s('df'), "a", {'b':'count'}]], base_df)
     expected_output = pd.DataFrame({'b': {'cc': 2, 'ee': 1, 'ff': 0}},
-                                   index=pd.Index(['cc', 'ee', 'ff'], dtype='object', name='a'))
+        index=pd.Index(['cc', 'ee', 'ff'], dtype='object', name='a'))
     # Use check_index_type=False to handle pandas 3.0 where string index is 'str' instead of 'object'
     pd.testing.assert_frame_equal(output_df, expected_output, check_index_type=False)
     

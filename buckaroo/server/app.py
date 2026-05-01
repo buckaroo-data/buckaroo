@@ -16,18 +16,11 @@ def make_app(sessions: SessionManager | None = None, port: int = 8888, open_brow
 
     static_path = os.path.join(os.path.dirname(__file__), "..", "static")
 
-    return tornado.web.Application(
-        [
+    return tornado.web.Application([
             (r"/health", HealthHandler),
             (r"/diagnostics", DiagnosticsHandler),
             (r"/load", LoadHandler),
             (r"/load_compare", LoadCompareHandler),
             (r"/s/([^/]+)", SessionPageHandler),
             (r"/ws/([^/]+)", DataStreamHandler),
-        ],
-        sessions=sessions,
-        port=port,
-        open_browser=open_browser,
-        static_path=os.path.abspath(static_path),
-        server_start_time=SERVER_START_TIME,
-    )
+        ], sessions=sessions, port=port, open_browser=open_browser, static_path=os.path.abspath(static_path), server_start_time=SERVER_START_TIME)

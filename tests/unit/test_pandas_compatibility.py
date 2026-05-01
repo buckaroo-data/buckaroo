@@ -37,8 +37,7 @@ def test_widget_serialization_pandas_compatibility():
     df = pd.DataFrame({
         'name': ['Alice', 'Bob', 'Charlie'],
         'age': [25, 30, 35],
-        'score': [85.5, 90.0, 78.5]
-    })
+        'score': [85.5, 90.0, 78.5]})
 
     # Creating the widget triggers the full serialization pipeline including
     # _sd_to_jsondf() which calls pd.DataFrame(sd).to_json(orient='table')
@@ -64,8 +63,7 @@ def test_polars_widget_serialization_pandas_compatibility():
     df = pl.DataFrame({
         'name': ['Alice', 'Bob', 'Charlie'],
         'age': [25, 30, 35],
-        'score': [85.5, 90.0, 78.5]
-    })
+        'score': [85.5, 90.0, 78.5]})
 
     widget = PolarsBuckarooWidget(df)
 
@@ -87,8 +85,7 @@ def test_polars_infinite_widget_serialization_pandas_compatibility():
     df = pl.DataFrame({
         'row_num': list(range(100)),
         'int_col': [i + 10 for i in range(100)],
-        'str_col': [f'foo_{i + 10}' for i in range(100)]
-    })
+        'str_col': [f'foo_{i + 10}' for i in range(100)]})
 
     widget = PolarsBuckarooInfiniteWidget(df)
 

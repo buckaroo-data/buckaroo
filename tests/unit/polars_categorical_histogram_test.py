@@ -23,8 +23,7 @@ def test_simple_categorical_two_values():
     
     # Full pipeline
     full_summary, full_errs = PolarsAnalysisPipeline.full_produce_summary_df(
-        df, HA_CLASSES, debug=False
-    )
+        df, HA_CLASSES, debug=False)
     
     # PAF path
     ldf = df.lazy()
@@ -90,8 +89,7 @@ def test_simple_categorical_three_values():
     
     # Full pipeline
     full_summary, full_errs = PolarsAnalysisPipeline.full_produce_summary_df(
-        df, HA_CLASSES, debug=False
-    )
+        df, HA_CLASSES, debug=False)
     full_cat_hist = full_summary.get('a', {}).get('categorical_histogram', {})
     
     # PAF path
@@ -119,8 +117,7 @@ def test_categorical_with_longtail():
     
     # Full pipeline
     full_summary, full_errs = PolarsAnalysisPipeline.full_produce_summary_df(
-        df, HA_CLASSES, debug=False
-    )
+        df, HA_CLASSES, debug=False)
     full_cat_hist = full_summary.get('a', {}).get('categorical_histogram', {})
     
     # PAF path
@@ -160,8 +157,7 @@ def test_categorical_from_test_histogram_analysis():
     
     # Full pipeline
     full_summary, full_errs = PolarsAnalysisPipeline.full_produce_summary_df(
-        df, HA_CLASSES, debug=False
-    )
+        df, HA_CLASSES, debug=False)
     full_cat_hist = full_summary.get('a', {}).get('categorical_histogram', {})
     
     # PAF path
@@ -201,8 +197,7 @@ def test_categorical_small_categories_filtered():
     
     # Full pipeline
     full_summary, full_errs = PolarsAnalysisPipeline.full_produce_summary_df(
-        df, HA_CLASSES, debug=False
-    )
+        df, HA_CLASSES, debug=False)
     full_cat_hist = full_summary.get('a', {}).get('categorical_histogram', {})
     
     # PAF path
@@ -228,8 +223,7 @@ def test_categorical_value_counts_structure():
     
     # Full pipeline
     full_summary, full_errs = PolarsAnalysisPipeline.full_produce_summary_df(
-        df, HA_CLASSES, debug=False
-    )
+        df, HA_CLASSES, debug=False)
     full_vc = full_summary.get('a', {}).get('value_counts')
     
     # PAF path

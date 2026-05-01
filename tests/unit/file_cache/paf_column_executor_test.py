@@ -20,10 +20,8 @@ from tests.unit.file_cache.executor_test_utils import (
 
 class SelectOnlyAnalysis(PolarsAnalysis):
     provides_defaults = {'null_count':0}
-    select_clauses = [
-        F.all().null_count().name.map(json_postfix('null_count')),
-        F.all().mean().name.map(json_postfix('mean')),
-    ]
+    select_clauses = [F.all().null_count().name.map(json_postfix('null_count')),
+        F.all().mean().name.map(json_postfix('mean'))]
 
 
 def test_paf_column_executor_basic():
@@ -94,33 +92,25 @@ def test_paf_column_executor_runs_computed_summary():
 class AnalysisA(PolarsAnalysis):
     """Analysis A produces a unique stat key 'analysis_a_stat'"""
     provides_defaults = {'analysis_a_stat': 0}
-    select_clauses = [
-        F.all().mean().name.map(json_postfix('analysis_a_stat')),
-    ]
+    select_clauses = [F.all().mean().name.map(json_postfix('analysis_a_stat'))]
 
 
 class AnalysisB(PolarsAnalysis):
     """Analysis B produces a unique stat key 'analysis_b_stat'"""
     provides_defaults = {'analysis_b_stat': 0}
-    select_clauses = [
-        F.all().sum().name.map(json_postfix('analysis_b_stat')),
-    ]
+    select_clauses = [F.all().sum().name.map(json_postfix('analysis_b_stat'))]
 
 
 class AnalysisC(PolarsAnalysis):
     """Analysis C produces a unique stat key 'analysis_c_stat'"""
     provides_defaults = {'analysis_c_stat': 0}
-    select_clauses = [
-        F.all().min().name.map(json_postfix('analysis_c_stat')),
-    ]
+    select_clauses = [F.all().min().name.map(json_postfix('analysis_c_stat'))]
 
 
 class AnalysisD(PolarsAnalysis):
     """Analysis D produces a unique stat key 'analysis_d_stat'"""
     provides_defaults = {'analysis_d_stat': 0}
-    select_clauses = [
-        F.all().max().name.map(json_postfix('analysis_d_stat')),
-    ]
+    select_clauses = [F.all().max().name.map(json_postfix('analysis_d_stat'))]
 
 
 def test_paf_column_executor_with_different_analysis_sets(tmp_path):
@@ -176,14 +166,15 @@ def test_paf_column_executor_with_different_analysis_sets(tmp_path):
         # STEP 1: Run with analyses a,b,c
         collected1 = []
         exec1 = PAFColumnExecutor([AnalysisA, AnalysisB, AnalysisC])
-        ex1 = Executor(ldf, exec1, create_listener(collected1), fc, file_path=test_file, planning_function=simple_one_column_planning)
+        ex1 = Executor(ldf, exec1, create_listener(collected1), fc, file_path=test_file,
+            planning_function=simple_one_column_planning)
         ex1.run()
         
         results_1 = extract_results(collected1)
         assert len(results_1) > 0, "Run 1 should produce results"
-        assert_stats_present(results_1, test_column, 
-                           ['analysis_a_stat', 'analysis_b_stat', 'analysis_c_stat'],
-                           ['analysis_d_stat'])
+        assert_stats_present(results_1, test_column,
+            ['analysis_a_stat', 'analysis_b_stat', 'analysis_c_stat'],
+            ['analysis_d_stat'])
         
         # Build and save merged_sd from run 1 (simulating ColumnExecutorDataflow)
         aggregated_summary_1 = {}
@@ -210,8 +201,7 @@ def test_paf_column_executor_with_different_analysis_sets(tmp_path):
         exec2 = PAFColumnExecutor(
             [AnalysisB, AnalysisC, AnalysisD],
             cached_merged_sd=cached_merged_sd_2,
-            orig_to_rw_map=orig_to_rw_map
-        )
+            orig_to_rw_map=orig_to_rw_map)
         
         # Check which columns will be executed
         exec_args_2 = exec2.get_execution_args(existing_cached)
@@ -239,7 +229,8 @@ def test_paf_column_executor_with_different_analysis_sets(tmp_path):
         assert not exec_args_2.no_exec, "no_exec should be False because analysis_d_stat needs to be computed"
         
         collected2 = []
-        ex2 = Executor(ldf, exec2, create_listener(collected2), fc, file_path=test_file, planning_function=simple_one_column_planning)
+        ex2 = Executor(ldf, exec2, create_listener(collected2), fc, file_path=test_file,
+            planning_function=simple_one_column_planning)
         ex2.run()
         
         # Verify that execution occurred (column was in columns_to_execute)
@@ -309,8 +300,7 @@ def test_paf_column_executor_with_different_analysis_sets(tmp_path):
         exec3 = PAFColumnExecutor(
             [AnalysisA, AnalysisB, AnalysisC],
             cached_merged_sd=cached_merged_sd_3,
-            orig_to_rw_map=orig_to_rw_map
-        )
+            orig_to_rw_map=orig_to_rw_map)
         
         # All requested analyses (a,b,c) should be cached, so no execution needed
         exec_args_3 = exec3.get_execution_args(existing_cached_3)
@@ -319,7 +309,8 @@ def test_paf_column_executor_with_different_analysis_sets(tmp_path):
         assert len(exec_args_3.columns) == 0, "Run 3 should have no columns to execute"
         
         collected3 = []
-        ex3 = Executor(ldf, exec3, create_listener(collected3), fc, file_path=test_file, planning_function=simple_one_column_planning)
+        ex3 = Executor(ldf, exec3, create_listener(collected3), fc, file_path=test_file,
+            planning_function=simple_one_column_planning)
         ex3.run()
         
         # Verify no execution occurred (all cached)
@@ -382,9 +373,7 @@ def test_paf_column_executor_with_different_analysis_sets(tmp_path):
 class SimpleAnalysis(PolarsAnalysis):
     """Simple analysis that produces a stat key"""
     provides_defaults = {}
-    select_clauses = [
-        F.all().mean().name.map(json_postfix('mean_stat')),
-    ]
+    select_clauses = [F.all().mean().name.map(json_postfix('mean_stat'))]
 
 
 def test_no_exec_per_column_group(tmp_path):
@@ -430,8 +419,7 @@ def test_no_exec_per_column_group(tmp_path):
         # Create test data with two columns
         df = pl.DataFrame({
             'col1': [1, 2, 3, 4, 5],
-            'col2': [10, 20, 30, 40, 50]
-        })
+            'col2': [10, 20, 30, 40, 50]})
         test_file = tmp_path / "test_data.csv"
         df.write_csv(test_file)
         
@@ -443,7 +431,8 @@ def test_no_exec_per_column_group(tmp_path):
         # STEP 1: Run with both columns to populate cache
         collected1 = []
         exec1 = PAFColumnExecutor([SimpleAnalysis])
-        ex1 = Executor(ldf, exec1, create_listener(collected1), fc, file_path=test_file, planning_function=simple_one_column_planning)
+        ex1 = Executor(ldf, exec1, create_listener(collected1), fc, file_path=test_file,
+            planning_function=simple_one_column_planning)
         ex1.run()
         
         # Verify both columns were executed
@@ -485,8 +474,7 @@ def test_no_exec_per_column_group(tmp_path):
         exec2 = PAFColumnExecutor(
             [SimpleAnalysis],
             cached_merged_sd=cached_merged_sd_partial,  # Only col1 is in cache
-            orig_to_rw_map=orig_to_rw_map
-        )
+            orig_to_rw_map=orig_to_rw_map)
         
         # Check execution args for each column individually
         # col1 should have no_exec=True (fully cached)
@@ -520,8 +508,7 @@ def test_no_exec_per_column_group(tmp_path):
             fc,
             file_path=test_file,
             cached_merged_sd=cached_merged_sd_partial,
-            planning_function=simple_one_column_planning
-        )
+            planning_function=simple_one_column_planning)
         ex2.run()
         
         # INTENDED BEHAVIOR (what we want):

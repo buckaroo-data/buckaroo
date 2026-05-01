@@ -184,16 +184,8 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         requires, needs_raw = _get_requires_from_params(sig, hints)
         provides = _get_provides_from_return_type(func.__name__, return_type)
 
-        stat_func = StatFunc(
-            name=func.__name__,
-            func=func,
-            requires=requires,
-            provides=provides,
-            needs_raw=needs_raw,
-            column_filter=column_filter,
-            quiet=quiet,
-            default=default,
-        )
+        stat_func = StatFunc(name=func.__name__, func=func, requires=requires, provides=provides, needs_raw=needs_raw,
+            column_filter=column_filter, quiet=quiet, default=default)
 
         # Attach metadata to the function so pipeline can find it
         func._stat_func = stat_func

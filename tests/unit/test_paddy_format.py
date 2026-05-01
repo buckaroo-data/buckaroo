@@ -148,30 +148,251 @@ def dedent(s: str) -> str:
             "long_call_greedy_wrap",
             # 203 chars on one line — should wrap greedily at 120,
             # continuation indented at line_indent + 4 (here, 0 + 4 = 4).
-            "result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4, very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)\n",
-            "result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,\n    very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)\n",
+            """
+            result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4, very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)
+            """,
+            """
+            result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,
+                very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)
+            """,
         ),
         (
             "multiline_collapse_target_too_long_wraps_instead",
             # Trailing-comma multiline; collapsed form would be 203 chars.
             # Don't collapse — wrap greedily instead. Trailing comma is dropped.
-            "result = some_function_name(\n    very_long_argument_1,\n    very_long_argument_2,\n    very_long_argument_3,\n    very_long_argument_4,\n    very_long_argument_5,\n    very_long_argument_6,\n    very_long_argument_7,\n    very_long_argument_8,\n)\n",
-            "result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,\n    very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)\n",
+            """
+            result = some_function_name(
+                very_long_argument_1,
+                very_long_argument_2,
+                very_long_argument_3,
+                very_long_argument_4,
+                very_long_argument_5,
+                very_long_argument_6,
+                very_long_argument_7,
+                very_long_argument_8,
+            )
+            """,
+            """
+            result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,
+                very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)
+            """,
         ),
         (
             "long_list_greedy_wrap",
             # 162 chars on one line — wrap greedily.
-            "long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5, very_long_value_6, very_long_value_7, very_long_value_8]\n",
-            "long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5,\n    very_long_value_6, very_long_value_7, very_long_value_8]\n",
+            """
+            long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5, very_long_value_6, very_long_value_7, very_long_value_8]
+            """,
+            """
+            long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5,
+                very_long_value_6, very_long_value_7, very_long_value_8]
+            """,
+        ),
+        (
+            "skip_wrap_inside_fstring_for_py311_compat",
+            # Real case from buckaroo/file_cache/base.py. paddy wrapped
+            # a Call inside an f-string, which is a SyntaxError on
+            # Python 3.11 (PEP 701 multi-line f-strings only landed in
+            # 3.12). Don't wrap any Call/List/Set/Dict whose ancestor is
+            # a FormattedString — leave the f-string's expression on a
+            # single line, even when the line is over budget.
+            """
+            log_msg = f"prefix {len(state.get('aaaaaaaaaaa', []))}, {len(state.get('bbbbbbbbbbbbbbbbbbbb', []))}, {len(state.get('cccccccccccccccccccccc', []))}"
+            """,
+            """
+            log_msg = f"prefix {len(state.get('aaaaaaaaaaa', []))}, {len(state.get('bbbbbbbbbbbbbbbbbbbb', []))}, {len(state.get('cccccccccccccccccccccc', []))}"
+            """,
+        ),
+        (
+            "long_funcdef_greedy_wrap",
+            # Real case from buckaroo/dataflow/column_executor_dataflow.py
+            # compute_summary_with_executor — collapsed form is 400+ chars.
+            # Continuation indent for FunctionDef params is line_indent + 8
+            # (NOT + 4 like Call/List/Set/Dict) so the args sit visually
+            # distinct from the body, which is at line_indent + 4. PEP 8
+            # explicitly recommends this for "distinguishing arguments
+            # from the rest".
+            """
+            def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None, progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None, planning_function: Optional["PlanningFunction"] = None, timeout_secs: Optional[float] = None, cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                pass
+            """,
+            """
+            def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None,
+                    progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None,
+                    planning_function: Optional["PlanningFunction"] = None, timeout_secs: Optional[float] = None,
+                    cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                pass
+            """,
         ),
         (
             "reindent_continuation_to_indent_plus_4",
             # Continuation line of a multi-line call sits at column 0 (legal
             # inside parens, but visually broken). Re-indent it to
             # original_indent + 4. Trailing space after the comma on line 1
-            # is also cleaned up.
-            "class C:\n    def f(self, ser):\n        return dict(str_bool_frac=str_bool_frac(ser), \nregular_int_parse_frac=regular_int_parse_frac(ser))\n",
-            "class C:\n    def f(self, ser):\n        return dict(str_bool_frac=str_bool_frac(ser),\n            regular_int_parse_frac=regular_int_parse_frac(ser))\n",
+            # is also cleaned up — kept as `\n` in this fixture so the
+            # trailing space survives editor whitespace-stripping.
+            (
+                "class C:\n"
+                "    def f(self, ser):\n"
+                "        return dict(str_bool_frac=str_bool_frac(ser), \n"
+                "regular_int_parse_frac=regular_int_parse_frac(ser))\n"
+            ),
+            (
+                "class C:\n"
+                "    def f(self, ser):\n"
+                "        return dict(str_bool_frac=str_bool_frac(ser),\n"
+                "            regular_int_parse_frac=regular_int_parse_frac(ser))\n"
+            ),
+        ),
+        (
+            "reindent_skipped_when_group_has_blank_line_subgroups",
+            # Real case from buckaroo/customizations/pandas_commands.py
+            # AGG_METHODS_WITH_HELP. The list groups its tuples into
+            # visual subgroups separated by blank lines. Today the
+            # re-indent pass half-applies: `_reindent_pw` skips any
+            # whitespace with `empty_lines`, so elements right after a
+            # blank line stay at col 0 (the user's chosen indent), but
+            # elements with a plain `,\n` before them get bumped to
+            # line_indent + 4. The result is mixed indentation. When
+            # the user has used blank lines to structure the group,
+            # leave the WHOLE group's continuation alone.
+            """
+            data = [
+            ('a', 1),
+            ('b', 2),
+
+            ('c', 3),
+            ('d', 4)]
+            """,
+            """
+            data = [
+            ('a', 1),
+            ('b', 2),
+
+            ('c', 3),
+            ('d', 4)]
+            """,
+        ),
+        (
+            "reindent_preserves_hanging_indent_aligned_with_first_element",
+            # Real case from buckaroo/customizations/all_transforms.py.
+            # The `[` opens with item 1 inline on the same line; items 2-3
+            # are aligned with item 1 (one column past the `[`). That's a
+            # legitimate hanging-indent style — re-indent must NOT shift it
+            # to line_indent+4, which would leave item 1 left of items 2-3.
+            """
+            class C:
+                def transform_to_py(df, col):
+                    return chr(10).join(
+                        ["old_col = df",
+                         "df.drop(col)",
+                         "df.index = old_col.values"])
+            """,
+            """
+            class C:
+                def transform_to_py(df, col):
+                    return chr(10).join(
+                        ["old_col = df",
+                         "df.drop(col)",
+                         "df.index = old_col.values"])
+            """,
+        ),
+        (
+            "preserve_dict_with_multiline_values",
+            # Real case from buckaroo/.../analysis_management_test.py.
+            # Outer dict has trailing comma → collapse rule would fire,
+            # but its values are multi-line (each value is itself a
+            # dict spanning several lines). Collapsing produces output
+            # like `}, 'b': {` where the previous value's close brace
+            # collides with the next key on the same line, making the
+            # keys hard to spot. Skip collapse when a Dict has 2+ items
+            # and any value spans multiple lines.
+            """
+            assert_dict_eq({
+                'a': {
+                    'orig_col_name': 'aaa',
+                    'len': 4
+                },
+                'b': {
+                    'orig_col_name': 'bbb',
+                    'len': 5
+                },
+            }, sdf)
+            """,
+            """
+            assert_dict_eq({
+                'a': {
+                    'orig_col_name': 'aaa',
+                    'len': 4
+                },
+                'b': {
+                    'orig_col_name': 'bbb',
+                    'len': 5
+                },
+            }, sdf)
+            """,
+        ),
+        (
+            "preserve_tabular_dict_hanging_indent",
+            # Real case from buckaroo/dataflow/customizable_dataflow_test.py
+            # DFVIEWER_CONFIG_DEFAULT. The user opens `{` at end of line
+            # then puts every key at a chosen "tabular" column (col 19
+            # here) — not line_indent + 4 (canonical) and not aligned
+            # with the bracket. Multiple sibling dicts in the file share
+            # the same column so they read as comparable tables.
+            # Preserve: skip collapse (despite trailing comma), wrap and
+            # re-indent.
+            """
+            CFG = {
+                               'pinned_rows': [],
+                               'column_config': [],
+                               'left_col_configs': [],
+                               'component_config': {},
+                               'extra_grid_config': {},
+            }
+            """,
+            """
+            CFG = {
+                               'pinned_rows': [],
+                               'column_config': [],
+                               'left_col_configs': [],
+                               'component_config': {},
+                               'extra_grid_config': {},
+            }
+            """,
+        ),
+        (
+            "wrap_continuation_uses_col_after_open_when_shallow",
+            # Real case from buckaroo/dataflow/styling_core.py
+            # ThemeColorConfig. The inner Dict's `{` is at col 4 with item 1
+            # inline at col 5; the canonical line_indent + 4 = col 8 puts
+            # continuations DEEPER than item 1, leaving item 1 visually
+            # offset. Use col_after_open_bracket instead, since it's
+            # shallower than line_indent + 4. Rule:
+            # continuation_col = min(line_indent + 4, col_after_open_bracket)
+            # (FunctionDef stays at line_indent + 8 unconditionally.)
+            """
+            ThemeColorConfig = TypedDict('ThemeColorConfig', {
+                'accentColor': NotRequired[str],
+                'accentHoverColor': NotRequired[str],
+                'backgroundColor': NotRequired[str],
+                'foregroundColor': NotRequired[str],
+                'oddRowBackgroundColor': NotRequired[str],
+                'borderColor': NotRequired[str],
+                'headerBorderColor': NotRequired[str],
+                'headerBackgroundColor': NotRequired[str],
+                'spacing': NotRequired[int],
+                'cellHorizontalPaddingScale': NotRequired[float],
+                'rowVerticalPaddingScale': NotRequired[float],
+            })
+            """,
+            """
+            ThemeColorConfig = TypedDict('ThemeColorConfig',
+                {'accentColor': NotRequired[str], 'accentHoverColor': NotRequired[str], 'backgroundColor': NotRequired[str],
+                 'foregroundColor': NotRequired[str], 'oddRowBackgroundColor': NotRequired[str], 'borderColor': NotRequired[str],
+                 'headerBorderColor': NotRequired[str], 'headerBackgroundColor': NotRequired[str], 'spacing': NotRequired[int],
+                 'cellHorizontalPaddingScale': NotRequired[float], 'rowVerticalPaddingScale': NotRequired[float]})
+            """,
         ),
         (
             "table_format_single_col_floats",
@@ -331,15 +552,11 @@ def dedent(s: str) -> str:
         (
             "idempotent_outer_call_continuation_shifts_inner_dict",
             # Minimal repro from buckaroo/pluggable_analysis_framework/
-            # safe_summary_df.py. The outer Call has its continuation line
-            # at col 23; the inner Dict's second key sits at col 24 (just
-            # past the `{`). On the first pass, the outer Call's
-            # continuation gets re-indented to col 8 (line_indent + 4),
-            # but the inner Dict's continuation stays at col 24 because
-            # _line_indent_plus_4 reads the *current* line indent of the
-            # Dict's `{` line, which still points at col 23. On the
-            # second pass, the Dict's `{` line is now at col 8, so the
-            # inner key gets re-indented to col 12. Two passes to settle.
+            # safe_summary_df.py. The outer Call's continuation lands at
+            # col 8 (line_indent + 4). For the inner Dict, the new
+            # continuation rule is min(line_indent + 4, col_after_open):
+            # `{` at col 8, col_after_{ = 9, line_indent + 4 = 12, so
+            # 9 wins — the inner Dict's continuation aligns with key 1.
             """
             def f(dct):
                 cleaned_dct = val_replace(dct,
@@ -351,21 +568,17 @@ def dedent(s: str) -> str:
             def f(dct):
                 cleaned_dct = val_replace(dct,
                     {pd.NA: UnquotedString("pd.NA"),
-                        np.nan: UnquotedString("np.nan")})
+                     np.nan: UnquotedString("np.nan")})
                 return cleaned_dct
             """,
         ),
         (
             "idempotent_nested_list_inside_dict_value",
-            # Minimal repro from buckaroo/ddd_library.py. After Pass 1
-            # collapses the outer Dict's trailing-comma multiline form,
-            # the 'timedelta' key's value (a multi-line List) sits at a
-            # new line indent. The inner List's continuation lines were
-            # at col 39 in the original; on run 1 they get re-indented to
-            # col 8 (line_indent + 4 of the OUTER dict's row). On run 2,
-            # they shift to col 12 (line_indent + 4 of the inner Call's
-            # row, which is now at col 8). Same root cause as the case
-            # above.
+            # Minimal repro from buckaroo/ddd_library.py. The outer Dict
+            # has multi-line values (the 'timedelta' Call spans several
+            # lines), so it falls under the user-formatted preservation
+            # rule: skip collapse / wrap / re-indent on the outer Dict
+            # AND on its Dict/List/Call values. Output equals input.
             """
             def f():
                 return pd.DataFrame({
@@ -378,11 +591,13 @@ def dedent(s: str) -> str:
             """,
             """
             def f():
-                return pd.DataFrame({'categorical': pd.Categorical(['red', 'green', 'blue', 'red', 'green']),
+                return pd.DataFrame({
+                    'categorical': pd.Categorical(['red', 'green', 'blue', 'red', 'green']),
                     'timedelta': pd.to_timedelta(['1 days 02:03:04', '0 days 00:00:01',
-                        '365 days', '0 days 00:00:00.001',
-                        '0 days 00:00:00.000100']),
-                    'int_col': [10, 20, 30, 40, 50]})
+                                                   '365 days', '0 days 00:00:00.001',
+                                                   '0 days 00:00:00.000100']),
+                    'int_col': [10, 20, 30, 40, 50],
+                })
             """,
         ),
         (
@@ -470,8 +685,12 @@ def dedent(s: str) -> str:
         (
             "unsplittable_single_arg_overflows",
             # Single arg > 120 chars; nothing to break on, stays as-is.
-            "result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)\n",
-            "result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)\n",
+            """
+            result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)
+            """,
+            """
+            result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)
+            """,
         ),
         (
             "single_line_unchanged",
@@ -512,6 +731,106 @@ def test_paddy_format_golden(name, src, expected):
     )
     # Idempotency: a second pass over `got` must be a no-op.
     again = paddy_format(got)
+    assert again == got, (
+        f"\n--- not idempotent for {name} ---"
+        f"\n--- once ---\n{got}"
+        f"\n--- twice ---\n{again}"
+    )
+
+
+@pytest.mark.parametrize(
+    "name,src,expected",
+    [
+        (
+            "one_per_line_dict_call_kwargs",
+            # Real case from buckaroo/customizations/pd_fracs.py. Collapsed
+            # form is 158 chars — over budget. With wrap_mode="one_per_line",
+            # each kwarg goes on its own line at line_indent + 4; close
+            # bracket stacks on last item.
+            """
+            class C:
+                def f(self, ser):
+                    return dict(
+                        str_bool_frac=str_bool_frac(ser),
+                        regular_int_parse_frac=regular_int_parse_frac(ser),
+                        strip_int_parse_frac=strip_int_parse_frac(ser),
+                        us_dates_frac=us_dates_frac(ser),
+                    )
+            """,
+            """
+            class C:
+                def f(self, ser):
+                    return dict(
+                        str_bool_frac=str_bool_frac(ser),
+                        regular_int_parse_frac=regular_int_parse_frac(ser),
+                        strip_int_parse_frac=strip_int_parse_frac(ser),
+                        us_dates_frac=us_dates_frac(ser))
+            """,
+        ),
+        (
+            "one_per_line_dict_literal_overlong",
+            # Dict literal collapsed exceeds 120 → one item per line.
+            """
+            frac_name_to_command = {
+                "str_bool_frac": "str_bool",
+                "regular_int_parse_frac": "regular_int_parse",
+                "strip_int_parse_frac": "strip_int_parse",
+                "us_dates_frac": "us_date",
+            }
+            """,
+            """
+            frac_name_to_command = {
+                "str_bool_frac": "str_bool",
+                "regular_int_parse_frac": "regular_int_parse",
+                "strip_int_parse_frac": "strip_int_parse",
+                "us_dates_frac": "us_date"}
+            """,
+        ),
+        (
+            "one_per_line_funcdef_overlong",
+            # Long function signature — each param on its own line at
+            # line_indent + 8 in one_per_line mode (FunctionDef-specific
+            # so args sit distinct from the body at line_indent + 4).
+            """
+            def compute_summary_with_executor(self, file_cache=None, progress_listener=None, file_path=None, planning_function=None, timeout_secs=None) -> None:
+                pass
+            """,
+            """
+            def compute_summary_with_executor(
+                    self,
+                    file_cache=None,
+                    progress_listener=None,
+                    file_path=None,
+                    planning_function=None,
+                    timeout_secs=None) -> None:
+                pass
+            """,
+        ),
+        (
+            "one_per_line_short_call_collapses_to_single_line",
+            # Collapsed form fits in 120 → still single-line, mode is a
+            # no-op (parity with greedy mode for short cases).
+            """
+            result = some_function_name(
+                arg1,
+                arg2,
+                arg3,
+            )
+            """,
+            """
+            result = some_function_name(arg1, arg2, arg3)
+            """,
+        ),
+    ],
+)
+def test_paddy_format_one_per_line(name, src, expected):
+    got = paddy_format(dedent(src), wrap_mode="one_per_line")
+    assert got == dedent(expected), (
+        f"\n--- input ---\n{dedent(src)}"
+        f"\n--- expected ---\n{dedent(expected)}"
+        f"\n--- got ---\n{got}"
+    )
+    again = paddy_format(got, wrap_mode="one_per_line")
     assert again == got, (
         f"\n--- not idempotent for {name} ---"
         f"\n--- once ---\n{got}"

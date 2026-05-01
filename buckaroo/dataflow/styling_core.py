@@ -29,43 +29,35 @@ CellRendererArgs = Union[
 # Formatter Types
 ObjDisplayerA = TypedDict('ObjDisplayerA', {
     'displayer': Literal["obj"],
-    'max_length': NotRequired[int]
-})
+    'max_length': NotRequired[int]})
 
 BooleanDisplayerA = TypedDict('BooleanDisplayerA', {
-    'displayer': Literal["boolean"]
-})
+    'displayer': Literal["boolean"]})
 
 StringDisplayerA = TypedDict('StringDisplayerA', {
     'displayer': Literal["string"],
-    'max_length': NotRequired[int]
-})
+    'max_length': NotRequired[int]})
 
 FloatDisplayerA = TypedDict('FloatDisplayerA', {
     'displayer': Literal["float"],
     'min_fraction_digits': int,
-    'max_fraction_digits': int
-})
+    'max_fraction_digits': int})
 
 DatetimeDefaultDisplayerA = TypedDict('DatetimeDefaultDisplayerA', {
-    'displayer': Literal["datetimeDefault"]
-})
+    'displayer': Literal["datetimeDefault"]})
 
 DatetimeLocaleDisplayerA = TypedDict('DatetimeLocaleDisplayerA', {
     'displayer': Literal["datetimeLocaleString"],
     'locale': Literal["en-US", "en-GB", "en-CA", "fr-FR", "es-ES", "de-DE", "ja-JP"],
-    'args': Dict[str, Any]
-})
+    'args': Dict[str, Any]})
 
 IntegerDisplayerA = TypedDict('IntegerDisplayerA', {
     'displayer': Literal["integer"],
     'min_digits': int,
-    'max_digits': int
-})
+    'max_digits': int})
 
 CompactNumberDisplayerA = TypedDict('CompactNumberDisplayerA', {
-    'displayer': Literal["compact_number"]
-})
+    'displayer': Literal["compact_number"]})
 
 FormatterArgs = Union[
     ObjDisplayerA,
@@ -87,25 +79,21 @@ ColorMap = Union[Literal["BLUE_TO_YELLOW", "DIVERGING_RED_WHITE_BLUE"], List[str
 ColorMapRules = TypedDict('ColorMapRules', {
     'color_rule': Literal["color_map"],
     'map_name': ColorMap,
-    'val_column': NotRequired[str]
-})
+    'val_column': NotRequired[str]})
 
 ColorCategoricalRules = TypedDict('ColorCategoricalRules', {
     'color_rule': Literal["color_categorical"],
     'map_name': ColorMap,
-    'val_column': NotRequired[str]
-})
+    'val_column': NotRequired[str]})
 
 ColorWhenNotNullRules = TypedDict('ColorWhenNotNullRules', {
     'color_rule': Literal["color_not_null"],
     'conditional_color': Union[str, Literal["red"]],
-    'exist_column': str
-})
+    'exist_column': str})
 
 ColorFromColumn = TypedDict('ColorFromColumn', {
     'color_rule': Literal["color_from_column"],
-    'val_column': str
-})
+    'val_column': str})
 
 ColorMappingConfig = Union[
     ColorMapRules,
@@ -117,12 +105,10 @@ ColorMappingConfig = Union[
 # Tooltip types
 SimpleTooltip = TypedDict('SimpleTooltip', {
     'tooltip_type': Literal["simple"],
-    'val_column': str
-})
+    'val_column': str})
 
 SummarySeriesTooltip = TypedDict('SummarySeriesTooltip', {
-    'tooltip_type': Literal["summary_series"]
-})
+    'tooltip_type': Literal["summary_series"]})
 
 TooltipConfig = Union[SimpleTooltip, SummarySeriesTooltip]
 
@@ -160,35 +146,19 @@ PinnedRowConfig = TypedDict('PinnedRowConfig', {
     'default_renderer_columns': NotRequired[List[str]]  # used to render index column values with string not the specified displayer
 })
 
-ThemeColorConfig = TypedDict('ThemeColorConfig', {
-    'accentColor': NotRequired[str],
-    'accentHoverColor': NotRequired[str],
-    'backgroundColor': NotRequired[str],
-    'foregroundColor': NotRequired[str],
-    'oddRowBackgroundColor': NotRequired[str],
-    'borderColor': NotRequired[str],
-    'headerBorderColor': NotRequired[str],
-    'headerBackgroundColor': NotRequired[str],
-    'spacing': NotRequired[int],
-    'cellHorizontalPaddingScale': NotRequired[float],
-    'rowVerticalPaddingScale': NotRequired[float],
-})
+ThemeColorConfig = TypedDict('ThemeColorConfig',
+    {'accentColor': NotRequired[str], 'accentHoverColor': NotRequired[str], 'backgroundColor': NotRequired[str],
+     'foregroundColor': NotRequired[str], 'oddRowBackgroundColor': NotRequired[str], 'borderColor': NotRequired[str],
+     'headerBorderColor': NotRequired[str], 'headerBackgroundColor': NotRequired[str], 'spacing': NotRequired[int],
+     'cellHorizontalPaddingScale': NotRequired[float], 'rowVerticalPaddingScale': NotRequired[float]})
 
-ThemeConfig = TypedDict('ThemeConfig', {
-    'colorScheme': NotRequired[Literal["light", "dark", "auto"]],
-    'accentColor': NotRequired[str],
-    'accentHoverColor': NotRequired[str],
-    'backgroundColor': NotRequired[str],
-    'foregroundColor': NotRequired[str],
-    'oddRowBackgroundColor': NotRequired[str],
-    'borderColor': NotRequired[str],
-    'headerBorderColor': NotRequired[str],
-    'spacing': NotRequired[int],
-    'cellHorizontalPaddingScale': NotRequired[float],
-    'rowVerticalPaddingScale': NotRequired[float],
-    'light': NotRequired[ThemeColorConfig],
-    'dark': NotRequired[ThemeColorConfig],
-})
+ThemeConfig = TypedDict('ThemeConfig',
+    {'colorScheme': NotRequired[Literal["light", "dark", "auto"]], 'accentColor': NotRequired[str],
+     'accentHoverColor': NotRequired[str], 'backgroundColor': NotRequired[str], 'foregroundColor': NotRequired[str],
+     'oddRowBackgroundColor': NotRequired[str], 'borderColor': NotRequired[str], 'headerBorderColor': NotRequired[str],
+     'spacing': NotRequired[int], 'cellHorizontalPaddingScale': NotRequired[float],
+     'rowVerticalPaddingScale': NotRequired[float], 'light': NotRequired[ThemeColorConfig],
+     'dark': NotRequired[ThemeColorConfig]})
 
 ComponentConfig = TypedDict('ComponentConfig', {
     'height_fraction': NotRequired[float],
@@ -197,16 +167,14 @@ ComponentConfig = TypedDict('ComponentConfig', {
     'shortMode': NotRequired[bool],
     'selectionBackground': NotRequired[str],
     'className': NotRequired[str],
-    'theme': NotRequired[ThemeConfig]
-})
+    'theme': NotRequired[ThemeConfig]})
 
 DFViewerConfig = TypedDict('DFViewerConfig', {
     'pinned_rows': List[PinnedRowConfig],
     'column_config': List[ColumnConfig],
     'left_col_configs': List[ColumnConfig],  # basically for the pandas index
     'extra_grid_config': NotRequired[Dict[str, Any]],  # GridOptions
-    'component_config': NotRequired[ComponentConfig]
-})
+    'component_config': NotRequired[ComponentConfig]})
 
 DisplayArgs = TypedDict('DisplayArgs', {
     'data_key':str,
@@ -214,17 +182,16 @@ DisplayArgs = TypedDict('DisplayArgs', {
     'summary_stats_key': str})
 
 INDEX_COL_CONFIG:ColumnConfig = {'col_name': 'index', 'header_name':'index',
-                       'displayer_args': {'displayer': 'obj'}}
+    'displayer_args': {'displayer': 'obj'}}
 EMPTY_DFVIEWER_CONFIG: DFViewerConfig = {
     'pinned_rows': [],
     'column_config': [],
-    'left_col_configs': [INDEX_COL_CONFIG]
-}
+    'left_col_configs': [INDEX_COL_CONFIG]}
 
 
 EMPTY_DF_DISPLAY_ARG: DisplayArgs = {
   'data_key': 'empty', 'df_viewer_config': EMPTY_DFVIEWER_CONFIG,
-  'summary_stats_key': 'empty'}
+    'summary_stats_key': 'empty'}
 
 
 SENTINEL_DF_1 = pd.DataFrame({'foo'  :[10, 20], 'bar' : ["asdf", "iii"]})
@@ -364,8 +331,7 @@ class StylingAnalysis(ColAnalysis):
                      }]
         if index_names_empty(df.index) and index_names_empty(df.columns) and not isinstance(df.index, pd.MultiIndex):
             return [{'col_name': 'index', 'header_name':'index',
-                             'displayer_args': {'displayer': 'obj'}}
-                     ]
+                'displayer_args': {'displayer': 'obj'}}]
         base_col_path = get_empty_index_level_arr(df.columns)
         col_levels = get_index_level_names(df.columns)
 
@@ -375,7 +341,7 @@ class StylingAnalysis(ColAnalysis):
             else:
                 col_levels.append(df.index.name)
             return [{'col_path':col_levels, 'field':'index',
-                     'displayer_args': {'displayer': 'obj'}}]
+                'displayer_args': {'displayer': 'obj'}}]
         ccs:List[ColumnConfig] = []
 
         for i, idx_name in enumerate(df.index.names):
@@ -383,7 +349,7 @@ class StylingAnalysis(ColAnalysis):
                 # if len(base_col_path) == 0:
                 #     base_col_path = ['']
                 ccs.append({'header_name':'', 'col_name':'index_' + to_chars(i),
-                     'displayer_args': {'displayer': 'obj'}})
+                    'displayer_args': {'displayer': 'obj'}})
             else:
                 if index_names_empty(df.index):
                     local_col_path = base_col_path.copy()
@@ -391,7 +357,7 @@ class StylingAnalysis(ColAnalysis):
                     local_col_path = base_col_path.copy()
                     local_col_path.append(str(idx_name))
                 ccs.append({'col_path': local_col_path, 'field':'index_' + to_chars(i),
-                     'displayer_args': {'displayer': 'obj'}})
+                    'displayer_args': {'displayer': 'obj'}})
         if not index_names_empty(df.columns):
             for i, cl in enumerate(col_levels):
                 ccs[-1]['col_path'][i] = cl
@@ -460,8 +426,7 @@ class StylingAnalysis(ColAnalysis):
             'column_config': cls.style_columns(sd, df),
             'left_col_configs':  cls.get_left_col_configs(df),
             'extra_grid_config': cls.extra_grid_config,
-            'component_config': cls.component_config
-        }
+            'component_config': cls.component_config}
                     
     @classmethod
     def style_columns(cls, sd:SDType, df:pd.DataFrame) -> List[ColumnConfig]:

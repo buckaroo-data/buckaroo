@@ -24,13 +24,7 @@ def _section(title: str):
 
 def _run(cmd: list[str], timeout: float = 15, **kwargs) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            **kwargs,
-        )
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kwargs)
     except FileNotFoundError:
         return subprocess.CompletedProcess(cmd, 127, "", f"command not found: {cmd[0]}")
     except subprocess.TimeoutExpired:
@@ -77,10 +71,7 @@ def diagnose_uvx_stdout_pollution():
 
     # Run uvx with /dev/null as stdin and a script that exits immediately
     # Any stdout from uvx itself (before Python runs) would corrupt JSON-RPC
-    r = _run(
-        ["uvx", "--from", "buckaroo[mcp]", "python", "-c", ""],
-        timeout=30,
-    )
+    r = _run(["uvx", "--from", "buckaroo[mcp]", "python", "-c", ""], timeout=30)
     if r.returncode == 127:
         print(f"SKIP — {r.stderr.strip()}")
         return
@@ -109,10 +100,7 @@ def diagnose_uvx_startup_timing():
 
     for label in ("cold", "warm"):
         t0 = time.monotonic()
-        r = _run(
-            ["uvx", "--from", "buckaroo[mcp]", "python", "-c", "print('ok')"],
-            timeout=60,
-        )
+        r = _run(["uvx", "--from", "buckaroo[mcp]", "python", "-c", "print('ok')"], timeout=60)
         elapsed = time.monotonic() - t0
         ok = r.stdout.strip() == "ok"
         print(f"{label:5s} start: {elapsed:.2f}s  (exit={r.returncode}, ok={ok})")
@@ -145,12 +133,7 @@ def diagnose_mcp_handshake():
     cmd = ["uvx", "--from", "buckaroo[mcp]", "buckaroo-table"]
     t0 = time.monotonic()
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = proc.communicate(input=payload.encode(), timeout=10)
         elapsed = time.monotonic() - t0
     except subprocess.TimeoutExpired:

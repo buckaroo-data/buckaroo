@@ -12,10 +12,7 @@ import pandas as pd
 from buckaroo.df_util import old_col_new_col
 
 from .col_analysis import ColAnalysis, ErrDict, SDType
-from .stat_func import (
-    StatFunc, RawSeries, SampledSeries, RawDataFrame,
-    RAW_MARKER_TYPES, MISSING, collect_stat_funcs,
-)
+from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
 from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_typed_dag, build_column_dag, DAGConfigError
 from .v1_adapter import col_analysis_to_stat_funcs
@@ -52,20 +49,13 @@ def _normalize_inputs(inputs: list) -> List[StatFunc]:
 
         raise TypeError(
             f"Cannot convert {obj!r} to StatFunc. Expected StatFunc, "
-            f"@stat-decorated function, stat group class, or ColAnalysis subclass."
-        )
+            f"@stat-decorated function, stat group class, or ColAnalysis subclass.")
 
     return all_funcs
 
 
-def _execute_stat_func(
-    sf: StatFunc,
-    accumulator: Dict[str, StatResult],
-    column_name: str,
-    raw_series=None,
-    sampled_series=None,
-    raw_dataframe=None,
-) -> None:
+def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_name: str, raw_series=None,
+        sampled_series=None, raw_dataframe=None) -> None:
     """Execute a single StatFunc, updating the accumulator in place.
 
     Handles:
@@ -90,12 +80,8 @@ def _execute_stat_func(
                     accumulator[sk.name] = Ok(sf.default)
             else:
                 for sk in sf.provides:
-                    accumulator[sk.name] = Err(
-                        error=e,
-                        stat_func_name=sf.name,
-                        column_name=column_name,
-                        inputs=summary_dict.copy(),
-                    )
+                    accumulator[sk.name] = Err(error=e, stat_func_name=sf.name, column_name=column_name,
+                        inputs=summary_dict.copy())
             return
         if sf.spread_dict_result and isinstance(result, dict):
             for k, v in result.items():
@@ -130,15 +116,10 @@ def _execute_stat_func(
                         and not isinstance(result.value, req.type)):
                     type_err = TypeError(
                         f"'{sf.name}' expects '{req.name}' as {req.type.__name__}, "
-                        f"but got {type(result.value).__name__}: {result.value!r}"
-                    )
+                        f"but got {type(result.value).__name__}: {result.value!r}")
                     for sk in sf.provides:
-                        accumulator[sk.name] = Err(
-                            error=type_err,
-                            stat_func_name=sf.name,
-                            column_name=column_name,
-                            inputs={},
-                        )
+                        accumulator[sk.name] = Err(error=type_err, stat_func_name=sf.name, column_name=column_name,
+                            inputs={})
                     has_upstream_err = True
                     break
                 kwargs[req.name] = result.value
@@ -146,27 +127,17 @@ def _execute_stat_func(
                 # Upstream error — propagate to all outputs
                 upstream_err = UpstreamError(sf.name, req.name, result.error)
                 for sk in sf.provides:
-                    accumulator[sk.name] = Err(
-                        error=upstream_err,
-                        stat_func_name=sf.name,
-                        column_name=column_name,
-                        inputs={},
-                    )
+                    accumulator[sk.name] = Err(error=upstream_err, stat_func_name=sf.name, column_name=column_name,
+                        inputs={})
                 has_upstream_err = True
                 break
         else:
             # Required key not in accumulator — should not happen after DAG validation
             # but handle gracefully
             err = DAGConfigError(
-                f"Required key '{req.name}' not found in accumulator for '{sf.name}'"
-            )
+                f"Required key '{req.name}' not found in accumulator for '{sf.name}'")
             for sk in sf.provides:
-                accumulator[sk.name] = Err(
-                    error=err,
-                    stat_func_name=sf.name,
-                    column_name=column_name,
-                    inputs={},
-                )
+                accumulator[sk.name] = Err(error=err, stat_func_name=sf.name, column_name=column_name, inputs={})
             has_upstream_err = True
             break
 
@@ -203,12 +174,8 @@ def _execute_stat_func(
                 accumulator[sk.name] = Ok(sf.default)
         else:
             for sk in sf.provides:
-                accumulator[sk.name] = Err(
-                    error=e,
-                    stat_func_name=sf.name,
-                    column_name=column_name,
-                    inputs=kwargs.copy(),
-                )
+                accumulator[sk.name] = Err(error=e, stat_func_name=sf.name, column_name=column_name,
+                    inputs=kwargs.copy())
 
 
 class StatPipeline:
@@ -235,11 +202,7 @@ class StatPipeline:
     def ordered_a_objs(self):
         return list(self._original_inputs)
 
-    def __init__(
-        self,
-        stat_funcs: list,
-        unit_test: bool = True,
-    ):
+    def __init__(self, stat_funcs: list, unit_test: bool = True):
         self.all_stat_funcs = _normalize_inputs(stat_funcs)
         self._original_inputs = list(stat_funcs)
 
@@ -259,15 +222,8 @@ class StatPipeline:
         if unit_test:
             self._unit_test_result = self.unit_test()
 
-    def process_column(
-        self,
-        column_name: str,
-        column_dtype,
-        raw_series=None,
-        sampled_series=None,
-        raw_dataframe=None,
-        initial_stats: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Dict[str, Any], List[StatError]]:
+    def process_column(self, column_name: str, column_dtype, raw_series=None, sampled_series=None, raw_dataframe=None,
+            initial_stats: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[StatError]]:
         """Process a single column through the stat DAG.
 
         1. Filters stat functions by column dtype
@@ -287,12 +243,8 @@ class StatPipeline:
             for k, v in initial_stats.items():
                 accumulator[k] = Ok(v)
         for sf in column_funcs:
-            _execute_stat_func(
-                sf, accumulator, column_name,
-                raw_series=raw_series,
-                sampled_series=sampled_series,
-                raw_dataframe=raw_dataframe,
-            )
+            _execute_stat_func(sf, accumulator, column_name, raw_series=raw_series, sampled_series=sampled_series,
+                raw_dataframe=raw_dataframe)
 
         # Build key_to_func for this column's funcs
         col_key_to_func: Dict[str, StatFunc] = {}
@@ -302,11 +254,7 @@ class StatPipeline:
 
         return resolve_accumulator(accumulator, column_name, col_key_to_func)
 
-    def process_df(
-        self,
-        df: pd.DataFrame,
-        debug: bool = False,
-    ) -> Tuple[SDType, List[StatError]]:
+    def process_df(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, List[StatError]]:
         """Process all columns of a DataFrame.
 
         Returns:
@@ -323,28 +271,16 @@ class StatPipeline:
             ser = df[orig_col_name]
             col_dtype = ser.dtype
 
-            col_result, col_errors = self.process_column(
-                column_name=rewritten_col_name,
-                column_dtype=col_dtype,
-                raw_series=ser,
-                sampled_series=ser,
-                raw_dataframe=df,
-                initial_stats={
-                    'orig_col_name': orig_col_name,
-                    'rewritten_col_name': rewritten_col_name,
-                },
-            )
+            col_result, col_errors = self.process_column(column_name=rewritten_col_name, column_dtype=col_dtype,
+                raw_series=ser, sampled_series=ser, raw_dataframe=df,
+                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name})
 
             summary[rewritten_col_name] = col_result
             all_errors.extend(col_errors)
 
         return summary, all_errors
 
-    def process_df_v1_compat(
-        self,
-        df: pd.DataFrame,
-        debug: bool = False,
-    ) -> Tuple[SDType, ErrDict]:
+    def process_df_v1_compat(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, ErrDict]:
         """Process DataFrame with v1-compatible error format.
 
         Returns (SDType, ErrDict) matching the v1 AnalysisPipeline interface.
@@ -390,10 +326,7 @@ class StatPipeline:
             new_funcs = _normalize_inputs(new_inputs)
             new_ordered = build_typed_dag(new_funcs, external_keys=self.EXTERNAL_KEYS)
         except DAGConfigError as e:
-            return False, [StatError(
-                column="<dag>", stat_key="<config>",
-                error=e, stat_func=None,
-            )]
+            return False, [StatError(column="<dag>", stat_key="<config>", error=e, stat_func=None)]
 
         # Update internal state
         self.all_stat_funcs = new_funcs

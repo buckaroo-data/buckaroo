@@ -81,15 +81,8 @@ def col_analysis_to_stat_funcs(kls: Type[ColAnalysis]) -> List[StatFunc]:
 
         series_func = _make_series_func(_kls, _defaults)
 
-        funcs.append(StatFunc(
-            name=f"{kls.__name__}__series",
-            func=series_func,
-            requires=series_requires,
-            provides=series_provides,
-            needs_raw=True,
-            quiet=kls.quiet,
-            spread_dict_result=True,
-        ))
+        funcs.append(StatFunc(name=f"{kls.__name__}__series", func=series_func, requires=series_requires,
+            provides=series_provides, needs_raw=True, quiet=kls.quiet, spread_dict_result=True))
 
     if has_computed:
         # Computed phase: uses v1_computed mode to receive full accumulator
@@ -115,16 +108,8 @@ def col_analysis_to_stat_funcs(kls: Type[ColAnalysis]) -> List[StatFunc]:
 
         computed_func = _make_computed_func(_kls)
 
-        funcs.append(StatFunc(
-            name=f"{kls.__name__}__computed",
-            func=computed_func,
-            requires=computed_requires,
-            provides=computed_provides,
-            needs_raw=False,
-            quiet=kls.quiet,
-            v1_computed=True,
-            spread_dict_result=True,
-        ))
+        funcs.append(StatFunc(name=f"{kls.__name__}__computed", func=computed_func, requires=computed_requires,
+            provides=computed_provides, needs_raw=False, quiet=kls.quiet, v1_computed=True, spread_dict_result=True))
 
     elif not has_series and not has_computed:
         # Class only has provides_defaults (pure defaults, no computation)
@@ -141,13 +126,7 @@ def col_analysis_to_stat_funcs(kls: Type[ColAnalysis]) -> List[StatFunc]:
 
             defaults_func = _make_defaults_func(_defaults, _kls_name)
 
-            funcs.append(StatFunc(
-                name=_kls_name,
-                func=defaults_func,
-                requires=[],
-                provides=provide_keys,
-                needs_raw=False,
-                quiet=kls.quiet,
-            ))
+            funcs.append(StatFunc(name=_kls_name, func=defaults_func, requires=[], provides=provide_keys,
+                needs_raw=False, quiet=kls.quiet))
 
     return funcs

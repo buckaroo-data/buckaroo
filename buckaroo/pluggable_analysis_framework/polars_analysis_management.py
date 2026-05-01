@@ -132,8 +132,7 @@ def polars_produce_series_df(df:pl.DataFrame,
     # This ensures consistency with PAFColumnExecutor
     # Note: we pass run_computed_summary=False because that's done in polars_produce_summary_df
     series_stats, errs = polars_series_stats_from_select_result(
-        result_df, df, unordered_objs, df_name, debug, run_computed_summary=False
-    )
+        result_df, df, unordered_objs, df_name, debug, run_computed_summary=False)
     
     return series_stats, errs
 
@@ -188,14 +187,8 @@ def polars_produce_summary_df(
     return summary_col_dict, errs
 
 #FIXME shouldn't this be used by produce_summary_df?
-def polars_series_stats_from_select_result(
-    select_result_df: pl.DataFrame,
-    original_df_for_schema: pl.DataFrame,
-    unordered_objs: PAObjs,
-    df_name: str = 'test_df',
-    debug: bool = False,
-    run_computed_summary: bool = True,
-) -> SDType:
+def polars_series_stats_from_select_result(select_result_df: pl.DataFrame, original_df_for_schema: pl.DataFrame,
+        unordered_objs: PAObjs, df_name: str = 'test_df', debug: bool = False, run_computed_summary: bool = True) -> SDType:
     """
     Build series-level stats given a DataFrame produced by selecting the
     analysis expressions up-front. This avoids reconstructing and executing
@@ -207,10 +200,7 @@ def polars_series_stats_from_select_result(
     summary_dict: dict[str, dict[str, Any]] = {}
     for orig_ser_name, rewritten_col_name in old_col_new_col(original_df_for_schema):
         orig_col_to_rewritten[orig_ser_name] = rewritten_col_name
-        summary_dict[rewritten_col_name] = {
-            'orig_col_name': orig_ser_name,
-            'rewritten_col_name': rewritten_col_name,
-        }
+        summary_dict[rewritten_col_name] = {'orig_col_name': orig_ser_name, 'rewritten_col_name': rewritten_col_name}
         for a_klass in unordered_objs:
             summary_dict[rewritten_col_name].update(a_klass.provides_defaults)
 
@@ -308,7 +298,7 @@ class PolarsAnalysisPipeline(AnalysisPipeline):
         series_stat_dict, series_errs = polars_produce_series_df(df, ordered_objs, df_name, debug)
         
         summary_dict, summary_errs = polars_produce_summary_df(
-        df, series_stat_dict, ordered_objs, df_name, debug)
+            df, series_stat_dict, ordered_objs, df_name, debug)
         series_errs.update(summary_errs)
         return summary_dict, series_errs
 

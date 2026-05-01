@@ -25,10 +25,7 @@ with open(out_path, 'w') as f:
 print(f"Generated {out_path}")
 
 # BigInt precision test: INT64 values above Number.MAX_SAFE_INTEGER (2^53-1)
-bigint_df = pd.DataFrame({
-    'big_id': [9007199254740993, 9007199254740994, 9007199254740995],
-    'label': ['a', 'b', 'c'],
-})
+bigint_df = pd.DataFrame({'big_id': [9007199254740993, 9007199254740994, 9007199254740995], 'label': ['a', 'b', 'c']})
 bigint_html = to_html(bigint_df, title="BigInt Precision Test")
 bigint_path = os.path.join(os.path.dirname(__file__), '..', 'buckaroo', 'static', 'bigint-test.html')
 with open(bigint_path, 'w') as f:

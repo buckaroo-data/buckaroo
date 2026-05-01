@@ -38,18 +38,7 @@ class BaseHeuristicCleaningGenOps(ColAnalysis):
             return {"cleaning_ops": [], "cleaning_name": "None"}
         else:
             cleaning_name = cls.rules_op_names.get(
-                cleaning_op_name, cleaning_op_name
-            )
-            ops = [
-                sA(
-                    cleaning_name,
-                    clean_strategy=cls.__name__,
-                    clean_col=column_metadata["orig_col_name"],
-                ),
-                {"symbol": "df"},
-            ]
-            return {
-                "cleaning_ops": ops,
-                "cleaning_name": cleaning_name,
-                "add_orig": True,
-            }
+                cleaning_op_name, cleaning_op_name)
+            ops = [sA(cleaning_name, clean_strategy=cls.__name__, clean_col=column_metadata["orig_col_name"]),
+                {"symbol": "df"}]
+            return {"cleaning_ops": ops, "cleaning_name": cleaning_name, "add_orig": True}

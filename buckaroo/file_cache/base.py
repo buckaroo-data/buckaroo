@@ -199,7 +199,7 @@ class MemoryFileCache(AbstractFileCache):
         def get_buffer_info(k:Literal["validity"]|Literal["offsets"]) -> SimpleBufferKey:
             if k in buffers and buffers[k] is not None:
                 return buffers[k]._get_buffer_info() #type:ignore
-            return (0,0,0,)
+            return (0, 0, 0)
         validity: SimpleBufferKey = get_buffer_info('validity')
         offsets:SimpleBufferKey = get_buffer_info('offsets')
         values = buffers['values']._get_buffer_info()
@@ -507,7 +507,7 @@ class Executor:
 
         self.file_path: MaybeFilepath = ensure_filepath(file_path)
 
-        self.dfi = (id(self.ldf), str(self.file_path) if self.file_path else "",)
+        self.dfi = (id(self.ldf), str(self.file_path) if self.file_path else "")
         self.executor_class_name = self.__class__.__name__
         
         # Store cached merged_sd and mapping for checking complete columns
@@ -569,8 +569,7 @@ class Executor:
                 row_start=ex_args.row_start,
                 row_end=ex_args.row_end,
                 extra=ex_args.extra,
-                no_exec=False
-            )
+                no_exec=False)
             
             if self.executor_log.check_log_for_completed(self.dfi, original_group_args):
                 logger.info(f"Executor.run() SKIPPING group {col_group} - already completed (found in executor log)")
@@ -764,8 +763,7 @@ class Executor:
                 baseline_overhead=state['baseline_overhead'],
                 timeout_secs=timeout_secs,
                 execution_history=history,
-                remaining_columns=state['remaining']
-            )
+                remaining_columns=state['remaining'])
             
             # Plan next batches
             plan_result = self.planning_function(context)

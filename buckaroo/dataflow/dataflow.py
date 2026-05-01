@@ -56,7 +56,7 @@ class DataFlow(ABCDataflow):
 
     command_config = Dict({}).tag(sync=True)
     operation_results = Dict({'transformed_df':None,
-                              'generated_py_code': ""})
+        'generated_py_code': ""})
 
 
     raw_df = Any('')
@@ -137,7 +137,7 @@ class DataFlow(ABCDataflow):
             self.cleaned = result
             self.operations = result[3]
         self.operation_results = {'transformed_df':None,
-                                  'generated_py_code': self.generated_code}
+            'generated_py_code': self.generated_code}
 
     @property
     def cleaned_df(self):
@@ -230,8 +230,7 @@ BuckarooOptions = TypedDict('BuckarooOptions', {
     # this is a weird one I think it's a List of Literals, I forget.
     # It's odd in the frontend too
     'show_commands': List[str],  
-    'summary_stats': List[str],
-    })
+    'summary_stats': List[str]})
 
     
 class CustomizableDataflow(DataFlow):
@@ -305,14 +304,8 @@ class CustomizableDataflow(DataFlow):
 
     #typing compalins about this, but so far as this class is concerned, buckaroo_options follows theBuckarooOptions type
     # typing doesn't get along well with traitlets
-    buckaroo_options:BuckarooOptions = Dict({
-        'sampled': ['random'],
-        'auto_clean': ['aggressive', 'conservative'],
-        'post_processing': [],
-        'df_display': ['main', 'summary'],
-        'show_commands': ['on'],
-        'summary_stats': ['all'],
-    }).tag(sync=True)
+    buckaroo_options:BuckarooOptions = Dict({'sampled': ['random'], 'auto_clean': ['aggressive', 'conservative'],
+        'post_processing': [], 'df_display': ['main', 'summary'], 'show_commands': ['on'], 'summary_stats': ['all']}).tag(sync=True)
 
     def setup_options_from_analysis(self):
         self.df_display_klasses = filter_analysis(self.analysis_klasses, "df_display_name")
@@ -465,12 +458,12 @@ class CustomizableDataflow(DataFlow):
         # selected, optionally
         if self.skip_main_serial:
             self.df_data_dict = {'main': [],
-                                 'all_stats': self._sd_to_jsondf(merged_sd),
-                                 'empty': []}
+                'all_stats': self._sd_to_jsondf(merged_sd),
+                'empty': []}
         else:
             self.df_data_dict = {'main': self._df_to_obj(processed_df),
-                                 'all_stats': self._sd_to_jsondf(merged_sd),
-                                 'empty': []}
+                'all_stats': self._sd_to_jsondf(merged_sd),
+                'empty': []}
 
         temp_display_args = {}
         for display_name, A_Klass in self.df_display_klasses.items():
@@ -479,8 +472,8 @@ class CustomizableDataflow(DataFlow):
             df_viewer_config['column_config'] =  merge_column_config(
                 base_column_config, self.processed_df, self.column_config_overrides)
             disp_arg = {'data_key': A_Klass.data_key,
-                        'df_viewer_config': df_viewer_config,
-                        'summary_stats_key': A_Klass.summary_stats_key}
+                'df_viewer_config': df_viewer_config,
+                'summary_stats_key': A_Klass.summary_stats_key}
             temp_display_args[display_name] = disp_arg
 
         if self.pinned_rows is not None:

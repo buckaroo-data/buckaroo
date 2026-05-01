@@ -1,12 +1,7 @@
 from typing import Dict, List
 import pandas as pd
 from buckaroo.dataflow.styling_core import ColumnConfig, DFViewerConfig, NormalColumnConfig, PartialColConfig, StylingAnalysis, merge_sd_overrides, rewrite_override_col_references
-from buckaroo.customizations.styling import (
-    _formatted_char_count,
-    estimate_min_width_px,
-    _HISTOGRAM_MIN_PX,
-    _MIN_COL_PX,
-)
+from buckaroo.customizations.styling import (_formatted_char_count, estimate_min_width_px, _HISTOGRAM_MIN_PX, _MIN_COL_PX)
 from buckaroo.ddd_library import get_basic_df2, get_multiindex_index_df, get_multiindex_index_multiindex_with_names_cols_df, get_multiindex_index_with_names_multiindex_cols_df, get_multiindex_with_names_both, get_multiindex_with_names_index_df, get_multiindex_cols_df, get_multiindex_with_names_cols_df, get_tuple_cols_df
 from buckaroo.df_util import ColIdentifier
 from buckaroo.pluggable_analysis_framework.col_analysis import SDType
@@ -18,7 +13,7 @@ def test_simple_styling() -> None:
         'bar':['foo', 'bar', 'baz']})
 
     dfvc: DFViewerConfig = StylingAnalysis.get_dfviewer_config(
-    {'a':{'orig_col_name':'foo'}, 'b':{'orig_col_name':'bar'}}, simple_df)
+        {'a':{'orig_col_name':'foo'}, 'b':{'orig_col_name':'bar'}}, simple_df)
 
     col_config: List[ColumnConfig] = dfvc['column_config']
     assert len(col_config) == 2
@@ -30,11 +25,8 @@ def test_simple_styling() -> None:
 def test_multi_index_styling() -> None:
 
     mic_df: pd.DataFrame = get_multiindex_cols_df()
-    fake_sd:SDType = {
-        "a": {'orig_col_name':('foo','a')},
-        "b": {'orig_col_name':('foo','b')},
-        "c": {'orig_col_name':('bar','a')},
-    }
+    fake_sd:SDType = {"a": {'orig_col_name':('foo','a')}, "b": {'orig_col_name':('foo','b')},
+        "c": {'orig_col_name':('bar','a')}}
 
     dfvc: DFViewerConfig = StylingAnalysis.get_dfviewer_config(fake_sd, mic_df)
 
@@ -49,11 +41,8 @@ def test_multi_index_styling() -> None:
 def test_tuple_col_styling() -> None:
 
     mic_df: pd.DataFrame = get_tuple_cols_df()
-    fake_sd:SDType = {
-        "a": {'orig_col_name':('foo','a')},
-        "b": {'orig_col_name':('foo','b')},
-        "c": {'orig_col_name':('bar','a')},
-    }
+    fake_sd:SDType = {"a": {'orig_col_name':('foo','a')}, "b": {'orig_col_name':('foo','b')},
+        "c": {'orig_col_name':('bar','a')}}
 
     dfvc: DFViewerConfig = StylingAnalysis.get_dfviewer_config(fake_sd, mic_df)
 
@@ -83,10 +72,10 @@ def test_index_styling1():
 
 def test_index_styling2():
     assert [{'col_path':['level_a', 'level_b', 'index'],
-            'field':'index', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_with_names_cols_df())
+        'field':'index', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_with_names_cols_df())
 def test_index_styling3():
     assert [{'col_path':['index_name_1'], 'field':'index_a', 'displayer_args': {'displayer': 'obj'}},
-    {'col_path':['index_name_2'], 'field':'index_b', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_with_names_index_df())
+        {'col_path':['index_name_2'], 'field':'index_b', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_with_names_index_df())
 
 def test_index_styling4():
 
@@ -117,11 +106,11 @@ def test_index_styling4():
 
 def test_index_styling5():
     assert [{'col_path':['', '', 'index_name_1'], 'field':'index_a', 'displayer_args': {'displayer': 'obj'}},
-    {'col_path':['', '', 'index_name_2'], 'field':'index_b', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_index_with_names_multiindex_cols_df())
+        {'col_path':['', '', 'index_name_2'], 'field':'index_b', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_index_with_names_multiindex_cols_df())
 
 def test_index_styling6():
     assert [{'col_path':['', '', 'index_name_1'], 'field':'index_a', 'displayer_args': {'displayer': 'obj'}},
-    {'col_path':['level_a', 'level_b', 'index_name_2'], 'field':'index_b', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_with_names_both())
+        {'col_path':['level_a', 'level_b', 'index_name_2'], 'field':'index_b', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_with_names_both())
         
 
 def test_get_dfviewer_config_merge_hidden():
@@ -163,7 +152,7 @@ def test_get_dfviewer_column_config_override():
     
     b_config : NormalColumnConfig = {
     'col_name': 'b', 'header_name':'sent_str_col', 'displayer_args': {'displayer': 'obj'},
-             'color_map_config': {'color_rule': 'color_from_column', 'val_column': 'c'}}
+        'color_map_config': {'color_rule': 'color_from_column', 'val_column': 'c'}}
     expected_output: DFViewerConfig = {
         'pinned_rows': [],
         'column_config':  [
@@ -194,8 +183,7 @@ def test_rewrite_override():
 
     rewrites: Dict[ColIdentifier, ColIdentifier] =  {
         'Volume_colors': "ccc",
-        'foo' : 'ddd'
-    }
+        'foo' : 'ddd'}
     color_from_column:PartialColConfig = {
               'color_map_config': {'color_rule': 'color_from_column', 'val_column': 'Volume_colors'}}
     rewritten_color_from_column = {
@@ -232,7 +220,7 @@ def test_merge_sd_overrides():
 
     merged : SDType = merge_sd_overrides(orig_sd, typed_df, override_sd)
 
-    assert merged['a'] == {'foo':10, 'orig_col_name':'int_col', 'rewritten_col_name':'a', 
+    assert merged['a'] == {'foo':10, 'orig_col_name':'int_col', 'rewritten_col_name':'a',
         'column_config_override': {'color_map_config': {'color_rule': 'color_from_column', 'col_name': 'a'}}}
     assert len(merged) == 1
     assert 'int_col' not in merged
@@ -253,9 +241,9 @@ def test_merge_sd_overrides2():
     merged : SDType = merge_sd_overrides(orig_sd, typed_df, override_sd)
 
     assert merged['a'] == { 'foo':10,
-    'orig_col_name':'int_col', 'rewritten_col_name':'a', 
-    'column_config_override': {'color_map_config': {'color_rule': 'color_from_column', 'col_name': 'a'}},
-    'extra_key':9}
+        'orig_col_name':'int_col', 'rewritten_col_name':'a',
+        'column_config_override': {'color_map_config': {'color_rule': 'color_from_column', 'col_name': 'a'}},
+        'extra_key':9}
     assert len(merged) == 1
 
 

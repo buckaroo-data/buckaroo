@@ -31,14 +31,7 @@ def test_sd_to_parquet_b64_returns_tagged_dict():
 
 
 def test_sd_to_parquet_b64_round_trip_scalars():
-    sd = {
-        'col_a': {
-            'dtype': 'float64',
-            'mean': np.float64(42.0),
-            'min': np.float64(0.0),
-            'max': np.float64(100.0),
-        },
-    }
+    sd = {'col_a': {'dtype': 'float64', 'mean': np.float64(42.0), 'min': np.float64(0.0), 'max': np.float64(100.0)}}
     result = sd_to_parquet_b64(sd)
     df = _decode_parquet_b64(result)
 
@@ -55,18 +48,9 @@ def test_sd_to_parquet_b64_histogram_round_trip():
     This is the key test for #630: histogram data must be JSON-decodable
     from the parquet payload with correct types (numbers, not strings).
     """
-    histogram = [
-        {'name': '0.0 - 1.0', 'tail': 1},
-        {'name': '1-20', 'population': np.float64(15.0)},
-        {'name': '20-40', 'population': np.float64(25.0)},
-        {'name': '99.0 - 100.0', 'tail': 1},
-    ]
-    sd = {
-        'col_a': {
-            'histogram': histogram,
-            'dtype': 'float64',
-        },
-    }
+    histogram = [{'name': '0.0 - 1.0', 'tail': 1}, {'name': '1-20', 'population': np.float64(15.0)},
+        {'name': '20-40', 'population': np.float64(25.0)}, {'name': '99.0 - 100.0', 'tail': 1}]
+    sd = {'col_a': {'histogram': histogram, 'dtype': 'float64'}}
     result = sd_to_parquet_b64(sd)
     df = _decode_parquet_b64(result)
 
@@ -90,12 +74,8 @@ def test_sd_to_parquet_b64_histogram_round_trip():
 
 
 def test_sd_to_parquet_b64_categorical_histogram():
-    histogram = [
-        {'name': 'foo', 'cat_pop': np.float64(40.0)},
-        {'name': 'bar', 'cat_pop': np.float64(35.0)},
-        {'name': 'longtail', 'longtail': np.float64(15.0)},
-        {'name': 'unique', 'unique': np.float64(10.0)},
-    ]
+    histogram = [{'name': 'foo', 'cat_pop': np.float64(40.0)}, {'name': 'bar', 'cat_pop': np.float64(35.0)},
+        {'name': 'longtail', 'longtail': np.float64(15.0)}, {'name': 'unique', 'unique': np.float64(10.0)}]
     sd = {'col': {'histogram': histogram, 'dtype': 'object'}}
     result = sd_to_parquet_b64(sd)
     df = _decode_parquet_b64(result)
@@ -109,10 +89,7 @@ def test_sd_to_parquet_b64_categorical_histogram():
 
 
 def test_sd_to_parquet_b64_multiple_columns():
-    sd = {
-        'x': {'mean': np.float64(1.0), 'dtype': 'float64'},
-        'y': {'mean': np.float64(2.0), 'dtype': 'int64'},
-    }
+    sd = {'x': {'mean': np.float64(1.0), 'dtype': 'float64'}, 'y': {'mean': np.float64(2.0), 'dtype': 'int64'}}
     result = sd_to_parquet_b64(sd)
     df = _decode_parquet_b64(result)
 

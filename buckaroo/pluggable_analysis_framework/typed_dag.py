@@ -60,8 +60,7 @@ def build_typed_dag(stat_funcs: List[StatFunc], external_keys: Set[str] = frozen
 
             if req.name not in provides_map:
                 raise DAGConfigError(
-                    f"No function provides '{req.name}' (required by '{sf.name}')"
-                )
+                    f"No function provides '{req.name}' (required by '{sf.name}')")
 
             # Type compatibility check (warning, not error)
             provided_key, provider_func = provides_map[req.name]
@@ -69,12 +68,9 @@ def build_typed_dag(stat_funcs: List[StatFunc], external_keys: Set[str] = frozen
                     and req.type != provided_key.type):
                 if not (isinstance(req.type, type) and isinstance(provided_key.type, type)
                         and issubclass(provided_key.type, req.type)):
-                    warnings.warn(
-                        f"Type mismatch: '{sf.name}' expects '{req.name}' as "
+                    warnings.warn(f"Type mismatch: '{sf.name}' expects '{req.name}' as "
                         f"{req.type.__name__}, but '{provider_func.name}' provides "
-                        f"{provided_key.type.__name__}. beartype will enforce at runtime.",
-                        stacklevel=2,
-                    )
+                        f"{provided_key.type.__name__}. beartype will enforce at runtime.", stacklevel=2)
 
     # Build dependency graph for topological sort
     # Each StatFunc is identified by its name
@@ -104,11 +100,7 @@ def build_typed_dag(stat_funcs: List[StatFunc], external_keys: Set[str] = frozen
     return [func_map[name] for name in order if name in func_map]
 
 
-def build_column_dag(
-    all_stat_funcs: List[StatFunc],
-    column_dtype,
-    external_keys: Set[str] = frozenset(),
-) -> List[StatFunc]:
+def build_column_dag(all_stat_funcs: List[StatFunc], column_dtype, external_keys: Set[str] = frozenset()) -> List[StatFunc]:
     """Filter stat functions by column dtype and build DAG.
 
     Functions whose column_filter rejects this dtype are excluded.
@@ -145,8 +137,7 @@ def build_column_dag(
             sf for sf in candidates
             if all(
                 req.type in RAW_MARKER_TYPES or req.name in provides
-                for req in sf.requires
-            )
+                for req in sf.requires)
         ]
 
     if not candidates:

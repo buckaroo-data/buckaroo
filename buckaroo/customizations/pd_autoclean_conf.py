@@ -15,9 +15,7 @@ from buckaroo.customizations.pandas_cleaning_commands import (
     StripIntParse
 )
 
-from buckaroo.customizations.pandas_commands import (
-    NoOp,
-)
+from buckaroo.customizations.pandas_commands import (NoOp)
 
 
 #all commands used need to be in base_commands for the configuration of the lowcode UI
@@ -41,8 +39,7 @@ BASE_COMMANDS = [
 
     #complex transforms
     GroupBy, GroupByTransform,
-    LinearRegression
-]
+    LinearRegression]
 
 
 class CleaningGenOps(ColAnalysis):
@@ -74,26 +71,13 @@ class NoCleaningConf(AutocleaningConfig):
 
 class AggressiveAC(AutocleaningConfig):
     autocleaning_analysis_klasses = [HeuristicFracs, AggresiveCleaningGenOps]
-    command_klasses = [
-        IntParse,
-        StripIntParse,
-        StrBool,
-        USDate,
-        DropCol,
-        FillNA,
-        GroupBy,
-        NoOp,
-        Search,
-    ]
+    command_klasses = [IntParse, StripIntParse, StrBool, USDate, DropCol, FillNA, GroupBy, NoOp, Search]
 
     quick_command_klasses = [Search]
     name = "aggressive"
 
 
 class ConservativeAC(AggressiveAC):
-    autocleaning_analysis_klasses = [
-        HeuristicFracs,
-        ConvservativeCleaningGenops,
-    ]
+    autocleaning_analysis_klasses = [HeuristicFracs, ConvservativeCleaningGenops]
     name = "conservative"
 

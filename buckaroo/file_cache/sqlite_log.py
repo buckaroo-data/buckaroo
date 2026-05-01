@@ -36,8 +36,7 @@ class SQLiteExecutorLog(ExecutorLog):
               start_time TEXT NOT NULL,
               end_time TEXT
             )
-            """
-        )
+            """)
         self._conn.commit()
 
     def _args_key_parts(self, args: ExecutorArgs) -> tuple[str, int, Optional[int], Optional[int], int]:
@@ -53,8 +52,7 @@ class SQLiteExecutorLog(ExecutorLog):
         cols, include_hash, row_start, row_end, expr_count = self._args_key_parts(args)
         self._conn.execute(
             "INSERT INTO events (dfi, columns_json, include_hash, row_start, row_end, expr_count, completed, start_time, end_time) VALUES (?,?,?,?,?,?,?,?,?)",
-            (dfi_k, cols, include_hash, row_start, row_end, expr_count, 0, dtdt.now().isoformat(), None)
-        )
+            (dfi_k, cols, include_hash, row_start, row_end, expr_count, 0, dtdt.now().isoformat(), None))
         self._conn.commit()
 
     def log_end_col_group(self, dfi: DFIdentifier, args:ExecutorArgs) -> None:
@@ -69,8 +67,7 @@ class SQLiteExecutorLog(ExecutorLog):
               ORDER BY id DESC LIMIT 1
             )
             """,
-            (dtdt.now().isoformat(), dfi_k, cols, include_hash, row_start, row_end)
-        )
+            (dtdt.now().isoformat(), dfi_k, cols, include_hash, row_start, row_end))
         self._conn.commit()
 
     def check_log_for_previous_failure(self, dfi: DFIdentifier, args:ExecutorArgs) -> bool:
@@ -81,8 +78,7 @@ class SQLiteExecutorLog(ExecutorLog):
             SELECT COUNT(1) FROM events
             WHERE dfi=? AND columns_json=? AND include_hash=? AND IFNULL(row_start,-1)=IFNULL(?, -1) AND IFNULL(row_end,-1)=IFNULL(?, -1) AND completed=0
             """,
-            (dfi_k, cols, include_hash, row_start, row_end)
-        )
+            (dfi_k, cols, include_hash, row_start, row_end))
         (cnt,) = cur.fetchone()
         return cnt > 0
     
@@ -98,8 +94,7 @@ class SQLiteExecutorLog(ExecutorLog):
             SELECT COUNT(1) FROM events
             WHERE dfi=? AND columns_json=? AND include_hash=? AND IFNULL(row_start,-1)=IFNULL(?, -1) AND IFNULL(row_end,-1)=IFNULL(?, -1) AND completed=1
             """,
-            (dfi_k, cols, include_hash, row_start, row_end)
-        )
+            (dfi_k, cols, include_hash, row_start, row_end))
         (cnt,) = cur.fetchone()
         return cnt > 0
 
@@ -112,22 +107,10 @@ class SQLiteExecutorLog(ExecutorLog):
             dfi_dec = json.loads(dfi_k)
             dfi: DFIdentifier = (dfi_dec[0], dfi_dec[1])  # type: ignore
             # Reconstruct minimal args (expressions omitted for log purposes)
-            args = ExecutorArgs(
-                columns=list(json.loads(cols_json)),
-                column_specific_expressions=False,
-                include_hash=bool(include_hash),
-                expressions=[],
-                row_start=row_start,
-                row_end=row_end,
-                extra=None,
-            )
-            ev = ExecutorLogEvent(
-                dfi=dfi,
-                args=args,
-                start_time=dtdt.fromisoformat(start_s),
-                end_time=dtdt.fromisoformat(end_s) if end_s else None,
-                completed=bool(completed),
-            )
+            args = ExecutorArgs(columns=list(json.loads(cols_json)), column_specific_expressions=False,
+                include_hash=bool(include_hash), expressions=[], row_start=row_start, row_end=row_end, extra=None)
+            ev = ExecutorLogEvent(dfi=dfi, args=args, start_time=dtdt.fromisoformat(start_s),
+                end_time=dtdt.fromisoformat(end_s) if end_s else None, completed=bool(completed))
             res.append(ev)
         return res
 
@@ -140,8 +123,7 @@ class SQLiteExecutorLog(ExecutorLog):
         # so we check for any incomplete events for this dfi
         cur = self._conn.execute(
             "SELECT COUNT(1) FROM events WHERE dfi=? AND completed=0",
-            (dfi_k,)
-        )
+            (dfi_k,))
         (cnt,) = cur.fetchone()
         return cnt > 0
 

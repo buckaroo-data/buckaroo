@@ -153,13 +153,9 @@ class ComputedDefaultSummaryStats(ColAnalysis):
 
     requires_summary = ['length', 'value_counts', 'null_count']
 
-    provides_defaults = {
-        'non_null_count':0,
-        'most_freq':0, '2nd_freq':0, '3rd_freq':0, '4th_freq':0, '5th_freq':0,
-        
-        'distinct_per':0, 'empty_per':0, 'unique_per':0, 'nan_per':0,
-        'unique_count':0, 'empty_count':0, 'distinct_count':0,
-    }
+    provides_defaults = {'non_null_count':0, 'most_freq':0, '2nd_freq':0, '3rd_freq':0, '4th_freq':0, '5th_freq':0,
+        'distinct_per':0, 'empty_per':0, 'unique_per':0, 'nan_per':0, 'unique_count':0, 'empty_count':0,
+        'distinct_count':0}
 
 
     @staticmethod
@@ -200,8 +196,7 @@ class ComputedDefaultSummaryStats(ColAnalysis):
             'distinct_per':distinct_count/l,
             'empty_per':empty_count/l,
             'unique_per':unique_count/l,
-            'nan_per':summary_dict['null_count']/l
-        }
+            'nan_per':summary_dict['null_count']/l}
 
 class PdCleaningStats(ColAnalysis):
     provides_defaults = {'int_parse_fail': 0.0, 'int_parse':0.0}

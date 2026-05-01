@@ -80,8 +80,7 @@ def test_marimo():
     from buckaroo.marimo_utils import (  # noqa: F401
         marimo_monkeypatch,
         marimo_unmonkeypatch,
-        BuckarooDataFrame,
-    )
+        BuckarooDataFrame)
 
     print("  marimo: OK")
 
@@ -104,14 +103,8 @@ def test_notebook():
     print("  notebook: OK")
 
 
-TESTS = {
-    "base": test_base,
-    "polars": test_polars,
-    "mcp": test_mcp,
-    "marimo": test_marimo,
-    "jupyterlab": test_jupyterlab,
-    "notebook": test_notebook,
-}
+TESTS = {"base": test_base, "polars": test_polars, "mcp": test_mcp, "marimo": test_marimo,
+    "jupyterlab": test_jupyterlab, "notebook": test_notebook}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

@@ -49,8 +49,7 @@ dirty_df = pd.DataFrame(
             1,
             None,
         ],
-    }
-)
+    })
 
 expected_df = pd.DataFrame(
     {
@@ -100,8 +99,7 @@ expected_df = pd.DataFrame(
             1,
             None,
         ],
-    }
-)
+    })
 
 
 def test_aggressive_autocleaning():

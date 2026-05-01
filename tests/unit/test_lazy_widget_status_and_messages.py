@@ -14,15 +14,11 @@ def test_stats_start_with_pending_status():
     """Test that stats initially have __status__='pending'."""
     df = pl.DataFrame({
         'col1': [1, 2, 3],
-        'col2': ['a', 'b', 'c']
-    })
+        'col2': ['a', 'b', 'c']})
     ldf = df.lazy()
     
-    widget = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget = LazyInfinitePolarsBuckarooWidget(ldf, sync_executor_class=SyncExecutor,
+        parallel_executor_class=SyncExecutor)
     
     # Check initial summary defaults immediately after init - before computation completes
     # The initial_sd is set in _initial_summary_defaults() which includes __status__='pending'
@@ -31,8 +27,7 @@ def test_stats_start_with_pending_status():
     merged_sd = widget._df.merged_sd or {}
     has_status_col = any(
         isinstance(v, dict) and '__status__' in v
-        for v in merged_sd.values()
-    )
+        for v in merged_sd.values())
     # Build a pseudo status_row from merged_sd for the assertion below
     if has_status_col:
         status_row = {'index': '__status__'}
@@ -49,23 +44,18 @@ def test_stats_start_with_pending_status():
         assert any(
             val == 'pending' 
             for key, val in status_row.items() 
-            if key != 'index'
-        ), f"Expected at least one column with 'pending' status, got: {status_row}"
+            if key != 'index'), f"Expected at least one column with 'pending' status, got: {status_row}"
 
 
 def test_stats_clear_status_on_success():
     """Test that __status__ is removed when computation succeeds."""
     df = pl.DataFrame({
         'col1': [1, 2, 3, 4, 5],
-        'col2': [10, 20, 30, 40, 50]
-    })
+        'col2': [10, 20, 30, 40, 50]})
     ldf = df.lazy()
     
-    widget = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget = LazyInfinitePolarsBuckarooWidget(ldf, sync_executor_class=SyncExecutor,
+        parallel_executor_class=SyncExecutor)
     
     # Wait for computation to complete
     wait_for_nested_executor_finish(widget, timeout_secs=10.0)
@@ -84,8 +74,7 @@ def test_stats_set_error_status_on_failure():
     """Test that __status__ is set to 'error' when computation fails."""
     df = pl.DataFrame({
         'col1': [1, 2, 3],
-        'col2': ['a', 'b', 'c']
-    })
+        'col2': ['a', 'b', 'c']})
     ldf = df.lazy()
     
     # Create a failing executor
@@ -95,12 +84,8 @@ def test_stats_set_error_status_on_failure():
         def execute(self, ldf, execution_args):
             raise RuntimeError("Simulated execution failure")
     
-    widget = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        column_executor_class=FailingExecutor,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget = LazyInfinitePolarsBuckarooWidget(ldf, column_executor_class=FailingExecutor,
+        sync_executor_class=SyncExecutor, parallel_executor_class=SyncExecutor)
     
     # Wait a bit for the failure to be processed
     time.sleep(1.0)
@@ -144,30 +129,19 @@ def test_cache_hit_message(tmp_path):
     test_file = tmp_path / "test.parquet"
     df = pl.DataFrame({
         'col1': [1, 2, 3, 4, 5],
-        'col2': [10, 20, 30, 40, 50]
-    })
+        'col2': [10, 20, 30, 40, 50]})
     df.write_parquet(test_file)
     
     ldf = pl.read_parquet(test_file).lazy()
     
     # First run - should cache
-    widget1 = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        file_path=str(test_file),
-        show_message_box=True,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget1 = LazyInfinitePolarsBuckarooWidget(ldf, file_path=str(test_file), show_message_box=True,
+        sync_executor_class=SyncExecutor, parallel_executor_class=SyncExecutor)
     wait_for_nested_executor_finish(widget1, timeout_secs=10.0)
     
     # Second run - should hit cache
-    widget2 = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        file_path=str(test_file),
-        show_message_box=True,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget2 = LazyInfinitePolarsBuckarooWidget(ldf, file_path=str(test_file), show_message_box=True,
+        sync_executor_class=SyncExecutor, parallel_executor_class=SyncExecutor)
     
     # Wait a bit for cache check
     time.sleep(0.5)
@@ -180,8 +154,7 @@ def test_cache_hit_message(tmp_path):
     # Should have "file found in cache" message
     found_message = any(
         'file found in cache' in m.get('message', '').lower()
-        for m in cache_messages
-    )
+        for m in cache_messages)
     assert found_message, "Should have 'file found in cache' message"
 
 
@@ -195,13 +168,8 @@ def test_cache_miss_message(tmp_path):
     ldf = pl.read_parquet(test_file).lazy()
     
     # Run with a file that's not in cache
-    widget = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        file_path=str(test_file),
-        show_message_box=True,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget = LazyInfinitePolarsBuckarooWidget(ldf, file_path=str(test_file), show_message_box=True,
+        sync_executor_class=SyncExecutor, parallel_executor_class=SyncExecutor)
     
     # Wait a bit for cache check
     time.sleep(0.5)
@@ -225,30 +193,19 @@ def test_cache_info_message(tmp_path):
     test_file = tmp_path / "test.parquet"
     df = pl.DataFrame({
         'col1': [1, 2, 3, 4, 5],
-        'col2': [10, 20, 30, 40, 50]
-    })
+        'col2': [10, 20, 30, 40, 50]})
     df.write_parquet(test_file)
     
     ldf = pl.read_parquet(test_file).lazy()
     
     # First run - should cache
-    widget1 = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        file_path=str(test_file),
-        show_message_box=True,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget1 = LazyInfinitePolarsBuckarooWidget(ldf, file_path=str(test_file), show_message_box=True,
+        sync_executor_class=SyncExecutor, parallel_executor_class=SyncExecutor)
     wait_for_nested_executor_finish(widget1, timeout_secs=10.0)
     
     # Second run - should hit cache and log cache info
-    widget2 = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        file_path=str(test_file),
-        show_message_box=True,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget2 = LazyInfinitePolarsBuckarooWidget(ldf, file_path=str(test_file), show_message_box=True,
+        sync_executor_class=SyncExecutor, parallel_executor_class=SyncExecutor)
     
     # Wait a bit for cache check
     time.sleep(0.5)
@@ -270,16 +227,11 @@ def test_execution_update_messages():
     """Test that execution update messages are logged."""
     df = pl.DataFrame({
         'col1': [1, 2, 3, 4, 5],
-        'col2': [10, 20, 30, 40, 50]
-    })
+        'col2': [10, 20, 30, 40, 50]})
     ldf = df.lazy()
     
-    widget = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        show_message_box=True,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget = LazyInfinitePolarsBuckarooWidget(ldf, show_message_box=True, sync_executor_class=SyncExecutor,
+        parallel_executor_class=SyncExecutor)
     
     # Wait for computation to complete
     wait_for_nested_executor_finish(widget, timeout_secs=10.0)
@@ -312,16 +264,11 @@ def test_execution_messages_include_all_fields():
     """Test that execution messages include all required fields."""
     df = pl.DataFrame({
         'col1': [1, 2, 3],
-        'col2': ['a', 'b', 'c']
-    })
+        'col2': ['a', 'b', 'c']})
     ldf = df.lazy()
     
-    widget = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        show_message_box=True,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget = LazyInfinitePolarsBuckarooWidget(ldf, show_message_box=True, sync_executor_class=SyncExecutor,
+        parallel_executor_class=SyncExecutor)
     
     # Wait for computation
     wait_for_nested_executor_finish(widget, timeout_secs=10.0)
@@ -349,10 +296,7 @@ def test_message_log_limited_to_1000():
     df = pl.DataFrame({'col1': [1, 2, 3]})
     ldf = df.lazy()
     
-    widget = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        show_message_box=True,
-    )
+    widget = LazyInfinitePolarsBuckarooWidget(ldf, show_message_box=True)
     
     # Manually add many messages to test the limit
     messages = []
@@ -360,8 +304,7 @@ def test_message_log_limited_to_1000():
         messages.append({
             'time': f'2024-01-01T00:00:{i:02d}',
             'type': 'test',
-            'message': f'Test message {i}'
-        })
+            'message': f'Test message {i}'})
     
     widget.message_log = {'messages': messages}
     
@@ -405,8 +348,7 @@ def test_messages_not_logged_when_disabled(tmp_path):
     assert len(messages) == 0 or all(
         # If messages exist, they should be from a different widget/file
         'test_disabled' not in str(m.get('message', ''))
-        for m in messages
-    ), f"Should have no messages for this widget when message box is disabled, got {len(messages)} messages"
+        for m in messages), f"Should have no messages for this widget when message box is disabled, got {len(messages)} messages"
 
 
 def test_message_structure():
@@ -414,12 +356,8 @@ def test_message_structure():
     df = pl.DataFrame({'col1': [1, 2, 3]})
     ldf = df.lazy()
     
-    widget = LazyInfinitePolarsBuckarooWidget(
-        ldf,
-        show_message_box=True,
-        sync_executor_class=SyncExecutor,
-        parallel_executor_class=SyncExecutor,
-    )
+    widget = LazyInfinitePolarsBuckarooWidget(ldf, show_message_box=True, sync_executor_class=SyncExecutor,
+        parallel_executor_class=SyncExecutor)
     
     # Wait for computation
     wait_for_nested_executor_finish(widget, timeout_secs=10.0)

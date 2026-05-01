@@ -26,9 +26,7 @@ def is_in_marimo():
     return marimo.running_in_notebook()
     
 
-def enable(buckaroo_kls=BuckarooInfiniteWidget,
-           debug=False,
-           ):
+def enable(buckaroo_kls=BuckarooInfiniteWidget, debug=False):
     """
     Automatically use buckaroo to display all DataFrames
     instances in the notebook.

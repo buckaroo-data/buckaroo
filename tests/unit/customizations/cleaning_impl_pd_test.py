@@ -11,8 +11,7 @@ If it's a phone number, probably not.  But then you have to inspect carefully to
 
 phone_regex = r'^\(?([0-9]{3})\)?[-.●]?([0-9]{3})[-.●]?([0-9]{4})$'
 
-mostly_phone_numbers = [
-    ["14243357275", True, "no seperators, leading US Code"],
+mostly_phone_numbers = [["14243357275", True, "no seperators, leading US Code"],
     ["4243357275",  True, "no seperators, no country code"],
     ["1(424)335-7275", True, "regular seperators, leading US Code"],
     ["(424)335-7275",  True, "regular seperators, no country code"],
@@ -23,5 +22,4 @@ mostly_phone_numbers = [
     ["(424) 335 7275",  True, "space seperators, no country code"],
     ["+1(424)335-7275", True, "regular seperators, international +, leading US Code"],
     ["+1 424 335 7275", True, "space seperators, interntaional +, leading US Code"],
-    ["+49 69 1234 5678", True, "space seperators, interntaional +, leading German Code"],
-]
+    ["+49 69 1234 5678", True, "space seperators, interntaional +, leading German Code"]]

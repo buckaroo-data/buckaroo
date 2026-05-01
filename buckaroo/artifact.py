@@ -13,11 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from buckaroo.serialization_utils import (
-    prepare_df_for_serialization,
-    _json_encode_cell,
-    _coerce_for_json,
-)
+from buckaroo.serialization_utils import (prepare_df_for_serialization, _json_encode_cell, _coerce_for_json)
 from buckaroo.dataflow.widget_extension_utils import configure_buckaroo
 from buckaroo.buckaroo_widget import BuckarooWidget
 
@@ -130,12 +126,8 @@ def prepare_buckaroo_artifact(df, column_config_overrides=None,
         bw.sampling_klass.serialize_sample(processed_df))
     df_data = _df_to_parquet_b64_tagged(serializable_df)
 
-    artifact = {
-        'embed_type': embed_type,
-        'df_data': df_data,
-        'df_viewer_config': df_viewer_config,
-        'summary_stats_data': summary_stats_data,
-    }
+    artifact = {'embed_type': embed_type, 'df_data': df_data, 'df_viewer_config': df_viewer_config,
+        'summary_stats_data': summary_stats_data}
 
     if embed_type == "Buckaroo":
         # Include the full widget state for the StatusBar display switcher.
@@ -232,7 +224,4 @@ def to_html(df, title="Buckaroo", embed_type="DFViewer", **kwargs) -> str:
         Complete HTML document string.
     """
     artifact = prepare_buckaroo_artifact(df, embed_type=embed_type, **kwargs)
-    return _HTML_TEMPLATE.format(
-        title=title,
-        artifact_json=artifact_to_json(artifact),
-    )
+    return _HTML_TEMPLATE.format(title=title, artifact_json=artifact_to_json(artifact))

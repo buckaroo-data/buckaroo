@@ -6,12 +6,7 @@ from urllib.parse import urlparse
 
 import tornado.websocket
 
-from buckaroo.server.data_loading import (
-    handle_infinite_request,
-    handle_infinite_request_buckaroo,
-    handle_infinite_request_lazy,
-    get_buckaroo_display_state,
-)
+from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
 from buckaroo.server.session import build_state_message
 
 log = logging.getLogger("buckaroo.server.websocket")
@@ -37,11 +32,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         try:
             msg = json.loads(message)
         except (json.JSONDecodeError, TypeError):
-            self.write_message(json.dumps({
-                "type": "error",
-                "error_code": "invalid_json",
-                "message": "Invalid JSON",
-            }))
+            self.write_message(json.dumps({"type": "error", "error_code": "invalid_json", "message": "Invalid JSON"}))
             return
 
         msg_type = msg.get("type")
@@ -65,10 +56,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
 
             # Skip if no effective change to the fields that drive the dataflow.
             if all(old_state.get(f) == new_state.get(f) for f in _DATAFLOW_FIELDS):
-                log.debug(
-                    "buckaroo_state_change no-op session=%s — skipping rebroadcast",
-                    self.session_id,
-                )
+                log.debug("buckaroo_state_change no-op session=%s — skipping rebroadcast", self.session_id)
                 return
 
             # Propagate changes to the dataflow (mirrors BuckarooWidgetBase._buckaroo_state)
@@ -108,11 +96,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         except Exception:
             tb = traceback.format_exc()
             log.error("buckaroo_state_change error session=%s: %s", self.session_id, tb)
-            err: dict = {
-                "type": "error",
-                "error_code": "state_change_error",
-                "message": "Failed to apply state change",
-            }
+            err: dict = {"type": "error", "error_code": "state_change_error", "message": "Failed to apply state change"}
             if _BUCKAROO_DEBUG:
                 err["details"] = tb
             self.write_message(json.dumps(err))
@@ -122,25 +106,17 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         session = sessions.get(self.session_id)
 
         if not session or (session.df is None and session.ldf is None):
-            self.write_message(json.dumps({
-                "type": "infinite_resp",
-                "key": payload_args,
-                "data": [],
-                "length": 0,
-                "error_info": "No data loaded for this session",
-            }))
+            self.write_message(json.dumps({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0,
+                "error_info": "No data loaded for this session"}))
             return
 
         try:
             if session.mode == "lazy" and session.ldf is not None:
-                resp_msg, parquet_bytes = handle_infinite_request_lazy(
-                    session.ldf, session.orig_to_rw, session.rw_to_orig,
-                    session.metadata.get("rows", 0), payload_args,
-                )
+                resp_msg, parquet_bytes = handle_infinite_request_lazy(session.ldf, session.orig_to_rw,
+                    session.rw_to_orig, session.metadata.get("rows", 0), payload_args)
             elif session.mode == "buckaroo" and session.dataflow:
                 resp_msg, parquet_bytes = handle_infinite_request_buckaroo(
-                    session.dataflow, payload_args
-                )
+                    session.dataflow, payload_args)
             else:
                 resp_msg, parquet_bytes = handle_infinite_request(session.df, payload_args)
 
@@ -153,14 +129,11 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             second_pa = payload_args.get("second_request")
             if second_pa:
                 if session.mode == "lazy" and session.ldf is not None:
-                    resp2, parquet2 = handle_infinite_request_lazy(
-                        session.ldf, session.orig_to_rw, session.rw_to_orig,
-                        session.metadata.get("rows", 0), second_pa,
-                    )
+                    resp2, parquet2 = handle_infinite_request_lazy(session.ldf, session.orig_to_rw, session.rw_to_orig,
+                        session.metadata.get("rows", 0), second_pa)
                 elif session.mode == "buckaroo" and session.dataflow:
                     resp2, parquet2 = handle_infinite_request_buckaroo(
-                        session.dataflow, second_pa
-                    )
+                        session.dataflow, second_pa)
                 else:
                     resp2, parquet2 = handle_infinite_request(session.df, second_pa)
                 self.write_message(json.dumps(resp2))
@@ -169,13 +142,8 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         except Exception:
             tb = traceback.format_exc()
             log.error("infinite_request error session=%s: %s", self.session_id, tb)
-            self.write_message(json.dumps({
-                "type": "infinite_resp",
-                "key": payload_args,
-                "data": [],
-                "length": 0,
-                "error_info": tb if _BUCKAROO_DEBUG else "Request failed",
-            }))
+            self.write_message(json.dumps({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0,
+                "error_info": tb if _BUCKAROO_DEBUG else "Request failed"}))
 
     def on_close(self):
         sessions = self.application.settings["sessions"]

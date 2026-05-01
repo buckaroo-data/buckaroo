@@ -83,14 +83,8 @@ def build_html() -> str:
     flat: list[dict] = []
     for section_title, stories in STORIES:
         for name, label, status in stories:
-            flat.append({
-                "name": name,
-                "label": label,
-                "status": status,
-                "section": section_title,
-                "before": img_data_uri(BEFORE_DIR / f"{name}.png"),
-                "after":  img_data_uri(AFTER_DIR  / f"{name}.png"),
-            })
+            flat.append({"name": name, "label": label, "status": status, "section": section_title,
+                "before": img_data_uri(BEFORE_DIR / f"{name}.png"), "after":  img_data_uri(AFTER_DIR  / f"{name}.png")})
 
     stories_json = json.dumps(flat)
 
@@ -101,8 +95,7 @@ def build_html() -> str:
         if entry["section"] != current_section:
             current_section = entry["section"]
             nav_items.append(
-                f'<div class="nav-section">{current_section}</div>'
-            )
+                f'<div class="nav-section">{current_section}</div>')
         short = entry["name"].split("_", 1)[1].replace("_", " ") if "_" in entry["name"] else entry["name"]
         status = entry["status"]
         status_class = f"status-{status}"
@@ -113,8 +106,7 @@ def build_html() -> str:
             f'<span class="nav-tag tag-{status}">{status_label}</span>'
             f'<span class="nav-label">{short}</span>'
             f'<span class="nav-issue">{entry["label"]}</span>'
-            f'</div>'
-        )
+            f'</div>')
     nav_html = "\n".join(nav_items)
 
     return f"""<!DOCTYPE html>
@@ -594,15 +586,12 @@ loadFromHash();
 
 if __name__ == "__main__":
     if not BEFORE_DIR.exists() and not AFTER_DIR.exists():
-        print(
-            "No screenshots found.\n"
+        print("No screenshots found.\n"
             "Run:\n"
             "  ./scripts/download_styling_screenshots.sh\n"
             "or capture locally with:\n"
             "  cd packages/buckaroo-js-core && "
-            "SCREENSHOT_DIR=screenshots/after npx playwright test pw-tests/styling-issues-screenshots.spec.ts",
-            file=sys.stderr,
-        )
+            "SCREENSHOT_DIR=screenshots/after npx playwright test pw-tests/styling-issues-screenshots.spec.ts", file=sys.stderr)
         sys.exit(1)
 
     html = build_html()

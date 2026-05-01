@@ -47,7 +47,7 @@ class RequiresNullCount(PolarsAnalysis):
 
 class MixedAnalysis(PolarsAnalysis):
     provides_defaults = dict(
-    empty_count=0, sum=0)
+        empty_count=0, sum=0)
 
 
 
@@ -131,9 +131,8 @@ def Xtest_produce_series_column_ops():
     summary_df, _unused = polars_produce_series_df(mixed_df, [HistogramAnalysis])
     assert summary_df["string_col"] == {'categorical_histogram': [], 'histogram': [], 'histogram_bins': []}
 
-    assert summary_df["int_col"]["histogram_args"]["meat_histogram"] == (
-        [2,  0,  0,  0,  0,  0,  0,  0,  0,  1],
-        [1.0,  4.0,  7.0,  10.0,  13.0,  16.0,  19.0,  22.0,  25.0,  28.0,  100.0],)
+    assert summary_df["int_col"]["histogram_args"]["meat_histogram"] == ([2,  0,  0,  0,  0,  0,  0,  0,  0,  1], [1.0,
+        4.0, 7.0, 10.0, 13.0, 16.0, 19.0, 22.0, 25.0, 28.0, 100.0])
 
     
 
@@ -209,15 +208,15 @@ def Xtest_numeric_histograms():
     #note the negative numbers
     float_arr = np.array(
         [  0.15866514,  1.17068755, -0.33565104,  0.65639612, -1.82228383,
-          -0.31636192,  1.15528901,  0.51853447, -2.46400234, -0.43549045,
-           0.00352285,  0.81172013, -0.72803939, -1.00862492, -0.22710132,
-          -0.3175636 ,  0.75857194, -1.78286566, -1.34886293,  0.13987727,
-           0.38449789, -1.40855498,  1.87998263,  0.67376218,  0.35140324,
-           0.57988045, -0.88552517, -1.89412544, -0.93349705, -0.79151579,
-          -1.43998107,  0.44633053,  0.46607586, -0.28883213, -0.16766607,
-           1.49832905,  0.56894383,  0.66272376,  0.89071271, -2.03593151,
-          -0.52559652, -1.87226564, -0.55629666, -0.56985112,  0.06456509,
-          -0.44142502, -2.09803033,  0.51801718, -1.56189092, -1.17083831])
+         -0.31636192,  1.15528901,  0.51853447, -2.46400234, -0.43549045,
+         0.00352285,  0.81172013, -0.72803939, -1.00862492, -0.22710132,
+         -0.3175636 ,  0.75857194, -1.78286566, -1.34886293,  0.13987727,
+         0.38449789, -1.40855498,  1.87998263,  0.67376218,  0.35140324,
+         0.57988045, -0.88552517, -1.89412544, -0.93349705, -0.79151579,
+         -1.43998107,  0.44633053,  0.46607586, -0.28883213, -0.16766607,
+         1.49832905,  0.56894383,  0.66272376,  0.89071271, -2.03593151,
+         -0.52559652, -1.87226564, -0.55629666, -0.56985112,  0.06456509,
+         -0.44142502, -2.09803033,  0.51801718, -1.56189092, -1.17083831])
     #make them all positive numbers
     float_arr2 = float_arr + 2.46400234
 
@@ -225,7 +224,7 @@ def Xtest_numeric_histograms():
     int_arr = np.array(
         [-272,  107,  -85,    5,   -6,   19,   38, -102,  -84,   79,  106,
          59, -132,   81, -122,  -62,  -34,   80,   14,   19,  -20, -155,
-          1,   -9,   82,   37,  114,   76,  -90,   -2,   63,  169, -239,
+         1,   -9,   82,   37,  114,   76,  -90,   -2,   63,  169, -239,
          -225,   71,   55,  174,   30,  -69,   99,   62, -116,   51,  -45,
          57,   64,    8,  -20, -130,  -83])
     int_arr2 = int_arr + 272
@@ -233,8 +232,7 @@ def Xtest_numeric_histograms():
         'float_col': float_arr,
         'float_col2': float_arr2,
         'int_col': int_arr,
-        'int_col2': int_arr2
-    })
+        'int_col2': int_arr2})
 
     summary_df, errs = PolarsAnalysisPipeline.full_produce_summary_df(df, HA_CLASSES, debug=True)
     print(summary_df['int_col']['histogram'])
@@ -292,8 +290,7 @@ def test_paf_histograms_match_full_polars_pipeline_head_500():
 
     # Baseline: full Polars pipeline (series + summary with computed_summary)
     full_summary, full_errs = PolarsAnalysisPipeline.full_produce_summary_df(
-        head_df, HA_CLASSES, debug=False
-    )
+        head_df, HA_CLASSES, debug=False)
     assert full_errs == {}
 
     # PAF / ColumnExecutor path used by LazyInfinitePolarsBuckarooWidget
@@ -373,7 +370,7 @@ class TestDfStats(unittest.TestCase):
                   'orig_col_name':'normal_int_series', 'rewritten_col_name':'a'},
             'b': {'len': 4,
                   'orig_col_name':'float_nan_ser', 'rewritten_col_name':'b'}},
-        dfs.sdf)
+            dfs.sdf)
 
 
     # def test_dfstats_Missing_Analysis(self):
@@ -385,30 +382,22 @@ class TestDfStats(unittest.TestCase):
 class HistogramAnalysisWithColumnOps(PolarsAnalysis):
     """Test analysis that uses column_ops to compute histogram_args."""
     provides_defaults = {'histogram_args': None, 'histogram': []}
-    select_clauses = [
-        F.all().null_count().name.map(json_postfix('null_count')),
-        F.all().mean().name.map(json_postfix('mean')),
-    ]
+    select_clauses = [F.all().null_count().name.map(json_postfix('null_count')),
+        F.all().mean().name.map(json_postfix('mean'))]
     column_ops = {
         'histogram_args': (
             NUMERIC_POLARS_DTYPES,
-            lambda ser: {'computed': True, 'sum': float(ser.sum()), 'mean': float(ser.mean())}
-        )
-    }
+            lambda ser: {'computed': True, 'sum': float(ser.sum()), 'mean': float(ser.mean())})}
 
 
 class SimpleColumnOpsAnalysis(PolarsAnalysis):
     """Simple analysis with column_ops for testing."""
     provides_defaults = {'custom_metric': None}
-    select_clauses = [
-        F.all().len().name.map(json_postfix('length')),
-    ]
+    select_clauses = [F.all().len().name.map(json_postfix('length'))]
     column_ops = {
         'custom_metric': (
             NUMERIC_POLARS_DTYPES,
-            lambda ser: {'sum': float(ser.sum()), 'count': len(ser)}
-        )
-    }
+            lambda ser: {'sum': float(ser.sum()), 'count': len(ser)})}
 
 
 def test_polars_series_stats_from_select_result_skips_column_ops_with_empty_schema():
@@ -416,24 +405,18 @@ def test_polars_series_stats_from_select_result_skips_column_ops_with_empty_sche
     Test that polars_series_stats_from_select_result skips column_ops
     when original_df_for_schema is empty (backward compatibility behavior).
     """
-    df = pl.DataFrame({
-        'numeric_col': [1.0, 2.0, 3.0, 4.0, 5.0],
-        'string_col': ['a', 'b', 'c', 'd', 'e'],
-    })
+    df = pl.DataFrame({'numeric_col': [1.0, 2.0, 3.0, 4.0, 5.0], 'string_col': ['a', 'b', 'c', 'd', 'e']})
     
     # Create select result (simulating what PAFColumnExecutor would produce)
-    select_result = df.lazy().select(
-        F.col('numeric_col').null_count().alias(json.dumps(['numeric_col', 'null_count'])),
+    select_result = df.lazy().select(F.col('numeric_col').null_count().alias(json.dumps(['numeric_col', 'null_count'])),
         F.col('numeric_col').mean().alias(json.dumps(['numeric_col', 'mean'])),
-        F.col('string_col').len().alias(json.dumps(['string_col', 'length'])),
-    ).collect()
+        F.col('string_col').len().alias(json.dumps(['string_col', 'length']))).collect()
     
     # Empty schema DataFrame (backward compatibility usage)
     empty_schema = pl.DataFrame({c: [] for c in df.columns})
     
     series_stats, errs = polars_series_stats_from_select_result(
-        select_result, empty_schema, [HistogramAnalysisWithColumnOps], debug=False
-    )
+        select_result, empty_schema, [HistogramAnalysisWithColumnOps], debug=False)
     
     # Find the numeric column in results
     numeric_col_key = None
@@ -456,22 +439,16 @@ def test_polars_series_stats_from_select_result_executes_column_ops_with_data():
     Test that polars_series_stats_from_select_result executes column_ops
     when actual data DataFrame is provided.
     """
-    df = pl.DataFrame({
-        'numeric_col': [1.0, 2.0, 3.0, 4.0, 5.0],
-        'string_col': ['a', 'b', 'c', 'd', 'e'],
-    })
+    df = pl.DataFrame({'numeric_col': [1.0, 2.0, 3.0, 4.0, 5.0], 'string_col': ['a', 'b', 'c', 'd', 'e']})
     
     # Create select result
-    select_result = df.lazy().select(
-        F.col('numeric_col').null_count().alias(json.dumps(['numeric_col', 'null_count'])),
+    select_result = df.lazy().select(F.col('numeric_col').null_count().alias(json.dumps(['numeric_col', 'null_count'])),
         F.col('numeric_col').mean().alias(json.dumps(['numeric_col', 'mean'])),
-        F.col('string_col').len().alias(json.dumps(['string_col', 'length'])),
-    ).collect()
+        F.col('string_col').len().alias(json.dumps(['string_col', 'length']))).collect()
     
     # Pass actual data DataFrame
     series_stats, errs = polars_series_stats_from_select_result(
-        select_result, df, [HistogramAnalysisWithColumnOps], debug=False
-    )
+        select_result, df, [HistogramAnalysisWithColumnOps], debug=False)
     
     # Find the numeric column in results
     numeric_col_key = None
@@ -498,19 +475,13 @@ def test_polars_series_stats_from_select_result_column_ops_with_simple_analysis(
     """
     Test column_ops execution with a simpler analysis to verify the general pattern.
     """
-    df = pl.DataFrame({
-        'numeric_col': [10.0, 20.0, 30.0],
-        'string_col': ['a', 'b', 'c'],
-    })
+    df = pl.DataFrame({'numeric_col': [10.0, 20.0, 30.0], 'string_col': ['a', 'b', 'c']})
     
-    select_result = df.lazy().select(
-        F.col('numeric_col').len().alias(json.dumps(['numeric_col', 'length'])),
-    ).collect()
+    select_result = df.lazy().select(F.col('numeric_col').len().alias(json.dumps(['numeric_col', 'length']))).collect()
     
     # Pass actual data
     series_stats, errs = polars_series_stats_from_select_result(
-        select_result, df, [SimpleColumnOpsAnalysis], debug=False
-    )
+        select_result, df, [SimpleColumnOpsAnalysis], debug=False)
     
     numeric_col_key = None
     for key, value in series_stats.items():
@@ -536,20 +507,15 @@ def test_polars_series_stats_from_select_result_handles_empty_dataframe():
     Test that the function still works when original_df_for_schema is empty
     (backward compatibility - should not break existing code).
     """
-    df = pl.DataFrame({
-        'numeric_col': [1.0, 2.0, 3.0],
-    })
+    df = pl.DataFrame({'numeric_col': [1.0, 2.0, 3.0]})
     
-    select_result = df.lazy().select(
-        F.col('numeric_col').mean().alias(json.dumps(['numeric_col', 'mean'])),
-    ).collect()
+    select_result = df.lazy().select(F.col('numeric_col').mean().alias(json.dumps(['numeric_col', 'mean']))).collect()
     
     empty_schema = pl.DataFrame({c: [] for c in df.columns})
     
     # Should not crash even with empty schema
     series_stats, errs = polars_series_stats_from_select_result(
-        select_result, empty_schema, [SimpleColumnOpsAnalysis], debug=False
-    )
+        select_result, empty_schema, [SimpleColumnOpsAnalysis], debug=False)
     
     # Should still produce basic stats from select_result
     assert len(series_stats) > 0, "Should produce some stats even with empty schema"

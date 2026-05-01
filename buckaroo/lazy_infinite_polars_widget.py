@@ -67,12 +67,8 @@ def _extract_file_path_from_lazyframe(ldf: pl.LazyFrame) -> Optional[str]:
         
         # Look for scan_parquet, scan_csv, scan_ipc, scan_ndjson patterns
         # Pattern: scan_parquet("/path/to/file.parquet")
-        patterns = [
-            r'scan_parquet\("([^"]+)"\)',
-            r'scan_csv\("([^"]+)"\)',
-            r'scan_ipc\("([^"]+)"\)',
-            r'scan_ndjson\("([^"]+)"\)',
-        ]
+        patterns = [r'scan_parquet\("([^"]+)"\)', r'scan_csv\("([^"]+)"\)', r'scan_ipc\("([^"]+)"\)',
+            r'scan_ndjson\("([^"]+)"\)']
         
         for pattern in patterns:
             match = re.search(pattern, plan_str)
@@ -124,14 +120,15 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         cache_size_kb = cache_size_bytes / 1024
         
         stats_per_column = total_stats // len(cached_sd) if cached_sd else 0
-        self._add_message('cache_info', 
-                    f'Cache info. {len(cached_sd)} columns in cache, {stats_per_column} stats per column, total cache size {cache_size_kb:.1f} kilobytes',
-                    show_message_box)
+        self._add_message('cache_info',
+            f'Cache info. {len(cached_sd)} columns in cache, {stats_per_column} stats per column, total cache size {cache_size_kb:.1f} kilobytes',
+            show_message_box)
     
     def _add_message(self, msg_type: str, message: str, show_message_box: bool, **kwargs) -> None:
         """Add a message to the message log if message box is enabled."""
         # Check both the parameter and the trait value
-        msg_box_enabled = show_message_box or (self.show_message_box.get('enabled', False) if isinstance(self.show_message_box, dict) else False)
+        msg_box_enabled = show_message_box or (self.show_message_box.get('enabled', False) if isinstance(self.show_message_box,
+            dict) else False)
         logger.debug(f"LazyInfinitePolarsBuckarooWidget._add_message: called with show_message_box={show_message_box}, trait={self.show_message_box}, enabled={msg_box_enabled}, msg_type={msg_type}, message={message[:100]}")
         if not msg_box_enabled:
             return
@@ -141,8 +138,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
             'time': datetime.datetime.now().isoformat(),
             'type': msg_type,
             'message': message,
-            **kwargs
-        }
+            **kwargs}
         current_messages.append(msg_entry)
         # Keep only last 1000 messages to avoid memory issues
         if len(current_messages) > 1000:
@@ -160,11 +156,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         if actual_count != len(current_messages):
             logger.warning(f"LazyInfinitePolarsBuckarooWidget._add_message: Mismatch! Expected {len(current_messages)} messages, got {actual_count}")
     
-    def _load_and_filter_cached_data(
-        self,
-        all_cols: List[str],
-        show_message_box: bool,
-    ) -> Optional[Dict[str, Dict[str, Any]]]:
+    def _load_and_filter_cached_data(self, all_cols: List[str], show_message_box: bool) -> Optional[Dict[str, Dict[str, Any]]]:
         """
         Load cached data from file cache, filter to match current LazyFrame columns, and log messages.
         
@@ -226,7 +218,8 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
     def _log_execution_update(self, progress_note, show_message_box: bool) -> None:
         """Log execution update message to message box if enabled."""
         # Check both the parameter and the trait value
-        msg_box_enabled = show_message_box or (self.show_message_box.get('enabled', False) if isinstance(self.show_message_box, dict) else False)
+        msg_box_enabled = show_message_box or (self.show_message_box.get('enabled', False) if isinstance(self.show_message_box,
+            dict) else False)
         if not msg_box_enabled:
             return
         
@@ -234,7 +227,8 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         time_str = datetime.datetime.now().isoformat()
         pid = os.getpid()
         num_cols = len(progress_note.col_group) if progress_note.col_group else 0
-        num_expressions = len(progress_note.execution_args.expressions) if hasattr(progress_note.execution_args, 'expressions') and progress_note.execution_args.expressions else 0
+        num_expressions = len(progress_note.execution_args.expressions) if hasattr(progress_note.execution_args,
+            'expressions') and progress_note.execution_args.expressions else 0
         explicit_cols = progress_note.col_group if progress_note.col_group else []
         
         exec_time_secs = None
@@ -244,14 +238,8 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
             else:
                 exec_time_secs = progress_note.execution_time
         
-        msg_data = {
-            'time_start': time_str,
-            'pid': pid,
-            'status': status_str,
-            'num_columns': num_cols,
-            'num_expressions': num_expressions,
-            'explicit_column_list': explicit_cols,
-        }
+        msg_data = {'time_start': time_str, 'pid': pid, 'status': status_str, 'num_columns': num_cols,
+            'num_expressions': num_expressions, 'explicit_column_list': explicit_cols}
         if exec_time_secs is not None:
             msg_data['execution_time_secs'] = exec_time_secs
         
@@ -498,11 +486,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         """
         # Build initial column_config: fall back to schema so raw data appears immediately.
         def _schema_column_config() -> list[dict[str, object]]:
-            return [{
-                "col_name": self._orig_to_rw.get(c, c),
-                "header_name": c,
-                "displayer_args": {"displayer": "obj"},
-            } for c in all_cols]
+            return [{"col_name": self._orig_to_rw.get(c, c), "header_name": c, "displayer_args": {"displayer": "obj"}} for c in all_cols]
         initial_col_config = self._build_column_config(summary_sd) if summary_sd else _schema_column_config()
 
         #fixme maybe the cache checking should be done by dataflow.
@@ -521,26 +505,22 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
             "column_config": initial_col_config,
             "left_col_configs": [{"col_name": "index", "header_name": "index", "displayer_args": {"displayer": "obj"}}],}
         
-        logger.info("LazyInfinite init: total_rows=%s; initial columns=%s", self.df_meta['total_rows'], [c.get("header_name") for c in initial_col_config])
-        logger.info(
-            "Setting df_display_args with pinned_rows=%s",
-            [pr.get("primary_key_val") for pr in df_viewer_config.get("pinned_rows", [])],
-        )
+        logger.info("LazyInfinite init: total_rows=%s; initial columns=%s", self.df_meta['total_rows'],
+            [c.get("header_name") for c in initial_col_config])
+        logger.info("Setting df_display_args with pinned_rows=%s",
+            [pr.get("primary_key_val") for pr in df_viewer_config.get("pinned_rows", [])])
         self.df_display_args = {
             'main': {
                 'data_key': 'main',
                 'df_viewer_config': df_viewer_config,
-                'summary_stats_key': 'all_stats'
-            }
-        }
+                'summary_stats_key': 'all_stats'}}
 
     # Traits consumed by DFViewerInfiniteDS
     df_meta = TDict({
         'columns': 0,
         'rows_shown': 0,
         'filtered_rows': 0,
-        'total_rows': 0
-    }).tag(sync=True)
+        'total_rows': 0}).tag(sync=True)
     df_data_dict = TDict({'empty': []}).tag(sync=True)
     df_display_args = TDict({}).tag(sync=True)
     df_id = Unicode("unknown").tag(sync=True)
@@ -556,8 +536,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
 
     def __init__(
         self,
-        ldf: pl.LazyFrame,
-        *,
+        ldf: pl.LazyFrame, *,
         analysis_klasses: Optional[List[Type[PolarsAnalysis]]] = None,
         debug: bool = False,
         column_executor_class: Optional[type] = None,
@@ -643,8 +622,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
             self._log_with_widget_info(
                 "LazyInfinitePolarsBuckarooWidget._on_progress_update",
                 include_current=True,
-                columns_in_update=len(aggregated_summary) if aggregated_summary else 0
-            )
+                columns_in_update=len(aggregated_summary) if aggregated_summary else 0)
             try:
                 # Merge with existing merged_sd to preserve cached columns
                 # aggregated_summary may only contain newly computed columns
@@ -680,8 +658,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
             self.executor_progress = {
                 'success': note.success,
                 'col_group': note.col_group,
-                'message': note.failure_message or ''
-            }
+                'message': note.failure_message or ''}
             
             self._log_execution_update(note, show_message_box)
 
@@ -705,15 +682,9 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         # Use default_planning_function (smart batch planner) for optimal performance by default
         # Tests can override with simple_one_column_planning for deterministic behavior
         chosen_planning_function = planning_function or default_planning_function
-        self._df.auto_compute_summary(
-            chosen_sync_exec,
-            chosen_par_exec,
-            file_cache=self._file_cache,
-            progress_listener=_listener,
-            file_path=self._file_path,
-            planning_function=chosen_planning_function,
-            timeout_secs=timeout_secs,
-        )
+        self._df.auto_compute_summary(chosen_sync_exec, chosen_par_exec, file_cache=self._file_cache,
+            progress_listener=_listener, file_path=self._file_path, planning_function=chosen_planning_function,
+            timeout_secs=timeout_secs)
         
         # Ensure summary is ready for initial display (checks if computation completed synchronously)
         summary_sd = self.ensure_initial_summary_for_display(initial_summary_sd)
@@ -721,17 +692,13 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         if isinstance(summary_rows, dict) and summary_rows.get('format') == 'parquet_b64':
             logger.info("Initial all_stats prepared as parquet_b64, b64_len=%s", len(summary_rows.get('data', '')))
         else:
-            logger.info(
-                "Initial all_stats prepared: len=%s sample=%s",
-                len(summary_rows),
-                (summary_rows[0] if summary_rows else None),
-            )
+            logger.info("Initial all_stats prepared: len=%s sample=%s", len(summary_rows),
+                (summary_rows[0] if summary_rows else None))
         # Check if __status__ is in the summary stats (check summary_sd dict directly)
         has_status = any(
             '__status__' in col_stats
             for col_stats in summary_sd.values()
-            if isinstance(col_stats, dict)
-        )
+            if isinstance(col_stats, dict))
         logger.info(f"LazyInfinitePolarsBuckarooWidget.__init__: __status__ present: {has_status}, show_message_box trait: {self.show_message_box}, message_log messages count: {len(self.message_log.get('messages', []))}")
 
         # Ensure df_display_args and df_data_dict are set up
@@ -744,15 +711,9 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
             if msg.get('type') == 'infinite_request':
                 payload_args = msg['payload_args']
                 try:
-                    logger.info(
-                        "infinite_request key=%s-%s-%s start=%s end=%s origEnd=%s",
-                        payload_args.get('sourceName'),
-                        payload_args.get('sort'),
-                        payload_args.get('sort_direction'),
-                        payload_args.get('start'),
-                        payload_args.get('end'),
-                        payload_args.get('origEnd'),
-                    )
+                    logger.info("infinite_request key=%s-%s-%s start=%s end=%s origEnd=%s",
+                        payload_args.get('sourceName'), payload_args.get('sort'), payload_args.get('sort_direction'),
+                        payload_args.get('start'), payload_args.get('end'), payload_args.get('origEnd'))
                 except Exception:
                     logger.exception("error logging infinite_request")
                 self._handle_payload_args(payload_args)
@@ -774,11 +735,8 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
             col_name = rw
             header_name = str(meta.get('orig_col_name', rw))
             # Minimal displayers; could be improved using dtype if available
-            column_config.append({
-                "col_name": col_name,
-                "header_name": header_name,
-                "displayer_args": {"displayer": "obj"},
-            })
+            column_config.append({"col_name": col_name, "header_name": header_name,
+                "displayer_args": {"displayer": "obj"}})
         return column_config
 
     def _prepare_df_for_serialization(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -803,14 +761,8 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
         if start is None or end is None:
             return
         try:
-            logger.info(
-                "_handle_payload_args start=%s end=%s origEnd=%s sort=%s sort_direction=%s",
-                start,
-                end,
-                new_payload_args.get('origEnd'),
-                new_payload_args.get('sort'),
-                new_payload_args.get('sort_direction'),
-            )
+            logger.info("_handle_payload_args start=%s end=%s origEnd=%s sort=%s sort_direction=%s", start, end,
+                new_payload_args.get('origEnd'), new_payload_args.get('sort'), new_payload_args.get('sort_direction'))
             # create a derived lazyframe to avoid borrowing conflicts with background tasks
             base = self._ldf.select(pl.all())
             sort = new_payload_args.get('sort')
@@ -828,10 +780,10 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
             )
             logger.info(
                 "sending slice [%s,%s) rows=%s total=%s",
-                start, end, len(slice_df), self.df_meta['total_rows']
-            )
-            self.send({"type": "infinite_resp", 'key': new_payload_args, 'data': [], 'length': self.df_meta['total_rows']},
-                      [self._to_parquet(slice_df)])
+                start, end, len(slice_df), self.df_meta['total_rows'])
+            self.send({"type": "infinite_resp", 'key': new_payload_args, 'data': [],
+                'length': self.df_meta['total_rows']},
+                [self._to_parquet(slice_df)])
 
             second_pa = new_payload_args.get('second_request')
             if second_pa:
@@ -844,16 +796,19 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
                     )
                     logger.info(
                         "sending second slice [%s,%s) rows=%s total=%s",
-                        s2, e2, len(slice2), self.df_meta['total_rows']
-                    )
-                    self.send({"type": "infinite_resp", 'key': second_pa, 'data': [], 'length': self.df_meta['total_rows']},
-                              [self._to_parquet(slice2)])
+                        s2, e2, len(slice2), self.df_meta['total_rows'])
+                    self.send({"type": "infinite_resp", 'key': second_pa, 'data': [],
+                        'length': self.df_meta['total_rows']},
+                        [self._to_parquet(slice2)])
         except Exception as e:
             stack_trace = traceback.format_exc()
-            self.send({"type": "infinite_resp", 'key': new_payload_args, 'data': [], 'error_info': stack_trace, 'length': 0}, [])
+            self.send({"type": "infinite_resp", 'key': new_payload_args, 'data': [], 'error_info': stack_trace,
+                'length': 0},
+                [])
             logger.exception("error handling payload args: %s", e)
 
-    def add_analysis(self, analysis_klass: Type[PolarsAnalysis], pinned_row_configs: Optional[List[Dict[str, Any]]] = None) -> None:
+    def add_analysis(self, analysis_klass: Type[PolarsAnalysis],
+            pinned_row_configs: Optional[List[Dict[str, Any]]] = None) -> None:
         """
         Add a new analysis class to the widget and trigger recomputation.
         

@@ -9,22 +9,11 @@ import tempfile
 import polars as pl
 import pytest
 
-from buckaroo.file_cache.cache_utils import (
-    ensure_executor_sqlite,
-    get_global_file_cache,
-    get_global_executor_log,
-    get_cache_size,
-    clear_file_cache,
-    clear_executor_log,
-    clear_oldest_cache_entries,
-    format_cache_size,
-)
+from buckaroo.file_cache.cache_utils import (ensure_executor_sqlite, get_global_file_cache, get_global_executor_log, get_cache_size, clear_file_cache, clear_executor_log, clear_oldest_cache_entries, format_cache_size)
 
 # TemporaryDirectory cleanup fails on Windows because SQLite keeps files open
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="SQLite file locking prevents tmpdir cleanup on Windows",
-)
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+    reason="SQLite file locking prevents tmpdir cleanup on Windows")
 
 
 def test_ensure_executor_sqlite():
@@ -245,8 +234,7 @@ def test_clear_oldest_cache_entries(tmp_path):
             old_time = time.time() - (60 * 60 * 24 * 31)  # 31 days ago
             fc._conn.execute(
                 "UPDATE files SET mtime = ? WHERE path = ?",
-                (old_time, str(file1))
-            )
+                (old_time, str(file1)))
             fc._conn.commit()
 
             # Add newer file

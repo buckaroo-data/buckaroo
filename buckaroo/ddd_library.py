@@ -22,7 +22,7 @@ def get_basic_df_with_named_index():
 
 def get_multiindex_cols_df(rows=15) -> pd.DataFrame:
     cols = pd.MultiIndex.from_tuples(
-    [('foo', 'a'), ('foo', 'b'),  ('bar', 'a'), ('bar', 'b'), ('bar', 'c')])
+        [('foo', 'a'), ('foo', 'b'),  ('bar', 'a'), ('bar', 'b'), ('bar', 'c')])
     return pd.DataFrame(
         [["asdf","foo_b", "bar_a", "bar_b", "bar_c"]] * rows,
         columns=cols)
@@ -49,7 +49,7 @@ def get_multiindex_index_df() -> pd.DataFrame:
     return pd.DataFrame({
         'foo_col':[10,20,30,40, 50, 60],
         'bar_col':['foo', 'bar', 'baz', 'quux', 'boff', None]},
-         index=row_index)
+        index=row_index)
 
 def get_multiindex3_index_df() -> pd.DataFrame:
     row_index = pd.MultiIndex.from_tuples([
@@ -59,19 +59,18 @@ def get_multiindex3_index_df() -> pd.DataFrame:
     return pd.DataFrame({
         'foo_col':[10,20,30,40, 50, 60],
         'bar_col':['foo', 'bar', 'baz', 'quux', 'boff', None]},
-         index=row_index)
+        index=row_index)
 
 def get_multiindex_with_names_index_df() -> pd.DataFrame:
     row_index = pd.MultiIndex.from_tuples([
         ('foo', 'a'), ('foo', 'b'),
         ('bar', 'a'), ('bar', 'b'), ('bar', 'c'),
         ('baz', 'a')],
-        names=['index_name_1', 'index_name_2']
-    )
+        names=['index_name_1', 'index_name_2'])
     return pd.DataFrame({
         'foo_col':[10,20,30,40, 50, 60],
-        'bar_col':['foo', 'bar', 'baz', 'quux', 'boff', None]},        
-         index=row_index)
+        'bar_col':['foo', 'bar', 'baz', 'quux', 'boff', None]},
+        index=row_index)
 
 def get_multiindex_index_multiindex_with_names_cols_df() -> pd.DataFrame:
     cols = pd.MultiIndex.from_tuples(
@@ -90,16 +89,15 @@ def get_multiindex_index_multiindex_with_names_cols_df() -> pd.DataFrame:
         ['foo', 'bar', 'baz', 'quux', 'boff',  None],
         [   10,    20,    30,     40,     50,    60],
         ['foo', 'bar', 'baz', 'quux', 'boff', None]],
-    columns=cols,
-index=row_index)
+        columns=cols,
+        index=row_index)
 
 def get_multiindex_index_with_names_multiindex_cols_df() -> pd.DataFrame:
     row_index = pd.MultiIndex.from_tuples([
         ('foo', 'a'), ('foo', 'b'),
         ('bar', 'a'), ('bar', 'b'), ('bar', 'c'),
         ('baz', 'a')],
-        names=['index_name_1', 'index_name_2']
-    )
+        names=['index_name_1', 'index_name_2'])
     cols = pd.MultiIndex.from_tuples(
         [('foo', 'a'), ('foo', 'b'),  ('bar', 'a'), ('bar', 'b'), ('bar', 'c'), ('baz', 'a')])
 
@@ -110,16 +108,15 @@ def get_multiindex_index_with_names_multiindex_cols_df() -> pd.DataFrame:
         ['foo', 'bar', 'baz', 'quux', 'boff', None],
         [10,20,30,40, 50, 60],
         ['foo', 'bar', 'baz', 'quux', 'boff', None]],
-    columns=cols,
-index=row_index)
+        columns=cols,
+        index=row_index)
 
 def get_multiindex_with_names_both() -> pd.DataFrame:
     row_index = pd.MultiIndex.from_tuples([
         ('foo', 'a'), ('foo', 'b'),
         ('bar', 'a'), ('bar', 'b'), ('bar', 'c'),
         ('baz', 'a')],
-        names=['index_name_1', 'index_name_2']
-    )
+        names=['index_name_1', 'index_name_2'])
     cols = pd.MultiIndex.from_tuples(
         [('foo', 'a'), ('foo', 'b'),  ('bar', 'a'), ('bar', 'b'), ('bar', 'c'), ('baz', 'a')],
         names=['level_a', 'level_b'])
@@ -132,8 +129,8 @@ def get_multiindex_with_names_both() -> pd.DataFrame:
         ['foo', 'bar', 'baz', 'quux', 'boff', None],
         [10,20,30,40, 50, 60],
         ['foo', 'bar', 'baz', 'quux', 'boff', None]],
-columns=cols,
-index=row_index)
+        columns=cols,
+        index=row_index)
 
 
 def df_with_infinity() -> pd.DataFrame:
@@ -151,7 +148,7 @@ def get_df_with_named_index() -> pd.DataFrame:
       someone put the effort into naming the index, you'd probably want to display that
     """
     return pd.DataFrame({'a':      ["asdf", "foo_b", "bar_a", "bar_b", "bar_c"]},
-                        index=pd.Index([10,20,30,40,50], name='foo'))
+        index=pd.Index([10,20,30,40,50], name='foo'))
 
 
 def df_with_weird_types() -> pd.DataFrame:

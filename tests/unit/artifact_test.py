@@ -5,19 +5,10 @@ from io import BytesIO
 import pandas as pd
 import pytest
 
-from buckaroo.artifact import (
-    prepare_buckaroo_artifact,
-    artifact_to_json,
-    to_html,
-    _df_to_parquet_b64_tagged,
-)
+from buckaroo.artifact import (prepare_buckaroo_artifact, artifact_to_json, to_html, _df_to_parquet_b64_tagged)
 
 
-simple_df = pd.DataFrame({
-    'int_col': [1, 2, 3],
-    'str_col': ['a', 'b', 'c'],
-    'float_col': [1.1, 2.2, 3.3],
-})
+simple_df = pd.DataFrame({'int_col': [1, 2, 3], 'str_col': ['a', 'b', 'c'], 'float_col': [1.1, 2.2, 3.3]})
 
 
 def _is_parquet_b64(val):
@@ -184,9 +175,7 @@ class TestWeirdTypesParquetRoundtrip:
     """
 
     def test_period_coerced_to_string(self):
-        df = pd.DataFrame({
-            'period': pd.Series(pd.period_range('2021-01', periods=3, freq='M')),
-        })
+        df = pd.DataFrame({'period': pd.Series(pd.period_range('2021-01', periods=3, freq='M'))})
         result = _df_to_parquet_b64_tagged(df)
         decoded = _decode_parquet_b64(result)
         # Column 'a' (renamed from 'period') should be string, not PeriodDtype
@@ -194,19 +183,15 @@ class TestWeirdTypesParquetRoundtrip:
             f"period column was not coerced: dtype={decoded['a'].dtype}"
 
     def test_interval_coerced_to_string(self):
-        df = pd.DataFrame({
-            'interval': pd.Series(
-                pd.arrays.IntervalArray.from_breaks([0, 1, 2, 3])),
-        })
+        df = pd.DataFrame({'interval': pd.Series(
+            pd.arrays.IntervalArray.from_breaks([0, 1, 2, 3]))})
         result = _df_to_parquet_b64_tagged(df)
         decoded = _decode_parquet_b64(result)
         assert not isinstance(decoded['a'].dtype, pd.IntervalDtype), \
             f"interval column was not coerced: dtype={decoded['a'].dtype}"
 
     def test_timedelta_coerced_to_string(self):
-        df = pd.DataFrame({
-            'td': pd.to_timedelta(['1 days', '2 days', '3 days']),
-        })
+        df = pd.DataFrame({'td': pd.to_timedelta(['1 days', '2 days', '3 days'])})
         result = _df_to_parquet_b64_tagged(df)
         decoded = _decode_parquet_b64(result)
         # Should not be timedelta64 — hyparquet reads duration[ns] as raw ints
@@ -230,10 +215,7 @@ class TestWeirdTypesParquetRoundtrip:
 class TestPolarsSupport:
     def test_polars_dataframe(self):
         pl = pytest.importorskip("polars")
-        df = pl.DataFrame({
-            'int_col': [1, 2, 3],
-            'str_col': ['a', 'b', 'c'],
-        })
+        df = pl.DataFrame({'int_col': [1, 2, 3], 'str_col': ['a', 'b', 'c']})
         artifact = prepare_buckaroo_artifact(df)
         assert _is_parquet_b64(artifact['df_data'])
         assert _is_parquet_b64(artifact['summary_stats_data'])

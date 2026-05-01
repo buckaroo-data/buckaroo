@@ -127,7 +127,7 @@ class TestAnalysisPipeline(unittest.TestCase):
             'a': {'distinct_count': 4, 'orig_col_name':'normal_int_series', 'rewritten_col_name':'a'},
             'b': {'distinct_count':0,  'orig_col_name':'empty_na_ser', 'rewritten_col_name':'b'},
             'c': {'distinct_count':2,  'orig_col_name':'float_nan_ser', 'rewritten_col_name':'c'}},
-        sdf2)
+            sdf2)
 
 
     def test_produce_series_df3(self):
@@ -139,13 +139,13 @@ class TestAnalysisPipeline(unittest.TestCase):
 
         """
         sdf3, _errs = produce_series_df(
-        test_df, [DistinctCount, DistinctPer], 'test_df', debug=True)
+            test_df, [DistinctCount, DistinctPer], 'test_df', debug=True)
 
         assert_dict_eq({
             'a': {'distinct_count': 4, 'distinct_per':0, 'orig_col_name':'normal_int_series', 'rewritten_col_name':'a'},
             'b': {'distinct_count': 0, 'distinct_per':0, 'orig_col_name':'empty_na_ser',      'rewritten_col_name':'b'},
             'c': {'distinct_count': 2, 'distinct_per':0, 'orig_col_name':'float_nan_ser',     'rewritten_col_name':'c'}},
-        sdf3)
+            sdf3)
 
     def Xtest_produce_series_debug(self):
         """
@@ -337,7 +337,7 @@ class TestDfStats(unittest.TestCase):
                   'orig_col_name':'empty_na_ser', 'rewritten_col_name':'b'},
             'c': {'distinct_count': 2, 'distinct_per':0.5, 'len': 4,
                   'orig_col_name':'float_nan_ser', 'rewritten_col_name':'c'}},
-        dfs.sdf)
+            dfs.sdf)
 
 
     def test_dfstats_Missing_Analysis(self):

@@ -19,12 +19,8 @@ LOG_DIR = os.path.join(os.path.expanduser("~"), ".buckaroo", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, "mcp_tool.log")
 
-logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+logging.basicConfig(filename=LOG_FILE, level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger("buckaroo.mcp_tool")
 
 SERVER_PORT = int(os.environ.get("BUCKAROO_PORT", "8700"))
@@ -55,14 +51,10 @@ def _start_server_monitor(server_pid: int):
         "except OSError:\n"
         "    pass\n"
     )
-    _server_monitor = subprocess.Popen(
-        [sys.executable, "-c", monitor_code],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    _server_monitor = subprocess.Popen([sys.executable, "-c", monitor_code], stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     log.info("Started server monitor (pid=%d) watching server pid=%d",
-             _server_monitor.pid, server_pid)
+        _server_monitor.pid, server_pid)
 
 
 def _cleanup_server():
@@ -106,14 +98,11 @@ signal.signal(signal.SIGTERM, _signal_handler)
 signal.signal(signal.SIGINT, _signal_handler)
 
 
-mcp = FastMCP(
-    "buckaroo-table",
-    instructions=(
+mcp = FastMCP("buckaroo-table", instructions=(
         "When the user mentions or asks about a CSV, TSV, Parquet, or JSON data file, "
         "always use the view_data tool to display it interactively in Buckaroo. "
         "Prefer view_data over reading file contents directly."
-    ),
-)
+    ))
 
 
 @mcp.prompt()
@@ -199,16 +188,13 @@ def ensure_server() -> dict:
         running_version = health.get("version", "unknown")
         if running_version == expected_version:
             log.info("Server already running (v%s) — pid=%s uptime=%.0fs",
-                     running_version, health.get("pid"), health.get("uptime_s", 0))
-            return {
-                "server_status": "reused",
-                "server_pid": health.get("pid"),
-                "server_uptime_s": health.get("uptime_s", 0),
-            }
+                running_version, health.get("pid"), health.get("uptime_s", 0))
+            return {"server_status": "reused", "server_pid": health.get("pid"),
+                "server_uptime_s": health.get("uptime_s", 0)}
         else:
             old_pid = health.get("pid")
             log.info("Version mismatch: running=%s expected=%s — killing old server (pid=%s)",
-                     running_version, expected_version, old_pid)
+                running_version, expected_version, old_pid)
             if old_pid:
                 try:
                     os.kill(old_pid, signal.SIGTERM)
@@ -242,11 +228,8 @@ def ensure_server() -> dict:
             ]
             if missing:
                 log.warning("Static files missing or empty: %s — pages may be blank", missing)
-            return {
-                "server_status": "started",
-                "server_pid": health.get("pid"),
-                "server_uptime_s": health.get("uptime_s", 0),
-            }
+            return {"server_status": "started", "server_pid": health.get("pid"),
+                "server_uptime_s": health.get("uptime_s", 0)}
 
     log.error("Server failed to start within 5s — see %s", server_log)
     raise RuntimeError(_format_startup_failure())
@@ -268,11 +251,7 @@ def _view_impl(path: str) -> str:
     log.debug("POST %s/load payload=%s", SERVER_URL, payload.decode())
 
     try:
-        req = Request(
-            f"{SERVER_URL}/load",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
+        req = Request(f"{SERVER_URL}/load", data=payload, headers={"Content-Type": "application/json"})
         resp = urlopen(req, timeout=30)
         body = resp.read()
         log.debug("Response status=%d body=%s", resp.status, body[:500])
@@ -306,7 +285,7 @@ def _view_impl(path: str) -> str:
         f"Browser: {browser_action} | Session: {SESSION_ID}"
     )
     log.info("view_data success — %d rows, %d cols, browser=%s, server=%s(%s)",
-             rows, len(cols), browser_action, server_pid, server_info["server_status"])
+        rows, len(cols), browser_action, server_pid, server_info["server_status"])
     return summary
 
 
@@ -368,14 +347,12 @@ def buckaroo_diagnostics() -> str:
     static_summary = "\n".join(
         f"  {name}: {'OK' if info.get('exists') and info.get('size_bytes', 0) > 0 else 'PROBLEM'} "
         f"({info.get('size_bytes', 0):,} bytes)"
-        for name, info in static_files.items()
-    )
+        for name, info in static_files.items())
 
     deps = diag.get("dependencies", {})
     dep_lines = "\n".join(
         f"  {name}: {'installed' if ok else 'MISSING'}"
-        for name, ok in deps.items()
-    )
+        for name, ok in deps.items())
 
     result = (
         f"## Buckaroo Server Diagnostics\n\n"

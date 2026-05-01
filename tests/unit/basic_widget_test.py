@@ -45,8 +45,7 @@ class KitchenSinkWidget(BuckarooWidget):
     Histogram, ComputedDefaultSummaryStats,
     # default buckaroo styling
     DefaultSummaryStatsStyling, DefaultMainStyling,
-    EverythingStyling
-    ]
+    EverythingStyling]
 
 def test_styling_instantiation():
     
@@ -167,12 +166,12 @@ def test_quick_commands_run():
     df = pd.DataFrame({'a': ["30", "40"], 'b': ['aa', 'bb']})
     bw = BuckarooWidget(df)
     bw.buckaroo_state = {'cleaning_method': '',
-                         'post_processing': '',
-                         'sampled': False,
-                         'show_commands': False,
-                         'df_display': 'main',
-                         'search_string': '',
-                         'quick_command_args': {'search': ['aa']}}
+        'post_processing': '',
+        'sampled': False,
+        'show_commands': False,
+        'df_display': 'main',
+        'search_string': '',
+        'quick_command_args': {'search': ['aa']}}
 
     expected = pd.DataFrame({
         'a': ["30"],
@@ -256,18 +255,18 @@ def test_auto_clean_preserve_error():
         [{ "symbol": "us_date",
         "meta": { "clean_strategy": "AggresiveCleaningGenOps",
                   "clean_col": "us_dates", "auto_clean": True }},
-      {"symbol": "df" }, "us_dates" ],
-  [{"symbol": "str_bool", "meta": { "clean_strategy": "AggresiveCleaningGenOps",
+         {"symbol": "df" }, "us_dates" ],
+        [{"symbol": "str_bool", "meta": { "clean_strategy": "AggresiveCleaningGenOps",
                                     "clean_col": "mostly_bool",
                                     "auto_clean": True}},
-    {"symbol": "df"},"mostly_bool"],
-  [{"symbol": "strip_int_parse",
+         {"symbol": "df"},"mostly_bool"],
+        [{"symbol": "strip_int_parse",
       "meta": {
         "clean_strategy": "AggresiveCleaningGenOps",
         "clean_col": "b"
       }
     },
-    { "symbol": "df" }, "b" ]]
+         { "symbol": "df" }, "b" ]]
     
     bw.buckaroo_state = {
         "cleaning_method": "conservative", #aggressive, that's the change that throws the error

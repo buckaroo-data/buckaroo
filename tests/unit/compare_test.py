@@ -22,15 +22,12 @@ def test_single_non_a_join_key():
 def test_multi_key_join():
     """col_join_dfs works with multiple join columns."""
     df1 = pd.DataFrame(
-        {"account_id": [1, 1, 2], "as_of_date": ["2024-01", "2024-02", "2024-01"], "amount": [100, 200, 300]}
-    )
+        {"account_id": [1, 1, 2], "as_of_date": ["2024-01", "2024-02", "2024-01"], "amount": [100, 200, 300]})
     df2 = pd.DataFrame(
-        {"account_id": [1, 1, 2], "as_of_date": ["2024-01", "2024-02", "2024-01"], "amount": [100, 250, 300]}
-    )
+        {"account_id": [1, 1, 2], "as_of_date": ["2024-01", "2024-02", "2024-01"], "amount": [100, 250, 300]})
 
     m_df, overrides, eqs = col_join_dfs(
-        df1, df2, join_columns=["account_id", "as_of_date"], how="outer"
-    )
+        df1, df2, join_columns=["account_id", "as_of_date"], how="outer")
 
     assert len(m_df) == 3
     assert (m_df["membership"] == 3).all()
