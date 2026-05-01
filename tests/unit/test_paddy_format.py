@@ -189,6 +189,21 @@ def dedent(s: str) -> str:
             """,
         ),
         (
+            "skip_wrap_inside_fstring_for_py311_compat",
+            # Real case from buckaroo/file_cache/base.py. paddy wrapped
+            # a Call inside an f-string, which is a SyntaxError on
+            # Python 3.11 (PEP 701 multi-line f-strings only landed in
+            # 3.12). Don't wrap any Call/List/Set/Dict whose ancestor is
+            # a FormattedString — leave the f-string's expression on a
+            # single line, even when the line is over budget.
+            """
+            log_msg = f"prefix {len(state.get('aaaaaaaaaaa', []))}, {len(state.get('bbbbbbbbbbbbbbbbbbbb', []))}, {len(state.get('cccccccccccccccccccccc', []))}"
+            """,
+            """
+            log_msg = f"prefix {len(state.get('aaaaaaaaaaa', []))}, {len(state.get('bbbbbbbbbbbbbbbbbbbb', []))}, {len(state.get('cccccccccccccccccccccc', []))}"
+            """,
+        ),
+        (
             "long_funcdef_greedy_wrap",
             # Real case from buckaroo/dataflow/column_executor_dataflow.py
             # compute_summary_with_executor — collapsed form is 400+ chars.
