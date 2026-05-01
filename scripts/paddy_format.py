@@ -124,9 +124,15 @@ def _collapse_items(items, post_attr, preserve_singleton_comma: bool = False):
 
 
 class _PaddyTransformer(cst.CSTTransformer):
+    def __init__(self, tabular_ids: set[int] | None = None):
+        super().__init__()
+        self.tabular_ids = tabular_ids or set()
+
     # ----- Call -----
 
     def leave_Call(self, original, updated):
+        if id(original) in self.tabular_ids:
+            return updated
         c = self._collapse_call(updated)
         if c is not None:
             return c
@@ -270,12 +276,18 @@ class _PaddyTransformer(cst.CSTTransformer):
     # ----- Collections (List, Set, Dict) -----
 
     def leave_List(self, original, updated):
+        if id(original) in self.tabular_ids:
+            return updated
         return self._handle_collection(updated, "lbracket", "rbracket")
 
     def leave_Set(self, original, updated):
+        if id(original) in self.tabular_ids:
+            return updated
         return self._handle_collection(updated, "lbrace", "rbrace")
 
     def leave_Dict(self, original, updated):
+        if id(original) in self.tabular_ids:
+            return updated
         return self._handle_collection(updated, "lbrace", "rbrace")
 
     def _handle_collection(self, updated, open_attr, close_attr):
@@ -631,19 +643,79 @@ def _line_indent_plus_4(node, positions, lines) -> int | None:
 
 
 def _continuation_col(node, positions, lines) -> int | None:
-    """Where wrapped continuation lines start. line_indent + 4 for
-    Call/List/Set/Dict; line_indent + 8 for FunctionDef so the args
-    sit visually distinct from the body (which is at line_indent + 4).
-    PEP 8: "When using a hanging indent the following should be
-    considered: there should be no arguments on the first line and
-    further indentation should be used to clearly distinguish itself
-    as a continuation line." """
+    """Where wrapped continuation lines start.
+
+    - FunctionDef: line_indent + 8 (args distinct from body, which is at
+      line_indent + 4 — PEP 8 hanging-indent guidance).
+    - Call/List/Set/Dict: min(line_indent + 4, col_after_open_bracket).
+      When the open bracket is "shallow" (close to line start), aligning
+      with col_after_open avoids leaving item 1 (which sits at that col)
+      visually offset from items 2..N. When the open bracket is deep
+      (e.g. `result = some_function_name(`), line_indent + 4 wins."""
     base = _line_indent_plus_4(node, positions, lines)
     if base is None:
         return None
     if isinstance(node, cst.FunctionDef):
         return base + 4
-    return base
+    open_col = _open_bracket_first_col(node, positions)
+    if open_col is None:
+        return base
+    return min(base, open_col)
+
+
+def _is_tabular_layout(node, positions, lines) -> bool:
+    """Detect "tabular hanging-indent" layout: the open bracket is at
+    end of line, every child sits on its own line at the same column N,
+    and N is none of the canonical column choices (line_indent + 4,
+    col_after_open_bracket, or line_indent + 8 for FunctionDef). The
+    user has deliberately chosen a non-canonical column to align the
+    children (e.g. so multiple sibling dicts present as comparable
+    tables). Skip collapse / wrap / re-indent on these — leave the
+    layout alone."""
+    if isinstance(node, cst.Call):
+        children = node.args
+    elif isinstance(node, (cst.List, cst.Set, cst.Dict)):
+        children = node.elements
+    else:
+        return False
+    if len(children) < 2:
+        return False
+    pos = positions[node]
+    cols: list[int] = []
+    prev_line = pos.start.line
+    for c in children:
+        target = c.key if isinstance(c, cst.DictElement) else c.value
+        cpos = positions[target]
+        if cpos.start.line == prev_line:
+            return False
+        cols.append(cpos.start.column)
+        prev_line = cpos.start.line
+    # Tolerate up to 1-col variance so a single off-by-one typo in an
+    # otherwise tabular dict still gets recognised (real cases in the
+    # codebase have minor misalignments).
+    if max(cols) - min(cols) > 1:
+        return False
+    target_col = max(set(cols), key=cols.count)
+    canonicals = set()
+    plus_4 = _line_indent_plus_4(node, positions, lines)
+    if plus_4 is not None:
+        canonicals.add(plus_4)
+        if isinstance(node, cst.FunctionDef):
+            canonicals.add(plus_4 + 4)
+    after_open = _open_bracket_first_col(node, positions)
+    if after_open is not None:
+        canonicals.add(after_open)
+    if target_col in canonicals:
+        return False
+    return True
+
+
+def _find_tabular_layouts(module, positions, lines) -> set[int]:
+    ids: set[int] = set()
+    for node in positions:
+        if _is_tabular_layout(node, positions, lines):
+            ids.add(id(node))
+    return ids
 
 
 def _is_wrappable(node) -> bool:
@@ -677,6 +749,8 @@ def _wrap_pass(src: str, budget: int, wrap_mode: str = "greedy") -> str:
             if line_idx >= len(lines):
                 continue
             if len(lines[line_idx]) <= budget:
+                continue
+            if _is_tabular_layout(node, positions, lines):
                 continue
             first_col = _open_bracket_first_col(node, positions)
             cont_col = _continuation_col(node, positions, lines)
@@ -859,7 +933,9 @@ def _reindent_pass_once(src: str) -> str:
             continue
         if _has_blank_line_subgroups(node):
             continue
-        indent = _line_indent_plus_4(node, positions, lines)
+        if _is_tabular_layout(node, positions, lines):
+            continue
+        indent = _continuation_col(node, positions, lines)
         if indent is None:
             continue
         targets[id(node)] = indent
@@ -1322,7 +1398,12 @@ def paddy_format(src: str, wrap_mode: str = "greedy") -> str:
         module = cst.parse_module(src)
     except cst.ParserSyntaxError:
         return src
-    src = module.visit(_PaddyTransformer()).code
+    wrapper = cst.metadata.MetadataWrapper(module)
+    positions = wrapper.resolve(cst.metadata.PositionProvider)
+    module = wrapper.module
+    lines = src.splitlines()
+    tabular_ids = _find_tabular_layouts(module, positions, lines)
+    src = module.visit(_PaddyTransformer(tabular_ids)).code
     # Re-indent and wrap interact: when wrap moves an outer bracket to a
     # multi-line form, an inner group's reference line shifts and its
     # continuation indent (line_indent + 4) needs to be re-derived.

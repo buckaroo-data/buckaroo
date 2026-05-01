@@ -502,15 +502,11 @@ def dedent(s: str) -> str:
         (
             "idempotent_outer_call_continuation_shifts_inner_dict",
             # Minimal repro from buckaroo/pluggable_analysis_framework/
-            # safe_summary_df.py. The outer Call has its continuation line
-            # at col 23; the inner Dict's second key sits at col 24 (just
-            # past the `{`). On the first pass, the outer Call's
-            # continuation gets re-indented to col 8 (line_indent + 4),
-            # but the inner Dict's continuation stays at col 24 because
-            # _line_indent_plus_4 reads the *current* line indent of the
-            # Dict's `{` line, which still points at col 23. On the
-            # second pass, the Dict's `{` line is now at col 8, so the
-            # inner key gets re-indented to col 12. Two passes to settle.
+            # safe_summary_df.py. The outer Call's continuation lands at
+            # col 8 (line_indent + 4). For the inner Dict, the new
+            # continuation rule is min(line_indent + 4, col_after_open):
+            # `{` at col 8, col_after_{ = 9, line_indent + 4 = 12, so
+            # 9 wins — the inner Dict's continuation aligns with key 1.
             """
             def f(dct):
                 cleaned_dct = val_replace(dct,
@@ -522,7 +518,7 @@ def dedent(s: str) -> str:
             def f(dct):
                 cleaned_dct = val_replace(dct,
                     {pd.NA: UnquotedString("pd.NA"),
-                        np.nan: UnquotedString("np.nan")})
+                     np.nan: UnquotedString("np.nan")})
                 return cleaned_dct
             """,
         ),
