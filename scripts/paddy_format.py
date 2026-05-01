@@ -709,6 +709,46 @@ def _collect_wrappables(node) -> list:
     return v.found
 
 
+class _FStringDescendantCollector(cst.CSTVisitor):
+    """Collect every wrappable node (Call/List/Set/Dict) whose ancestor
+    is a FormattedString. Wrapping inside an f-string would insert a
+    newline inside the expression, which is a SyntaxError on Python 3.11
+    (PEP 701 multi-line f-strings only landed in 3.12)."""
+
+    def __init__(self):
+        super().__init__()
+        self.depth = 0
+        self.ids: set[int] = set()
+
+    def visit_FormattedString(self, n):
+        self.depth += 1
+
+    def leave_FormattedString(self, n):
+        self.depth -= 1
+
+    def _maybe_add(self, n):
+        if self.depth > 0:
+            self.ids.add(id(n))
+
+    def visit_Call(self, n):
+        self._maybe_add(n)
+
+    def visit_List(self, n):
+        self._maybe_add(n)
+
+    def visit_Set(self, n):
+        self._maybe_add(n)
+
+    def visit_Dict(self, n):
+        self._maybe_add(n)
+
+
+def _find_fstring_descendants(module) -> set[int]:
+    v = _FStringDescendantCollector()
+    module.visit(v)
+    return v.ids
+
+
 def _find_tabular_layouts(module, positions, lines) -> set[int]:
     ids: set[int] = set()
     for node in positions:
@@ -756,6 +796,7 @@ def _wrap_pass(src: str, budget: int, wrap_mode: str = "greedy") -> str:
         module = wrapper.module
         lines = src.splitlines()
         skip_ids = _find_tabular_layouts(module, positions, lines)
+        skip_ids |= _find_fstring_descendants(module)
 
         candidates = []
         for node, pos in positions.items():

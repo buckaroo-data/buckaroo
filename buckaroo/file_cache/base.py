@@ -708,8 +708,7 @@ class Executor:
             iteration += 1
             state = self._planning_state
             
-            log_msg_iter = f"Executor.get_next_column_chunk() ITERATION {iteration} - executor_id={id(self)}, remaining={len(state.get('remaining',
-                []))}, current_batches={len(state.get('current_batches', []))}, batch_index={state.get('batch_index', 0)}"
+            log_msg_iter = f"Executor.get_next_column_chunk() ITERATION {iteration} - executor_id={id(self)}, remaining={len(state.get('remaining', []))}, current_batches={len(state.get('current_batches', []))}, batch_index={state.get('batch_index', 0)}"
             logger.debug(log_msg_iter)
             
             # If we have batches queued, return next one
@@ -745,8 +744,7 @@ class Executor:
                 return None
             
             # Extract history from executor log
-            log_msg_planning = f"Executor.get_next_column_chunk() CALLING PLANNING FUNCTION - executor_id={id(self)}, remaining={len(state['remaining'])}, planning_function={self.planning_function.__name__ if hasattr(self.planning_function,
-                '__name__') else type(self.planning_function).__name__}"
+            log_msg_planning = f"Executor.get_next_column_chunk() CALLING PLANNING FUNCTION - executor_id={id(self)}, remaining={len(state['remaining'])}, planning_function={self.planning_function.__name__ if hasattr(self.planning_function, '__name__') else type(self.planning_function).__name__}"
             logger.info(log_msg_planning)
             
             history = extract_execution_history(self.executor_log, self.dfi)
