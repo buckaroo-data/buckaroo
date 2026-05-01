@@ -192,18 +192,20 @@ def dedent(s: str) -> str:
             "long_funcdef_greedy_wrap",
             # Real case from buckaroo/dataflow/column_executor_dataflow.py
             # compute_summary_with_executor — collapsed form is 400+ chars.
-            # Today the wrap pass only covers Call/List/Set/Dict, so
-            # function signatures stay on one massive line. Wrap params
-            # at line_indent + 4 just like Call args.
+            # Continuation indent for FunctionDef params is line_indent + 8
+            # (NOT + 4 like Call/List/Set/Dict) so the args sit visually
+            # distinct from the body, which is at line_indent + 4. PEP 8
+            # explicitly recommends this for "distinguishing arguments
+            # from the rest".
             """
             def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None, progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None, planning_function: Optional["PlanningFunction"] = None, timeout_secs: Optional[float] = None, cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
                 pass
             """,
             """
             def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None,
-                progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None,
-                planning_function: Optional["PlanningFunction"] = None, timeout_secs: Optional[float] = None,
-                cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                    progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None,
+                    planning_function: Optional["PlanningFunction"] = None, timeout_secs: Optional[float] = None,
+                    cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
                 pass
             """,
         ),
@@ -681,19 +683,20 @@ def test_paddy_format_golden(name, src, expected):
         (
             "one_per_line_funcdef_overlong",
             # Long function signature — each param on its own line at
-            # line_indent + 4 in one_per_line mode.
+            # line_indent + 8 in one_per_line mode (FunctionDef-specific
+            # so args sit distinct from the body at line_indent + 4).
             """
             def compute_summary_with_executor(self, file_cache=None, progress_listener=None, file_path=None, planning_function=None, timeout_secs=None) -> None:
                 pass
             """,
             """
             def compute_summary_with_executor(
-                self,
-                file_cache=None,
-                progress_listener=None,
-                file_path=None,
-                planning_function=None,
-                timeout_secs=None) -> None:
+                    self,
+                    file_cache=None,
+                    progress_listener=None,
+                    file_path=None,
+                    planning_function=None,
+                    timeout_secs=None) -> None:
                 pass
             """,
         ),

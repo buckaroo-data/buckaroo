@@ -630,6 +630,22 @@ def _line_indent_plus_4(node, positions, lines) -> int | None:
     return (len(line) - len(line.lstrip())) + 4
 
 
+def _continuation_col(node, positions, lines) -> int | None:
+    """Where wrapped continuation lines start. line_indent + 4 for
+    Call/List/Set/Dict; line_indent + 8 for FunctionDef so the args
+    sit visually distinct from the body (which is at line_indent + 4).
+    PEP 8: "When using a hanging indent the following should be
+    considered: there should be no arguments on the first line and
+    further indentation should be used to clearly distinguish itself
+    as a continuation line." """
+    base = _line_indent_plus_4(node, positions, lines)
+    if base is None:
+        return None
+    if isinstance(node, cst.FunctionDef):
+        return base + 4
+    return base
+
+
 def _is_wrappable(node) -> bool:
     if isinstance(node, cst.Call):
         return len(node.args) >= 2
@@ -663,7 +679,7 @@ def _wrap_pass(src: str, budget: int, wrap_mode: str = "greedy") -> str:
             if len(lines[line_idx]) <= budget:
                 continue
             first_col = _open_bracket_first_col(node, positions)
-            cont_col = _line_indent_plus_4(node, positions, lines)
+            cont_col = _continuation_col(node, positions, lines)
             if first_col is None or cont_col is None:
                 continue
             candidates.append((node, pos, first_col, cont_col))
