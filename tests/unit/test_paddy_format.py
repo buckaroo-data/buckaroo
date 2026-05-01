@@ -283,6 +283,68 @@ def dedent(s: str) -> str:
             """,
         ),
         (
+            "preserve_tabular_dict_hanging_indent",
+            # Real case from buckaroo/dataflow/customizable_dataflow_test.py
+            # DFVIEWER_CONFIG_DEFAULT. The user opens `{` at end of line
+            # then puts every key at a chosen "tabular" column (col 19
+            # here) — not line_indent + 4 (canonical) and not aligned
+            # with the bracket. Multiple sibling dicts in the file share
+            # the same column so they read as comparable tables.
+            # Preserve: skip collapse (despite trailing comma), wrap and
+            # re-indent.
+            """
+            CFG = {
+                               'pinned_rows': [],
+                               'column_config': [],
+                               'left_col_configs': [],
+                               'component_config': {},
+                               'extra_grid_config': {},
+            }
+            """,
+            """
+            CFG = {
+                               'pinned_rows': [],
+                               'column_config': [],
+                               'left_col_configs': [],
+                               'component_config': {},
+                               'extra_grid_config': {},
+            }
+            """,
+        ),
+        (
+            "wrap_continuation_uses_col_after_open_when_shallow",
+            # Real case from buckaroo/dataflow/styling_core.py
+            # ThemeColorConfig. The inner Dict's `{` is at col 4 with item 1
+            # inline at col 5; the canonical line_indent + 4 = col 8 puts
+            # continuations DEEPER than item 1, leaving item 1 visually
+            # offset. Use col_after_open_bracket instead, since it's
+            # shallower than line_indent + 4. Rule:
+            # continuation_col = min(line_indent + 4, col_after_open_bracket)
+            # (FunctionDef stays at line_indent + 8 unconditionally.)
+            """
+            ThemeColorConfig = TypedDict('ThemeColorConfig', {
+                'accentColor': NotRequired[str],
+                'accentHoverColor': NotRequired[str],
+                'backgroundColor': NotRequired[str],
+                'foregroundColor': NotRequired[str],
+                'oddRowBackgroundColor': NotRequired[str],
+                'borderColor': NotRequired[str],
+                'headerBorderColor': NotRequired[str],
+                'headerBackgroundColor': NotRequired[str],
+                'spacing': NotRequired[int],
+                'cellHorizontalPaddingScale': NotRequired[float],
+                'rowVerticalPaddingScale': NotRequired[float],
+            })
+            """,
+            """
+            ThemeColorConfig = TypedDict('ThemeColorConfig',
+                {'accentColor': NotRequired[str], 'accentHoverColor': NotRequired[str], 'backgroundColor': NotRequired[str],
+                 'foregroundColor': NotRequired[str], 'oddRowBackgroundColor': NotRequired[str], 'borderColor': NotRequired[str],
+                 'headerBorderColor': NotRequired[str], 'headerBackgroundColor': NotRequired[str], 'spacing': NotRequired[int],
+                 'cellHorizontalPaddingScale': NotRequired[float], 'rowVerticalPaddingScale': NotRequired[float]})
+            """,
+        ),
+        (
             "table_format_single_col_floats",
             # `# table-format` directive on the line above forces a column
             # table layout — each element on its own line, decimal points
