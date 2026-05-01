@@ -32,7 +32,7 @@ jobs:
       - name: Run ruff
         run: uv run ruff check
       - name: Run paddy-format check
-        run: uv run python scripts/paddy_format.py --check $(find buckaroo tests scripts -type f -name "*.py" -not -path "buckaroo/jlisp/lispy.py")
+        run: find buckaroo tests scripts -type f -name "*.py" -not -path "buckaroo/jlisp/lispy.py" -print0 | xargs -0 uv run python scripts/paddy_format.py --check
 
   TestJS:
     name: JS / Build + Test
