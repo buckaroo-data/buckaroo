@@ -148,21 +148,45 @@ def dedent(s: str) -> str:
             "long_call_greedy_wrap",
             # 203 chars on one line — should wrap greedily at 120,
             # continuation indented at line_indent + 4 (here, 0 + 4 = 4).
-            "result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4, very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)\n",
-            "result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,\n    very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)\n",
+            """
+            result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4, very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)
+            """,
+            """
+            result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,
+                very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)
+            """,
         ),
         (
             "multiline_collapse_target_too_long_wraps_instead",
             # Trailing-comma multiline; collapsed form would be 203 chars.
             # Don't collapse — wrap greedily instead. Trailing comma is dropped.
-            "result = some_function_name(\n    very_long_argument_1,\n    very_long_argument_2,\n    very_long_argument_3,\n    very_long_argument_4,\n    very_long_argument_5,\n    very_long_argument_6,\n    very_long_argument_7,\n    very_long_argument_8,\n)\n",
-            "result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,\n    very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)\n",
+            """
+            result = some_function_name(
+                very_long_argument_1,
+                very_long_argument_2,
+                very_long_argument_3,
+                very_long_argument_4,
+                very_long_argument_5,
+                very_long_argument_6,
+                very_long_argument_7,
+                very_long_argument_8,
+            )
+            """,
+            """
+            result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,
+                very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)
+            """,
         ),
         (
             "long_list_greedy_wrap",
             # 162 chars on one line — wrap greedily.
-            "long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5, very_long_value_6, very_long_value_7, very_long_value_8]\n",
-            "long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5,\n    very_long_value_6, very_long_value_7, very_long_value_8]\n",
+            """
+            long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5, very_long_value_6, very_long_value_7, very_long_value_8]
+            """,
+            """
+            long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5,
+                very_long_value_6, very_long_value_7, very_long_value_8]
+            """,
         ),
         (
             "long_funcdef_greedy_wrap",
@@ -171,17 +195,37 @@ def dedent(s: str) -> str:
             # Today the wrap pass only covers Call/List/Set/Dict, so
             # function signatures stay on one massive line. Wrap params
             # at line_indent + 4 just like Call args.
-            "def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None, progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None, planning_function: Optional[\"PlanningFunction\"] = None, timeout_secs: Optional[float] = None, cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:\n    pass\n",
-            "def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None,\n    progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None,\n    planning_function: Optional[\"PlanningFunction\"] = None, timeout_secs: Optional[float] = None,\n    cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:\n    pass\n",
+            """
+            def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None, progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None, planning_function: Optional["PlanningFunction"] = None, timeout_secs: Optional[float] = None, cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                pass
+            """,
+            """
+            def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None,
+                progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None,
+                planning_function: Optional["PlanningFunction"] = None, timeout_secs: Optional[float] = None,
+                cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                pass
+            """,
         ),
         (
             "reindent_continuation_to_indent_plus_4",
             # Continuation line of a multi-line call sits at column 0 (legal
             # inside parens, but visually broken). Re-indent it to
             # original_indent + 4. Trailing space after the comma on line 1
-            # is also cleaned up.
-            "class C:\n    def f(self, ser):\n        return dict(str_bool_frac=str_bool_frac(ser), \nregular_int_parse_frac=regular_int_parse_frac(ser))\n",
-            "class C:\n    def f(self, ser):\n        return dict(str_bool_frac=str_bool_frac(ser),\n            regular_int_parse_frac=regular_int_parse_frac(ser))\n",
+            # is also cleaned up — kept as `\n` in this fixture so the
+            # trailing space survives editor whitespace-stripping.
+            (
+                "class C:\n"
+                "    def f(self, ser):\n"
+                "        return dict(str_bool_frac=str_bool_frac(ser), \n"
+                "regular_int_parse_frac=regular_int_parse_frac(ser))\n"
+            ),
+            (
+                "class C:\n"
+                "    def f(self, ser):\n"
+                "        return dict(str_bool_frac=str_bool_frac(ser),\n"
+                "            regular_int_parse_frac=regular_int_parse_frac(ser))\n"
+            ),
         ),
         (
             "reindent_skipped_when_group_has_blank_line_subgroups",
@@ -533,8 +577,12 @@ def dedent(s: str) -> str:
         (
             "unsplittable_single_arg_overflows",
             # Single arg > 120 chars; nothing to break on, stays as-is.
-            "result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)\n",
-            "result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)\n",
+            """
+            result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)
+            """,
+            """
+            result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)
+            """,
         ),
         (
             "single_line_unchanged",
