@@ -12,28 +12,13 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def git_show(ref: str, path: str) -> str:
-    return subprocess.run(
-        ["git", "show", f"{ref}:{path}"],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+    return subprocess.run(["git", "show", f"{ref}:{path}"], cwd=REPO, capture_output=True, text=True, check=True).stdout
 
 
 def changed_files() -> list[str]:
-    out = subprocess.run(
-        ["git", "diff", "main..HEAD", "--name-only"],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    skip = {
-        "tests/unit/test_paddy_format.py",
-        "scripts/paddy_format.py",
-        "scripts/paddy_review_finder.py",
-    }
+    out = subprocess.run(["git", "diff", "main..HEAD", "--name-only"], cwd=REPO, capture_output=True, text=True,
+        check=True).stdout
+    skip = {"tests/unit/test_paddy_format.py", "scripts/paddy_format.py", "scripts/paddy_review_finder.py"}
     return [
         f.strip()
         for f in out.splitlines()
@@ -42,13 +27,8 @@ def changed_files() -> list[str]:
 
 
 def changed_hunks(path: str) -> list[tuple[int, int, int, int]]:
-    out = subprocess.run(
-        ["git", "diff", "main..HEAD", "--unified=0", "--", path],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+    out = subprocess.run(["git", "diff", "main..HEAD", "--unified=0", "--", path], cwd=REPO, capture_output=True,
+        text=True, check=True).stdout
     hunks = []
     for line in out.splitlines():
         m = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
@@ -58,14 +38,8 @@ def changed_hunks(path: str) -> list[tuple[int, int, int, int]]:
     return hunks
 
 
-def expand_to_block(
-    lines: list[str],
-    start: int,
-    count: int,
-    pad_above: int = 2,
-    pad_below: int = 2,
-    max_span: int = 40,
-) -> tuple[int, int]:
+def expand_to_block(lines: list[str], start: int, count: int, pad_above: int = 2, pad_below: int = 2,
+        max_span: int = 40) -> tuple[int, int]:
     s = max(1, start - pad_above)
     e = min(len(lines), start + count - 1 + pad_below)
     if e - s + 1 > max_span:
@@ -95,8 +69,7 @@ def funky_score(old_block: str, new_block: str) -> tuple[int, list[str]]:
             if next_indent > indent + 4:
                 score += 2
                 reasons.append(
-                    f"continuation at col {next_indent} (line_indent={indent})"
-                )
+                    f"continuation at col {next_indent} (line_indent={indent})")
                 break
 
     indents = []
@@ -176,11 +149,9 @@ def main() -> int:
         "Order: most-funky-first by automated score "
         "(def-wrap = 3, hanging-indent-deep = 2, "
         "old-was-uniform-new-isn't = 2, others = 1).\n\n"
-        "---\n\n" + body + "\n"
-    )
+        "---\n\n" + body + "\n")
     print(
-        f"wrote {out_path} — {len(sections)} flagged, showing top {min(30, len(sections))}"
-    )
+        f"wrote {out_path} — {len(sections)} flagged, showing top {min(30, len(sections))}")
     return 0
 
 
