@@ -194,6 +194,13 @@ def _numeric_histogram(execute, table, col, min_val, max_val, total_rows):
     df = execute(query)
     if len(df) == 0:
         return []
+    # Nulls in ``col`` produce a NULL ``__bucket`` row; drop it so
+    # ``int(row["__bucket"])`` below doesn't raise on NaN. Without this,
+    # any column with even one null silently lost its histogram via the
+    # ``default=[]`` fallback on ``histogram``.
+    df = df[df["__bucket"].notna()]
+    if len(df) == 0:
+        return []
     total = float(df["__count"].sum())
     if total == 0:
         return []

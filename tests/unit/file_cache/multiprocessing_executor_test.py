@@ -18,7 +18,14 @@ def test_multiprocessing_executor_success():
     def listener(p: ProgressNotification):
         notes.append(p)
     #FIXME this should be able to work without async_mode=False, but it doesn't .  maybe there is a pytest config
-    exc = MultiprocessingExecutor(ldf, SimpleColumnExecutor(), listener, fc, timeout_secs=5.0, async_mode=False)
+    # Windows ``spawn`` start-method needs ~5s to bootstrap a fresh
+    # interpreter and reimport buckaroo; with the previous 5.0s timeout
+    # the first column would intermittently time out, retry, and produce
+    # an extra ProgressNotification. 30s leaves ample headroom for the
+    # spawn cost — the actual work for a 3-row frame is microseconds.
+    timeout_secs = 30.0 if sys.platform == "win32" else 5.0
+    exc = MultiprocessingExecutor(ldf, SimpleColumnExecutor(), listener, fc, timeout_secs=timeout_secs,
+        async_mode=False)
     exc.run()
     # one notification per column
     assert len(notes) == len(df.columns)
