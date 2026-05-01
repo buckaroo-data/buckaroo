@@ -559,15 +559,11 @@ def dedent(s: str) -> str:
         ),
         (
             "idempotent_nested_list_inside_dict_value",
-            # Minimal repro from buckaroo/ddd_library.py. After Pass 1
-            # collapses the outer Dict's trailing-comma multiline form,
-            # the 'timedelta' key's value (a multi-line List) sits at a
-            # new line indent. The inner List's continuation lines were
-            # at col 39 in the original; on run 1 they get re-indented to
-            # col 8 (line_indent + 4 of the OUTER dict's row). On run 2,
-            # they shift to col 12 (line_indent + 4 of the inner Call's
-            # row, which is now at col 8). Same root cause as the case
-            # above.
+            # Minimal repro from buckaroo/ddd_library.py. The outer Dict
+            # has multi-line values (the 'timedelta' Call spans several
+            # lines), so it falls under the user-formatted preservation
+            # rule: skip collapse / wrap / re-indent on the outer Dict
+            # AND on its Dict/List/Call values. Output equals input.
             """
             def f():
                 return pd.DataFrame({
@@ -580,11 +576,13 @@ def dedent(s: str) -> str:
             """,
             """
             def f():
-                return pd.DataFrame({'categorical': pd.Categorical(['red', 'green', 'blue', 'red', 'green']),
+                return pd.DataFrame({
+                    'categorical': pd.Categorical(['red', 'green', 'blue', 'red', 'green']),
                     'timedelta': pd.to_timedelta(['1 days 02:03:04', '0 days 00:00:01',
-                        '365 days', '0 days 00:00:00.001',
-                        '0 days 00:00:00.000100']),
-                    'int_col': [10, 20, 30, 40, 50]})
+                                                   '365 days', '0 days 00:00:00.001',
+                                                   '0 days 00:00:00.000100']),
+                    'int_col': [10, 20, 30, 40, 50],
+                })
             """,
         ),
         (

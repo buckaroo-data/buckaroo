@@ -710,11 +710,81 @@ def _is_tabular_layout(node, positions, lines) -> bool:
     return True
 
 
+def _has_multiline_values(node, positions) -> bool:
+    """Dict with 2+ items where any value spans multiple lines.
+    Collapsing such a Dict would jam keys onto the previous value's
+    close-brace line, making the keys hard to spot. Treat as user-
+    formatted and skip collapse / wrap / re-indent."""
+    if not isinstance(node, cst.Dict):
+        return False
+    if len(node.elements) < 2:
+        return False
+    for el in node.elements:
+        if not isinstance(el, cst.DictElement):
+            continue
+        vpos = positions.get(el.value)
+        if vpos is None:
+            continue
+        if vpos.start.line != vpos.end.line:
+            return True
+    return False
+
+
+def _is_user_formatted(node, positions, lines) -> bool:
+    """Combined predicate: tabular hanging-indent OR dict with
+    multi-line values. Both cases are layouts the user has clearly
+    chosen and the formatter should leave alone."""
+    return (_is_tabular_layout(node, positions, lines)
+        or _has_multiline_values(node, positions))
+
+
+class _WrappableCollector(cst.CSTVisitor):
+    """Collects every Call/List/Set/Dict node within a subtree."""
+
+    def __init__(self):
+        super().__init__()
+        self.found: list = []
+
+    def visit_Call(self, node):
+        self.found.append(node)
+
+    def visit_List(self, node):
+        self.found.append(node)
+
+    def visit_Set(self, node):
+        self.found.append(node)
+
+    def visit_Dict(self, node):
+        self.found.append(node)
+
+
+def _collect_wrappables(node) -> list:
+    v = _WrappableCollector()
+    node.visit(v)
+    return v.found
+
+
 def _find_tabular_layouts(module, positions, lines) -> set[int]:
     ids: set[int] = set()
     for node in positions:
-        if _is_tabular_layout(node, positions, lines):
+        if _is_user_formatted(node, positions, lines):
             ids.add(id(node))
+    # Propagate: when a Dict has multi-line values, ALL nested wrappable
+    # nodes within those values are part of the user-chosen layout.
+    # Don't apply any transformation (collapse/stack/wrap/re-indent) to
+    # them. Recursive walk handles cases like
+    #   {'k': pd.to_timedelta(['a', 'b',\n                              'c'])}
+    # where the multi-line continuation lives inside a Call's List arg.
+    for node in list(positions):
+        if not isinstance(node, cst.Dict):
+            continue
+        if not _has_multiline_values(node, positions):
+            continue
+        for el in node.elements:
+            if not isinstance(el, cst.DictElement):
+                continue
+            for inner in _collect_wrappables(el.value):
+                ids.add(id(inner))
     return ids
 
 
@@ -740,6 +810,7 @@ def _wrap_pass(src: str, budget: int, wrap_mode: str = "greedy") -> str:
         positions = wrapper.resolve(cst.metadata.PositionProvider)
         module = wrapper.module
         lines = src.splitlines()
+        skip_ids = _find_tabular_layouts(module, positions, lines)
 
         candidates = []
         for node, pos in positions.items():
@@ -750,7 +821,7 @@ def _wrap_pass(src: str, budget: int, wrap_mode: str = "greedy") -> str:
                 continue
             if len(lines[line_idx]) <= budget:
                 continue
-            if _is_tabular_layout(node, positions, lines):
+            if id(node) in skip_ids:
                 continue
             first_col = _open_bracket_first_col(node, positions)
             cont_col = _continuation_col(node, positions, lines)
@@ -922,6 +993,7 @@ def _reindent_pass_once(src: str) -> str:
     positions = wrapper.resolve(cst.metadata.PositionProvider)
     module = wrapper.module
     lines = src.splitlines()
+    skip_ids = _find_tabular_layouts(module, positions, lines)
 
     targets: dict[int, int] = {}
     for node, pos in positions.items():
@@ -933,7 +1005,7 @@ def _reindent_pass_once(src: str) -> str:
             continue
         if _has_blank_line_subgroups(node):
             continue
-        if _is_tabular_layout(node, positions, lines):
+        if id(node) in skip_ids:
             continue
         indent = _continuation_col(node, positions, lines)
         if indent is None:
