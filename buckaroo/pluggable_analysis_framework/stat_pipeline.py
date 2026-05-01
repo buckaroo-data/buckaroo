@@ -3,6 +3,7 @@
 Replaces AnalysisPipeline with typed DAG execution and Ok/Err error propagation.
 Accepts a mix of v2 @stat functions and v1 ColAnalysis classes (via adapter).
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -12,8 +13,8 @@ import pandas as pd
 from buckaroo.df_util import old_col_new_col
 
 from .col_analysis import ColAnalysis, ErrDict, SDType
-from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
-from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator
+from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqTable, XorqExecute, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
+from .stat_result import (Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator)
 from .typed_dag import build_typed_dag, build_column_dag, DAGConfigError
 from .v1_adapter import col_analysis_to_stat_funcs
 from .utils import PERVERSE_DF
@@ -30,7 +31,7 @@ def _normalize_inputs(inputs: list) -> List[StatFunc]:
             continue
 
         # A @stat-decorated function
-        if callable(obj) and hasattr(obj, '_stat_func'):
+        if callable(obj) and hasattr(obj, "_stat_func"):
             all_funcs.append(obj._stat_func)
             continue
 
@@ -55,7 +56,7 @@ def _normalize_inputs(inputs: list) -> List[StatFunc]:
 
 
 def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_name: str, raw_series=None,
-        sampled_series=None, raw_dataframe=None) -> None:
+        sampled_series=None, raw_dataframe=None, xorq_table=None, xorq_execute=None) -> None:
     """Execute a single StatFunc, updating the accumulator in place.
 
     Handles:
@@ -99,10 +100,18 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
             kwargs[req.name] = raw_series
             continue
         if req.type is SampledSeries:
-            kwargs[req.name] = sampled_series if sampled_series is not None else raw_series
+            kwargs[req.name] = (
+                sampled_series if sampled_series is not None else raw_series
+            )
             continue
         if req.type is RawDataFrame:
             kwargs[req.name] = raw_dataframe
+            continue
+        if req.type is XorqTable:
+            kwargs[req.name] = xorq_table
+            continue
+        if req.type is XorqExecute:
+            kwargs[req.name] = xorq_execute
             continue
 
         # Look up in accumulator
@@ -110,10 +119,12 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
             result = accumulator[req.name]
             if isinstance(result, Ok):
                 # Type check at the boundary: catch mismatched stat definitions early
-                if (req.type is not Any
-                        and req.type not in RAW_MARKER_TYPES
-                        and result.value is not None
-                        and not isinstance(result.value, req.type)):
+                if (
+                    req.type is not Any
+                    and req.type not in RAW_MARKER_TYPES
+                    and result.value is not None
+                    and not isinstance(result.value, req.type)
+                ):
                     type_err = TypeError(
                         f"'{sf.name}' expects '{req.name}' as {req.type.__name__}, "
                         f"but got {type(result.value).__name__}: {result.value!r}")
@@ -196,7 +207,7 @@ class StatPipeline:
         result, errors = pipeline.process_df(my_df)
     """
 
-    EXTERNAL_KEYS = frozenset({'orig_col_name', 'rewritten_col_name'})
+    EXTERNAL_KEYS = frozenset({"orig_col_name", "rewritten_col_name"})
 
     @property
     def ordered_a_objs(self):
@@ -254,7 +265,9 @@ class StatPipeline:
 
         return resolve_accumulator(accumulator, column_name, col_key_to_func)
 
-    def process_df(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, List[StatError]]:
+    def process_df(
+        self, df: pd.DataFrame, debug: bool = False
+    ) -> Tuple[SDType, List[StatError]]:
         """Process all columns of a DataFrame.
 
         Returns:
@@ -273,14 +286,16 @@ class StatPipeline:
 
             col_result, col_errors = self.process_column(column_name=rewritten_col_name, column_dtype=col_dtype,
                 raw_series=ser, sampled_series=ser, raw_dataframe=df,
-                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name})
+                initial_stats={"orig_col_name": orig_col_name, "rewritten_col_name": rewritten_col_name})
 
             summary[rewritten_col_name] = col_result
             all_errors.extend(col_errors)
 
         return summary, all_errors
 
-    def process_df_v1_compat(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, ErrDict]:
+    def process_df_v1_compat(
+        self, df: pd.DataFrame, debug: bool = False
+    ) -> Tuple[SDType, ErrDict]:
         """Process DataFrame with v1-compatible error format.
 
         Returns (SDType, ErrDict) matching the v1 AnalysisPipeline interface.
@@ -291,7 +306,11 @@ class StatPipeline:
         errs: ErrDict = {}
         for se in errors:
             # Find the original ColAnalysis class if this came from v1 adapter
-            kls = _find_v1_class(se.stat_func, self._original_inputs) if se.stat_func else None
+            kls = (
+                _find_v1_class(se.stat_func, self._original_inputs)
+                if se.stat_func
+                else None
+            )
             err_key = (se.column, se.stat_func.name if se.stat_func else "unknown")
             errs[err_key] = (se.error, kls)
 
@@ -317,8 +336,12 @@ class StatPipeline:
         # Remove existing with same name if re-adding
         if isinstance(stat_func_or_class, type):
             new_inputs = [
-                inp for inp in new_inputs
-                if not (isinstance(inp, type) and inp.__name__ == stat_func_or_class.__name__)
+                inp
+                for inp in new_inputs
+                if not (
+                    isinstance(inp, type)
+                    and inp.__name__ == stat_func_or_class.__name__
+                )
             ]
         new_inputs.append(stat_func_or_class)
 
@@ -326,7 +349,8 @@ class StatPipeline:
             new_funcs = _normalize_inputs(new_inputs)
             new_ordered = build_typed_dag(new_funcs, external_keys=self.EXTERNAL_KEYS)
         except DAGConfigError as e:
-            return False, [StatError(column="<dag>", stat_key="<config>", error=e, stat_func=None)]
+            return False, [
+                StatError(column="<dag>", stat_key="<config>", error=e, stat_func=None)]
 
         # Update internal state
         self.all_stat_funcs = new_funcs
@@ -365,16 +389,20 @@ class StatPipeline:
             raise KeyError(f"No stat function provides '{stat_name}'")
 
         lines = [f"StatFunc: {sf.name}"]
-        req_strs = [f"{sk.name} ({sk.type.__name__ if hasattr(sk.type, '__name__') else sk.type})"
-                     for sk in sf.requires]
+        req_strs = [
+            f"{sk.name} ({sk.type.__name__ if hasattr(sk.type, '__name__') else sk.type})"
+            for sk in sf.requires
+        ]
         lines.append(f"  requires: {', '.join(req_strs) if req_strs else 'none'}")
 
-        prov_strs = [f"{sk.name} ({sk.type.__name__ if hasattr(sk.type, '__name__') else sk.type})"
-                      for sk in sf.provides]
+        prov_strs = [
+            f"{sk.name} ({sk.type.__name__ if hasattr(sk.type, '__name__') else sk.type})"
+            for sk in sf.provides
+        ]
         lines.append(f"  provides: {', '.join(prov_strs)}")
 
         if sf.column_filter is not None:
-            filter_name = getattr(sf.column_filter, '__name__', repr(sf.column_filter))
+            filter_name = getattr(sf.column_filter, "__name__", repr(sf.column_filter))
             lines.append(f"  column_filter: {filter_name}")
         else:
             lines.append("  column_filter: None (all columns)")
@@ -382,7 +410,7 @@ class StatPipeline:
         if sf.default is not MISSING:
             lines.append(f"  default: {sf.default!r}")
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def print_errors(self, errors: List[StatError]) -> None:
         """Print reproduction code for all errors."""
@@ -399,9 +427,9 @@ def _find_v1_class(stat_func: Optional[StatFunc], original_inputs: list) -> Any:
 
     # The v1 adapter names funcs as "ClassName__series" or "ClassName__computed"
     name = stat_func.name
-    for suffix in ('__series', '__computed'):
+    for suffix in ("__series", "__computed"):
         if name.endswith(suffix):
-            class_name = name[:-len(suffix)]
+            class_name = name[: -len(suffix)]
             for inp in original_inputs:
                 if isinstance(inp, type) and inp.__name__ == class_name:
                     return inp
