@@ -216,6 +216,25 @@ class TestHistogram:
         # Empty list is fine; the key being present is what matters
         assert "histogram" in stats["const"]
 
+    def test_numeric_histogram_with_nulls(self):
+        """Numeric column with nulls must still produce a populated histogram.
+
+        Regression: nulls in the source column produce a NULL ``__bucket``
+        group; ``int(NaN)`` then raised inside ``_numeric_histogram`` and
+        ``default=[]`` swallowed the failure, so columns with even a single
+        null silently lost their histogram entirely.
+        """
+        table = xo.memtable(
+            pd.DataFrame({"vals": [1.0, None, 3.0, None, 5.0, 7.0, 9.0]}))
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(table)
+        assert errors == []
+        h = stats["vals"]["histogram"]
+        assert isinstance(h, list)
+        assert len(h) > 0, "histogram should not be empty for a numeric column with nulls"
+        total_pop = sum(b["cat_pop"] for b in h)
+        assert abs(total_pop - 1.0) < 1e-6
+
 
 # ============================================================
 # Structured error capture — silent excepts must be gone
