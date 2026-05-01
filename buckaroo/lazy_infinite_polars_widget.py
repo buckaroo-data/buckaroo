@@ -699,8 +699,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
             '__status__' in col_stats
             for col_stats in summary_sd.values()
             if isinstance(col_stats, dict))
-        logger.info(f"LazyInfinitePolarsBuckarooWidget.__init__: __status__ present: {has_status}, show_message_box trait: {self.show_message_box}, message_log messages count: {len(self.message_log.get('messages',
-            []))}")
+        logger.info(f"LazyInfinitePolarsBuckarooWidget.__init__: __status__ present: {has_status}, show_message_box trait: {self.show_message_box}, message_log messages count: {len(self.message_log.get('messages', []))}")
 
         # Ensure df_display_args and df_data_dict are set up
         self.ensure_df_display_args(all_cols, summary_sd, summary_rows)

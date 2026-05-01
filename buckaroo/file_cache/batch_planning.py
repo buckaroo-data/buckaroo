@@ -111,8 +111,7 @@ def extract_execution_history(executor_log: 'ExecutorLog', dfi: 'DFIdentifier') 
             continue
         matched_count += 1
         if matched_count <= 3:  # Log first few matches
-            log_msg = f"extract_execution_history: event {i} MATCHED - dfi={event.dfi}, columns={len(event.args.columns) if hasattr(event,
-                'args') and event.args else 'N/A'}"
+            log_msg = f"extract_execution_history: event {i} MATCHED - dfi={event.dfi}, columns={len(event.args.columns) if hasattr(event, 'args') and event.args else 'N/A'}"
             logger.info(log_msg)
         
         # Determine if timed out (started but not completed, and end_time is None)
