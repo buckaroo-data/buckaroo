@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
@@ -73,7 +73,7 @@ jobs:
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
@@ -95,7 +95,7 @@ jobs:
       - name: Build JS extension + Python wheel
         run: ./scripts/full_build.sh
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: buckaroo-build
           path: |
@@ -234,7 +234,7 @@ jobs:
     runs-on: depot-ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -338,7 +338,7 @@ jobs:
     timeout-minutes: 15
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -362,7 +362,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
@@ -388,7 +388,7 @@ jobs:
         run: bash scripts/test_playwright_screenshots.sh
       - name: Upload Theme Screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: theme-screenshots
           path: packages/buckaroo-js-core/screenshots/
@@ -401,7 +401,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         with:
           version: 9.10.0
       - uses: actions/setup-node@v6
@@ -438,7 +438,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
@@ -515,14 +515,14 @@ jobs:
       # ── Upload artifacts ──
       - name: Upload before screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: styling-screenshots-before
           path: packages/buckaroo-js-core/screenshots/before/
           if-no-files-found: ignore
       - name: Upload after screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: styling-screenshots-after
           path: packages/buckaroo-js-core/screenshots/after/
@@ -542,7 +542,7 @@ jobs:
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
@@ -579,7 +579,7 @@ jobs:
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
@@ -618,7 +618,7 @@ jobs:
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
@@ -687,7 +687,7 @@ jobs:
           python-version: "3.13"
           prune-cache: false
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
