@@ -283,6 +283,41 @@ def dedent(s: str) -> str:
             """,
         ),
         (
+            "preserve_dict_with_multiline_values",
+            # Real case from buckaroo/.../analysis_management_test.py.
+            # Outer dict has trailing comma → collapse rule would fire,
+            # but its values are multi-line (each value is itself a
+            # dict spanning several lines). Collapsing produces output
+            # like `}, 'b': {` where the previous value's close brace
+            # collides with the next key on the same line, making the
+            # keys hard to spot. Skip collapse when a Dict has 2+ items
+            # and any value spans multiple lines.
+            """
+            assert_dict_eq({
+                'a': {
+                    'orig_col_name': 'aaa',
+                    'len': 4
+                },
+                'b': {
+                    'orig_col_name': 'bbb',
+                    'len': 5
+                },
+            }, sdf)
+            """,
+            """
+            assert_dict_eq({
+                'a': {
+                    'orig_col_name': 'aaa',
+                    'len': 4
+                },
+                'b': {
+                    'orig_col_name': 'bbb',
+                    'len': 5
+                },
+            }, sdf)
+            """,
+        ),
+        (
             "preserve_tabular_dict_hanging_indent",
             # Real case from buckaroo/dataflow/customizable_dataflow_test.py
             # DFVIEWER_CONFIG_DEFAULT. The user opens `{` at end of line
