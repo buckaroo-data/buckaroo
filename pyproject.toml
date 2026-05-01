@@ -105,8 +105,11 @@ test = [
 
 # Install for the XorqStatPipeline. The pipeline operates on xorq
 # expressions (xorq.vendor.ibis) only — no raw ibis-framework dep.
+# Gated on python<3.14: xorq 0.3.21 (latest as of writing) requires
+# python<3.14 and caps pyarrow<22, both of which conflict with the
+# 3.14 floor in the main dependency block.
 xorq = [
-    "xorq>=0.1.0",
+    "xorq>=0.1.0 ; python_version < '3.14'",
 ]
 mcp = ["mcp", "tornado>=6.0", "polars"]
 marimo = [
@@ -214,8 +217,8 @@ exclude = [
 line-length = 88
 indent-width = 4
 
-# Assume Python 3.8
-target-version = "py38"
+# Match requires-python = ">=3.11"
+target-version = "py311"
 
 [tool.ruff.lint]
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.

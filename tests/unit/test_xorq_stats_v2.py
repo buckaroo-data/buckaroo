@@ -368,15 +368,15 @@ class TestTypingStatsClassification:
 
     def test_temporal_dtypes_classified(self):
         for dt in ("timestamp[ns]", "date32", "time", "interval"):
-            assert self._classify(dt)[
-                "is_datetime"
-            ], f"{dt!r} should be classified as datetime"
+            assert self._classify(dt)["is_datetime"], (
+                f"{dt!r} should be classified as datetime"
+            )
 
     def test_non_temporal_dtypes_not_misclassified(self):
         for dt in ("string", "int64", "boolean", "float64"):
-            assert not self._classify(dt)[
-                "is_datetime"
-            ], f"{dt!r} must NOT be classified as datetime"
+            assert not self._classify(dt)["is_datetime"], (
+                f"{dt!r} must NOT be classified as datetime"
+            )
 
 
 # ============================================================
@@ -438,9 +438,9 @@ class TestBackendThreading:
         # each: bounds + bucket), strs, bools (categorical → 1 query each).
         # Plus 1 batch aggregate. So with full threading we expect well over 1.
         # Without the fix, only the batch query (1) goes through the backend.
-        assert (
-            backend.calls > 1
-        ), f"histogram bypasses pipeline backend; saw only {backend.calls} call"
+        assert backend.calls > 1, (
+            f"histogram bypasses pipeline backend; saw only {backend.calls} call"
+        )
 
     def test_histogram_does_not_recompute_min_max(self):
         """Histogram must not issue its own bounds query — min/max already in batch.
@@ -466,6 +466,6 @@ class TestBackendThreading:
         backend = TrackingBackend()
         pipeline = XorqStatPipeline(XORQ_STATS_V2, backend=backend)
         pipeline.process_table(_make_table())
-        assert (
-            backend.calls <= 5
-        ), f"histogram is recomputing min/max; saw {backend.calls} queries"
+        assert backend.calls <= 5, (
+            f"histogram is recomputing min/max; saw {backend.calls} queries"
+        )
