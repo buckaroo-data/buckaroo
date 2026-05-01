@@ -23,128 +23,80 @@ def dedent(s: str) -> str:
     return textwrap.dedent(s).lstrip("\n")
 
 
-@pytest.mark.parametrize(
-    "name,src,expected",
-    [
-        (
-            "call_with_trailing_comma",
-            """
+@pytest.mark.parametrize("name,src,expected", [("call_with_trailing_comma", """
             func(
                 a,
                 b,
             )
-            """,
-            """
+            """, """
             func(a, b)
-            """,
-        ),
-        (
-            "call_no_trailing_comma",
-            """
+            """), ("call_no_trailing_comma", """
             func(
                 a,
                 b
             )
-            """,
-            """
+            """, """
             func(
                 a,
                 b)
-            """,
-        ),
-        (
-            "list_literal",
-            """
+            """), ("list_literal", """
             xs = [
                 1,
                 2,
                 3,
             ]
-            """,
-            """
+            """, """
             xs = [1, 2, 3]
-            """,
-        ),
-        (
-            "dict_literal",
-            """
+            """), ("dict_literal", """
             d = {
                 'a': 1,
                 'b': 2,
             }
-            """,
-            """
+            """, """
             d = {'a': 1, 'b': 2}
-            """,
-        ),
-        (
-            "tuple_with_parens",
-            """
+            """), ("tuple_with_parens", """
             t = (
                 1,
                 2,
                 3,
             )
-            """,
-            """
+            """, """
             t = (1, 2, 3)
-            """,
-        ),
-        (
-            "set_literal",
-            """
+            """), ("set_literal", """
             s = {
                 1,
                 2,
                 3,
             }
-            """,
-            """
+            """, """
             s = {1, 2, 3}
-            """,
-        ),
-        (
-            "nested_list_in_call",
-            """
+            """), ("nested_list_in_call", """
             func(
                 [
                     1,
                     2,
                 ],
             )
-            """,
-            """
+            """, """
             func([1, 2])
-            """,
-        ),
-        (
-            "function_def",
-            """
+            """), ("function_def", """
             def f(
                 a,
                 b,
                 c,
             ):
                 return a
-            """,
-            """
+            """, """
             def f(a, b, c):
                 return a
-            """,
-        ),
-        (
-            "from_import",
-            """
+            """), ("from_import", """
             from x import (
                 foo,
                 bar,
             )
-            """,
-            """
+            """, """
             from x import (foo, bar)
-            """,
-        ),
-        (
+            """), (
             "long_call_greedy_wrap",
             # 203 chars on one line — should wrap greedily at 120,
             # continuation indented at line_indent + 4 (here, 0 + 4 = 4).
@@ -154,9 +106,7 @@ def dedent(s: str) -> str:
             """
             result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,
                 very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)
-            """,
-        ),
-        (
+            """), (
             "multiline_collapse_target_too_long_wraps_instead",
             # Trailing-comma multiline; collapsed form would be 203 chars.
             # Don't collapse — wrap greedily instead. Trailing comma is dropped.
@@ -175,9 +125,7 @@ def dedent(s: str) -> str:
             """
             result = some_function_name(very_long_argument_1, very_long_argument_2, very_long_argument_3, very_long_argument_4,
                 very_long_argument_5, very_long_argument_6, very_long_argument_7, very_long_argument_8)
-            """,
-        ),
-        (
+            """), (
             "long_list_greedy_wrap",
             # 162 chars on one line — wrap greedily.
             """
@@ -186,9 +134,7 @@ def dedent(s: str) -> str:
             """
             long_xs = [very_long_value_1, very_long_value_2, very_long_value_3, very_long_value_4, very_long_value_5,
                 very_long_value_6, very_long_value_7, very_long_value_8]
-            """,
-        ),
-        (
+            """), (
             "skip_wrap_inside_fstring_for_py311_compat",
             # Real case from buckaroo/file_cache/base.py. paddy wrapped
             # a Call inside an f-string, which is a SyntaxError on
@@ -201,9 +147,7 @@ def dedent(s: str) -> str:
             """,
             """
             log_msg = f"prefix {len(state.get('aaaaaaaaaaa', []))}, {len(state.get('bbbbbbbbbbbbbbbbbbbb', []))}, {len(state.get('cccccccccccccccccccccc', []))}"
-            """,
-        ),
-        (
+            """), (
             "long_funcdef_greedy_wrap",
             # Real case from buckaroo/dataflow/column_executor_dataflow.py
             # compute_summary_with_executor — collapsed form is 400+ chars.
@@ -222,9 +166,7 @@ def dedent(s: str) -> str:
                     planning_function: Optional["PlanningFunction"] = None, timeout_secs: Optional[float] = None,
                     cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
                 pass
-            """,
-        ),
-        (
+            """), (
             "reindent_continuation_to_indent_plus_4",
             # Continuation line of a multi-line call sits at column 0 (legal
             # inside parens, but visually broken). Re-indent it to
@@ -242,9 +184,7 @@ def dedent(s: str) -> str:
                 "    def f(self, ser):\n"
                 "        return dict(str_bool_frac=str_bool_frac(ser),\n"
                 "            regular_int_parse_frac=regular_int_parse_frac(ser))\n"
-            ),
-        ),
-        (
+            )), (
             "reindent_skipped_when_group_has_blank_line_subgroups",
             # Real case from buckaroo/customizations/pandas_commands.py
             # AGG_METHODS_WITH_HELP. The list groups its tuples into
@@ -271,9 +211,7 @@ def dedent(s: str) -> str:
 
             ('c', 3),
             ('d', 4)]
-            """,
-        ),
-        (
+            """), (
             "reindent_preserves_hanging_indent_aligned_with_first_element",
             # Real case from buckaroo/customizations/all_transforms.py.
             # The `[` opens with item 1 inline on the same line; items 2-3
@@ -295,9 +233,7 @@ def dedent(s: str) -> str:
                         ["old_col = df",
                          "df.drop(col)",
                          "df.index = old_col.values"])
-            """,
-        ),
-        (
+            """), (
             "preserve_dict_with_multiline_values",
             # Real case from buckaroo/.../analysis_management_test.py.
             # Outer dict has trailing comma → collapse rule would fire,
@@ -330,9 +266,7 @@ def dedent(s: str) -> str:
                     'len': 5
                 },
             }, sdf)
-            """,
-        ),
-        (
+            """), (
             "preserve_tabular_dict_hanging_indent",
             # Real case from buckaroo/dataflow/customizable_dataflow_test.py
             # DFVIEWER_CONFIG_DEFAULT. The user opens `{` at end of line
@@ -359,9 +293,7 @@ def dedent(s: str) -> str:
                                'component_config': {},
                                'extra_grid_config': {},
             }
-            """,
-        ),
-        (
+            """), (
             "wrap_continuation_uses_col_after_open_when_shallow",
             # Real case from buckaroo/dataflow/styling_core.py
             # ThemeColorConfig. The inner Dict's `{` is at col 4 with item 1
@@ -392,9 +324,7 @@ def dedent(s: str) -> str:
                  'foregroundColor': NotRequired[str], 'oddRowBackgroundColor': NotRequired[str], 'borderColor': NotRequired[str],
                  'headerBorderColor': NotRequired[str], 'headerBackgroundColor': NotRequired[str], 'spacing': NotRequired[int],
                  'cellHorizontalPaddingScale': NotRequired[float], 'rowVerticalPaddingScale': NotRequired[float]})
-            """,
-        ),
-        (
+            """), (
             "table_format_single_col_floats",
             # `# table-format` directive on the line above forces a column
             # table layout — each element on its own line, decimal points
@@ -407,9 +337,7 @@ def dedent(s: str) -> str:
             """
             # table-format
             data = [1.23, 45.6, 7.89, 100.5]
-            """,
-        ),
-        (
+            """), (
             "table_format_single_col_floats_wrap",
             # When the single-line form exceeds 120 chars, table-format
             # wraps using strict uniform cells: each cell is
@@ -426,9 +354,7 @@ def dedent(s: str) -> str:
             # table-format
             data = [  1.23,  45.6 ,   7.89, 100.5 ,   1.23,  45.6 ,   7.89, 100.5 ,   1.23,  45.6 ,   7.89, 100.5 ,   1.23,  45.6 ,
                       7.89, 100.5 ,   1.23,  45.6 ,   7.89, 100.5 ,   1.23,  45.6 ,   7.89, 100.5 ]
-            """,
-        ),
-        (
+            """), (
             "table_format_ints_only_wrap",
             # Int-only column: max_int_width = 5 (for 40000), max_frac = 0,
             # so each cell is 5 chars right-aligned. Sep is ", " (2 chars),
@@ -443,9 +369,7 @@ def dedent(s: str) -> str:
             # table-format
             data = [   10,   200,  3000, 40000,    10,   200,  3000, 40000,    10,   200,  3000, 40000,    10,   200,  3000, 40000,
                        10,   200,  3000, 40000,    10,   200,  3000, 40000]
-            """,
-        ),
-        (
+            """), (
             "table_format_mixed_ints_floats_wrap",
             # Mixed ints and floats long enough to wrap: max_int_width = 2
             # (for 30), max_frac_width = 3 (for 4.567). Cell width = 6.
@@ -462,9 +386,7 @@ def dedent(s: str) -> str:
             # table-format
             data = [ 1    ,  2.5  , 30    ,  4.567,  1    ,  2.5  , 30    ,  4.567,  1    ,  2.5  , 30    ,  4.567,  1    ,  2.5  ,
                     30    ,  4.567,  1    ,  2.5  , 30    ,  4.567,  1    ,  2.5  , 30    ,  4.567]
-            """,
-        ),
-        (
+            """), (
             "table_format_mixed_ints_floats",
             # Mixed ints and floats: ints align by least-significant digit
             # (the position the decimal point would occupy). Decimal column
@@ -476,9 +398,7 @@ def dedent(s: str) -> str:
             """
             # table-format
             data = [1, 2.5, 30, 4.567, 50000]
-            """,
-        ),
-        (
+            """), (
             "table_format_multi_col_tuples",
             # Short multi-col list — directive is a no-op when single-line
             # form already fits in budget.
@@ -489,9 +409,7 @@ def dedent(s: str) -> str:
             """
             # table-format
             data = [(1.23, 5), (4.56, 600), (7.89, 70)]
-            """,
-        ),
-        (
+            """), (
             "table_format_list_of_dicts_wrap",
             # List of dicts that share the same keys and have numeric
             # values. Each key becomes a column; values in that column
@@ -518,9 +436,7 @@ def dedent(s: str) -> str:
                 {'a': 12.34 , 'b':   50, 'c':  3.14 },
                 {'a':  7.89 , 'b': 1000, 'c':  0.5  },
             ]
-            """,
-        ),
-        (
+            """), (
             "table_format_multi_col_tuples_wrap",
             # Long multi-col list — single-line form exceeds 120 chars.
             # Each tuple goes on its own line; cells within tuples are
@@ -547,9 +463,7 @@ def dedent(s: str) -> str:
                 (4.56, 600),
                 (7.89,  70),
             ]
-            """,
-        ),
-        (
+            """), (
             "idempotent_outer_call_continuation_shifts_inner_dict",
             # Minimal repro from buckaroo/pluggable_analysis_framework/
             # safe_summary_df.py. The outer Call's continuation lands at
@@ -570,9 +484,7 @@ def dedent(s: str) -> str:
                     {pd.NA: UnquotedString("pd.NA"),
                      np.nan: UnquotedString("np.nan")})
                 return cleaned_dct
-            """,
-        ),
-        (
+            """), (
             "idempotent_nested_list_inside_dict_value",
             # Minimal repro from buckaroo/ddd_library.py. The outer Dict
             # has multi-line values (the 'timedelta' Call spans several
@@ -598,9 +510,7 @@ def dedent(s: str) -> str:
                                                    '0 days 00:00:00.000100']),
                     'int_col': [10, 20, 30, 40, 50],
                 })
-            """,
-        ),
-        (
+            """), (
             "comment_in_args_blocks_collapse_close_stays_at_col0",
             # A comment in mid-args whitespace blocks the collapse rule.
             # The close bracket sat at col 0 in the source — re-indent
@@ -621,9 +531,7 @@ def dedent(s: str) -> str:
                 a,  # note
                 b,
             )
-            """,
-        ),
-        (
+            """), (
             "kwonly_only_multiline_collapses",
             # _collapse_funcdef only walks Parameters.params today, so
             # `*, a, b,` (where a/b live in kwonly_params and the `*`
@@ -640,9 +548,7 @@ def dedent(s: str) -> str:
             """
             def f(*, a, b):
                 pass
-            """,
-        ),
-        (
+            """), (
             "kwonly_after_regular_multiline_collapses",
             # Mixed regular + kwonly: today produces a half-collapsed
             # `def f(a, b, *,\n    c,\n):` because only `params.params`
@@ -660,9 +566,7 @@ def dedent(s: str) -> str:
             """
             def f(a, b, *, c):
                 pass
-            """,
-        ),
-        (
+            """), (
             "posonly_multiline_collapses",
             # posonly_params (a, b) are in their own field; today they
             # get left multi-line while the regular param `c` collapses
@@ -680,9 +584,7 @@ def dedent(s: str) -> str:
             """
             def f(a, b, /, c):
                 pass
-            """,
-        ),
-        (
+            """), (
             "unsplittable_single_arg_overflows",
             # Single arg > 120 chars; nothing to break on, stays as-is.
             """
@@ -690,38 +592,20 @@ def dedent(s: str) -> str:
             """,
             """
             result = func(extremely_long_single_argument_that_cannot_be_broken_apart_into_smaller_pieces_and_must_overflow_the_line_budget)
-            """,
-        ),
-        (
-            "single_line_unchanged",
-            """
+            """), ("single_line_unchanged", """
             func(a, b, c)
-            """,
-            """
+            """, """
             func(a, b, c)
-            """,
-        ),
-        (
-            "empty_call_unchanged",
-            """
+            """), ("empty_call_unchanged", """
             func()
-            """,
-            """
+            """, """
             func()
-            """,
-        ),
-        (
-            "no_args_multiline_unchanged",
-            """
+            """), ("no_args_multiline_unchanged", """
             func(
             )
-            """,
-            """
+            """, """
             func()
-            """,
-        ),
-    ],
-)
+            """)])
 def test_paddy_format_golden(name, src, expected):
     got = paddy_format(dedent(src))
     assert got == dedent(expected), (
@@ -738,9 +622,7 @@ def test_paddy_format_golden(name, src, expected):
     )
 
 
-@pytest.mark.parametrize(
-    "name,src,expected",
-    [
+@pytest.mark.parametrize("name,src,expected", [
         (
             "one_per_line_dict_call_kwargs",
             # Real case from buckaroo/customizations/pd_fracs.py. Collapsed
@@ -765,8 +647,7 @@ def test_paddy_format_golden(name, src, expected):
                         regular_int_parse_frac=regular_int_parse_frac(ser),
                         strip_int_parse_frac=strip_int_parse_frac(ser),
                         us_dates_frac=us_dates_frac(ser))
-            """,
-        ),
+            """),
         (
             "one_per_line_dict_literal_overlong",
             # Dict literal collapsed exceeds 120 → one item per line.
@@ -784,8 +665,7 @@ def test_paddy_format_golden(name, src, expected):
                 "regular_int_parse_frac": "regular_int_parse",
                 "strip_int_parse_frac": "strip_int_parse",
                 "us_dates_frac": "us_date"}
-            """,
-        ),
+            """),
         (
             "one_per_line_funcdef_overlong",
             # Long function signature — each param on its own line at
@@ -804,8 +684,7 @@ def test_paddy_format_golden(name, src, expected):
                     planning_function=None,
                     timeout_secs=None) -> None:
                 pass
-            """,
-        ),
+            """),
         (
             "one_per_line_short_call_collapses_to_single_line",
             # Collapsed form fits in 120 → still single-line, mode is a
@@ -819,10 +698,8 @@ def test_paddy_format_golden(name, src, expected):
             """,
             """
             result = some_function_name(arg1, arg2, arg3)
-            """,
-        ),
-    ],
-)
+            """),
+    ])
 def test_paddy_format_one_per_line(name, src, expected):
     got = paddy_format(dedent(src), wrap_mode="one_per_line")
     assert got == dedent(expected), (
@@ -849,8 +726,7 @@ def test_idempotent():
                 2,
             ],
         )
-        """
-    )
+        """)
     once = paddy_format(src)
     twice = paddy_format(once)
     assert (
@@ -868,8 +744,7 @@ def test_preserves_comment_before_close():
             b,
             # important note
         )
-        """
-    )
+        """)
     got = paddy_format(src)
     assert "# important note" in got
 
@@ -893,8 +768,7 @@ def test_table_format_directive_outside_top_level_is_ignored():
             # table-format
             [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
         )
-        """
-    )
+        """)
     out = paddy_format(src)
     assert "table-format" in out  # directive comment preserved
     # Result is whatever the normal collapse / wrap produces — the key
@@ -949,11 +823,8 @@ def test_cli_multi_file_run(tmp_path):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize(
-    "path",
-    sorted((REPO_ROOT / "buckaroo").rglob("*.py")),
-    ids=lambda p: str(p.relative_to(REPO_ROOT)),
-)
+@pytest.mark.parametrize("path", sorted((REPO_ROOT / "buckaroo").rglob("*.py")),
+    ids=lambda p: str(p.relative_to(REPO_ROOT)))
 def test_paddy_format_smoke_on_buckaroo(path):
     """Round-trip every file under `buckaroo/`: format, re-parse, and
     re-format. Catches regressions where paddy produces invalid Python
