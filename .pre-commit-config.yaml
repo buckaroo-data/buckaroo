@@ -3,3 +3,12 @@ repos:
     rev: v1.7.11
     hooks:
       - id: actionlint
+  - repo: local
+    hooks:
+      - id: paddy-format
+        name: paddy-format
+        entry: uv run python scripts/paddy_format.py
+        language: system
+        types: [python]
+        files: ^(buckaroo|tests|scripts)/.*\.py$
+        exclude: ^buckaroo/jlisp/lispy\.py$
