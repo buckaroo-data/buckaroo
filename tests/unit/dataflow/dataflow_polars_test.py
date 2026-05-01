@@ -6,10 +6,12 @@ from polars.testing import assert_frame_equal
 
 
 simple_df = pl.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
+# table-format
 BASIC_DF_JSON_DATA = [
-    {'index':0, 'a':1, 'b':'a', 'level_0':0},
-    {'index':1, 'a':2, 'b':'b', 'level_0':1},
-    {'index':2, 'a':3, 'b':'c', 'level_0':2}]
+    {'index': 0, 'a': 1, 'b': 'a', 'level_0': 0},
+    {'index': 1, 'a': 2, 'b': 'b', 'level_0': 1},
+    {'index': 2, 'a': 3, 'b': 'c', 'level_0': 2},
+]
 
 BASIC_DF = pl.DataFrame({'foo_col': [10, 20, 20], 'bar_col':['foo', 'bar', 'baz']})
 

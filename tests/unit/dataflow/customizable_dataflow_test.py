@@ -18,10 +18,12 @@ EMPTY_DF_JSON = {
             'data': []}
 
 
+# table-format
 BASIC_DF_JSON_DATA = [
-                        {'index':0, 'a':10, 'b':'foo', 'level_0':0},
-                        {'index':1, 'a':20, 'b':'bar', 'level_0':1},
-                        {'index':2, 'a':20, 'b':'baz', 'level_0':2}]
+    {'index': 0, 'a': 10, 'b': 'foo', 'level_0': 0},
+    {'index': 1, 'a': 20, 'b': 'bar', 'level_0': 1},
+    {'index': 2, 'a': 20, 'b': 'baz', 'level_0': 2},
+]
 DFVIEWER_CONFIG_DEFAULT = {
                    'pinned_rows': [],
                    'column_config':  [

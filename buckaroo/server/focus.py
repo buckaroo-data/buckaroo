@@ -16,11 +16,12 @@ import webbrowser
 log = logging.getLogger("buckaroo.server.focus")
 
 # Chromium-based browsers on macOS that share the same AppleScript tab/window API
+# table-format
 _CHROMIUM_BROWSERS = [
-    ("Google Chrome", "/Applications/Google Chrome.app"),
+    (       "Google Chrome",        "/Applications/Google Chrome.app"),
     ("Google Chrome Canary", "/Applications/Google Chrome Canary.app"),
-    ("Chromium", "/Applications/Chromium.app"),
-    ("Arc", "/Applications/Arc.app"),
+    (            "Chromium",             "/Applications/Chromium.app"),
+    (                 "Arc",                  "/Applications/Arc.app"),
 ]
 
 _CHROME_BINARY = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"

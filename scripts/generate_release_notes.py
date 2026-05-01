@@ -17,15 +17,16 @@ import subprocess
 import sys
 from collections import defaultdict
 
+# table-format
 CATEGORY_ORDER = [
-    ("feat", "Features"),
-    ("fix", "Bug Fixes"),
-    ("perf", "Performance"),
-    ("refactor", "Refactoring"),
-    ("ci", "CI/CD"),
-    ("chore", "Chores"),
-    ("deps", "Dependencies"),
-    ("other", "Other"),
+    (    "feat",     "Features"),
+    (     "fix",    "Bug Fixes"),
+    (    "perf",  "Performance"),
+    ("refactor",  "Refactoring"),
+    (      "ci",        "CI/CD"),
+    (   "chore",       "Chores"),
+    (    "deps", "Dependencies"),
+    (   "other",        "Other"),
 ]
 
 CATEGORY_MAP = {label: display for label, display in CATEGORY_ORDER}
