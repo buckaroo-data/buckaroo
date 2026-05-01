@@ -14,21 +14,41 @@ REPO = Path(__file__).resolve().parents[1]
 def git_show(ref: str, path: str) -> str:
     return subprocess.run(
         ["git", "show", f"{ref}:{path}"],
-        cwd=REPO, capture_output=True, text=True, check=True).stdout
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
 
 
 def changed_files() -> list[str]:
-    out = subprocess.run(["git", "diff", "main..HEAD", "--name-only"],
-        cwd=REPO, capture_output=True, text=True, check=True).stdout
-    skip = {"tests/unit/test_paddy_format.py", "scripts/paddy_format.py",
-        "scripts/paddy_review_finder.py"}
-    return [f.strip() for f in out.splitlines()
-        if f.strip().endswith(".py") and f.strip() not in skip]
+    out = subprocess.run(
+        ["git", "diff", "main..HEAD", "--name-only"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    skip = {
+        "tests/unit/test_paddy_format.py",
+        "scripts/paddy_format.py",
+        "scripts/paddy_review_finder.py",
+    }
+    return [
+        f.strip()
+        for f in out.splitlines()
+        if f.strip().endswith(".py") and f.strip() not in skip
+    ]
 
 
 def changed_hunks(path: str) -> list[tuple[int, int, int, int]]:
-    out = subprocess.run(["git", "diff", "main..HEAD", "--unified=0", "--", path],
-        cwd=REPO, capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(
+        ["git", "diff", "main..HEAD", "--unified=0", "--", path],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
     hunks = []
     for line in out.splitlines():
         m = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
@@ -38,8 +58,14 @@ def changed_hunks(path: str) -> list[tuple[int, int, int, int]]:
     return hunks
 
 
-def expand_to_block(lines: list[str], start: int, count: int,
-    pad_above: int = 2, pad_below: int = 2, max_span: int = 40) -> tuple[int, int]:
+def expand_to_block(
+    lines: list[str],
+    start: int,
+    count: int,
+    pad_above: int = 2,
+    pad_below: int = 2,
+    max_span: int = 40,
+) -> tuple[int, int]:
     s = max(1, start - pad_above)
     e = min(len(lines), start + count - 1 + pad_below)
     if e - s + 1 > max_span:
@@ -48,7 +74,7 @@ def expand_to_block(lines: list[str], start: int, count: int,
 
 
 def slice_lines(lines: list[str], start: int, end: int) -> str:
-    return "\n".join(lines[start - 1: end])
+    return "\n".join(lines[start - 1 : end])
 
 
 def funky_score(old_block: str, new_block: str) -> tuple[int, list[str]]:
@@ -68,7 +94,9 @@ def funky_score(old_block: str, new_block: str) -> tuple[int, list[str]]:
             next_indent = len(next_line) - len(next_line.lstrip())
             if next_indent > indent + 4:
                 score += 2
-                reasons.append(f"continuation at col {next_indent} (line_indent={indent})")
+                reasons.append(
+                    f"continuation at col {next_indent} (line_indent={indent})"
+                )
                 break
 
     indents = []
@@ -95,8 +123,11 @@ def funky_score(old_block: str, new_block: str) -> tuple[int, list[str]]:
 
     old_lines = old_block.splitlines()
     old_indents = [len(ln) - len(ln.lstrip()) for ln in old_lines if ln.strip()]
-    if (len(set(old_indents)) <= 2 and len(old_lines) >= 4
-        and len(set(indents)) > len(set(old_indents))):
+    if (
+        len(set(old_indents)) <= 2
+        and len(old_lines) >= 4
+        and len(set(indents)) > len(set(old_indents))
+    ):
         score += 2
         reasons.append("old layout was uniform; new layout has more indent variation")
 
@@ -131,7 +162,8 @@ def main() -> int:
                 f"## `{path}` lines {ns}–{ns + max(nc - 1, 0)}\n\n"
                 f"score={score}: {', '.join(reasons)}\n\n"
                 f"### before (main)\n```python\n{old_block}\n```\n\n"
-                f"### after (rollout-2 / greedy)\n```python\n{new_block}\n```\n")
+                f"### after (rollout-2 / greedy)\n```python\n{new_block}\n```\n"
+            )
             sections.append((score, section))
 
     sections.sort(key=lambda x: -x[0])
@@ -144,8 +176,11 @@ def main() -> int:
         "Order: most-funky-first by automated score "
         "(def-wrap = 3, hanging-indent-deep = 2, "
         "old-was-uniform-new-isn't = 2, others = 1).\n\n"
-        "---\n\n" + body + "\n")
-    print(f"wrote {out_path} — {len(sections)} flagged, showing top {min(30, len(sections))}")
+        "---\n\n" + body + "\n"
+    )
+    print(
+        f"wrote {out_path} — {len(sections)} flagged, showing top {min(30, len(sections))}"
+    )
     return 0
 
 
