@@ -26,11 +26,8 @@ def _(mo):
 
 @app.cell
 def _(BuckarooWidget, pd):
-    small_df = pd.DataFrame({
-        'name': ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve'],
-        'age': [30, 25, 35, 28, 32],
-        'score': [88.5, 92.3, 76.1, 95.0, 81.7],
-    })
+    small_df = pd.DataFrame({'name': ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve'], 'age': [30, 25, 35, 28, 32],
+        'score': [88.5, 92.3, 76.1, 95.0, 81.7]})
     small_widget = BuckarooWidget(small_df)
     small_widget
     return small_df, small_widget

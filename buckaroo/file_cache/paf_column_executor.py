@@ -8,9 +8,7 @@ import logging
 import polars as pl
 
 from buckaroo.file_cache.base import ColumnExecutor, ColumnResults, ColumnResult, ExecutorArgs
-from buckaroo.pluggable_analysis_framework.polars_analysis_management import (
-    PolarsAnalysis, polars_select_expressions, polars_series_stats_from_select_result,
-)
+from buckaroo.pluggable_analysis_framework.polars_analysis_management import (PolarsAnalysis, polars_select_expressions, polars_series_stats_from_select_result)
 from buckaroo.pluggable_analysis_framework.polars_utils import split_to_dicts
 
 
@@ -21,7 +19,8 @@ class PAFColumnExecutor(ColumnExecutor[ExecutorArgs]):
     summary stats per column, and returns ColumnResults suitable for caching.
     """
 
-    def __init__(self, analyses: List[Type[PolarsAnalysis]], cached_merged_sd: dict[str, dict[str, Any]] | None = None, orig_to_rw_map: dict[str, str] | None = None) -> None:
+    def __init__(self, analyses: List[Type[PolarsAnalysis]], cached_merged_sd: dict[str, dict[str, Any]] | None = None,
+            orig_to_rw_map: dict[str, str] | None = None) -> None:
         self.analyses = list(analyses)
         self.cached_merged_sd = cached_merged_sd or {}
         self.orig_to_rw_map = orig_to_rw_map or {}
@@ -127,8 +126,7 @@ class PAFColumnExecutor(ColumnExecutor[ExecutorArgs]):
         # include hash only if any column (including cached ones) is marked missing via sentinel
         include_hash = any(
             bool(existing_stats.get(col, {}).get('__missing_hash__'))
-            for col in all_input_cols
-        )
+            for col in all_input_cols)
 
         # Use the EXACT same expressions as regular PAF to ensure identical results
         # This ensures PAFColumnExecutor is a drop-in replacement for regular PAF
@@ -220,8 +218,7 @@ class PAFColumnExecutor(ColumnExecutor[ExecutorArgs]):
         # Use run_computed_summary=True so computed_summary runs here (PAFColumnExecutor doesn't
         # call polars_produce_summary_df separately)
         series_stats, errs = polars_series_stats_from_select_result(
-            res, original_data, self.analyses, 'paf_exec', debug=False, run_computed_summary=True
-        )
+            res, original_data, self.analyses, 'paf_exec', debug=False, run_computed_summary=True)
         # Extract hash values from result if present
         hash_values: dict[str, int] = {}
         for c in cols:
@@ -254,11 +251,6 @@ class PAFColumnExecutor(ColumnExecutor[ExecutorArgs]):
         for c in cols:
             hash_val = hash_values.get(c, 0)
             per_col_stats = orig_to_stats.get(c, {})
-            results[c] = ColumnResult(
-                series_hash=hash_val,
-                column_name=c,
-                expressions=[],
-                result=per_col_stats,
-            )
+            results[c] = ColumnResult(series_hash=hash_val, column_name=c, expressions=[], result=per_col_stats)
         return results
 

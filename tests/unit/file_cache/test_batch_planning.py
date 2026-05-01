@@ -5,12 +5,7 @@ These tests use simulated execution results - no actual timeouts or multiprocess
 """
 from datetime import timedelta
 
-from buckaroo.file_cache.batch_planning import (
-    ExecutionResult,
-    PlanningContext,
-    default_planning_function,
-    smart_planning_function,
-)
+from buckaroo.file_cache.batch_planning import (ExecutionResult, PlanningContext, default_planning_function, smart_planning_function)
 
 
 def test_baseline_measurement():
@@ -25,8 +20,7 @@ def test_baseline_measurement():
         baseline_overhead=timedelta(seconds=0.1),  # Already calibrated
         timeout_secs=30.0,
         execution_history=[],
-        remaining_columns=['a', 'b', 'c', 'd']
-    )
+        remaining_columns=['a', 'b', 'c', 'd'])
     
     result = default_planning_function(context)
     
@@ -47,11 +41,8 @@ def test_half_batch_after_baseline():
                 columns=[],  # Baseline
                 success=True,
                 execution_time=timedelta(seconds=0.1),
-                timed_out=False
-            )
-        ],
-        remaining_columns=['a', 'b', 'c', 'd']
-    )
+                timed_out=False)],
+        remaining_columns=['a', 'b', 'c', 'd'])
     
     result = default_planning_function(context)
     
@@ -69,8 +60,7 @@ def test_other_half_after_successful_half():
         timeout_secs=30.0,
         execution_history=[
             ExecutionResult(columns=[], success=True, execution_time=timedelta(seconds=0.1), timed_out=False),
-            ExecutionResult(columns=['a', 'b'], success=True, execution_time=timedelta(seconds=2.0), timed_out=False)
-        ],
+            ExecutionResult(columns=['a', 'b'], success=True, execution_time=timedelta(seconds=2.0), timed_out=False)],
         remaining_columns=['c', 'd']  # Other half
     )
     
@@ -89,8 +79,7 @@ def test_single_column_after_timeout():
         timeout_secs=30.0,
         execution_history=[
             ExecutionResult(columns=[], success=True, execution_time=timedelta(seconds=0.1), timed_out=False),
-            ExecutionResult(columns=['a', 'b'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True)
-        ],
+            ExecutionResult(columns=['a', 'b'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True)],
         remaining_columns=['a', 'b', 'c', 'd']  # Still all remaining (half batch timed out)
     )
     
@@ -109,7 +98,8 @@ def test_binary_search_after_single_column():
         baseline_overhead=timedelta(seconds=0.1),
         timeout_secs=30.0,
         execution_history=[
-            ExecutionResult(columns=['a', 'b', 'c', 'd'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True),  # Half batch timeout
+            ExecutionResult(columns=['a', 'b', 'c', 'd'], success=False, execution_time=timedelta(seconds=30.0),
+                timed_out=True),  # Half batch timeout
             ExecutionResult(columns=['a'], success=True, execution_time=timedelta(seconds=2.0), timed_out=False)  # Single column success
         ],
         remaining_columns=['b', 'c', 'd', 'e', 'f', 'g', 'h']  # After single column test
@@ -131,7 +121,8 @@ def test_binary_search_continues_after_2x_success():
         baseline_overhead=timedelta(seconds=0.1),
         timeout_secs=30.0,
         execution_history=[
-            ExecutionResult(columns=['a', 'b', 'c', 'd'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True),  # Half batch timeout
+            ExecutionResult(columns=['a', 'b', 'c', 'd'], success=False, execution_time=timedelta(seconds=30.0),
+                timed_out=True),  # Half batch timeout
             ExecutionResult(columns=['a'], success=True, execution_time=timedelta(seconds=2.0), timed_out=False),  # 1 column success
             ExecutionResult(columns=['b', 'c'], success=True, execution_time=timedelta(seconds=3.0), timed_out=False)  # 2 columns success
         ],
@@ -161,10 +152,12 @@ def test_binary_search_stops_at_failure():
         baseline_overhead=timedelta(seconds=0.1),
         timeout_secs=30.0,
         execution_history=[
-            ExecutionResult(columns=['a', 'b', 'c', 'd'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True),  # Half batch timeout
+            ExecutionResult(columns=['a', 'b', 'c', 'd'], success=False, execution_time=timedelta(seconds=30.0),
+                timed_out=True),  # Half batch timeout
             ExecutionResult(columns=['a'], success=True, execution_time=timedelta(seconds=2.0), timed_out=False),  # 1 column success
             ExecutionResult(columns=['b', 'c'], success=True, execution_time=timedelta(seconds=3.0), timed_out=False),  # 2 columns success
-            ExecutionResult(columns=['d', 'e', 'f', 'g'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True)  # 4 columns timeout
+            ExecutionResult(columns=['d', 'e', 'f', 'g'], success=False, execution_time=timedelta(seconds=30.0),
+                timed_out=True)  # 4 columns timeout
         ],
         remaining_columns=['d', 'e', 'f', 'g', 'h']  # After tests, but 4 failed so d,e,f,g still remain
     )
@@ -191,7 +184,8 @@ def test_optimized_batching():
         baseline_overhead=timedelta(seconds=0.1),
         timeout_secs=30.0,
         execution_history=[
-            ExecutionResult(columns=['a', 'b', 'c', 'd'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True),
+            ExecutionResult(columns=['a', 'b', 'c', 'd'], success=False, execution_time=timedelta(seconds=30.0),
+                timed_out=True),
             ExecutionResult(columns=['a'], success=True, execution_time=timedelta(seconds=2.0), timed_out=False),
             ExecutionResult(columns=['b', 'c'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True)  # 2 columns failed
         ],
@@ -217,10 +211,8 @@ def test_complete_when_no_remaining():
         execution_history=[
             ExecutionResult(columns=[], success=True, execution_time=timedelta(seconds=0.1), timed_out=False),
             ExecutionResult(columns=['a'], success=True, execution_time=timedelta(seconds=2.0), timed_out=False),
-            ExecutionResult(columns=['b'], success=True, execution_time=timedelta(seconds=2.0), timed_out=False)
-        ],
-        remaining_columns=[]
-    )
+            ExecutionResult(columns=['b'], success=True, execution_time=timedelta(seconds=2.0), timed_out=False)],
+        remaining_columns=[])
     
     result = default_planning_function(context)
     
@@ -237,10 +229,8 @@ def test_single_column_timeout_error():
         execution_history=[
             ExecutionResult(columns=[], success=True, execution_time=timedelta(seconds=0.1), timed_out=False),
             ExecutionResult(columns=['a', 'b'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True),
-            ExecutionResult(columns=['a'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True)
-        ],
-        remaining_columns=['a', 'b']
-    )
+            ExecutionResult(columns=['a'], success=False, execution_time=timedelta(seconds=30.0), timed_out=True)],
+        remaining_columns=['a', 'b'])
     
     result = default_planning_function(context)
     

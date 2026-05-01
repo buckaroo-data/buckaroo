@@ -31,7 +31,7 @@ class CleaningGenOps(ColAnalysis):
     def computed_summary(kls, column_metadata):
         if column_metadata['int_parse'] > kls.int_parse_threshhold:
             return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}],
-                    'add_orig': True}
+                'add_orig': True}
         else:
             return {'cleaning_ops': []}
 
@@ -72,16 +72,14 @@ def test_format_ops():
 def test_merge_ops():
     existing_ops = [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, 'a'],
-        [{'symbol': 'usergen'}, 'foo_column']
-    ]
+        [{'symbol': 'usergen'}, 'foo_column']]
 
     cleaning_ops = [
         [{'symbol': 'new_cleaning', 'meta':{'auto_clean': True}}, 'a']]
 
     expected_merged = [
         [{'symbol': 'new_cleaning', 'meta':{'auto_clean': True}}, 'a'],
-        [{'symbol': 'usergen'}, 'foo_column']
-    ]
+        [{'symbol': 'usergen'}, 'foo_column']]
     print( merge_ops(existing_ops, cleaning_ops))
     print("@"*80)
     assert merge_ops(existing_ops, cleaning_ops) == expected_merged
@@ -123,8 +121,7 @@ def test_handle_user_ops():
     cleaned_df, cleaning_sd, generated_code, merged_operations3 = cleaning_result3
     assert merged_operations3 == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a'],
-        [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']
-    ]
+        [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
 
 
 def desired_test_make_origs():
@@ -134,12 +131,10 @@ def desired_test_make_origs():
     df_a = pl.DataFrame({'a': [10, 20, 30, 40], 'b': [1, 2, 3, 4]})
     df_b = pl.DataFrame({'a': [10, 20,  0, 40], 'b': [1, 2, 3, 4]})    
 
-    expected = pl.DataFrame(
-        [pl.Series("a",      [  10,   20,    0,   40], dtype=pl.Int64),
-         pl.Series("a_orig", [None, None,   30, None], dtype=pl.Int64),
-         pl.Series("b",      [   1,    2,    3,    4], dtype=pl.Int64),
-         pl.Series("b_orig", [None, None, None, None], dtype=pl.Int64)],
-    )
+    expected = pl.DataFrame([pl.Series("a",      [  10,   20,    0,   40], dtype=pl.Int64),
+        pl.Series("a_orig", [None, None,   30, None], dtype=pl.Int64),
+        pl.Series("b",      [   1,    2,    3,    4], dtype=pl.Int64),
+        pl.Series("b_orig", [None, None, None, None], dtype=pl.Int64)])
 
     combined = PolarsAutocleaning.make_origs(
         df_a, df_b, {'a':{'add_orig': True}, 'b': {'add_orig': True}})
@@ -151,7 +146,7 @@ def test_make_origs_different_dtype():
     expected = pl.DataFrame(
         {
             'a': [30, 40],
-            'a_orig': [30,  "40"]},
+         'a_orig': [30,  "40"]},
         strict=False)
     combined = PolarsAutocleaning.make_origs(
         raw, cleaned, {'a':{'add_orig': True}})

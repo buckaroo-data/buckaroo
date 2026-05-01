@@ -28,8 +28,7 @@ class SQLiteFileCache(AbstractFileCache):
               mtime REAL NOT NULL,
               metadata_json TEXT NOT NULL
             )
-            """
-        )
+            """)
         # Add merged_sd_blob column if it doesn't exist (schema migration)
         try:
             self._conn.execute("ALTER TABLE files ADD COLUMN merged_sd_blob BLOB")
@@ -43,8 +42,7 @@ class SQLiteFileCache(AbstractFileCache):
               series_hash TEXT PRIMARY KEY,
               result_blob BLOB NOT NULL
             )
-            """
-        )
+            """)
         self._conn.commit()
 
     # File metadata API -----------------------------------------------------
@@ -67,8 +65,7 @@ class SQLiteFileCache(AbstractFileCache):
                     metadata_without_merged_sd[k] = str(v)
         self._conn.execute(
             "REPLACE INTO files(path, mtime, metadata_json, merged_sd_blob) VALUES (?,?,?,?)",
-            (str(path), mtime, json.dumps(metadata_without_merged_sd), merged_sd_blob)
-        )
+            (str(path), mtime, json.dumps(metadata_without_merged_sd), merged_sd_blob))
         self._conn.commit()
 
     def add_metadata(self, path:Path, metadata:dict[str, Any]) -> None:
@@ -132,15 +129,13 @@ class SQLiteFileCache(AbstractFileCache):
                     rows.append({
                         'col_name': str(col_name),
                         'stat_key': str(stat_key),
-                        'val_json': val_json
-                    })
+                        'val_json': val_json})
                 except Exception:
                     # If JSON serialization fails, convert to string
                     rows.append({
                         'col_name': str(col_name),
                         'stat_key': str(stat_key),
-                        'val_json': json.dumps(str(stat_val))
-                    })
+                        'val_json': json.dumps(str(stat_val))})
         
         if not rows:
             # Return empty parquet if no data
@@ -216,13 +211,11 @@ class SQLiteFileCache(AbstractFileCache):
             # Update metadata, mtime, and merged_sd_blob
             self._conn.execute(
                 "UPDATE files SET mtime=?, metadata_json=?, merged_sd_blob=? WHERE path=?",
-                (current_mtime, json.dumps(md), merged_sd_blob, str(path))
-            )
+                (current_mtime, json.dumps(md), merged_sd_blob, str(path)))
         else:
             self._conn.execute(
                 "INSERT INTO files(path, mtime, metadata_json, merged_sd_blob) VALUES (?,?,?,?)",
-                (str(path), current_mtime, json.dumps(metadata_without_merged_sd), merged_sd_blob)
-            )
+                (str(path), current_mtime, json.dumps(metadata_without_merged_sd), merged_sd_blob))
         self._conn.commit()
 
     # Series results API ----------------------------------------------------
@@ -239,8 +232,7 @@ class SQLiteFileCache(AbstractFileCache):
         blob = self._dict_to_parquet_bytes(current)
         self._conn.execute(
             "REPLACE INTO series_results(series_hash, result_blob) VALUES (?,?)",
-            (str(series_hash), blob)
-        )
+            (str(series_hash), blob))
         self._conn.commit()
 
     def get_series_results(self, series_hash:int) -> SummaryStats|None:

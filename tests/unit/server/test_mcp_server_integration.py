@@ -31,9 +31,7 @@ import pytest
 
 slow = pytest.mark.slow
 
-pytestmark = [
-    pytest.mark.skipif(sys.platform == "win32", reason="Unix signal-based tests"),
-]
+pytestmark = [pytest.mark.skipif(sys.platform == "win32", reason="Unix signal-based tests")]
 
 # ---------------------------------------------------------------------------
 # Mock away ``mcp`` so buckaroo_mcp_tool can be imported without the package
@@ -121,12 +119,8 @@ def _start_server(port: int) -> subprocess.Popen:
 
     Captures stderr so failures can be diagnosed.
     """
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "buckaroo.server", "--port", str(port), "--no-browser"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        cwd=REPO_ROOT,
-    )
+    proc = subprocess.Popen([sys.executable, "-m", "buckaroo.server", "--port", str(port), "--no-browser"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, cwd=REPO_ROOT)
     return proc
 
 
@@ -171,8 +165,7 @@ class TestServerSubprocessHealthCheck:
                 stderr_text = stderr.decode(errors="replace")[:1000] if stderr else "(empty)"
                 pytest.fail(
                     f"Server did not respond to /health within 15s on port {port}\n"
-                    f"exit code: {proc.returncode}\nstderr: {stderr_text}"
-                )
+                    f"exit code: {proc.returncode}\nstderr: {stderr_text}")
 
             assert health["status"] == "ok"
             assert isinstance(health["pid"], int)
@@ -199,8 +192,7 @@ class TestServerSubprocessHealthCheck:
 _MCP_CMD_OVERRIDE = os.environ.get("BUCKAROO_MCP_CMD", "")
 _has_mcp_cmd = bool(_MCP_CMD_OVERRIDE) and all(
     __import__("shutil").which(part) is not None
-    for part in _MCP_CMD_OVERRIDE.split()[:1]
-)
+    for part in _MCP_CMD_OVERRIDE.split()[:1])
 
 
 @slow
@@ -217,12 +209,7 @@ class TestKillStdioKillsTornado:
 
         mcp_cmd = _MCP_CMD_OVERRIDE.split()
 
-        proc = subprocess.Popen(
-            mcp_cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        proc = subprocess.Popen(mcp_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         tmp_csv = None
         server_port = 8700  # default port used by MCP tool
@@ -279,10 +266,8 @@ class TestKillStdioKillsTornado:
                 w.writerow([1, 2])
 
             # Call view_data — this starts the tornado server
-            send({
-                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                "params": {"name": "view_data", "arguments": {"path": tmp_csv}},
-            })
+            send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "view_data", "arguments": {"path": tmp_csv}}})
             call_resp = recv(2, timeout=30)
             assert call_resp is not None, "No response to view_data"
 

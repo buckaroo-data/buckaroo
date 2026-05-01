@@ -72,11 +72,8 @@ def main():
         sys.exit(1)
 
     # Collect versions (sorted newest first by semver)
-    versions = sorted(
-        [d.name for d in screenshots_dir.iterdir() if d.is_dir() and not d.name.startswith('.')],
-        key=lambda v: [int(x) for x in v.split('.')],
-        reverse=True,
-    )
+    versions = sorted([d.name for d in screenshots_dir.iterdir() if d.is_dir() and not d.name.startswith('.')],
+        key=lambda v: [int(x) for x in v.split('.')], reverse=True)
 
     nav_links = []
     release_blocks = []
@@ -95,15 +92,9 @@ def main():
             url = f"{version}/{png}"
             cards.append(CARD_TEMPLATE % {'url': url, 'name': name})
 
-        release_blocks.append(RELEASE_TEMPLATE % {
-            'version': version,
-            'cards': '\n'.join(cards),
-        })
+        release_blocks.append(RELEASE_TEMPLATE % {'version': version, 'cards': '\n'.join(cards)})
 
-    html = HTML_TEMPLATE % {
-        'nav': ' '.join(nav_links),
-        'releases': '\n'.join(release_blocks),
-    }
+    html = HTML_TEMPLATE % {'nav': ' '.join(nav_links), 'releases': '\n'.join(release_blocks)}
 
     output = screenshots_dir / 'index.html'
     output.write_text(html)

@@ -76,7 +76,7 @@ def test_check_and_fix_df3():
 def test_check_and_fix_df4():
     dt_strs = ['2024-06-24 09:32:00-04:00', '2024-06-24 09:33:00-04:00', '2024-06-24 09:34:00-04:00']
     dt_vals = pd.to_datetime(dt_strs)
-    df = pd.DataFrame({'value': [10, 20, 30],},
+    df = pd.DataFrame({'value': [10, 20, 30]},
         index=dt_vals)
     recheck(df)
 

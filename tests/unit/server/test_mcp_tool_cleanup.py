@@ -21,10 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # These tests use SIGKILL/SIGTERM extensively — Unix-only
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Unix signal-based process lifecycle tests",
-)
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Unix signal-based process lifecycle tests")
 
 
 # ---------------------------------------------------------------------------
@@ -68,11 +65,8 @@ REPO_ROOT = os.path.dirname(os.path.abspath(buckaroo_mcp_tool.__file__))
 
 def _spawn_sleep():
     """Spawn a long-running subprocess we can use as a stand-in for the server."""
-    return subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(600)"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"], stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL)
 
 
 def _is_alive(pid: int) -> bool:
@@ -248,13 +242,8 @@ print(server.pid, flush=True)
 sys.stdin.buffer.read()
 """
 
-        parent = subprocess.Popen(
-            [sys.executable, "-c", parent_script],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            cwd=REPO_ROOT,
-        )
+        parent = subprocess.Popen([sys.executable, "-c", parent_script], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, cwd=REPO_ROOT)
 
         server_pid = None
         try:
@@ -439,13 +428,8 @@ sys.stdout.buffer.flush()
 sys.stdin.buffer.read()
 '''
 
-        grandparent = subprocess.Popen(
-            [sys.executable, "-c", grandparent_script],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            cwd=REPO_ROOT,
-        )
+        grandparent = subprocess.Popen([sys.executable, "-c", grandparent_script], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=REPO_ROOT)
 
         server_pid = None
         try:
@@ -514,12 +498,7 @@ class TestStdoutSafety:
             "sys.modules['mcp.server.fastmcp'] = mcp_fastmcp\n"
             "import buckaroo_mcp_tool\n"
         )
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            cwd=REPO_ROOT,
-            timeout=10,
-        )
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, cwd=REPO_ROOT, timeout=10)
         assert result.stdout == b"", (
             f"buckaroo_mcp_tool wrote to stdout during import "
             f"({len(result.stdout)} bytes):\n"

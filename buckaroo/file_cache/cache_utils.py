@@ -78,11 +78,8 @@ def get_cache_size() -> dict[str, int]:
     file_cache_size = file_cache_path.stat().st_size if file_cache_path.exists() else 0
     executor_log_size = executor_log_path.stat().st_size if executor_log_path.exists() else 0
     
-    return {
-        'file_cache': file_cache_size,
-        'executor_log': executor_log_size,
-        'total': file_cache_size + executor_log_size,
-    }
+    return {'file_cache': file_cache_size, 'executor_log': executor_log_size,
+        'total': file_cache_size + executor_log_size}
 
 
 def clear_file_cache() -> None:
@@ -118,8 +115,7 @@ def clear_oldest_cache_entries(max_age_days: int = 30) -> int:
     # Delete old files based on mtime
     cursor = fc._conn.execute(
         "DELETE FROM files WHERE mtime < ?",
-        (cutoff_time,)
-    )
+        (cutoff_time,))
     files_deleted = cursor.rowcount
     
     fc._conn.commit()

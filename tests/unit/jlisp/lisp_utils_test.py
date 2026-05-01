@@ -5,10 +5,8 @@ from buckaroo.jlisp.lisp_utils import (
 
 def test_split_operations():
 
-    full_ops = [
-        [{"symbol":"dropcol", "meta":{"auto_clean":True}},{"symbol":"df"},"starttime"],
-        [{"symbol":"dropcol"},{"symbol":"df"},"starttime"],
-    ]
+    full_ops = [[{"symbol":"dropcol", "meta":{"auto_clean":True}},{"symbol":"df"},"starttime"],
+        [{"symbol":"dropcol"},{"symbol":"df"},"starttime"]]
 
     EXPECTED_cleaning_ops = [
         [{"symbol":"dropcol", "meta":{"auto_clean":True}},{"symbol":"df"},"starttime"]]
@@ -52,16 +50,14 @@ def test_format_ops():
 def test_merge_ops():
     existing_ops = [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, 'a'],
-        [{'symbol': 'usergen'}, 'foo_column']
-    ]
+        [{'symbol': 'usergen'}, 'foo_column']]
 
     cleaning_ops = [
         [{'symbol': 'new_cleaning', 'meta':{'auto_clean': True}}, 'a']]
 
     expected_merged = [
         [{'symbol': 'new_cleaning', 'meta':{'auto_clean': True}}, 'a'],
-        [{'symbol': 'usergen'}, 'foo_column']
-    ]
+        [{'symbol': 'usergen'}, 'foo_column']]
     print( merge_ops(existing_ops, cleaning_ops))
     print("@"*80)
     assert merge_ops(existing_ops, cleaning_ops) == expected_merged

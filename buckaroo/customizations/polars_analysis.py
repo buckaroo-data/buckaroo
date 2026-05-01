@@ -33,7 +33,7 @@ Overtime codebases will probably trend towards many classes with single facts, b
 
 class ComputedDefaultSummaryStats(PolarsAnalysis):
     requires_summary = ['length',
-                        'unique_count', 'empty_count', 'distinct_count']
+        'unique_count', 'empty_count', 'distinct_count']
     provides_defaults = dict(
         distinct_per=0, empty_per=0, unique_per=0, nan_per=0)
 
@@ -80,11 +80,11 @@ class BasicAnalysis(PolarsAnalysis):
 
 
     provides_defaults = {'length':0, 'min':0, 'max':0, 'mode':0,
-                         'mean':0, 'unique_count':0, 'empty_count':0, 'distinct_count':0,
-                         'most_freq':0, 'median':0,
-                         'std':0,
-                         'null_count':0, 'non_null_count':0,
-                         '2nd_freq':0, '3rd_freq':0, '4th_freq':0, '5th_freq':0}
+        'mean':0, 'unique_count':0, 'empty_count':0, 'distinct_count':0,
+        'most_freq':0, 'median':0,
+        'std':0,
+        'null_count':0, 'non_null_count':0,
+        '2nd_freq':0, '3rd_freq':0, '4th_freq':0, '5th_freq':0}
 
 
     requires_summary = ['value_counts']
@@ -100,8 +100,7 @@ class BasicAnalysis(PolarsAnalysis):
         
         F.col(pl.Utf8).str.count_matches("^$").sum().name.map(json_postfix('empty_count')),
         (NOT_STRUCTS.len() - NOT_STRUCTS.is_duplicated().sum()).name.map(json_postfix('unique_count')),
-        (NOT_STRUCTS.len() - NOT_STRUCTS.null_count()).name.map(json_postfix('non_null_count'))
-        ]
+        (NOT_STRUCTS.len() - NOT_STRUCTS.null_count()).name.map(json_postfix('non_null_count'))]
 
     @staticmethod
     def computed_summary(summary_dict):
@@ -115,15 +114,15 @@ class BasicAnalysis(PolarsAnalysis):
                     return regular_col_vc_df[pos]['key'][0]
                 return None
             return {'mode': get_freq(0),
-                    '2nd_freq': get_freq(1),
-                    '3rd_freq': get_freq(2),
-                    '4th_freq': get_freq(3),
-                    '5th_freq': get_freq(4),
-                    'distinct_count':len(temp_df)}
+                '2nd_freq': get_freq(1),
+                '3rd_freq': get_freq(2),
+                '4th_freq': get_freq(3),
+                '5th_freq': get_freq(4),
+                'distinct_count':len(temp_df)}
         else:
 
             return dict(mode=None, value_counts=DUMMY_VALUE_COUNTS, distinct_count=0,
-                        mean=0, unique_count=0)
+                mean=0, unique_count=0)
 
 
 class PlTyping(PolarsAnalysis):
@@ -169,11 +168,10 @@ def normalize_polars_histogram_ser(ser):
     smallest, largest =  df.select(small_q, large_q).to_numpy()[0]
 
     meat_df = df.lazy().filter(
-        (small_q < C) & (C < large_q)
-    ).select(C).collect()['named_col']
+        (small_q < C) & (C < large_q)).select(C).collect()['named_col']
     if len(meat_df) == 0:
         return { 'low_tail': smallest, 'high_tail':largest,
-                 'meat_histogram': [[],[]], 'normalized_populations': []}
+            'meat_histogram': [[],[]], 'normalized_populations': []}
     raw_hist = meat_df.hist(bin_count=10, include_breakpoint=True)
     hist_df = raw_hist.select(pl.col("breakpoint"), pl.selectors.ends_with("count").alias("count"))
     edges = hist_df['breakpoint'].to_list()
@@ -181,8 +179,8 @@ def normalize_polars_histogram_ser(ser):
     counts = hist_df['count'][1:]
     norm_counts = counts/counts.sum()
     return { 'low_tail': smallest, 'high_tail':largest,
-             'meat_histogram': (counts.to_list(), edges),
-             'normalized_populations': norm_counts.to_list()}
+        'meat_histogram': (counts.to_list(), edges),
+        'normalized_populations': norm_counts.to_list()}
 
 
 def categorical_dict_from_vc(vc_ser, top_n_positions=7) -> Dict[str, int]:
@@ -235,9 +233,7 @@ class HistogramAnalysis(PolarsAnalysis):
     column_ops = {
         'histogram_args': (NUMERIC_POLARS_DTYPES, normalize_polars_histogram_ser)}
 
-    requires_summary = ['min', 'max', 'value_counts', 'length', 'unique_count', 'is_numeric', 'nan_per',
-                        'null_count',
-                        ]
+    requires_summary = ['min', 'max', 'value_counts', 'length', 'unique_count', 'is_numeric', 'nan_per', 'null_count']
     provides_defaults = dict(categorical_histogram=[], histogram=[], histogram_bins=[])
 
     @staticmethod
@@ -303,16 +299,12 @@ class HistogramAnalysis(PolarsAnalysis):
                                 temp_histo = numeric_histogram(histogram_args, min_, max_, nan_per)
                                 if len(temp_histo) > 5:
                                     # if we had basically a categorical variable encoded into an integer.. don't return it
-                                    return {
-                                        'histogram': temp_histo,
-                                        'histogram_bins': meat_histogram[1],
-                                    }
+                                    return {'histogram': temp_histo, 'histogram_bins': meat_histogram[1]}
                             except Exception:
                                 pass  # Fall through to categorical histogram
         
         return {'categorical_histogram': cd, 'histogram' : categorical_histogram_from_cd(cd, nan_per),
-                'histogram_bins': ['faked']
-                }
+            'histogram_bins': ['faked']}
 
 class PLCleaningStats(PolarsAnalysis):
     requires_summary = ['value_counts', 'length']
@@ -331,7 +323,6 @@ class PLCleaningStats(PolarsAnalysis):
 
 
 PL_Analysis_Klasses = [VCAnalysis, BasicAnalysis, PlTyping, ComputedDefaultSummaryStats,
-                       HistogramAnalysis
-                       ]
+    HistogramAnalysis]
 
 

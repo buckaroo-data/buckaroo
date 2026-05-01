@@ -128,11 +128,7 @@ def test_jupyter_simulate():
     
     my_locals = {}
     exec(
-        compile(
-            textwrap.dedent(ipython_cell_source),
-            filename=ipython_cell_id,
-            mode="exec",
-        ),
+        compile(textwrap.dedent(ipython_cell_source), filename=ipython_cell_id, mode="exec"),
         # TODO when Python 3.11 is the minimum supported version, use
         # locals=my_locals instead of passing globals and locals in the
         # next two lines as positional arguments

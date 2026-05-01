@@ -68,8 +68,7 @@ def _items_collapsible(items, open_ws, post_attr) -> bool:
         return False
     for it in items:
         if isinstance(it.comma, cst.Comma) and not _is_clean_ws(
-            it.comma.whitespace_after
-        ):
+            it.comma.whitespace_after):
             return False
         if post_attr is not None and not _is_clean_ws(getattr(it, post_attr)):
             return False
@@ -144,21 +143,17 @@ class _PaddyTransformer(cst.CSTTransformer):
                 return updated.with_changes(whitespace_before_args=_empty())
             return None
         if not _items_collapsible(
-            updated.args, updated.whitespace_before_args, "whitespace_after_arg"
-        ):
+            updated.args, updated.whitespace_before_args, "whitespace_after_arg"):
             return None
-        return updated.with_changes(
-            args=_collapse_items(updated.args, "whitespace_after_arg"),
-            whitespace_before_args=_empty(),
-        )
+        return updated.with_changes(args=_collapse_items(updated.args, "whitespace_after_arg"),
+            whitespace_before_args=_empty())
 
     def _stack_call(self, updated):
         if not updated.args:
             return updated
         last = updated.args[-1]
         if isinstance(last.comma, cst.MaybeSentinel) and _is_clean_pw(
-            last.whitespace_after_arg
-        ):
+            last.whitespace_after_arg):
             new_last = last.with_changes(whitespace_after_arg=_empty())
             return updated.with_changes(args=[*updated.args[:-1], new_last])
         return updated
@@ -186,12 +181,10 @@ class _PaddyTransformer(cst.CSTTransformer):
             return None
         for _, it in slots:
             if isinstance(it.comma, cst.Comma) and not _is_clean_ws(
-                it.comma.whitespace_after
-            ):
+                it.comma.whitespace_after):
                 return None
             if isinstance(it, cst.Param) and not _is_clean_ws(
-                it.whitespace_after_param
-            ):
+                it.whitespace_after_param):
                 return None
         new_slots = []
         for i, (kind, it) in enumerate(slots):
@@ -208,22 +201,15 @@ class _PaddyTransformer(cst.CSTTransformer):
             if isinstance(it, cst.Param):
                 changes["whitespace_after_param"] = _empty()
             new_slots.append((kind, it.with_changes(**changes)))
-        new_params = params.with_changes(
-            posonly_params=tuple(it for k, it in new_slots if k == "posonly"),
+        new_params = params.with_changes(posonly_params=tuple(it for k, it in new_slots if k == "posonly"),
             posonly_ind=next(
-                (it for k, it in new_slots if k == "posslash"), params.posonly_ind
-            ),
+                (it for k, it in new_slots if k == "posslash"), params.posonly_ind),
             params=tuple(it for k, it in new_slots if k == "param"),
             star_arg=next((it for k, it in new_slots if k == "star"), params.star_arg),
             kwonly_params=tuple(it for k, it in new_slots if k == "kwonly"),
             star_kwarg=next(
-                (it for k, it in new_slots if k == "starkwarg"), params.star_kwarg
-            ),
-        )
-        return updated.with_changes(
-            params=new_params,
-            whitespace_before_params=_empty(),
-        )
+                (it for k, it in new_slots if k == "starkwarg"), params.star_kwarg))
+        return updated.with_changes(params=new_params, whitespace_before_params=_empty())
 
     def _stack_funcdef(self, updated):
         params = updated.params
@@ -231,12 +217,8 @@ class _PaddyTransformer(cst.CSTTransformer):
             return updated
         last = params.params[-1]
         if isinstance(last.comma, cst.Comma) and _is_clean_pw(
-            last.comma.whitespace_after
-        ):
-            new_last = last.with_changes(
-                comma=cst.MaybeSentinel.DEFAULT,
-                whitespace_after_param=_empty(),
-            )
+            last.comma.whitespace_after):
+            new_last = last.with_changes(comma=cst.MaybeSentinel.DEFAULT, whitespace_after_param=_empty())
             new_params = params.with_changes(params=[*params.params[:-1], new_last])
             return updated.with_changes(params=new_params)
         return updated
@@ -248,16 +230,14 @@ class _PaddyTransformer(cst.CSTTransformer):
         if not isinstance(names, (list, tuple)) or not names:
             return updated
         has_parens = isinstance(updated.lpar, cst.LeftParen) and isinstance(
-            updated.rpar, cst.RightParen
-        )
+            updated.rpar, cst.RightParen)
         last = names[-1]
         if has_parens and isinstance(last.comma, cst.Comma):
             c = self._collapse_importfrom(updated)
             if c is not None:
                 return c
         if isinstance(last.comma, cst.Comma) and _is_clean_pw(
-            last.comma.whitespace_after
-        ):
+            last.comma.whitespace_after):
             new_last = last.with_changes(comma=cst.MaybeSentinel.DEFAULT)
             return updated.with_changes(names=tuple([*names[:-1], new_last]))
         return updated
@@ -295,24 +275,20 @@ class _PaddyTransformer(cst.CSTTransformer):
         close_node = getattr(updated, close_attr)
         if not updated.elements and _is_clean_pw(open_node.whitespace_after):
             return updated.with_changes(
-                **{open_attr: open_node.with_changes(whitespace_after=_empty())}
-            )
+                **{open_attr: open_node.with_changes(whitespace_after=_empty())})
         if updated.elements and isinstance(updated.elements[-1].comma, cst.Comma):
             c = self._collapse_collection(
-                updated, open_attr, close_attr, open_node, close_node
-            )
+                updated, open_attr, close_attr, open_node, close_node)
             if c is not None:
                 return c
         if _is_clean_pw(close_node.whitespace_before):
             new_elements = list(updated.elements)
             if new_elements and isinstance(new_elements[-1].comma, cst.Comma):
                 new_elements[-1] = new_elements[-1].with_changes(
-                    comma=cst.MaybeSentinel.DEFAULT
-                )
+                    comma=cst.MaybeSentinel.DEFAULT)
             new_close = close_node.with_changes(whitespace_before=_empty())
             return updated.with_changes(
-                elements=new_elements, **{close_attr: new_close}
-            )
+                elements=new_elements, **{close_attr: new_close})
         return updated
 
     def _collapse_collection(
@@ -322,13 +298,9 @@ class _PaddyTransformer(cst.CSTTransformer):
             return None
         if not _items_collapsible(updated.elements, open_node.whitespace_after, None):
             return None
-        return updated.with_changes(
-            elements=_collapse_items(updated.elements, None),
-            **{
-                open_attr: open_node.with_changes(whitespace_after=_empty()),
-                close_attr: close_node.with_changes(whitespace_before=_empty()),
-            },
-        )
+        return updated.with_changes(elements=_collapse_items(updated.elements, None),
+            **{open_attr: open_node.with_changes(whitespace_after=_empty()),
+               close_attr: close_node.with_changes(whitespace_before=_empty())})
 
     # ----- Tuple (parens are optional) -----
 
@@ -345,8 +317,7 @@ class _PaddyTransformer(cst.CSTTransformer):
             new_elements = list(updated.elements)
             if new_elements and isinstance(new_elements[-1].comma, cst.Comma):
                 new_elements[-1] = new_elements[-1].with_changes(
-                    comma=cst.MaybeSentinel.DEFAULT
-                )
+                    comma=cst.MaybeSentinel.DEFAULT)
             new_rp = rp.with_changes(whitespace_before=_empty())
             return updated.with_changes(elements=new_elements, rpar=[new_rp])
         return updated
@@ -356,29 +327,17 @@ class _PaddyTransformer(cst.CSTTransformer):
             return None
         if not _items_collapsible(updated.elements, lp.whitespace_after, None):
             return None
-        return updated.with_changes(
-            elements=_collapse_items(
-                updated.elements, None, preserve_singleton_comma=True
-            ),
-            lpar=[lp.with_changes(whitespace_after=_empty())],
-            rpar=[rp.with_changes(whitespace_before=_empty())],
-        )
+        return updated.with_changes(elements=_collapse_items(
+            updated.elements, None, preserve_singleton_comma=True), lpar=[lp.with_changes(whitespace_after=_empty())], rpar=[rp.with_changes(whitespace_before=_empty())])
 
 
 _LINE_BUDGET = 120
 
 
 def _newline_indent(col: int):
-    return cst.ParenthesizedWhitespace(
-        first_line=cst.TrailingWhitespace(
-            whitespace=cst.SimpleWhitespace(""),
-            comment=None,
-            newline=cst.Newline(),
-        ),
-        empty_lines=[],
-        indent=False,
-        last_line=cst.SimpleWhitespace(" " * col),
-    )
+    return cst.ParenthesizedWhitespace(first_line=cst.TrailingWhitespace(whitespace=cst.SimpleWhitespace(""),
+        comment=None, newline=cst.Newline()),
+        empty_lines=[], indent=False, last_line=cst.SimpleWhitespace(" " * col))
 
 
 def _greedy_pack(
@@ -416,10 +375,7 @@ def _greedy_pack(
 
 
 def _arg_render_len(module: cst.Module, arg: cst.Arg) -> int:
-    cleaned = arg.with_changes(
-        comma=cst.MaybeSentinel.DEFAULT,
-        whitespace_after_arg=cst.SimpleWhitespace(""),
-    )
+    cleaned = arg.with_changes(comma=cst.MaybeSentinel.DEFAULT, whitespace_after_arg=cst.SimpleWhitespace(""))
     return len(module.code_for_node(cleaned))
 
 
@@ -445,11 +401,7 @@ def _build_wrapped_args(args, groups, indent_col):
             else:
                 comma = cst.Comma(whitespace_after=cst.SimpleWhitespace(" "))
             new_args.append(
-                arg.with_changes(
-                    comma=comma,
-                    whitespace_after_arg=cst.SimpleWhitespace(""),
-                )
-            )
+                arg.with_changes(comma=comma, whitespace_after_arg=cst.SimpleWhitespace("")))
     return new_args
 
 
@@ -481,15 +433,8 @@ class _NodeWrapper(cst.CSTTransformer):
       - "one_per_line": every item on its own line at continuation_col
     """
 
-    def __init__(
-        self,
-        target,
-        first_col: int,
-        continuation_col: int,
-        module: cst.Module,
-        budget: int,
-        wrap_mode: str = "greedy",
-    ):
+    def __init__(self, target, first_col: int, continuation_col: int, module: cst.Module, budget: int,
+            wrap_mode: str = "greedy"):
         super().__init__()
         self.target = target
         self.first_col = first_col
@@ -531,7 +476,7 @@ class _NodeWrapper(cst.CSTTransformer):
         close_node = getattr(updated, close_attr)
         return updated.with_changes(elements=new_elements,
             **{open_attr: open_node.with_changes(whitespace_after=self._open_ws()),
-                close_attr: close_node.with_changes(whitespace_before=cst.SimpleWhitespace(""))})
+               close_attr: close_node.with_changes(whitespace_before=cst.SimpleWhitespace(""))})
 
     def leave_Call(self, original, updated):
         if original is not self.target or self.applied:
@@ -858,11 +803,8 @@ def _reindent_pw(ws, indent: int):
         return ws
     if ws.empty_lines:
         return ws
-    return ws.with_changes(
-        first_line=ws.first_line.with_changes(whitespace=cst.SimpleWhitespace("")),
-        indent=False,
-        last_line=cst.SimpleWhitespace(" " * indent),
-    )
+    return ws.with_changes(first_line=ws.first_line.with_changes(whitespace=cst.SimpleWhitespace("")), indent=False,
+        last_line=cst.SimpleWhitespace(" " * indent))
 
 
 class _Reindenter(cst.CSTTransformer):
@@ -889,19 +831,13 @@ class _Reindenter(cst.CSTTransformer):
                 new_arg = new_arg.with_changes(
                     comma=arg.comma.with_changes(
                         whitespace_after=_reindent_pw(
-                            arg.comma.whitespace_after, indent
-                        )
-                    )
-                )
+                            arg.comma.whitespace_after, indent)))
             if isinstance(arg.whitespace_after_arg, cst.ParenthesizedWhitespace):
                 new_arg = new_arg.with_changes(
-                    whitespace_after_arg=_reindent_pw(arg.whitespace_after_arg, indent)
-                )
+                    whitespace_after_arg=_reindent_pw(arg.whitespace_after_arg, indent))
             new_args.append(new_arg)
-        return updated.with_changes(
-            args=new_args,
-            whitespace_before_args=_reindent_pw(updated.whitespace_before_args, indent),
-        )
+        return updated.with_changes(args=new_args,
+            whitespace_before_args=_reindent_pw(updated.whitespace_before_args, indent))
 
     def _leave_collection(self, original, updated):
         indent = self.targets.get(id(original))
@@ -914,9 +850,7 @@ class _Reindenter(cst.CSTTransformer):
             if isinstance(el.comma, cst.Comma) and i != last_idx:
                 new_el = el.with_changes(
                     comma=el.comma.with_changes(
-                        whitespace_after=_reindent_pw(el.comma.whitespace_after, indent)
-                    )
-                )
+                        whitespace_after=_reindent_pw(el.comma.whitespace_after, indent)))
             new_elements.append(new_el)
         return updated.with_changes(elements=new_elements)
 
@@ -1042,8 +976,7 @@ def _atom_text(node) -> str | None:
     if isinstance(node, (cst.Integer, cst.Float)):
         return node.value
     if isinstance(node, cst.UnaryOperation) and isinstance(
-        node.operator, (cst.Plus, cst.Minus)
-    ):
+        node.operator, (cst.Plus, cst.Minus)):
         inner = _atom_text(node.expression)
         if inner is None:
             return None
@@ -1157,16 +1090,9 @@ def _column_padding(values: list[str]) -> list[tuple[int, int]]:
 
 
 def _row_break_ws(indent_col: int) -> cst.ParenthesizedWhitespace:
-    return cst.ParenthesizedWhitespace(
-        first_line=cst.TrailingWhitespace(
-            whitespace=cst.SimpleWhitespace(""),
-            comment=None,
-            newline=cst.Newline(),
-        ),
-        empty_lines=[],
-        indent=False,
-        last_line=cst.SimpleWhitespace(" " * indent_col),
-    )
+    return cst.ParenthesizedWhitespace(first_line=cst.TrailingWhitespace(whitespace=cst.SimpleWhitespace(""),
+        comment=None, newline=cst.Newline()),
+        empty_lines=[], indent=False, last_line=cst.SimpleWhitespace(" " * indent_col))
 
 
 def _table_format_single_col(
@@ -1227,11 +1153,9 @@ def _table_format_single_col(
     return node.with_changes(
         elements=new_elements,
         lbracket=node.lbracket.with_changes(
-            whitespace_after=cst.SimpleWhitespace(" " * pads[0][0])
-        ),
+            whitespace_after=cst.SimpleWhitespace(" " * pads[0][0])),
         rbracket=node.rbracket.with_changes(
-            whitespace_before=cst.SimpleWhitespace(" " * pads[-1][1])
-        ),
+            whitespace_before=cst.SimpleWhitespace(" " * pads[-1][1])),
     )
 
 
@@ -1278,18 +1202,14 @@ def _table_format_multi_col(node: cst.List, line_indent: int) -> "cst.List | Non
         new_lpar = (
             [
                 t.lpar[0].with_changes(
-                    whitespace_after=cst.SimpleWhitespace(" " * first_leading)
-                )
-            ]
+                    whitespace_after=cst.SimpleWhitespace(" " * first_leading))]
             if t.lpar
             else t.lpar
         )
         new_rpar = (
             [
                 t.rpar[0].with_changes(
-                    whitespace_before=cst.SimpleWhitespace(" " * last_trailing)
-                )
-            ]
+                    whitespace_before=cst.SimpleWhitespace(" " * last_trailing))]
             if t.rpar
             else t.rpar
         )
@@ -1363,20 +1283,13 @@ def _table_format_dict_rows(node: cst.List, line_indent: int) -> "cst.List | Non
                     whitespace_after=cst.SimpleWhitespace(" "),
                 )
             new_d_elems.append(
-                de.with_changes(
-                    whitespace_before_colon=cst.SimpleWhitespace(""),
-                    whitespace_after_colon=new_ws_after_colon,
-                    comma=inner_comma,
-                )
-            )
+                de.with_changes(whitespace_before_colon=cst.SimpleWhitespace(""),
+                    whitespace_after_colon=new_ws_after_colon, comma=inner_comma))
         last_trailing = col_pads[-1][r_idx][1]
-        new_d = d.with_changes(
-            elements=new_d_elems,
+        new_d = d.with_changes(elements=new_d_elems,
             lbrace=d.lbrace.with_changes(whitespace_after=cst.SimpleWhitespace("")),
             rbrace=d.rbrace.with_changes(
-                whitespace_before=cst.SimpleWhitespace(" " * last_trailing)
-            ),
-        )
+                whitespace_before=cst.SimpleWhitespace(" " * last_trailing)))
         outer_comma = cst.Comma(
             whitespace_before=cst.SimpleWhitespace(""),
             whitespace_after=_row_break_ws(line_indent if is_last else cont_col),
@@ -1429,8 +1342,7 @@ class _TableFormatter(cst.CSTTransformer):
                     return multi
             elif all(
                 isinstance(e.value, (cst.Integer, cst.Float, cst.UnaryOperation))
-                for e in elements
-            ):
+                for e in elements):
                 values = [_atom_text(e.value) for e in elements]
                 cont_col = pos.start.column + 1
                 return _table_format_single_col(updated, values, cont_col, self.budget)
@@ -1493,11 +1405,7 @@ def paddy_format(src: str, wrap_mode: str = "greedy") -> str:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Lisp-style Python formatter.")
     parser.add_argument("files", nargs="+", type=Path, help="files to format")
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="exit 1 if any file would be changed; do not write",
-    )
+    parser.add_argument("--check", action="store_true", help="exit 1 if any file would be changed; do not write")
     parser.add_argument("--wrap-mode", choices=("greedy", "one-per-line"), default="greedy",
         help="how to wrap over-budget bracket groups (default: greedy)")
     args = parser.parse_args(argv)

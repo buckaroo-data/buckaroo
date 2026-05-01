@@ -36,7 +36,7 @@ class CleaningGenOps(ColAnalysis):
     def computed_summary(kls, column_metadata):
         if column_metadata['int_parse'] > kls.int_parse_threshhold:
             return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}],
-                    'add_orig': True}
+                'add_orig': True}
         else:
             return {'cleaning_ops': []}
 
@@ -79,8 +79,7 @@ def test_handle_user_ops():
     _cleaned_df, _cleaning_sd, _generated_code, merged_operations3 = cleaning_result3
     assert merged_operations3 == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a'],
-        [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']
-    ]
+        [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
 
 
 def test_make_origs_different_dtype():
@@ -89,7 +88,7 @@ def test_make_origs_different_dtype():
     expected = pd.DataFrame(
         {
             'a': [30, 40],
-            'a_orig': [30,  "40"]})
+         'a_orig': [30,  "40"]})
     combined = PandasAutocleaning.make_origs(
         raw, cleaned, {'a':{'add_orig': True, 'orig_col_name': 'a'}})
     assert combined.to_dict() == expected.to_dict()
@@ -103,7 +102,7 @@ def test_make_origs_preserve():
     expected = pd.DataFrame(
         {
             'a': pd.Series([30, 40, None], dtype='Int64'),
-            'a_orig': [30,  "40", "not_used"]})
+         'a_orig': [30,  "40", "not_used"]})
     combined = PandasAutocleaning.make_origs(
         raw, cleaned, {'a':{'add_orig': True, 'preserve_orig_index':True, 'orig_col_name':'a'}})
     assert combined.to_dict() == expected.to_dict()
@@ -117,7 +116,7 @@ def test_make_origs_non_alphabetpreserve():
     expected = pd.DataFrame(
         {
             'a_modified': pd.Series([30, 40, None], dtype='Int64'),
-            'a_modified_orig': [30,  "40", "not_used"]})
+         'a_modified_orig': [30,  "40", "not_used"]})
     combined = PandasAutocleaning.make_origs(
         raw, cleaned, {'a_modified':{'add_orig': True, 'preserve_orig_index':True, 'orig_col_name':'a_modified'}})
     assert combined.to_dict() == expected.to_dict()
@@ -131,7 +130,7 @@ def Xtest_make_origs_filtered_new():
     expected = pd.DataFrame(
         {
             'a': [30, 40],
-            'a_orig': [30,  "40"]})
+         'a_orig': [30,  "40"]})
     combined = PandasAutocleaning.make_origs(
         raw, cleaned, {'a':{'add_orig': True, 'preserve_orig_index':True}})
     assert combined.to_dict() == expected.to_dict()
@@ -451,10 +450,9 @@ def test_autoclean_merge_ops():
         autoclean_conf = tuple([SentinelConfig, SentinelConfig2, NoCleaningConf])
 
     dirty_df = pd.DataFrame(
-            {'a':[10,  20,  30,   40,  10, 20.3,   5, None, None, None],
-             'b':["3", "4", "a", "5", "5",  "b", "b", None, None, None],
-             'c':["3", "4", "a", "5", "5",  "b", "b", None, None, None],
-             })
+        {'a':[10,  20,  30,   40,  10, 20.3,   5, None, None, None],
+         'b':["3", "4", "a", "5", "5",  "b", "b", None, None, None],
+         'c':["3", "4", "a", "5", "5",  "b", "b", None, None, None]})
 
     bw = SentinelBuckaroo(dirty_df)
     assert bw.operations == []
@@ -466,8 +464,7 @@ def test_autoclean_merge_ops():
         "show_commands": "on",
         "df_display": "main",
         "search_string": "",
-        "quick_command_args": {}
-    }
+        "quick_command_args": {}}
 
     assert bw.dataflow.cleaning_method == 'sentinel1'
     assert bw.operations ==  [
@@ -484,8 +481,7 @@ def test_autoclean_merge_ops():
         "show_commands": "on",
         "df_display": "main",
         "search_string": "",
-        "quick_command_args": {}
-    }
+        "quick_command_args": {}}
     assert bw.operations ==  [
         [sA('noop2', clean_col='c') , s('df'), 'c']]
 
@@ -529,8 +525,7 @@ def test_autoclean_full_widget():
         "show_commands": "on",
         "df_display": "main",
         "search_string": "",
-        "quick_command_args": {}
-    }
+        "quick_command_args": {}}
 
     assert bw.dataflow.cleaning_method == 'sentinel1'
     # make sure the widget oprations were updated
@@ -594,8 +589,7 @@ def test_quick_commands():
         quick_commands, {"search": ["asdf"], "only_outliers": ["col_B"]})
     assert both_produced_commands == [
         [sQ('search'), s('df'), "col", "asdf"],
-        [sQ('only_outliers'), s('df'), "col_B", .01]
-    ]
+        [sQ('only_outliers'), s('df'), "col_B", .01]]
 
 
     #note the order of produced commands depends on the order of command_list passed into generate_quick_ops
@@ -611,7 +605,7 @@ class TwoArgSearch(Command):
     command_pattern = [[3, 'term', 'type', 'string'],
                        [4, 'term', 'type', 'int']]
     quick_args_pattern = [[3, 'term', 'type', 'string'],
-                  [4, 'term', 'type', 'int']]
+        [4, 'term', 'type', 'int']]
 
 
 def test_two_arg_quick_command():

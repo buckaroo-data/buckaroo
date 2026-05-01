@@ -40,8 +40,8 @@ def pd_py_serialize(dct):
     This is used to output an exact string that is valid python code.
     """
     cleaned_dct = val_replace(dct,
-                       {pd.NA: UnquotedString("pd.NA"),
-                        np.nan: UnquotedString("np.nan")})
+        {pd.NA: UnquotedString("pd.NA"),
+         np.nan: UnquotedString("np.nan")})
     return dict_repr(cleaned_dct)
 
 def get_df_name(df, level=0):

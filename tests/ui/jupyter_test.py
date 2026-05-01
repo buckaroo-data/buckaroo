@@ -30,9 +30,8 @@ def test_widget_buckaroo(ipywidgets_runner, page_session: playwright.sync_api.Pa
         import buckaroo
         import pandas as pd
         df = pd.DataFrame({"carName": ["Chevelle", "Skylark", "PL411"],
-                           "origin": ["US", "US", "asia"],
-                           "make": ["Chevrolet", "Buick", "Datsun"]
-                           })
+            "origin": ["US", "US", "asia"],
+            "make": ["Chevrolet", "Buick", "Datsun"]})
         bw = buckaroo.BuckarooWidget(df)
         display(bw)
     ipywidgets_runner(kernel_code)

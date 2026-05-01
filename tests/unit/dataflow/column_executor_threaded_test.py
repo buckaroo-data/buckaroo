@@ -23,8 +23,7 @@ def test_polars_only_progress_streams_sequentially():
 
     cdf = ColumnExecutorDataflow(
         ldf,
-        column_executor_class=SlowPAFColumnExecutor
-    )
+        column_executor_class=SlowPAFColumnExecutor)
     cdf.progress_update_callback = on_progress
 
     # run compute synchronously; updates should stream sequentially

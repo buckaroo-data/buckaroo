@@ -29,12 +29,12 @@ def test_auto_select_uses_parallel_if_sync_incomplete_logged():
     df = pl.DataFrame({'a':[1,2,3], 'b':[4,5,6]})
     ldf = df.lazy()
     log = SimpleExecutorLog()
-    dfi = (id(ldf), "",)
+    dfi = (id(ldf), "")
     # fabricate an incomplete event for TrackingSync
     fake_args = ExecutorArgs(columns=['a'], column_specific_expressions=False, include_hash=True,
-                             expressions=[], row_start=None, row_end=None, extra=None)
+        expressions=[], row_start=None, row_end=None, extra=None)
     log._events.append(ExecutorLogEvent(dfi=dfi, args=fake_args, executor_class_name=TrackingSync.__name__,
-                                        start_time=dtdt.now(), end_time=None, completed=False))  # type: ignore[arg-type]
+        start_time=dtdt.now(), end_time=None, completed=False))  # type: ignore[arg-type]
 
     cdf = ColumnExecutorDataflow(ldf, executor_log=log)
     cdf.auto_compute_summary(TrackingSync, TrackingPar)

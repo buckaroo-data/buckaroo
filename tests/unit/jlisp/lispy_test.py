@@ -107,20 +107,18 @@ def test_other():
     jl_eval([s('>'), 4, 9]) # comparison
 
     jl_eval([s('begin'), 
-             [s('define'), s('named_func'), [s('lambda'), [s('a')], 
-                                             [s('+'), s('a'), 3]]],
-             [s('named_func'), 10]
-             ])
+             [s('define'), s('named_func'), [s('lambda'), [s('a')],
+                 [s('+'), s('a'), 3]]],
+             [s('named_func'), 10]])
      # define a lambda, assign it to a variable 'named_func', then call it with an argument of 10
 
 def test_lambda_no_args():
     """I don't know how to get a no arg lambda to work, punting for now """ 
-    [s('begin'), 
-            [s('define'), s('some_var'), 5],
-            [s('define'), s('named_func'), [s('lambda'), [], #[s('unused')], 
+    [s('begin'),
+     [s('define'), s('some_var'), 5],
+     [s('define'), s('named_func'), [s('lambda'), [], #[s('unused')], 
                                                 [s('+'), s('some_var'), 3]]],
-            [s('named_func')]
-        ]
+     [s('named_func')]]
     assert True
 
 def test_macro2():

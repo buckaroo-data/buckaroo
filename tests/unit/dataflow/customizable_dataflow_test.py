@@ -115,8 +115,7 @@ def test_hide_column_config_overrides():
     assert cdfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
 
     cdfc2 = ACDFC(BASIC_DF,
-                      column_config_overrides={'bar_col': {'merge_rule': 'hidden'}}
-                      )
+        column_config_overrides={'bar_col': {'merge_rule': 'hidden'}})
 
     assert cdfc2.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_WITHOUT_B
 
@@ -129,8 +128,8 @@ def test_custom_summary_stats():
 
     summary_sd = dc_dfc.widget_args_tuple[2]
     assert summary_sd == {
-                          'a': {'distinct_count':2, 'rewritten_col_name':'a', 'orig_col_name':'foo_col', },
-                          'b': {'distinct_count':3, 'rewritten_col_name':'b', 'orig_col_name':'bar_col', }}
+                          'a': {'distinct_count':2, 'rewritten_col_name':'a', 'orig_col_name':'foo_col'},
+        'b': {'distinct_count':3, 'rewritten_col_name':'b', 'orig_col_name':'bar_col'}}
     assert list(summary_sd.keys()) == ['a', 'b']
 
 def test_init_sd():
@@ -342,7 +341,7 @@ def test_column_config_override_widget():
          'float_col': [.5] * ROWS,
          "str_col": ["foobar"]* ROWS})
     bw2 = BuckarooWidget(
-        typed_df, 
+        typed_df,
         column_config_overrides={
             'float_col':
             {'displayer_args': { 'displayer': 'integer', 'min_digits': 3, 'max_digits': 5 }}})
@@ -360,7 +359,7 @@ def test_column_config_override_rewrite():
          'float_col': [.5] * ROWS,
          "str_col": ["foobar"]* ROWS})
     bw2 = BuckarooWidget(
-        typed_df, 
+        typed_df,
         column_config_overrides={
             'float_col': {
                 'tooltip_config': {'tooltip_type': 'simple', 'val_column': 'str_col'}}})
@@ -477,9 +476,7 @@ def test_bstate_commands():
         {'int_col': [1] * ROWS,
          'float_col': [.5] * ROWS,
          "str_col": ["foobar"]* ROWS,
-         "other": ["foo", "foo", "needle", "needle", "foo"]
-
-         })
+         "other": ["foo", "foo", "needle", "needle", "foo"]})
 
     base_a_klasses = BuckarooWidget.analysis_klasses.copy()
     base_a_klasses.extend([TransposeProcessing])
@@ -515,9 +512,7 @@ def test_bstate_commands2():
         {'int_col': [1] * ROWS,
          'float_col': [.5] * ROWS,
          "str_col": ["foobar"]* ROWS,
-         "other": ["foo", "foo", "needle", "needle", "foo"]
-
-         })
+         "other": ["foo", "foo", "needle", "needle", "foo"]})
 
     base_a_klasses = BuckarooWidget.analysis_klasses.copy()
     base_a_klasses.extend([TransposeProcessing])
@@ -561,9 +556,7 @@ def test_bstate_commands3():
         {'int_col': [1] * ROWS,
          'float_col': [.5] * ROWS,
          "str_col": ["foobar"]* ROWS,
-         "other": ["foo", "foo", "needle", "needle", "foo"]
-
-         })
+         "other": ["foo", "foo", "needle", "needle", "foo"]})
 
     base_a_klasses = BuckarooInfiniteWidget.analysis_klasses.copy()
     base_a_klasses.extend([TransposeProcessing])

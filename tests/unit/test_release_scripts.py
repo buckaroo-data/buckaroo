@@ -37,12 +37,10 @@ def test_classify_pr_other():
 # ---------------------------------------------------------------------------
 
 def test_group_prs():
-    prs = [
-        {"number": 1, "title": "fix: null pointer", "labels": []},
+    prs = [{"number": 1, "title": "fix: null pointer", "labels": []},
         {"number": 2, "title": "feat: new chart type", "labels": []},
         {"number": 3, "title": "Bump requests to 2.31", "labels": [{"name": "dependencies"}]},
-        {"number": 4, "title": "fix: another crash", "labels": []},
-    ]
+        {"number": 4, "title": "fix: another crash", "labels": []}]
     groups = group_prs(prs)
     assert len(groups["fix"]) == 2
     assert len(groups["feat"]) == 1
@@ -54,10 +52,8 @@ def test_group_prs():
 # ---------------------------------------------------------------------------
 
 def test_generate_plain_notes_normal():
-    grouped = {
-        "feat": [{"number": 10, "title": "feat: add export button"}],
-        "fix": [{"number": 11, "title": "fix: tooltip overflow"}],
-    }
+    grouped = {"feat": [{"number": 10, "title": "feat: add export button"}],
+        "fix": [{"number": 11, "title": "fix: tooltip overflow"}]}
     release_notes, changelog_entry = generate_plain_notes(grouped, "1.2.3", "2026-02-24")
 
     assert "## Features" in release_notes

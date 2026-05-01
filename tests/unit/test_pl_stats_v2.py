@@ -12,13 +12,7 @@ import polars as pl
 
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
 
-from buckaroo.customizations.pl_stats_v2 import (
-    pl_typing_stats, _type,
-    pl_base_summary_stats, pl_numeric_stats,
-    computed_default_summary_stats,
-    pl_histogram_series, histogram,
-    PL_ANALYSIS_V2,
-)
+from buckaroo.customizations.pl_stats_v2 import (pl_typing_stats, _type, pl_base_summary_stats, pl_numeric_stats, computed_default_summary_stats, pl_histogram_series, histogram, PL_ANALYSIS_V2)
 from buckaroo.customizations.styling import DefaultMainStyling
 
 
@@ -279,12 +273,9 @@ class TestPlNumericStats:
 
 class TestPlHistogram:
     def _make_pipeline(self):
-        return StatPipeline(
-            [pl_typing_stats, pl_base_summary_stats, pl_numeric_stats,
-             computed_default_summary_stats,
-             pl_histogram_series, histogram],
-            unit_test=False,
-        )
+        return StatPipeline([pl_typing_stats, pl_base_summary_stats, pl_numeric_stats,
+            computed_default_summary_stats,
+            pl_histogram_series, histogram], unit_test=False)
 
     def test_numeric_histogram(self):
         pipeline = self._make_pipeline()
@@ -324,12 +315,8 @@ class TestPlHistogram:
 class TestPlFullPipeline:
     def test_mixed_df(self):
         """Pipeline handles a polars DataFrame with mixed column types."""
-        df = pl.DataFrame({
-            'ints': [1, 2, 3, 4, 5],
-            'floats': [1.1, 2.2, 3.3, 4.4, 5.5],
-            'strs': ['a', 'b', 'c', 'd', 'e'],
-            'bools': [True, False, True, False, True],
-        })
+        df = pl.DataFrame({'ints': [1, 2, 3, 4, 5], 'floats': [1.1, 2.2, 3.3, 4.4, 5.5],
+            'strs': ['a', 'b', 'c', 'd', 'e'], 'bools': [True, False, True, False, True]})
         pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
         result, errors = pipeline.process_df(df)
         assert len(result) == 4
@@ -368,12 +355,8 @@ class TestPlFullPipeline:
 
     def test_type_classification(self):
         """Verify _type is correct per column type."""
-        df = pl.DataFrame({
-            'ints': [1, 2, 3],
-            'floats': [1.0, 2.0, 3.0],
-            'strs': ['a', 'b', 'c'],
-            'bools': [True, False, True],
-        })
+        df = pl.DataFrame({'ints': [1, 2, 3], 'floats': [1.0, 2.0, 3.0], 'strs': ['a', 'b', 'c'],
+            'bools': [True, False, True]})
         pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
         result, errors = pipeline.process_df(df)
 
@@ -383,13 +366,8 @@ class TestPlFullPipeline:
 
     def test_duration_column_in_full_pipeline(self):
         """Duration columns should be classified as 'duration', not 'datetime' (issue #622)."""
-        df = pl.DataFrame({
-            'duration': [100, 200, 125, 500],
-            'ints': [1, 2, 3, 4],
-        }, schema={
-            'duration': pl.Duration(),
-            'ints': pl.Int64,
-        })
+        df = pl.DataFrame({'duration': [100, 200, 125, 500], 'ints': [1, 2, 3, 4]},
+            schema={'duration': pl.Duration(), 'ints': pl.Int64})
         pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
         result, errors = pipeline.process_df(df)
 
@@ -408,28 +386,21 @@ class TestPlFullPipeline:
 
     def test_all_polars_types_classified(self):
         """All common polars types should get a specific _type, not 'obj'."""
-        df = pl.DataFrame({
-            'int_col': [1, 2, 3],
-            'float_col': [1.0, 2.0, 3.0],
-            'str_col': ['a', 'b', 'c'],
+        df = pl.DataFrame({'int_col': [1, 2, 3], 'float_col': [1.0, 2.0, 3.0], 'str_col': ['a', 'b', 'c'],
             'bool_col': [True, False, True],
             'dt_col': [datetime(2021, 1, 1), datetime(2021, 1, 2), datetime(2021, 1, 3)],
             'dur_col': pl.Series([100, 200, 300], dtype=pl.Duration()),
             'time_col': [dt.time(14, 30), dt.time(9, 15), dt.time(12, 0)],
             'cat_col': pl.Series(['x', 'y', 'z']).cast(pl.Categorical),
-            'dec_col': pl.Series(['1.50', '2.75', '3.00']).cast(pl.Decimal(10, 2)),
-            'bin_col': [b'aa', b'bb', b'cc'],
-        })
+            'dec_col': pl.Series(['1.50', '2.75', '3.00']).cast(pl.Decimal(10, 2)), 'bin_col': [b'aa', b'bb', b'cc']})
         pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
         result, _ = pipeline.process_df(df)
 
         types = {col_stats['_type'] for col_stats in result.values()}
         # None should be 'obj'
         assert 'obj' not in types
-        assert types == {
-            'integer', 'float', 'string', 'boolean',
-            'datetime', 'duration', 'time', 'categorical', 'decimal', 'binary',
-        }
+        assert types == {'integer', 'float', 'string', 'boolean', 'datetime', 'duration', 'time', 'categorical',
+            'decimal', 'binary'}
 
     def test_styling_for_new_types(self):
         """Verify correct displayer for each new type."""

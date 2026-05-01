@@ -14,8 +14,7 @@ def test_read_df_csv(tmp_path):
     csv_file = tmp_path / "test.csv"
     df = pl.DataFrame({
         'a': [1, 2, 3],
-        'b': ['x', 'y', 'z']
-    })
+        'b': ['x', 'y', 'z']})
     df.write_csv(csv_file)
     
     ldf = read_df(csv_file)
@@ -31,8 +30,7 @@ def test_read_parquet(tmp_path):
     parquet_file = tmp_path / "test.parquet"
     df = pl.DataFrame({
         'a': [1, 2, 3],
-        'b': ['x', 'y', 'z']
-    })
+        'b': ['x', 'y', 'z']})
     df.write_parquet(parquet_file)
     
     ldf = read_df(parquet_file)

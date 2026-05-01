@@ -19,10 +19,7 @@ from .dataflow.widget_extension_utils import configure_buckaroo
 class PLSampling(Sampling):
     pre_limit = False
 
-local_analysis_klasses = list(PL_ANALYSIS_V2) + [
-    DefaultSummaryStatsStyling,
-    DefaultMainStyling,
-]
+local_analysis_klasses = list(PL_ANALYSIS_V2) + [DefaultSummaryStatsStyling, DefaultMainStyling]
 
 
 class PolarsAutocleaning(PandasAutocleaning):
@@ -107,12 +104,13 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
                 sorted_df = processed_df.with_row_index().sort(converted_sort_column, descending=not ascending)
                 slice_df = sorted_df[start:end]
                 #slice_df['index'] = slice_df.index
-                self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)}, [to_parquet(slice_df)])
+                self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)},
+                    [to_parquet(slice_df)])
             else:
                 slice_df = processed_df.with_row_index()[start:end]
                 #slice_df['index'] = slice_df.index
                 self.send({ "type": "infinite_resp", 'key':new_payload_args,
-                            'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
+                    'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
     
                 second_pa = new_payload_args.get('second_request')
                 if not second_pa:
@@ -123,8 +121,7 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
                 extra_df['index'] = extra_df.index
                 self.send(
                     {"type": "infinite_resp", 'key':second_pa, 'data':[], 'length':len(processed_df)},
-                    [to_parquet(extra_df)]
-                )
+                    [to_parquet(extra_df)])
         except Exception as e:
             print(e)
             stack_trace = traceback.format_exc()
@@ -132,11 +129,8 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
             raise
 
 
-def PolarsDFViewer(df,
-                   column_config_overrides=None,
-                   extra_pinned_rows=None, pinned_rows=None,
-                   extra_analysis_klasses=None, analysis_klasses=None,
-                   ):
+def PolarsDFViewer(df, column_config_overrides=None, extra_pinned_rows=None, pinned_rows=None,
+        extra_analysis_klasses=None, analysis_klasses=None):
     """
     Display a Polars DataFrame with buckaroo styling and analysis, no extra UI pieces
 
@@ -171,7 +165,7 @@ class PolarsDFViewerInfinite(PolarsBuckarooInfiniteWidget):
         component_config=None,
         init_sd=None, record_transcript=False):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
-                         extra_grid_config, component_config, init_sd, record_transcript=record_transcript)
+            extra_grid_config, component_config, init_sd, record_transcript=record_transcript)
         self.df_id = str(id(orig_df))
 
 

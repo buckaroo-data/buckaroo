@@ -17,12 +17,8 @@ def main():
     args = parser.parse_args()
 
     # Configure server-side logging to file with timestamps
-    logging.basicConfig(
-        filename=os.path.join(LOG_DIR, "server.log"),
-        level=logging.DEBUG,
-        format="%(asctime)s pid=%(process)d [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    logging.basicConfig(filename=os.path.join(LOG_DIR, "server.log"), level=logging.DEBUG,
+        format="%(asctime)s pid=%(process)d [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     log = logging.getLogger("buckaroo.server")
     log.info("Server starting — port=%d open_browser=%s pid=%d", args.port, not args.no_browser, os.getpid())
 

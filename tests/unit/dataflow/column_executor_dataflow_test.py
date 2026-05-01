@@ -11,11 +11,8 @@ class SelectOnlyAnalysis(PolarsAnalysis):
     """
     Simple analysis used in existing polars tests; provides a few aggregate measures.
     """
-    select_clauses = [
-        F.all().null_count().name.map(json_postfix('null_count')),
-        F.all().mean().name.map(json_postfix('mean')),
-        F.all().quantile(.99).name.map(json_postfix('quin99')),
-    ]
+    select_clauses = [F.all().null_count().name.map(json_postfix('null_count')),
+        F.all().mean().name.map(json_postfix('mean')), F.all().quantile(.99).name.map(json_postfix('quin99'))]
 
 
 def test_init_and_df_meta_lazy():

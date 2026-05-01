@@ -53,15 +53,9 @@ def build_state_message(session: "SessionState", metadata: dict | None = None) -
     Returns:
         A dict ready to be JSON-serialised and sent to WebSocket clients.
     """
-    msg: dict = {
-        "type": "initial_state",
-        "metadata": metadata if metadata is not None else session.metadata,
-        "prompt": session.prompt,
-        "df_display_args": session.df_display_args,
-        "df_data_dict": session.df_data_dict,
-        "df_meta": session.df_meta,
-        "mode": session.mode,
-    }
+    msg: dict = {"type": "initial_state", "metadata": metadata if metadata is not None else session.metadata,
+        "prompt": session.prompt, "df_display_args": session.df_display_args, "df_data_dict": session.df_data_dict,
+        "df_meta": session.df_meta, "mode": session.mode}
     if session.mode == "buckaroo":
         msg["buckaroo_state"] = session.buckaroo_state
         msg["buckaroo_options"] = session.buckaroo_options
@@ -81,11 +75,7 @@ class SessionManager:
     ``IOLoop.call_later`` so it also executes on the IOLoop thread.
     """
 
-    def __init__(
-        self,
-        ttl_s: float = _DEFAULT_SESSION_TTL_S,
-        eviction_interval_s: float = _DEFAULT_EVICTION_INTERVAL_S,
-    ) -> None:
+    def __init__(self, ttl_s: float = _DEFAULT_SESSION_TTL_S, eviction_interval_s: float = _DEFAULT_EVICTION_INTERVAL_S) -> None:
         self.sessions: dict[str, SessionState] = {}
         self._ttl_s = ttl_s
         self._eviction_interval_s = eviction_interval_s
@@ -101,8 +91,7 @@ class SessionManager:
         try:
             import tornado.ioloop
             tornado.ioloop.IOLoop.current().call_later(
-                self._eviction_interval_s, self._evict_and_reschedule
-            )
+                self._eviction_interval_s, self._evict_and_reschedule)
         except RuntimeError:
             # No IOLoop running (e.g. unit tests without an IOLoop).
             pass
@@ -128,12 +117,8 @@ class SessionManager:
             log.info("Evicted idle session=%s", sid)
         if to_evict:
             self._evicted_count += len(to_evict)
-            log.info(
-                "Evicted %d idle session(s); total_evicted=%d active=%d",
-                len(to_evict),
-                self._evicted_count,
-                len(self.sessions),
-            )
+            log.info("Evicted %d idle session(s); total_evicted=%d active=%d", len(to_evict), self._evicted_count,
+                len(self.sessions))
         return len(to_evict)
 
     # ------------------------------------------------------------------

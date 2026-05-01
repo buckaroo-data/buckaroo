@@ -9,25 +9,12 @@ from typing import Any, TypedDict
 import pandas as pd
 import pytest
 
-from buckaroo.pluggable_analysis_framework.stat_func import (
-    StatKey, StatFunc, RawSeries,
-    MISSING, stat, collect_stat_funcs,
-)
-from buckaroo.pluggable_analysis_framework.stat_result import (
-    Ok, Err, UpstreamError, StatError, resolve_accumulator,
-)
-from buckaroo.pluggable_analysis_framework.typed_dag import (
-    build_typed_dag, build_column_dag, DAGConfigError,
-)
-from buckaroo.pluggable_analysis_framework.column_filters import (
-    is_numeric, is_string, is_temporal, is_boolean, any_of, not_,
-)
-from buckaroo.pluggable_analysis_framework.stat_pipeline import (
-    StatPipeline, _normalize_inputs,
-)
-from buckaroo.pluggable_analysis_framework.v1_adapter import (
-    col_analysis_to_stat_funcs,
-)
+from buckaroo.pluggable_analysis_framework.stat_func import (StatKey, StatFunc, RawSeries, MISSING, stat, collect_stat_funcs)
+from buckaroo.pluggable_analysis_framework.stat_result import (Ok, Err, UpstreamError, StatError, resolve_accumulator)
+from buckaroo.pluggable_analysis_framework.typed_dag import (build_typed_dag, build_column_dag, DAGConfigError)
+from buckaroo.pluggable_analysis_framework.column_filters import (is_numeric, is_string, is_temporal, is_boolean, any_of, not_)
+from buckaroo.pluggable_analysis_framework.stat_pipeline import (StatPipeline, _normalize_inputs)
+from buckaroo.pluggable_analysis_framework.v1_adapter import (col_analysis_to_stat_funcs)
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 
@@ -253,12 +240,7 @@ class TestOkErr:
             r.value = 99
 
     def test_err(self):
-        e = Err(
-            error=ValueError("bad"),
-            stat_func_name="test",
-            column_name="col1",
-            inputs={'a': 1},
-        )
+        e = Err(error=ValueError("bad"), stat_func_name="test", column_name="col1", inputs={'a': 1})
         assert isinstance(e.error, ValueError)
         assert e.stat_func_name == 'test'
         assert e.column_name == 'col1'
@@ -280,10 +262,7 @@ class TestResolveAccumulator:
         assert errors == []
 
     def test_with_err(self):
-        acc = {
-            'a': Ok(1),
-            'b': Err(ValueError("bad"), "func", "col1"),
-        }
+        acc = {'a': Ok(1), 'b': Err(ValueError("bad"), "func", "col1")}
         plain, errors = resolve_accumulator(acc, 'col1')
         assert plain['a'] == 1
         assert plain['b'] is None
@@ -291,11 +270,7 @@ class TestResolveAccumulator:
         assert errors[0].stat_key == 'b'
 
     def test_with_key_to_func(self):
-        sf = StatFunc(
-            name='test', func=lambda: None,
-            requires=[], provides=[StatKey('a', int)],
-            needs_raw=False,
-        )
+        sf = StatFunc(name='test', func=lambda: None, requires=[], provides=[StatKey('a', int)], needs_raw=False)
         acc = {'a': Err(ValueError("bad"), "test", "col1")}
         _, errors = resolve_accumulator(acc, 'col1', {'a': sf})
         assert errors[0].stat_func is sf
@@ -303,37 +278,21 @@ class TestResolveAccumulator:
 
 class TestStatError:
     def test_reproduce_code_scalar(self):
-        sf = StatFunc(
-            name='distinct_per', func=distinct_per,
+        sf = StatFunc(name='distinct_per', func=distinct_per,
             requires=[StatKey('length', int), StatKey('distinct_count', int)],
-            provides=[StatKey('distinct_per', float)],
-            needs_raw=False,
-        )
-        se = StatError(
-            column='col1', stat_key='distinct_per',
-            error=ZeroDivisionError('division by zero'),
-            stat_func=sf,
-            inputs={'length': 0, 'distinct_count': 0},
-        )
+            provides=[StatKey('distinct_per', float)], needs_raw=False)
+        se = StatError(column='col1', stat_key='distinct_per', error=ZeroDivisionError('division by zero'),
+            stat_func=sf, inputs={'length': 0, 'distinct_count': 0})
         code = se.reproduce_code()
         assert 'distinct_per' in code
         assert 'ZeroDivisionError' in code
         assert 'length=0' in code
 
     def test_reproduce_code_series(self):
-        sf = StatFunc(
-            name='length', func=length,
-            requires=[StatKey('ser', RawSeries)],
-            provides=[StatKey('length', int)],
-            needs_raw=True,
-        )
+        sf = StatFunc(name='length', func=length, requires=[StatKey('ser', RawSeries)],
+            provides=[StatKey('length', int)], needs_raw=True)
         ser = pd.Series([1, 2, 3])
-        se = StatError(
-            column='col1', stat_key='length',
-            error=TypeError('test'),
-            stat_func=sf,
-            inputs={'ser': ser},
-        )
+        se = StatError(column='col1', stat_key='length', error=TypeError('test'), stat_func=sf, inputs={'ser': ser})
         code = se.reproduce_code()
         assert 'pd.Series' in code
         assert 'TypeError' in code
@@ -347,56 +306,33 @@ class TestBuildTypedDag:
     def test_basic_ordering(self):
         f1 = StatFunc('length', lambda: 10, [], [StatKey('length', int)], False)
         f2 = StatFunc('dc', lambda: 5, [], [StatKey('distinct_count', int)], False)
-        f3 = StatFunc(
-            'dp', lambda length, d: d / length,
-            [StatKey('length', int), StatKey('distinct_count', int)],
-            [StatKey('distinct_per', float)],
-            False,
-        )
+        f3 = StatFunc('dp', lambda length, d: d / length, [StatKey('length', int), StatKey('distinct_count', int)],
+            [StatKey('distinct_per', float)], False)
         ordered = build_typed_dag([f3, f1, f2])
         names = [f.name for f in ordered]
         assert names.index('length') < names.index('dp')
         assert names.index('dc') < names.index('dp')
 
     def test_missing_provider(self):
-        f1 = StatFunc(
-            'dp', lambda: None,
-            [StatKey('nonexistent', int)],
-            [StatKey('result', float)],
-            False,
-        )
+        f1 = StatFunc('dp', lambda: None, [StatKey('nonexistent', int)], [StatKey('result', float)], False)
         with pytest.raises(DAGConfigError, match='nonexistent'):
             build_typed_dag([f1])
 
     def test_raw_types_not_validated(self):
         """RawSeries requirements should not raise DAGConfigError."""
-        f1 = StatFunc(
-            'length', lambda ser: len(ser),
-            [StatKey('ser', RawSeries)],
-            [StatKey('length', int)],
-            True,
-        )
+        f1 = StatFunc('length', lambda ser: len(ser), [StatKey('ser', RawSeries)], [StatKey('length', int)], True)
         ordered = build_typed_dag([f1])
         assert len(ordered) == 1
 
     def test_cycle_detection(self):
-        f1 = StatFunc(
-            'a', lambda: None,
-            [StatKey('b', int)], [StatKey('a', int)], False,
-        )
-        f2 = StatFunc(
-            'b', lambda: None,
-            [StatKey('a', int)], [StatKey('b', int)], False,
-        )
+        f1 = StatFunc('a', lambda: None, [StatKey('b', int)], [StatKey('a', int)], False)
+        f2 = StatFunc('b', lambda: None, [StatKey('a', int)], [StatKey('b', int)], False)
         with pytest.raises(DAGConfigError, match='[Cc]ycle'):
             build_typed_dag([f1, f2])
 
     def test_type_mismatch_warning(self):
         f1 = StatFunc('a', lambda: 1.5, [], [StatKey('x', float)], False)
-        f2 = StatFunc(
-            'b', lambda: None,
-            [StatKey('x', int)], [StatKey('y', int)], False,
-        )
+        f2 = StatFunc('b', lambda: None, [StatKey('x', int)], [StatKey('y', int)], False)
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             build_typed_dag([f1, f2])
@@ -409,15 +345,9 @@ class TestBuildTypedDag:
 
 class TestBuildColumnDag:
     def test_filters_by_dtype(self):
-        f_numeric = StatFunc(
-            'mean', lambda: 0.0, [StatKey('ser', RawSeries)],
-            [StatKey('mean', float)], True,
-            column_filter=is_numeric,
-        )
-        f_all = StatFunc(
-            'length', lambda: 0, [StatKey('ser', RawSeries)],
-            [StatKey('length', int)], True,
-        )
+        f_numeric = StatFunc('mean', lambda: 0.0, [StatKey('ser', RawSeries)], [StatKey('mean', float)], True,
+            column_filter=is_numeric)
+        f_all = StatFunc('length', lambda: 0, [StatKey('ser', RawSeries)], [StatKey('length', int)], True)
 
         # Numeric column — both should be included
         result = build_column_dag([f_numeric, f_all], pd.Series([1]).dtype)
@@ -430,20 +360,10 @@ class TestBuildColumnDag:
 
     def test_cascade_removal(self):
         """If a filtered-out func provides a key needed by another, cascade remove."""
-        f1 = StatFunc(
-            'mean', lambda: 0.0, [StatKey('ser', RawSeries)],
-            [StatKey('mean', float)], True,
-            column_filter=is_numeric,
-        )
-        f2 = StatFunc(
-            'mean_ratio', lambda: 0.0,
-            [StatKey('mean', float)],
-            [StatKey('mean_ratio', float)], False,
-        )
-        f3 = StatFunc(
-            'length', lambda: 0, [StatKey('ser', RawSeries)],
-            [StatKey('length', int)], True,
-        )
+        f1 = StatFunc('mean', lambda: 0.0, [StatKey('ser', RawSeries)], [StatKey('mean', float)], True,
+            column_filter=is_numeric)
+        f2 = StatFunc('mean_ratio', lambda: 0.0, [StatKey('mean', float)], [StatKey('mean_ratio', float)], False)
+        f3 = StatFunc('length', lambda: 0, [StatKey('ser', RawSeries)], [StatKey('length', int)], True)
 
         # String column: mean is filtered out, mean_ratio cascades out
         result = build_column_dag([f1, f2, f3], pd.Series(['a']).dtype)
@@ -571,34 +491,21 @@ class TestNormalizeInputs:
 
 class TestStatPipeline:
     def test_basic_pipeline(self):
-        pipeline = StatPipeline(
-            [length, distinct_count, distinct_per],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([length, distinct_count, distinct_per], unit_test=False)
         assert 'distinct_per' in pipeline.provided_summary_facts_set
         assert 'length' in pipeline.provided_summary_facts_set
 
     def test_process_column(self):
-        pipeline = StatPipeline(
-            [length, distinct_count, distinct_per],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([length, distinct_count, distinct_per], unit_test=False)
         ser = pd.Series([1, 2, 3, 1, 2])
-        result, errors = pipeline.process_column(
-            column_name='test',
-            column_dtype=ser.dtype,
-            raw_series=ser,
-        )
+        result, errors = pipeline.process_column(column_name='test', column_dtype=ser.dtype, raw_series=ser)
         assert result['length'] == 5
         assert result['distinct_count'] == 3
         assert result['distinct_per'] == 3 / 5
         assert errors == []
 
     def test_process_df(self):
-        pipeline = StatPipeline(
-            [length, null_count, nan_per],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([length, null_count, nan_per], unit_test=False)
         df = pd.DataFrame({'a': [1, 2, 3], 'b': [None, 2, None]})
         result, errors = pipeline.process_df(df)
         assert len(result) == 2
@@ -618,10 +525,7 @@ class TestStatPipeline:
         def depends_on_fail(always_fails: int) -> float:
             return always_fails * 2.0
 
-        pipeline = StatPipeline(
-            [always_fails, depends_on_fail],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([always_fails, depends_on_fail], unit_test=False)
         ser = pd.Series([1, 2, 3])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
 
@@ -666,10 +570,7 @@ class TestStatPipeline:
 
     def test_column_filter(self):
         """Numeric-only stat should not appear for string columns."""
-        pipeline = StatPipeline(
-            [length, mean_stat],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([length, mean_stat], unit_test=False)
         df = pd.DataFrame({'nums': [1, 2, 3], 'strs': ['a', 'b', 'c']})
         result, errors = pipeline.process_df(df)
 
@@ -688,10 +589,7 @@ class TestStatPipeline:
 
     def test_v1_compat_mixed(self):
         """Mix v1 and v2 in the same pipeline."""
-        pipeline = StatPipeline(
-            [V1Len, V1DistinctCount, distinct_per],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([V1Len, V1DistinctCount, distinct_per], unit_test=False)
         ser = pd.Series([1, 2, 3, 1])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 4
@@ -729,10 +627,7 @@ class TestStatPipeline:
 
     def test_process_perverse_df(self):
         """Pipeline should handle PERVERSE_DF without crashing."""
-        pipeline = StatPipeline(
-            [length, null_count, distinct_count, nan_per, distinct_per],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([length, null_count, distinct_count, nan_per, distinct_per], unit_test=False)
         result, errors = pipeline.process_df(PERVERSE_DF)
         assert len(result) == len(PERVERSE_DF.columns)
 
@@ -743,10 +638,7 @@ class TestStatPipeline:
         assert errors == []
 
     def test_unit_test_runs(self):
-        pipeline = StatPipeline(
-            [length, null_count, nan_per],
-            unit_test=True,
-        )
+        pipeline = StatPipeline([length, null_count, nan_per], unit_test=True)
         passed, errors = pipeline._unit_test_result
         assert passed is True
 
@@ -755,10 +647,7 @@ class TestStatPipelineV1Compat:
     """Test backward compatibility with v1 ColAnalysis classes."""
 
     def test_v1_only_pipeline(self):
-        pipeline = StatPipeline(
-            [V1Len, V1DistinctCount, V1DistinctPer],
-            unit_test=False,
-        )
+        pipeline = StatPipeline([V1Len, V1DistinctCount, V1DistinctPer], unit_test=False)
         df = pd.DataFrame({'a': [1, 2, 3], 'b': [1, 1, 1]})
         result, errors = pipeline.process_df(df)
         assert len(result) == 2
@@ -822,13 +711,7 @@ class TestIntegration:
 
     def test_full_pipeline_on_perverse_df(self):
         """Run a realistic pipeline on PERVERSE_DF."""
-        pipeline = StatPipeline([
-            length,
-            null_count,
-            distinct_count,
-            nan_per,
-            distinct_per,
-        ], unit_test=False)
+        pipeline = StatPipeline([length, null_count, distinct_count, nan_per, distinct_per], unit_test=False)
 
         result, errors = pipeline.process_df(PERVERSE_DF)
         assert len(result) == len(PERVERSE_DF.columns)

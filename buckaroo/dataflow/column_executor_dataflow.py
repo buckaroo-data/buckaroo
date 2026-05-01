@@ -47,8 +47,7 @@ class ColumnExecutorDataflow(ABCDataflow):
         'columns': 0,
         'rows_shown': 0,
         'filtered_rows': 0,
-        'total_rows': 0
-    }).tag(sync=True)
+        'total_rows': 0}).tag(sync=True)
 
     # No-op configs (placeholders)
     command_config = TDict({}).tag(sync=True)
@@ -104,8 +103,7 @@ class ColumnExecutorDataflow(ABCDataflow):
             'columns': len(cols),
             'rows_shown': 0,
             'filtered_rows': 0,
-            'total_rows': total_rows
-        }
+            'total_rows': total_rows}
 
 
     def add_analysis(self, analysis_klass: Type[PolarsAnalysis]) -> None:
@@ -120,15 +118,10 @@ class ColumnExecutorDataflow(ABCDataflow):
     def populate_df_meta(self) -> None:
         self._initialize_df_meta()
 
-    def compute_summary_with_executor(
-        self,
-        file_cache: Optional[FileCache] = None,
-        progress_listener: Optional[ProgressListener] = None,
-        file_path: MaybeFilepathLike = None,
-        planning_function: Optional["PlanningFunction"] = None,
-        timeout_secs: Optional[float] = None,
-        cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None,
-    ) -> None:
+    def compute_summary_with_executor(self, file_cache: Optional[FileCache] = None,
+            progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None,
+            planning_function: Optional["PlanningFunction"] = None, timeout_secs: Optional[float] = None,
+            cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         """
         Execute the PAF column executor over the LazyFrame to compute summary stats.
         - Avoids materializing the entire dataframe; executes per-column selections lazily.
@@ -194,8 +187,7 @@ class ColumnExecutorDataflow(ABCDataflow):
         column_executor = self._column_executor_class(
             self.analysis_klasses,
             cached_merged_sd=cached_merged_sd_for_executor,
-            orig_to_rw_map=orig_to_rw
-        )
+            orig_to_rw_map=orig_to_rw)
 
         # Start with cached merged_sd if available (so skipped columns are included in aggregated_summary)
         # Note: cached_merged_sd_for_executor is already filtered to only include columns in the current LazyFrame
@@ -276,7 +268,8 @@ class ColumnExecutorDataflow(ABCDataflow):
                     # Update merged_sd as stats come in (important for async executors)
                     # Merge with existing to preserve any cached columns
                     current_merged = self.merged_sd.copy() if self.merged_sd else {}
-                    current_merged.update(merge_sds(self.cleaned_sd or {}, self.summary_sd or {}, self.processed_sd or {}))
+                    current_merged.update(merge_sds(self.cleaned_sd or {}, self.summary_sd or {},
+                        self.processed_sd or {}))
                     self.merged_sd = current_merged
             except Exception:
                 # do not interrupt execution on progress update failures
@@ -287,29 +280,27 @@ class ColumnExecutorDataflow(ABCDataflow):
         # Only pass timeout_secs if it's MultiprocessingExecutor and timeout is provided
         if timeout_secs is not None and issubclass(self._executor_class, MultiprocessingExecutor):
             ex = self._executor_class(
-                self.raw_ldf, 
-                column_executor, 
-                _listener, 
-                fc, 
-                executor_log=self.executor_log, 
+                self.raw_ldf,
+                column_executor,
+                _listener,
+                fc,
+                executor_log=self.executor_log,
                 file_path=file_path,
                 timeout_secs=timeout_secs,
                 cached_merged_sd=cached_merged_sd_for_executor,
                 orig_to_rw_map=orig_to_rw,
-                planning_function=planning_function
-            )
+                planning_function=planning_function)
         else:
             ex = self._executor_class(
-                self.raw_ldf, 
-                column_executor, 
-                _listener, 
-                fc, 
-                executor_log=self.executor_log, 
+                self.raw_ldf,
+                column_executor,
+                _listener,
+                fc,
+                executor_log=self.executor_log,
                 file_path=file_path,
                 cached_merged_sd=cached_merged_sd_for_executor,
                 orig_to_rw_map=orig_to_rw,
-                planning_function=planning_function
-            )
+                planning_function=planning_function)
         executor_id = id(ex)
         executor_pid = os.getpid()
         log_msg = f"ColumnExecutorDataflow.compute_summary_with_executor: Executor created - executor_id={executor_id}, executor_class={self._executor_class.__name__}, pid={executor_pid}, dataflow_id={dataflow_id}, dataflow_pid={dataflow_pid}, listener_id={listener_id}"
@@ -333,19 +324,11 @@ class ColumnExecutorDataflow(ABCDataflow):
         
         return None
 
-    def auto_compute_summary(
-        self,
-        sync_executor_class: Type[Executor],
-        parallel_executor_class: Type[Executor],
-        num_rows_threshold: int = 300,
-        num_cols_threshold: int = 50,
-        file_cache: Optional[FileCache] = None,
-        progress_listener: Optional[ProgressListener] = None,
-        file_path: MaybeFilepathLike = None,
-        planning_function: Optional["PlanningFunction"] = None,
-        timeout_secs: Optional[float] = None,
-        cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None,
-    ) -> None:
+    def auto_compute_summary(self, sync_executor_class: Type[Executor], parallel_executor_class: Type[Executor],
+            num_rows_threshold: int = 300, num_cols_threshold: int = 50, file_cache: Optional[FileCache] = None,
+            progress_listener: Optional[ProgressListener] = None, file_path: MaybeFilepathLike = None,
+            planning_function: Optional["PlanningFunction"] = None, timeout_secs: Optional[float] = None,
+            cached_merged_sd_override: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         # Determine shape
         try:
             total_rows = int(self.raw_ldf.select(pl.len().alias("__len")).collect().item())
@@ -354,21 +337,16 @@ class ColumnExecutorDataflow(ABCDataflow):
         num_cols = len(self.raw_ldf.collect_schema().names())
         use_parallel = (total_rows >= num_rows_threshold) or (num_cols >= num_cols_threshold)
         # If sync was tried before and incomplete, force parallel
-        dfi = (id(self.raw_ldf), "",)
+        dfi = (id(self.raw_ldf), "")
         if self.executor_log.has_incomplete_for_executor(dfi, sync_executor_class.__name__):
             use_parallel = True
         exec_class = parallel_executor_class if use_parallel else sync_executor_class
         # Run
         self._executor_class = exec_class
         try:
-            self.compute_summary_with_executor(
-                file_cache=file_cache, 
-                progress_listener=progress_listener, 
-                file_path=file_path, 
-                planning_function=planning_function, 
-                timeout_secs=timeout_secs,
-                cached_merged_sd_override=cached_merged_sd_override,
-            )
+            self.compute_summary_with_executor(file_cache=file_cache, progress_listener=progress_listener,
+                file_path=file_path, planning_function=planning_function, timeout_secs=timeout_secs,
+                cached_merged_sd_override=cached_merged_sd_override)
         except Exception as e:
             #FIXME this is a place we want to send a progress notification about the failure or the different approach
             logger.warning(f"compute_summary_with_executor failed with {exec_class.__name__}: {e}", exc_info=True)
@@ -377,16 +355,12 @@ class ColumnExecutorDataflow(ABCDataflow):
             if exec_class is sync_executor_class:
                 self._executor_class = parallel_executor_class
                 try:
-                    self.compute_summary_with_executor(
-                        file_cache=file_cache, 
-                        progress_listener=progress_listener, 
-                        file_path=file_path, 
-                        planning_function=planning_function, 
-                        timeout_secs=timeout_secs,
-                        cached_merged_sd_override=cached_merged_sd_override,
-                    )
+                    self.compute_summary_with_executor(file_cache=file_cache, progress_listener=progress_listener,
+                        file_path=file_path, planning_function=planning_function, timeout_secs=timeout_secs,
+                        cached_merged_sd_override=cached_merged_sd_override)
                 except Exception as e2:
-                    logger.error(f"compute_summary_with_executor also failed with parallel executor: {e2}", exc_info=True)
+                    logger.error(f"compute_summary_with_executor also failed with parallel executor: {e2}",
+                        exc_info=True)
                     # Don't re-raise, let it fail silently and use defaults
 
     @property

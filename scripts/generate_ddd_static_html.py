@@ -11,18 +11,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from buckaroo.artifact import to_html
-from buckaroo.ddd_library import (
-    df_with_infinity,
-    df_with_really_big_number,
-    df_with_col_named_index,
-    get_df_with_named_index,
-    get_multiindex_with_names_cols_df,
-    get_multiindex_index_df,
-    get_multiindex3_index_df,
-    get_multiindex_with_names_both,
-    df_with_weird_types,
-    pl_df_with_weird_types,
-)
+from buckaroo.ddd_library import (df_with_infinity, df_with_really_big_number, df_with_col_named_index, get_df_with_named_index, get_multiindex_with_names_cols_df, get_multiindex_index_df, get_multiindex3_index_df, get_multiindex_with_names_both, df_with_weird_types, pl_df_with_weird_types)
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'extra-html', 'ddd')
 os.makedirs(OUT_DIR, exist_ok=True)

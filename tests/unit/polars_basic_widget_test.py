@@ -65,9 +65,7 @@ class SelectOnlyAnalysis(PolarsAnalysis):
         F.all().mean().name.map(json_postfix('mean')),
         F.all().quantile(.99).name.map(json_postfix('quin99'))]
 
-test_df = pl.DataFrame({
-        'normal_int_series' : pl.Series([1,2,3,4]),
-})
+test_df = pl.DataFrame({'normal_int_series' : pl.Series([1,2,3,4])})
 
 
 def test_polars_all_stats():
@@ -82,7 +80,8 @@ def test_polars_all_stats():
     sdf, errs = polars_produce_series_df(
         test_df, [SelectOnlyAnalysis], 'test_df', debug=True)
     expected = {
-        'a':  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0, 'rewritten_col_name':'a', 'orig_col_name':'normal_int_series'}}
+        'a':  {'mean': 2.5, 'null_count':  0, 'quin99':  4.0, 'rewritten_col_name':'a',
+            'orig_col_name':'normal_int_series'}}
     #dsdf = replace_in_dict(sdf, [(np.nan, None)])
     class SimplePolarsBuckaroo(PolarsBuckarooWidget):
         DFStatsClass = PlDfStats  # v1 PolarsAnalysis classes need PlDfStats
@@ -112,8 +111,7 @@ def test_polars_infinite():
 
 def Xtest_polars_index_col():
     df = pl.DataFrame({'bools':[True, True, False, False, True, None],
-                       'index':[   0,    1,     2,     3,    4,    5]
-                       })
+                       'index':[   0,    1,     2,     3,    4,    5]})
     pbw2= PolarsBuckarooWidget(df)
     assert pbw2 is not None
 
@@ -150,7 +148,8 @@ def test_pandas_all_stats():
 
     sbw = SimpleBuckaroo(pd_test_df)
     assert sbw.dataflow.merged_sd == {
-        'a' :  {'mean': 2.5,  'null_count':  0, 'quin99':  4.0, 'rewritten_col_name':'a', 'orig_col_name':'normal_int_series'}}
+        'a' :  {'mean': 2.5, 'null_count':  0, 'quin99':  4.0, 'rewritten_col_name':'a',
+            'orig_col_name':'normal_int_series'}}
     assert sbw.df_display_args['main']['df_viewer_config'] == EXPECTED_DF_VIEWER_CONFIG
 
 
@@ -227,7 +226,8 @@ class ValueCountPostProcessing(PolarsAnalysis):
     @classmethod
     def post_process_df(kls, df):
         result_df = df.select(
-            F.all().value_counts().implode().list.gather(pl.arange(0, 10), null_on_oob=True).explode().struct.rename_fields(['val', 'unused_count']).struct.field('val').prefix('val_'),
+            F.all().value_counts().implode().list.gather(pl.arange(0, 10), null_on_oob=True).explode().struct.rename_fields(['val',
+                'unused_count']).struct.field('val').prefix('val_'),
             F.all().value_counts().implode().list.gather(pl.arange(0, 10), null_on_oob=True).explode().struct.field('count').prefix('count_'))
         return [result_df, {}]
     post_processing_method = "value_counts"
@@ -325,9 +325,8 @@ def test_polars_search():
 
 def get_named_col_pldf():
     return pl.DataFrame({'foo':[1,2,3],
-                  'bar':["asdf","iiu", "asd999"],
-                  'baz':[True, False, True]
-                  })
+        'bar':["asdf","iiu", "asd999"],
+        'baz':[True, False, True]})
                   
 
 def test_serialize_regular_df():

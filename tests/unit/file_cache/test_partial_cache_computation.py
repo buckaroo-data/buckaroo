@@ -20,10 +20,8 @@ from tests.unit.file_cache.executor_test_utils import wait_for_nested_executor_f
 
 # Timing assumptions and tmpdir cleanup don't work on Windows (spawn is slow,
 # SQLite file locking prevents cleanup)
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Timing-dependent tests incompatible with Windows spawn context",
-)
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+    reason="Timing-dependent tests incompatible with Windows spawn context")
 
 
 def test_partial_cache_loads_immediately_and_continues_computing(tmp_path):
@@ -48,8 +46,7 @@ def test_partial_cache_loads_immediately_and_continues_computing(tmp_path):
             'col2': [4, 5, 6],
             'col3': [7, 8, 9],
             'col4': [10, 11, 12],
-            'col5': [13, 14, 15]
-        })
+            'col5': [13, 14, 15]})
         df.write_csv(test_file)
         
         # Track which columns are computed
@@ -111,8 +108,7 @@ def test_partial_cache_loads_immediately_and_continues_computing(tmp_path):
                     ldf1,
                     file_path=str(test_file),
                     sync_executor_class=Executor,
-                    parallel_executor_class=Executor
-                )
+                    parallel_executor_class=Executor)
                 
                 # Wait for 3rd notification (simulating Jupyter Lab - widget updates as notifications arrive)
                 # This is more realistic than time.sleep() as it responds to actual progress
@@ -140,8 +136,7 @@ def test_partial_cache_loads_immediately_and_continues_computing(tmp_path):
                     ldf2,
                     file_path=str(test_file),
                     sync_executor_class=Executor,
-                    parallel_executor_class=Executor
-                )
+                    parallel_executor_class=Executor)
                 
                 # For cached columns, should be immediate - no need to wait for notifications
                 # Use wait utility to ensure initialization is complete
@@ -187,8 +182,7 @@ def test_partial_cache_shows_cached_immediately_computes_rest(tmp_path):
             'col2': [4, 5, 6],
             'col3': [7, 8, 9],
             'col4': [10, 11, 12],
-            'col5': [13, 14, 15]
-        })
+            'col5': [13, 14, 15]})
         df.write_csv(test_file)
         
         # First: Compute and cache only first 3 columns
@@ -199,8 +193,7 @@ def test_partial_cache_shows_cached_immediately_computes_rest(tmp_path):
             ldf1,
             file_path=str(test_file),
             sync_executor_class=Executor,
-            parallel_executor_class=Executor
-        )
+            parallel_executor_class=Executor)
         assert w1
         wait_for_nested_executor_finish(w1, timeout_secs=5.0)
         
@@ -244,8 +237,7 @@ def test_partial_cache_shows_cached_immediately_computes_rest(tmp_path):
                 ldf2,
                 file_path=str(test_file),
                 sync_executor_class=Executor,
-                parallel_executor_class=Executor
-            )
+                parallel_executor_class=Executor)
             
             # Immediately after creation, should have at least the 3 cached columns
             # Note: cached columns should appear immediately, but we wait briefly for initialization
@@ -306,8 +298,7 @@ def test_huge_dataframe_partial_cache_scenario(tmp_path):
             ldf1,
             file_path=str(test_file),
             sync_executor_class=Executor,
-            parallel_executor_class=Executor
-        )
+            parallel_executor_class=Executor)
         assert w1
         wait_for_nested_executor_finish(w1, timeout_secs=5.0)
         
@@ -327,8 +318,7 @@ def test_huge_dataframe_partial_cache_scenario(tmp_path):
             ldf2,
             file_path=str(test_file),
             sync_executor_class=Executor,
-            parallel_executor_class=Executor
-        )
+            parallel_executor_class=Executor)
         
         # Immediately check - should have cached columns
         time.sleep(0.1)

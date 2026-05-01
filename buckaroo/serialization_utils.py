@@ -61,8 +61,7 @@ def check_and_fix_df(df:pd.DataFrame) -> pd.DataFrame:
 EMPTY_DF_WHOLE = {
     'pinned_rows':[],
     'column_config': [],
-    'data': []
-}
+    'data': []}
 
 def d_update(d1, d2):
     ret_dict = d1.copy()
@@ -194,8 +193,7 @@ def to_parquet(df):
     if not HAS_FASTPARQUET:
         raise ImportError(
             "fastparquet is required for parquet serialization but is not installed. "
-            "Install it with: pip install fastparquet"
-        )
+            "Install it with: pip install fastparquet")
 
     data: BytesIO = BytesIO()
 

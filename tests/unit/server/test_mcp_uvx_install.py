@@ -44,23 +44,14 @@ if _MCP_CMD_OVERRIDE:
     # Wheel mode: command is already installed (e.g. "buckaroo-table")
     MCP_CMD = _MCP_CMD_OVERRIDE.split()
     _can_run = shutil.which(MCP_CMD[0]) is not None
-    skip_no_cmd = pytest.mark.skipif(
-        not _can_run,
-        reason=f"{MCP_CMD[0]!r} not on PATH (set by BUCKAROO_MCP_CMD)",
-    )
+    skip_no_cmd = pytest.mark.skipif(not _can_run, reason=f"{MCP_CMD[0]!r} not on PATH (set by BUCKAROO_MCP_CMD)")
 else:
     # uvx mode: build the full uvx command
     UVX_PACKAGE = os.environ.get("BUCKAROO_MCP_PACKAGE", "buckaroo[mcp]")
     UVX_INDEX_URL = os.environ.get("BUCKAROO_INDEX_URL", "https://test.pypi.org/simple/")
     UVX_EXTRA_INDEX = os.environ.get("BUCKAROO_EXTRA_INDEX", "https://pypi.org/simple/")
-    MCP_CMD = [
-        "uvx",
-        "--index-strategy", "unsafe-best-match",
-        "--index-url", UVX_INDEX_URL,
-        "--extra-index-url", UVX_EXTRA_INDEX,
-        "--from", UVX_PACKAGE,
-        "buckaroo-table",
-    ]
+    MCP_CMD = ["uvx", "--index-strategy", "unsafe-best-match", "--index-url", UVX_INDEX_URL, "--extra-index-url",
+        UVX_EXTRA_INDEX, "--from", UVX_PACKAGE, "buckaroo-table"]
     _can_run = shutil.which("uvx") is not None
     skip_no_cmd = pytest.mark.skipif(not _can_run, reason="uvx not on PATH")
 
@@ -189,14 +180,11 @@ class TestMcpInstall:
     @pytest.mark.skipif(bool(_MCP_CMD_OVERRIDE), reason="not applicable in wheel mode")
     def test_uvx_resolves_package(self):
         """uvx can resolve and fetch buckaroo[mcp] without errors."""
-        cmd = [
-            "uvx",
-            "--index-strategy", "unsafe-best-match",
-            "--index-url", os.environ.get("BUCKAROO_INDEX_URL", "https://test.pypi.org/simple/"),
-            "--extra-index-url", os.environ.get("BUCKAROO_EXTRA_INDEX", "https://pypi.org/simple/"),
-            "--from", os.environ.get("BUCKAROO_MCP_PACKAGE", "buckaroo[mcp]"),
-            "python", "-c", "import buckaroo_mcp_tool; print('ok')",
-        ]
+        cmd = ["uvx", "--index-strategy", "unsafe-best-match", "--index-url",
+            os.environ.get("BUCKAROO_INDEX_URL", "https://test.pypi.org/simple/"), "--extra-index-url",
+            os.environ.get("BUCKAROO_EXTRA_INDEX", "https://pypi.org/simple/"), "--from",
+            os.environ.get("BUCKAROO_MCP_PACKAGE", "buckaroo[mcp]"), "python", "-c",
+            "import buckaroo_mcp_tool; print('ok')"]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         assert r.returncode == 0, (
             f"uvx resolve failed:\nstdout: {r.stdout[:500]}\nstderr: {r.stderr[:500]}"
@@ -207,12 +195,7 @@ class TestMcpInstall:
         """Running buckaroo-table via uvx must produce 0 bytes on stdout
         when stdin is immediately closed, OR only valid JSON-RPC lines.
         Any non-JSON stdout would corrupt the MCP protocol."""
-        proc = subprocess.Popen(
-            MCP_CMD,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        proc = subprocess.Popen(MCP_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         # Close stdin immediately — server should exit cleanly
         proc.stdin.close()
         try:
@@ -233,18 +216,12 @@ class TestMcpInstall:
                 except json.JSONDecodeError:
                     pytest.fail(
                         f"uvx wrote non-JSON to stdout (line {i+1}), "
-                        f"which would corrupt the MCP protocol:\n{line[:200]}"
-                    )
+                        f"which would corrupt the MCP protocol:\n{line[:200]}")
 
     def test_uvx_mcp_handshake(self):
         """Pipe an MCP initialize message and verify we get a valid response
         with serverInfo.name == 'buckaroo-table'."""
-        proc = subprocess.Popen(
-            MCP_CMD,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        proc = subprocess.Popen(MCP_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         payload = _make_init_payload()
         try:
             stdout, stderr = proc.communicate(input=payload, timeout=10)
@@ -254,8 +231,7 @@ class TestMcpInstall:
             pytest.fail(
                 f"MCP handshake timed out after 10s.\n"
                 f"stdout ({len(stdout)}b): {stdout[:300]}\n"
-                f"stderr ({len(stderr)}b): {stderr.decode(errors='replace')[:300]}"
-            )
+                f"stderr ({len(stderr)}b): {stderr.decode(errors='replace')[:300]}")
 
         assert len(stdout) > 0, (
             f"No response on stdout.\n"
@@ -277,12 +253,7 @@ class TestMcpInstall:
 
     def test_uvx_startup_timing(self):
         """Time from process spawn to first JSON-RPC response must be < 15s."""
-        proc = subprocess.Popen(
-            MCP_CMD,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        proc = subprocess.Popen(MCP_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         payload = _make_init_payload()
         t0 = time.monotonic()
         try:
@@ -304,24 +275,14 @@ class TestMcpInstall:
 
         Uses newline-delimited JSON (the MCP Python SDK stdio transport format).
         """
-        proc = subprocess.Popen(
-            MCP_CMD,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        proc = subprocess.Popen(MCP_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         try:
             # Step 1: initialize + initialized notification
             _mcp_handshake(proc, request_id=1)
 
             # Step 2: list tools
-            _send(proc, {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/list",
-                "params": {},
-            })
+            _send(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
             tools_resp = _recv(proc, target_id=2)
             assert tools_resp is not None, "No response to tools/list"
             assert "result" in tools_resp, f"tools/list failed: {tools_resp}"
@@ -352,12 +313,7 @@ class TestMcpInstall:
         """
         port = 8700
 
-        proc = subprocess.Popen(
-            MCP_CMD,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        proc = subprocess.Popen(MCP_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         tmp_csv = None
         try:
@@ -365,9 +321,7 @@ class TestMcpInstall:
             _mcp_handshake(proc, request_id=1)
 
             # Step 2: create a temp CSV
-            tmp = tempfile.NamedTemporaryFile(
-                suffix=".csv", delete=False, mode="w",
-            )
+            tmp = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
             tmp_csv = tmp.name
             tmp.close()
             _write_test_csv(tmp_csv)
@@ -472,14 +426,8 @@ class TestUvxFailureModes:
     def test_uvx_bad_index_url_fails_gracefully(self):
         """uvx with a nonexistent index URL should exit non-zero with a
         useful error on stderr and no stdout pollution."""
-        cmd = [
-            "uvx",
-            "--index-strategy", "unsafe-best-match",
-            "--index-url", "https://nonexistent.example.com/simple/",
-            "--extra-index-url", "https://nonexistent.example.com/simple/",
-            "--from", "buckaroo[mcp]",
-            "buckaroo-table",
-        ]
+        cmd = ["uvx", "--index-strategy", "unsafe-best-match", "--index-url", "https://nonexistent.example.com/simple/",
+            "--extra-index-url", "https://nonexistent.example.com/simple/", "--from", "buckaroo[mcp]", "buckaroo-table"]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         assert r.returncode != 0, (
             f"Expected non-zero exit for bad index URL, got {r.returncode}"
@@ -496,17 +444,12 @@ class TestUvxFailureModes:
             except json.JSONDecodeError:
                 pytest.fail(
                     f"uvx wrote non-JSON to stdout on failure, "
-                    f"which would corrupt MCP protocol:\n{line[:200]}"
-                )
+                    f"which would corrupt MCP protocol:\n{line[:200]}")
 
     def test_uvx_nonexistent_package_fails_gracefully(self):
         """uvx with a package that doesn't exist should exit non-zero
         with a useful error on stderr."""
-        cmd = [
-            "uvx",
-            "--from", "nonexistent-pkg-zzz-does-not-exist[mcp]",
-            "buckaroo-table",
-        ]
+        cmd = ["uvx", "--from", "nonexistent-pkg-zzz-does-not-exist[mcp]", "buckaroo-table"]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         assert r.returncode != 0, (
             f"Expected non-zero exit for nonexistent package, got {r.returncode}"
@@ -522,5 +465,4 @@ class TestUvxFailureModes:
             except json.JSONDecodeError:
                 pytest.fail(
                     f"uvx wrote non-JSON to stdout on failure, "
-                    f"which would corrupt MCP protocol:\n{line[:200]}"
-                )
+                    f"which would corrupt MCP protocol:\n{line[:200]}")

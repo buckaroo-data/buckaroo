@@ -27,8 +27,7 @@ class UpstreamError(Exception):
         self.failed_input = failed_input
         self.original_error = original_error
         super().__init__(
-            f"Cannot compute '{stat_func_name}': input '{failed_input}' failed"
-        )
+            f"Cannot compute '{stat_func_name}': input '{failed_input}' failed")
 
 
 @dataclass(frozen=True)
@@ -109,11 +108,8 @@ class StatError:
         return '\n'.join(lines)
 
 
-def resolve_accumulator(
-    accumulator: Dict[str, StatResult],
-    column_name: str,
-    key_to_func: Optional[Dict[str, Any]] = None,
-) -> Tuple[Dict[str, Any], List[StatError]]:
+def resolve_accumulator(accumulator: Dict[str, StatResult], column_name: str,
+        key_to_func: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[StatError]]:
     """Convert Ok/Err accumulator to plain dict + error list.
 
     Args:
@@ -137,13 +133,8 @@ def resolve_accumulator(
         elif isinstance(result, Err):
             plain[key] = None
             stat_func = key_to_func.get(key)
-            errors.append(StatError(
-                column=column_name,
-                stat_key=key,
-                error=result.error,
-                stat_func=stat_func,
-                inputs=result.inputs,
-            ))
+            errors.append(StatError(column=column_name, stat_key=key, error=result.error, stat_func=stat_func,
+                inputs=result.inputs))
         else:
             # Should not happen, but be defensive
             plain[key] = result

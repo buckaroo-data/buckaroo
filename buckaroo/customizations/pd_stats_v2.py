@@ -25,22 +25,13 @@ from typing import Any, TypedDict
 import numpy as np
 import pandas as pd
 
-from buckaroo.pluggable_analysis_framework.stat_func import (
-    StatFunc, StatKey, stat, RawSeries,
-)
+from buckaroo.pluggable_analysis_framework.stat_func import (StatFunc, StatKey, stat, RawSeries)
 from buckaroo.pluggable_analysis_framework.column_filters import is_numeric_not_bool
 
 # Helper functions from v1 modules (not rewritten - pure utilities)
 from buckaroo.customizations.analysis import get_mode
-from buckaroo.customizations.histogram import (
-    categorical_histogram, numeric_histogram,
-)
-from buckaroo.customizations.pd_fracs import (
-    regular_int_parse_frac as _regular_int_parse_frac,
-    strip_int_parse_frac as _strip_int_parse_frac,
-    str_bool_frac as _str_bool_frac,
-    us_dates_frac as _us_dates_frac,
-)
+from buckaroo.customizations.histogram import (categorical_histogram, numeric_histogram)
+from buckaroo.customizations.pd_fracs import (regular_int_parse_frac as _regular_int_parse_frac, strip_int_parse_frac as _strip_int_parse_frac, str_bool_frac as _str_bool_frac, us_dates_frac as _us_dates_frac)
 
 
 # ============================================================
@@ -57,45 +48,22 @@ def orig_col_name(ser: RawSeries) -> Any:
 # Typing Stats (replaces TypingStats ColAnalysis)
 # ============================================================
 
-TypingResult = TypedDict('TypingResult', {
-    'dtype': str,
-    'is_numeric': bool,
-    'is_integer': bool,
-    'is_datetime': bool,
-    'is_timedelta': bool,
-    'is_bool': bool,
-    'is_float': bool,
-    'is_string': bool,
-    'is_categorical': bool,
-    'is_period': bool,
-    'is_interval': bool,
-    'is_time': bool,
-    'is_decimal': bool,
-    'is_binary': bool,
-    'memory_usage': int,
-})
+TypingResult = TypedDict('TypingResult',
+    {'dtype': str, 'is_numeric': bool, 'is_integer': bool, 'is_datetime': bool, 'is_timedelta': bool, 'is_bool': bool,
+     'is_float': bool, 'is_string': bool, 'is_categorical': bool, 'is_period': bool, 'is_interval': bool,
+     'is_time': bool, 'is_decimal': bool, 'is_binary': bool, 'memory_usage': int})
 
 
 @stat()
 def typing_stats(ser: RawSeries) -> TypingResult:
     """Compute dtype and type flags for a column."""
-    return {
-        'dtype': str(ser.dtype),
-        'is_numeric': pd.api.types.is_numeric_dtype(ser),
-        'is_integer': pd.api.types.is_integer_dtype(ser),
-        'is_datetime': pd.api.types.is_datetime64_any_dtype(ser),
-        'is_timedelta': pd.api.types.is_timedelta64_dtype(ser),
-        'is_bool': pd.api.types.is_bool_dtype(ser),
-        'is_float': pd.api.types.is_float_dtype(ser),
-        'is_string': pd.api.types.is_string_dtype(ser),
+    return {'dtype': str(ser.dtype), 'is_numeric': pd.api.types.is_numeric_dtype(ser),
+        'is_integer': pd.api.types.is_integer_dtype(ser), 'is_datetime': pd.api.types.is_datetime64_any_dtype(ser),
+        'is_timedelta': pd.api.types.is_timedelta64_dtype(ser), 'is_bool': pd.api.types.is_bool_dtype(ser),
+        'is_float': pd.api.types.is_float_dtype(ser), 'is_string': pd.api.types.is_string_dtype(ser),
         'is_categorical': isinstance(ser.dtype, pd.CategoricalDtype),
-        'is_period': isinstance(ser.dtype, pd.PeriodDtype),
-        'is_interval': isinstance(ser.dtype, pd.IntervalDtype),
-        'is_time': False,
-        'is_decimal': False,
-        'is_binary': False,
-        'memory_usage': ser.memory_usage(),
-    }
+        'is_period': isinstance(ser.dtype, pd.PeriodDtype), 'is_interval': isinstance(ser.dtype, pd.IntervalDtype),
+        'is_time': False, 'is_decimal': False, 'is_binary': False, 'memory_usage': ser.memory_usage()}
 
 
 @stat()
@@ -135,14 +103,8 @@ def _type(is_bool: bool, is_numeric: bool, is_float: bool,
 # Base Summary Stats (replaces DefaultSummaryStats ColAnalysis)
 # ============================================================
 
-BaseSummaryResult = TypedDict('BaseSummaryResult', {
-    'length': int,
-    'null_count': int,
-    'value_counts': pd.Series,
-    'mode': Any,
-    'min': Any,
-    'max': Any,
-})
+BaseSummaryResult = TypedDict('BaseSummaryResult',
+    {'length': int, 'null_count': int, 'value_counts': pd.Series, 'mode': Any, 'min': Any, 'max': Any})
 
 
 @stat()
@@ -152,14 +114,8 @@ def base_summary_stats(ser: RawSeries) -> BaseSummaryResult:
     is_numeric = pd.api.types.is_numeric_dtype(ser)
     is_bool = pd.api.types.is_bool_dtype(ser)
 
-    base = {
-        'length': length,
-        'null_count': int(ser.isna().sum()),
-        'value_counts': ser.value_counts(),
-        'mode': get_mode(ser),
-        'min': np.nan,
-        'max': np.nan,
-    }
+    base = {'length': length, 'null_count': int(ser.isna().sum()), 'value_counts': ser.value_counts(),
+        'mode': get_mode(ser), 'min': np.nan, 'max': np.nan}
 
     if is_numeric and not is_bool and base['null_count'] < length:
         base['min'] = ser.dropna().min()
@@ -172,21 +128,13 @@ def base_summary_stats(ser: RawSeries) -> BaseSummaryResult:
 # Numeric Stats (mean/std/median — numeric non-bool only)
 # ============================================================
 
-NumericStatsResult = TypedDict('NumericStatsResult', {
-    'mean': float,
-    'std': float,
-    'median': float,
-})
+NumericStatsResult = TypedDict('NumericStatsResult', {'mean': float, 'std': float, 'median': float})
 
 
 @stat(column_filter=is_numeric_not_bool)
 def numeric_stats(ser: RawSeries) -> NumericStatsResult:
     """Compute mean/std/median for numeric non-bool columns."""
-    return {
-        'mean': float(ser.mean()),
-        'std': float(ser.std()),
-        'median': float(ser.median()),
-    }
+    return {'mean': float(ser.mean()), 'std': float(ser.std()), 'median': float(ser.median())}
 
 
 # ============================================================
@@ -194,27 +142,14 @@ def numeric_stats(ser: RawSeries) -> NumericStatsResult:
 # (replaces ComputedDefaultSummaryStats ColAnalysis)
 # ============================================================
 
-ComputedSummaryResult = TypedDict('ComputedSummaryResult', {
-    'non_null_count': int,
-    'most_freq': Any,
-    '2nd_freq': Any,
-    '3rd_freq': Any,
-    '4th_freq': Any,
-    '5th_freq': Any,
-    'unique_count': int,
-    'empty_count': int,
-    'distinct_count': int,
-    'distinct_per': float,
-    'empty_per': float,
-    'unique_per': float,
-    'nan_per': float,
-})
+ComputedSummaryResult = TypedDict('ComputedSummaryResult',
+    {'non_null_count': int, 'most_freq': Any, '2nd_freq': Any, '3rd_freq': Any, '4th_freq': Any, '5th_freq': Any,
+     'unique_count': int, 'empty_count': int, 'distinct_count': int, 'distinct_per': float, 'empty_per': float,
+     'unique_per': float, 'nan_per': float})
 
 
 @stat()
-def computed_default_summary_stats(
-    length: int, value_counts: pd.Series, null_count: int,
-) -> ComputedSummaryResult:
+def computed_default_summary_stats(length: int, value_counts: pd.Series, null_count: int) -> ComputedSummaryResult:
     """Compute derived stats from basic summary stats."""
     try:
         empty_count = value_counts.get('', 0)
@@ -228,31 +163,17 @@ def computed_default_summary_stats(
             return None
         return value_counts.index[pos]
 
-    return {
-        'non_null_count': length - null_count,
-        'most_freq': vc_nth(0),
-        '2nd_freq': vc_nth(1),
-        '3rd_freq': vc_nth(2),
-        '4th_freq': vc_nth(3),
-        '5th_freq': vc_nth(4),
-        'unique_count': unique_count,
-        'empty_count': empty_count,
-        'distinct_count': distinct_count,
-        'distinct_per': distinct_count / length,
-        'empty_per': empty_count / length,
-        'unique_per': unique_count / length,
-        'nan_per': null_count / length,
-    }
+    return {'non_null_count': length - null_count, 'most_freq': vc_nth(0), '2nd_freq': vc_nth(1), '3rd_freq': vc_nth(2),
+        '4th_freq': vc_nth(3), '5th_freq': vc_nth(4), 'unique_count': unique_count, 'empty_count': empty_count,
+        'distinct_count': distinct_count, 'distinct_per': distinct_count / length, 'empty_per': empty_count / length,
+        'unique_per': unique_count / length, 'nan_per': null_count / length}
 
 
 # ============================================================
 # Histogram (replaces Histogram ColAnalysis)
 # ============================================================
 
-HistogramSeriesResult = TypedDict('HistogramSeriesResult', {
-    'histogram_args': dict,
-    'histogram_bins': list,
-})
+HistogramSeriesResult = TypedDict('HistogramSeriesResult', {'histogram_args': dict, 'histogram_bins': list})
 
 
 @stat()
@@ -290,11 +211,8 @@ def histogram_series(ser: RawSeries) -> HistogramSeriesResult:
 
 
 @stat()
-def histogram(
-    value_counts: pd.Series, nan_per: float, is_numeric: bool,
-    length: int, min: Any, max: Any,
-    histogram_args: dict,
-) -> list:
+def histogram(value_counts: pd.Series, nan_per: float, is_numeric: bool, length: int, min: Any, max: Any,
+        histogram_args: dict) -> list:
     """Compute histogram from summary stats and histogram args."""
     if is_numeric and len(value_counts) > 5 and histogram_args:
         min_, max_ = min, max
@@ -308,37 +226,24 @@ def histogram(
 # PdCleaningStats (replaces PdCleaningStats ColAnalysis)
 # ============================================================
 
-PdCleaningResult = TypedDict('PdCleaningResult', {
-    'int_parse_fail': float,
-    'int_parse': float,
-})
+PdCleaningResult = TypedDict('PdCleaningResult', {'int_parse_fail': float, 'int_parse': float})
 
 
 @stat()
 def pd_cleaning_stats(value_counts: pd.Series, length: int) -> PdCleaningResult:
     """Compute int parsing stats for cleaning."""
     vc = value_counts
-    coerced_ser = pd.to_numeric(
-        vc.index.values, errors='coerce', downcast='integer',
-        dtype_backend='pyarrow',
-    )
+    coerced_ser = pd.to_numeric(vc.index.values, errors='coerce', downcast='integer', dtype_backend='pyarrow')
     nan_sum = (pd.Series(coerced_ser).isna() * 1 * vc.values).sum()
-    return {
-        'int_parse_fail': nan_sum / length,
-        'int_parse': (length - nan_sum) / length,
-    }
+    return {'int_parse_fail': nan_sum / length, 'int_parse': (length - nan_sum) / length}
 
 
 # ============================================================
 # Heuristic Fracs (replaces HeuristicFracs ColAnalysis)
 # ============================================================
 
-HeuristicFracsResult = TypedDict('HeuristicFracsResult', {
-    'str_bool_frac': float,
-    'regular_int_parse_frac': float,
-    'strip_int_parse_frac': float,
-    'us_dates_frac': float,
-})
+HeuristicFracsResult = TypedDict('HeuristicFracsResult',
+    {'str_bool_frac': float, 'regular_int_parse_frac': float, 'strip_int_parse_frac': float, 'us_dates_frac': float})
 
 
 @stat()
@@ -348,18 +253,9 @@ def heuristic_fracs(ser: RawSeries) -> HeuristicFracsResult:
         pd.api.types.is_string_dtype(ser)
         or pd.api.types.is_object_dtype(ser)
     ):
-        return {
-            'str_bool_frac': 0,
-            'regular_int_parse_frac': 0,
-            'strip_int_parse_frac': 0,
-            'us_dates_frac': 0,
-        }
-    return {
-        'str_bool_frac': _str_bool_frac(ser),
-        'regular_int_parse_frac': _regular_int_parse_frac(ser),
-        'strip_int_parse_frac': _strip_int_parse_frac(ser),
-        'us_dates_frac': _us_dates_frac(ser),
-    }
+        return {'str_bool_frac': 0, 'regular_int_parse_frac': 0, 'strip_int_parse_frac': 0, 'us_dates_frac': 0}
+    return {'str_bool_frac': _str_bool_frac(ser), 'regular_int_parse_frac': _regular_int_parse_frac(ser),
+        'strip_int_parse_frac': _strip_int_parse_frac(ser), 'us_dates_frac': _us_dates_frac(ser)}
 
 
 # ============================================================
@@ -372,94 +268,40 @@ try:
 
     def _make_cleaning_stat(rules, rules_op_names, class_name):
         """Factory for heuristic cleaning ops StatFunc objects."""
-        def cleaning_func(
-            str_bool_frac=0.0, regular_int_parse_frac=0.0,
-            strip_int_parse_frac=0.0, us_dates_frac=0.0,
-            orig_col_name='',
-        ):
-            column_metadata = {
-                'str_bool_frac': str_bool_frac,
-                'regular_int_parse_frac': regular_int_parse_frac,
-                'strip_int_parse_frac': strip_int_parse_frac,
-                'us_dates_frac': us_dates_frac,
-                'orig_col_name': orig_col_name,
-            }
+        def cleaning_func(str_bool_frac=0.0, regular_int_parse_frac=0.0, strip_int_parse_frac=0.0, us_dates_frac=0.0,
+                orig_col_name=''):
+            column_metadata = {'str_bool_frac': str_bool_frac, 'regular_int_parse_frac': regular_int_parse_frac,
+                'strip_int_parse_frac': strip_int_parse_frac, 'us_dates_frac': us_dates_frac,
+                'orig_col_name': orig_col_name}
             cleaning_op_name = get_top_score(rules, column_metadata)
             if cleaning_op_name == "none":
-                return {
-                    "cleaning_ops": [],
-                    "cleaning_name": "None",
-                    "add_orig": False,
-                }
+                return {"cleaning_ops": [], "cleaning_name": "None", "add_orig": False}
             else:
-                cleaning_name = rules_op_names.get(
-                    cleaning_op_name, cleaning_op_name,
-                )
-                ops = [
-                    sA(
-                        cleaning_name,
-                        clean_strategy=class_name,
-                        clean_col=orig_col_name,
-                    ),
-                    {"symbol": "df"},
-                ]
-                return {
-                    "cleaning_ops": ops,
-                    "cleaning_name": cleaning_name,
-                    "add_orig": True,
-                }
+                cleaning_name = rules_op_names.get(cleaning_op_name, cleaning_op_name)
+                ops = [sA(cleaning_name, clean_strategy=class_name, clean_col=orig_col_name), {"symbol": "df"}]
+                return {"cleaning_ops": ops, "cleaning_name": cleaning_name, "add_orig": True}
 
         cleaning_func.__name__ = class_name
         cleaning_func.__qualname__ = class_name
 
-        return StatFunc(
-            name=class_name,
-            func=cleaning_func,
-            requires=[
-                StatKey('str_bool_frac', float),
-                StatKey('regular_int_parse_frac', float),
-                StatKey('strip_int_parse_frac', float),
-                StatKey('us_dates_frac', float),
-                StatKey('orig_col_name', Any),
-            ],
-            provides=[
-                StatKey('cleaning_ops', Any),
-                StatKey('cleaning_name', Any),
-                StatKey('add_orig', Any),
-            ],
-            needs_raw=False,
-        )
+        return StatFunc(name=class_name, func=cleaning_func,
+            requires=[StatKey('str_bool_frac', float), StatKey('regular_int_parse_frac', float),
+                StatKey('strip_int_parse_frac', float), StatKey('us_dates_frac', float), StatKey('orig_col_name', Any)],
+            provides=[StatKey('cleaning_ops', Any), StatKey('cleaning_name', Any), StatKey('add_orig', Any)],
+            needs_raw=False)
 
-    _frac_name_to_command = {
-        "str_bool_frac": "str_bool",
-        "regular_int_parse_frac": "regular_int_parse",
-        "strip_int_parse_frac": "strip_int_parse",
-        "us_dates_frac": "us_date",
-    }
+    _frac_name_to_command = {"str_bool_frac": "str_bool", "regular_int_parse_frac": "regular_int_parse",
+        "strip_int_parse_frac": "strip_int_parse", "us_dates_frac": "us_date"}
 
-    conservative_cleaning = _make_cleaning_stat(
-        rules={
-            "str_bool_frac": [s("f>"), 0.9],
-            "regular_int_parse_frac": [s("f>"), 0.9],
-            "strip_int_parse_frac": [s("f>"), 0.9],
-            "none": [s("none-rule")],
-            "us_dates_frac": [s("primary"), [s("f>"), 0.8]],
-        },
-        rules_op_names=_frac_name_to_command,
-        class_name='ConservativeCleaningGenops',
-    )
+    conservative_cleaning = _make_cleaning_stat(rules={"str_bool_frac": [s("f>"), 0.9],
+        "regular_int_parse_frac": [s("f>"), 0.9], "strip_int_parse_frac": [s("f>"), 0.9], "none": [s("none-rule")],
+        "us_dates_frac": [s("primary"), [s("f>"), 0.8]]},
+        rules_op_names=_frac_name_to_command, class_name='ConservativeCleaningGenops')
 
-    aggressive_cleaning = _make_cleaning_stat(
-        rules={
-            "str_bool_frac": [s("f>"), 0.6],
-            "regular_int_parse_frac": [s("f>"), 0.7],
-            "strip_int_parse_frac": [s("f>"), 0.6],
-            "none": [s("none-rule")],
-            "us_dates_frac": [s("primary"), [s("f>"), 0.7]],
-        },
-        rules_op_names=_frac_name_to_command,
-        class_name='AggresiveCleaningGenOps',
-    )
+    aggressive_cleaning = _make_cleaning_stat(rules={"str_bool_frac": [s("f>"), 0.6],
+        "regular_int_parse_frac": [s("f>"), 0.7], "strip_int_parse_frac": [s("f>"), 0.6], "none": [s("none-rule")],
+        "us_dates_frac": [s("primary"), [s("f>"), 0.7]]},
+        rules_op_names=_frac_name_to_command, class_name='AggresiveCleaningGenOps')
 
 except ImportError:
     conservative_cleaning = None
@@ -471,21 +313,11 @@ except ImportError:
 # ============================================================
 
 # Core analysis (equivalent to default analysis_klasses)
-PD_ANALYSIS_V2 = [
-    typing_stats, _type,
-    base_summary_stats,
-    numeric_stats,
-    computed_default_summary_stats,
-    histogram_series, histogram,
-]
+PD_ANALYSIS_V2 = [typing_stats, _type, base_summary_stats, numeric_stats, computed_default_summary_stats,
+    histogram_series, histogram]
 
 # With cleaning stats
-PD_ANALYSIS_V2_WITH_CLEANING = PD_ANALYSIS_V2 + [
-    pd_cleaning_stats,
-]
+PD_ANALYSIS_V2_WITH_CLEANING = PD_ANALYSIS_V2 + [pd_cleaning_stats]
 
 # With heuristic fracs (for autocleaning)
-PD_ANALYSIS_V2_WITH_HEURISTICS = PD_ANALYSIS_V2 + [
-    heuristic_fracs,
-    orig_col_name,
-]
+PD_ANALYSIS_V2_WITH_HEURISTICS = PD_ANALYSIS_V2 + [heuristic_fracs, orig_col_name]

@@ -56,8 +56,7 @@ dirty_df = pd.DataFrame(
             1,
             None,
         ],
-    }
-)
+    })
 
 expected_df = pd.DataFrame({
     'untouched_a': dirty_df['untouched_a'],
@@ -132,8 +131,7 @@ def test_full_autoclean():
         "show_commands": False,
         "df_display": "main",
         "search_string": "",
-        "quick_command_args": {}
-    }
+        "quick_command_args": {}}
 
     result =  abw.dataflow.processed_df
 

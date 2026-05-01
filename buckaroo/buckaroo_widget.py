@@ -90,8 +90,8 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
             raise Exception("This dataframe or columns is pretty big, you don't want to serialize it")
         args_dict = {'args':
              {'data': pd_to_obj(self.dataflow.processed_df),
-            'df_viewer_config': self.dataflow.df_display_args[self.buckaroo_state['df_display']]['df_viewer_config'],
-            'secondary_df_viewer_config': EMPTY_DFVIEWER_CONFIG}}
+              'df_viewer_config': self.dataflow.df_display_args[self.buckaroo_state['df_display']]['df_viewer_config'],
+              'secondary_df_viewer_config': EMPTY_DFVIEWER_CONFIG}}
         args_dict['args']['summary_stats_data'] = []
         if include_summary_stats:
             1/0 # not supported yet
@@ -178,8 +178,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
 
     operations = Any([]).tag(sync=True)
     operation_results = Dict(
-        {'transformed_df': EMPTY_DF_WHOLE, 'generated_py_code':'# instantiation, unused'}
-    ).tag(sync=True)
+        {'transformed_df': EMPTY_DF_WHOLE, 'generated_py_code':'# instantiation, unused'}).tag(sync=True)
     command_config = Dict({}).tag(sync=True)
 
     buckaroo_options = Dict({}).tag(sync=True)
@@ -194,8 +193,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         'show_commands': False,
         'df_display': 'main',
         'search_string': '',
-        'quick_command_args': {}
-    }).tag(sync=True)
+        'quick_command_args': {}}).tag(sync=True)
 
 
     @observe('buckaroo_state')
@@ -213,11 +211,11 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     #widget config.  Change these via inheritance to alter core behaviors of buckaroo
     #command_klasses = DefaultCommandKlsList
     analysis_klasses = [TypingStats, DefaultSummaryStats,
-                        Histogram,
-                        ComputedDefaultSummaryStats,
-                        StylingAnalysis,
-                        DefaultSummaryStats,
-                        DefaultSummaryStatsStyling, DefaultMainStyling]
+        Histogram,
+        ComputedDefaultSummaryStats,
+        StylingAnalysis,
+        DefaultSummaryStats,
+        DefaultSummaryStatsStyling, DefaultMainStyling]
 
 
     def add_analysis(self, analysis_klass):
@@ -336,8 +334,8 @@ class BuckarooInfiniteWidget(BuckarooWidget):
         
         #note this needs to be empty so that we can do the infinite stuff
         self.df_data_dict = {'main': [],
-                             'all_stats': self._sd_to_jsondf(merged_sd),
-                             'empty': []}
+            'all_stats': self._sd_to_jsondf(merged_sd),
+            'empty': []}
 
         temp_display_args = {}
         for display_name, A_Klass in self.dataflow.df_display_klasses.items():
@@ -367,8 +365,8 @@ class BuckarooInfiniteWidget(BuckarooWidget):
         component_config:Union[Literal[None], ComponentConfig]=None,
         init_sd=None, record_transcript=False):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
-                         extra_grid_config, component_config, init_sd,
-                         skip_main_serial=True, record_transcript=record_transcript)
+            extra_grid_config, component_config, init_sd,
+            skip_main_serial=True, record_transcript=record_transcript)
 
         def widget_tuple_args_bridge(change_unused):
             self._handle_widget_change(change_unused)
@@ -395,11 +393,12 @@ class BuckarooInfiniteWidget(BuckarooWidget):
                 converted_sort_column = processed_sd[sort]['orig_col_name']
                 sorted_df = processed_df.sort_values(by=[converted_sort_column], ascending=ascending)
                 slice_df = sorted_df[start:end]
-                self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)}, [to_parquet(slice_df)])
+                self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)},
+                    [to_parquet(slice_df)])
             else:
                 slice_df = processed_df[start:end]
                 self.send({ "type": "infinite_resp", 'key':new_payload_args,
-                            'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
+                    'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
     
                 second_pa = new_payload_args.get('second_request')
                 if not second_pa:
@@ -409,8 +408,7 @@ class BuckarooInfiniteWidget(BuckarooWidget):
                 extra_df = processed_df[extra_start:extra_end]
                 self.send(
                     {"type": "infinite_resp", 'key':second_pa, 'data':[], 'length':len(processed_df)},
-                    [to_parquet(extra_df)]
-                )
+                    [to_parquet(extra_df)])
         except Exception as e:
             logger.error(e)
             stack_trace = traceback.format_exc()
@@ -433,12 +431,11 @@ class DFViewerInfinite(BuckarooInfiniteWidget):
         component_config:Union[Literal[None], ComponentConfig]=None,
         init_sd=None):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
-                         extra_grid_config, component_config, init_sd)
+            extra_grid_config, component_config, init_sd)
         self.df_id = str(id(orig_df))
 
 
 class AutocleaningBuckaroo(BuckarooInfiniteWidget):
     autoclean_conf = tuple([NoCleaningConf, AggressiveAC, ConservativeAC])
     analysis_klasses = copy_extend(
-        BuckarooInfiniteWidget.analysis_klasses, CleaningDetailStyling
-    )
+        BuckarooInfiniteWidget.analysis_klasses, CleaningDetailStyling)

@@ -13,15 +13,8 @@ STATIC_DIR = ROOT / "buckaroo" / "static"
 # full_build.sh produces the real versions; this hook ensures empty stubs
 # exist so that editable installs (uv sync) and Python-only CI jobs work
 # without building JS first.
-REQUIRED_STUBS = [
-    "widget.js",
-    "widget.css",
-    "compiled.css",
-    "standalone.js",
-    "standalone.css",
-    "static-embed.js",
-    "static-embed.css",
-]
+REQUIRED_STUBS = ["widget.js", "widget.css", "compiled.css", "standalone.js", "standalone.css", "static-embed.js",
+    "static-embed.css"]
 
 
 class BuckarooBuildHook(BuildHookInterface):
@@ -52,18 +45,9 @@ class BuckarooBuildHook(BuildHookInterface):
             if style_css.exists():
                 shutil.copy(style_css, STATIC_DIR / "compiled.css")
             subprocess.check_call(["pnpm", "install"], cwd=packages_root)
-            subprocess.check_call(
-                ["pnpm", "--filter", "buckaroo-widget", "run", "build"],
-                cwd=packages_root,
-            )
-            subprocess.check_call(
-                ["pnpm", "--filter", "buckaroo-widget", "run", "build:standalone"],
-                cwd=packages_root,
-            )
-            subprocess.check_call(
-                ["pnpm", "-C", str(packages_root / "js"), "run", "build:static"],
-                cwd=ROOT,
-            )
+            subprocess.check_call(["pnpm", "--filter", "buckaroo-widget", "run", "build"], cwd=packages_root)
+            subprocess.check_call(["pnpm", "--filter", "buckaroo-widget", "run", "build:standalone"], cwd=packages_root)
+            subprocess.check_call(["pnpm", "-C", str(packages_root / "js"), "run", "build:static"], cwd=ROOT)
             return
 
         # Otherwise (editable installs, or pnpm not available), create

@@ -33,8 +33,7 @@ def col_join_dfs(df1, df2, join_columns, how):
         if isinstance(col, str) and any(s in col for s in _sentinels):
             raise ValueError(
                 f"|df2 and {_indicator_col} are sentinel column names used by this tool, "
-                f"and can't be used in a dataframe passed in, {col} violates that constraint"
-            )
+                f"and can't be used in a dataframe passed in, {col} violates that constraint")
 
     df1_name, df2_name = "df_1", "df_2"
 
@@ -42,19 +41,14 @@ def col_join_dfs(df1, df2, join_columns, how):
     if df1[join_columns].duplicated().any():
         raise ValueError(
             f"Duplicate join keys found in df1 on columns {join_columns}. "
-            "Join keys must be unique in each dataframe for a valid comparison."
-        )
+            "Join keys must be unique in each dataframe for a valid comparison.")
     if df2[join_columns].duplicated().any():
         raise ValueError(
             f"Duplicate join keys found in df2 on columns {join_columns}. "
-            "Join keys must be unique in each dataframe for a valid comparison."
-        )
+            "Join keys must be unique in each dataframe for a valid comparison.")
 
     # Merge first so diff stats are computed on key-aligned rows
-    m_df = pd.merge(
-        df1, df2, on=join_columns, how=how, suffixes=["", df2_suffix],
-        indicator=_indicator_col,
-    )
+    m_df = pd.merge(df1, df2, on=join_columns, how=how, suffixes=["", df2_suffix], indicator=_indicator_col)
 
     # Compute membership from merge indicator
     # 1 = df1 only, 2 = df2 only, 3 = both
@@ -82,9 +76,7 @@ def col_join_dfs(df1, df2, join_columns, how):
                 m_df_col = df2_col.removesuffix(df2_suffix)
                 eqs[col] = {
                     "diff_count": int(
-                        (m_df.loc[both_mask, m_df_col] != m_df.loc[both_mask, df2_col]).sum()
-                    )
-                }
+                        (m_df.loc[both_mask, m_df_col] != m_df.loc[both_mask, df2_col]).sum())}
             else:
                 eqs[col] = {"diff_count": 0}
         else:
@@ -125,11 +117,6 @@ def col_join_dfs(df1, df2, join_columns, how):
     pk_map = [pk_color, pk_color, pk_color, pk_color]
     for jc in join_columns:
         column_config_overrides[jc] = {
-            "color_map_config": {
-                "color_rule": "color_categorical",
-                "map_name": pk_map,
-                "val_column": "membership",
-            }
-        }
+            "color_map_config": {"color_rule": "color_categorical", "map_name": pk_map, "val_column": "membership"}}
 
     return m_df, column_config_overrides, eqs

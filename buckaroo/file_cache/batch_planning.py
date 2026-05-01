@@ -111,7 +111,8 @@ def extract_execution_history(executor_log: 'ExecutorLog', dfi: 'DFIdentifier') 
             continue
         matched_count += 1
         if matched_count <= 3:  # Log first few matches
-            log_msg = f"extract_execution_history: event {i} MATCHED - dfi={event.dfi}, columns={len(event.args.columns) if hasattr(event, 'args') and event.args else 'N/A'}"
+            log_msg = f"extract_execution_history: event {i} MATCHED - dfi={event.dfi}, columns={len(event.args.columns) if hasattr(event,
+                'args') and event.args else 'N/A'}"
             logger.info(log_msg)
         
         # Determine if timed out (started but not completed, and end_time is None)
@@ -164,8 +165,7 @@ def simple_one_column_planning(context: PlanningContext) -> PlanningResult:
     return PlanningResult(
         batches=[ColumnBatch(columns=[remaining[0]])],
         phase="simple",
-        notes="One column at a time (simple planning)"
-    )
+        notes="One column at a time (simple planning)")
 
 
 def smart_planning_function(context: PlanningContext) -> PlanningResult:
@@ -223,8 +223,7 @@ def smart_planning_function(context: PlanningContext) -> PlanningResult:
         return PlanningResult(
             batches=[ColumnBatch(columns=remaining[:half_size])],
             phase="half_batch",
-            notes=f"Trying half batch ({half_size} columns)"
-        )
+            notes=f"Trying half batch ({half_size} columns)")
     
     half_result = half_batch_results[0]
     log_msg = f"smart_planning_function: Found half batch result: success={half_result.success}, timed_out={half_result.timed_out}, columns={len(half_result.columns)}"
@@ -240,8 +239,7 @@ def smart_planning_function(context: PlanningContext) -> PlanningResult:
             return PlanningResult(
                 batches=[ColumnBatch(columns=other_half)],
                 phase="other_half",
-                notes="Half batch succeeded, processing other half"
-            )
+                notes="Half batch succeeded, processing other half")
         # All done
         return PlanningResult(batches=[], phase="complete", notes="All columns processed")
     
@@ -268,8 +266,7 @@ def smart_planning_function(context: PlanningContext) -> PlanningResult:
             return PlanningResult(
                 batches=[ColumnBatch(columns=[remaining[0]])],
                 phase="single_column",
-                notes="Half batch timed out, starting with 1 column"
-            )
+                notes="Half batch timed out, starting with 1 column")
         
         single_result = single_col_results[0]
         if not single_result.success or single_result.timed_out:
@@ -277,8 +274,7 @@ def smart_planning_function(context: PlanningContext) -> PlanningResult:
             return PlanningResult(
                 batches=[],
                 phase="error",
-                notes="Single column timed out - should use expression bisector"
-            )
+                notes="Single column timed out - should use expression bisector")
         # Single column succeeded, now we can start binary search
         successful_sizes = [1]
     
@@ -299,8 +295,7 @@ def smart_planning_function(context: PlanningContext) -> PlanningResult:
             return PlanningResult(
                 batches=[ColumnBatch(columns=[remaining[0]])],
                 phase="single_column",
-                notes="All batch sizes failed, restarting with 1 column"
-            )
+                notes="All batch sizes failed, restarting with 1 column")
         max_successful = max(successful_sizes)
         log_msg = f"smart_planning_function: Backed down to size {max_successful}"
         logger.info(log_msg)
@@ -339,8 +334,7 @@ def smart_planning_function(context: PlanningContext) -> PlanningResult:
             return PlanningResult(
                 batches=batches,
                 phase="optimized",
-                notes=f"Using batch size: {optimal_batch_size} columns (staying at this size after finding limit at {max_failed})"
-            )
+                notes=f"Using batch size: {optimal_batch_size} columns (staying at this size after finding limit at {max_failed})")
     
     # Start from the largest successful size, double it
     next_size = max_successful * 2
@@ -365,8 +359,7 @@ def smart_planning_function(context: PlanningContext) -> PlanningResult:
             return PlanningResult(
                 batches=batches,
                 phase="optimized",
-                notes=f"Using optimal batch size: {optimal_batch_size} columns (found via binary search)"
-            )
+                notes=f"Using optimal batch size: {optimal_batch_size} columns (found via binary search)")
         # If next_size succeeded, it should be in successful_sizes, so this shouldn't happen
         # But handle it anyway - use next_size as optimal
         optimal_batch_size = next_size
@@ -378,8 +371,7 @@ def smart_planning_function(context: PlanningContext) -> PlanningResult:
         return PlanningResult(
             batches=batches,
             phase="optimized",
-            notes=f"Using optimal batch size: {optimal_batch_size} columns"
-        )
+            notes=f"Using optimal batch size: {optimal_batch_size} columns")
     
     # Check if next_size would exceed limits
     if next_size >= half_batch_size:
@@ -395,15 +387,13 @@ def smart_planning_function(context: PlanningContext) -> PlanningResult:
         return PlanningResult(
             batches=batches,
             phase="optimized",
-            notes=f"Using optimal batch size: {optimal_batch_size} columns (reached half batch limit)"
-        )
+            notes=f"Using optimal batch size: {optimal_batch_size} columns (reached half batch limit)")
     
     # Try the next size (2x the largest successful)
     return PlanningResult(
         batches=[ColumnBatch(columns=remaining[:next_size])],
         phase="binary_search",
-        notes=f"Testing batch size {next_size} (2x {max_successful})"
-    )
+        notes=f"Testing batch size {next_size} (2x {max_successful})")
 
 
 # Alias for backward compatibility

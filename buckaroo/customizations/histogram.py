@@ -147,8 +147,7 @@ class Histogram(ColAnalysis):
                 low_tail=low_tail,
                 high_tail=high_tail))
 
-    requires_summary = ['value_counts', 'nan_per', 'is_numeric', 'length',
-                        'min', 'max',]
+    requires_summary = ['value_counts', 'nan_per', 'is_numeric', 'length', 'min', 'max']
 
 
     @staticmethod

@@ -10,7 +10,7 @@ EMPTY_DFVIEWER_CONFIG = {
     'pinned_rows': [],
     'column_config': []}
 EMPTY_DF_DISPLAY_ARG = {'data_key': 'empty', 'df_viewer_config': EMPTY_DFVIEWER_CONFIG,
-                           'summary_stats_key': 'empty'}
+    'summary_stats_key': 'empty'}
 
 
 SENTINEL_DF_1 = pd.DataFrame({'foo'  :[10, 20], 'bar' : ["asdf", "iii"]})
