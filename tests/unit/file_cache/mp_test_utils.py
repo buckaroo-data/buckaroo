@@ -11,8 +11,11 @@ multiprocessing  an behave differently when a function is defined in an imported
   """
 
 
-LOCAL_TIMEOUT = 0.8
-CI_TIMEOUT = 1.0
+# 3.0s headroom for forkserver process startup + IPC.
+# Warm-up fixture (file_cache/conftest.py::_warm_mp_context) primes the context,
+# but each process spawn still costs 0.5-1.5s for fork + buckaroo import.
+LOCAL_TIMEOUT = 3.0
+CI_TIMEOUT = 3.0
 # spawn context on Windows is much slower than forkserver (full process startup)
 WINDOWS_CI_TIMEOUT = 10.0
 
