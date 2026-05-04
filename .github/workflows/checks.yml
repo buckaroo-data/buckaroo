@@ -305,7 +305,7 @@ jobs:
         run: uv sync --all-extras --dev
       - name: Run tests
         run: uv run --with pytest-cov pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v6
 
   TestPythonMaxVersions:
     name: Python / Test (Max Versions)
