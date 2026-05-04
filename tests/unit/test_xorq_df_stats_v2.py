@@ -10,7 +10,7 @@ import pytest
 
 xo = pytest.importorskip("xorq.api")
 
-from buckaroo.pluggable_analysis_framework.df_stats_v2 import (  # noqa: E402
+from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (  # noqa: E402
     XorqDfStatsV2)
 from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2  # noqa: E402
 

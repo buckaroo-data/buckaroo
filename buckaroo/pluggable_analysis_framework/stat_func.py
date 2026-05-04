@@ -7,7 +7,6 @@ The function signature IS the contract:
   - Return type becomes `provides`
   - RawSeries/SampledSeries params indicate raw data needs
 """
-
 from __future__ import annotations
 
 import inspect
@@ -18,7 +17,6 @@ from typing import Any, Callable, List, Optional, get_type_hints
 # Sentinel for "no default provided"
 class _MissingSentinel:
     """Sentinel object indicating no default was provided."""
-
     _instance = None
 
     def __new__(cls):
@@ -27,7 +25,7 @@ class _MissingSentinel:
         return cls._instance
 
     def __repr__(self):
-        return "<MISSING>"
+        return '<MISSING>'
 
     def __bool__(self):
         return False
@@ -40,22 +38,18 @@ MISSING = _MissingSentinel()
 # Marker types for raw data access
 # ---------------------------------------------------------------------------
 
-
 class RawSeries:
     """Marker type: 'give me the raw column series'."""
-
     pass
 
 
 class SampledSeries:
     """Marker type: 'give me the downsampled series'."""
-
     pass
 
 
 class RawDataFrame:
     """Marker type: 'give me the full dataframe'."""
-
     pass
 
 
@@ -66,18 +60,16 @@ class XorqColumn:
     XorqColumn are expected to return a xorq expression (xorq.vendor.ibis)
     that the pipeline folds into a single ``table.aggregate(...)`` query.
     """
-
     pass
 
 
-class XorqTable:
-    """Marker type: 'give me the full xorq table'.
+class XorqExpr:
+    """Marker type: 'give me the full xorq table expression'.
 
     Used by XorqStatPipeline for stats that need to run their own per-column
     query (e.g. histograms — group_by + aggregate cannot be folded into the
     main batch).
     """
-
     pass
 
 
@@ -91,34 +83,30 @@ class XorqExecute:
     queries (histograms, etc.) must use this instead of calling
     ``query.execute()`` directly so a user-supplied backend isn't bypassed.
     """
-
     pass
 
 
-RAW_MARKER_TYPES = (RawSeries, SampledSeries, RawDataFrame, XorqColumn, XorqTable, XorqExecute)
+RAW_MARKER_TYPES = (RawSeries, SampledSeries, RawDataFrame, XorqColumn, XorqExpr, XorqExecute)
 
 
 # ---------------------------------------------------------------------------
 # StatKey — a named, typed slot in the DAG
 # ---------------------------------------------------------------------------
 
-
 @dataclass(frozen=True)
 class StatKey:
     """A named, typed slot in the stat DAG."""
-
     name: str
     type: type  # Python type (int, float, Any, pd.Series, etc.)
 
     def __repr__(self):
-        type_name = getattr(self.type, "__name__", str(self.type))
+        type_name = getattr(self.type, '__name__', str(self.type))
         return f"StatKey({self.name!r}, {type_name})"
 
 
 # ---------------------------------------------------------------------------
 # StatFunc — a registered stat computation
 # ---------------------------------------------------------------------------
-
 
 @dataclass
 class StatFunc:
@@ -134,7 +122,6 @@ class StatFunc:
         quiet: suppress error reporting
         default: fallback value on failure (MISSING = no fallback)
     """
-
     name: str
     func: Callable
     requires: List[StatKey]
@@ -151,13 +138,12 @@ class StatFunc:
 # Helpers for @stat decorator
 # ---------------------------------------------------------------------------
 
-
 def _is_typed_dict(tp) -> bool:
     """Check if a type is a TypedDict subclass."""
     if tp is None or not isinstance(tp, type):
         return False
     # TypedDict classes have __required_keys__ or __optional_keys__
-    return hasattr(tp, "__required_keys__") or hasattr(tp, "__optional_keys__")
+    return hasattr(tp, '__required_keys__') or hasattr(tp, '__optional_keys__')
 
 
 def _get_provides_from_return_type(func_name: str, return_type) -> List[StatKey]:
@@ -180,7 +166,7 @@ def _get_requires_from_params(sig: inspect.Signature, hints: dict) -> tuple:
     needs_raw = False
 
     for param_name, param in sig.parameters.items():
-        if param_name in ("self", "cls"):
+        if param_name in ('self', 'cls'):
             continue
 
         param_type = hints.get(param_name, Any)
@@ -197,20 +183,20 @@ def _get_requires_from_params(sig: inspect.Signature, hints: dict) -> tuple:
 # @stat decorator
 # ---------------------------------------------------------------------------
 
-
 def stat(column_filter=None, quiet=False, default=MISSING, provides=None):
     """Decorator that converts a function into a StatFunc.
 
     The function signature IS the contract:
       - Parameter names/types become `requires`
-      - Return type becomes `provides`
+      - Return type becomes `provides` (key auto-derived from func name)
       - RawSeries/SampledSeries params indicate raw data needs
 
     ``provides='key'`` (or ``['k1', 'k2']``) overrides the auto-derived
-    name(s). Useful when the function name and the provided key need to
-    differ — e.g., batch-eligible xorq @stat funcs that return a xorq
-    expression at runtime but want to keep readable names like
-    ``base_min`` while providing the ``min`` key.
+    name(s). The xorq batch path uses this so a stat func can keep a
+    descriptive name (``base_min``) while writing into a stable
+    accumulator key (``min``) shared with the polars/pandas implementations.
+    Without the override, every backend would have to define its own
+    ``min`` function and downstream stats would have to know which one ran.
 
     Usage::
 
@@ -230,7 +216,6 @@ def stat(column_filter=None, quiet=False, default=MISSING, provides=None):
         def base_min(col: XorqColumn) -> float:
             return col.min().cast('float64')
     """
-
     def decorator(func):
         sig = inspect.signature(func)
         try:
@@ -238,13 +223,11 @@ def stat(column_filter=None, quiet=False, default=MISSING, provides=None):
         except Exception:
             hints = {}
 
-        return_type = hints.get("return", inspect.Parameter.empty)
+        return_type = hints.get('return', inspect.Parameter.empty)
 
         requires, needs_raw = _get_requires_from_params(sig, hints)
         if provides is not None:
-            key_type = (
-                return_type if return_type is not inspect.Parameter.empty else Any
-            )
+            key_type = return_type if return_type is not inspect.Parameter.empty else Any
             keys = [provides] if isinstance(provides, str) else list(provides)
             provides_keys = [StatKey(k, key_type) for k in keys]
         else:
@@ -264,7 +247,6 @@ def stat(column_filter=None, quiet=False, default=MISSING, provides=None):
 # collect_stat_funcs — extract StatFunc objects from various sources
 # ---------------------------------------------------------------------------
 
-
 def collect_stat_funcs(obj) -> List[StatFunc]:
     """Collect StatFunc objects from a class, function, or StatFunc instance.
 
@@ -276,7 +258,7 @@ def collect_stat_funcs(obj) -> List[StatFunc]:
     if isinstance(obj, StatFunc):
         return [obj]
 
-    if callable(obj) and hasattr(obj, "_stat_func"):
+    if callable(obj) and hasattr(obj, '_stat_func'):
         return [obj._stat_func]
 
     if isinstance(obj, type):
@@ -284,7 +266,7 @@ def collect_stat_funcs(obj) -> List[StatFunc]:
         funcs = []
         for name in sorted(dir(obj)):
             attr = getattr(obj, name, None)
-            if callable(attr) and hasattr(attr, "_stat_func"):
+            if callable(attr) and hasattr(attr, '_stat_func'):
                 funcs.append(attr._stat_func)
         return funcs
 

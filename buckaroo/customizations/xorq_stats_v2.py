@@ -10,7 +10,7 @@ Stat layout:
     ``length``, ``null_count``, ``min``, ``max``, ``distinct_count``,
     ``mean``, ``std``, ``median``. Folded into one ``table.aggregate()``.
   - **Computed**: ``non_null_count``, ``nan_per``, ``distinct_per``.
-  - **Histogram**: per-column query against the ``XorqTable``.
+  - **Histogram**: per-column query against the ``XorqExpr``.
 
 Usage::
 
@@ -26,9 +26,11 @@ Usage::
 from __future__ import annotations
 
 import math
-from typing import TypedDict
+from typing import Any, Callable, TypedDict
 
-from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (XorqColumn, XorqTable, XorqExecute)
+import pandas as pd
+
+from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (XorqColumn, XorqExpr, XorqExecute)
 from buckaroo.pluggable_analysis_framework.stat_func import stat
 
 try:
@@ -64,6 +66,12 @@ TypingResult = TypedDict("TypingResult",
 @stat()
 def typing_stats(dtype: str) -> TypingResult:
     """Derive type flags from the ibis schema dtype string.
+
+    ``dtype`` is left as ``str`` rather than an enum / Literal because
+    ibis dtype reprs are open-ended: parametrised forms like
+    ``decimal(10, 2)``, ``timestamp('UTC')``, ``array<int64>``, and
+    ``struct<a: int64, b: string>`` cannot be enumerated up front. We
+    match by prefix instead.
 
     Uses prefix matching rather than substring ``in`` — the latter would
     false-positive on hypothetical future ibis types containing "time" or
@@ -170,7 +178,8 @@ def distinct_per(length: int, distinct_count: int) -> float:
 # ============================================================
 
 
-def _numeric_histogram(execute, table, col, min_val, max_val, total_rows):
+def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str, min_val: float,
+        max_val: float) -> list:
     if min_val is None or max_val is None:
         return []
     if (isinstance(min_val, float) and math.isnan(min_val)) or (
@@ -181,12 +190,12 @@ def _numeric_histogram(execute, table, col, min_val, max_val, total_rows):
         return []
 
     bucket = (
-        ((table[col].cast("float64") - min_val) / (max_val - min_val) * 10)
+        ((expr[col].cast("float64") - min_val) / (max_val - min_val) * 10)
         .cast("int64")
         .clip(lower=0, upper=9)
     )
     query = (
-        table.mutate(__bucket=bucket)
+        expr.mutate(__bucket=bucket)
         .group_by("__bucket")
         .aggregate(__count=lambda t: t.count())
         .order_by("__bucket")
@@ -216,9 +225,9 @@ def _numeric_histogram(execute, table, col, min_val, max_val, total_rows):
     return out
 
 
-def _categorical_histogram(execute, table, col):
+def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str) -> list:
     query = (
-        table.group_by(col)
+        expr.group_by(col)
         .aggregate(__count=lambda t: t.count())
         .order_by(xo.desc("__count"))
         .limit(10)
@@ -237,9 +246,13 @@ def _categorical_histogram(execute, table, col):
 
 
 @stat(default=[])
-def histogram(table: XorqTable, execute: XorqExecute, orig_col_name: str, is_numeric: bool, is_bool: bool, length: int,
-        min: float, max: float) -> list:
+def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numeric: bool, is_bool: bool, length: int,
+        distinct_count: int, min: float, max: float) -> list:
     """10-bucket numeric histogram or top-10 categorical histogram.
+
+    Numeric columns with very few distinct values (<= 5) fall through to
+    the categorical branch — ten quantile buckets over five values is
+    mostly empty bars. Mirrors the pd_stats_v2 ``histogram`` threshold.
 
     ``min`` and ``max`` come from the batch aggregate. The pipeline
     pre-populates them as ``None`` for every column so non-numeric cols
@@ -255,9 +268,9 @@ def histogram(table: XorqTable, execute: XorqExecute, orig_col_name: str, is_num
     """
     if length == 0:
         return []
-    if is_numeric and not is_bool:
-        return _numeric_histogram(execute, table, orig_col_name, min, max, length)
-    return _categorical_histogram(execute, table, orig_col_name)
+    if is_numeric and not is_bool and distinct_count > 5:
+        return _numeric_histogram(execute, expr, orig_col_name, min, max)
+    return _categorical_histogram(execute, expr, orig_col_name)
 
 
 # ============================================================

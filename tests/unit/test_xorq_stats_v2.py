@@ -21,10 +21,13 @@ from buckaroo.customizations.xorq_stats_v2 import (  # noqa: E402
 
 
 def _make_table():
+    # ints/floats need >5 distinct values to land on the numeric histogram
+    # branch (cf. histogram() in xorq_stats_v2 — small-cardinality numeric
+    # cols fall through to categorical, mirroring pd_stats_v2).
     return xo.memtable(
         pd.DataFrame(
-            {"ints": [1, 2, 3, 4, 5], "floats": [1.1, 2.2, 3.3, 4.4, 5.5], "strs": ["a", "b", "c", "d", "e"],
-             "bools": [True, False, True, False, True]}))
+            {"ints": [1, 2, 3, 4, 5, 6, 7], "floats": [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7],
+             "strs": ["a", "b", "c", "d", "e", "f", "g"], "bools": [True, False, True, False, True, False, True]}))
 
 
 def _make_table_with_nulls():
@@ -93,7 +96,7 @@ class TestBatchAggregate:
     def test_length_and_null_count(self):
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
         stats, _ = pipeline.process_table(_make_table())
-        assert stats["ints"]["length"] == 5
+        assert stats["ints"]["length"] == 7
         assert stats["ints"]["null_count"] == 0
 
     def test_with_nulls(self):
@@ -107,7 +110,7 @@ class TestBatchAggregate:
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
         stats, _ = pipeline.process_table(_make_table())
         assert stats["ints"]["min"] == 1.0
-        assert stats["ints"]["max"] == 5.0
+        assert stats["ints"]["max"] == 7.0
 
     def test_min_max_skipped_for_string(self):
         """String columns: column_filter excludes the min/max stats."""
@@ -120,8 +123,8 @@ class TestBatchAggregate:
     def test_distinct_count(self):
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
         stats, _ = pipeline.process_table(_make_table())
-        assert stats["ints"]["distinct_count"] == 5
-        assert stats["strs"]["distinct_count"] == 5
+        assert stats["ints"]["distinct_count"] == 7
+        assert stats["strs"]["distinct_count"] == 7
 
 
 # ============================================================
@@ -134,7 +137,7 @@ class TestNumericStats:
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
         stats, _ = pipeline.process_table(_make_table())
         assert "mean" in stats["ints"]
-        assert abs(stats["ints"]["mean"] - 3.0) < 0.01
+        assert abs(stats["ints"]["mean"] - 4.0) < 0.01
 
     def test_float_column_full_numeric(self):
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
@@ -166,7 +169,7 @@ class TestComputedStats:
     def test_no_nulls(self):
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
         stats, _ = pipeline.process_table(_make_table())
-        assert stats["ints"]["non_null_count"] == 5
+        assert stats["ints"]["non_null_count"] == 7
         assert stats["ints"]["nan_per"] == 0.0
         assert stats["ints"]["distinct_per"] == 1.0
 
@@ -225,7 +228,7 @@ class TestHistogram:
         null silently lost their histogram entirely.
         """
         table = xo.memtable(
-            pd.DataFrame({"vals": [1.0, None, 3.0, None, 5.0, 7.0, 9.0]}))
+            pd.DataFrame({"vals": [1.0, None, 3.0, None, 5.0, 7.0, 9.0, 11.0, 13.0]}))
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
         stats, errors = pipeline.process_table(table)
         assert errors == []
@@ -258,7 +261,7 @@ class TestErrorCapture:
         assert len(errors) > 0
         assert any(isinstance(e.error, _Boom) for e in errors)
         # And the rest of the pipeline should still work
-        assert stats["ints"]["length"] == 5
+        assert stats["ints"]["length"] == 7
 
     def test_bad_aggregate_execution_surfaces(self):
         """If a stat raises while building the expression, the error is reported."""
@@ -272,7 +275,7 @@ class TestErrorCapture:
         stats, errors = pipeline.process_table(_make_table())
         assert any(e.stat_key == "bad_agg" for e in errors)
         # Other stats unaffected
-        assert stats["ints"]["length"] == 5
+        assert stats["ints"]["length"] == 7
 
 
 # ============================================================

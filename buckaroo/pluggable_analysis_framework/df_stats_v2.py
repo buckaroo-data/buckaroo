@@ -12,7 +12,6 @@ Usage::
     stats.sdf  # -> SDType
     stats.errs  # -> ErrDict (v1 compatible)
 """
-
 from __future__ import annotations
 
 from typing import Type
@@ -24,7 +23,6 @@ from .col_analysis import AObjs, ColAnalysis
 from .stat_pipeline import StatPipeline
 from .utils import FAST_SUMMARY_WHEN_GREATER
 from .safe_summary_df import output_full_reproduce
-from .xorq_stat_pipeline import XorqStatPipeline
 
 
 class DfStatsV2:
@@ -115,50 +113,3 @@ class PlDfStatsV2:
             print("Errors on original dataframe")
         if errors or self.stat_errors:
             self.ap.print_errors(errors + self.stat_errors)
-
-
-class XorqDfStatsV2:
-    """Drop-in DfStats wrapper for xorq table inputs.
-
-    Mirrors the ``DfStatsV2`` / ``PlDfStatsV2`` surface (``.sdf``, ``.errs``,
-    ``.ap.ordered_a_objs``, ``verify_analysis_objects``) so DataFlow,
-    ``CustomizableDataflow`` and any other DfStats consumer can run
-    against a xorq table without changes.
-
-    Stats execute through ``XorqStatPipeline`` — a single batched
-    ``table.aggregate(...)`` query plus per-column histogram queries —
-    pushing computation to the backend instead of materialising the
-    entire table.
-    """
-
-    @classmethod
-    def verify_analysis_objects(cls, objs):
-        XorqStatPipeline(objs)
-
-    def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False):
-        self.table = table
-        self.ap = XorqStatPipeline(col_analysis_objs)
-        self.operating_df_name = operating_df_name
-        self.debug = debug
-        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
-        self.stat_errors = []
-        if self.errs:
-            output_full_reproduce(self.errs, self.sdf, operating_df_name)
-
-    def add_analysis(self, a_obj):
-        """Add an analysis class/stat func and reprocess the table.
-
-        Matches the contract of DfStatsV2.add_analysis / PlDfStatsV2.add_analysis
-        so DataFlow.add_analysis works against a xorq-backed stats wrapper.
-        """
-        passed, errors = self.ap.add_stat(a_obj)
-        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
-        _, self.stat_errors = self.ap.process_table(self.table)
-        if not passed:
-            print("DAG validation failed")
-        if self.errs:
-            print("Errors on original table")
-        if errors or self.stat_errors:
-            for err in errors + self.stat_errors:
-                if err.stat_func is not None:
-                    print(err.reproduce_code())

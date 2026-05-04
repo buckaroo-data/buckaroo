@@ -6,7 +6,7 @@ Two-phase execution:
      are folded into a single ``table.aggregate(...)`` query and executed
      once.
   2. Per-column post-batch — computed stats (deps only on other stats) and
-     XorqTable-param stats (e.g. histograms that need their own query)
+     XorqExpr-param stats (e.g. histograms that need their own query)
      run through the standard typed-DAG executor with results written into
      the per-column accumulator.
 
@@ -24,14 +24,15 @@ from typing import Any, Dict, List, Tuple
 import pandas as pd
 
 from .col_analysis import ErrDict, SDType
-from .stat_func import XorqColumn, XorqTable, XorqExecute, RAW_MARKER_TYPES, StatFunc
+from .safe_summary_df import output_full_reproduce
+from .stat_func import XorqColumn, XorqExpr, XorqExecute, RAW_MARKER_TYPES, StatFunc
 from .stat_pipeline import _execute_stat_func, _find_v1_class, _normalize_inputs
 from .stat_result import Err, Ok, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_column_dag, build_typed_dag
 from .utils import PERVERSE_DF
 
 # Re-export marker types so users only need to import from this module.
-__all__ = ["XorqStatPipeline", "XorqColumn", "XorqTable", "XorqExecute"]
+__all__ = ["XorqStatPipeline", "XorqDfStatsV2", "XorqColumn", "XorqExpr", "XorqExecute"]
 
 try:
     import xorq.api as xo
@@ -253,7 +254,7 @@ class XorqStatPipeline:
                 if sf.provides and all(sk.name in col_accum for sk in sf.provides):
                     continue
                 _execute_stat_func(sf, col_accum, col, raw_series=None, sampled_series=None, raw_dataframe=None,
-                    xorq_table=table, xorq_execute=self._execute)
+                    xorq_expr=table, xorq_execute=self._execute)
 
             col_key_to_func: Dict[str, StatFunc] = {}
             for sf in col_funcs:
@@ -315,11 +316,58 @@ class XorqStatPipeline:
         summary, errors = self.process_table(table)
         errs: ErrDict = {}
         for se in errors:
-            kls = (
-                _find_v1_class(se.stat_func, self._original_inputs)
-                if se.stat_func
-                else None
-            )
+            kls = _find_v1_class(se.stat_func, self._original_inputs) if se.stat_func else None
             err_key = (se.column, se.stat_func.name if se.stat_func else "unknown")
             errs[err_key] = (se.error, kls)
         return summary, errs
+
+
+class XorqDfStatsV2:
+    """Drop-in DfStats wrapper for xorq table inputs.
+
+    Mirrors the ``DfStatsV2`` / ``PlDfStatsV2`` surface (``.sdf``, ``.errs``,
+    ``.ap.ordered_a_objs``, ``verify_analysis_objects``) so DataFlow,
+    ``CustomizableDataflow`` and any other DfStats consumer can run
+    against a xorq table without changes.
+
+    Lives in this module (not ``df_stats_v2``) so importing
+    ``buckaroo.pluggable_analysis_framework.df_stats_v2`` doesn't transitively
+    require xorq — installs without ``buckaroo[xorq]`` keep working.
+
+    Stats execute through ``XorqStatPipeline`` — a single batched
+    ``table.aggregate(...)`` query plus per-column histogram queries —
+    pushing computation to the backend instead of materialising the
+    entire table.
+    """
+
+    @classmethod
+    def verify_analysis_objects(cls, objs):
+        XorqStatPipeline(objs)
+
+    def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False):
+        self.table = table
+        self.ap = XorqStatPipeline(col_analysis_objs)
+        self.operating_df_name = operating_df_name
+        self.debug = debug
+        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
+        self.stat_errors = []
+        if self.errs:
+            output_full_reproduce(self.errs, self.sdf, operating_df_name)
+
+    def add_analysis(self, a_obj):
+        """Add an analysis class/stat func and reprocess the table.
+
+        Matches the contract of DfStatsV2.add_analysis / PlDfStatsV2.add_analysis
+        so DataFlow.add_analysis works against a xorq-backed stats wrapper.
+        """
+        passed, errors = self.ap.add_stat(a_obj)
+        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
+        _, self.stat_errors = self.ap.process_table(self.table)
+        if not passed:
+            print("DAG validation failed")
+        if self.errs:
+            print("Errors on original table")
+        if errors or self.stat_errors:
+            for err in errors + self.stat_errors:
+                if err.stat_func is not None:
+                    print(err.reproduce_code())
