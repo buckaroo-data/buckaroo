@@ -44,8 +44,22 @@ def is_multiple_provides(tp) -> bool:
     those as multi-key returns for backwards compat (see ``_is_typed_dict``);
     this helper is for callers who need to distinguish the two intents.
     """
-    # TODO: implement detection. Stub returns False so dependent tests fail
-    # visibly on CI before the implementation lands.
+    if not isinstance(tp, type):
+        return False
+    if not (hasattr(tp, "__required_keys__") or hasattr(tp, "__optional_keys__")):
+        return False
+    # Walk __orig_bases__ — TypedDict's __bases__ collapses to (dict,) at
+    # class creation, and issubclass is unsupported on TypedDict types.
+    seen = set()
+    stack = list(getattr(tp, "__orig_bases__", ()))
+    while stack:
+        base = stack.pop()
+        if id(base) in seen:
+            continue
+        seen.add(id(base))
+        if base is MultipleProvides:
+            return True
+        stack.extend(getattr(base, "__orig_bases__", ()))
     return False
 
 
