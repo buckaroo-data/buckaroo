@@ -170,16 +170,59 @@ def _is_typed_dict(tp) -> bool:
     return hasattr(tp, '__required_keys__') or hasattr(tp, '__optional_keys__')
 
 
+def _is_multiple_provides(tp) -> bool:
+    """Check if a return type explicitly opts into MultipleProvides.
+
+    Walks ``__orig_bases__`` because TypedDict's metaclass collapses
+    ``__bases__`` to ``(dict,)`` and ``issubclass`` is unsupported on
+    TypedDict types.
+
+    Detection is best-effort: Python 3.11's TypedDict implementation
+    discards ``__orig_bases__`` for subclasses, so on 3.11 this returns
+    False even for genuine ``class Foo(MultipleProvides):`` declarations.
+    Callers must fall through to ``_is_typed_dict`` for back-compat.
+    """
+    if not _is_typed_dict(tp):
+        return False
+    seen = set()
+    stack = list(getattr(tp, '__orig_bases__', ()))
+    while stack:
+        base = stack.pop()
+        if id(base) in seen:
+            continue
+        seen.add(id(base))
+        if base is MultipleProvides:
+            return True
+        stack.extend(getattr(base, '__orig_bases__', ()))
+    return False
+
+
+def _expand_typed_dict_fields(tp) -> List[StatKey]:
+    """One StatKey per declared field, type from the field's annotation."""
+    return [StatKey(k, v) for k, v in get_type_hints(tp).items()]
+
+
 def _get_provides_from_return_type(func_name: str, return_type) -> List[StatKey]:
-    """Derive provided StatKeys from return annotation."""
+    """Derive provided StatKeys from a stat func's return annotation.
+
+    Three branches, in order:
+      1. No annotation → single StatKey under the function name, type Any.
+      2. ``MultipleProvides`` subclass (the documented multi-key idiom) →
+         one StatKey per field. Detected on Python 3.12+ via
+         ``__orig_bases__``; on 3.11 falls through to (3) since the
+         TypedDict metaclass loses inheritance info.
+      3. Bare TypedDict subclass (back-compat — pd_stats_v2 still has
+         many of these) → one StatKey per field, identical to (2).
+      4. Any other type → single StatKey under the function name.
+    """
     if return_type is inspect.Parameter.empty or return_type is None:
         return [StatKey(func_name, Any)]
 
+    if _is_multiple_provides(return_type):
+        return _expand_typed_dict_fields(return_type)
+
     if _is_typed_dict(return_type):
-        provides = []
-        for key, val_type in get_type_hints(return_type).items():
-            provides.append(StatKey(key, val_type))
-        return provides
+        return _expand_typed_dict_fields(return_type)
 
     return [StatKey(func_name, return_type)]
 
