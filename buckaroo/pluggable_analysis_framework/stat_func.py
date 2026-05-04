@@ -11,7 +11,15 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, get_type_hints
+from typing import Any, Callable, List, Optional, TypedDict, get_type_hints
+
+
+# Alias for TypedDict, named to communicate intent at the @stat callsite:
+# "this stat function returns more than one accumulator key". The pipeline
+# already resolves TypedDict return annotations into one StatKey per field;
+# MultipleProvides exists so consumers can write ``def stuff(...) -> MyKeys``
+# instead of ``-> MyTypedDict`` and have the read-aloud meaning match.
+MultipleProvides = TypedDict
 
 
 # Sentinel for "no default provided"
@@ -183,20 +191,18 @@ def _get_requires_from_params(sig: inspect.Signature, hints: dict) -> tuple:
 # @stat decorator
 # ---------------------------------------------------------------------------
 
-def stat(column_filter=None, quiet=False, default=MISSING, provides=None):
+def stat(column_filter=None, quiet=False, default=MISSING):
     """Decorator that converts a function into a StatFunc.
 
     The function signature IS the contract:
       - Parameter names/types become `requires`
-      - Return type becomes `provides` (key auto-derived from func name)
-      - RawSeries/SampledSeries params indicate raw data needs
+      - Function name (or each TypedDict / MultipleProvides field) becomes
+        `provides`
+      - RawSeries/SampledSeries/Xorq* params indicate raw data needs
 
-    ``provides='key'`` (or ``['k1', 'k2']``) overrides the auto-derived
-    name(s). The xorq batch path uses this so a stat func can keep a
-    descriptive name (``base_min``) while writing into a stable
-    accumulator key (``min``) shared with the polars/pandas implementations.
-    Without the override, every backend would have to define its own
-    ``min`` function and downstream stats would have to know which one ran.
+    Single-provider stats: name the function the same as the accumulator
+    key the rest of the DAG expects. Use ``MultipleProvides`` (a TypedDict
+    alias) when one function should write several keys.
 
     Usage::
 
@@ -212,9 +218,13 @@ def stat(column_filter=None, quiet=False, default=MISSING, provides=None):
         def safe_ratio(a: int, b: int) -> float:
             return a / b
 
-        @stat(provides='min', column_filter=is_numeric)
-        def base_min(col: XorqColumn) -> float:
-            return col.min().cast('float64')
+        class TypingResult(MultipleProvides):
+            is_numeric: bool
+            is_integer: bool
+
+        @stat()
+        def typing_stats(dtype: str) -> TypingResult:
+            ...
     """
     def decorator(func):
         sig = inspect.signature(func)
@@ -226,12 +236,7 @@ def stat(column_filter=None, quiet=False, default=MISSING, provides=None):
         return_type = hints.get('return', inspect.Parameter.empty)
 
         requires, needs_raw = _get_requires_from_params(sig, hints)
-        if provides is not None:
-            key_type = return_type if return_type is not inspect.Parameter.empty else Any
-            keys = [provides] if isinstance(provides, str) else list(provides)
-            provides_keys = [StatKey(k, key_type) for k in keys]
-        else:
-            provides_keys = _get_provides_from_return_type(func.__name__, return_type)
+        provides_keys = _get_provides_from_return_type(func.__name__, return_type)
 
         stat_func = StatFunc(name=func.__name__, func=func, requires=requires, provides=provides_keys,
             needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default)

@@ -100,7 +100,7 @@ class XorqStatPipeline:
     # Keys that the pipeline pre-populates per column. Listed as external
     # so the DAG validator doesn't require a stat to provide them, and so
     # that build_column_dag treats dependents as satisfied even when the
-    # actual provider stat (e.g. base_min for numeric cols) is filtered
+    # actual provider stat (e.g. ``min`` for numeric cols) is filtered
     # out by column_filter.
     EXTERNAL_KEYS = frozenset(
         {"orig_col_name", "rewritten_col_name", "dtype", "length", "min", "max"})
@@ -172,7 +172,7 @@ class XorqStatPipeline:
         # Pre-populate every column accumulator with the externally-provided
         # keys. ``length`` is filled in by the batch query below. ``min`` /
         # ``max`` start as None so dependents (histogram) don't cascade-
-        # exclude on non-numeric columns; base_min / base_max overwrite for
+        # exclude on non-numeric columns; ``min`` / ``max`` overwrite for
         # numeric cols.
         accumulators: Dict[str, Dict[str, StatResult]] = {}
         for col in columns:

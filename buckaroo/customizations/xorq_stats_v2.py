@@ -26,12 +26,12 @@ Usage::
 from __future__ import annotations
 
 import math
-from typing import Any, Callable, TypedDict
+from typing import Any, Callable
 
 import pandas as pd
 
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (XorqColumn, XorqExpr, XorqExecute)
-from buckaroo.pluggable_analysis_framework.stat_func import stat
+from buckaroo.pluggable_analysis_framework.stat_func import MultipleProvides, stat
 
 try:
     import xorq.api as xo
@@ -59,8 +59,13 @@ def _is_numeric_not_bool(dtype) -> bool:
 # Typing — derive type flags from the schema dtype string
 # ============================================================
 
-TypingResult = TypedDict("TypingResult",
-    {"is_numeric": bool, "is_integer": bool, "is_float": bool, "is_bool": bool, "is_datetime": bool, "is_string": bool})
+class TypingResult(MultipleProvides):
+    is_numeric: bool
+    is_integer: bool
+    is_float: bool
+    is_bool: bool
+    is_datetime: bool
+    is_string: bool
 
 
 @stat()
@@ -110,42 +115,47 @@ def _type(is_bool: bool, is_integer: bool, is_float: bool, is_datetime: bool, is
 # ============================================================
 # These functions return ``ibis.Expr`` at runtime; the batch executor
 # folds them into a single ``table.aggregate(...)`` call and the resulting
-# scalar lands in the accumulator under the key named by ``provides=``.
+# scalar lands in the accumulator under the key matching the function name.
 # Type annotations describe the *eventual scalar type* in the accumulator.
+#
+# Names like ``min`` / ``max`` shadow the corresponding builtins inside this
+# module — intentional. Module-internal code never calls ``builtins.min`` /
+# ``max``; aggregations go through ``col.min()`` / ``col.max()`` (ibis
+# methods on the column expression).
 
 
-@stat(provides="null_count")
-def base_null_count(col: XorqColumn) -> int:
+@stat()
+def null_count(col: XorqColumn) -> int:
     return col.isnull().sum().coalesce(0).cast("int64")
 
 
-@stat(provides="min", column_filter=_is_numeric_ibis)
-def base_min(col: XorqColumn) -> float:
+@stat(column_filter=_is_numeric_ibis)
+def min(col: XorqColumn) -> float:
     return col.min().cast("float64")
 
 
-@stat(provides="max", column_filter=_is_numeric_ibis)
-def base_max(col: XorqColumn) -> float:
+@stat(column_filter=_is_numeric_ibis)
+def max(col: XorqColumn) -> float:
     return col.max().cast("float64")
 
 
-@stat(provides="distinct_count")
-def base_distinct_count(col: XorqColumn) -> int:
+@stat()
+def distinct_count(col: XorqColumn) -> int:
     return col.nunique().cast("int64")
 
 
-@stat(provides="mean", column_filter=_is_numeric_not_bool)
-def base_mean(col: XorqColumn) -> float:
+@stat(column_filter=_is_numeric_not_bool)
+def mean(col: XorqColumn) -> float:
     return col.mean().cast("float64")
 
 
-@stat(provides="std", column_filter=_is_numeric_not_bool)
-def base_std(col: XorqColumn) -> float:
+@stat(column_filter=_is_numeric_not_bool)
+def std(col: XorqColumn) -> float:
     return col.std().cast("float64")
 
 
-@stat(provides="median", column_filter=_is_numeric_not_bool)
-def base_median(col: XorqColumn) -> float:
+@stat(column_filter=_is_numeric_not_bool)
+def median(col: XorqColumn) -> float:
     return col.approx_median().cast("float64")
 
 
@@ -256,7 +266,7 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
 
     ``min`` and ``max`` come from the batch aggregate. The pipeline
     pre-populates them as ``None`` for every column so non-numeric cols
-    (where ``base_min``/``base_max`` are filtered out) don't cascade-
+    (where ``min``/``max`` are filtered out by ``column_filter``) don't cascade-
     exclude this stat — the categorical branch ignores them.
 
     All queries go through the injected ``execute`` callable so a
@@ -284,5 +294,5 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
 # construction. Use the pandas/polars equivalents (``PD_ANALYSIS_V2`` /
 # ``PL_ANALYSIS_V2``) for those pipelines.
 
-XORQ_STATS_V2 = [typing_stats, _type, base_null_count, base_min, base_max, base_distinct_count, base_mean, base_std,
-    base_median, non_null_count, nan_per, distinct_per, histogram]
+XORQ_STATS_V2 = [typing_stats, _type, null_count, min, max, distinct_count, mean, std, median,
+    non_null_count, nan_per, distinct_per, histogram]
