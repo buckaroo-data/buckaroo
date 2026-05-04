@@ -29,38 +29,13 @@ class MultipleProvides(TypedDict):
         def typing_stats(dtype: str) -> TypingResult:
             return {'is_numeric': ..., 'is_integer': ...}
 
-    Distinguishable from a bare ``TypedDict`` via ``is_multiple_provides()``:
-    the marker walks ``__orig_bases__`` (because TypedDict's ``__bases__``
-    collapses to ``(dict,)`` at class-creation time and ``issubclass`` is
-    unsupported on TypedDicts).
+    On Python 3.11, TypedDict's metaclass collapses subclass inheritance to
+    ``(dict,)`` at class-creation time and discards ``__orig_bases__`` —
+    runtime detection of "this TypedDict subclassed MultipleProvides" is
+    impossible. The class still serves as a named, importable marker that
+    documents intent in source code, and the pipeline handles its expansion
+    via the same TypedDict-field walk used for any TypedDict return.
     """
-
-
-def is_multiple_provides(tp) -> bool:
-    """True iff ``tp`` is a TypedDict subclass that explicitly opts into
-    MultipleProvides somewhere in its declared ``__orig_bases__`` chain.
-
-    Bare ``TypedDict`` subclasses return False. The pipeline still treats
-    those as multi-key returns for backwards compat (see ``_is_typed_dict``);
-    this helper is for callers who need to distinguish the two intents.
-    """
-    if not isinstance(tp, type):
-        return False
-    if not (hasattr(tp, "__required_keys__") or hasattr(tp, "__optional_keys__")):
-        return False
-    # Walk __orig_bases__ — TypedDict's __bases__ collapses to (dict,) at
-    # class creation, and issubclass is unsupported on TypedDict types.
-    seen = set()
-    stack = list(getattr(tp, "__orig_bases__", ()))
-    while stack:
-        base = stack.pop()
-        if id(base) in seen:
-            continue
-        seen.add(id(base))
-        if base is MultipleProvides:
-            return True
-        stack.extend(getattr(base, "__orig_bases__", ()))
-    return False
 
 
 # Sentinel for "no default provided"
