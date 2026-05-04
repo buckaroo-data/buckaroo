@@ -14,12 +14,39 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional, TypedDict, get_type_hints
 
 
-# Alias for TypedDict, named to communicate intent at the @stat callsite:
-# "this stat function returns more than one accumulator key". The pipeline
-# already resolves TypedDict return annotations into one StatKey per field;
-# MultipleProvides exists so consumers can write ``def stuff(...) -> MyKeys``
-# instead of ``-> MyTypedDict`` and have the read-aloud meaning match.
-MultipleProvides = TypedDict
+class MultipleProvides(TypedDict):
+    """Marker base class for stat funcs that return more than one accumulator key.
+
+    Subclass this (instead of ``TypedDict`` directly) when a single ``@stat``
+    function should write several keys into the per-column accumulator. The
+    pipeline expands every field of the subclass into its own ``StatKey``::
+
+        class TypingResult(MultipleProvides):
+            is_numeric: bool
+            is_integer: bool
+
+        @stat()
+        def typing_stats(dtype: str) -> TypingResult:
+            return {'is_numeric': ..., 'is_integer': ...}
+
+    Distinguishable from a bare ``TypedDict`` via ``is_multiple_provides()``:
+    the marker walks ``__orig_bases__`` (because TypedDict's ``__bases__``
+    collapses to ``(dict,)`` at class-creation time and ``issubclass`` is
+    unsupported on TypedDicts).
+    """
+
+
+def is_multiple_provides(tp) -> bool:
+    """True iff ``tp`` is a TypedDict subclass that explicitly opts into
+    MultipleProvides somewhere in its declared ``__orig_bases__`` chain.
+
+    Bare ``TypedDict`` subclasses return False. The pipeline still treats
+    those as multi-key returns for backwards compat (see ``_is_typed_dict``);
+    this helper is for callers who need to distinguish the two intents.
+    """
+    # TODO: implement detection. Stub returns False so dependent tests fail
+    # visibly on CI before the implementation lands.
+    return False
 
 
 # Sentinel for "no default provided"

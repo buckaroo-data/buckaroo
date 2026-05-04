@@ -9,7 +9,7 @@ from typing import Any, TypedDict
 import pandas as pd
 import pytest
 
-from buckaroo.pluggable_analysis_framework.stat_func import (StatKey, StatFunc, RawSeries, MISSING, stat, collect_stat_funcs)
+from buckaroo.pluggable_analysis_framework.stat_func import (StatKey, StatFunc, RawSeries, MISSING, MultipleProvides, is_multiple_provides, stat, collect_stat_funcs)
 from buckaroo.pluggable_analysis_framework.stat_result import (Ok, Err, UpstreamError, StatError, resolve_accumulator)
 from buckaroo.pluggable_analysis_framework.typed_dag import (build_typed_dag, build_column_dag, DAGConfigError)
 from buckaroo.pluggable_analysis_framework.column_filters import (is_numeric, is_string, is_temporal, is_boolean, any_of, not_)
@@ -175,6 +175,86 @@ class TestStatDecorator:
     def test_no_default(self):
         sf = distinct_per._stat_func
         assert sf.default is MISSING
+
+
+class _MultiSizeStats(MultipleProvides):
+    row_count: int
+    null_total: int
+
+
+@stat()
+def multi_size(ser: RawSeries) -> _MultiSizeStats:
+    return {'row_count': len(ser), 'null_total': int(ser.isna().sum())}
+
+
+class TestMultipleProvides:
+    """MultipleProvides is the documented marker for multi-key @stat returns.
+
+    The pipeline already supports any TypedDict subclass; ``MultipleProvides``
+    is a real subclass (not an alias) so callers can disambiguate it from a
+    bare TypedDict via ``is_multiple_provides``.
+    """
+
+    def test_subclass_marker_detected(self):
+        assert is_multiple_provides(_MultiSizeStats)
+
+    def test_bare_typed_dict_not_multiple_provides(self):
+        # FreqStats inherits TypedDict directly, not MultipleProvides — the
+        # pipeline still unpacks it (back-compat), but is_multiple_provides
+        # must distinguish the two intents.
+        from typing import TypedDict
+        class Bare(TypedDict):
+            x: int
+        assert not is_multiple_provides(Bare)
+
+    def test_non_type_inputs(self):
+        assert not is_multiple_provides(int)
+        assert not is_multiple_provides('not a type')
+        assert not is_multiple_provides(None)
+
+    def test_decorator_yields_one_statkey_per_field(self):
+        sf = multi_size._stat_func
+        assert {p.name for p in sf.provides} == {'row_count', 'null_total'}
+        assert {p.type for p in sf.provides} == {int}
+
+    def test_pipeline_unpacks_into_accumulator(self):
+        df = pd.DataFrame({'a': [1, 2, None, 4, 5]})
+        pipeline = StatPipeline([multi_size])
+        summary, errors = pipeline.process_df(df)
+        assert errors == []
+        # Both fields landed in the per-column accumulator under their own keys.
+        assert summary['a']['row_count'] == 5
+        assert summary['a']['null_total'] == 1
+
+    def test_downstream_consumes_individual_keys(self):
+        # A second stat depends on one of the unpacked fields by name —
+        # proves the multi-provider write happens before downstream resolves.
+        @stat()
+        def null_ratio(row_count: int, null_total: int) -> float:
+            return null_total / row_count if row_count else 0.0
+
+        df = pd.DataFrame({'a': [1, 2, None, 4, 5]})
+        pipeline = StatPipeline([multi_size, null_ratio])
+        summary, errors = pipeline.process_df(df)
+        assert errors == []
+        assert summary['a']['null_ratio'] == pytest.approx(0.2)
+
+    def test_subclass_inherits_marker(self):
+        # Two-level inheritance still detects the marker.
+        class Base(MultipleProvides):
+            x: int
+
+        class Derived(Base):
+            y: float
+
+        assert is_multiple_provides(Base)
+        assert is_multiple_provides(Derived)
+        # And the @stat decorator picks up both fields from the leaf.
+        @stat()
+        def gives_both(ser: RawSeries) -> Derived:
+            return {'x': len(ser), 'y': float(len(ser))}
+        sf = gives_both._stat_func
+        assert {p.name for p in sf.provides} == {'x', 'y'}
 
 
 class TestStatKey:
