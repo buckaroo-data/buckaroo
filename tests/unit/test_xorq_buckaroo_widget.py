@@ -6,11 +6,15 @@ XorqDfStatsV2: column-name rewriting for the frontend, df_meta from
 when a postprocessor raises.
 """
 
+from io import BytesIO
+
+import pandas as pd
 import pytest
 
 xo = pytest.importorskip("xorq.api")
 
-from buckaroo.xorq_buckaroo import XorqBuckarooWidget  # noqa: E402
+from buckaroo.xorq_buckaroo import (  # noqa: E402
+    XorqBuckarooInfiniteWidget, XorqBuckarooWidget)
 
 
 def _expr():
@@ -107,3 +111,113 @@ class TestPostProcessing:
         assert rows[0].get("a") == "boom"
         assert w.df_meta["columns"] == 1
         assert w.df_meta["filtered_rows"] == 1
+
+
+def _searchable_expr():
+    return xo.memtable(
+        {
+            "name": ["Alice", "Bob", "Charlie", "Daria", "Eve"],
+            "role": ["admin", "user", "admin", "user", "guest"],
+            "score": [10, 20, 30, 40, 50],
+        })
+
+
+class TestSearch:
+    def test_search_filters_via_quick_command_args(self):
+        w = XorqBuckarooWidget(_searchable_expr())
+        assert w.df_meta["filtered_rows"] == 5
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": ["admin"]}
+        w.buckaroo_state = state
+        assert w.df_meta["filtered_rows"] == 2
+
+    def test_search_substring_across_string_columns(self):
+        """'li' matches Alice (name) and Charlie (name) — not score."""
+        w = XorqBuckarooWidget(_searchable_expr())
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": ["li"]}
+        w.buckaroo_state = state
+        assert w.df_meta["filtered_rows"] == 2
+
+    def test_empty_search_clears_filter(self):
+        w = XorqBuckarooWidget(_searchable_expr())
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": ["admin"]}
+        w.buckaroo_state = state
+        assert w.df_meta["filtered_rows"] == 2
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": [""]}
+        w.buckaroo_state = state
+        assert w.df_meta["filtered_rows"] == 5
+
+
+def _paginated_expr():
+    return xo.memtable(
+        {
+            "a": [3, 1, 4, 1, 5, 9, 2, 6, 5, 3],
+            "b": ["p", "q", "r", "s", "t", "u", "v", "w", "x", "y"],
+        })
+
+
+def _capture_send(widget):
+    captured: list = []
+    widget.send = lambda msg, buffers=None: captured.append((msg, buffers))
+    return captured
+
+
+class TestInfiniteWidget:
+    def test_smoke(self):
+        XorqBuckarooInfiniteWidget(_paginated_expr())
+
+    def test_main_is_empty_pagination_drives_loading(self):
+        """Infinite widgets ship empty df_data_dict.main; data arrives via payload."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        assert w.df_data_dict["main"] == []
+        assert w.render_func_name == "BuckarooInfiniteWidget"
+
+    def test_payload_slice_returns_correct_rows(self):
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        captured = _capture_send(w)
+        w._handle_payload_args({"start": 5, "end": 8})
+        assert len(captured) == 1
+        msg, bufs = captured[0]
+        assert msg["type"] == "infinite_resp"
+        assert msg["length"] == 10
+        df = pd.read_parquet(BytesIO(bufs[0]))
+        assert list(df["index"]) == [5, 6, 7]
+
+    def test_payload_sort_pushes_down(self):
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        sort_key = next(
+            k for k, v in w.dataflow.merged_sd.items() if v.get("orig_col_name") == "a")
+        captured = _capture_send(w)
+        w._handle_payload_args(
+            {"start": 0, "end": 4, "sort": sort_key, "sort_direction": "asc"})
+        msg, bufs = captured[0]
+        df = pd.read_parquet(BytesIO(bufs[0]))
+        # 'a' values, sorted ascending: [1, 1, 2, 3]
+        assert list(df["a"]) == [1, 1, 2, 3]
+
+    def test_second_request_piggyback(self):
+        """Frontend can attach a second slice request; widget sends both."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        captured = _capture_send(w)
+        w._handle_payload_args(
+            {"start": 0, "end": 3, "second_request": {"start": 5, "end": 8}})
+        assert len(captured) == 2
+        first, second = captured
+        assert first[0]["key"]["start"] == 0 and first[0]["key"]["end"] == 3
+        assert second[0]["key"]["start"] == 5 and second[0]["key"]["end"] == 8
+
+    def test_search_then_paginate_sees_filtered_count(self):
+        """Total length in the response reflects the filter — pushdown end-to-end."""
+        w = XorqBuckarooInfiniteWidget(_searchable_expr())
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": ["admin"]}
+        w.buckaroo_state = state
+        captured = _capture_send(w)
+        w._handle_payload_args({"start": 0, "end": 10})
+        msg, bufs = captured[0]
+        assert msg["length"] == 2  # only Alice + Charlie match
+        df = pd.read_parquet(BytesIO(bufs[0]))
+        assert len(df) == 2
