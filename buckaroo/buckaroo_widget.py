@@ -124,7 +124,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         self.record_transcript = record_transcript
         self.exception = None
         kls = self.__class__
-        class InnerDataFlow(CustomizableDataflow):
+        class InnerDataFlow(kls.dataflow_klass):
             sampling_klass = kls.sampling_klass
             autocleaning_klass = kls.autocleaning_klass
             DFStatsClass = kls.DFStatsClass
@@ -166,6 +166,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
     DFStatsClass = DfStatsV2 # Pandas Specific
     autoclean_conf = tuple([CleaningConf, NoCleaningConf]) #override the base CustomizableDataFlow conf
+    dataflow_klass = CustomizableDataflow
 
 
     df_data_dict = Dict({}).tag(sync=True)
