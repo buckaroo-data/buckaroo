@@ -12,7 +12,7 @@ import pandas as pd
 from buckaroo.df_util import old_col_new_col
 
 from .col_analysis import ColAnalysis, ErrDict, SDType
-from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
+from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqExpr, XorqExecute, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
 from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_typed_dag, build_column_dag, DAGConfigError
 from .v1_adapter import col_analysis_to_stat_funcs
@@ -55,7 +55,7 @@ def _normalize_inputs(inputs: list) -> List[StatFunc]:
 
 
 def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_name: str, raw_series=None,
-        sampled_series=None, raw_dataframe=None) -> None:
+        sampled_series=None, raw_dataframe=None, xorq_expr=None, xorq_execute=None) -> None:
     """Execute a single StatFunc, updating the accumulator in place.
 
     Handles:
@@ -103,6 +103,12 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
             continue
         if req.type is RawDataFrame:
             kwargs[req.name] = raw_dataframe
+            continue
+        if req.type is XorqExpr:
+            kwargs[req.name] = xorq_expr
+            continue
+        if req.type is XorqExecute:
+            kwargs[req.name] = xorq_execute
             continue
 
         # Look up in accumulator
@@ -284,6 +290,9 @@ class StatPipeline:
         """Process DataFrame with v1-compatible error format.
 
         Returns (SDType, ErrDict) matching the v1 AnalysisPipeline interface.
+        Used by DfStatsV2/PlDfStatsV2 (and via _find_v1_class, by any caller
+        that mixes ColAnalysis subclasses into the input list — DataFlow,
+        autocleaning, server.data_loading, polars_buckaroo).
         """
         summary, errors = self.process_df(df, debug=debug)
 
