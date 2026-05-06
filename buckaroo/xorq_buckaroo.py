@@ -50,9 +50,15 @@ class XorqSampling(Sampling):
     """Push-down sampling.
 
     Stats run against the full expression on the backend — there's no
-    pre-stats pandas sample. For display, ``serialize_sample`` materialises
-    ``expr.limit(serialize_limit).execute()`` (or returns a pandas
-    DataFrame as-is, e.g. an error frame from the post-processing path).
+    pre-stats pandas sample. For display, ``serialize_sample`` issues
+    a *bounded* ``expr.limit(serialize_limit).execute()`` so the
+    backend returns at most ``serialize_limit`` rows. A bare
+    ``expr.execute()`` (no limit) is never emitted — that would pull
+    the entire table and defeat the point of the push-down design.
+
+    Pandas inputs (e.g. the error frame, or a postprocessor that
+    materialised) are handled in-process: down-sampled if larger than
+    ``serialize_limit``, otherwise returned as-is.
     """
 
     pre_limit = False
@@ -67,9 +73,17 @@ class XorqSampling(Sampling):
             if cls.serialize_limit and len(df_or_expr) > cls.serialize_limit:
                 return df_or_expr.sample(cls.serialize_limit).sort_index()
             return df_or_expr
-        if cls.serialize_limit:
-            return df_or_expr.limit(cls.serialize_limit).execute()
-        return df_or_expr.execute()
+        if not cls.serialize_limit or cls.serialize_limit < 0:
+            # Refuse to materialise an unbounded expr through display.
+            # Subclasses that drive their own paginated loading
+            # (e.g. ``XorqInfiniteSampling``) skip this path entirely
+            # via ``skip_main_serial=True`` on the widget side.
+            raise RuntimeError(
+                f"{cls.__name__}.serialize_sample called on an ibis expression with "
+                f"serialize_limit={cls.serialize_limit!r}; refusing to issue an "
+                "unbounded expr.execute(). Use a positive serialize_limit, or skip "
+                "the main serial on a widget that paginates.")
+        return df_or_expr.limit(cls.serialize_limit).execute()
 
 
 def _xorq_search(expr, _col, val):
@@ -300,32 +314,34 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
         if processed_df is None:
             return
 
+        # All slicing happens here so it's obvious that nothing executes
+        # the full expression. Each request emits exactly one bounded
+        # window query (``expr.limit(end - start, offset=start).execute()``)
+        # plus one aggregate (``expr.count().execute()`` for total length).
         try:
             total_length = _expr_count(processed_df)
             sort = new_payload_args.get('sort')
+            sort_col = None
+            ascending = True
             if sort:
-                sort_dir = new_payload_args.get('sort_direction')
                 processed_sd = self.dataflow.widget_args_tuple[2]
-                orig_col = processed_sd[sort]['orig_col_name']
-                slice_df = self._sliced_pandas(
-                    processed_df, start, end, sort_col=orig_col, ascending=(sort_dir == 'asc'))
-                self.send(
-                    {"type": "infinite_resp", 'key': new_payload_args,
-                     'data': [], 'length': total_length},
-                    [to_parquet(slice_df)])
-                return
+                sort_col = processed_sd[sort]['orig_col_name']
+                ascending = new_payload_args.get('sort_direction') == 'asc'
 
-            slice_df = self._sliced_pandas(processed_df, start, end)
+            slice_df = self._execute_window(processed_df, start, end, sort_col, ascending)
             self.send(
                 {"type": "infinite_resp", 'key': new_payload_args,
                  'data': [], 'length': total_length},
                 [to_parquet(slice_df)])
 
+            # Sorted requests don't piggyback a second window today.
+            if sort:
+                return
             second_pa = new_payload_args.get('second_request')
             if not second_pa:
                 return
             extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
-            extra_df = self._sliced_pandas(processed_df, extra_start, extra_end)
+            extra_df = self._execute_window(processed_df, extra_start, extra_end)
             self.send(
                 {"type": "infinite_resp", 'key': second_pa,
                  'data': [], 'length': total_length},
@@ -339,17 +355,22 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
             raise
 
     @staticmethod
-    def _sliced_pandas(processed_df, start, end, sort_col=None, ascending=True):
-        """Materialise rows ``[start, end)`` as a pandas DataFrame.
+    def _execute_window(processed_df, start, end, sort_col=None, ascending=True):
+        """Materialise rows ``[start, end)`` — and **only** those rows.
 
-        For an ibis expr we push ``order_by + limit/offset`` to the
-        backend. For a pandas frame (postprocessor materialised, or
-        error-frame fallback) we slice in-process.
+        For an ibis expression: builds the bounded query
+        ``expr.limit(end - start, offset=start).execute()`` (with
+        ``order_by`` first when ``sort_col`` is set). The expression
+        stays lazy until ``.execute()`` here; the backend returns at
+        most ``end - start`` rows.
 
-        The pandas index on the returned frame is set to
-        ``RangeIndex(start, start + len(df))`` so ``to_parquet`` (which
-        injects ``index`` from ``df.index``) gives the frontend the
-        correct absolute row numbers.
+        For a pandas DataFrame (postprocessor materialised, or
+        error-frame fallback): slices in-process.
+
+        The returned frame's pandas index is
+        ``RangeIndex(start, start + len(df))`` so ``to_parquet`` —
+        which injects ``index`` from ``df.index`` — gives the frontend
+        the correct absolute row numbers.
         """
         if _is_pandas(processed_df):
             if sort_col is not None:
@@ -360,8 +381,8 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
 
         expr = processed_df
         if sort_col is not None:
-            order = expr[sort_col].asc() if ascending else expr[sort_col].desc()
-            expr = expr.order_by(order)
+            expr = expr.order_by(
+                expr[sort_col].asc() if ascending else expr[sort_col].desc())
         df = expr.limit(end - start, offset=start).execute()
         df.index = pd.RangeIndex(start, start + len(df))
         return df
