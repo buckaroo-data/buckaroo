@@ -212,3 +212,343 @@ class TestInfiniteWidget:
         assert msg["length"] == 2  # only Alice + Charlie match
         df = pd.read_parquet(BytesIO(bufs[0]))
         assert len(df) == 2
+
+
+class TestInfiniteWindowEdges:
+    """Edge cases around the [start, end) request window."""
+
+    def test_partial_window_at_end(self):
+        """end > total_rows returns the rows that exist; doesn't error."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        captured = _capture_send(w)
+        w._handle_payload_args({"start": 8, "end": 20})  # only rows 8, 9 exist
+        msg, bufs = captured[0]
+        df = pd.read_parquet(BytesIO(bufs[0]))
+        assert len(df) == 2
+        assert list(df["index"]) == [8, 9]
+        assert msg["length"] == 10
+
+    def test_window_past_end_returns_empty(self):
+        """start beyond row count returns zero rows, not an error."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        captured = _capture_send(w)
+        w._handle_payload_args({"start": 50, "end": 60})
+        msg, bufs = captured[0]
+        df = pd.read_parquet(BytesIO(bufs[0]))
+        assert len(df) == 0
+        assert msg["length"] == 10  # total is still reported
+
+    def test_index_carries_absolute_offsets_across_pages(self):
+        """Each page's index column matches its absolute row offset."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        captured = _capture_send(w)
+        for start, end in [(0, 3), (3, 6), (6, 9)]:
+            w._handle_payload_args({"start": start, "end": end})
+        indices = [list(pd.read_parquet(BytesIO(bufs[0]))["index"]) for _, bufs in captured]
+        assert indices == [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
+
+
+class TestInfiniteSort:
+    """Sort variants — direction and dtype."""
+
+    def test_sort_descending(self):
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        sort_key = next(
+            k for k, v in w.dataflow.merged_sd.items() if v.get("orig_col_name") == "a")
+        captured = _capture_send(w)
+        w._handle_payload_args(
+            {"start": 0, "end": 4, "sort": sort_key, "sort_direction": "desc"})
+        df = pd.read_parquet(BytesIO(captured[0][1][0]))
+        # 'a' values descending: [9, 6, 5, 5]
+        assert list(df["a"]) == [9, 6, 5, 5]
+
+    def test_sort_by_string_column(self):
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        sort_key = next(
+            k for k, v in w.dataflow.merged_sd.items() if v.get("orig_col_name") == "b")
+        captured = _capture_send(w)
+        w._handle_payload_args(
+            {"start": 0, "end": 5, "sort": sort_key, "sort_direction": "asc"})
+        df = pd.read_parquet(BytesIO(captured[0][1][0]))
+        assert list(df["b"]) == ["p", "q", "r", "s", "t"]
+
+    def test_sort_with_offset(self):
+        """order_by + limit/offset — the second page of a sorted view."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        sort_key = next(
+            k for k, v in w.dataflow.merged_sd.items() if v.get("orig_col_name") == "a")
+        captured = _capture_send(w)
+        w._handle_payload_args(
+            {"start": 5, "end": 10, "sort": sort_key, "sort_direction": "asc"})
+        df = pd.read_parquet(BytesIO(captured[0][1][0]))
+        # full asc sort: [1,1,2,3,3,4,5,5,6,9]; offset 5 → [4,5,5,6,9]
+        assert list(df["a"]) == [4, 5, 5, 6, 9]
+        # index column counts from the request offset
+        assert list(df["index"]) == [5, 6, 7, 8, 9]
+
+    def test_second_request_skipped_when_sorted(self):
+        """Sort path returns one parquet payload; second_request is ignored
+        (current behaviour — frontend doesn't piggyback when sorted)."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        sort_key = next(
+            k for k, v in w.dataflow.merged_sd.items() if v.get("orig_col_name") == "a")
+        captured = _capture_send(w)
+        w._handle_payload_args(
+            {"start": 0, "end": 3, "sort": sort_key, "sort_direction": "asc",
+             "second_request": {"start": 5, "end": 8}})
+        assert len(captured) == 1
+
+
+class TestInfinitePostprocessing:
+    """Pagination interacts with add_processing in two ways: an
+    expression-returning processor stays lazy (push-down preserved),
+    a pandas-returning processor falls back to in-process slicing."""
+
+    def test_filter_processor_paginates_with_pushed_down_count(self):
+        """Postprocessor returns a filtered expr; pagination still pushes down."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+
+        def big_a(expr):
+            return expr.filter(expr.a > 3)
+
+        w.add_processing(big_a)
+        captured = _capture_send(w)
+        w._handle_payload_args({"start": 0, "end": 10})
+        msg, bufs = captured[0]
+        # _paginated_expr 'a': [3,1,4,1,5,9,2,6,5,3] — filter > 3 → [4,5,9,6,5] (5 rows)
+        assert msg["length"] == 5
+        df = pd.read_parquet(BytesIO(bufs[0]))
+        assert sorted(df["a"]) == [4, 5, 5, 6, 9]
+
+    def test_pandas_processor_paginates_in_process(self):
+        """A processor that materialises to pandas takes the in-process slice
+        branch in _execute_window."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+
+        def materialise(expr):
+            return expr.execute()  # returns a pandas DataFrame
+
+        w.add_processing(materialise)
+        captured = _capture_send(w)
+        w._handle_payload_args({"start": 4, "end": 7})
+        msg, bufs = captured[0]
+        df = pd.read_parquet(BytesIO(bufs[0]))
+        assert len(df) == 3
+        assert list(df["index"]) == [4, 5, 6]
+        assert msg["length"] == 10
+
+
+class TestInfiniteErrorPath:
+    def test_unknown_sort_column_emits_error_info(self):
+        """Garbage sort key → exception caught, error_info sent, length=0.
+        We re-raise after sending so the test sees both."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        captured = _capture_send(w)
+        with pytest.raises(KeyError):
+            w._handle_payload_args(
+                {"start": 0, "end": 3, "sort": "no_such_col", "sort_direction": "asc"})
+        assert len(captured) == 1
+        msg, _bufs = captured[0]
+        assert msg["type"] == "infinite_resp"
+        assert "error_info" in msg
+        assert msg["length"] == 0
+
+
+class TestLazyPostprocessor:
+    """Postprocessing steps must just decorate the expression. No
+    materialisation inside the step itself — that would defeat the
+    push-down design (stats run on a materialised pandas/arrow object
+    rather than against the backend, pagination has nothing to bound)."""
+
+    def _spy_executes(self, monkeypatch):
+        """Spy on both pandas (``execute``) and arrow (``to_pyarrow``)
+        materialisation paths. A lazy step shouldn't trigger either."""
+        from xorq.vendor.ibis.expr.types.core import Expr
+        ops: list = []
+        original_execute = Expr.execute
+        original_to_pyarrow = Expr.to_pyarrow
+
+        def spy_execute(self, *args, **kwargs):
+            ops.append(type(self.op()).__name__)
+            return original_execute(self, *args, **kwargs)
+
+        def spy_to_pyarrow(self, *args, **kwargs):
+            ops.append(type(self.op()).__name__)
+            return original_to_pyarrow(self, *args, **kwargs)
+
+        monkeypatch.setattr(Expr, "execute", spy_execute)
+        monkeypatch.setattr(Expr, "to_pyarrow", spy_to_pyarrow)
+        return ops
+
+    def test_filter_step_does_not_execute(self, monkeypatch):
+        """Postprocessor body runs exactly once during registration.
+        Spy across that call only — it must record zero executes."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        ops = self._spy_executes(monkeypatch)
+        executes_during_step = []
+
+        def big_a(expr):
+            executes_during_step.append(len(ops))
+            result = expr.filter(expr.a > 3).order_by(expr.a)
+            executes_during_step.append(len(ops))
+            return result
+
+        w.add_processing(big_a)
+        # The step entered and exited with the same execute count.
+        before, after = executes_during_step
+        assert after - before == 0
+
+    def test_multi_stage_step_stays_lazy(self, monkeypatch):
+        """A non-trivial step — filter → mutate → order_by — is still
+        purely declarative; no execute fires inside the step body."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        ops = self._spy_executes(monkeypatch)
+        executes_during_step = []
+
+        def derive(expr):
+            executes_during_step.append(len(ops))
+            result = (
+                expr.filter(expr.a > 1)
+                .mutate(a_squared=expr.a * expr.a)
+                .order_by("a"))
+            executes_during_step.append(len(ops))
+            return result
+
+        w.add_processing(derive)
+        before, after = executes_during_step
+        assert after - before == 0
+
+        # Pagination still works against the derived expression.
+        captured = _capture_send(w)
+        w._handle_payload_args({"start": 0, "end": 5})
+        msg, bufs = captured[0]
+        df = pd.read_parquet(BytesIO(bufs[0]))
+        # _paginated_expr 'a': [3,1,4,1,5,9,2,6,5,3] — filter > 1 → 8 rows.
+        assert msg["length"] == 8
+        # mutate column survives — column names get rewritten to a/b/c, but
+        # the merged_sd preserves orig_col_name.
+        orig_names = {v["orig_col_name"] for v in w.dataflow.merged_sd.values()}
+        assert "a_squared" in orig_names
+
+    def test_lazy_step_paginates_with_bounded_execution(self, monkeypatch):
+        """End-to-end: lazy step + paginated request → only count + limit
+        executes hit the backend, never a bare table fetch."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+
+        def lazy_step(expr):
+            return expr.filter(expr.a > 1).order_by(expr.a)
+
+        w.add_processing(lazy_step)
+
+        # Spy starts AFTER registration so we only watch pagination.
+        ops = self._spy_executes(monkeypatch)
+        captured = _capture_send(w)
+        w._handle_payload_args({"start": 2, "end": 5})
+
+        # Exactly one count + one limit; no full-table fetch.
+        assert ops == ["CountStar", "Limit"]
+        df = pd.read_parquet(BytesIO(captured[0][1][0]))
+        assert len(df) == 3
+
+
+class TestInfiniteBoundedExecution:
+    """The PR review's central invariant: the expression stays lazy and
+    only ever materialises through bounded ops — ``Limit`` for the row
+    window (via ``to_pyarrow`` on the arrow path) or ``CountStar`` for
+    the scalar total. A bare materialisation on the underlying Table op
+    would fetch the entire dataset and defeat the push-down design."""
+
+    def _make_spy(self, monkeypatch):
+        """Spy on every materialisation entry point we use: ``execute``
+        for aggregates and ``to_pyarrow`` for the row window. Captures
+        the outermost op class so the test can assert plan boundedness."""
+        from xorq.vendor.ibis.expr.types.core import Expr
+        ops_seen: list = []
+        original_execute = Expr.execute
+        original_to_pyarrow = Expr.to_pyarrow
+
+        def spy_execute(self, *args, **kwargs):
+            ops_seen.append(type(self.op()).__name__)
+            return original_execute(self, *args, **kwargs)
+
+        def spy_to_pyarrow(self, *args, **kwargs):
+            ops_seen.append(type(self.op()).__name__)
+            return original_to_pyarrow(self, *args, **kwargs)
+
+        monkeypatch.setattr(Expr, "execute", spy_execute)
+        monkeypatch.setattr(Expr, "to_pyarrow", spy_to_pyarrow)
+        return ops_seen
+
+    def test_unsorted_window_only_emits_count_and_limit(self, monkeypatch):
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        captured = _capture_send(w)
+        ops = self._make_spy(monkeypatch)
+        w._handle_payload_args({"start": 5, "end": 8})
+        # Exactly two executes: aggregate (count) + bounded window (limit).
+        assert ops == ["CountStar", "Limit"]
+        # And the slice respected the bound.
+        df = pd.read_parquet(BytesIO(captured[0][1][0]))
+        assert len(df) == 3
+
+    def test_sorted_window_only_emits_count_and_limit(self, monkeypatch):
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+        sort_key = next(
+            k for k, v in w.dataflow.merged_sd.items() if v.get("orig_col_name") == "a")
+        captured = _capture_send(w)
+        ops = self._make_spy(monkeypatch)
+        w._handle_payload_args(
+            {"start": 0, "end": 4, "sort": sort_key, "sort_direction": "asc"})
+        # Sort wraps the table in Sort -> Limit; we only execute the Limit
+        # (the outermost op), never a bare Table fetch.
+        assert ops == ["CountStar", "Limit"]
+        assert len(pd.read_parquet(BytesIO(captured[0][1][0]))) == 4
+
+    def test_no_full_table_execute_on_large_expr(self, monkeypatch):
+        """Synthesise a 'large' expression and verify the spy never sees a
+        bare Table op execute. The expr is small in this test, but the
+        same code path handles backends where a bare execute would round-
+        trip the entire dataset."""
+        big = xo.memtable({"a": list(range(1000))})
+        w = XorqBuckarooInfiniteWidget(big)
+        ops = self._make_spy(monkeypatch)
+        w._handle_payload_args({"start": 100, "end": 110})
+        # The processed_df is ``big`` (an InMemoryTable op). A bare
+        # ``processed_df.execute()`` would show up here as 'InMemoryTable'.
+        assert "InMemoryTable" not in ops
+        assert ops == ["CountStar", "Limit"]
+
+    def test_window_uses_arrow_path_no_pandas_detour(self, monkeypatch):
+        """Mirror polars infinite: arrow → parquet, no pandas in the wire
+        path for the ibis branch.
+
+        Spies on both ``Expr.execute`` and ``Expr.to_pyarrow`` *after*
+        widget construction (so registration-time stat queries don't
+        pollute the read-out). The windowed slice must travel via
+        ``to_pyarrow`` (arrow Table) and never hit ``execute`` (which
+        would return a pandas DataFrame)."""
+        w = XorqBuckarooInfiniteWidget(_paginated_expr())
+
+        from xorq.vendor.ibis.expr.types.core import Expr
+        execute_ops: list = []
+        to_pyarrow_ops: list = []
+        original_execute = Expr.execute
+        original_to_pyarrow = Expr.to_pyarrow
+
+        def spy_execute(self, *args, **kwargs):
+            execute_ops.append(type(self.op()).__name__)
+            return original_execute(self, *args, **kwargs)
+
+        def spy_to_pyarrow(self, *args, **kwargs):
+            to_pyarrow_ops.append(type(self.op()).__name__)
+            return original_to_pyarrow(self, *args, **kwargs)
+
+        monkeypatch.setattr(Expr, "execute", spy_execute)
+        monkeypatch.setattr(Expr, "to_pyarrow", spy_to_pyarrow)
+
+        w._handle_payload_args({"start": 2, "end": 5})
+
+        # The aggregate (count) goes through .execute() — that's a scalar
+        # round-trip, not the wire payload.
+        assert execute_ops == ["CountStar"]
+        # The row window goes through .to_pyarrow() — never .execute().
+        assert to_pyarrow_ops == ["Limit"]

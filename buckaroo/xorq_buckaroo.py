@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import logging
 import traceback
+from io import BytesIO
 from typing import Any
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from traitlets import Unicode
 
 from .buckaroo_widget import BuckarooInfiniteWidget, BuckarooWidget
@@ -316,7 +319,7 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
 
         # All slicing happens here so it's obvious that nothing executes
         # the full expression. Each request emits exactly one bounded
-        # window query (``expr.limit(end - start, offset=start).execute()``)
+        # window query (``expr.limit(end - start, offset=start).to_pyarrow()``)
         # plus one aggregate (``expr.count().execute()`` for total length).
         try:
             total_length = _expr_count(processed_df)
@@ -328,11 +331,11 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
                 sort_col = processed_sd[sort]['orig_col_name']
                 ascending = new_payload_args.get('sort_direction') == 'asc'
 
-            slice_df = self._execute_window(processed_df, start, end, sort_col, ascending)
+            window_bytes = self._window_to_parquet(processed_df, start, end, sort_col, ascending)
             self.send(
                 {"type": "infinite_resp", 'key': new_payload_args,
                  'data': [], 'length': total_length},
-                [to_parquet(slice_df)])
+                [window_bytes])
 
             # Sorted requests don't piggyback a second window today.
             if sort:
@@ -341,11 +344,11 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
             if not second_pa:
                 return
             extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
-            extra_df = self._execute_window(processed_df, extra_start, extra_end)
+            extra_bytes = self._window_to_parquet(processed_df, extra_start, extra_end)
             self.send(
                 {"type": "infinite_resp", 'key': second_pa,
                  'data': [], 'length': total_length},
-                [to_parquet(extra_df)])
+                [extra_bytes])
         except Exception as e:
             logger.error(e)
             stack_trace = traceback.format_exc()
@@ -355,34 +358,48 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
             raise
 
     @staticmethod
-    def _execute_window(processed_df, start, end, sort_col=None, ascending=True):
-        """Materialise rows ``[start, end)`` — and **only** those rows.
+    def _window_to_parquet(processed_df, start, end, sort_col=None, ascending=True) -> bytes:
+        """Materialise rows ``[start, end)`` and serialise to parquet — *no
+        pandas detour for the ibis path*.
 
-        For an ibis expression: builds the bounded query
-        ``expr.limit(end - start, offset=start).execute()`` (with
-        ``order_by`` first when ``sort_col`` is set). The expression
-        stays lazy until ``.execute()`` here; the backend returns at
-        most ``end - start`` rows.
+        Mirrors the polars infinite widget's wire path: arrow → parquet,
+        not arrow → pandas → fastparquet. The bounded query
+        ``expr.limit(end - start, offset=start)`` (after ``order_by`` when
+        ``sort_col`` is set) goes straight to ``to_pyarrow()``; the
+        resulting ``pyarrow.Table`` is column-renamed to buckaroo's
+        rewritten ``a, b, c`` space, an ``index`` column with absolute
+        offsets ``[start, start + n)`` is appended, and the table is
+        written with ``pyarrow.parquet.write_table``.
 
         For a pandas DataFrame (postprocessor materialised, or
-        error-frame fallback): slices in-process.
-
-        The returned frame's pandas index is
-        ``RangeIndex(start, start + len(df))`` so ``to_parquet`` —
-        which injects ``index`` from ``df.index`` — gives the frontend
-        the correct absolute row numbers.
+        error-frame fallback) we still go through the pandas
+        ``to_parquet`` helper — there's no expression to push down.
         """
         if _is_pandas(processed_df):
             if sort_col is not None:
                 processed_df = processed_df.sort_values(by=[sort_col], ascending=ascending)
             df = processed_df[start:end].copy()
             df.index = pd.RangeIndex(start, start + len(df))
-            return df
+            return to_parquet(df)
 
         expr = processed_df
         if sort_col is not None:
             expr = expr.order_by(
                 expr[sort_col].asc() if ascending else expr[sort_col].desc())
-        df = expr.limit(end - start, offset=start).execute()
-        df.index = pd.RangeIndex(start, start + len(df))
-        return df
+        # Rename original columns to the rewritten 'a, b, c' space the
+        # frontend works in. Done at the expression level — and *before*
+        # the limit — so the outermost op stays ``Limit`` (the bounded
+        # plan stays observable for spies / query inspection).
+        rename_select = [
+            expr[orig].name(rew)
+            for orig, rew in old_col_new_col(processed_df)]
+        renamed = expr.select(rename_select)
+        windowed = renamed.limit(end - start, offset=start)
+        table = windowed.to_pyarrow()
+        # Append absolute-offset index column for the frontend.
+        index_arr = pa.array(
+            list(range(start, start + len(table))), type=pa.int64())
+        table = table.append_column('index', index_arr)
+        out = BytesIO()
+        pq.write_table(table, out, compression='none')
+        return out.getvalue()
