@@ -19,11 +19,8 @@ from buckaroo.xorq_buckaroo import (  # noqa: E402
 
 def _expr():
     return xo.memtable(
-        {
-            "price": [12.5, 18.9, 7.4, 22.1, 14.0, 9.9, 31.2, 11.5, 19.8, 50.0],
-            "qty": [1, 2, 1, 3, 2, 4, 1, 2, 5, 9],
-            "category": ["a", "b", "a", "c", "b", "b", "c", "a", "b", "c"],
-        })
+        {"price": [12.5, 18.9, 7.4, 22.1, 14.0, 9.9, 31.2, 11.5, 19.8, 50.0], "qty": [1, 2, 1, 3, 2, 4, 1, 2, 5, 9],
+         "category": ["a", "b", "a", "c", "b", "b", "c", "a", "b", "c"]})
 
 
 class TestInstantiation:
@@ -115,11 +112,8 @@ class TestPostProcessing:
 
 def _searchable_expr():
     return xo.memtable(
-        {
-            "name": ["Alice", "Bob", "Charlie", "Daria", "Eve"],
-            "role": ["admin", "user", "admin", "user", "guest"],
-            "score": [10, 20, 30, 40, 50],
-        })
+        {"name": ["Alice", "Bob", "Charlie", "Daria", "Eve"], "role": ["admin", "user", "admin", "user", "guest"],
+         "score": [10, 20, 30, 40, 50]})
 
 
 class TestSearch:
@@ -153,10 +147,7 @@ class TestSearch:
 
 def _paginated_expr():
     return xo.memtable(
-        {
-            "a": [3, 1, 4, 1, 5, 9, 2, 6, 5, 3],
-            "b": ["p", "q", "r", "s", "t", "u", "v", "w", "x", "y"],
-        })
+        {"a": [3, 1, 4, 1, 5, 9, 2, 6, 5, 3], "b": ["p", "q", "r", "s", "t", "u", "v", "w", "x", "y"]})
 
 
 def _capture_send(widget):

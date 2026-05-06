@@ -48,17 +48,11 @@ def test_xorq_buckaroo_imports_without_polars():
     """``buckaroo[xorq]`` must not transitively require ``polars``."""
     pytest.importorskip("xorq.api")
     _run_with_blocked(
-        blocked_packages=[
-            "polars",
-            "buckaroo.customizations.pl_autocleaning_conf",
-            "buckaroo.customizations.polars_commands",
-            "buckaroo.customizations.polars_analysis",
-            "buckaroo.customizations.pl_stats_v2",
-            "buckaroo.polars_buckaroo",
-            "buckaroo.lazy_infinite_polars_widget",
+        blocked_packages=["polars", "buckaroo.customizations.pl_autocleaning_conf",
+            "buckaroo.customizations.polars_commands", "buckaroo.customizations.polars_analysis",
+            "buckaroo.customizations.pl_stats_v2", "buckaroo.polars_buckaroo", "buckaroo.lazy_infinite_polars_widget",
             "buckaroo.pluggable_analysis_framework.polars_analysis_management",
-            "buckaroo.pluggable_analysis_framework.polars_utils",
-        ],
+            "buckaroo.pluggable_analysis_framework.polars_utils"],
         target_module="buckaroo.xorq_buckaroo")
 
 
@@ -66,10 +60,6 @@ def test_polars_buckaroo_imports_without_xorq():
     """``buckaroo[polars]`` must not transitively require ``xorq``."""
     pytest.importorskip("polars")
     _run_with_blocked(
-        blocked_packages=[
-            "xorq",
-            "buckaroo.xorq_buckaroo",
-            "buckaroo.customizations.xorq_stats_v2",
-            "buckaroo.pluggable_analysis_framework.xorq_stat_pipeline",
-        ],
+        blocked_packages=["xorq", "buckaroo.xorq_buckaroo", "buckaroo.customizations.xorq_stats_v2",
+            "buckaroo.pluggable_analysis_framework.xorq_stat_pipeline"],
         target_module="buckaroo.polars_buckaroo")
