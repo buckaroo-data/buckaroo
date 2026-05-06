@@ -517,6 +517,51 @@ class TestInfiniteBoundedExecution:
         assert "InMemoryTable" not in ops
         assert ops == ["CountStar", "Limit"]
 
+    def test_separate_window_requests_each_emit_one_bounded_query(self, monkeypatch):
+        """Two non-adjacent windows on a 5k-row expression: each request
+        emits exactly one CountStar (total length) and one Limit
+        (windowed slice) — never a full-table fetch.
+
+        Pins down the infinite-loading contract: the frontend can
+        scroll-jump (not just paginate sequentially) without the widget
+        materialising any rows outside the requested windows."""
+        big = xo.memtable(
+            {"a": list(range(5000)), "b": [str(i) for i in range(5000)]})
+        w = XorqBuckarooInfiniteWidget(big)
+
+        # Spy installed AFTER widget construction so registration-time
+        # stat queries aren't counted.
+        ops = self._make_spy(monkeypatch)
+        captured = _capture_send(w)
+
+        # First window: rows [0, 50).
+        w._handle_payload_args({"start": 0, "end": 50})
+        # Second window: jump to [300, 350) — non-adjacent.
+        w._handle_payload_args({"start": 300, "end": 350})
+
+        # Two requests → two count + two limit. No InMemoryTable fetch.
+        assert ops == ["CountStar", "Limit", "CountStar", "Limit"]
+        assert "InMemoryTable" not in ops
+
+        # Both responses sent.
+        assert len(captured) == 2
+
+        # First response: 50 rows, index 0..49, total length 5000.
+        msg1, bufs1 = captured[0]
+        df1 = pd.read_parquet(BytesIO(bufs1[0]))
+        assert msg1["length"] == 5000
+        assert len(df1) == 50
+        assert list(df1["index"]) == list(range(0, 50))
+        assert list(df1["a"]) == list(range(0, 50))
+
+        # Second response: 50 rows, index 300..349, same total length.
+        msg2, bufs2 = captured[1]
+        df2 = pd.read_parquet(BytesIO(bufs2[0]))
+        assert msg2["length"] == 5000
+        assert len(df2) == 50
+        assert list(df2["index"]) == list(range(300, 350))
+        assert list(df2["a"]) == list(range(300, 350))
+
     def test_window_uses_arrow_path_no_pandas_detour(self, monkeypatch):
         """Mirror polars infinite: arrow → parquet, no pandas in the wire
         path for the ibis branch.
