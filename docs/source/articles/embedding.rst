@@ -64,7 +64,10 @@ The four classes are:
      - ``DFViewerInfinite``
 
 For polars, swap the prefix: ``PolarsBuckarooWidget``,
-``PolarsBuckarooInfiniteWidget``, ``PolarsDFViewer``.
+``PolarsBuckarooInfiniteWidget``, ``PolarsDFViewer``. For xorq
+(ibis expressions): ``XorqBuckarooWidget``,
+``XorqBuckarooInfiniteWidget``. The xorq path doesn't currently
+expose a DFViewer-only variant — it ships with the full Buckaroo UI.
 
 Picking between them:
 
@@ -76,11 +79,11 @@ Picking between them:
   than only the sampled subset.
 
 
-Backends: pandas and polars
----------------------------
+Backends: pandas, polars, and xorq
+----------------------------------
 
-Buckaroo supports both pandas and polars. The selection happens at the
-import path:
+Buckaroo supports three backends. The selection happens at the import
+path:
 
 .. code-block:: python
 
@@ -91,29 +94,52 @@ import path:
     from buckaroo.polars_buckaroo import (
         PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget, PolarsDFViewer)
 
-The user-facing UI is identical between the two — same status bar, same
-column histograms, same command UI. What differs is internal: the analysis
-classes (mean, median, null counts, histograms, etc.) are implemented
-against each library's native API, so neither backend pays a conversion
-cost just to render.
+    # Xorq / ibis expressions
+    from buckaroo.xorq_buckaroo import (
+        XorqBuckarooWidget, XorqBuckarooInfiniteWidget)
 
-A few entry points accept either kind of frame and dispatch by type. The
-static-embed helpers (``prepare_buckaroo_artifact``, ``to_html``) inspect
-the input and pick the right widget class for you. ``LazyFrame`` is
-collected to a ``DataFrame`` first.
+The user-facing UI is identical across all three — same status bar,
+same column histograms, same command UI. What differs is internal:
+the analysis classes (mean, median, null counts, histograms, etc.)
+are implemented against each library's native API, so neither pandas
+nor polars pays a conversion cost to render, and xorq pushes
+computation down to whatever backend is behind the expression.
+
+A few entry points accept either pandas or polars frames and dispatch
+by type. The static-embed helpers (``prepare_buckaroo_artifact``,
+``to_html``) inspect the input and pick the right widget class for
+you. ``LazyFrame`` is collected to a ``DataFrame`` first.
 
 Polars is an optional dependency: ``pip install buckaroo[polars]``.
 Without it, the polars import paths simply aren't there, and the pandas
 classes work the same.
 
-**xorq backend** *(coming soon)* — a third backend, built on
-`xorq <https://github.com/xorq-labs/xorq>`_/ibis, will let Buckaroo
-compute summary statistics across DuckDB, Snowflake, BigQuery, and
-other ibis-supported engines without materializing the dataframe in
-Python. The pluggable analysis framework already has the executor
-infrastructure (see ``buckaroo.pluggable_analysis_framework.xorq_stat_pipeline``
-and the :doc:`xorq-stats` article) — what's still in progress is
-the matching ``XorqBuckarooWidget`` / ``XorqDFViewer`` entry points.
+**xorq** is a third backend, built on
+`xorq <https://github.com/letsql/xorq>`_/ibis, that takes an
+*expression* rather than a materialized frame. Stats compile to a
+single batched ``expr.aggregate(...)`` query plus per-column histogram
+queries, and the only thing pulled into Python is a display-sized
+sample (``expr.limit(N).execute()``). This means Buckaroo can render
+summary statistics over DuckDB, Postgres, Snowflake, BigQuery, and
+any other ibis-supported engine without materializing the table.
+
+.. code-block:: python
+
+    import xorq.api as xo
+    from buckaroo.xorq_buckaroo import XorqBuckarooInfiniteWidget
+
+    expr = xo.read_parquet("citibike-trips.parquet")
+    XorqBuckarooInfiniteWidget(expr)
+
+The Infinite variant is usually what you want for xorq — each scroll
+window pushes a ``LIMIT/OFFSET`` to the backend and streams the
+resulting Arrow window straight to the browser. Postprocessing is
+expression-to-expression: register a function that takes the current
+expression and returns a new one, and stats keep pushing down.
+
+Install with ``pip install 'buckaroo[xorq]'``. See :doc:`xorq-stats`
+for a walkthrough of the underlying stat pipeline and how to add
+custom aggregates.
 
 
 Embedding modes
@@ -381,6 +407,9 @@ post-processing method.
    * - Notebook ``BuckarooWidget`` / ``BuckarooInfiniteWidget``
      - Yes
      - Kernel runs the transform
+   * - Notebook ``XorqBuckarooWidget`` / ``XorqBuckarooInfiniteWidget``
+     - Yes
+     - Kernel rewrites the ibis expression and pushes the new query down
    * - Notebook ``DFViewer``
      - No
      - No status bar
@@ -428,6 +457,8 @@ Quick chooser
      - ``prepare_buckaroo_artifact()`` + your own HTML
    * - Big file, want infinite scroll without a notebook
      - Buckaroo server
+   * - Data lives in DuckDB / Postgres / Snowflake / BigQuery
+     - ``XorqBuckarooInfiniteWidget`` (notebook, push-down stats)
    * - Letting Claude Code view data files
      - Buckaroo server via MCP (``buckaroo[mcp]``)
    * - Solara dashboard
