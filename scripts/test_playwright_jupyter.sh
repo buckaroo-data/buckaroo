@@ -79,6 +79,7 @@ NOTEBOOKS=(
     "test_polars_dfviewer.ipynb"
     "test_polars_dfviewer_infinite.ipynb"
     "test_infinite_scroll_transcript.ipynb"
+    "test_xorq_infinite_scroll.ipynb"
 )
 
 # If specific notebook(s) provided, test only those (comma-separated)
@@ -380,10 +381,14 @@ for notebook in "${NOTEBOOKS[@]}"; do
     cd packages/buckaroo-js-core
     log_message "Running Playwright test for $notebook..."
     
-    # Use special test file for transcript testing, otherwise use integration.spec.ts only
+    # Use special test files for tests that have their own spec; default
+    # to the generic integration.spec.ts for plain widget render checks.
     if [[ "$notebook" == "test_infinite_scroll_transcript.ipynb" ]]; then
         PW_TEST_FILE="pw-tests/infinite-scroll-transcript.spec.ts"
         PW_TIMEOUT=45000
+    elif [[ "$notebook" == "test_xorq_infinite_scroll.ipynb" ]]; then
+        PW_TEST_FILE="pw-tests/xorq-infinite-scroll.spec.ts"
+        PW_TIMEOUT=60000
     else
         PW_TEST_FILE="pw-tests/integration.spec.ts"
         PW_TIMEOUT=30000
