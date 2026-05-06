@@ -86,7 +86,15 @@ const xorqViewerConfig: DFViewerConfig = {
     left_col_configs: [],
     column_config: [
         { col_name: "index", header_name: "index", displayer_args: { displayer: "obj" } },
-        { col_name: "a", header_name: "price", displayer_args: { displayer: "float" } },
+        {
+            col_name: "a",
+            header_name: "price",
+            displayer_args: {
+                displayer: "float",
+                min_fraction_digits: 2,
+                max_fraction_digits: 2,
+            },
+        },
         { col_name: "b", header_name: "name", displayer_args: { displayer: "string" } },
     ],
     component_config: {},

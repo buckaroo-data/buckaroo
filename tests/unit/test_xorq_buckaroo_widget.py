@@ -421,8 +421,7 @@ class TestLazyPostprocessor:
         # Pagination still works against the derived expression.
         captured = _capture_send(w)
         w._handle_payload_args({"start": 0, "end": 5})
-        msg, bufs = captured[0]
-        df = pd.read_parquet(BytesIO(bufs[0]))
+        msg, _bufs = captured[0]
         # _paginated_expr 'a': [3,1,4,1,5,9,2,6,5,3] — filter > 1 → 8 rows.
         assert msg["length"] == 8
         # mutate column survives — column names get rewritten to a/b/c, but
