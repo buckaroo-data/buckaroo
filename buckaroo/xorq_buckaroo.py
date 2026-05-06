@@ -16,10 +16,9 @@ from typing import Any
 import pandas as pd
 
 from .buckaroo_widget import BuckarooWidget
-from .customizations.pl_autocleaning_conf import NoCleaningConfPl
 from .customizations.styling import DefaultMainStyling, DefaultSummaryStatsStyling
 from .customizations.xorq_stats_v2 import XORQ_STATS_V2
-from .dataflow.autocleaning import PandasAutocleaning
+from .dataflow.autocleaning import AutocleaningConfig, PandasAutocleaning
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import Sampling
 from .df_util import old_col_new_col
@@ -67,6 +66,17 @@ class XorqSampling(Sampling):
         if cls.serialize_limit:
             return df_or_expr.limit(cls.serialize_limit).execute()
         return df_or_expr.execute()
+
+
+class NoCleaningConfXorq(AutocleaningConfig):
+    """No-cleaning config local to the xorq path — avoids importing
+    ``NoCleaningConfPl`` (which would transitively load polars and break
+    a polars-less ``buckaroo[xorq]`` install)."""
+
+    autocleaning_analysis_klasses = []
+    command_klasses = []
+    quick_command_klasses = []
+    name = ""
 
 
 class XorqAutocleaning(PandasAutocleaning):
@@ -156,7 +166,7 @@ class XorqBuckarooWidget(BuckarooWidget):
 
     analysis_klasses = _XORQ_ANALYSIS_KLASSES
     autocleaning_klass = XorqAutocleaning
-    autoclean_conf = tuple([NoCleaningConfPl])
+    autoclean_conf = tuple([NoCleaningConfXorq])
     DFStatsClass = XorqDfStatsV2
     sampling_klass = XorqSampling
     dataflow_klass = XorqDataflow
