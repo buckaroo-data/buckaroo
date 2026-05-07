@@ -56,8 +56,8 @@ def profile(label, fn, top=25, filter_substr="buckaroo"):
 
     # Header + filtered rows
     lines = raw.splitlines()
-    header_idx = next((i for i, l in enumerate(lines)
-                        if l.lstrip().startswith("ncalls")), None)
+    header_idx = next((i for i, ln in enumerate(lines)
+                        if ln.lstrip().startswith("ncalls")), None)
     if header_idx is None:
         print(raw)
         return
@@ -80,8 +80,8 @@ def profile(label, fn, top=25, filter_substr="buckaroo"):
     ps2.print_stats(top * 2)
     print("\n  --- top tottime (any module) ---")
     raw2 = s2.getvalue().splitlines()
-    h2 = next((i for i, l in enumerate(raw2)
-               if l.lstrip().startswith("ncalls")), None)
+    h2 = next((i for i, ln in enumerate(raw2)
+               if ln.lstrip().startswith("ncalls")), None)
     if h2 is not None:
         print(raw2[h2])
         for ln in raw2[h2 + 1:h2 + 1 + top]:

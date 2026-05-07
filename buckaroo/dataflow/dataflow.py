@@ -21,6 +21,32 @@ from .styling_core import (
 
 
 from .abc_dataflow import ABCDataflow
+
+
+class DfTrait(Any):
+    """Any-trait for values that may contain a pandas/polars DataFrame.
+
+    The default ``traitlets.TraitType.set`` decides whether to fire
+    ``@observe`` callbacks via ``bool(old_value == new_value)``. For a
+    DataFrame that triggers a full element-wise comparison
+    (O(rows × cols)) — and on widget construction with a moderately large
+    frame, those traitlets-internal comparisons dominate runtime
+    (~78% of construction time on a real 883k×26 CSV; see issue #706).
+
+    DfTrait uses identity comparison instead. Trades a possible
+    spurious notification (cheap) when the same DataFrame object is
+    re-assigned for skipping the expensive ``==``.
+    """
+
+    def set(self, obj, value):
+        new_value = self._validate(obj, value)
+        try:
+            old_value = obj._trait_values[self.name]
+        except KeyError:
+            old_value = self.default_value
+        obj._trait_values[self.name] = new_value
+        if old_value is not new_value:
+            obj._notify_trait(self.name, old_value, new_value)
     
 class DataFlow(ABCDataflow):
     """This class is meant to only represent the dataflow through
@@ -59,9 +85,9 @@ class DataFlow(ABCDataflow):
         'generated_py_code': ""})
 
 
-    raw_df = Any('')
+    raw_df = DfTrait('')
     sample_method = Unicode('default')
-    sampled_df = Any('')
+    sampled_df = DfTrait('')
 
     cleaning_method = Unicode('')
     quick_command_args = Dict({})
@@ -70,10 +96,10 @@ class DataFlow(ABCDataflow):
     # us that the interpeter is run through at least once
     operations = Any([]).tag(sync=True)
 
-    cleaned = Any().tag(default=None)
-    
+    cleaned = DfTrait().tag(default=None)
+
     post_processing_method = Unicode('').tag(default='')
-    processed_result = Any().tag(default=None)
+    processed_result = DfTrait().tag(default=None)
 
     analysis_klasses = None
     summary_sd = Any()
@@ -88,7 +114,7 @@ class DataFlow(ABCDataflow):
 
     merged_column_config = Any()
 
-    widget_args_tuple = Any()
+    widget_args_tuple = DfTrait()
 
 
     
