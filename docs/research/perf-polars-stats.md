@@ -334,6 +334,73 @@ Still real, still worth fixing, but **decisively smaller than the
 traitlets and to_pandas issues** — and only matters on the polars side
 where it isn't already dwarfed by other costs.
 
+## xorq backends — datafusion and duckdb
+
+`scripts/perf/perf_xorq.py` smoke-tests `XorqBuckarooWidget` /
+`XorqBuckarooInfiniteWidget` with `xo.connect()` (datafusion, default)
+and `xo.duckdb.connect()`. The same datasets as the other harnesses.
+Black-box: register the table once with `con.create_table('t', df)`,
+then time widget construction (best of 3) and a 200-row execute pull.
+
+### Widget construction (warm, best of 3) — across all four engines
+
+| dataset | xorq[datafusion] | xorq[duckdb] | pandas (post-#706) | polars |
+| --- | --- | --- | --- | --- |
+| synth 100k × 8 | 320 ms | 364 ms | 105 ms | 99 ms |
+| synth 500k × 8 | 437 ms | 396 ms | 135 ms | 125 ms |
+| Fielding 174k × 18 | 555 ms | 690 ms | 101 ms | 60 ms |
+| Boston 883k × 26 | 793 ms | 744 ms | 758 ms | 430 ms |
+
+Infinite variant on the same data:
+
+| dataset | xorq[df] inf | xorq[duckdb] inf | pandas inf | polars inf |
+| --- | --- | --- | --- | --- |
+| synth 100k | 326 ms | 336 ms | 87 ms | 74 ms |
+| synth 500k | 409 ms | 376 ms | 121 ms | 48 ms |
+| Fielding 174k | 522 ms | 651 ms | 84 ms | 32 ms |
+| Boston 883k | 732 ms | 680 ms | 715 ms | 96 ms |
+
+### `create_table` (one-time, not in widget timing)
+
+| dataset | datafusion | duckdb |
+| --- | --- | --- |
+| synth 100k | 20 ms | 40 ms |
+| synth 500k | 63 ms | 99 ms |
+| Fielding 174k | 28 ms | 56 ms |
+| Boston 883k | 617 ms | 1104 ms |
+
+### What this tells us
+
+1. **xorq backends are 3–15× slower than pandas/polars for widget
+   construction.** Intrinsic to the design: every stat is a SQL query
+   pushed to the engine. The v2 stat pipeline runs ~7 stats × ~N cols,
+   so several dozen round-trips per widget. Each query is fast in
+   isolation but the count adds up.
+2. **Datafusion edges out duckdb** for widget construction at small N
+   and string-heavy data; duckdb catches up on synth 500k. For
+   `create_table`, datafusion is **~2× faster** across the board —
+   pandas→arrow ingestion is significantly cheaper there.
+3. **Infinite vs main widget: xorq sees little win.** The infinite
+   path skips main serialization, but for xorq backends serialization
+   isn't the cost — the stats SQL queries are. So both variants land
+   near the same number.
+4. **200-row execute pull is fast.** 2–5 ms for both backends. SQL
+   `LIMIT … OFFSET` round-trips are not a hotspot.
+5. **Boston 883k duckdb create_table at ~1.1 s is the worst single
+   number** in any of the harnesses — pandas DataFrame → duckdb table
+   ingestion of a 376 MB string-heavy frame.
+
+### What's next for xorq perf
+
+Not investigated here, but worth considering:
+- Profile `XorqStatPipeline.process_df` to see whether the cost is
+  per-query overhead (network/IPC) or actual SQL execution. If it's
+  the former, batching multiple stats into a single SQL query (one
+  SELECT with many aggregations) would collapse the round-trip count.
+- The `XorqDfStatsV2` likely benefits from the #706 traitlets fix
+  (it inherits the DataFlow traits), but the win is small there
+  because xorq exprs don't have an O(rows × cols) `__eq__`.
+
 ## Updated picture of "polars feels slower"
 
 Three independent issues, in descending order of impact:
