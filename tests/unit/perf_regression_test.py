@@ -94,3 +94,31 @@ def test_pandas_infinite_widget_no_full_dataframe_eq():
         "Construction is scaling with cells — likely traitlets DataFrame.__eq__ "
         "regression (#706)."
     )
+
+
+# ============================================================
+# Issue #707 — _pl_vc_to_pd must not regress to .to_list().
+# .to_list() is ~9x slower than .to_numpy() for value_counts conversion.
+# ============================================================
+
+def test_pl_vc_to_pd_not_using_to_list():
+    """Regression for #707: _pl_vc_to_pd must use .to_numpy(), not .to_list()."""
+    import polars as pl
+    from buckaroo.customizations.pl_stats_v2 import _pl_vc_to_pd
+
+    ser = pl.Series('a', list(range(50_000)))
+
+    def fast_baseline():
+        vc = ser.drop_nulls().value_counts(sort=True)
+        return pd.Series(vc['count'].to_numpy(), index=vc[ser.name].to_numpy())
+
+    impl_t = _best_of(lambda: _pl_vc_to_pd(ser), n=5)
+    fast_t = _best_of(fast_baseline, n=5)
+
+    # Current (.to_list) is ~9x slower than baseline; fixed (.to_numpy)
+    # should be within ~1x. 3x leaves comfortable CI headroom either way.
+    ratio = impl_t / max(fast_t, 1e-6)
+    assert ratio < 3.0, (
+        f"_pl_vc_to_pd is {impl_t*1000:.1f}ms vs to_numpy baseline {fast_t*1000:.1f}ms "
+        f"({ratio:.1f}x). Likely a .to_list() regression — see issue #707."
+    )
