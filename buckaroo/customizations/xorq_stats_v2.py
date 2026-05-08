@@ -145,6 +145,27 @@ def distinct_count(col: XorqColumn) -> int:
 
 
 @stat(column_filter=_is_numeric_not_bool)
+def low_tail_quantile(col: XorqColumn) -> float:
+    """1st-percentile cutoff for numeric histogram trimming.
+
+    Buckets get spread across the "meat" of the distribution rather
+    than the full min/max range; rows below this value contribute to a
+    ``tail`` marker. Mirrors ``np.quantile(vals, 0.01)`` in
+    pd_stats_v2's ``histogram_series``.
+
+    Folded into the Phase 1 batched aggregate via the standard
+    ``_is_batch_func`` rule (XorqColumn parameter only).
+    """
+    return col.quantile(0.01)
+
+
+@stat(column_filter=_is_numeric_not_bool)
+def high_tail_quantile(col: XorqColumn) -> float:
+    """99th-percentile cutoff. See ``low_tail_quantile``."""
+    return col.quantile(0.99)
+
+
+@stat(column_filter=_is_numeric_not_bool)
 def mean(col: XorqColumn) -> float:
     return col.mean().cast("float64")
 
@@ -329,4 +350,5 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
 # ``PL_ANALYSIS_V2``) for those pipelines.
 
 XORQ_STATS_V2 = [typing_stats, _type, null_count, min, max, distinct_count, mean, std, median,
+    low_tail_quantile, high_tail_quantile,
     non_null_count, nan_per, distinct_per, histogram]

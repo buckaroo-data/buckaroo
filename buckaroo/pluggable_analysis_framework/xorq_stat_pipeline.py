@@ -68,6 +68,34 @@ def _to_python_scalar(val):
     return val
 
 
+def _fmt_num(v):
+    """Format a numeric bucket bound for histogram bar labels.
+
+    Avoids scientific notation for typical real-world ranges so labels
+    read naturally in the cell tooltip ("1059" not "1.06e+03"). Uses 4
+    significant digits, switches to scientific only above 1e6 / below
+    1e-3 where compact form is genuinely shorter.
+    """
+    if v is None:
+        return "?"
+    try:
+        f = float(v)
+    except Exception:
+        return str(v)
+    if f != f:  # NaN
+        return "nan"
+    abs_f = abs(f)
+    if abs_f == 0:
+        return "0"
+    if abs_f >= 1e6 or abs_f < 1e-3:
+        return f"{f:.3g}"
+    if abs_f >= 100:
+        return f"{f:.0f}"
+    if abs_f >= 1:
+        return f"{f:.2f}".rstrip("0").rstrip(".") or "0"
+    return f"{f:.3g}"
+
+
 def _scalar_from(result):
     """Pull a Python scalar out of an ``Ok``-wrapped accumulator entry.
 
@@ -335,15 +363,24 @@ class XorqStatPipeline:
             self._batch_categorical_histograms(table, accumulators, cat_cols)
 
     def _batch_numeric_histograms(self, table, accumulators, cols: List[str]) -> None:
-        """Fold N×10 bucket counts into a single aggregate query."""
+        """Fold N×10 bucket counts into a single aggregate query.
+
+        Buckets cover the 1st-to-99th-percentile "meat" of the
+        distribution (matching ``pd_stats_v2.histogram_series``) so
+        skewed columns spread across the chart instead of collapsing
+        into a single dominant bar. Rows below the 1st percentile and
+        above the 99th get separate ``tail`` markers. Falls back to
+        min/max bucketing when the percentile stats aren't available
+        (e.g. degenerate column or older pipeline configuration).
+        """
         agg_exprs = []
         bucket_meta: Dict[str, Dict[str, Any]] = {}
 
         for col in cols:
-            min_r = accumulators[col].get("min")
-            max_r = accumulators[col].get("max")
-            min_v = min_r.value if isinstance(min_r, Ok) else None
-            max_v = max_r.value if isinstance(max_r, Ok) else None
+            min_v = _scalar_from(accumulators[col].get("min"))
+            max_v = _scalar_from(accumulators[col].get("max"))
+            low_q = _scalar_from(accumulators[col].get("low_tail_quantile"))
+            high_q = _scalar_from(accumulators[col].get("high_tail_quantile"))
 
             if min_v is None or max_v is None:
                 accumulators[col]["histogram"] = Ok([])
@@ -355,20 +392,37 @@ class XorqStatPipeline:
                 accumulators[col]["histogram"] = Ok([])
                 continue
 
-            width = (max_v - min_v) / 10
-            bucket_meta[col] = {"min": min_v, "max": max_v, "width": width}
+            # Use percentile bounds when the column has enough spread
+            # for them to be meaningful; fall back to min/max otherwise.
+            if (low_q is not None and high_q is not None
+                    and not (isinstance(low_q, float)
+                             and (math.isnan(low_q) or math.isnan(high_q)))
+                    and low_q < high_q):
+                bucket_lo, bucket_hi = float(low_q), float(high_q)
+                trimmed = True
+            else:
+                bucket_lo, bucket_hi = float(min_v), float(max_v)
+                trimmed = False
+
+            width = (bucket_hi - bucket_lo) / 10
+            bucket_meta[col] = {"lo": bucket_lo, "hi": bucket_hi, "width": width, "min": min_v, "max": max_v,
+                "trimmed": trimmed}
             for b in range(10):
-                low = min_v + b * width
-                # Last bucket uses ``max_v`` as the upper bound directly
-                # — FP arithmetic on (b+1)*width can drift just below max
-                # and miss the actual maximum value (which then renders
-                # as an empty bucket and shrinks the bucket-percent total).
+                low = bucket_lo + b * width
+                # Last bucket uses ``bucket_hi`` directly to avoid FP
+                # drift on (b+1)*width missing the boundary value.
                 if b == 9:
-                    cond = (table[col] >= low) & (table[col] <= max_v)
+                    cond = (table[col] >= low) & (table[col] <= bucket_hi)
                 else:
                     high = low + width
                     cond = (table[col] >= low) & (table[col] < high)
                 agg_exprs.append(cond.cast("int64").sum().name(f"{col}|hist_b{b}"))
+            if trimmed:
+                # Tail markers: rows outside the percentile-trimmed range.
+                low_tail = (table[col] < bucket_lo).cast("int64").sum()
+                high_tail = (table[col] > bucket_hi).cast("int64").sum()
+                agg_exprs.append(low_tail.name(f"{col}|hist_tail_lo"))
+                agg_exprs.append(high_tail.name(f"{col}|hist_tail_hi"))
 
         if not agg_exprs:
             return
@@ -385,25 +439,32 @@ class XorqStatPipeline:
         for col, meta in bucket_meta.items():
             counts = [_to_python_scalar(df[f"{col}|hist_b{b}"].iloc[0]) or 0
                       for b in range(10)]
-            non_null_total = float(sum(counts))
             length = _scalar_from(accumulators[col].get("length")) or 0
             null_count = _scalar_from(accumulators[col].get("null_count")) or 0
-            if non_null_total == 0 or length == 0:
+            if length == 0:
                 accumulators[col]["histogram"] = Ok([])
                 continue
+
             out = []
+            if meta["trimmed"]:
+                low_tail_count = _to_python_scalar(
+                    df[f"{col}|hist_tail_lo"].iloc[0]) or 0
+                high_tail_count = _to_python_scalar(
+                    df[f"{col}|hist_tail_hi"].iloc[0]) or 0
+                if low_tail_count > 0:
+                    out.append({"name": f"{_fmt_num(meta['min'])} - {_fmt_num(meta['lo'])}", "tail": 1})
             for b, count in enumerate(counts):
-                low = meta["min"] + b * meta["width"]
-                high = low + meta["width"]
-                # Match pandas: ``population`` key, value as percent of
-                # total length (0–100), so HistogramCell renders the
-                # solid-gray numeric-bucket bars at the right scale.
+                low = meta["lo"] + b * meta["width"]
+                high = meta["hi"] if b == 9 else low + meta["width"]
+                # Match pandas: ``population`` key, percent of total
+                # length (0–100). HistogramCell renders this as the
+                # solid-gray numeric-bucket bar.
                 pct = round(float(count) / length * 100, 0)
-                out.append({"name": f"{low:.3g}-{high:.3g}",
-                    "population": pct})
+                out.append({"name": f"{_fmt_num(low)}-{_fmt_num(high)}", "population": pct})
+            if meta["trimmed"] and high_tail_count > 0:
+                out.append({"name": f"{_fmt_num(meta['hi'])} - {_fmt_num(meta['max'])}", "tail": 1})
             if null_count > 0:
-                out.append({"name": "NA",
-                    "NA": round(float(null_count) / length * 100, 0)})
+                out.append({"name": "NA", "NA": round(float(null_count) / length * 100, 0)})
             accumulators[col]["histogram"] = Ok(out)
 
     def _batch_categorical_histograms(self, table, accumulators, cols: List[str]) -> None:
@@ -479,20 +540,43 @@ class XorqStatPipeline:
                 continue
             sub_df = by_col.get_group(col)
             top_k_total = int(sub_df["__count"].sum())
-            # Match pandas categorical_histogram: ``cat_pop`` is percent
-            # of total length (0–100), filter near-empty bars (>0.3%),
-            # then a single ``longtail`` for non-null mass outside the
-            # top-K and an ``NA`` bar for the null mass.
+            top_k_min = int(sub_df["__count"].min()) if len(sub_df) else 0
+            top_k_unique_rows = int((sub_df["__count"] == 1).sum())
+            non_null = length - null_count
+            residual = non_null - top_k_total
+
+            # Pandas's categorical_histogram counts ALL distinct values
+            # appearing exactly once (top-K + residual) into the
+            # ``unique`` marker, leaving only the duplicated values as
+            # cat_pop bars. We approximate this in SQL: when
+            # ``top_k_min == 1``, every residual value must also appear
+            # exactly once (residual values are by definition less
+            # frequent than the smallest top-K count). When
+            # ``top_k_min > 1``, residual values may appear up to
+            # top_k_min times, so we treat the residual as longtail
+            # without an extra unique-count query.
+            if top_k_min == 1:
+                unique_rows = top_k_unique_rows + residual
+                longtail_rows = 0
+            else:
+                unique_rows = 0
+                longtail_rows = residual
+
             out = []
             for _, row in sub_df.iterrows():
+                if int(row["__count"]) <= 1:
+                    # Subsumed by the ``unique`` marker below.
+                    continue
                 pct = round(float(row["__count"]) / length * 100, 0)
                 if pct > 0.3:
-                    out.append({"name": str(row["__val"]), "cat_pop": pct})
-            non_null = length - null_count
-            longtail = non_null - top_k_total
-            if longtail > 0:
+                    out.append({"name": str(row["__val"]),
+                        "cat_pop": pct})
+            if longtail_rows > 0:
                 out.append({"name": "longtail",
-                    "longtail": round(float(longtail) / length * 100, 0)})
+                    "longtail": round(float(longtail_rows) / length * 100, 0)})
+            if unique_rows > 0:
+                out.append({"name": "unique",
+                    "unique": round(float(unique_rows) / length * 100, 0)})
             if null_count > 0:
                 out.append({"name": "NA",
                     "NA": round(float(null_count) / length * 100, 0)})
