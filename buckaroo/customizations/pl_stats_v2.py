@@ -67,8 +67,11 @@ def _pl_vc_to_pd(ser: pl.Series) -> pd.Series:
     which expect a pd.Series value_counts.
     """
     vc = ser.drop_nulls().value_counts(sort=True)
-    col_name = ser.name
-    return pd.Series(vc['count'].to_list(), index=vc[col_name].to_list())
+    # Cast count to int64 to match the previous .to_list() path's effective
+    # dtype. Keeps `categorical_dict`'s `full_long_tail - unique_count`
+    # subtraction signed (counts come back as uint32, which underflows on 0-N).
+    counts = vc['count'].to_numpy().astype(np.int64, copy=False)
+    return pd.Series(counts, index=vc[ser.name].to_numpy())
 
 
 @stat()
