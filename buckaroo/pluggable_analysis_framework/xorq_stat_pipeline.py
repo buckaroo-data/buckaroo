@@ -68,6 +68,18 @@ def _to_python_scalar(val):
     return val
 
 
+def _scalar_from(result):
+    """Pull a Python scalar out of an ``Ok``-wrapped accumulator entry.
+
+    Returns ``None`` for missing keys or ``Err`` results. Lets the
+    histogram batch read length/null_count from the Phase 1 accumulator
+    without scattering ``isinstance(..., Ok)`` checks.
+    """
+    if isinstance(result, Ok):
+        return result.value
+    return None
+
+
 def _is_batch_func(sf: StatFunc) -> bool:
     """A batch-phase func has an XorqColumn parameter and only raw/external deps.
 
@@ -347,12 +359,14 @@ class XorqStatPipeline:
             bucket_meta[col] = {"min": min_v, "max": max_v, "width": width}
             for b in range(10):
                 low = min_v + b * width
-                high = low + width
-                # Last bucket is inclusive of max so the actual maximum
-                # value lands somewhere; otherwise it falls outside.
+                # Last bucket uses ``max_v`` as the upper bound directly
+                # — FP arithmetic on (b+1)*width can drift just below max
+                # and miss the actual maximum value (which then renders
+                # as an empty bucket and shrinks the bucket-percent total).
                 if b == 9:
-                    cond = (table[col] >= low) & (table[col] <= high)
+                    cond = (table[col] >= low) & (table[col] <= max_v)
                 else:
+                    high = low + width
                     cond = (table[col] >= low) & (table[col] < high)
                 agg_exprs.append(cond.cast("int64").sum().name(f"{col}|hist_b{b}"))
 
@@ -371,16 +385,25 @@ class XorqStatPipeline:
         for col, meta in bucket_meta.items():
             counts = [_to_python_scalar(df[f"{col}|hist_b{b}"].iloc[0]) or 0
                       for b in range(10)]
-            total = float(sum(counts))
-            if total == 0:
+            non_null_total = float(sum(counts))
+            length = _scalar_from(accumulators[col].get("length")) or 0
+            null_count = _scalar_from(accumulators[col].get("null_count")) or 0
+            if non_null_total == 0 or length == 0:
                 accumulators[col]["histogram"] = Ok([])
                 continue
             out = []
             for b, count in enumerate(counts):
                 low = meta["min"] + b * meta["width"]
                 high = low + meta["width"]
+                # Match pandas: ``population`` key, value as percent of
+                # total length (0–100), so HistogramCell renders the
+                # solid-gray numeric-bucket bars at the right scale.
+                pct = round(float(count) / length * 100, 0)
                 out.append({"name": f"{low:.3g}-{high:.3g}",
-                    "cat_pop": float(count) / total})
+                    "population": pct})
+            if null_count > 0:
+                out.append({"name": "NA",
+                    "NA": round(float(null_count) / length * 100, 0)})
             accumulators[col]["histogram"] = Ok(out)
 
     def _batch_categorical_histograms(self, table, accumulators, cols: List[str]) -> None:
@@ -441,17 +464,38 @@ class XorqStatPipeline:
         for col in cols:
             if "histogram" in accumulators[col]:
                 continue
-            if col not in seen_cols:
+            length = _scalar_from(accumulators[col].get("length")) or 0
+            null_count = _scalar_from(accumulators[col].get("null_count")) or 0
+            if length == 0:
                 accumulators[col]["histogram"] = Ok([])
+                continue
+            if col not in seen_cols:
+                # No top-K rows, but null_count may still be > 0
+                out = []
+                if null_count > 0:
+                    out.append({"name": "NA",
+                        "NA": round(float(null_count) / length * 100, 0)})
+                accumulators[col]["histogram"] = Ok(out)
                 continue
             sub_df = by_col.get_group(col)
-            total = float(sub_df["__count"].sum())
-            if total == 0:
-                accumulators[col]["histogram"] = Ok([])
-                continue
-            out = [{"name": str(row["__val"]),
-                "cat_pop": float(row["__count"]) / total}
-                   for _, row in sub_df.iterrows()]
+            top_k_total = int(sub_df["__count"].sum())
+            # Match pandas categorical_histogram: ``cat_pop`` is percent
+            # of total length (0–100), filter near-empty bars (>0.3%),
+            # then a single ``longtail`` for non-null mass outside the
+            # top-K and an ``NA`` bar for the null mass.
+            out = []
+            for _, row in sub_df.iterrows():
+                pct = round(float(row["__count"]) / length * 100, 0)
+                if pct > 0.3:
+                    out.append({"name": str(row["__val"]), "cat_pop": pct})
+            non_null = length - null_count
+            longtail = non_null - top_k_total
+            if longtail > 0:
+                out.append({"name": "longtail",
+                    "longtail": round(float(longtail) / length * 100, 0)})
+            if null_count > 0:
+                out.append({"name": "NA",
+                    "NA": round(float(null_count) / length * 100, 0)})
             accumulators[col]["histogram"] = Ok(out)
 
     def add_stat(self, stat_func_or_class) -> Tuple[bool, List[StatError]]:

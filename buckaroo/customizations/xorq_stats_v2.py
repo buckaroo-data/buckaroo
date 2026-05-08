@@ -189,7 +189,7 @@ def distinct_per(length: int, distinct_count: int) -> float:
 
 
 def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str, min_val: float,
-        max_val: float) -> list:
+        max_val: float, length: int = 0, null_count: int = 0) -> list:
     if min_val is None or max_val is None:
         return []
     if (isinstance(min_val, float) and math.isnan(min_val)) or (
@@ -220,9 +220,13 @@ def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: s
     df = df[df["__bucket"].notna()]
     if len(df) == 0:
         return []
-    total = float(df["__count"].sum())
-    if total == 0:
+    non_null = float(df["__count"].sum())
+    if non_null == 0:
         return []
+    # Use length when available so percentages match the categorical
+    # path (% of total rows, including nulls). Fall back to non_null
+    # when length wasn't passed in.
+    denom = float(length) if length else non_null
 
     bucket_width = (max_val - min_val) / 10
     out = []
@@ -230,12 +234,18 @@ def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: s
         idx = int(row["__bucket"])
         low = min_val + idx * bucket_width
         high = low + bucket_width
-        out.append(
-            {"name": f"{low:.3g}-{high:.3g}", "cat_pop": float(row["__count"]) / total})
+        # Match pandas: ``population`` key (HistogramCell renders this
+        # as the solid-gray numeric-bucket bar) with values in 0–100.
+        pct = round(float(row["__count"]) / denom * 100, 0)
+        out.append({"name": f"{low:.3g}-{high:.3g}", "population": pct})
+    if null_count > 0 and length:
+        out.append({"name": "NA",
+            "NA": round(float(null_count) / length * 100, 0)})
     return out
 
 
-def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str) -> list:
+def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str,
+        length: int = 0, null_count: int = 0) -> list:
     query = (
         expr.group_by(col)
         .aggregate(__count=lambda t: t.count())
@@ -244,20 +254,37 @@ def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, co
     )
     df = execute(query)
     if len(df) == 0:
+        out = []
+        if null_count > 0 and length:
+            out.append({"name": "NA",
+                "NA": round(float(null_count) / length * 100, 0)})
+        return out
+    top_k_total = int(df["__count"].sum())
+    if top_k_total == 0:
         return []
-    total = float(df["__count"].sum())
-    if total == 0:
-        return []
+    denom = float(length) if length else float(top_k_total)
     out = []
     for _, row in df.iterrows():
-        out.append(
-            {"name": str(row[col]), "cat_pop": float(row["__count"]) / total})
+        # Match pandas: ``cat_pop`` percent of total length, drop bars
+        # that would render at <1px (>0.3% threshold).
+        pct = round(float(row["__count"]) / denom * 100, 0)
+        if pct > 0.3:
+            out.append({"name": str(row[col]), "cat_pop": pct})
+    if length:
+        non_null = length - null_count
+        longtail = non_null - top_k_total
+        if longtail > 0:
+            out.append({"name": "longtail",
+                "longtail": round(float(longtail) / length * 100, 0)})
+        if null_count > 0:
+            out.append({"name": "NA",
+                "NA": round(float(null_count) / length * 100, 0)})
     return out
 
 
 @stat(default=[])
 def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numeric: bool, is_bool: bool, length: int,
-        distinct_count: int, min: float, max: float) -> list:
+        null_count: int, distinct_count: int, min: float, max: float) -> list:
     """10-bucket numeric histogram or top-10 categorical histogram.
 
     Numeric columns with very few distinct values (<= 5) fall through to
@@ -269,6 +296,11 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
     (where ``min``/``max`` are filtered out by ``column_filter``) don't cascade-
     exclude this stat — the categorical branch ignores them.
 
+    Output keys match what HistogramCell.tsx expects: ``population`` for
+    numeric bucket bars, ``cat_pop`` for categorical top-K bars,
+    ``longtail`` for the non-null mass beyond top-K, and ``NA`` for the
+    null mass — each as a percent of total length (0–100).
+
     All queries go through the injected ``execute`` callable so a
     pipeline-supplied backend isn't bypassed.
 
@@ -279,8 +311,10 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
     if length == 0:
         return []
     if is_numeric and not is_bool and distinct_count > 5:
-        return _numeric_histogram(execute, expr, orig_col_name, min, max)
-    return _categorical_histogram(execute, expr, orig_col_name)
+        return _numeric_histogram(
+            execute, expr, orig_col_name, min, max, length, null_count)
+    return _categorical_histogram(
+        execute, expr, orig_col_name, length, null_count)
 
 
 # ============================================================

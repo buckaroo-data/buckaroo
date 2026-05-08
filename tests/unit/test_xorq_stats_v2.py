@@ -194,10 +194,14 @@ class TestHistogram:
         assert isinstance(h, list)
         assert len(h) > 0
         assert "name" in h[0]
-        assert "cat_pop" in h[0]
-        # cat_pops should sum to ~1.0
-        total_pop = sum(b["cat_pop"] for b in h)
-        assert abs(total_pop - 1.0) < 1e-6
+        # Frontend HistogramCell.tsx renders numeric bucket bars from
+        # ``population``; values are percent (0–100) of total length.
+        assert "population" in h[0], (
+            f"numeric histogram should use 'population' key, got {list(h[0])}")
+        bucket_total = sum(b.get("population", 0) for b in h)
+        # Buckets cover all rows (no nulls in this fixture), so they
+        # sum to ~100 within rounding noise.
+        assert 95 <= bucket_total <= 105, bucket_total
 
     def test_categorical_histogram_present(self):
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
@@ -205,10 +209,41 @@ class TestHistogram:
         assert errors == []
         h = stats["cat"]["histogram"]
         assert isinstance(h, list)
-        assert 0 < len(h) <= 10  # top-10 cap
+        assert 0 < len(h) <= 11  # top-10 cap + optional longtail/NA
         # 'a' appears 3 times — should be present
         names = [b["name"] for b in h]
         assert "a" in names
+        # Frontend HistogramCell.tsx renders categorical bars from
+        # ``cat_pop``; values are percent (0–100), not 0–1 fractions.
+        cat_bars = [b for b in h if b.get("name") not in ("longtail", "NA")]
+        assert all("cat_pop" in b for b in cat_bars), (
+            f"categorical histogram should use 'cat_pop' key, got {h}")
+        assert all(0 <= b["cat_pop"] <= 100 for b in cat_bars), (
+            f"cat_pop must be a percent (0–100), got {h}")
+
+    def test_histogram_keys_match_frontend_render_keys(self):
+        """HistogramCell.tsx maps ``population``, ``cat_pop``, ``tail``,
+        ``longtail``, ``unique``, ``NA`` to specific bar styles. Any
+        other key renders nothing (silent invisible bars). Lock the
+        keyset for both numeric and categorical paths.
+        """
+        VALID = {"name", "population", "cat_pop", "tail",
+            "longtail", "unique", "NA"}
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+
+        # numeric
+        stats, _ = pipeline.process_table(_make_table())
+        for bar in stats["ints"]["histogram"]:
+            assert set(bar) <= VALID, (
+                f"numeric bar uses unknown keys: {set(bar) - VALID}")
+
+        # categorical (with nulls so longtail/NA are also exercised)
+        table = xo.memtable(pd.DataFrame({
+            "k": ["a", "b", "a", None, "b", "a", "c", "d", "e", "f", "g", "h"]}))
+        stats, _ = pipeline.process_table(table)
+        for bar in stats["k"]["histogram"]:
+            assert set(bar) <= VALID, (
+                f"categorical bar uses unknown keys: {set(bar) - VALID}")
 
     def test_histogram_constant_column_empty(self):
         """Constant numeric column (min == max) → empty histogram, not crash."""
@@ -235,8 +270,15 @@ class TestHistogram:
         h = stats["vals"]["histogram"]
         assert isinstance(h, list)
         assert len(h) > 0, "histogram should not be empty for a numeric column with nulls"
-        total_pop = sum(b["cat_pop"] for b in h)
-        assert abs(total_pop - 1.0) < 1e-6
+        # Bucket bars use ``population`` (percent of length); the null
+        # mass shows up as a separate ``NA`` bar.
+        bucket_total = sum(b.get("population", 0) for b in h
+                           if b.get("name") != "NA")
+        na_total = sum(b.get("NA", 0) for b in h if b.get("name") == "NA")
+        # 9 rows total, 2 nulls → buckets ~78% + NA ~22%
+        assert 90 <= bucket_total + na_total <= 110, (
+            f"bucket+NA percent should sum to ~100; got {bucket_total}+{na_total}")
+        assert na_total > 0, "expected an NA bar for the null rows"
 
 
 # ============================================================
