@@ -390,16 +390,27 @@ Infinite variant on the same data:
    number** in any of the harnesses — pandas DataFrame → duckdb table
    ingestion of a 376 MB string-heavy frame.
 
-### What's next for xorq perf
+### Update — #709 fix landed (PR #710)
 
-Not investigated here, but worth considering:
-- Profile `XorqStatPipeline.process_df` to see whether the cost is
-  per-query overhead (network/IPC) or actual SQL execution. If it's
-  the former, batching multiple stats into a single SQL query (one
-  SELECT with many aggregations) would collapse the round-trip count.
-- The `XorqDfStatsV2` likely benefits from the #706 traitlets fix
-  (it inherits the DataFlow traits), but the win is small there
-  because xorq exprs don't have an O(rows × cols) `__eq__`.
+Profiling confirmed it's per-query overhead, not SQL execution. Three
+fixes (`_summary_sd` dedupe, `XorqDfStatsV2` and
+`verify_analysis_objects` both pass `unit_test=False`) cut the query
+count by ~80% and the wall time by 2.3-3.9×:
+
+| dataset | xorq[df] PRE | xorq[df] POST | xorq[duckdb] PRE | xorq[duckdb] POST |
+| --- | --- | --- | --- | --- |
+| synth 100k × 8 | 320 ms | **81 ms** (3.9×) | 364 ms | **103 ms** (3.5×) |
+| synth 500k × 8 | 437 ms | **133 ms** (3.3×) | 396 ms | **118 ms** (3.4×) |
+| Fielding 174k × 18 | 555 ms | **209 ms** (2.7×) | 690 ms | **269 ms** (2.6×) |
+| Boston 883k × 26 | 793 ms | **318 ms** (2.5×) | 744 ms | **325 ms** (2.3×) |
+
+Post-fix query count: 4 (3-col fixture), 9 (8 cols), 27 (26 cols).
+Remaining is 1 batched aggregate + 1 histogram per column.
+
+Still TODO: fold histograms into the batched aggregate to drop the
+count to 1-2 regardless of column count. Numeric histograms can use
+the already-computed min/max via a 2-pass batch; categorical top-K
+is harder to batch in ibis.
 
 ## Updated picture of "polars feels slower"
 
