@@ -23,6 +23,43 @@ def _expr():
          "category": ["a", "b", "a", "c", "b", "b", "c", "a", "b", "c"]})
 
 
+class TestQueryCount:
+    """Regression for #709: XorqStatPipeline used to issue ~51 SQL queries
+    per widget construction on an 8-col input — a 4× redundant pipeline run
+    (per-column histograms × 2 _get_summary_sd × (real table + PERVERSE_DF
+    unit_test)). Cap query count to a small constant.
+    """
+
+    def test_widget_construction_query_count(self):
+        from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
+        # Patch _execute on the class so all pipelines (real + unit_test) count.
+        orig = XorqStatPipeline._execute
+        queries = []
+
+        def counting(self, q):
+            queries.append(q)
+            return orig(self, q)
+
+        XorqStatPipeline._execute = counting
+        try:
+            XorqBuckarooWidget(_expr())
+        finally:
+            XorqStatPipeline._execute = orig
+
+        # Pre-fix #709: 41 queries on the 3-col fixture (4× redundant
+        # pipeline runs + per-column histograms). Post-fix: 4 (one batched
+        # aggregate + one histogram per column). Cap at 6 for CI headroom.
+        # If this rises above 6, suspect either:
+        #  - _summary_sd dedupe broke (cascade re-firing)
+        #  - XorqStatPipeline(unit_test=True) coming back into a hot path
+        #  - new per-column query added somewhere
+        # If we ever batch histograms (#709 follow-up), this can drop to 1.
+        assert len(queries) <= 6, (
+            f"XorqBuckarooWidget(3-col) issued {len(queries)} SQL queries; "
+            f"expected ≤ 6 (#709 regression). Pre-fix baseline was 41."
+        )
+
+
 class TestInstantiation:
     def test_smoke(self):
         XorqBuckarooWidget(_expr())
