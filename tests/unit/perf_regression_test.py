@@ -45,9 +45,80 @@ def test_basic_instantiation():
     bw_do_stuff(float_df(100_000,5))
     bw_end2 = time.time()
     bw_time_2 = bw_end2 - bw_start2
-    
+
     assert bw_time_2 < np_time * 60
 
 
+# ============================================================
+# Issue #706 — pandas widget construction must not perform full DataFrame
+# equality during traitlets change-detection. Cost is O(rows × cols) and
+# dominated 78% of construction time on a real 883k×26 CSV.
+# ============================================================
+
+def _best_of(fn, n=3):
+    fn()  # warmup
+    times = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        fn()
+        times.append(time.perf_counter() - t0)
+    return min(times)
 
 
+def test_pandas_infinite_widget_no_full_dataframe_eq():
+    """Regression for #706: traitlets _compare must use identity for DF traits.
+
+    Construction time on a 200k×10 object-dtype frame must not scale anywhere
+    near linearly with cells (the bug makes it scale exactly linearly).
+    """
+    from buckaroo.buckaroo_widget import BuckarooInfiniteWidget
+
+    big = pd.DataFrame({f'c{i}': ['xyz'] * 200_000 for i in range(10)})
+    small = pd.DataFrame({f'c{i}': ['xyz'] * 1_000 for i in range(10)})
+
+    # Warmup imports + first-DAG-build so the first measured call doesn't pay
+    # cold-start cost.
+    BuckarooInfiniteWidget(small)
+    BuckarooInfiniteWidget(big)
+
+    big_t = _best_of(lambda: BuckarooInfiniteWidget(big), n=3)
+    small_t = _best_of(lambda: BuckarooInfiniteWidget(small), n=3)
+    ratio = big_t / max(small_t, 1e-6)
+
+    # Bug today: ratio ~6-8x (DataFrame.__eq__ scales with cells).
+    # Fixed: ratio ~1.5-2x (just stat-pipeline overhead on more rows).
+    # 3.5x leaves CI headroom and still discriminates clearly.
+    assert ratio < 3.5, (
+        f"BuckarooInfiniteWidget on 200k×10 obj df is {big_t*1000:.0f}ms, "
+        f"{ratio:.1f}x the 1k×10 baseline ({small_t*1000:.0f}ms). "
+        "Construction is scaling with cells — likely traitlets DataFrame.__eq__ "
+        "regression (#706)."
+    )
+
+
+# ============================================================
+# Issue #707 — _pl_vc_to_pd must not regress to .to_list().
+# .to_list() is ~9x slower than .to_numpy() for value_counts conversion.
+# ============================================================
+
+def test_pl_vc_to_pd_not_using_to_list():
+    """Regression for #707: _pl_vc_to_pd must use .to_numpy(), not .to_list()."""
+    import polars as pl
+    from buckaroo.customizations.pl_stats_v2 import _pl_vc_to_pd
+
+    ser = pl.Series('a', list(range(50_000)))
+
+    def fast_baseline():
+        vc = ser.drop_nulls().value_counts(sort=True)
+        return pd.Series(vc['count'].to_numpy(), index=vc[ser.name].to_numpy())
+
+    impl_t = _best_of(lambda: _pl_vc_to_pd(ser), n=5)
+    fast_t = _best_of(fast_baseline, n=5)
+
+    # Current (.to_list) is ~9x slower than baseline; fixed (.to_numpy)
+    # should be within ~1x. 3x leaves comfortable CI headroom either way.
+    ratio = impl_t / max(fast_t, 1e-6)
+    assert ratio < 3.0, (
+        f"_pl_vc_to_pd is {impl_t*1000:.1f}ms vs to_numpy baseline {fast_t*1000:.1f}ms "
+        f"({ratio:.1f}x). Likely a .to_list() regression — see issue #707."
+    )
