@@ -116,12 +116,15 @@ classes work the same.
 
 **xorq** is a third backend, built on
 `xorq <https://github.com/letsql/xorq>`_/ibis, that takes an
-*expression* rather than a materialized frame. Stats compile to a
-single batched ``expr.aggregate(...)`` query plus per-column histogram
-queries, and the only thing pulled into Python is a display-sized
-sample (``expr.limit(N).execute()``). This means Buckaroo can render
-summary statistics over DuckDB, Postgres, Snowflake, BigQuery, and
-any other ibis-supported engine without materializing the table.
+*expression* rather than a materialized frame. The stat pipeline
+compiles to a small, fixed number of batched SQL queries: one
+``expr.aggregate(...)`` for length / null-count / min / max /
+distinct-count across every column, plus the histogram queries.
+Computation stays in the engine — the only thing pulled into Python
+is a display-sized sample (``expr.limit(N).execute()``). This means
+Buckaroo can render summary statistics over DuckDB, Postgres,
+Snowflake, BigQuery, and any other ibis-supported engine without
+materializing the table.
 
 .. code-block:: python
 
@@ -131,11 +134,22 @@ any other ibis-supported engine without materializing the table.
     expr = xo.read_parquet("citibike-trips.parquet")
     XorqBuckarooInfiniteWidget(expr)
 
+The default backend is xorq's built-in datafusion engine. Swap to
+duckdb, postgres, etc. by registering the table on the relevant
+connection:
+
+.. code-block:: python
+
+    con = xo.duckdb.connect("warehouse.db")
+    expr = con.table("trips").filter(con.table("trips").year == 2024)
+    XorqBuckarooInfiniteWidget(expr)
+
 The Infinite variant is usually what you want for xorq — each scroll
 window pushes a ``LIMIT/OFFSET`` to the backend and streams the
 resulting Arrow window straight to the browser. Postprocessing is
 expression-to-expression: register a function that takes the current
-expression and returns a new one, and stats keep pushing down.
+expression and returns a new one, and stats keep pushing down to the
+engine.
 
 Install with ``pip install 'buckaroo[xorq]'``. See :doc:`xorq-stats`
 for a walkthrough of the underlying stat pipeline and how to add
@@ -252,6 +266,16 @@ import ``BuckarooStaticTable`` and ``resolveDFDataAsync`` from
 
 This is the same path ``static-embed.tsx`` uses; you're substituting
 your own page shell. Same eager-only limitations as static HTML.
+
+.. note::
+
+   ``buckaroo-js-core`` is not yet published to npm. Until then, the
+   options are: (1) consume the prebuilt ``static-embed.js`` bundle
+   that ships with the wheel under ``buckaroo/static/`` and call
+   ``window.BuckarooStaticEmbed`` rather than importing modules; or
+   (2) work inside this monorepo and resolve ``buckaroo-js-core`` via
+   the pnpm workspace. The npm publication is tracked under the
+   "future" entry in the quick chooser below.
 
 When to use it: embedding into a Sphinx docs page, a marketing site,
 a CMS-rendered article, a multi-table dashboard. You control the
