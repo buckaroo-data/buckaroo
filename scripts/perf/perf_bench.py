@@ -162,7 +162,7 @@ def run_widget_comparison(n_rows: int):
     pl_stats = time_dfstats(plf, PlDfStatsV2, list(PL_ANALYSIS_V2), f"polars PlDfStatsV2 {n_rows:,}")
     print(f"\nDfStatsV2(pandas):   {pd_stats['total'] * 1000:.1f} ms")
     print(f"PlDfStatsV2(polars): {pl_stats['total'] * 1000:.1f} ms")
-    print(f"  (DfStats includes the >1M-cell downsample-to-50k path)")
+    print("  (DfStats includes the >1M-cell downsample-to-50k path)")
 
     pd_w = time_widget_construction(pdf, BuckarooWidget, f"BuckarooWidget {n_rows:,}")
     pl_w = time_widget_construction(plf, PolarsBuckarooWidget, f"PolarsBuckarooWidget {n_rows:,}")
