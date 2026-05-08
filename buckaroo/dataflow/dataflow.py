@@ -196,10 +196,23 @@ class DataFlow(ABCDataflow):
             ret_summary[col] = {}
         return ret_summary, {}
 
+    _summary_sd_cache_key = (None, None)
+
     @observe('processed_result', 'analysis_klasses')
     @exception_protect('summary_sd-protector')
     def _summary_sd(self, change):
-        result_summary_sd, errs  = self._get_summary_sd(self.processed_df)
+        # Dedupe: the autocleaning operations cascade re-fires
+        # _operation_result → cleaned → processed_result with a freshly-built
+        # tuple wrapper, which makes this observer fire twice per widget
+        # construction even when processed_df identity is unchanged.
+        # Skip when neither the dataframe nor analysis_klasses has actually
+        # changed since the last run. See issue #709.
+        df = self.processed_df
+        klasses = self.analysis_klasses
+        if (id(df), id(klasses)) == self._summary_sd_cache_key:
+            return
+        self._summary_sd_cache_key = (id(df), id(klasses))
+        result_summary_sd, errs  = self._get_summary_sd(df)
         self.summary_sd = result_summary_sd
         self.errs = errs
 

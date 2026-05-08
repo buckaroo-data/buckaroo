@@ -342,11 +342,17 @@ class XorqDfStatsV2:
 
     @classmethod
     def verify_analysis_objects(cls, objs):
-        XorqStatPipeline(objs)
+        # unit_test=False to skip the per-widget PERVERSE_DF pipeline run
+        # (issue #709). DAG validation still runs as part of __init__.
+        XorqStatPipeline(objs, unit_test=False)
 
     def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False):
         self.table = table
-        self.ap = XorqStatPipeline(col_analysis_objs)
+        # Skip the unit_test PERVERSE_DF run on each widget construction —
+        # it doubles the SQL query count (issue #709). The DAG-validation
+        # cost is already paid by verify_analysis_objects on first set up
+        # and by the test suite. Mirrors PlDfStatsV2.
+        self.ap = XorqStatPipeline(col_analysis_objs, unit_test=False)
         self.operating_df_name = operating_df_name
         self.debug = debug
         self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
