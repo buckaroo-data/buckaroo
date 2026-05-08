@@ -5,6 +5,7 @@ Accepts a mix of v2 @stat functions and v1 ColAnalysis classes (via adapter).
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -208,9 +209,13 @@ class StatPipeline:
     def ordered_a_objs(self):
         return list(self._original_inputs)
 
-    def __init__(self, stat_funcs: list, unit_test: bool = True):
+    def __init__(self, stat_funcs: list, unit_test: bool = True, record_timings: bool = False):
         self.all_stat_funcs = _normalize_inputs(stat_funcs)
         self._original_inputs = list(stat_funcs)
+        self.record_timings = record_timings
+        # When record_timings is True: list of (column, stat_name, seconds) tuples
+        # captured during the most recent process_df call.
+        self.timings: List[Tuple[str, str, float]] = []
 
         # Validate the full DAG (raises DAGConfigError if invalid)
         self.ordered_stat_funcs = build_typed_dag(
@@ -248,9 +253,14 @@ class StatPipeline:
         if initial_stats:
             for k, v in initial_stats.items():
                 accumulator[k] = Ok(v)
+        record_timings = self.record_timings
         for sf in column_funcs:
+            if record_timings:
+                t0 = time.perf_counter()
             _execute_stat_func(sf, accumulator, column_name, raw_series=raw_series, sampled_series=sampled_series,
                 raw_dataframe=raw_dataframe)
+            if record_timings:
+                self.timings.append((column_name, sf.name, time.perf_counter() - t0))
 
         # Build key_to_func for this column's funcs
         col_key_to_func: Dict[str, StatFunc] = {}
@@ -269,6 +279,9 @@ class StatPipeline:
         """
         if len(df) == 0:
             return {}, []
+
+        if self.record_timings:
+            self.timings = []
 
         summary: SDType = {}
         all_errors: List[StatError] = []

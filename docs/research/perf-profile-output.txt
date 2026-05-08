@@ -1,0 +1,235 @@
+must be running inside ipython to enable default display via enable()
+warmup...
+(done)
+
+loading tmpzyxhlh1w.csv...
+
+==============================================================================
+PROFILE: BuckarooInfiniteWidget — Boston 883k×26 (pandas)
+==============================================================================
+         222375 function calls (216355 primitive calls) in 0.755 seconds
+   Ordered by: cumulative time
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.752    0.752 buckaroo_widget.py:363(__init__)
+        1    0.000    0.000    0.752    0.752 buckaroo_widget.py:107(__init__)
+
+  --- top tottime (any module) ---
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        2    0.586    0.293    0.586    0.293 array_ops.py:113(comp_method_OBJECT_ARRAY)
+       46    0.042    0.001    0.042    0.001 algorithms.py:963(value_counts_arraylike)
+       50    0.014    0.000    0.014    0.000 missing.py:305(_isna_string_dtype)
+        4    0.012    0.003    0.014    0.004 take.py:120(_take_nd_ndarray)
+        1    0.007    0.007    0.007    0.007 sample.py:117(sample)
+       78    0.003    0.000    0.003    0.000 {built-in method builtins.sum}
+      174    0.003    0.000    0.004    0.000 base.py:3777(get_loc)
+50115/49700    0.003    0.000    0.005    0.000 {built-in method builtins.isinstance}
+      171    0.002    0.000    0.002    0.000 {built-in method numpy.empty}
+      644    0.002    0.000    0.002    0.000 generic.py:6236(__finalize__)
+        1    0.002    0.002    0.143    0.143 dataflow.py:199(_summary_sd)
+      444    0.002    0.000    0.002    0.000 base.py:5373(__getitem__)
+       50    0.002    0.000    0.002    0.000 {method 'argsort' of 'numpy.ndarray' objects}
+9370/9275    0.002    0.000    0.003    0.000 {built-in method builtins.getattr}
+       30    0.001    0.000    0.001    0.000 {method 'partition' of 'numpy.ndarray' objects}
+      312    0.001    0.000    0.008    0.000 series.py:389(__init__)
+       26    0.001    0.000    0.002    0.000 common.py:1671(is_all_strings)
+        8    0.001    0.000    0.001    0.000 nanops.py:954(nanvar)
+      276    0.001    0.000    0.114    0.000 stat_pipeline.py:58(_execute_stat_func)
+12677/8912    0.001    0.000    0.002    0.000 {built-in method builtins.len}
+        4    0.001    0.000    0.002    0.000 traitlets.py:1280(__new__)
+        1    0.001    0.001    0.755    0.755 perf_profile.py:113(<lambda>)
+      415    0.001    0.000    0.001    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+      402    0.001    0.000    0.003    0.000 construction.py:517(sanitize_array)
+        2    0.001    0.000    0.001    0.001 _histograms_impl.py:680(histogram)
+
+==============================================================================
+PROFILE: BuckarooWidget — Boston 883k×26 (pandas)
+==============================================================================
+         544669 function calls (533438 primitive calls) in 0.807 seconds
+   Ordered by: cumulative time
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.807    0.807 buckaroo_widget.py:107(__init__)
+        1    0.000    0.000    0.033    0.033 buckaroo_widget.py:134(_df_to_obj)
+        1    0.001    0.001    0.033    0.033 buckaroo_widget.py:153(_df_to_obj)
+        7    0.000    0.000    0.031    0.004 buckaroo_widget.py:69(bidirectional_wire)
+
+  --- top tottime (any module) ---
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        2    0.588    0.294    0.588    0.294 array_ops.py:113(comp_method_OBJECT_ARRAY)
+       46    0.043    0.001    0.043    0.001 algorithms.py:963(value_counts_arraylike)
+  5386/11    0.020    0.000    0.031    0.003 widget.py:87(_separate_buffers)
+       74    0.016    0.000    0.016    0.000 missing.py:305(_isna_string_dtype)
+353055/352638    0.014    0.000    0.016    0.000 {built-in method builtins.isinstance}
+       10    0.013    0.001    0.014    0.001 take.py:120(_take_nd_ndarray)
+        2    0.012    0.006    0.012    0.006 sample.py:117(sample)
+        1    0.008    0.008    0.008    0.008 {built-in method pandas._libs.json.ujson_dumps}
+        1    0.008    0.008    0.008    0.008 decoder.py:343(raw_decode)
+      178    0.004    0.000    0.005    0.000 base.py:3777(get_loc)
+       80    0.003    0.000    0.003    0.000 {built-in method builtins.sum}
+      476    0.002    0.000    0.003    0.000 base.py:5373(__getitem__)
+       52    0.002    0.000    0.002    0.000 {method 'argsort' of 'numpy.ndarray' objects}
+        1    0.002    0.002    0.174    0.174 dataflow.py:199(_summary_sd)
+       30    0.002    0.000    0.002    0.000 {method 'partition' of 'numpy.ndarray' objects}
+      189    0.002    0.000    0.002    0.000 {built-in method numpy.empty}
+      140    0.001    0.000    0.001    0.000 {method 'copy' of 'numpy.ndarray' objects}
+       26    0.001    0.000    0.002    0.000 common.py:1671(is_all_strings)
+      315    0.001    0.000    0.008    0.000 series.py:389(__init__)
+      276    0.001    0.000    0.114    0.000 stat_pipeline.py:58(_execute_stat_func)
+13162/9223    0.001    0.000    0.002    0.000 {built-in method builtins.len}
+      700    0.001    0.000    0.002    0.000 generic.py:6236(__finalize__)
+      145    0.001    0.000    0.003    0.000 managers.py:1954(get_rows_with_mask)
+      425    0.001    0.000    0.001    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+        2    0.001    0.000    0.001    0.000 base.py:2229(is_monotonic_increasing)
+
+==============================================================================
+PROFILE: PolarsBuckarooInfiniteWidget — Boston 883k×26 (polars)
+==============================================================================
+         122132 function calls (119126 primitive calls) in 0.134 seconds
+   Ordered by: cumulative time
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.134    0.134 buckaroo_widget.py:363(__init__)
+        1    0.000    0.000    0.134    0.134 buckaroo_widget.py:107(__init__)
+
+  --- top tottime (any module) ---
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.024    0.024    0.024    0.024 {method 'sample_n' of 'builtins.PyDataFrame' objects}
+       86    0.023    0.000    0.023    0.000 {method 'collect' of 'builtins.PyLazyFrame' objects}
+       26    0.018    0.001    0.018    0.001 {method 'value_counts' of 'builtins.PySeries' objects}
+       55    0.010    0.000    0.014    0.000 cast.py:123(maybe_convert_platform)
+       52    0.006    0.000    0.006    0.000 {method 'to_list' of 'builtins.PySeries' objects}
+       56    0.005    0.000    0.005    0.000 base.py:3777(get_loc)
+       55    0.003    0.000    0.004    0.000 cast.py:1579(construct_1d_object_array_from_listlike)
+       57    0.003    0.000    0.003    0.000 {built-in method builtins.sum}
+23888/23803    0.001    0.000    0.002    0.000 {built-in method builtins.isinstance}
+      225    0.001    0.000    0.085    0.000 stat_pipeline.py:58(_execute_stat_func)
+      149    0.001    0.000    0.016    0.000 construction.py:517(sanitize_array)
+        3    0.001    0.000    0.001    0.000 _histograms_impl.py:680(histogram)
+      247    0.001    0.000    0.001    0.000 {built-in method numpy.empty}
+       26    0.001    0.000    0.043    0.002 pl_stats_v2.py:63(_pl_vc_to_pd)
+        3    0.001    0.000    0.001    0.000 {method 'median' of 'builtins.PySeries' objects}
+       75    0.001    0.000    0.018    0.000 series.py:389(__init__)
+      198    0.001    0.000    0.001    0.000 generic.py:6236(__finalize__)
+       38    0.001    0.000    0.002    0.000 typed_dag.py:24(build_typed_dag)
+6990/5744    0.001    0.000    0.001    0.000 {built-in method builtins.len}
+      824    0.000    0.000    0.007    0.000 encoder.py:205(iterencode)
+     1058    0.000    0.000    0.008    0.000 __init__.py:183(dumps)
+     1202    0.000    0.000    0.001    0.000 {built-in method __new__ of type object at 0x106face38}
+       47    0.000    0.000    0.004    0.000 base.py:475(__new__)
+      204    0.000    0.000    0.001    0.000 base.py:5373(__getitem__)
+     1058    0.000    0.000    0.007    0.000 encoder.py:183(encode)
+
+==============================================================================
+PROFILE: PolarsBuckarooWidget — Boston 883k×26 (polars)
+==============================================================================
+         444822 function calls (436699 primitive calls) in 0.671 seconds
+   Ordered by: cumulative time
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.671    0.671 buckaroo_widget.py:107(__init__)
+        1    0.000    0.000    0.527    0.527 buckaroo_widget.py:134(_df_to_obj)
+        1    0.039    0.039    0.527    0.527 polars_buckaroo.py:63(_df_to_obj)
+        7    0.000    0.000    0.031    0.004 buckaroo_widget.py:69(bidirectional_wire)
+
+  --- top tottime (any module) ---
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.253    0.253    0.254    0.254 pandas_compat.py:780(table_to_dataframe)
+        1    0.193    0.193    0.193    0.193 {method 'to_pandas' of 'builtins.PyDataFrame' objects}
+        1    0.039    0.039    0.527    0.527 polars_buckaroo.py:63(_df_to_obj)
+  5302/11    0.020    0.000    0.031    0.003 widget.py:87(_separate_buffers)
+       86    0.019    0.000    0.019    0.000 {method 'collect' of 'builtins.PyLazyFrame' objects}
+       26    0.017    0.001    0.017    0.001 {method 'value_counts' of 'builtins.PySeries' objects}
+326780/326693    0.012    0.000    0.013    0.000 {built-in method builtins.isinstance}
+        1    0.010    0.010    0.010    0.010 {method 'sample_n' of 'builtins.PyDataFrame' objects}
+       58    0.010    0.000    0.014    0.000 cast.py:123(maybe_convert_platform)
+        1    0.008    0.008    0.008    0.008 {built-in method pandas._libs.json.ujson_dumps}
+        1    0.007    0.007    0.454    0.454 frame.py:2468(to_pandas)
+        1    0.007    0.007    0.007    0.007 decoder.py:343(raw_decode)
+        1    0.006    0.006    0.006    0.006 sample.py:117(sample)
+       52    0.005    0.000    0.005    0.000 {method 'to_list' of 'builtins.PySeries' objects}
+       86    0.005    0.000    0.006    0.000 base.py:3777(get_loc)
+        6    0.004    0.001    0.005    0.001 take.py:120(_take_nd_ndarray)
+       60    0.003    0.000    0.003    0.000 {built-in method builtins.sum}
+       58    0.003    0.000    0.004    0.000 cast.py:1579(construct_1d_object_array_from_listlike)
+       32    0.001    0.000    0.001    0.000 {method 'copy' of 'numpy.ndarray' objects}
+       46    0.001    0.000    0.001    0.000 missing.py:305(_isna_string_dtype)
+      225    0.001    0.000    0.082    0.000 stat_pipeline.py:58(_execute_stat_func)
+      155    0.001    0.000    0.015    0.000 construction.py:517(sanitize_array)
+      268    0.001    0.000    0.001    0.000 {built-in method numpy.empty}
+        3    0.001    0.000    0.001    0.000 _histograms_impl.py:680(histogram)
+       26    0.001    0.000    0.041    0.002 pl_stats_v2.py:63(_pl_vc_to_pd)
+
+==============================================================================
+PROFILE: PolarsBuckarooWidget — synthetic 100k×8 (polars)
+==============================================================================
+         185637 function calls (179183 primitive calls) in 0.115 seconds
+   Ordered by: cumulative time
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.115    0.115 buckaroo_widget.py:107(__init__)
+        1    0.000    0.000    0.018    0.018 buckaroo_widget.py:134(_df_to_obj)
+        1    0.001    0.001    0.018    0.018 polars_buckaroo.py:63(_df_to_obj)
+        7    0.000    0.000    0.013    0.002 buckaroo_widget.py:69(bidirectional_wire)
+
+  --- top tottime (any module) ---
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+       22    0.027    0.001    0.034    0.002 cast.py:123(maybe_convert_platform)
+        8    0.010    0.001    0.010    0.001 {method 'value_counts' of 'builtins.PySeries' objects}
+  5158/11    0.009    0.000    0.013    0.001 widget.py:87(_separate_buffers)
+        1    0.008    0.008    0.008    0.008 pandas_compat.py:780(table_to_dataframe)
+       32    0.007    0.000    0.007    0.000 {method 'collect' of 'builtins.PyLazyFrame' objects}
+       22    0.007    0.000    0.008    0.000 cast.py:1579(construct_1d_object_array_from_listlike)
+130748/130717    0.005    0.000    0.005    0.000 {built-in method builtins.isinstance}
+       16    0.004    0.000    0.004    0.000 {method 'to_list' of 'builtins.PySeries' objects}
+       32    0.003    0.000    0.003    0.000 base.py:3777(get_loc)
+        1    0.003    0.003    0.003    0.003 {built-in method pandas._libs.json.ujson_dumps}
+        1    0.002    0.002    0.002    0.002 decoder.py:343(raw_decode)
+       22    0.002    0.000    0.002    0.000 {built-in method builtins.sum}
+       55    0.001    0.000    0.036    0.001 construction.py:517(sanitize_array)
+      103    0.001    0.000    0.001    0.000 {built-in method numpy.empty}
+        3    0.001    0.000    0.002    0.001 _histograms_impl.py:680(histogram)
+        8    0.001    0.000    0.053    0.007 pl_stats_v2.py:63(_pl_vc_to_pd)
+        1    0.001    0.001    0.018    0.018 polars_buckaroo.py:63(_df_to_obj)
+        3    0.001    0.000    0.001    0.000 {method 'median' of 'builtins.PySeries' objects}
+        1    0.001    0.001    0.001    0.001 sample.py:117(sample)
+        6    0.001    0.000    0.001    0.000 {method 'quantile' of 'builtins.PySeries' objects}
+      117    0.001    0.000    0.074    0.001 stat_pipeline.py:58(_execute_stat_func)
+        1    0.000    0.000    0.000    0.000 {method 'to_pandas' of 'builtins.PyDataFrame' objects}
+       24    0.000    0.000    0.012    0.000 base.py:475(__new__)
+       90    0.000    0.000    0.000    0.000 base.py:5373(__getitem__)
+       21    0.000    0.000    0.037    0.002 series.py:389(__init__)
+
+==============================================================================
+PROFILE: BuckarooWidget — synthetic 100k×8 (pandas)
+==============================================================================
+         270256 function calls (261197 primitive calls) in 0.135 seconds
+   Ordered by: cumulative time
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.135    0.135 buckaroo_widget.py:107(__init__)
+        7    0.000    0.000    0.013    0.002 buckaroo_widget.py:69(bidirectional_wire)
+        1    0.000    0.000    0.009    0.009 buckaroo_widget.py:134(_df_to_obj)
+        1    0.000    0.000    0.009    0.009 buckaroo_widget.py:153(_df_to_obj)
+
+  --- top tottime (any module) ---
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+       28    0.025    0.001    0.025    0.001 algorithms.py:963(value_counts_arraylike)
+        2    0.013    0.006    0.013    0.006 array_ops.py:113(comp_method_OBJECT_ARRAY)
+  5240/11    0.009    0.000    0.013    0.001 widget.py:87(_separate_buffers)
+       22    0.007    0.000    0.012    0.001 algorithms.py:1023(mode)
+151361/151069    0.006    0.000    0.007    0.000 {built-in method builtins.isinstance}
+       33    0.006    0.000    0.006    0.000 {method 'partition' of 'numpy.ndarray' objects}
+       14    0.005    0.000    0.005    0.000 missing.py:305(_isna_string_dtype)
+       45    0.004    0.000    0.004    0.000 {method 'sort' of 'numpy.ndarray' objects}
+        1    0.003    0.003    0.003    0.003 {built-in method pandas._libs.json.ujson_dumps}
+       88    0.003    0.000    0.003    0.000 base.py:3777(get_loc)
+        1    0.003    0.003    0.003    0.003 decoder.py:343(raw_decode)
+       34    0.002    0.000    0.002    0.000 {method 'argsort' of 'numpy.ndarray' objects}
+       42    0.002    0.000    0.002    0.000 {built-in method builtins.sum}
+      216    0.002    0.000    0.003    0.000 base.py:5373(__getitem__)
+        6    0.002    0.000    0.002    0.000 common.py:1671(is_all_strings)
+        3    0.001    0.000    0.002    0.001 _histograms_impl.py:680(histogram)
+       93    0.001    0.000    0.003    0.000 managers.py:1954(get_rows_with_mask)
+    37/33    0.001    0.000    0.003    0.000 sorting.py:369(nargsort)
+      410    0.001    0.000    0.001    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+      213    0.001    0.000    0.006    0.000 series.py:389(__init__)
+8213/5622    0.001    0.000    0.001    0.000 {built-in method builtins.len}
+      168    0.001    0.000    0.090    0.001 stat_pipeline.py:58(_execute_stat_func)
+        1    0.001    0.001    0.001    0.001 sample.py:117(sample)
+      419    0.001    0.000    0.001    0.000 generic.py:6236(__finalize__)
+      262    0.001    0.000    0.002    0.000 construction.py:517(sanitize_array)
