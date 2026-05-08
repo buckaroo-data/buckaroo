@@ -131,7 +131,8 @@ materializing the table.
     import xorq.api as xo
     from buckaroo.xorq_buckaroo import XorqBuckarooInfiniteWidget
 
-    expr = xo.read_parquet("citibike-trips.parquet")
+    con = xo.connect()                            # built-in datafusion
+    expr = con.read_parquet("citibike-trips.parquet")
     XorqBuckarooInfiniteWidget(expr)
 
 The default backend is xorq's built-in datafusion engine. Swap to
