@@ -19,6 +19,7 @@ Optional dependency: install with ``buckaroo[xorq]``.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -65,6 +66,46 @@ def _to_python_scalar(val):
         except Exception:
             return val
     return val
+
+
+def _fmt_num(v):
+    """Format a numeric bucket bound for histogram bar labels.
+
+    Avoids scientific notation for typical real-world ranges so labels
+    read naturally in the cell tooltip ("1059" not "1.06e+03"). Uses 4
+    significant digits, switches to scientific only above 1e6 / below
+    1e-3 where compact form is genuinely shorter.
+    """
+    if v is None:
+        return "?"
+    try:
+        f = float(v)
+    except Exception:
+        return str(v)
+    if f != f:  # NaN
+        return "nan"
+    abs_f = abs(f)
+    if abs_f == 0:
+        return "0"
+    if abs_f >= 1e6 or abs_f < 1e-3:
+        return f"{f:.3g}"
+    if abs_f >= 100:
+        return f"{f:.0f}"
+    if abs_f >= 1:
+        return f"{f:.2f}".rstrip("0").rstrip(".") or "0"
+    return f"{f:.3g}"
+
+
+def _scalar_from(result):
+    """Pull a Python scalar out of an ``Ok``-wrapped accumulator entry.
+
+    Returns ``None`` for missing keys or ``Err`` results. Lets the
+    histogram batch read length/null_count from the Phase 1 accumulator
+    without scattering ``isinstance(..., Ok)`` checks.
+    """
+    if isinstance(result, Ok):
+        return result.value
+    return None
 
 
 def _is_batch_func(sf: StatFunc) -> bool:
@@ -239,6 +280,13 @@ class XorqStatPipeline:
                     accumulators[col][stat_name] = Err(error=KeyError(
                         f"missing aggregate column {col_stat!r} in result"), stat_func_name=sf.name, column_name=col, inputs={})
 
+        # ---- Phase 1.5: batched histograms -----------------------------
+        # Pre-populates accumulators[col]['histogram'] from at most two
+        # batched queries (one numeric, one categorical UNION). The Phase 2
+        # ``histogram`` stat then short-circuits because its provided key
+        # is already in the accumulator. See issue #709 follow-up.
+        self._batch_histograms(table, schema, columns, accumulators)
+
         # ---- Phase 2: per-column post-batch ----------------------------
         all_errors: List[StatError] = []
         summary: SDType = {}
@@ -266,6 +314,273 @@ class XorqStatPipeline:
             all_errors.extend(errors)
 
         return summary, all_errors
+
+    # ============================================================
+    # Phase 1.5 — batched histograms
+    #
+    # The per-column histogram path used to fire one query per column
+    # (top-K group-by for categoricals, bucket group-by for numerics).
+    # That dominated SQL roundtrips on wide tables: 26 cols → 26+ queries.
+    # Phase 1.5 collapses these to at most two queries:
+    #
+    #   - numeric histograms:  one ``table.aggregate(...)`` with N×10
+    #     SUM(CASE WHEN col IN bucket THEN 1 ELSE 0) expressions.
+    #   - categorical histograms: a ``UNION ALL`` of per-col top-10
+    #     subqueries, executed as a single SQL statement.
+    #
+    # Routing matches ``customizations.xorq_stats_v2.histogram``:
+    #   length == 0                                    → []
+    #   numeric, not bool, distinct_count > 5          → numeric path
+    #   else                                            → categorical path
+    # ============================================================
+
+    def _batch_histograms(self, table, schema, columns, accumulators) -> None:
+        """Populate accumulators[col]['histogram'] for every column."""
+        numeric_cols: List[str] = []
+        cat_cols: List[str] = []
+
+        for col in columns:
+            length_r = accumulators[col].get("length")
+            length_v = length_r.value if isinstance(length_r, Ok) else None
+            if length_v == 0:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+
+            col_dtype = schema[col]
+            is_numeric_not_bool = bool(
+                col_dtype.is_numeric() and not col_dtype.is_boolean())
+            distinct_r = accumulators[col].get("distinct_count")
+            distinct_v = distinct_r.value if isinstance(distinct_r, Ok) else None
+
+            if is_numeric_not_bool and distinct_v is not None and distinct_v > 5:
+                numeric_cols.append(col)
+            else:
+                cat_cols.append(col)
+
+        if numeric_cols:
+            self._batch_numeric_histograms(table, accumulators, numeric_cols)
+        if cat_cols:
+            self._batch_categorical_histograms(table, accumulators, cat_cols)
+
+    def _batch_numeric_histograms(self, table, accumulators, cols: List[str]) -> None:
+        """Fold N×10 bucket counts into a single aggregate query.
+
+        Buckets cover the 1st-to-99th-percentile "meat" of the
+        distribution (matching ``pd_stats_v2.histogram_series``) so
+        skewed columns spread across the chart instead of collapsing
+        into a single dominant bar. Rows below the 1st percentile and
+        above the 99th get separate ``tail`` markers. Falls back to
+        min/max bucketing when the percentile stats aren't available
+        (e.g. degenerate column or older pipeline configuration).
+        """
+        agg_exprs = []
+        bucket_meta: Dict[str, Dict[str, Any]] = {}
+
+        for col in cols:
+            min_v = _scalar_from(accumulators[col].get("min"))
+            max_v = _scalar_from(accumulators[col].get("max"))
+            low_q = _scalar_from(accumulators[col].get("low_tail_quantile"))
+            high_q = _scalar_from(accumulators[col].get("high_tail_quantile"))
+
+            if min_v is None or max_v is None:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            if isinstance(min_v, float) and (math.isnan(min_v) or math.isnan(max_v)):
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            if min_v == max_v:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+
+            # Use percentile bounds when the column has enough spread
+            # for them to be meaningful; fall back to min/max otherwise.
+            if (low_q is not None and high_q is not None
+                    and not (isinstance(low_q, float)
+                             and (math.isnan(low_q) or math.isnan(high_q)))
+                    and low_q < high_q):
+                bucket_lo, bucket_hi = float(low_q), float(high_q)
+                trimmed = True
+            else:
+                bucket_lo, bucket_hi = float(min_v), float(max_v)
+                trimmed = False
+
+            width = (bucket_hi - bucket_lo) / 10
+            bucket_meta[col] = {"lo": bucket_lo, "hi": bucket_hi, "width": width, "min": min_v, "max": max_v,
+                "trimmed": trimmed}
+            for b in range(10):
+                low = bucket_lo + b * width
+                # Last bucket uses ``bucket_hi`` directly to avoid FP
+                # drift on (b+1)*width missing the boundary value.
+                if b == 9:
+                    cond = (table[col] >= low) & (table[col] <= bucket_hi)
+                else:
+                    high = low + width
+                    cond = (table[col] >= low) & (table[col] < high)
+                agg_exprs.append(cond.cast("int64").sum().name(f"{col}|hist_b{b}"))
+            if trimmed:
+                # Tail markers: rows outside the percentile-trimmed range.
+                low_tail = (table[col] < bucket_lo).cast("int64").sum()
+                high_tail = (table[col] > bucket_hi).cast("int64").sum()
+                agg_exprs.append(low_tail.name(f"{col}|hist_tail_lo"))
+                agg_exprs.append(high_tail.name(f"{col}|hist_tail_hi"))
+
+        if not agg_exprs:
+            return
+
+        try:
+            df = self._execute(table.aggregate(agg_exprs))
+        except Exception as e:
+            for col in bucket_meta:
+                accumulators[col]["histogram"] = Err(
+                    error=e, stat_func_name="histogram_batch_numeric",
+                    column_name=col, inputs={})
+            return
+
+        for col, meta in bucket_meta.items():
+            counts = [_to_python_scalar(df[f"{col}|hist_b{b}"].iloc[0]) or 0
+                      for b in range(10)]
+            length = _scalar_from(accumulators[col].get("length")) or 0
+            null_count = _scalar_from(accumulators[col].get("null_count")) or 0
+            if length == 0:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+
+            out = []
+            if meta["trimmed"]:
+                low_tail_count = _to_python_scalar(
+                    df[f"{col}|hist_tail_lo"].iloc[0]) or 0
+                high_tail_count = _to_python_scalar(
+                    df[f"{col}|hist_tail_hi"].iloc[0]) or 0
+                if low_tail_count > 0:
+                    out.append({"name": f"{_fmt_num(meta['min'])} - {_fmt_num(meta['lo'])}", "tail": 1})
+            for b, count in enumerate(counts):
+                low = meta["lo"] + b * meta["width"]
+                high = meta["hi"] if b == 9 else low + meta["width"]
+                # Match pandas: ``population`` key, percent of total
+                # length (0–100). HistogramCell renders this as the
+                # solid-gray numeric-bucket bar.
+                pct = round(float(count) / length * 100, 0)
+                out.append({"name": f"{_fmt_num(low)}-{_fmt_num(high)}", "population": pct})
+            if meta["trimmed"] and high_tail_count > 0:
+                out.append({"name": f"{_fmt_num(meta['hi'])} - {_fmt_num(meta['max'])}", "tail": 1})
+            if null_count > 0:
+                out.append({"name": "NA", "NA": round(float(null_count) / length * 100, 0)})
+            accumulators[col]["histogram"] = Ok(out)
+
+    def _batch_categorical_histograms(self, table, accumulators, cols: List[str]) -> None:
+        """One UNION ALL of per-column top-10 subqueries.
+
+        Each subquery yields rows shaped (col_name, value, count). After
+        execution we groupby col_name and compute cat_pop per row. The
+        result mirrors what ``_categorical_histogram`` produces per column.
+        """
+        if not cols:
+            return
+
+        subs = []
+        for col in cols:
+            try:
+                sub = (table.group_by(col)
+                       .aggregate(__count=lambda t: t.count())
+                       .order_by(xo.desc("__count"))
+                       .limit(10))
+                # cast value to string so all subqueries have a uniform
+                # __val type for the UNION
+                sub = sub.mutate(
+                    __col_name=xo.literal(col),
+                    __val=sub[col].cast("string"))
+                sub = sub.select("__col_name", "__val", "__count")
+                subs.append(sub)
+            except Exception as e:
+                accumulators[col]["histogram"] = Err(
+                    error=e, stat_func_name="histogram_batch_categorical",
+                    column_name=col, inputs={})
+
+        if not subs:
+            return
+
+        union = subs[0]
+        for s in subs[1:]:
+            union = union.union(s, distinct=False)
+
+        try:
+            df = self._execute(union)
+        except Exception as e:
+            for col in cols:
+                if "histogram" not in accumulators[col]:
+                    accumulators[col]["histogram"] = Err(
+                        error=e, stat_func_name="histogram_batch_categorical",
+                        column_name=col, inputs={})
+            return
+
+        # Distribute results back to per-column accumulators.
+        if len(df) == 0:
+            for col in cols:
+                if "histogram" not in accumulators[col]:
+                    accumulators[col]["histogram"] = Ok([])
+            return
+
+        by_col = df.groupby("__col_name", sort=False)
+        seen_cols = set(by_col.groups.keys())
+        for col in cols:
+            if "histogram" in accumulators[col]:
+                continue
+            length = _scalar_from(accumulators[col].get("length")) or 0
+            null_count = _scalar_from(accumulators[col].get("null_count")) or 0
+            if length == 0:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            if col not in seen_cols:
+                # No top-K rows, but null_count may still be > 0
+                out = []
+                if null_count > 0:
+                    out.append({"name": "NA",
+                        "NA": round(float(null_count) / length * 100, 0)})
+                accumulators[col]["histogram"] = Ok(out)
+                continue
+            sub_df = by_col.get_group(col)
+            top_k_total = int(sub_df["__count"].sum())
+            top_k_min = int(sub_df["__count"].min()) if len(sub_df) else 0
+            top_k_unique_rows = int((sub_df["__count"] == 1).sum())
+            non_null = length - null_count
+            residual = non_null - top_k_total
+
+            # Pandas's categorical_histogram counts ALL distinct values
+            # appearing exactly once (top-K + residual) into the
+            # ``unique`` marker, leaving only the duplicated values as
+            # cat_pop bars. We approximate this in SQL: when
+            # ``top_k_min == 1``, every residual value must also appear
+            # exactly once (residual values are by definition less
+            # frequent than the smallest top-K count). When
+            # ``top_k_min > 1``, residual values may appear up to
+            # top_k_min times, so we treat the residual as longtail
+            # without an extra unique-count query.
+            if top_k_min == 1:
+                unique_rows = top_k_unique_rows + residual
+                longtail_rows = 0
+            else:
+                unique_rows = 0
+                longtail_rows = residual
+
+            out = []
+            for _, row in sub_df.iterrows():
+                if int(row["__count"]) <= 1:
+                    # Subsumed by the ``unique`` marker below.
+                    continue
+                pct = round(float(row["__count"]) / length * 100, 0)
+                if pct > 0.3:
+                    out.append({"name": str(row["__val"]),
+                        "cat_pop": pct})
+            if longtail_rows > 0:
+                out.append({"name": "longtail",
+                    "longtail": round(float(longtail_rows) / length * 100, 0)})
+            if unique_rows > 0:
+                out.append({"name": "unique",
+                    "unique": round(float(unique_rows) / length * 100, 0)})
+            if null_count > 0:
+                out.append({"name": "NA",
+                    "NA": round(float(null_count) / length * 100, 0)})
+            accumulators[col]["histogram"] = Ok(out)
 
     def add_stat(self, stat_func_or_class) -> Tuple[bool, List[StatError]]:
         """Add a stat function or ColAnalysis class interactively.

@@ -24,10 +24,13 @@ def _expr():
 
 
 class TestQueryCount:
-    """Regression for #709: XorqStatPipeline used to issue ~51 SQL queries
-    per widget construction on an 8-col input — a 4× redundant pipeline run
-    (per-column histograms × 2 _get_summary_sd × (real table + PERVERSE_DF
-    unit_test)). Cap query count to a small constant.
+    """Regression for #709: XorqStatPipeline used to issue 41 SQL queries
+    per widget construction on the 3-col fixture (4× redundant pipeline run
+    + per-column histograms × 2 _get_summary_sd × (real table + PERVERSE_DF
+    unit_test)). After the dedupe + unit_test=False fixes the count is 4
+    (1 batch + 1 hist per col). After the histogram-batching follow-up,
+    the count is constant at 3 regardless of column count: one batched
+    aggregate + one numeric-histogram aggregate + one categorical UNION.
     """
 
     def test_widget_construction_query_count(self):
@@ -46,17 +49,55 @@ class TestQueryCount:
         finally:
             XorqStatPipeline._execute = orig
 
-        # Pre-fix #709: 41 queries on the 3-col fixture (4× redundant
-        # pipeline runs + per-column histograms). Post-fix: 4 (one batched
-        # aggregate + one histogram per column). Cap at 6 for CI headroom.
-        # If this rises above 6, suspect either:
+        # Post-histogram-batching: 3 queries on the 3-col fixture (1
+        # batched aggregate + 1 numeric-hist batch + 1 categorical UNION).
+        # Cap at 4 for CI headroom. If this rises, suspect:
+        #  - histogram batching broke (per-column queries returning)
         #  - _summary_sd dedupe broke (cascade re-firing)
         #  - XorqStatPipeline(unit_test=True) coming back into a hot path
-        #  - new per-column query added somewhere
-        # If we ever batch histograms (#709 follow-up), this can drop to 1.
-        assert len(queries) <= 6, (
+        # Pre-fix baseline was 41.
+        assert len(queries) <= 4, (
             f"XorqBuckarooWidget(3-col) issued {len(queries)} SQL queries; "
-            f"expected ≤ 6 (#709 regression). Pre-fix baseline was 41."
+            f"expected ≤ 4 (#709 + histogram-batching regression). "
+            f"Pre-fix baseline was 41."
+        )
+
+    def test_widget_query_count_constant_in_columns(self):
+        """The fix's structural property: query count is independent of
+        column count. Guards against any future per-column query path
+        leaking back into widget construction.
+        """
+        from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
+
+        orig = XorqStatPipeline._execute
+        queries: list = []
+
+        def counting(self, q):
+            queries.append(q)
+            return orig(self, q)
+
+        # 3-col fixture
+        XorqStatPipeline._execute = counting
+        try:
+            XorqBuckarooWidget(_expr())
+            small_count = len(queries)
+
+            # 13-col fixture: numeric + string mix
+            queries.clear()
+            many_cols = {f'n{i}': list(range(10)) for i in range(7)}
+            many_cols.update({f's{i}': ['a', 'b'] * 5 for i in range(6)})
+            many = xo.memtable(many_cols)
+            XorqBuckarooWidget(many)
+            big_count = len(queries)
+        finally:
+            XorqStatPipeline._execute = orig
+
+        # Allow ±1 query of slack for engine quirks (e.g. an extra count
+        # query); reject anything that scales linearly with column count.
+        assert big_count <= small_count + 1, (
+            f"Widget on 13 cols issued {big_count} queries vs {small_count} "
+            f"on 3 cols. Query count must be (approximately) constant in "
+            f"column count — see #709 follow-up."
         )
 
 
