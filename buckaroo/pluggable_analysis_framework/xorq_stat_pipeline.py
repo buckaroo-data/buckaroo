@@ -19,6 +19,7 @@ Optional dependency: install with ``buckaroo[xorq]``.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -239,6 +240,13 @@ class XorqStatPipeline:
                     accumulators[col][stat_name] = Err(error=KeyError(
                         f"missing aggregate column {col_stat!r} in result"), stat_func_name=sf.name, column_name=col, inputs={})
 
+        # ---- Phase 1.5: batched histograms -----------------------------
+        # Pre-populates accumulators[col]['histogram'] from at most two
+        # batched queries (one numeric, one categorical UNION). The Phase 2
+        # ``histogram`` stat then short-circuits because its provided key
+        # is already in the accumulator. See issue #709 follow-up.
+        self._batch_histograms(table, schema, columns, accumulators)
+
         # ---- Phase 2: per-column post-batch ----------------------------
         all_errors: List[StatError] = []
         summary: SDType = {}
@@ -266,6 +274,185 @@ class XorqStatPipeline:
             all_errors.extend(errors)
 
         return summary, all_errors
+
+    # ============================================================
+    # Phase 1.5 — batched histograms
+    #
+    # The per-column histogram path used to fire one query per column
+    # (top-K group-by for categoricals, bucket group-by for numerics).
+    # That dominated SQL roundtrips on wide tables: 26 cols → 26+ queries.
+    # Phase 1.5 collapses these to at most two queries:
+    #
+    #   - numeric histograms:  one ``table.aggregate(...)`` with N×10
+    #     SUM(CASE WHEN col IN bucket THEN 1 ELSE 0) expressions.
+    #   - categorical histograms: a ``UNION ALL`` of per-col top-10
+    #     subqueries, executed as a single SQL statement.
+    #
+    # Routing matches ``customizations.xorq_stats_v2.histogram``:
+    #   length == 0                                    → []
+    #   numeric, not bool, distinct_count > 5          → numeric path
+    #   else                                            → categorical path
+    # ============================================================
+
+    def _batch_histograms(self, table, schema, columns, accumulators) -> None:
+        """Populate accumulators[col]['histogram'] for every column."""
+        numeric_cols: List[str] = []
+        cat_cols: List[str] = []
+
+        for col in columns:
+            length_r = accumulators[col].get("length")
+            length_v = length_r.value if isinstance(length_r, Ok) else None
+            if length_v == 0:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+
+            col_dtype = schema[col]
+            is_numeric_not_bool = bool(
+                col_dtype.is_numeric() and not col_dtype.is_boolean())
+            distinct_r = accumulators[col].get("distinct_count")
+            distinct_v = distinct_r.value if isinstance(distinct_r, Ok) else None
+
+            if is_numeric_not_bool and distinct_v is not None and distinct_v > 5:
+                numeric_cols.append(col)
+            else:
+                cat_cols.append(col)
+
+        if numeric_cols:
+            self._batch_numeric_histograms(table, accumulators, numeric_cols)
+        if cat_cols:
+            self._batch_categorical_histograms(table, accumulators, cat_cols)
+
+    def _batch_numeric_histograms(self, table, accumulators, cols: List[str]) -> None:
+        """Fold N×10 bucket counts into a single aggregate query."""
+        agg_exprs = []
+        bucket_meta: Dict[str, Dict[str, Any]] = {}
+
+        for col in cols:
+            min_r = accumulators[col].get("min")
+            max_r = accumulators[col].get("max")
+            min_v = min_r.value if isinstance(min_r, Ok) else None
+            max_v = max_r.value if isinstance(max_r, Ok) else None
+
+            if min_v is None or max_v is None:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            if isinstance(min_v, float) and (math.isnan(min_v) or math.isnan(max_v)):
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            if min_v == max_v:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+
+            width = (max_v - min_v) / 10
+            bucket_meta[col] = {"min": min_v, "max": max_v, "width": width}
+            for b in range(10):
+                low = min_v + b * width
+                high = low + width
+                # Last bucket is inclusive of max so the actual maximum
+                # value lands somewhere; otherwise it falls outside.
+                if b == 9:
+                    cond = (table[col] >= low) & (table[col] <= high)
+                else:
+                    cond = (table[col] >= low) & (table[col] < high)
+                agg_exprs.append(cond.cast("int64").sum().name(f"{col}|hist_b{b}"))
+
+        if not agg_exprs:
+            return
+
+        try:
+            df = self._execute(table.aggregate(agg_exprs))
+        except Exception as e:
+            for col in bucket_meta:
+                accumulators[col]["histogram"] = Err(
+                    error=e, stat_func_name="histogram_batch_numeric",
+                    column_name=col, inputs={})
+            return
+
+        for col, meta in bucket_meta.items():
+            counts = [_to_python_scalar(df[f"{col}|hist_b{b}"].iloc[0]) or 0
+                      for b in range(10)]
+            total = float(sum(counts))
+            if total == 0:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            out = []
+            for b, count in enumerate(counts):
+                low = meta["min"] + b * meta["width"]
+                high = low + meta["width"]
+                out.append({"name": f"{low:.3g}-{high:.3g}",
+                    "cat_pop": float(count) / total})
+            accumulators[col]["histogram"] = Ok(out)
+
+    def _batch_categorical_histograms(self, table, accumulators, cols: List[str]) -> None:
+        """One UNION ALL of per-column top-10 subqueries.
+
+        Each subquery yields rows shaped (col_name, value, count). After
+        execution we groupby col_name and compute cat_pop per row. The
+        result mirrors what ``_categorical_histogram`` produces per column.
+        """
+        if not cols:
+            return
+
+        subs = []
+        for col in cols:
+            try:
+                sub = (table.group_by(col)
+                       .aggregate(__count=lambda t: t.count())
+                       .order_by(xo.desc("__count"))
+                       .limit(10))
+                # cast value to string so all subqueries have a uniform
+                # __val type for the UNION
+                sub = sub.mutate(
+                    __col_name=xo.literal(col),
+                    __val=sub[col].cast("string"))
+                sub = sub.select("__col_name", "__val", "__count")
+                subs.append(sub)
+            except Exception as e:
+                accumulators[col]["histogram"] = Err(
+                    error=e, stat_func_name="histogram_batch_categorical",
+                    column_name=col, inputs={})
+
+        if not subs:
+            return
+
+        union = subs[0]
+        for s in subs[1:]:
+            union = union.union(s, distinct=False)
+
+        try:
+            df = self._execute(union)
+        except Exception as e:
+            for col in cols:
+                if "histogram" not in accumulators[col]:
+                    accumulators[col]["histogram"] = Err(
+                        error=e, stat_func_name="histogram_batch_categorical",
+                        column_name=col, inputs={})
+            return
+
+        # Distribute results back to per-column accumulators.
+        if len(df) == 0:
+            for col in cols:
+                if "histogram" not in accumulators[col]:
+                    accumulators[col]["histogram"] = Ok([])
+            return
+
+        by_col = df.groupby("__col_name", sort=False)
+        seen_cols = set(by_col.groups.keys())
+        for col in cols:
+            if "histogram" in accumulators[col]:
+                continue
+            if col not in seen_cols:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            sub_df = by_col.get_group(col)
+            total = float(sub_df["__count"].sum())
+            if total == 0:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            out = [{"name": str(row["__val"]),
+                "cat_pop": float(row["__count"]) / total}
+                   for _, row in sub_df.iterrows()]
+            accumulators[col]["histogram"] = Ok(out)
 
     def add_stat(self, stat_func_or_class) -> Tuple[bool, List[StatError]]:
         """Add a stat function or ColAnalysis class interactively.
