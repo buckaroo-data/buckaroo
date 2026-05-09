@@ -207,7 +207,10 @@ def ensure_server() -> dict:
                     log.debug("Kill old server error (harmless): %s", exc)
 
     global _server_proc
-    cmd = [sys.executable, "-m", "buckaroo.server"]
+    # Pass --port explicitly so we don't depend on the buckaroo.server default
+    # (the default has shifted historically; the MCP tool's port is governed
+    # by the BUCKAROO_PORT env var with a SERVER_PORT default).
+    cmd = [sys.executable, "-m", "buckaroo.server", "--port", str(SERVER_PORT)]
     log.info("Starting server: %s", " ".join(cmd))
 
     server_log = os.path.join(LOG_DIR, "server.log")
