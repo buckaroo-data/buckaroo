@@ -160,3 +160,87 @@ describe("gcRowStore — edge cases", () => {
         expect(rs.size()).toBe(0);
     });
 });
+
+
+describe("gcRowStore — head/tail pinning", () => {
+    test("pinned head survives even when active window is far away", () => {
+        const rs = new RowStore();
+        fillStore(rs, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+        // sort: positions 0..10 → rowids [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+        const sv = new SortView("k", "asc", Int32Array.from([9, 8, 7, 6, 5, 4, 3, 2, 1, 0]));
+        // active window deep in the middle
+        gcRowStore(rs, [aw(sv, 4, 6)], 0, { views: [sv], headSize: 3, tailSize: 0 });
+
+        // head ⇒ positions 0..3 ⇒ rowids 9, 8, 7
+        // window ⇒ positions 4..6 ⇒ rowids 5, 4
+        for (const r of [9, 8, 7, 5, 4]) expect(rs.has(r)).toBe(true);
+        for (const r of [0, 1, 2, 3, 6]) expect(rs.has(r)).toBe(false);
+    });
+
+    test("pinned tail survives even when active window is far away", () => {
+        const rs = new RowStore();
+        fillStore(rs, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+        const sv = new SortView("k", "asc", Int32Array.from([9, 8, 7, 6, 5, 4, 3, 2, 1, 0]));
+        gcRowStore(rs, [aw(sv, 0, 2)], 0, { views: [sv], headSize: 0, tailSize: 3 });
+
+        // tail ⇒ positions 7..10 ⇒ rowids 2, 1, 0
+        // window ⇒ positions 0..2 ⇒ rowids 9, 8
+        for (const r of [9, 8, 2, 1, 0]) expect(rs.has(r)).toBe(true);
+        for (const r of [3, 4, 5, 6, 7]) expect(rs.has(r)).toBe(false);
+    });
+
+    test("head + tail across multiple pinned views are all kept", () => {
+        const rs = new RowStore();
+        fillStore(rs, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+        // sort by k: rowidOrder = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+        const sk = new SortView("k", "asc", Int32Array.from([9, 8, 7, 6, 5, 4, 3, 2, 1, 0]));
+        // sort by m: rowidOrder = [0, 2, 4, 6, 8, 1, 3, 5, 7, 9]
+        const sm = new SortView("m", "asc", Int32Array.from([0, 2, 4, 6, 8, 1, 3, 5, 7, 9]));
+
+        gcRowStore(rs, [], 0, { views: [sk, sm], headSize: 2, tailSize: 2 });
+
+        // sk head: 9, 8;     tail: 1, 0
+        // sm head: 0, 2;     tail: 7, 9
+        // union:   0, 1, 2, 7, 8, 9
+        for (const r of [0, 1, 2, 7, 8, 9]) expect(rs.has(r)).toBe(true);
+        for (const r of [3, 4, 5, 6]) expect(rs.has(r)).toBe(false);
+    });
+
+    test("headSize=0 + tailSize=0 disables pinning", () => {
+        const rs = new RowStore();
+        fillStore(rs, [0, 1, 2, 3, 4]);
+        const sv = new SortView("k", "asc", Int32Array.from([4, 3, 2, 1, 0]));
+        gcRowStore(rs, [], 0, { views: [sv], headSize: 0, tailSize: 0 });
+        expect(rs.size()).toBe(0);
+    });
+
+    test("head/tail larger than view length pins everything", () => {
+        const rs = new RowStore();
+        fillStore(rs, [0, 1, 2]);
+        const sv = new SortView("k", "asc", Int32Array.from([2, 1, 0]));
+        gcRowStore(rs, [], 0, { views: [sv], headSize: 100, tailSize: 100 });
+        expect(rs.size()).toBe(3);
+    });
+
+    test("identity view can be pinned too", () => {
+        const rs = new RowStore();
+        fillStore(rs, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        const idv = new IdentityView(10);
+        gcRowStore(rs, [], 0, { views: [idv], headSize: 2, tailSize: 2 });
+        // head 0, 1; tail 8, 9
+        for (const r of [0, 1, 8, 9]) expect(rs.has(r)).toBe(true);
+        for (const r of [2, 3, 4, 5, 6, 7]) expect(rs.has(r)).toBe(false);
+    });
+
+    test("head and tail overlap (small view) is deduped", () => {
+        const rs = new RowStore();
+        fillStore(rs, [0, 1, 2, 3]);
+        const sv = new SortView("k", "asc", Int32Array.from([0, 1, 2, 3]));
+        gcRowStore(rs, [], 0, { views: [sv], headSize: 3, tailSize: 3 });
+        // head 0,1,2; tail 1,2,3 — union 0..4
+        expect(rs.size()).toBe(4);
+    });
+});
