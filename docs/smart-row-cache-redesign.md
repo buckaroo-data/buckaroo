@@ -1,7 +1,7 @@
 # SmartRowCache redesign — rowid-keyed store + view permutations
 
 ## Status
-DRAFT — design locked. Implementation pending. Strategy: build alongside, big-bang replace once tests pass.
+Phases 1-6 + controller layer of phase 7 landed on `feat/smart-row-cache-redesign`. 183 JS tests + 11 Python tests pass. Remaining work (consumer cutover) is listed at the bottom.
 
 ## Today's architecture (briefly)
 
@@ -117,9 +117,32 @@ Each phase has its own commit pair (failing test → implementation), per repo T
 | 4 | Pinned head/tail: eager fetch policy after sort lands | client-side fetch logic |
 | 5 | LRU-4 on SortViews/FilterViews | view registry |
 | 6 | Server contract: extend `populate` to return `{rowids, rows}`; add `sort` / `filter` shapes | Python `_handle_payload_args` |
-| 7 | Cut over `BuckarooWidgetInfinite.tsx` consumers; rewrite/retire `SmartRowCache.test.ts`; delete old types | net deletion |
+| 7a | RowCache.test.ts: end-to-end controller behavior | `RowCache.ts` |
+| 7b | Wire RowCache into `TableInfinite.tsx` consumer | replace KeyAwareSmartRowCache reads |
+| 7c | Wire `row_cache_payloads` into widget message handler | new `populate` / `sort` / `filter` message kinds |
+| 7d | Verify Playwright tests pass with new wire protocol | update fixtures as needed |
+| 7e | Retire `SmartRowCache.test.ts` (keep tests for `KeyAwareSmartRowCache` if it survives as the "rows that change" path) | net deletion |
 
-Phases 1-5 are pure TS, no Python touched. Phase 6 is the contract change. Phase 7 is the big-bang.
+Phases 1-5 are pure TS, no Python touched. Phase 6 is the Python contract. Phase 7a is the JS controller layer (the API consumers will use). Phases 7b-e are the actual consumer cutover and are the next session of work.
+
+## What's built
+
+| File | Surface |
+|---|---|
+| `packages/buckaroo-js-core/src/components/DFViewerParts/RowStore.ts` | `set/setMany/get/getMany/has/delete/size/rowids/missingRowids` |
+| `…/Views.ts` | `View` interface + `IdentityView` / `SortView` / `FilterView` |
+| `…/RowStoreGc.ts` | `gcRowStore(rs, activeWindows, padding, pin?)` |
+| `…/ViewRegistry.ts` | LRU cache of views keyed by `viewKey()` |
+| `…/RowCache.ts` | Integration controller — the API the consumer uses |
+| `buckaroo/row_cache_payloads.py` | `tag_with_rowids` + populate/sort/filter response builders |
+
+## What's left (next session)
+
+- Wire `RowCache` into `TableInfinite.tsx` so the AG-Grid datasource pulls from it instead of `KeyAwareSmartRowCache`.
+- Wire `row_cache_payloads` into the Python widget message handler (new `populate` / `sort` / `filter` message kinds).
+- Decide whether to keep `KeyAwareSmartRowCache` (design says yes, for the "postprocessor-changed-rows" path) or fully replace.
+- Verify Playwright tests pass against the new wire format; update fixtures.
+- Delete dead code: at minimum, `SmartRowCache.ts` and `SmartRowCache.test.ts` once `KeyAwareSmartRowCache` no longer depends on them.
 
 ## Out of scope for v1
 
