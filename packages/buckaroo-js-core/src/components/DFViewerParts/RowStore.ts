@@ -50,6 +50,10 @@ export class RowStore {
         return this.rows.size;
     }
 
+    public rowids(): IterableIterator<number> {
+        return this.rows.keys();
+    }
+
     public missingRowids(rowids: number[]): number[] {
         const seen = new Set<number>();
         const out: number[] = [];
