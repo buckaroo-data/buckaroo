@@ -128,7 +128,7 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: artifacts/dist/
       - name: Comment on PR with install command
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
