@@ -59,6 +59,27 @@ class TestTagWithRowids:
         assert "age" in cols
         assert "_buckaroo_rowid" in cols
 
+    def test_rowid_column_is_int32(self):
+        # The JS view layer reads rowids into Int32Array (4 B/row); the
+        # design doc's 40 MB-per-10 M-rows wire budget assumes int32.
+        # Emitting int64 would double the wire payload.
+        from buckaroo.row_cache_payloads import tag_with_rowids
+
+        tagged = tag_with_rowids(_make_source())
+        assert tagged.to_pyarrow()["_buckaroo_rowid"].type == pa.int32()
+
+    def test_raises_when_source_already_has_rowid_column(self):
+        # pa.Table.append_column happily creates duplicate column names;
+        # then tagged.select("_buckaroo_rowid") is ambiguous and the
+        # rowid contract is silently broken. Reject up front.
+        from buckaroo.row_cache_payloads import tag_with_rowids
+
+        collision = xo.memtable(
+            {"_buckaroo_rowid": [10, 20, 30], "name": ["a", "b", "c"]}
+        )
+        with pytest.raises(ValueError, match="_buckaroo_rowid"):
+            tag_with_rowids(collision)
+
 
 class TestMakePopulatePayload:
     def test_returns_parquet_with_rowids_and_data_columns(self):
@@ -72,6 +93,7 @@ class TestMakePopulatePayload:
         table = _read_parquet_bytes(b)
         assert table.num_rows == 3
         assert table["_buckaroo_rowid"].to_pylist() == [0, 1, 2]
+        assert table["_buckaroo_rowid"].type == pa.int32()
         assert table["name"].to_pylist() == ["alice", "bob", "carol"]
 
     def test_offset_window_carries_the_correct_rowids(self):
@@ -115,6 +137,7 @@ class TestMakeSortPayload:
         table = _read_parquet_bytes(b)
         assert table.schema.names == ["_buckaroo_rowid"]
         assert table["_buckaroo_rowid"].to_pylist() == [1, 4, 0, 3, 2]
+        assert table["_buckaroo_rowid"].type == pa.int32()
 
     def test_returns_rowid_column_in_descending_sort_order(self):
         from buckaroo.row_cache_payloads import (
