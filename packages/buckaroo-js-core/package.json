@@ -1,14 +1,57 @@
 {
   "name": "buckaroo-js-core",
   "version": "0.12.0",
+  "description": "React + AG-Grid components and infinite-scroll data layer that power the Buckaroo DataFrame viewer.",
+  "keywords": [
+    "buckaroo",
+    "dataframe",
+    "ag-grid",
+    "react",
+    "pandas",
+    "data-viewer",
+    "jupyter"
+  ],
+  "license": "BSD-3-Clause",
+  "author": "Paddy Mullen",
+  "homepage": "https://github.com/paddymul/buckaroo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/paddymul/buckaroo.git",
+    "directory": "packages/buckaroo-js-core"
+  },
+  "bugs": {
+    "url": "https://github.com/paddymul/buckaroo/issues"
+  },
   "packageManager": "pnpm@9.0.0",
   "type": "module",
   "main": "dist/index.esm.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/index.esm.js",
+      "default": "./dist/index.esm.js"
+    },
+    "./style.css": "./dist/style.css",
+    "./dist/style.css": "./dist/style.css",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "vite",
     "build:tsc": "tsc -b",
     "build:vite": "vite build",
     "build": "tsc -b && vite build",
+    "prepublishOnly": "pnpm run build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "jest",
@@ -29,7 +72,9 @@
     "test:static-embed:headed": "pnpm exec playwright test --config playwright.config.static-embed.ts --headed"
   },
   "files": [
-    "/dist"
+    "dist",
+    "LICENSE",
+    "README.md"
   ],
   "dependencies": {
     "ag-grid-community": "^33.3.2",
@@ -77,7 +122,7 @@
     "vite-tsconfig-paths": "^5.1.4"
   },
   "peerDependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react": "^18.2.0 || ^19.0.0",
+    "react-dom": "^18.2.0 || ^19.0.0"
   }
 }
