@@ -195,13 +195,18 @@ test.describe('/load API', () => {
     expect(body.columns.map((c: { name: string }) => c.name)).toEqual(['name', 'age', 'score']);
   });
 
-  test('400 on missing session field', async ({ request }) => {
+  test('200 + minted session when session is omitted', async ({ request }) => {
+    // Headless hosts (Tauri/Electron) call /load without inventing a session
+    // ID; the server mints a UUID and returns it. Sessions explicitly passed
+    // by callers are honored unchanged (covered above in '200 on valid CSV').
     const resp = await request.post(`${BASE}/load`, {
       data: { path: csvPath },
     });
-    expect(resp.status()).toBe(400);
+    expect(resp.status()).toBe(200);
     const body = await resp.json();
-    expect(body.error).toContain("Missing");
+    expect(typeof body.session).toBe('string');
+    expect(body.session.length).toBeGreaterThan(0);
+    expect(body.rows).toBe(5);
   });
 
   test('400 on missing path field', async ({ request }) => {

@@ -13,6 +13,24 @@ LOG_DIR = os.path.join(os.path.expanduser("~"), ".buckaroo", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 
+def bind_and_make_app(port: int, open_browser: bool):
+    """Bind the listening socket, then build the Application with the *bound*
+    port stamped into ``settings``.
+
+    ``--port=0`` asks the OS for an ephemeral port; ``bind_sockets`` returns
+    the actual port it chose. ``LoadHandler._handle_browser_window`` reads
+    ``settings['port']`` to build the ``http://localhost:<port>/s/<id>`` URL
+    it asks the OS to focus, so the bound port — not the requested ``0`` —
+    must end up in settings.
+
+    Returns ``(sockets, bound_port, app)``. Caller owns ``sockets``.
+    """
+    sockets = tornado.netutil.bind_sockets(port, address="127.0.0.1")
+    bound_port = sockets[0].getsockname()[1]
+    app = make_app(port=bound_port, open_browser=open_browser)
+    return sockets, bound_port, app
+
+
 def main():
     parser = argparse.ArgumentParser(description="Buckaroo data server")
     parser.add_argument("--port", type=int, default=8700, help="Port to listen on (0 = random)")
@@ -48,12 +66,7 @@ def main():
     log = logging.getLogger("buckaroo.server")
     log.info("Server starting — port=%d open_browser=%s pid=%d", args.port, not args.no_browser, os.getpid())
 
-    app = make_app(port=args.port, open_browser=not args.no_browser)
-
-    # Use bind_sockets to recover the OS-assigned port when --port=0.
-    # Application.listen() doesn't expose the bound port; HTTPServer.add_sockets() does.
-    sockets = tornado.netutil.bind_sockets(args.port, address="127.0.0.1")
-    bound_port = sockets[0].getsockname()[1]
+    sockets, bound_port, app = bind_and_make_app(port=args.port, open_browser=not args.no_browser)
     server = tornado.httpserver.HTTPServer(app)
     server.add_sockets(sockets)
 
