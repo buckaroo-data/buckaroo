@@ -31,7 +31,6 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "import": "./dist/index.esm.js",
-      "require": "./dist/index.cjs.js",
       "default": "./dist/index.esm.js"
     },
     "./style.css": "./dist/style.css",
