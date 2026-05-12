@@ -95,7 +95,7 @@ beforeEach(() => {
 });
 
 describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
-  it("[captures current flash] post_processing change remounts the data grid (via outside_df_params key)", () => {
+  it("post_processing change purges the infinite cache without remounting", () => {
     const src = mkSrc();
     const { rerender } = render(
       <BuckarooInfiniteWidget
@@ -113,6 +113,7 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
       />,
     );
     expect(getSpyCalls().mountCount).toBe(1);
+    const purgesBefore = getSpyCalls().purgeInfiniteCache;
 
     rerender(
       <BuckarooInfiniteWidget
@@ -129,10 +130,12 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
         src={src}
       />,
     );
-    // post_processing is in outside_df_params, which is the React `key` on
-    // AgGridReact. So the entire grid is destroyed and remounted. This is the
-    // dominant flash cause. Post-refactor: mountCount stays 1, purgeInfiniteCache>=1.
-    expect(getSpyCalls().mountCount).toBe(2);
+    // The React key on AgGridReact is now data_type, not the stringified
+    // outside_df_params. A within-data_type content change (post_processing
+    // on a main DataSource here) drives the purge-cache effect instead of a
+    // full remount — that's the step-3 flash fix.
+    expect(getSpyCalls().mountCount).toBe(1);
+    expect(getSpyCalls().purgeInfiniteCache).toBeGreaterThan(purgesBefore);
   });
 
   it("cleaning_method change does NOT remount but rebuilds datasource (getRows refires)", () => {
@@ -229,10 +232,12 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     expect(secondRef).toBe(firstRef);
   });
 
-  it("activeCol prop survives a post_processing-driven remount (React state above the remount)", () => {
-    // The user clicks a cell, activeCol is stored in BuckarooInfiniteWidget's
-    // useState. Then post_processing changes and AG-Grid remounts. The new
-    // mount should receive the same activeCol via context.
+  it("activeCol prop survives a post_processing change (no remount, so AG-Grid selection is preserved too)", () => {
+    // Pre step 3 this was a "survives a remount" test — post_processing forced
+    // a key-driven remount and activeCol survived via context. Post step 3,
+    // post_processing no longer triggers a remount, so AG-Grid's internal cell
+    // selection state is *also* preserved (which is exactly the flash fix we
+    // wanted). This test now just confirms the prop continues to flow through.
     const src = mkSrc();
     const propsA = {
       df_data_dict: { summary_stats: [] },
@@ -253,20 +258,16 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     const activeColAtFirstMount = getSpyCalls().lastProps?.context?.activeCol;
     expect(activeColAtFirstMount).toEqual(["a", "stoptime"]);
 
-    // Force a remount by changing post_processing.
     const { rerender } = render(
       <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, post_processing: "" }} />,
     );
     rerender(
       <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, post_processing: "log_scale" }} />,
     );
-    // After remount, activeCol still flows through context. AG-Grid's *internal*
-    // selection visual is reset by the remount (which is one of the UX costs
-    // of the flash), but the prop is preserved.
     expect(getSpyCalls().lastProps?.context?.activeCol).toEqual(["a", "stoptime"]);
   });
 
-  it("[captures current flash] df_display switch (main → summary) remounts the grid", () => {
+  it("df_display switch (main → summary) remounts the grid because data_type changes", () => {
     const src = mkSrc();
     const propsA = {
       df_data_dict: { summary_stats: [{ index: "mean", a: 10 }] },
@@ -288,9 +289,12 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     rerender(
       <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, df_display: "summary" }} />,
     );
-    // df_display is in outside_df_params, so the key changes and AG-Grid
-    // remounts. It also switches data_type Raw <-> DataSource which legitimately
-    // needs a structural reconfigure — captured here as a single remount.
+    // df_display: "main" → "summary" switches data_wrapper.data_type from
+    // DataSource to Raw, which means AG-Grid's rowModelType has to change.
+    // rowModelType can't be reconfigured live, so the React key on AgGridReact
+    // is keyed on data_type and this *intentionally* remounts. (Plain
+    // within-data_type changes like post_processing no longer remount — see
+    // the prior test.)
     expect(getSpyCalls().mountCount).toBe(2);
   });
 });

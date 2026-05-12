@@ -48,7 +48,7 @@ beforeEach(() => {
 });
 
 describe("DFViewerInfinite — flash matrix (current behavior)", () => {
-  it("[captures current flash] post_processing change in outside_df_params remounts AG-Grid", () => {
+  it("post_processing change purges the infinite cache without remounting AG-Grid", () => {
     const { rerender } = render(
       <DFViewerInfinite
         data_wrapper={dsWrapper()}
@@ -60,6 +60,7 @@ describe("DFViewerInfinite — flash matrix (current behavior)", () => {
     );
     const calls = getSpyCalls();
     expect(calls.mountCount).toBe(1);
+    const purgesBefore = calls.purgeInfiniteCache;
 
     rerender(
       <DFViewerInfinite
@@ -70,10 +71,11 @@ describe("DFViewerInfinite — flash matrix (current behavior)", () => {
         outside_df_params={{ post_processing: "log_scale" }}
       />,
     );
-    // Today: key={JSON.stringify(outside_df_params)} forces React to unmount and
-    // remount AG-Grid. After the refactor we expect mountCount===1 and
-    // purgeInfiniteCache>=1 instead.
-    expect(calls.mountCount).toBe(2);
+    // Post step-3: the React key on AgGridReact is data_type, not the
+    // stringified outside_df_params. A within-data_type content change drives
+    // an effect that calls purgeInfiniteCache() instead of remounting the grid.
+    expect(getSpyCalls().mountCount).toBe(1);
+    expect(getSpyCalls().purgeInfiniteCache).toBeGreaterThan(purgesBefore);
   });
 
   it("outside_df_params identity-only change (same value, new object) does NOT remount", () => {
