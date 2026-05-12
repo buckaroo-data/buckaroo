@@ -105,6 +105,13 @@ export function BuckarooServerView({
         let cancelled = false;
         let ws: WebSocket | null = null;
 
+        // Clear stale state from any previous wsUrl. Without this, a host
+        // that recovers from a failed connection by updating wsUrl would
+        // keep seeing the old error banner because the render guard checks
+        // `if (error)` before rendering `ready`.
+        setError(null);
+        setReady(null);
+
         (async () => {
             try {
                 ws = new WebSocket(wsUrl);
