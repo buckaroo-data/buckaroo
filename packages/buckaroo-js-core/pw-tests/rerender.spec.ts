@@ -65,23 +65,35 @@ test.describe("Rerender flash matrix — DOM verification", () => {
     await expect(page.locator(".ag-floating-top").getByText("3")).toBeVisible();
   });
 
-  test("BuckarooWidgetTest: postprocessing/operations toggles do not leave the grid empty", async ({ page }) => {
-    // Locks in that the flash-mounted grid eventually shows rows again.
-    // After the refactor, this should also pass without the visible empty
-    // chrome interval — but that's a perceptual property hard to assert
-    // here. The contract we lock today is just "rows are visible after toggle".
+  test("BuckarooWidgetTest: df_display toggle (an outside_df_params change) does not leave the grid empty", async ({ page }) => {
+    // Locks in that an outside_df_params-driven AG-Grid remount eventually
+    // shows rows again. df_display is the only outside_df_params field this
+    // story actually exposes via its StatusBar (post_processing and
+    // cleaning_method options are empty for this story); the contract being
+    // verified — "remount on outside_df_params change doesn't leave the grid
+    // empty" — is identical.
+    //
+    // After the refactor (purgeInfiniteCache replaces React-key remount),
+    // this should also pass without the visible empty chrome interval — but
+    // that's a perceptual property hard to assert here.
     await page.goto(STORY_URL("buckaroo-buckaroowidgettest--primary"));
     await waitForCells(page);
 
     const initialRc = await getRowContents(page, 0);
     expect(initialRc.some((s) => s && s.length > 0)).toBe(true);
 
-    // BuckarooWidgetTest exposes outsideDFParams toggles via its StatusBar.
-    // We don't bind to specific control labels here — that would couple
-    // the test to UI copy. We just verify that after the page settles, a
-    // row at index 0 still has content.
-    await page.waitForTimeout(500);
-    const settled = await getRowContents(page, 0);
-    expect(settled.some((s) => s && s.length > 0)).toBe(true);
+    // The StatusBar exposes df_display as a <select> with options main/summary.
+    // Flip to summary, then back to main — each flip is a real outside_df_params
+    // change and (today) a full remount of the data grid.
+    const dfDisplaySelect = page.locator(".status-bar select").filter({ hasText: /main|summary/ }).first();
+    await dfDisplaySelect.selectOption("summary");
+    await waitForCells(page);
+    const summaryRc = await getRowContents(page, 0);
+    expect(summaryRc.some((s) => s && s.length > 0)).toBe(true);
+
+    await dfDisplaySelect.selectOption("main");
+    await waitForCells(page);
+    const mainRc = await getRowContents(page, 0);
+    expect(mainRc.some((s) => s && s.length > 0)).toBe(true);
   });
 });

@@ -7,7 +7,6 @@
  * Tests assert CURRENT behavior on main (Option A in docs/rerender-test-plan.md).
  * Tests tagged "[captures current flash]" are tracking pain, not validating it.
  */
-import React from "react";
 import { render } from "@testing-library/react";
 import { BuckarooInfiniteWidget } from "./BuckarooWidgetInfinite";
 import { KeyAwareSmartRowCache } from "./DFViewerParts/SmartRowCache";
@@ -15,7 +14,6 @@ import { getSpyCalls, resetSpy } from "../test-utils/agGridSpy";
 import { BuckarooState, BuckarooOptions, DFMeta } from "./WidgetTypes";
 import { DFViewerConfig } from "./DFViewerParts/DFWhole";
 import { IDisplayArgs } from "./DFViewerParts/gridUtils";
-import { CommandConfigT } from "./CommandUtils";
 
 jest.mock("ag-grid-react", () =>
   require("../test-utils/agGridSpy").agGridReactMockFactory(),
@@ -90,28 +88,6 @@ const initialState: BuckarooState = {
 };
 
 const mkSrc = () => new KeyAwareSmartRowCache(() => {});
-
-const renderWidget = (overrides: { state?: Partial<BuckarooState>; src?: KeyAwareSmartRowCache } = {}) => {
-  const state: BuckarooState = { ...initialState, ...overrides.state };
-  const noopOps = jest.fn();
-  const noopState = jest.fn();
-  const cmd: CommandConfigT = { argspecs: {}, defaultArgs: {} };
-  return render(
-    <BuckarooInfiniteWidget
-      df_data_dict={{ summary_stats: [] }}
-      df_display_args={baseDisplayArgs}
-      df_meta={baseDfMeta}
-      operations={[]}
-      on_operations={noopOps}
-      operation_results={{ transformed_df: [], generated_py_code: "", search_term: "" } as any}
-      command_config={cmd}
-      buckaroo_state={state}
-      on_buckaroo_state={noopState}
-      buckaroo_options={baseOptions}
-      src={overrides.src ?? mkSrc()}
-    />,
-  );
-};
 
 beforeEach(() => {
   resetSpy();
@@ -220,14 +196,35 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
   });
 
   it("[captures current flash] outsideDFParams is a new array literal on every render (no useMemo)", () => {
-    renderWidget({ state: { post_processing: "" } });
+    // Re-render the *same* widget instance — that's what the planned useMemo
+    // refactor would preserve identity across. Rendering two independent
+    // instances would never see memoization either way, so it can't flip to
+    // the desired assertion post-refactor.
+    const src = mkSrc();
+    const widgetEl = (state: BuckarooState) => (
+      <BuckarooInfiniteWidget
+        df_data_dict={{ summary_stats: [] }}
+        df_display_args={baseDisplayArgs}
+        df_meta={baseDfMeta}
+        operations={[]}
+        on_operations={jest.fn()}
+        operation_results={{} as any}
+        command_config={{ argspecs: {}, defaultArgs: {} }}
+        buckaroo_state={state}
+        on_buckaroo_state={jest.fn()}
+        buckaroo_options={baseOptions}
+        src={src}
+      />
+    );
+    const { rerender } = render(widgetEl({ ...initialState, post_processing: "" }));
     const firstRef = dfvCalls[0].outside_df_params;
     expect(Array.isArray(firstRef)).toBe(true);
-    // Force a parent rerender with the same state. outsideDFParams in
-    // BuckarooInfiniteWidget is a bare array literal; it gets a fresh
-    // identity each render. Post-refactor: should be wrapped in useMemo and
-    // be reference-equal here.
-    renderWidget({ state: { post_processing: "" } });
+
+    // Force a re-render with a fresh-identity state object that has the same
+    // values. outsideDFParams in BuckarooInfiniteWidget is a bare array literal;
+    // it gets a fresh identity each render. Post-refactor: should be wrapped
+    // in useMemo and be reference-equal here.
+    rerender(widgetEl({ ...initialState, post_processing: "" }));
     const secondRef = dfvCalls[dfvCalls.length - 1].outside_df_params;
     expect(secondRef).not.toBe(firstRef);
     // ...but VALUES are equal, which is why the React key doesn't change
