@@ -1,6 +1,6 @@
 import { CellRendererSelectorResult, ColDef, ColGroupDef, DomLayoutType, ICellRendererParams, IDatasource, SizeColumnsToContentStrategy, SizeColumnsToFitProvidedWidthStrategy, Theme } from 'ag-grid-community';
 import { DFWhole, DisplayerArgs, ColumnConfig, DFViewerConfig, ComponentConfig, NormalColumnConfig, MultiIndexColumnConfig, ColDefOrGroup, DFData, SDFT, PinnedRowConfig } from './DFWhole';
-import { CSSProperties, Dispatch, SetStateAction } from '../../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
+import { CSSProperties, Dispatch, SetStateAction } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { CommandConfigT } from '../CommandUtils';
 import { KeyAwareSmartRowCache, PayloadArgs } from './SmartRowCache';
 export declare function getCellRendererorFormatter(dispArgs: DisplayerArgs): ColDef;

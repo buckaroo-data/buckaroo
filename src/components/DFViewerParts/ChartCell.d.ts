@@ -1,4 +1,4 @@
-import { default as React } from '../../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
+import { default as React } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { ChartDisplayerA } from './DFWhole';
 export interface HistogramNode {
     name: string;
