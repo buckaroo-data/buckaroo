@@ -39,8 +39,7 @@ def tag_with_rowids(source: "xo.Expr") -> "xo.Expr":
     if _ROWID_COL in table.schema.names:
         raise ValueError(
             f"source already has a {_ROWID_COL!r} column; "
-            "tag_with_rowids must be called exactly once per source"
-        )
+            "tag_with_rowids must be called exactly once per source")
     rowids = pa.array(range(table.num_rows), type=pa.int32())
     tagged = table.append_column(_ROWID_COL, rowids)
     return xo.memtable(tagged)

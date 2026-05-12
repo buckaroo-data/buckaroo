@@ -24,11 +24,7 @@ def _read_parquet_bytes(b: bytes) -> pa.Table:
 
 def _make_source():
     return xo.memtable(
-        {
-            "name": ["alice", "bob", "carol", "dave", "eve"],
-            "age": [30, 25, 40, 35, 28],
-        }
-    )
+        {"name": ["alice", "bob", "carol", "dave", "eve"], "age": [30, 25, 40, 35, 28]})
 
 
 class TestTagWithRowids:
@@ -75,18 +71,14 @@ class TestTagWithRowids:
         from buckaroo.row_cache_payloads import tag_with_rowids
 
         collision = xo.memtable(
-            {"_buckaroo_rowid": [10, 20, 30], "name": ["a", "b", "c"]}
-        )
+            {"_buckaroo_rowid": [10, 20, 30], "name": ["a", "b", "c"]})
         with pytest.raises(ValueError, match="_buckaroo_rowid"):
             tag_with_rowids(collision)
 
 
 class TestMakePopulatePayload:
     def test_returns_parquet_with_rowids_and_data_columns(self):
-        from buckaroo.row_cache_payloads import (
-            tag_with_rowids,
-            make_populate_payload,
-        )
+        from buckaroo.row_cache_payloads import (tag_with_rowids, make_populate_payload)
 
         tagged = tag_with_rowids(_make_source())
         b = make_populate_payload(tagged, 0, 3)
@@ -97,10 +89,7 @@ class TestMakePopulatePayload:
         assert table["name"].to_pylist() == ["alice", "bob", "carol"]
 
     def test_offset_window_carries_the_correct_rowids(self):
-        from buckaroo.row_cache_payloads import (
-            tag_with_rowids,
-            make_populate_payload,
-        )
+        from buckaroo.row_cache_payloads import (tag_with_rowids, make_populate_payload)
 
         tagged = tag_with_rowids(_make_source())
         b = make_populate_payload(tagged, 2, 5)
@@ -109,10 +98,7 @@ class TestMakePopulatePayload:
         assert table["_buckaroo_rowid"].to_pylist() == [2, 3, 4]
 
     def test_request_past_end_returns_whatever_rows_exist(self):
-        from buckaroo.row_cache_payloads import (
-            tag_with_rowids,
-            make_populate_payload,
-        )
+        from buckaroo.row_cache_payloads import (tag_with_rowids, make_populate_payload)
 
         tagged = tag_with_rowids(_make_source())
         b = make_populate_payload(tagged, 3, 100)
@@ -124,10 +110,7 @@ class TestMakePopulatePayload:
 
 class TestMakeSortPayload:
     def test_returns_rowid_column_in_ascending_sort_order(self):
-        from buckaroo.row_cache_payloads import (
-            tag_with_rowids,
-            make_sort_payload,
-        )
+        from buckaroo.row_cache_payloads import (tag_with_rowids, make_sort_payload)
 
         # age: alice=30, bob=25, carol=40, dave=35, eve=28
         # rowids:        0       1       2        3       4
@@ -140,10 +123,7 @@ class TestMakeSortPayload:
         assert table["_buckaroo_rowid"].type == pa.int32()
 
     def test_returns_rowid_column_in_descending_sort_order(self):
-        from buckaroo.row_cache_payloads import (
-            tag_with_rowids,
-            make_sort_payload,
-        )
+        from buckaroo.row_cache_payloads import (tag_with_rowids, make_sort_payload)
 
         tagged = tag_with_rowids(_make_source())
         b = make_sort_payload(tagged, "age", ascending=False)
@@ -153,10 +133,7 @@ class TestMakeSortPayload:
     def test_carries_no_data_columns(self):
         # Sort response is just the permutation; rows are already in the
         # client's RowStore (or fetched on follow-up populate).
-        from buckaroo.row_cache_payloads import (
-            tag_with_rowids,
-            make_sort_payload,
-        )
+        from buckaroo.row_cache_payloads import (tag_with_rowids, make_sort_payload)
 
         tagged = tag_with_rowids(_make_source())
         b = make_sort_payload(tagged, "name", ascending=True)
@@ -166,10 +143,7 @@ class TestMakeSortPayload:
 
 class TestMakeFilterPayload:
     def test_returns_rowid_column_for_filtered_subset(self):
-        from buckaroo.row_cache_payloads import (
-            tag_with_rowids,
-            make_filter_payload,
-        )
+        from buckaroo.row_cache_payloads import (tag_with_rowids, make_filter_payload)
 
         tagged = tag_with_rowids(_make_source())
         # age > 30 → carol (rowid 2), dave (rowid 3)
@@ -182,10 +156,7 @@ class TestMakeFilterPayload:
         assert sorted(table["_buckaroo_rowid"].to_pylist()) == [2, 3]
 
     def test_empty_filter_returns_zero_rows(self):
-        from buckaroo.row_cache_payloads import (
-            tag_with_rowids,
-            make_filter_payload,
-        )
+        from buckaroo.row_cache_payloads import (tag_with_rowids, make_filter_payload)
 
         tagged = tag_with_rowids(_make_source())
         filtered = tagged.filter(tagged.age > 1000)
