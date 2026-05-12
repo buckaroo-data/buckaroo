@@ -15,6 +15,9 @@
  * See docs/smart-row-cache-redesign.md.
  */
 export type SortDirection = "asc" | "desc";
+export declare const IDENTITY_VIEW_KEY = "identity";
+export declare function sortViewKey(sortKey: string, sortDirection: SortDirection): string;
+export declare function filterViewKey(filterKey: string): string;
 export interface View {
     length(): number;
     positionAt(pos: number): number;
