@@ -6,6 +6,8 @@ import {
     SortView,
     FilterView,
     SortDirection,
+    sortViewKey,
+    filterViewKey,
 } from "./Views";
 import { ViewRegistry } from "./ViewRegistry";
 import { gcRowStore, ActiveWindow, PinSpec } from "./RowStoreGc";
@@ -117,13 +119,12 @@ export class RowCache {
     }
 
     public getSortView(sortKey: string, sortDirection: SortDirection): SortView | undefined {
-        const key = `sort:${sortKey}:${sortDirection}`;
-        const v = this.sortRegistry.get(key);
+        const v = this.sortRegistry.get(sortViewKey(sortKey, sortDirection));
         return v as SortView | undefined;
     }
 
     public getFilterView(filterKey: string): FilterView | undefined {
-        const v = this.filterRegistry.get(`filter:${filterKey}`);
+        const v = this.filterRegistry.get(filterViewKey(filterKey));
         return v as FilterView | undefined;
     }
 

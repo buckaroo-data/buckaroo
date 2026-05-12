@@ -11,11 +11,11 @@ client-side cache layer:
 Phase 7 wires these into the widget; phase 6 just establishes the wire shape.
 """
 
-from io import BytesIO
-
 import pyarrow as pa
 import pyarrow.parquet as pq
-import xorq.api as xo
+import pytest
+
+xo = pytest.importorskip("xorq.api")
 
 
 def _read_parquet_bytes(b: bytes) -> pa.Table:

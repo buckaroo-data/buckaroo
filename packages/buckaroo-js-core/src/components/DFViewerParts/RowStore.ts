@@ -7,10 +7,8 @@ import { DFDataRow } from "./DFWhole";
  *
  * Rowids are stable identifiers assigned by the server at initial
  * population — they survive sort and filter, so a single RowStore can
- * back any number of SortViews and FilterViews.
- *
- * This class is intentionally tiny in phase 1. GC and pinning land in
- * later phases.
+ * back any number of SortViews and FilterViews. Visibility-aware GC
+ * and head/tail pinning live in `RowStoreGc.ts`.
  */
 export class RowStore {
     private rows: Map<number, DFDataRow> = new Map();

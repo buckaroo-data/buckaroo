@@ -18,6 +18,17 @@
 export type SortDirection = "asc" | "desc";
 
 
+export const IDENTITY_VIEW_KEY = "identity";
+
+export function sortViewKey(sortKey: string, sortDirection: SortDirection): string {
+    return `sort:${sortKey}:${sortDirection}`;
+}
+
+export function filterViewKey(filterKey: string): string {
+    return `filter:${filterKey}`;
+}
+
+
 export interface View {
     length(): number;
     positionAt(pos: number): number;
@@ -50,7 +61,7 @@ export class IdentityView implements View {
     }
 
     public viewKey(): string {
-        return "identity";
+        return IDENTITY_VIEW_KEY;
     }
 }
 
@@ -81,7 +92,7 @@ export class SortView implements View {
     }
 
     public viewKey(): string {
-        return `sort:${this.sortKey}:${this.sortDirection}`;
+        return sortViewKey(this.sortKey, this.sortDirection);
     }
 }
 
@@ -110,6 +121,6 @@ export class FilterView implements View {
     }
 
     public viewKey(): string {
-        return `filter:${this.filterKey}`;
+        return filterViewKey(this.filterKey);
     }
 }

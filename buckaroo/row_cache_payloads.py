@@ -11,10 +11,8 @@ parquet bytes:
 materialises the source (xorq lazy → pa.Table), appends a dense
 ``_buckaroo_rowid`` column starting at 0, and re-wraps as a memtable so
 the rest of the pipeline can keep operating on a stable in-memory
-expression.
-
-Phase 6 of the redesign — pure functions, no widget wiring (that's
-phase 7).
+expression. The rowid column is ``int32`` so it matches the JS
+``Int32Array`` view permutations on the wire.
 """
 
 from io import BytesIO
@@ -27,12 +25,14 @@ import xorq.api as xo
 _ROWID_COL = "_buckaroo_rowid"
 
 
-def tag_with_rowids(source):
+def tag_with_rowids(source: "xo.Expr") -> "xo.Expr":
     """Materialise ``source`` and append a stable rowid column.
 
     Returns an xorq Table backed by an in-memory pyarrow Table with a
-    new ``_buckaroo_rowid`` column 0..N-1. Repeated evaluations return
-    the same rowids in the same order.
+    new ``_buckaroo_rowid`` column 0..N-1 (int32). Repeated evaluations
+    return the same rowids in the same order. Raises ``ValueError`` if
+    ``source`` already exposes a ``_buckaroo_rowid`` column — callers
+    must not call ``tag_with_rowids`` twice.
     """
     table = source.to_pyarrow()
     rowids = pa.array(list(range(table.num_rows)), type=pa.int64())
@@ -69,10 +69,13 @@ def make_sort_payload(tagged, sort_col: str, ascending: bool = True) -> bytes:
 
 def make_filter_payload(filtered_expr) -> bytes:
     """Filter response: just the ``_buckaroo_rowid`` column of the rows
-    that satisfy the (already-applied) filter. Source order preserved.
+    that satisfy the (already-applied) filter.
 
     The caller composes the filter on the tagged expression and hands
-    the result here. Keeps this function predicate-agnostic.
+    the result here. Keeps this function predicate-agnostic. Result
+    order is whatever the backend produces — the client treats this as
+    a subset, so the client must not rely on source order being
+    preserved.
     """
     rowid_only = filtered_expr.select(_ROWID_COL)
     table = rowid_only.to_pyarrow()
