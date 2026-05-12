@@ -321,4 +321,86 @@ describe("BuckarooInfiniteWidget — autocleaning toggle", () => {
             errSpy.mockRestore();
         }
     });
+
+    // Models a user mashing the cleaning_method dropdown faster than Python
+    // round-trips can complete. The summary stats vary in shape across the
+    // sequence — some columns flip between valid arrays, empty arrays, null,
+    // undefined, and the string sentinel. Every same-fiber rerender that
+    // takes a cell into or out of its early-return branch is a place where
+    // a Rules-of-Hooks violation could surface as React #300/#310.
+    it("survives rapid cleaning_method toggles with varying summary-stats shapes", () => {
+        const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const src = new KeyAwareSmartRowCache(() => {});
+
+            // A library of plausible cell-value shapes Python could push for
+            // a single column across an autoclean toggle.
+            const valueShapes: any[] = [
+                validHistogram,
+                altHistogram,
+                [], // empty array — still passes _.isArray but TypedHistogramCell
+                    // would render a no-data BarChart
+                "histogram", // pinned-row sentinel for missing data
+                undefined,
+                null,
+                validHistogram, // back to baseline
+            ];
+            const chartShapes: any[] = [
+                validChart,
+                altChart,
+                [],
+                "chart",
+                undefined,
+                null,
+                validChart,
+            ];
+            const cleaningMethods: BuckarooState["cleaning_method"][] = [
+                false,
+                "aggressive",
+                "conservative",
+                "",
+                "aggressive",
+                false,
+                "conservative",
+            ];
+
+            // Mount with the first frame.
+            const mkStats = (i: number): DFData => [
+                { index: "histogram", a: valueShapes[i], b: valueShapes[(i + 3) % valueShapes.length] },
+                { index: "chart", a: chartShapes[i], b: chartShapes[(i + 3) % chartShapes.length] },
+            ];
+
+            const { rerender } = render(widget(cleaningMethods[0], mkStats(0), src));
+
+            // Rapid-fire rerender across every (cleaning_method × stat shape)
+            // combination. No `act()` boundaries between renders — that's
+            // closer to "user mashes the dropdown" than the slow paced test.
+            for (let i = 1; i < cleaningMethods.length; i++) {
+                expect(() => {
+                    rerender(widget(cleaningMethods[i], mkStats(i), src));
+                }).not.toThrow();
+            }
+
+            // Now do it again, faster — 20 randomish toggles cycling shapes.
+            for (let k = 0; k < 20; k++) {
+                const i = (k * 3 + 1) % cleaningMethods.length;
+                expect(() => {
+                    rerender(widget(cleaningMethods[i], mkStats(i), src));
+                }).not.toThrow();
+            }
+
+            const reactErrors = errSpy.mock.calls.filter((args) =>
+                args.some(
+                    (a) =>
+                        typeof a === "string" &&
+                        /Rendered (more|fewer) hooks|Minified React error #(300|310)/i.test(
+                            a,
+                        ),
+                ),
+            );
+            expect(reactErrors).toEqual([]);
+        } finally {
+            errSpy.mockRestore();
+        }
+    });
 });
