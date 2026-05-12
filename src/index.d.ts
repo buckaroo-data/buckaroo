@@ -5,8 +5,6 @@ import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from 
 import { parquetRead, parquetMetadata } from 'hyparquet';
 import { resolveDFData, resolveDFDataAsync, preResolveDFDataDict } from './components/DFViewerParts/resolveDFData';
 import { BuckarooStaticTable } from './components/BuckarooStaticTable';
-import { BuckarooServerView, buckarooWsUrl } from './server/BuckarooServerView';
-import { WebSocketModel } from './server/WebSocketModel';
 import { HistogramCell } from './components/DFViewerParts/HistogramCell';
 import { InfiniteEx } from './components/DFViewerParts/TableInfinite';
 import { DependentTabs } from './components/DependentTabs';
@@ -56,9 +54,6 @@ declare const _default: {
     resolveDFDataAsync: typeof resolveDFDataAsync;
     preResolveDFDataDict: typeof preResolveDFDataDict;
     BuckarooStaticTable: typeof BuckarooStaticTable;
-    BuckarooServerView: typeof BuckarooServerView;
-    buckarooWsUrl: typeof buckarooWsUrl;
-    WebSocketModel: typeof WebSocketModel;
 };
 export default _default;
-export { ColumnsEditor, DependentTabs, OperationViewer, WidgetDCFCell, DFViewer, DFViewerInfinite, DFViewerInfiniteDS, StatusBar, HistogramCell, CommandUtils, utils, BuckarooInfiniteWidget, getKeySmartRowCache, InfiniteEx, widgetUtils, SampleButton, HeaderNoArgs, Counter, parquetRead, parquetMetadata, resolveDFData, resolveDFDataAsync, preResolveDFDataDict, BuckarooStaticTable, BuckarooServerView, buckarooWsUrl, WebSocketModel, };
+export { ColumnsEditor, DependentTabs, OperationViewer, WidgetDCFCell, DFViewer, DFViewerInfinite, DFViewerInfiniteDS, StatusBar, HistogramCell, CommandUtils, utils, BuckarooInfiniteWidget, getKeySmartRowCache, InfiniteEx, widgetUtils, SampleButton, HeaderNoArgs, Counter, parquetRead, parquetMetadata, resolveDFData, resolveDFDataAsync, preResolveDFDataDict, BuckarooStaticTable, };
