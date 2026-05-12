@@ -103,13 +103,14 @@ export class WebSocketModel {
 
     private emit(event: string, ...args: any[]): void {
         const handlers = this.handlers.get(event);
-        if (handlers) {
-            for (const h of handlers) {
-                try {
-                    h(...args);
-                } catch (e) {
-                    console.error(`[WebSocketModel] Error in handler for ${event}:`, e);
-                }
+        if (!handlers) return;
+        // Array.from to satisfy ES5 target without --downlevelIteration.
+        // Also gives us a stable snapshot if a handler unsubscribes during emit.
+        for (const h of Array.from(handlers)) {
+            try {
+                h(...args);
+            } catch (e) {
+                console.error(`[WebSocketModel] Error in handler for ${event}:`, e);
             }
         }
     }
