@@ -297,4 +297,61 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     // the prior test.)
     expect(getSpyCalls().mountCount).toBe(2);
   });
+
+  it("dataframe_id change forces a full remount (opt-in SPA reset)", () => {
+    // dataframe_id is the explicit "different dataframe" signal. Routine
+    // post_processing / sort / filter changes leave it alone and benefit from
+    // step-3/4's in-place update path. A change here is the rare "user opened
+    // a different file" event: DFViewerInfinite remounts so AG-Grid drops its
+    // selection / scroll / filter state, and dataframe_id participates in
+    // outside_df_params so SmartRowCache routes to a fresh sourceName.
+    const src = mkSrc();
+    const propsA = {
+      df_data_dict: { summary_stats: [] },
+      df_display_args: baseDisplayArgs,
+      df_meta: baseDfMeta,
+      operations: [],
+      on_operations: jest.fn(),
+      operation_results: {} as any,
+      command_config: { argspecs: {}, defaultArgs: {} },
+      buckaroo_options: baseOptions,
+      src,
+      on_buckaroo_state: jest.fn(),
+      buckaroo_state: { ...initialState, post_processing: "" },
+    };
+    const { rerender } = render(<BuckarooInfiniteWidget {...propsA} dataframe_id="df-1" />);
+    expect(getSpyCalls().mountCount).toBe(1);
+
+    rerender(<BuckarooInfiniteWidget {...propsA} dataframe_id="df-2" />);
+    expect(getSpyCalls().mountCount).toBe(2);
+  });
+
+  it("dataframe_id stable across post_processing change → step-3/4 in-place update path still wins", () => {
+    // Verify that adopting dataframe_id doesn't accidentally turn every state
+    // change into a remount. A dataframe_id that stays constant across a
+    // post_processing toggle leaves the grid mounted; the step-3 purge effect
+    // and step-4 stable rowIds do their job.
+    const src = mkSrc();
+    const propsA = {
+      df_data_dict: { summary_stats: [] },
+      df_display_args: baseDisplayArgs,
+      df_meta: baseDfMeta,
+      operations: [],
+      on_operations: jest.fn(),
+      operation_results: {} as any,
+      command_config: { argspecs: {}, defaultArgs: {} },
+      buckaroo_options: baseOptions,
+      src,
+      on_buckaroo_state: jest.fn(),
+      dataframe_id: "stable",
+    };
+    const { rerender } = render(
+      <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, post_processing: "" }} />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
+    rerender(
+      <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, post_processing: "log_scale" }} />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
+  });
 });

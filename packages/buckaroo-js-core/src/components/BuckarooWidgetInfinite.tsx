@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as _ from "lodash-es";
 import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
@@ -119,7 +119,8 @@ export function BuckarooInfiniteWidget({
         buckaroo_state,
         on_buckaroo_state,
         buckaroo_options,
-        src
+        src,
+        dataframe_id,
     }: {
         df_meta: DFMeta;
         df_data_dict: Record<string, DFData>;
@@ -131,7 +132,18 @@ export function BuckarooInfiniteWidget({
         buckaroo_state: BuckarooState;
         on_buckaroo_state: React.Dispatch<React.SetStateAction<BuckarooState>>;
         buckaroo_options: BuckarooOptions;
-        src: KeyAwareSmartRowCache
+        src: KeyAwareSmartRowCache;
+        // Opaque opt-in identity for the underlying dataframe. When the value
+        // changes the widget treats it as a "different dataframe" event:
+        //   - DFViewerInfinite remounts (resets AG-Grid selection / scroll)
+        //   - activeCol resets to default
+        //   - dataframe_id participates in outside_df_params so SmartRowCache
+        //     sourceName picks up the new identity
+        // Routine state changes (post_processing, sort/filter, etc.) should
+        // NOT mutate dataframe_id — leave it stable across those. This is the
+        // rare "user opened a different file" / "SPA route switched dataset"
+        // signal.
+        dataframe_id?: string;
     }) {
     console.log("132 BuckarooInfiniteWidget");
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
@@ -154,6 +166,16 @@ export function BuckarooInfiniteWidget({
         }, [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, JSON.stringify(buckaroo_state.quick_command_args)]);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 
+        // Reset activeCol on dataframe_id change. The DFViewerInfinite key below
+        // remounts the grid; this handles the bit of state that lives above it.
+        const prevDfIdRef = useRef(dataframe_id);
+        useEffect(() => {
+            if (prevDfIdRef.current !== dataframe_id) {
+                prevDfIdRef.current = dataframe_id;
+                setActiveCol(["a", "stoptime"]);
+            }
+        }, [dataframe_id]);
+
         const cDisp = df_display_args[buckaroo_state.df_display];
 
         const [data_wrapper, summaryStatsData] = useMemo(
@@ -166,10 +188,11 @@ export function BuckarooInfiniteWidget({
 
         //used to denote "this dataframe has been transformed", This is
         //evantually spliced back into the request args from scrolling/
-        //the data source
+        //the data source. dataframe_id participates so the SmartRowCache
+        //sourceName picks up an explicit "different dataframe" event.
         const outsideDFParams = useMemo(
-            () => [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display],
-            [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display],
+            () => [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
+            [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
         );
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
@@ -189,6 +212,7 @@ export function BuckarooInfiniteWidget({
                         themeConfig={cDisp.df_viewer_config?.component_config?.theme}
                     />
                     <DFViewerInfinite
+                        key={dataframe_id ?? "default"}
                         data_wrapper={data_wrapper}
                         df_viewer_config={cDisp.df_viewer_config}
                         summary_stats_data={summaryStatsData}
