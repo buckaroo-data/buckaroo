@@ -167,7 +167,10 @@ export function BuckarooInfiniteWidget({
         //used to denote "this dataframe has been transformed", This is
         //evantually spliced back into the request args from scrolling/
         //the data source
-        const outsideDFParams = [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display];
+        const outsideDFParams = useMemo(
+            () => [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display],
+            [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display],
+        );
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
              style={{ width: "100%", height: "100%" }}>

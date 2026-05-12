@@ -195,18 +195,19 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     expect(getSpyCalls().getRowsCallArgs.length).toBe(beforeGetRows);
   });
 
-  it("[captures current flash] outsideDFParams is a new array literal on every render (no useMemo)", () => {
-    // Re-render the *same* widget instance — that's what the planned useMemo
-    // refactor would preserve identity across. Rendering two independent
-    // instances would never see memoization either way, so it can't flip to
-    // the desired assertion post-refactor.
+  it("outsideDFParams identity is preserved across renders when its deps are unchanged", () => {
+    // useMemo with deps [operations, post_processing, quick_command_args, df_display]
+    // means: when those four deps are reference-equal across renders, the array
+    // returned to DFViewerInfinite is reference-equal too. That stops the React
+    // `key` on AG-Grid from changing identity from spurious re-renders.
     const src = mkSrc();
+    const stableOps: any[] = []; // reuse same reference across both renders
     const widgetEl = (state: BuckarooState) => (
       <BuckarooInfiniteWidget
         df_data_dict={{ summary_stats: [] }}
         df_display_args={baseDisplayArgs}
         df_meta={baseDfMeta}
-        operations={[]}
+        operations={stableOps}
         on_operations={jest.fn()}
         operation_results={{} as any}
         command_config={{ argspecs: {}, defaultArgs: {} }}
@@ -220,16 +221,12 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     const firstRef = dfvCalls[0].outside_df_params;
     expect(Array.isArray(firstRef)).toBe(true);
 
-    // Force a re-render with a fresh-identity state object that has the same
-    // values. outsideDFParams in BuckarooInfiniteWidget is a bare array literal;
-    // it gets a fresh identity each render. Post-refactor: should be wrapped
-    // in useMemo and be reference-equal here.
+    // Re-render with a fresh state object whose fields are reference-equal:
+    // quick_command_args is inherited from initialState ({} singleton),
+    // post_processing/df_display are primitives, operations is stableOps.
     rerender(widgetEl({ ...initialState, post_processing: "" }));
     const secondRef = dfvCalls[dfvCalls.length - 1].outside_df_params;
-    expect(secondRef).not.toBe(firstRef);
-    // ...but VALUES are equal, which is why the React key doesn't change
-    // and the grid doesn't remount on this kind of churn.
-    expect(JSON.stringify(secondRef)).toBe(JSON.stringify(firstRef));
+    expect(secondRef).toBe(firstRef);
   });
 
   it("activeCol prop survives a post_processing-driven remount (React state above the remount)", () => {
