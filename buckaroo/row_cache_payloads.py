@@ -29,13 +29,19 @@ def tag_with_rowids(source: "xo.Expr") -> "xo.Expr":
     """Materialise ``source`` and append a stable rowid column.
 
     Returns an xorq Table backed by an in-memory pyarrow Table with a
-    new ``_buckaroo_rowid`` column 0..N-1 (int32). Repeated evaluations
+    new ``_buckaroo_rowid`` column 0..N-1 (int32, to match the JS
+    Int32Array view permutations on the wire). Repeated evaluations
     return the same rowids in the same order. Raises ``ValueError`` if
     ``source`` already exposes a ``_buckaroo_rowid`` column — callers
     must not call ``tag_with_rowids`` twice.
     """
     table = source.to_pyarrow()
-    rowids = pa.array(list(range(table.num_rows)), type=pa.int64())
+    if _ROWID_COL in table.schema.names:
+        raise ValueError(
+            f"source already has a {_ROWID_COL!r} column; "
+            "tag_with_rowids must be called exactly once per source"
+        )
+    rowids = pa.array(range(table.num_rows), type=pa.int32())
     tagged = table.append_column(_ROWID_COL, rowids)
     return xo.memtable(tagged)
 
