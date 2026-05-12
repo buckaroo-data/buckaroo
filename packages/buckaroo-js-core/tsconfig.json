@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES5", // Specifies the JavaScript version to target when transpiling code.
+    "target": "ES2022", // Modern target. Every browser that supports React 18 also supports ES2022.
     "useDefineForClassFields": true, // Enables the use of 'define' for class fields.
-    "lib": ["ES2020", "DOM", "DOM.Iterable"], // Specifies the libraries available for the code.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"], // Specifies the libraries available for the code.
     "module": "ESNext", // Defines the module system to use for code generation.
     "skipLibCheck": true, // Skips type checking of declaration files.
       "composite":true,
