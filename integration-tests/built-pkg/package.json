@@ -1,0 +1,26 @@
+{
+  "name": "buckaroo-built-pkg-integration",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Integration test: render a DataFrame from the BUILT buckaroo-js-core npm package (tarball install, no workspace symlinks).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "buckaroo-js-core": "file:./buckaroo-js-core.tgz",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "typescript": "~5.6.2",
+    "vite": "^5.4.10"
+  }
+}
