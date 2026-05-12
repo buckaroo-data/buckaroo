@@ -7,8 +7,8 @@ import { createRoot } from "react-dom/client";
 // and the import resolved to packages/buckaroo-js-core/src, this test
 // would silently degrade to testing source. See README for guard rails.
 import { DFViewer } from "buckaroo-js-core";
-// CSS subpath (works pre-#721 via plain subpath access; post-#721 via exports).
-import "buckaroo-js-core/dist/style.css";
+// CSS comes through the package's "./style.css" export.
+import "buckaroo-js-core/style.css";
 
 const rows = [
   { index: 0, label: "alpha", value: 11 },
