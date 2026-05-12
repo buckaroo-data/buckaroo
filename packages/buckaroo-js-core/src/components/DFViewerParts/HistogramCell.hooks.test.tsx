@@ -47,6 +47,7 @@ jest.mock("react", () => {
 });
 
 import { render } from "@testing-library/react";
+import type { ColDef, Column, Context, GridApi } from "ag-grid-community";
 import { HistogramCell } from "./HistogramCell";
 
 // Do NOT mock useColorScheme to a plain () => "light" — that would erase
@@ -71,12 +72,15 @@ const validHistogram = [
     { name: "false", false: 40, population: 40 },
 ];
 
+// HistogramCell expects fully-typed AG-Grid handles. Tests don't exercise
+// any of those surfaces, so cast empty stubs to the declared interfaces —
+// honest about the type contract, no `as any` escape hatches.
 const mkProps = (value: any) => ({
     value,
-    api: {} as any,
-    colDef: { cellClass: "" } as any,
-    column: {} as any,
-    context: {},
+    api: {} as GridApi,
+    colDef: { cellClass: "" } as ColDef,
+    column: {} as Column,
+    context: {} as Context,
 });
 
 describe("HistogramCell — Rules of Hooks", () => {

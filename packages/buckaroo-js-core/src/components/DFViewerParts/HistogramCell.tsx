@@ -95,6 +95,10 @@ export const HistogramCell = (props:
         return <span></span>;
     }
   const histogramArr = potentialHistogramArr as HistogramBar[];
+  // cellClass is string | string[] | CellClassFunc; only the string form
+  // ever flows through here in practice, so narrow defensively.
+  const rawCellClass = props.colDef.cellClass;
+  const cellClass = typeof rawCellClass === "string" ? rawCellClass : "";
   // Render as a child component (not a function call) so the useState in
   // TypedHistogramCell lives on its own fiber. Otherwise its hook is
   // counted on HistogramCell's hook list and the count differs between
@@ -104,7 +108,7 @@ export const HistogramCell = (props:
   return <TypedHistogramCell
     histogramArr={histogramArr}
     context={props.context}
-    className={props.colDef.cellClass || ""}
+    className={cellClass}
     colorScheme={colorScheme}
   />;
 }
