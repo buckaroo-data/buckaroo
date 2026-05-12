@@ -505,3 +505,71 @@ class TestStdoutSafety:
             f"{result.stdout.decode(errors='replace')[:300]}\n"
             f"This would corrupt the MCP JSON-RPC protocol."
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests — `python -m buckaroo.server` spawn passes --port=<SERVER_PORT>
+# ---------------------------------------------------------------------------
+
+class TestEnsureServerPortArg:
+    """Both the top-level packaged ``buckaroo_mcp_tool`` (referenced by the
+    ``buckaroo-table`` console_scripts entry in pyproject.toml) and the inner
+    ``buckaroo.mcp_tool`` module must pass ``--port=<SERVER_PORT>`` to the
+    spawned ``python -m buckaroo.server``.
+
+    Without it, callers that set ``BUCKAROO_PORT`` to anything other than the
+    server's default poll the requested port while the spawned server binds
+    the default, breaking the contract.
+    """
+
+    @pytest.mark.parametrize("module_name", ["buckaroo_mcp_tool", "buckaroo.mcp_tool"])
+    def test_ensure_server_passes_port_flag(self, module_name):
+        import importlib
+        m = importlib.import_module(module_name)
+
+        captured: list = []
+
+        class FakePopen:
+            def __init__(self, cmd, **kwargs):
+                captured.append(cmd)
+                self.pid = 99999
+                self.stdin = None
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        fake_health = {"pid": 12345, "uptime_s": 0.1, "static_files": {}, "version": "test"}
+
+        with (
+            patch.object(m, "_health_check", side_effect=[None, fake_health]),
+            patch.object(m, "_start_server_monitor", lambda pid: None),
+            patch("subprocess.Popen", FakePopen),
+            patch("builtins.open", MagicMock()),
+            patch("time.sleep"),
+        ):
+            old_proc = m._server_proc
+            try:
+                m.ensure_server()
+            finally:
+                m._server_proc = old_proc
+
+        assert captured, f"{module_name}.ensure_server did not call subprocess.Popen"
+        cmd = captured[0]
+        assert "--port" in cmd, (
+            f"Expected '--port' in spawned cmd for {module_name}, got cmd={cmd!r}. "
+            f"Without it, callers that set BUCKAROO_PORT≠default will poll a different "
+            f"port than the spawned server binds."
+        )
+        port_arg = cmd[cmd.index("--port") + 1]
+        assert port_arg == str(m.SERVER_PORT), (
+            f"Expected --port {m.SERVER_PORT}, got --port {port_arg!r} in cmd={cmd!r}"
+        )
