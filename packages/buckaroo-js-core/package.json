@@ -13,14 +13,14 @@
   ],
   "license": "BSD-3-Clause",
   "author": "Paddy Mullen",
-  "homepage": "https://github.com/paddymul/buckaroo",
+  "homepage": "https://github.com/buckaroo-data/buckaroo",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/paddymul/buckaroo.git",
+    "url": "git+https://github.com/buckaroo-data/buckaroo.git",
     "directory": "packages/buckaroo-js-core"
   },
   "bugs": {
-    "url": "https://github.com/paddymul/buckaroo/issues"
+    "url": "https://github.com/buckaroo-data/buckaroo/issues"
   },
   "packageManager": "pnpm@9.0.0",
   "type": "module",
