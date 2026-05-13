@@ -135,14 +135,20 @@ export function BuckarooInfiniteWidget({
         src: KeyAwareSmartRowCache;
         // Opaque opt-in identity for the underlying dataframe. When the value
         // changes the widget treats it as a "different dataframe" event:
-        //   - DFViewerInfinite remounts (resets AG-Grid selection / scroll)
         //   - activeCol resets to default
         //   - dataframe_id participates in outside_df_params so SmartRowCache
         //     sourceName picks up the new identity
-        // Routine state changes (post_processing, sort/filter, etc.) should
-        // NOT mutate dataframe_id — leave it stable across those. This is the
-        // rare "user opened a different file" / "SPA route switched dataset"
-        // signal.
+        //
+        // NOTE: in addition to this explicit prop, the widget internally derives
+        // an *effective* dataframe id that also bumps on row-content-changing
+        // state: operations, post_processing, cleaning_method, and
+        // quick_command_args (which carries sort/search/etc.). Those state
+        // changes legitimately alter row identity, so we cannot do in-place
+        // cell updates safely — getRowId=String(index) would match the wrong
+        // record. The naive correct behavior is to remount the grid on those
+        // changes too. This means the visible flash returns for those specific
+        // operations; UI-only state changes (show_commands, theme, etc.)
+        // still get the in-place update path.
         dataframe_id?: string;
     }) {
     console.log("132 BuckarooInfiniteWidget");
@@ -191,8 +197,23 @@ export function BuckarooInfiniteWidget({
         //the data source. dataframe_id participates so the SmartRowCache
         //sourceName picks up an explicit "different dataframe" event.
         const outsideDFParams = useMemo(
-            () => [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
-            [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
+            () => [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
+            [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
+        );
+
+        // Effective remount key. Bundles dataframe_id with the
+        // row-content-changing state fields so any of them triggers a full
+        // grid remount. See the dataframe_id prop docs above for rationale —
+        // in-place updates aren't safe when row identity isn't stable.
+        const effectiveDataframeId = useMemo(
+            () => JSON.stringify([
+                dataframe_id,
+                operations,
+                buckaroo_state.post_processing,
+                buckaroo_state.cleaning_method,
+                buckaroo_state.quick_command_args,
+            ]),
+            [dataframe_id, operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args],
         );
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
@@ -212,7 +233,7 @@ export function BuckarooInfiniteWidget({
                         themeConfig={cDisp.df_viewer_config?.component_config?.theme}
                     />
                     <DFViewerInfinite
-                        key={dataframe_id ?? "default"}
+                        key={effectiveDataframeId}
                         data_wrapper={data_wrapper}
                         df_viewer_config={cDisp.df_viewer_config}
                         summary_stats_data={summaryStatsData}
