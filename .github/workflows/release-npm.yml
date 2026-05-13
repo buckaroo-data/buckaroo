@@ -61,8 +61,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Upgrade npm to a Trusted-Publishing-capable version
-        # Trusted Publishing requires npm >= 11.5.1
-        run: npm install -g npm@latest
+        # Trusted Publishing requires npm >= 11.5.1. The global npm dir
+        # on github-hosted runners is root-owned, so sudo is needed.
+        run: sudo npm install -g npm@latest
 
       - name: Set buckaroo-js-core version to ${{ inputs.version }}
         working-directory: packages/buckaroo-js-core
