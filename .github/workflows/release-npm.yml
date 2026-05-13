@@ -1,0 +1,94 @@
+name: Release npm
+
+# Standalone workflow that publishes packages/buckaroo-js-core to npm.
+# Kept separate from Release (PyPI) so we can iterate on it without
+# touching the wheel/PyPI pipeline. To keep buckaroo-js-core in lockstep
+# with the Python package, run this with `version` set to the same
+# semver as the matching Python release (e.g. the git tag created by
+# the Release workflow).
+#
+# Auth: npm Trusted Publishing via OIDC (no NPM_TOKEN secret). Register
+# this repo + workflow as a Trusted Publisher in the npm UI:
+#   https://www.npmjs.com/package/buckaroo-js-core/access
+# Repository:  buckaroo-data/buckaroo
+# Workflow:    release-npm.yml
+# Environment: npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish as (must match the buckaroo Python release, e.g. 0.13.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Run npm publish with --dry-run (no actual publish)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release-npm:
+    name: Publish buckaroo-js-core to npm
+    # GitHub-hosted runner required: npm Trusted Publishing OIDC is only
+    # supported on github-hosted runners (Depot's depot-ubuntu-latest is
+    # treated as self-hosted and won't receive npm OIDC credentials).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.10.0
+
+      - name: Setup Node.js with npm registry
+        uses: actions/setup-node@v6
+        with:
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+
+      - name: Upgrade npm to a Trusted-Publishing-capable version
+        # Trusted Publishing requires npm >= 11.5.1
+        run: npm install -g npm@latest
+
+      - name: Set buckaroo-js-core version to ${{ inputs.version }}
+        working-directory: packages/buckaroo-js-core
+        run: npm version "${{ inputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Build buckaroo-js-core
+        working-directory: packages/buckaroo-js-core
+        run: pnpm run build
+
+      - name: Check if version already published
+        id: check
+        run: |
+          VERSION="${{ inputs.version }}"
+          if npm view "buckaroo-js-core@${VERSION}" version >/dev/null 2>&1; then
+            echo "buckaroo-js-core@${VERSION} already on npm — skipping publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm (Trusted Publishing + provenance)
+        if: steps.check.outputs.skip != 'true'
+        working-directory: packages/buckaroo-js-core
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            npm publish --access public --provenance --dry-run
+          else
+            npm publish --access public --provenance
+          fi
