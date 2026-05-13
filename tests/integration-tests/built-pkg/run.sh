@@ -6,12 +6,12 @@
 # not workspace-linked source), then runs Playwright against a Vite dev server.
 #
 # Usage:
-#   bash integration-tests/built-pkg/run.sh
+#   bash tests/integration-tests/built-pkg/run.sh
 #
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
 CORE_DIR="$REPO_ROOT/packages/buckaroo-js-core"
 
 echo "==> Building buckaroo-js-core"

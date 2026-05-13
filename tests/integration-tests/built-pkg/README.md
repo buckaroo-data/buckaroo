@@ -6,7 +6,7 @@ The purpose is to catch any way the published npm package could be broken withou
 
 ## Why this lives outside `packages/`
 
-The Buckaroo pnpm workspace is defined at `packages/pnpm-workspace.yaml`. If this directory lived under `packages/`, pnpm would symlink `buckaroo-js-core` from the workspace and we'd silently be testing source again. By living at `integration-tests/built-pkg/` (outside `packages/`) and using **plain `npm install`** (not pnpm), there is no workspace path to take.
+The Buckaroo pnpm workspace is defined at `packages/pnpm-workspace.yaml`. If this directory lived under `packages/`, pnpm would symlink `buckaroo-js-core` from the workspace and we'd silently be testing source again. By living at `tests/integration-tests/built-pkg/` (outside `packages/`) and using **plain `npm install`** (not pnpm), there is no workspace path to take.
 
 The Playwright spec also asserts that no resource fetched during the page load resolves under `packages/buckaroo-js-core/src/` as a belt-and-suspenders check.
 
@@ -15,7 +15,7 @@ The Playwright spec also asserts that no resource fetched during the page load r
 From the repo root:
 
 ```sh
-bash integration-tests/built-pkg/run.sh
+bash tests/integration-tests/built-pkg/run.sh
 ```
 
 What that does:
@@ -36,7 +36,7 @@ What that does:
 ## Files
 
 ```
-integration-tests/built-pkg/
+tests/integration-tests/built-pkg/
 ├── package.json           # plain-npm consumer; buckaroo-js-core = file:./...tgz
 ├── vite.config.ts         # pinned to 127.0.0.1:5174 so Playwright reaches it
 ├── tsconfig.json

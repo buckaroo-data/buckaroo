@@ -29,7 +29,7 @@ jobs:
           version: 9.10.0
       # action-setup-pnpm's `run_install: true` shortcut does `pnpm install
       # --recursive` from the repo root, which picks up package.json files
-      # outside the workspace (e.g. integration-tests/built-pkg/). Scope the
+      # outside the workspace (e.g. tests/integration-tests/built-pkg/). Scope the
       # install to `packages/` where pnpm-workspace.yaml lives — matches
       # checks.yml.
       - name: Install pnpm dependencies
