@@ -65,6 +65,25 @@ jobs:
         # on github-hosted runners is root-owned, so sudo is needed.
         run: sudo npm install -g npm@latest
 
+      - name: OIDC diagnostics (compare against npm Trusted Publisher config)
+        # Prints the values npm checks against the Trusted Publisher
+        # config on the package. Compare these to what's registered at
+        # https://www.npmjs.com/package/buckaroo-js-core/access
+        run: |
+          echo "npm version:              $(npm --version)"
+          echo "GITHUB_REPOSITORY:        ${GITHUB_REPOSITORY}"
+          echo "GITHUB_WORKFLOW_REF:      ${GITHUB_WORKFLOW_REF}"
+          echo "GITHUB_REF:               ${GITHUB_REF}"
+          echo "GITHUB_REF_NAME:          ${GITHUB_REF_NAME}"
+          echo "GITHUB_JOB:               ${GITHUB_JOB}"
+          echo "Job environment (yaml):   npm"
+          echo
+          echo "On npmjs.com the Trusted Publisher must match:"
+          echo "  Owner:        $(echo "${GITHUB_REPOSITORY}" | cut -d/ -f1)"
+          echo "  Repository:   $(echo "${GITHUB_REPOSITORY}" | cut -d/ -f2)"
+          echo "  Workflow:     $(basename "${GITHUB_WORKFLOW_REF%@*}")"
+          echo "  Environment:  npm  (or leave blank if no environment configured)"
+
       - name: Set buckaroo-js-core version to ${{ inputs.version }}
         working-directory: packages/buckaroo-js-core
         run: npm version "${{ inputs.version }}" --no-git-tag-version --allow-same-version
@@ -89,7 +108,7 @@ jobs:
         working-directory: packages/buckaroo-js-core
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            npm publish --access public --provenance --dry-run
+            npm publish --access public --provenance --dry-run --loglevel=verbose
           else
-            npm publish --access public --provenance
+            npm publish --access public --provenance --loglevel=verbose
           fi
