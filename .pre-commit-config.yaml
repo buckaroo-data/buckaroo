@@ -12,3 +12,11 @@ repos:
         types: [python]
         files: ^(buckaroo|tests|scripts)/.*\.py$
         exclude: ^buckaroo/jlisp/lispy\.py$
+      - id: tsc-buckaroo-js-core
+        name: tsc buckaroo-js-core
+        # Type-check the whole project, not just staged files — TS needs
+        # to resolve imports across the project graph. ~0.65s warm.
+        entry: pnpm --filter buckaroo-js-core exec tsc -b
+        language: system
+        files: ^packages/buckaroo-js-core/.*\.(ts|tsx)$
+        pass_filenames: false
