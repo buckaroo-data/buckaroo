@@ -34,7 +34,10 @@ permissions:
 jobs:
   release-npm:
     name: Publish buckaroo-js-core to npm
-    runs-on: depot-ubuntu-latest
+    # GitHub-hosted runner required: npm Trusted Publishing OIDC is only
+    # supported on github-hosted runners (Depot's depot-ubuntu-latest is
+    # treated as self-hosted and won't receive npm OIDC credentials).
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: npm
     steps:
