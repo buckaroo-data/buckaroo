@@ -15,10 +15,26 @@ import {
     IDisplayArgs
 } from "./DFViewerParts/gridUtils";
 import { DatasourceOrRaw, DFViewerInfinite } from "./DFViewerParts/DFViewerInfinite";
-import { IDatasource } from "ag-grid-community";
+import { IDatasource, IGetRowsParams } from "ag-grid-community";
 import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "./DFViewerParts/SmartRowCache";
 import { parquetRead, parquetMetadata } from 'hyparquet'
 import { MessageBox } from "./MessageBox";
+
+// Wrap a static DFData array in a fake IDatasource. Used for summary stats
+// and other small pre-loaded datasets so they can share the same AG-Grid
+// rowModelType ("infinite") as the live main dataset. Without this, swapping
+// df_display from "main" to "summary" flips data_wrapper.data_type from
+// DataSource to Raw and forces an AG-Grid remount (rowModelType can't be
+// reconfigured live). With this, headers stay mounted across the swap.
+export const makeStaticInfiniteDs = (data: DFData): IDatasource => ({
+    rowCount: data.length,
+    getRows: (params: IGetRowsParams) => {
+        // Static data is always available — respond synchronously, no loading
+        // state, no network round-trip.
+        const slice = data.slice(params.startRow, params.endRow);
+        params.successCallback(slice, data.length);
+    },
+});
 
 export const getDataWrapper = (
     data_key: string,
@@ -32,14 +48,13 @@ export const getDataWrapper = (
             datasource: ds,
             length: total_rows || 50,
         };
-    } else {
-        const data = df_data_dict[data_key];
-        return {
-            data_type: "Raw",
-            data: data,
-            length: data.length,
-        };
     }
+    const data = df_data_dict[data_key];
+    return {
+        data_type: "DataSource",
+        datasource: makeStaticInfiniteDs(data),
+        length: data.length,
+    };
 };
 /*
 const gensym = () => {
@@ -241,6 +256,8 @@ export function BuckarooInfiniteWidget({
                         activeCol={activeCol}
                         setActiveCol={setActiveCol}
                         error_info={""}
+                        view_name={buckaroo_state.df_display}
+                        data_key={cDisp.data_key}
                     />
                 </div>
                 {buckaroo_state.show_commands ? (
