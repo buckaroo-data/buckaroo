@@ -20,21 +20,43 @@ import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "
 import { parquetRead, parquetMetadata } from 'hyparquet'
 import { MessageBox } from "./MessageBox";
 
+// Shared label for the swap-tracing console.logs added to debug summary-stats
+// toggle issues. grep "[bk-flash]" in the browser console to see the timeline.
+const bkLog = (event: string, extra?: Record<string, unknown>): void => {
+    // Use performance.now for sub-ms ordering across the React render → AG-Grid
+    // commit boundary. Logs are intentionally chatty — pull them out once the
+    // toggle path is confirmed working.
+    // eslint-disable-next-line no-console
+    console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
+};
+
 // Wrap a static DFData array in a fake IDatasource. Used for summary stats
 // and other small pre-loaded datasets so they can share the same AG-Grid
 // rowModelType ("infinite") as the live main dataset. Without this, swapping
 // df_display from "main" to "summary" flips data_wrapper.data_type from
 // DataSource to Raw and forces an AG-Grid remount (rowModelType can't be
 // reconfigured live). With this, headers stay mounted across the swap.
-export const makeStaticInfiniteDs = (data: DFData): IDatasource => ({
-    rowCount: data.length,
-    getRows: (params: IGetRowsParams) => {
-        // Static data is always available — respond synchronously, no loading
-        // state, no network round-trip.
-        const slice = data.slice(params.startRow, params.endRow);
-        params.successCallback(slice, data.length);
-    },
-});
+export const makeStaticInfiniteDs = (data: DFData, label?: string): IDatasource => {
+    bkLog("makeStaticInfiniteDs constructed", { label, dataLen: data.length });
+    return {
+        rowCount: data.length,
+        getRows: (params: IGetRowsParams) => {
+            // Static data is always available — respond synchronously, no loading
+            // state, no network round-trip.
+            const slice = data.slice(params.startRow, params.endRow);
+            bkLog("fakeDs.getRows ENTER", {
+                label,
+                startRow: params.startRow,
+                endRow: params.endRow,
+                sortModel: params.sortModel,
+                sliceLen: slice.length,
+                lastRow: data.length,
+            });
+            params.successCallback(slice, data.length);
+            bkLog("fakeDs.getRows EXIT (successCallback called)", { label });
+        },
+    };
+};
 
 export const getDataWrapper = (
     data_key: string,
@@ -42,6 +64,11 @@ export const getDataWrapper = (
     ds: IDatasource,
     total_rows?: number
 ): DatasourceOrRaw => {
+    bkLog("getDataWrapper called", {
+        data_key,
+        hasKeyInDict: df_data_dict[data_key] !== undefined,
+        total_rows,
+    });
     if (data_key === "main") {
         return {
             data_type: "DataSource",
@@ -50,10 +77,13 @@ export const getDataWrapper = (
         };
     }
     const data = df_data_dict[data_key];
+    if (data === undefined) {
+        bkLog("getDataWrapper WARNING — data is undefined", { data_key, availableKeys: Object.keys(df_data_dict) });
+    }
     return {
         data_type: "DataSource",
-        datasource: makeStaticInfiniteDs(data),
-        length: data.length,
+        datasource: makeStaticInfiniteDs(data || [], data_key),
+        length: (data || []).length,
     };
 };
 /*
@@ -166,7 +196,13 @@ export function BuckarooInfiniteWidget({
         // still get the in-place update path.
         dataframe_id?: string;
     }) {
-    console.log("132 BuckarooInfiniteWidget");
+    bkLog("BuckarooInfiniteWidget render", {
+        df_display: buckaroo_state.df_display,
+        post_processing: buckaroo_state.post_processing,
+        cleaning_method: buckaroo_state.cleaning_method,
+        dataframe_id,
+        opsLen: operations.length,
+    });
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
         // so having it live between relaods is key
         //const [respError, setRespError] = useState<string | undefined>(undefined);
