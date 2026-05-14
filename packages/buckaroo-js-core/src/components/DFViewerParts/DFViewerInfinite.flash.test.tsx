@@ -149,7 +149,7 @@ describe("DFViewerInfinite — flash matrix (current behavior)", () => {
     expect(getSpyCalls().mountCount).toBe(1);
   });
 
-  it("[captures current flash] getRowId for the same data index changes when outside_df_params change", () => {
+  it("getRowId for the same data index is stable across outside_df_params changes", () => {
     const { rerender } = render(
       <DFViewerInfinite
         data_wrapper={dsWrapper()}
@@ -168,13 +168,13 @@ describe("DFViewerInfinite — flash matrix (current behavior)", () => {
         outside_df_params={{ k: "B" }}
       />,
     );
-    // Today getRowId returns `${index}-${JSON.stringify(outside_df_params)}` so
-    // the row at index 0 gets two different IDs. AG-Grid then treats those as
-    // brand new rows on remount instead of recycling DOM. Post-refactor we
-    // expect rowIdsByIndex.get(0)!.size === 1.
+    // Post step-4: getRowId returns just String(index). Same row index → same
+    // rowId across outside_df_params changes. AG-Grid recycles the row DOM
+    // and does in-place cell-value updates instead of tearing down rows.
     const ids = getSpyCalls().rowIdsByIndex.get(0);
     expect(ids).toBeDefined();
-    expect(ids!.size).toBe(2);
+    expect(ids!.size).toBe(1);
+    expect([...ids!][0]).toBe("0");
   });
 
   it("DataSource mode datasource is exercised; sourceName carries outside_df_params", () => {

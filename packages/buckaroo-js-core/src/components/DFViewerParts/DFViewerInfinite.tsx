@@ -313,12 +313,8 @@ export function DFViewerInfiniteInner({
 
 
     const getRowId = useCallback(
-        (params: GetRowIdParams) => {
-            const outsideKey = JSON.stringify(params.context?.outside_df_params) || "";
-            const retVal = `${String(params?.data?.index)}-${outsideKey}`;
-            return retVal;
-        },
-        [outside_df_params],
+        (params: GetRowIdParams) => String(params?.data?.index),
+        [],
     );
 
     const resolvedScheme = effectiveScheme || 'dark';
@@ -342,7 +338,7 @@ export function DFViewerInfiniteInner({
         getRowId,
         rowModelType: "clientSide"}
 
-    }, [styledColumns.length, JSON.stringify(styledColumns), hs, df_viewer_config.extra_grid_config, setActiveCol, getRowId, outside_df_params ]);
+    }, [styledColumns.length, JSON.stringify(styledColumns), hs, df_viewer_config.extra_grid_config, setActiveCol, getRowId]);
 
         // Extract datasource separately to ensure it updates when data_wrapper changes
         const datasource = useMemo(() => {
