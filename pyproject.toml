@@ -127,6 +127,7 @@ packaging_tools = [
     
 [project.scripts]
 buckaroo-table = "buckaroo_mcp_tool:main"
+buckaroo-server = "buckaroo.server.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/paddymul/buckaroo"

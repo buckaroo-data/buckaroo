@@ -110,7 +110,10 @@ try:
     
     else:
         if not is_running_in_mp_timeout() and not has_initted:
-            print("must be running inside ipython to enable default display via enable()")
+            # Route to stderr so the buckaroo.server stdout handshake stays unambiguous
+            # (the Tauri sidecar parses stdout for BUCKAROO_PORT=<n>).
+            import sys as _sys
+            print("must be running inside ipython to enable default display via enable()", file=_sys.stderr)
             warn_on_incompatible()
     try:
         import polars
