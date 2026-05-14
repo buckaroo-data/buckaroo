@@ -313,12 +313,8 @@ export function DFViewerInfiniteInner({
 
 
     const getRowId = useCallback(
-        (params: GetRowIdParams) => {
-            const outsideKey = JSON.stringify(params.context?.outside_df_params) || "";
-            const retVal = `${String(params?.data?.index)}-${outsideKey}`;
-            return retVal;
-        },
-        [outside_df_params],
+        (params: GetRowIdParams) => String(params?.data?.index),
+        [],
     );
 
     const resolvedScheme = effectiveScheme || 'dark';
@@ -342,7 +338,7 @@ export function DFViewerInfiniteInner({
         getRowId,
         rowModelType: "clientSide"}
 
-    }, [styledColumns.length, JSON.stringify(styledColumns), hs, df_viewer_config.extra_grid_config, setActiveCol, getRowId, outside_df_params ]);
+    }, [styledColumns.length, JSON.stringify(styledColumns), hs, df_viewer_config.extra_grid_config, setActiveCol, getRowId]);
 
         // Extract datasource separately to ensure it updates when data_wrapper changes
         const datasource = useMemo(() => {
@@ -405,11 +401,41 @@ export function DFViewerInfiniteInner({
             }
         }, [rawDataSig, data_wrapper.data_type, data_wrapper]);
 
+        // Data-identity signature: when outside_df_params content changes (e.g.
+        // post_processing, cleaning_method, operations, df_display *within the
+        // same data_type*), invalidate AG-Grid's infinite cache so it refetches
+        // against the new sourceName. We do NOT remount — that's the React `key`
+        // below, which is keyed only on data_type to handle the
+        // DataSource<->Raw rowModelType switch that AG-Grid can't reconfigure
+        // on a live instance.
+        const outsideDFSig = useMemo(() => {
+            try {
+                return JSON.stringify(outside_df_params);
+            } catch {
+                return "no-outside-params";
+            }
+        }, [outside_df_params]);
+        const firstSigRunRef = useRef(true);
+        useEffect(() => {
+            if (firstSigRunRef.current) {
+                firstSigRunRef.current = false;
+                return;
+            }
+            if (data_wrapper.data_type !== "DataSource") return;
+            const api = gridRef.current?.api;
+            if (!api) return;
+            try {
+                api.purgeInfiniteCache();
+            } catch (_e) {
+                // ignore — purge before grid is fully ready is harmless
+            }
+        }, [outsideDFSig, data_wrapper.data_type]);
+
         return (
 
                 <AgGridReact
                     ref={gridRef}
-                    key={JSON.stringify(outside_df_params) || "no-outside-params"}
+                    key={data_wrapper.data_type}
                     theme={myTheme}
                     loadThemeGoogleFonts
                     gridOptions={finalGridOptions}

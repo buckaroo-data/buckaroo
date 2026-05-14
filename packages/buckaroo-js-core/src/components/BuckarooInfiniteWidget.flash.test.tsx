@@ -95,7 +95,12 @@ beforeEach(() => {
 });
 
 describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
-  it("[captures current flash] post_processing change remounts the data grid (via outside_df_params key)", () => {
+  it("post_processing change auto-bumps effectiveDataframeId and remounts the grid", () => {
+    // post_processing changes the underlying row contents. With
+    // getRowId=String(index) (step 4), in-place updates would silently match
+    // the wrong record. The widget bundles post_processing into an internal
+    // effective dataframe id alongside the user-supplied dataframe_id, so any
+    // such change forces a full remount (correct, but visibly flashes).
     const src = mkSrc();
     const { rerender } = render(
       <BuckarooInfiniteWidget
@@ -129,13 +134,12 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
         src={src}
       />,
     );
-    // post_processing is in outside_df_params, which is the React `key` on
-    // AgGridReact. So the entire grid is destroyed and remounted. This is the
-    // dominant flash cause. Post-refactor: mountCount stays 1, purgeInfiniteCache>=1.
     expect(getSpyCalls().mountCount).toBe(2);
   });
 
-  it("cleaning_method change does NOT remount but rebuilds datasource (getRows refires)", () => {
+  it("cleaning_method change auto-bumps effectiveDataframeId and remounts the grid", () => {
+    // cleaning_method also legitimately alters row contents (and may reorder
+    // rows). Same correctness story as post_processing: full remount.
     const src = mkSrc();
     const propsA = {
       df_data_dict: { summary_stats: [] },
@@ -152,17 +156,12 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     const { rerender } = render(
       <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, cleaning_method: "clean1" }} />,
     );
-    const beforeMount = getSpyCalls().mountCount;
-    const beforeGetRows = getSpyCalls().getRowsCallArgs.length;
+    expect(getSpyCalls().mountCount).toBe(1);
 
     rerender(
       <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, cleaning_method: "clean2" }} />,
     );
-    // cleaning_method is in mainDs deps but NOT in outside_df_params, so:
-    //   - no remount (React key unchanged)
-    //   - new mainDs reference → new datasource prop → spy fires getRows again
-    expect(getSpyCalls().mountCount).toBe(beforeMount);
-    expect(getSpyCalls().getRowsCallArgs.length).toBeGreaterThan(beforeGetRows);
+    expect(getSpyCalls().mountCount).toBe(2);
   });
 
   it("show_commands toggle does not remount and does not refetch", () => {
@@ -229,10 +228,12 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     expect(secondRef).toBe(firstRef);
   });
 
-  it("activeCol prop survives a post_processing-driven remount (React state above the remount)", () => {
-    // The user clicks a cell, activeCol is stored in BuckarooInfiniteWidget's
-    // useState. Then post_processing changes and AG-Grid remounts. The new
-    // mount should receive the same activeCol via context.
+  it("activeCol prop survives a post_processing change via React state above the auto-bump remount", () => {
+    // post_processing auto-bumps effectiveDataframeId and remounts the grid
+    // (AG-Grid drops its internal selection). But activeCol lives in
+    // BuckarooInfiniteWidget's useState — above the remount boundary — so the
+    // app-level "currently focused column" survives and flows back through
+    // context to the freshly mounted grid.
     const src = mkSrc();
     const propsA = {
       df_data_dict: { summary_stats: [] },
@@ -253,20 +254,16 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     const activeColAtFirstMount = getSpyCalls().lastProps?.context?.activeCol;
     expect(activeColAtFirstMount).toEqual(["a", "stoptime"]);
 
-    // Force a remount by changing post_processing.
     const { rerender } = render(
       <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, post_processing: "" }} />,
     );
     rerender(
       <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, post_processing: "log_scale" }} />,
     );
-    // After remount, activeCol still flows through context. AG-Grid's *internal*
-    // selection visual is reset by the remount (which is one of the UX costs
-    // of the flash), but the prop is preserved.
     expect(getSpyCalls().lastProps?.context?.activeCol).toEqual(["a", "stoptime"]);
   });
 
-  it("[captures current flash] df_display switch (main → summary) remounts the grid", () => {
+  it("df_display switch (main → summary) remounts the grid because data_type changes", () => {
     const src = mkSrc();
     const propsA = {
       df_data_dict: { summary_stats: [{ index: "mean", a: 10 }] },
@@ -288,9 +285,98 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     rerender(
       <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, df_display: "summary" }} />,
     );
-    // df_display is in outside_df_params, so the key changes and AG-Grid
-    // remounts. It also switches data_type Raw <-> DataSource which legitimately
-    // needs a structural reconfigure — captured here as a single remount.
+    // df_display: "main" → "summary" switches data_wrapper.data_type from
+    // DataSource to Raw, which means AG-Grid's rowModelType has to change.
+    // rowModelType can't be reconfigured live, so the React key on AgGridReact
+    // is keyed on data_type and this *intentionally* remounts.
     expect(getSpyCalls().mountCount).toBe(2);
+  });
+
+  it("dataframe_id change forces a full remount (explicit SPA reset)", () => {
+    // dataframe_id is the explicit "different dataframe" signal used by SPA
+    // embedders (e.g. route change → different dataset). DFViewerInfinite
+    // remounts so AG-Grid drops its selection / scroll / filter state, and
+    // dataframe_id participates in outside_df_params so SmartRowCache routes
+    // to a fresh sourceName. The widget *also* auto-bumps an internal
+    // effective dataframe id on row-content-changing state, but the explicit
+    // prop is the canonical signal for the SPA-reset use case.
+    const src = mkSrc();
+    const propsA = {
+      df_data_dict: { summary_stats: [] },
+      df_display_args: baseDisplayArgs,
+      df_meta: baseDfMeta,
+      operations: [],
+      on_operations: jest.fn(),
+      operation_results: {} as any,
+      command_config: { argspecs: {}, defaultArgs: {} },
+      buckaroo_options: baseOptions,
+      src,
+      on_buckaroo_state: jest.fn(),
+      buckaroo_state: { ...initialState, post_processing: "" },
+    };
+    const { rerender } = render(<BuckarooInfiniteWidget {...propsA} dataframe_id="df-1" />);
+    expect(getSpyCalls().mountCount).toBe(1);
+
+    rerender(<BuckarooInfiniteWidget {...propsA} dataframe_id="df-2" />);
+    expect(getSpyCalls().mountCount).toBe(2);
+  });
+
+  it("stable dataframe_id does NOT save us from a post_processing change — auto-bump still fires", () => {
+    // The earlier draft of this PR tried to keep the in-place update path for
+    // post_processing as long as dataframe_id didn't change. That broke
+    // correctness: getRowId=String(index) silently matches different records
+    // pre- vs post-transform. The naive fix is to remount on row-content
+    // changes regardless of dataframe_id stability.
+    const src = mkSrc();
+    const propsA = {
+      df_data_dict: { summary_stats: [] },
+      df_display_args: baseDisplayArgs,
+      df_meta: baseDfMeta,
+      operations: [],
+      on_operations: jest.fn(),
+      operation_results: {} as any,
+      command_config: { argspecs: {}, defaultArgs: {} },
+      buckaroo_options: baseOptions,
+      src,
+      on_buckaroo_state: jest.fn(),
+      dataframe_id: "stable",
+    };
+    const { rerender } = render(
+      <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, post_processing: "" }} />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
+    rerender(
+      <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, post_processing: "log_scale" }} />,
+    );
+    expect(getSpyCalls().mountCount).toBe(2);
+  });
+
+  it("UI-only state (show_commands) still uses the in-place update path even with the auto-bump in place", () => {
+    // Sanity check: the auto-bump must be narrow. Toggling UI state that
+    // doesn't change row contents (here: show_commands) must NOT bump
+    // effectiveDataframeId — otherwise opening the lowcode panel would flash
+    // the grid every time.
+    const src = mkSrc();
+    const propsA = {
+      df_data_dict: { summary_stats: [] },
+      df_display_args: baseDisplayArgs,
+      df_meta: baseDfMeta,
+      operations: [],
+      on_operations: jest.fn(),
+      operation_results: {} as any,
+      command_config: { argspecs: {}, defaultArgs: {} },
+      buckaroo_options: baseOptions,
+      src,
+      on_buckaroo_state: jest.fn(),
+      dataframe_id: "stable",
+    };
+    const { rerender } = render(
+      <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, show_commands: false }} />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
+    rerender(
+      <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, show_commands: "1" }} />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
   });
 });
