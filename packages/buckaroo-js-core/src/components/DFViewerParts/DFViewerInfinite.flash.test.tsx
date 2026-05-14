@@ -149,7 +149,7 @@ describe("DFViewerInfinite — flash matrix (current behavior)", () => {
     expect(getSpyCalls().mountCount).toBe(1);
   });
 
-  it("getRowId for the same data index is stable across outside_df_params changes", () => {
+  it("getRowId for the same data index is stable across outside_df_params changes (within a data_key)", () => {
     const { rerender } = render(
       <DFViewerInfinite
         data_wrapper={dsWrapper()}
@@ -157,6 +157,7 @@ describe("DFViewerInfinite — flash matrix (current behavior)", () => {
         summary_stats_data={[]}
         setActiveCol={jest.fn()}
         outside_df_params={{ k: "A" }}
+        data_key="main"
       />,
     );
     rerender(
@@ -166,15 +167,48 @@ describe("DFViewerInfinite — flash matrix (current behavior)", () => {
         summary_stats_data={[]}
         setActiveCol={jest.fn()}
         outside_df_params={{ k: "B" }}
+        data_key="main"
       />,
     );
-    // Post step-4: getRowId returns just String(index). Same row index → same
-    // rowId across outside_df_params changes. AG-Grid recycles the row DOM
-    // and does in-place cell-value updates instead of tearing down rows.
+    // getRowId is `${data_key}-${index}`. Within a single data_key, rowId is
+    // stable across outside_df_params changes — AG-Grid recycles row DOM
+    // and updates cells in place rather than tearing down rows. (Across
+    // data_keys, see the rowid-collision test below.)
     const ids = getSpyCalls().rowIdsByIndex.get(0);
     expect(ids).toBeDefined();
     expect(ids!.size).toBe(1);
-    expect([...ids!][0]).toBe("0");
+    expect([...ids!][0]).toBe("main-0");
+  });
+
+  it("getRowId namespaces by data_key so main and summary do not collide", () => {
+    const { rerender } = render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper()}
+        df_viewer_config={baseConfig}
+        summary_stats_data={[]}
+        setActiveCol={jest.fn()}
+        outside_df_params={{}}
+        data_key="main"
+      />,
+    );
+    rerender(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper()}
+        df_viewer_config={baseConfig}
+        summary_stats_data={[]}
+        setActiveCol={jest.fn()}
+        outside_df_params={{}}
+        data_key="summary_stats"
+      />,
+    );
+    // Same data index, different data_keys → distinct rowIds. AG-Grid sees
+    // them as separate identities and won't accidentally apply selection or
+    // focus from one view to the other.
+    const ids = getSpyCalls().rowIdsByIndex.get(0);
+    expect(ids).toBeDefined();
+    expect(ids!.size).toBe(2);
+    expect(ids!.has("main-0")).toBe(true);
+    expect(ids!.has("summary_stats-0")).toBe(true);
   });
 
   it("DataSource mode datasource is exercised; sourceName carries outside_df_params", () => {

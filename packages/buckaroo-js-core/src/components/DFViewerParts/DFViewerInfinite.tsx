@@ -51,7 +51,13 @@ ModuleRegistry.registerModules([
 
 const AccentColor = "#2196F3"
 
-
+// Shared label for swap-tracing console.logs. grep "[bk-flash]" in the
+// browser console to see the timeline of a df_display toggle. Temporary —
+// remove once the toggle path is confirmed working in production.
+const bkLog = (event: string, extra?: Record<string, unknown>): void => {
+    // eslint-disable-next-line no-console
+    console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
+};
 
 export interface DatasourceWrapper {
     datasource: IDatasource;
@@ -127,7 +133,9 @@ export function DFViewerInfinite({
     setActiveCol,
     outside_df_params,
     error_info,
-    max_rows_in_configs
+    max_rows_in_configs,
+    view_name,
+    data_key,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -141,10 +149,25 @@ export function DFViewerInfinite({
     error_info?: string;
     //splicing this in eventually
     max_rows_in_configs?:number // across all the configs what is the max rows
-
+    // Identifies which df_display entry is active. When this changes, the
+    // grid saves the previous view's column state (sort, widths, hide) and
+    // applies the target view's saved state — or a "no sort" default on
+    // first entry. Headers stay mounted across the swap.
+    view_name?: string;
+    // Identifies the underlying dataset (e.g. "main", "summary_stats"). Used
+    // as a namespace in getRowId so rows from different datasets never share
+    // a rowId, even though their `index` values overlap (row 0 in main is a
+    // different record than row 0 in summary).
+    data_key?: string;
 }) {
+    bkLog("DFViewerInfinite render", {
+        view_name,
+        data_key,
+        data_type: data_wrapper.data_type,
+        length: data_wrapper.length,
+    });
     /*
-    The idea is to do some pre-setup here for 
+    The idea is to do some pre-setup here for
     */
     const renderStartTime = useMemo(() => {
         //console.log("137renderStartTime");
@@ -200,6 +223,8 @@ export function DFViewerInfinite({
                     hs={hs}
                     themeConfig={themeConfig}
                     effectiveScheme={effectiveScheme}
+                    view_name={view_name}
+                    data_key={data_key}
                 />
             </div>
         </div>)
@@ -214,7 +239,9 @@ export function DFViewerInfiniteInner({
     renderStartTime: _renderStartTime,
     hs,
     themeConfig,
-    effectiveScheme
+    effectiveScheme,
+    view_name,
+    data_key,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -229,7 +256,16 @@ export function DFViewerInfiniteInner({
     hs:HeightStyleI;
     themeConfig?: ThemeConfig;
     effectiveScheme?: 'light' | 'dark';
+    view_name?: string;
+    data_key?: string;
 }) {
+    bkLog("DFViewerInfiniteInner render", {
+        view_name,
+        data_key,
+        data_type: data_wrapper.data_type,
+        length: data_wrapper.length,
+        outside_df_params,
+    });
 
 
     /*
@@ -299,7 +335,10 @@ export function DFViewerInfiniteInner({
     const extra_context = {
         activeCol,
         histogram_stats,
-        pinned_rows_config:df_viewer_config.pinned_rows
+        pinned_rows_config:df_viewer_config.pinned_rows,
+        // Available to getRowId so rows from different df_display entries
+        // (main vs summary, etc.) don't share rowIds.
+        data_key,
     }
 
     const pinned_rows = df_viewer_config.pinned_rows;
@@ -313,7 +352,15 @@ export function DFViewerInfiniteInner({
 
 
     const getRowId = useCallback(
-        (params: GetRowIdParams) => String(params?.data?.index),
+        (params: GetRowIdParams) => {
+            // Namespace rowIds by the active data_key so rows from different
+            // datasets don't collide. "main" and "summary_stats" both have a
+            // row at index 0 but they're different records — AG-Grid should
+            // treat them as distinct identities, even when the grid stays
+            // mounted across the swap.
+            const ns = params.context?.data_key ?? "main";
+            return `${ns}-${params?.data?.index}`;
+        },
         [],
     );
 
@@ -332,7 +379,16 @@ export function DFViewerInfiniteInner({
         domLayout:  hs.domLayout,
         autoSizeStrategy: df_viewer_config.extra_grid_config?.autoSizeStrategy || getAutoSize(styledColumns.length),
         onFirstDataRendered: (_params) => {
-            // Grid finished rendering
+            bkLog("AgGrid onFirstDataRendered");
+        },
+        onModelUpdated: (_params) => {
+            bkLog("AgGrid onModelUpdated");
+        },
+        onRowDataUpdated: (_params) => {
+            bkLog("AgGrid onRowDataUpdated");
+        },
+        onSortChanged: (_event) => {
+            bkLog("AgGrid onSortChanged", { sortModel: _event.api.getColumnState().filter((c: any) => c.sort) });
         },
         columnDefs:styledColumns,
         getRowId,
@@ -342,6 +398,10 @@ export function DFViewerInfiniteInner({
 
         // Extract datasource separately to ensure it updates when data_wrapper changes
         const datasource = useMemo(() => {
+            bkLog("datasource useMemo recomputing", {
+                data_type: data_wrapper.data_type,
+                length: data_wrapper.length,
+            });
             return data_wrapper.data_type === "DataSource" ? data_wrapper.datasource : {
                 rowCount: data_wrapper.length,
                 getRows: (_params: any) => {
@@ -417,19 +477,81 @@ export function DFViewerInfiniteInner({
         }, [outside_df_params]);
         const firstSigRunRef = useRef(true);
         useEffect(() => {
+            bkLog("outsideDFSig effect fired", {
+                isFirstRun: firstSigRunRef.current,
+                outsideDFSig,
+                data_type: data_wrapper.data_type,
+            });
             if (firstSigRunRef.current) {
                 firstSigRunRef.current = false;
                 return;
             }
             if (data_wrapper.data_type !== "DataSource") return;
             const api = gridRef.current?.api;
-            if (!api) return;
+            if (!api) {
+                bkLog("outsideDFSig effect — no api yet, skipping purge");
+                return;
+            }
             try {
                 api.purgeInfiniteCache();
-            } catch (_e) {
-                // ignore — purge before grid is fully ready is harmless
+                bkLog("outsideDFSig effect — purgeInfiniteCache called");
+            } catch (e) {
+                bkLog("outsideDFSig effect — purgeInfiniteCache threw", { error: String(e) });
             }
         }, [outsideDFSig, data_wrapper.data_type]);
+
+        // Per-view column state (sort, widths, hide, pinned, order) keyed by
+        // view_name. Ephemeral — lives only as long as this component instance,
+        // not persisted to buckaroo_state or anywhere upstream. On view_name
+        // change: save current grid state under the previous view, then apply
+        // the target view's saved state if any; otherwise blank the sort so
+        // a freshly-entered view starts clean (summary stats in particular
+        // are pre-ordered and sort by data value is meaningless).
+        const viewStateRef = useRef<Record<string, { columnState: any[] }>>({});
+        const prevViewNameRef = useRef<string | undefined>(view_name);
+        useEffect(() => {
+            bkLog("view_name effect fired", {
+                from: prevViewNameRef.current,
+                to: view_name,
+                same: prevViewNameRef.current === view_name,
+            });
+            if (prevViewNameRef.current === view_name) return;
+            const api = gridRef.current?.api;
+            const prev = prevViewNameRef.current;
+            prevViewNameRef.current = view_name;
+            if (!api) {
+                bkLog("view_name effect — no api yet, skipping save/restore");
+                return;
+            }
+            // Save the outgoing view's state. If columnDefs changed across the
+            // swap, AG-Grid will already have remapped state to the new column
+            // shape — saving here records whatever AG-Grid currently believes
+            // is the state. For the common case (same column_config across
+            // views) this is the real outgoing state.
+            if (prev !== undefined) {
+                try {
+                    const colState = api.getColumnState();
+                    viewStateRef.current[prev] = { columnState: colState };
+                    bkLog("view_name effect — saved state for prev view", { prev, colStateLen: colState.length });
+                } catch (e) {
+                    bkLog("view_name effect — getColumnState threw", { error: String(e) });
+                }
+            }
+            const target = view_name !== undefined ? viewStateRef.current[view_name] : undefined;
+            try {
+                if (target?.columnState) {
+                    api.applyColumnState({ state: target.columnState, applyOrder: true });
+                    bkLog("view_name effect — applied stashed state for target view", { view_name });
+                } else {
+                    // First time entering this view — explicitly null out any
+                    // sort that may have carried over from the previous view.
+                    api.applyColumnState({ defaultState: { sort: null } });
+                    bkLog("view_name effect — first entry, applied defaultState { sort: null }", { view_name });
+                }
+            } catch (e) {
+                bkLog("view_name effect — applyColumnState threw", { error: String(e) });
+            }
+        }, [view_name]);
 
         return (
 
@@ -443,6 +565,7 @@ export function DFViewerInfiniteInner({
                     datasource={datasource}
                     columnDefs={styledColumns}
                     onGridReady={(params) => {
+                        bkLog("AgGrid onGridReady", { view_name, data_key });
                         try {
                             // Ensure pinned rows are applied once API is ready
                             params.api.setGridOption('pinnedTopRowData', topRowsRef.current || []);

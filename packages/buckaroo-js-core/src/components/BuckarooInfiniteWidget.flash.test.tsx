@@ -10,7 +10,7 @@
 import { render } from "@testing-library/react";
 import { BuckarooInfiniteWidget } from "./BuckarooWidgetInfinite";
 import { KeyAwareSmartRowCache } from "./DFViewerParts/SmartRowCache";
-import { getSpyCalls, resetSpy } from "../test-utils/agGridSpy";
+import { getSpyCalls, resetSpy, setMockColumnState } from "../test-utils/agGridSpy";
 import { BuckarooState, BuckarooOptions, DFMeta } from "./WidgetTypes";
 import { DFViewerConfig } from "./DFViewerParts/DFWhole";
 import { IDisplayArgs } from "./DFViewerParts/gridUtils";
@@ -263,7 +263,14 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     expect(getSpyCalls().lastProps?.context?.activeCol).toEqual(["a", "stoptime"]);
   });
 
-  it("df_display switch (main → summary) remounts the grid because data_type changes", () => {
+  it("df_display switch (main ↔ summary) keeps the grid mounted — headers stay across the swap", () => {
+    // Pre-this-PR: summary stats came through as data_type="Raw", which flipped
+    // AG-Grid's rowModelType and forced a remount on every main↔summary toggle.
+    // Now summary stats are wrapped in a fake static IDatasource so both
+    // sides of the swap are data_type="DataSource". The React key on
+    // AgGridReact is keyed on data_type, so it doesn't change → no remount.
+    // Column headers, theme, options stay mounted; only datasource swaps and
+    // rows re-fetch from the new (fake) DS.
     const src = mkSrc();
     const propsA = {
       df_data_dict: { summary_stats: [{ index: "mean", a: 10 }] },
@@ -285,11 +292,13 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     rerender(
       <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, df_display: "summary" }} />,
     );
-    // df_display: "main" → "summary" switches data_wrapper.data_type from
-    // DataSource to Raw, which means AG-Grid's rowModelType has to change.
-    // rowModelType can't be reconfigured live, so the React key on AgGridReact
-    // is keyed on data_type and this *intentionally* remounts.
-    expect(getSpyCalls().mountCount).toBe(2);
+    expect(getSpyCalls().mountCount).toBe(1);
+
+    // And back to main: still no remount.
+    rerender(
+      <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, df_display: "main" }} />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
   });
 
   it("dataframe_id change forces a full remount (explicit SPA reset)", () => {
@@ -378,5 +387,74 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
       <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, show_commands: "1" }} />,
     );
     expect(getSpyCalls().mountCount).toBe(1);
+  });
+
+  describe("per-view column state save/restore on df_display change", () => {
+    const propsBase = () => ({
+      df_data_dict: { summary_stats: [{ index: "mean", a: 10 }] },
+      df_display_args: baseDisplayArgs,
+      df_meta: baseDfMeta,
+      operations: [],
+      on_operations: jest.fn(),
+      operation_results: {} as any,
+      command_config: { argspecs: {}, defaultArgs: {} },
+      buckaroo_options: baseOptions,
+      src: mkSrc(),
+      on_buckaroo_state: jest.fn(),
+    });
+
+    it("first entry to summary applies defaultState: { sort: null } (no carried-over sort)", () => {
+      const propsA = propsBase();
+      const { rerender } = render(
+        <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, df_display: "main" }} />,
+      );
+      const applyBefore = getSpyCalls().applyColumnState.length;
+
+      rerender(
+        <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, df_display: "summary" }} />,
+      );
+
+      const applyAfter = getSpyCalls().applyColumnState.slice(applyBefore);
+      // At least one applyColumnState fired on the swap. The most-recent call
+      // should be the "no sort" default since we've never been to summary
+      // before in this component instance.
+      expect(applyAfter.length).toBeGreaterThanOrEqual(1);
+      const last = applyAfter[applyAfter.length - 1];
+      expect(last.defaultState).toEqual({ sort: null });
+    });
+
+    it("returning to a previously-visited view applies its saved column state", () => {
+      const propsA = propsBase();
+      // Seed the spy with a "current column state" the widget will see when
+      // it reads via getColumnState() on swap-away. Simulates the user having
+      // sorted column "a" descending while on main.
+      const mainSavedState = [{ colId: "a", sort: "desc", sortIndex: 0 }];
+      setMockColumnState(mainSavedState);
+
+      const { rerender } = render(
+        <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, df_display: "main" }} />,
+      );
+
+      // Swap to summary — widget reads main's state from gridApi (returns
+      // mainSavedState) and stashes it; then applies "no sort" default for summary.
+      rerender(
+        <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, df_display: "summary" }} />,
+      );
+
+      // While on summary, change the mock state to something else — simulates
+      // user having no sort on summary.
+      setMockColumnState([]);
+      const applyCallsBeforeReturn = getSpyCalls().applyColumnState.length;
+
+      // Swap back to main — widget should apply the stashed mainSavedState.
+      rerender(
+        <BuckarooInfiniteWidget {...propsA} buckaroo_state={{ ...initialState, df_display: "main" }} />,
+      );
+
+      const applyCallsOnReturn = getSpyCalls().applyColumnState.slice(applyCallsBeforeReturn);
+      expect(applyCallsOnReturn.length).toBeGreaterThanOrEqual(1);
+      const last = applyCallsOnReturn[applyCallsOnReturn.length - 1];
+      expect(last.state).toEqual(mainSavedState);
+    });
   });
 });

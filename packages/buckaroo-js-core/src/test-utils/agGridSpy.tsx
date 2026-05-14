@@ -35,6 +35,10 @@ export interface AgGridSpyCalls {
     rowIdsByIndex: Map<number, Set<string>>;
     lastProps: any;
     onGridReadyCalled: number;
+    applyColumnState: Array<any>;
+    // Tests can populate this to control what getColumnState() returns. Use
+    // setMockColumnState() to update.
+    columnStateMock: any[];
 }
 
 const sharedCalls: AgGridSpyCalls = {
@@ -47,6 +51,8 @@ const sharedCalls: AgGridSpyCalls = {
     rowIdsByIndex: new Map(),
     lastProps: null,
     onGridReadyCalled: 0,
+    applyColumnState: [],
+    columnStateMock: [],
 };
 
 export const resetSpy = (): void => {
@@ -59,6 +65,14 @@ export const resetSpy = (): void => {
     sharedCalls.rowIdsByIndex = new Map();
     sharedCalls.lastProps = null;
     sharedCalls.onGridReadyCalled = 0;
+    sharedCalls.applyColumnState = [];
+    sharedCalls.columnStateMock = [];
+};
+
+// Tests use this to seed what the next getColumnState() call returns —
+// e.g. to simulate "user sorted column A asc in this view".
+export const setMockColumnState = (state: any[]): void => {
+    sharedCalls.columnStateMock = state;
 };
 
 /**
@@ -103,6 +117,10 @@ export const agGridReactMockFactory = () => {
                     getFirstDisplayedRowIndex: () => 0,
                     getLastDisplayedRowIndex: () => 0,
                     ensureIndexVisible: () => {},
+                    getColumnState: () => sharedCalls.columnStateMock,
+                    applyColumnState: (params: any) => {
+                        sharedCalls.applyColumnState.push(params);
+                    },
                 };
             }, []);
 
