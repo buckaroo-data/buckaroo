@@ -34,8 +34,11 @@ export interface AgGridSpyCalls {
     rowIdsByIndex: Map<number, Set<string>>;
     lastProps: any;
     onGridReadyCalled: number;
+    applyColumnState: Array<any>;
+    columnStateMock: any[];
 }
 export declare const resetSpy: () => void;
+export declare const setMockColumnState: (state: any[]) => void;
 /**
  * Factory called by `jest.mock("ag-grid-react", ...)` to install the spy.
  *

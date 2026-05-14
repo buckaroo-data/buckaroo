@@ -12,7 +12,7 @@ export interface RawDataWrapper {
     data_type: "Raw";
 }
 export type DatasourceOrRaw = DatasourceWrapper | RawDataWrapper;
-export declare function DFViewerInfinite({ data_wrapper, df_viewer_config, summary_stats_data, activeCol, setActiveCol, outside_df_params, error_info, max_rows_in_configs }: {
+export declare function DFViewerInfinite({ data_wrapper, df_viewer_config, summary_stats_data, activeCol, setActiveCol, outside_df_params, error_info, max_rows_in_configs, view_name, data_key, }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
     summary_stats_data?: DFData;
@@ -21,8 +21,10 @@ export declare function DFViewerInfinite({ data_wrapper, df_viewer_config, summa
     outside_df_params?: any;
     error_info?: string;
     max_rows_in_configs?: number;
+    view_name?: string;
+    data_key?: string;
 }): import("react/jsx-runtime").JSX.Element;
-export declare function DFViewerInfiniteInner({ data_wrapper, df_viewer_config, summary_stats_data, activeCol, setActiveCol, outside_df_params, renderStartTime: _renderStartTime, hs, themeConfig, effectiveScheme }: {
+export declare function DFViewerInfiniteInner({ data_wrapper, df_viewer_config, summary_stats_data, activeCol, setActiveCol, outside_df_params, renderStartTime: _renderStartTime, hs, themeConfig, effectiveScheme, view_name, data_key, }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
     summary_stats_data: DFData;
@@ -33,6 +35,8 @@ export declare function DFViewerInfiniteInner({ data_wrapper, df_viewer_config, 
     hs: HeightStyleI;
     themeConfig?: ThemeConfig;
     effectiveScheme?: 'light' | 'dark';
+    view_name?: string;
+    data_key?: string;
 }): import("react/jsx-runtime").JSX.Element;
 export declare function DFViewer({ df_data, df_viewer_config, summary_stats_data, activeCol, setActiveCol, }: {
     df_data: DFData;
