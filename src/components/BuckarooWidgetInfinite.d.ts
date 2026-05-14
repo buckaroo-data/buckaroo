@@ -10,7 +10,7 @@ import { IDatasource } from 'ag-grid-community';
 import { KeyAwareSmartRowCache } from './DFViewerParts/SmartRowCache';
 export declare const getDataWrapper: (data_key: string, df_data_dict: Record<string, DFData>, ds: IDatasource, total_rows?: number) => DatasourceOrRaw;
 export declare const getKeySmartRowCache: (model: any, setRespError: any) => KeyAwareSmartRowCache;
-export declare function BuckarooInfiniteWidget({ df_data_dict, df_display_args, df_meta, operations, on_operations, operation_results, command_config, buckaroo_state, on_buckaroo_state, buckaroo_options, src }: {
+export declare function BuckarooInfiniteWidget({ df_data_dict, df_display_args, df_meta, operations, on_operations, operation_results, command_config, buckaroo_state, on_buckaroo_state, buckaroo_options, src, dataframe_id, }: {
     df_meta: DFMeta;
     df_data_dict: Record<string, DFData>;
     df_display_args: Record<string, IDisplayArgs>;
@@ -22,6 +22,7 @@ export declare function BuckarooInfiniteWidget({ df_data_dict, df_display_args, 
     on_buckaroo_state: React.Dispatch<React.SetStateAction<BuckarooState>>;
     buckaroo_options: BuckarooOptions;
     src: KeyAwareSmartRowCache;
+    dataframe_id?: string;
 }): import("react/jsx-runtime").JSX.Element;
 export declare function DFViewerInfiniteDS({ df_meta, df_data_dict, df_display_args, src, df_id, message_log, show_message_box }: {
     df_meta: DFMeta;
