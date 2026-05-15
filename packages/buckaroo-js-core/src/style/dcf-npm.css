@@ -379,6 +379,11 @@ div.dependent-tabs ul.tabs li.active {
     font-family: monospace;
     white-space: pre;
 }
+/* AG-Grid adds .ag-cell-wrap-text when wrapText: true is set on a column;
+   defer to its wrapping rules instead of the global `white-space: pre`. */
+.ag-row .ag-cell.ag-cell-wrap-text {
+    white-space: normal;
+}
 .left-menu {
     color:black;
 }
