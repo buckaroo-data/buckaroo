@@ -85,6 +85,18 @@ def test_polars_search_none_needle():
     assert_frame_equal(result, base_df)
 
 
+def test_polars_search_empty_needle():
+    """Polars Search returns full df unchanged when needle is empty.
+
+    Regression guard. Today pl.col(pl.String).str.contains("") happens to
+    match every row, but that's an implementation detail of polars; the
+    explicit guard in Search.transform pins parity with pandas Search.
+    """
+    base_df = pl.DataFrame({'a': ['Alice', 'Bob'], 'b': [1, 2]})
+    result = Search.transform(base_df.clone(), 'a', '')
+    assert_frame_equal(result, base_df)
+
+
 '''
 
 
