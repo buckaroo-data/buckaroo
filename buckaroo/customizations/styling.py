@@ -100,6 +100,12 @@ class DefaultMainStyling(StylingAnalysis):
         else:
             disp = {'displayer': 'obj'}
             base_config['tooltip_config'] = {'tooltip_type':'simple', 'val_column': str(col)}
+        # Lowcode ops (e.g. Search) can contribute highlight metadata via the
+        # summary dict; the JS string displayer reads these from displayer_args.
+        if disp.get('displayer') == 'string':
+            for k in ('highlight_phrase', 'highlight_regex', 'highlight_color'):
+                if k in column_metadata:
+                    disp[k] = column_metadata[k]
         base_config['displayer_args'] = disp
 
         # Compute content-aware minWidth

@@ -6,8 +6,9 @@ from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.dataflow.autocleaning import merge_ops, format_ops, AutocleaningConfig
 from buckaroo.polars_buckaroo import PolarsAutocleaning
 from buckaroo.customizations.polars_commands import (
-    Command, PlSafeInt, DropCol, FillNA, GroupBy, NoOp
+    Command, PlSafeInt, DropCol, FillNA, GroupBy, NoOp, Search
 )
+from buckaroo.customizations.styling import DefaultMainStyling
 from buckaroo.jlisp.lisp_utils import s
 
 
