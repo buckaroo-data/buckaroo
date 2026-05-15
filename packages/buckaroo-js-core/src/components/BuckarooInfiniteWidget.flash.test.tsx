@@ -164,6 +164,56 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     expect(getSpyCalls().mountCount).toBe(2);
   });
 
+  it("quick_command_args.search change does NOT remount — purges the infinite cache instead", () => {
+    // Search (and other quick_command_args entries that act as filters/sorts) is
+    // a within-data_type content change. The post-#729/#730/#731 in-place update
+    // path handles this correctly: outside_df_params changes → SmartRowCache
+    // routes to a fresh sourceName → the purge effect calls
+    // gridApi.purgeInfiniteCache() → AG-Grid asks for fresh rows via getRows,
+    // which return the filtered data. Row DOM is reused (getRowId is stable
+    // within a data_key) and cells update in place.
+    //
+    // The earlier-merged auto-bump fix (in #726) bundled quick_command_args
+    // into effectiveDataframeId on a precautionary basis and reintroduced the
+    // flash for every search keystroke. This test asserts the desired
+    // behavior: search must look like the df_display swap from #739 — grid
+    // stays mounted, datasource refetches.
+    const src = mkSrc();
+    const propsA = {
+      df_data_dict: { summary_stats: [] },
+      df_display_args: baseDisplayArgs,
+      df_meta: baseDfMeta,
+      operations: [],
+      on_operations: jest.fn(),
+      operation_results: {} as any,
+      command_config: { argspecs: {}, defaultArgs: {} },
+      buckaroo_options: baseOptions,
+      src,
+      on_buckaroo_state: jest.fn(),
+    };
+    const { rerender } = render(
+      <BuckarooInfiniteWidget
+        {...propsA}
+        buckaroo_state={{ ...initialState, quick_command_args: {} }}
+      />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
+    const purgesBefore = getSpyCalls().purgeInfiniteCache;
+
+    rerender(
+      <BuckarooInfiniteWidget
+        {...propsA}
+        buckaroo_state={{
+          ...initialState,
+          quick_command_args: { search: ["mount vernon"] },
+        }}
+      />,
+    );
+
+    expect(getSpyCalls().mountCount).toBe(1);
+    expect(getSpyCalls().purgeInfiniteCache).toBeGreaterThan(purgesBefore);
+  });
+
   it("show_commands toggle does not remount and does not refetch", () => {
     const src = mkSrc();
     const propsA = {
