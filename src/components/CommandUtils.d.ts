@@ -10,7 +10,6 @@ export interface SymbolT {
     meta?: {
         auto_clean?: boolean;
         clean_strategy?: string;
-        quick_command?: boolean;
     };
 }
 export interface SymbolDf {
