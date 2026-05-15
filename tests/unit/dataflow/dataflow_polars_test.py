@@ -1,7 +1,8 @@
 from buckaroo.dataflow.dataflow import StylingAnalysis
 from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
-from buckaroo.polars_buckaroo import PolarsBuckarooWidget
-import polars as pl 
+from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget
+from buckaroo.jlisp.lisp_utils import s
+import polars as pl
 from polars.testing import assert_frame_equal
 
 
@@ -243,3 +244,64 @@ def test_column_config_override():
     int_cc_after = cc_after[0]
     assert int_cc_after['col_name'] == 'a' #make sure we found the right row
     assert int_cc_after['header_name'] == 'int_col' #make sure we found the right row
+
+
+def _find_cc(column_config, col_name):
+    for entry in column_config:
+        if entry.get('col_name') == col_name:
+            return entry
+    raise AssertionError(f"col_name {col_name!r} not in column_config")
+
+
+def test_search_op_delivers_highlight_regex_into_displayer_args():
+    """End-to-end: a `search` operation on the widget should plumb its
+    search term into `displayer_args.highlight_regex` for every polars-String
+    column in the final df_viewer_config that gets sent to the JS side."""
+    df = pl.DataFrame({
+        'businessname': ['pizza', 'sushi', 'taco'],
+        'comments': ['area code', 'no match', 'area zone'],
+        'rating': [5, 4, 3],
+    })
+    w = PolarsBuckarooInfiniteWidget(df)
+    w.dataflow.operations = [[{'symbol': 'search'}, s('df'), 'col', 'area']]
+
+    cc = w.df_display_args['main']['df_viewer_config']['column_config']
+    # 'a' is businessname (string) -- gets highlighted
+    a_args = _find_cc(cc, 'a')['displayer_args']
+    assert a_args['displayer'] == 'string'
+    assert a_args['highlight_regex'] == 'area'
+    # 'b' is comments (string) -- gets highlighted
+    b_args = _find_cc(cc, 'b')['displayer_args']
+    assert b_args['displayer'] == 'string'
+    assert b_args['highlight_regex'] == 'area'
+    # 'c' is rating (integer) -- no highlight (highlight only applies to string displayer)
+    c_args = _find_cc(cc, 'c')['displayer_args']
+    assert 'highlight_regex' not in c_args
+
+
+def test_column_config_overrides_preserves_highlight_phrase_and_color():
+    """End-to-end: a user-supplied column_config_overrides carrying
+    highlight_phrase + highlight_color should survive the merge_column_config
+    step and land in the final displayer_args."""
+    df = pl.DataFrame({
+        'businessname': ['pizza', 'sushi'],
+        'comments': ['area code', 'no match'],
+    })
+    overrides = {
+        'comments': {
+            'displayer_args': {
+                'displayer': 'string',
+                'max_length': 2000,
+                'highlight_phrase': ['area'],
+                'highlight_color': 'red',
+            },
+        },
+    }
+    w = PolarsBuckarooInfiniteWidget(df, column_config_overrides=overrides)
+
+    cc = w.df_display_args['main']['df_viewer_config']['column_config']
+    b_args = _find_cc(cc, 'b')['displayer_args']
+    assert b_args['displayer'] == 'string'
+    assert b_args['max_length'] == 2000
+    assert b_args['highlight_phrase'] == ['area']
+    assert b_args['highlight_color'] == 'red'
