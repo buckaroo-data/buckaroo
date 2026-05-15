@@ -161,7 +161,6 @@ export function childColDef(f:MultiIndexColumnConfig, level:number) : ColDefOrGr
   /*
   returns the proper colDef at level
    */
-  console.log("f",f, f.ag_grid_specs)
   return {
     headerName:f.col_path[level],
     ...baseColToColDef(f),
@@ -192,7 +191,6 @@ export function multiIndexColToColDef (f:MultiIndexColumnConfig[], level:number=
       ...(f[0].ag_grid_specs)
     };
 
-    console.log(" colDef from multiIndexColToColDef", colDef)
     return colDef
   }
 
@@ -202,7 +200,6 @@ export function multiIndexColToColDef (f:MultiIndexColumnConfig[], level:number=
       children: _.map(f, (x) => childColDef(x, childLevel)),
       ...(f[0].ag_grid_specs)
     };
-    console.log(" colDef from multiIndexColToColDef", colDef)
     return colDef
   } else {
     const groupedColumnConfigs = getSubChildren(f, childLevel);
@@ -211,7 +208,6 @@ export function multiIndexColToColDef (f:MultiIndexColumnConfig[], level:number=
       children: _.map(groupedColumnConfigs, (x) => multiIndexColToColDef(x as MultiIndexColumnConfig[], childLevel)),
       ...(f[0].ag_grid_specs)
     };
-    console.log(" colDef from multiIndexColToColDef", colDef)
     return colDef
   }
 }
@@ -239,7 +235,6 @@ export function mergeCellClass(
       //@ts-ignore
       c[classSpec] = extraClass
     } else {
-      console.log("c", c, classSpec)
       //@ts-ignore
       if(_.isArray(c[classSpec])) {
 	//@ts-ignore
@@ -395,8 +390,6 @@ export const getDs = (
         createTime,
         rowCount: undefined,
         getRows: (params: IGetRowsParams) => {
-	    //@ts-ignore
-	    console.log("gridUtils 198 calling getRows createTime", createTime, ((new Date()) - createTime));
             const sm = params.sortModel;
             const outside_params_string = JSON.stringify(params.context?.outside_df_params);
             const dsPayloadArgs = {
@@ -407,20 +400,12 @@ export const getDs = (
                 sort: sm.length === 1 ? sm[0].colId : undefined,
                 sort_direction: sm.length === 1 ? sm[0].sort : undefined,
             };
-            console.log("[getRows] dsPayloadArgs", dsPayloadArgs, "context.outside_df_params", outside_params_string);
-            const successWrapper = (df:DFData, length:number) => {
-		//@ts-ignore
-                console.log("successWrapper called 217",  createTime, ((new Date()) - createTime));
-                //   [dsPayloadArgs.start, dsPayloadArgs.end], length)
-                params.successCallback(df, length)
-            }
-
+            console.log(`[bk-flash ${performance.now().toFixed(1)}ms] getRows`, { start: dsPayloadArgs.start, end: dsPayloadArgs.end, sourceName: outside_params_string });
             const failWrapper = () => {
-                console.log("request failed for ", dsPayloadArgs)
+                console.error("[buckaroo] getRows request failed", dsPayloadArgs)
                 params.failCallback()
             }
-            // src.getRequestRows(dsPayloadArgs, params.successCallback)
-            src.getRequestRows(dsPayloadArgs, successWrapper, failWrapper)
+            src.getRequestRows(dsPayloadArgs, params.successCallback, failWrapper)
         }
     };
     return dsLoc;
@@ -488,9 +473,6 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
     const inIframe = window.parent !== window;
     const regularCompHeight = window.innerHeight / (compC?.height_fraction || 2);
     const dfvHeight = compC?.dfvHeight || regularCompHeight;
-    console.log("314, ", regularCompHeight, window.innerHeight, (compC?.height_fraction || 2), compC?.dfvHeight, regularCompHeight, dfvHeight);
-    //314,  175.5 351 2 200 175.5 200
-    //314,  175.5 351 2 undefined 175.5 175.5
     const regularDivStyle = { height: dfvHeight, overflow:"hidden" };
     const shortDivStyle = { minHeight: 50, maxHeight: dfvHeight, overflow:"hidden" };
 
@@ -511,11 +493,7 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
 
 
     const belowMinRows = (numRows + pinnedRowLen) < maxRowsWithoutScrolling;
-    console.log("belowMinRows", belowMinRows, numRows, pinnedRowLen, maxRowsWithoutScrolling)
-    //belowMinRows true 5 2 9
-    //console.log("maxRowsWithoutScrolling", maxRowsWithoutScrolling, belowMinRows, numRows, dfvHeight, rowHeight);
     const shortMode = compC?.shortMode || (belowMinRows && rowHeight === undefined);
-    console.log("shortMode", shortMode, compC?.shortMode, belowMinRows, rowHeight);
     const inIframeClass = inIframe ? "in-iframe" : "";
     //console.log("gridUtils 350 heightstyle", dfvHeight)
     if (isGoogleColab || inVSCcode() || (inIframe && window.innerHeight < 300)) {
@@ -529,7 +507,6 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
     }
     const domLayout: DomLayoutType = compC?.layoutType || (shortMode ? "autoHeight" : "normal");
     const applicableStyle = shortMode ? shortDivStyle : regularDivStyle;
-    console.log("351 gridUtils", shortMode, shortDivStyle, regularDivStyle)
     const classMode = shortMode ? "short-mode" : "regular-mode";
     return {
         classMode,

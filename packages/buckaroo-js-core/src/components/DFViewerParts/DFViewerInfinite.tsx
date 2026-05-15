@@ -605,13 +605,6 @@ const getDsGridOptions = (origGridOptions: GridOptions, maxRowsWithoutScrolling:
         suppressNoRowsOverlay: true,
         onSortChanged: (event: SortChangedEvent) => {
             const api: GridApi = event.api;
-	    //@ts-ignore
-            console.log(
-                "sortChanged",
-                api.getFirstDisplayedRowIndex(),
-                api.getLastDisplayedRowIndex(),
-                event,
-            );
             // every time the sort is changed, scroll back to the top row.
             // Setting a sort and being in the middle of it makes no sense
             api.ensureIndexVisible(0);
@@ -637,9 +630,7 @@ const getDsGridOptions = (origGridOptions: GridOptions, maxRowsWithoutScrolling:
     activeCol?: [string, string];
     setActiveCol?: SetColumnFunc;
 }) {
-  const defaultSetColumnFunc = (newCol:[string, string]):void => {
-        console.log("defaultSetColumnFunc", newCol)
-    }
+  const defaultSetColumnFunc = (_newCol:[string, string]):void => {}
     const sac:SetColumnFunc = setActiveCol || defaultSetColumnFunc;
     
     return (
