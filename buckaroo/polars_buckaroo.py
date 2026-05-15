@@ -18,6 +18,7 @@ from .dataflow.widget_extension_utils import configure_buckaroo
 
 class PLSampling(Sampling):
     pre_limit = False
+    serialize_limit = 1_000_000
 
 local_analysis_klasses = list(PL_ANALYSIS_V2) + [DefaultSummaryStatsStyling, DefaultMainStyling]
 
