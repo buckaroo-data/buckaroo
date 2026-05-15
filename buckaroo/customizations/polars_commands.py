@@ -138,7 +138,14 @@ class Search(Command):
 
     @staticmethod
     def transform(df, col, val):
-        return df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
+        filtered = df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
+        if not val:
+            return filtered
+        # `.str.contains(val)` treats val as a regex, so we expose it as
+        # highlight_regex (not _phrase) for consistent semantics on the JS side.
+        string_cols = [c for c, dt in zip(df.columns, df.dtypes) if dt == pl.String]
+        sd_updates = {c: {'highlight_regex': val} for c in string_cols}
+        return filtered, sd_updates
 
 
     @staticmethod
