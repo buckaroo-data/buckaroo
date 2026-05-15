@@ -247,6 +247,43 @@ def test_style_column_handles_col_meta_missing_type():
     assert cc['displayer_args']['displayer'] == 'obj'
 
 
+def test_style_column_merges_nested_displayer_args_and_ag_grid_specs():
+    """init_sd entries use the same nested shape as column_config_overrides
+    — {'displayer_args': {...}, 'ag_grid_specs': {...}} — but unlike
+    overrides, the merge here is shallow-per-bag (caller wins per-key)
+    rather than replace-the-bag. That's the whole point: max_length=2000
+    overrides styling's 35, wrapText/width overlay on minWidth, and any
+    other styled keys (e.g. highlight_regex) survive."""
+    col_meta = {'_type': 'string', 'orig_col_name': 'comments',
+                'displayer_args': {'displayer': 'string', 'max_length': 2000},
+                'ag_grid_specs': {'wrapText': True, 'width': 400, 'maxWidth': 400}}
+    cc = DefaultMainStyling.style_column('a', col_meta)
+    assert cc['displayer_args']['max_length'] == 2000
+    assert cc['ag_grid_specs']['wrapText'] is True
+    assert cc['ag_grid_specs']['width'] == 400
+    assert cc['ag_grid_specs']['maxWidth'] == 400
+    # styling's computed minWidth is still present unless caller overrode it
+    assert 'minWidth' in cc['ag_grid_specs']
+
+
+def test_init_sd_displayer_args_and_search_highlight_coexist_on_same_column():
+    """The whole point of routing per-column augmentations through init_sd
+    instead of column_config_overrides: init_sd's nested displayer_args and
+    a Search op's flat highlight_regex both land in merged_sd, and both
+    make it into the final displayer_args. column_config_overrides would
+    have clobbered the highlight by replacing displayer_args wholesale."""
+    from buckaroo.dataflow.styling_core import merge_sds
+    init_sd = {'a': {'_type': 'string', 'orig_col_name': 'comments',
+                     'displayer_args': {'displayer': 'string', 'max_length': 2000},
+                     'ag_grid_specs': {'wrapText': True}}}
+    search_contribution = {'a': {'highlight_regex': 'pizza'}}
+    merged = merge_sds(init_sd, search_contribution)
+    cc = DefaultMainStyling.style_column('a', merged['a'])
+    assert cc['displayer_args']['max_length'] == 2000
+    assert cc['displayer_args']['highlight_regex'] == 'pizza'
+    assert cc['ag_grid_specs']['wrapText'] is True
+
+
 def test_autoclean_codegen():
     ac = PolarsAutocleaning([ACConf, NoCleaning])
     df = pl.DataFrame({'a': ["30", "40"]})
