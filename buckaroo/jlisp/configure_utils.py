@@ -4,6 +4,22 @@ def configure_buckaroo(transforms):
     command_defaults = {}
     command_patterns = {}
 
+    # Accumulates sd_updates from transforms that return (df, sd_updates).
+    # Reset on each buckaroo_transform call; readable afterwards via
+    # buckaroo_transform.get_last_sd_updates().
+    sd_accumulator = {}
+
+    def _wrap_transform(orig):
+        def wrapped(*args, **kwargs):
+            result = orig(*args, **kwargs)
+            if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
+                df, sd_updates = result
+                for col, kv in sd_updates.items():
+                    sd_accumulator.setdefault(col, {}).update(kv)
+                return df
+            return result
+        return wrapped
+
     transform_lisp_primitives = {}
     to_py_lisp_primitives = {}
     for T in transforms:
@@ -11,18 +27,25 @@ def configure_buckaroo(transforms):
         transform_name = t.command_default[0]['symbol']
         command_defaults[transform_name] = t.command_default
         command_patterns[transform_name] = t.command_pattern
-        transform_lisp_primitives[transform_name] = T.transform
+        transform_lisp_primitives[transform_name] = _wrap_transform(T.transform)
         to_py_lisp_primitives[transform_name] = T.transform_to_py
-    
+
     buckaroo_eval, raw_parse = make_interpreter(transform_lisp_primitives)
 
     def buckaroo_transform(instructions, df):
+        sd_accumulator.clear()
         if isinstance(df, pd.DataFrame):
             df_copy = df.copy()
         else: # hack we know it's polars here... just getting something working for now
             df_copy = df.clone()
         ret_val =  buckaroo_eval(instructions, {'df':df_copy})
         return ret_val
+
+    def get_last_sd_updates():
+        # Snapshot — callers should not mutate the live accumulator.
+        return {col: dict(kv) for col, kv in sd_accumulator.items()}
+
+    buckaroo_transform.get_last_sd_updates = get_last_sd_updates
 
     convert_to_python, __unused = make_interpreter(to_py_lisp_primitives)
     def buckaroo_to_py(instructions):
