@@ -16,6 +16,12 @@ export interface BooleanDisplayerA {
 export interface StringDisplayerA {
     displayer: "string";
     max_length?: number;
+    // When set, wrap matches in a <mark> with the configured background.
+    // Matching is case-insensitive; an array highlights any of the phrases.
+    // Mutually exclusive with highlight_regex — regex wins if both are supplied.
+    highlight_phrase?: string | string[];
+    highlight_regex?: string; // JS regex source (no slashes/flags); applied case-insensitively
+    highlight_color?: string; // any CSS color; defaults to "yellow"
 }
 export interface FloatDisplayerA {
     displayer: "float";
