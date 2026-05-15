@@ -251,12 +251,23 @@ export function BuckarooInfiniteWidget({
         // bundled fields (operations, post_processing, cleaning_method) still
         // auto-bump pending follow-up work to let the Python side declare
         // per-command dataframe_id bumping (default bump, opt-out per command).
+        // Filter out filter-like ops (search, OnlyOutliers — Python marks them
+        // with meta.quick_command=true) so they don't bump the remount key.
+        // Those ops normalize from quick_command_args; the grid already
+        // refreshes via outsideDFSig → purgeInfiniteCache and they don't
+        // change row identity prefixes, so remounting would be wasteful churn.
+        // Full-row-content ops (post_processing, cleaning_method, regular
+        // operations) still remount per the auto-bump contract.
+        const remountOperations = useMemo(
+            () => operations.filter((op) => !op[0]?.meta?.quick_command),
+            [operations],
+        );
         const effectiveDataframeIdPrev = useRef<string | null>(null);
         const effectiveDataframeId = useMemo(
             () => {
                 const v = JSON.stringify([
                     dataframe_id,
-                    operations,
+                    remountOperations,
                     buckaroo_state.post_processing,
                     buckaroo_state.cleaning_method,
                 ]);
@@ -265,14 +276,11 @@ export function BuckarooInfiniteWidget({
                 if (prev === null) {
                     bkLog("effectiveDataframeId computed (initial)", { value: v });
                 } else if (prev !== v) {
-                    // Real change — DFViewerInfinite remounts. If this fires
-                    // on a search keystroke the PR #743 fix regressed:
-                    // quick_command_args is intentionally NOT in deps.
                     bkLog("effectiveDataframeId CHANGED (REMOUNT)", { from: prev, to: v });
                 }
                 return v;
             },
-            [dataframe_id, operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method],
+            [dataframe_id, remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method],
         );
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"

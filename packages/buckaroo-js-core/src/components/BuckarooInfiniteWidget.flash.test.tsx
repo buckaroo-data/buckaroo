@@ -214,6 +214,81 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     expect(getSpyCalls().purgeInfiniteCache).toBeGreaterThan(purgesBefore);
   });
 
+  it("operations entry marked meta.quick_command does NOT remount — Python's normalized search arrives as an op", () => {
+    // The widget excludes ops with meta.quick_command=true from
+    // effectiveDataframeId. Without this, Python normalizing a search keystroke
+    // into an operations entry (`[{symbol:"search", meta:{quick_command:true}},
+    // {symbol:"df"}, "col", val]`) bumps the remount key milliseconds after
+    // the result already painted — visible flash.
+    const src = mkSrc();
+    const propsA = {
+      df_data_dict: { summary_stats: [] },
+      df_display_args: baseDisplayArgs,
+      df_meta: baseDfMeta,
+      on_operations: jest.fn(),
+      operation_results: {} as any,
+      command_config: { argspecs: {}, defaultArgs: {} },
+      buckaroo_options: baseOptions,
+      src,
+      on_buckaroo_state: jest.fn(),
+    };
+    const { rerender } = render(
+      <BuckarooInfiniteWidget
+        {...propsA}
+        operations={[]}
+        buckaroo_state={{ ...initialState, quick_command_args: {} }}
+      />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
+    const purgesBefore = getSpyCalls().purgeInfiniteCache;
+
+    const searchOp: any = [
+      { symbol: "search", meta: { auto_clean: true, quick_command: true } },
+      { symbol: "df" },
+      "col",
+      "was",
+    ];
+    rerender(
+      <BuckarooInfiniteWidget
+        {...propsA}
+        operations={[searchOp]}
+        buckaroo_state={{
+          ...initialState,
+          quick_command_args: { search: ["was"] },
+        }}
+      />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
+    expect(getSpyCalls().purgeInfiniteCache).toBeGreaterThan(purgesBefore);
+  });
+
+  it("operations entry WITHOUT meta.quick_command DOES remount (existing autobump behavior)", () => {
+    // Regression guard: a regular (non-quick) op still bumps the remount key,
+    // because its row content really does change.
+    const src = mkSrc();
+    const propsA = {
+      df_data_dict: { summary_stats: [] },
+      df_display_args: baseDisplayArgs,
+      df_meta: baseDfMeta,
+      on_operations: jest.fn(),
+      operation_results: {} as any,
+      command_config: { argspecs: {}, defaultArgs: {} },
+      buckaroo_options: baseOptions,
+      src,
+      on_buckaroo_state: jest.fn(),
+    };
+    const { rerender } = render(
+      <BuckarooInfiniteWidget {...propsA} operations={[]} buckaroo_state={initialState} />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
+
+    const dropOp: any = [{ symbol: "dropcol" }, { symbol: "df" }, "col"];
+    rerender(
+      <BuckarooInfiniteWidget {...propsA} operations={[dropOp]} buckaroo_state={initialState} />,
+    );
+    expect(getSpyCalls().mountCount).toBe(2);
+  });
+
   it("show_commands toggle does not remount and does not refetch", () => {
     const src = mkSrc();
     const propsA = {
