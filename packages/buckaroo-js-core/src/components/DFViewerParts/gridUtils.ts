@@ -28,7 +28,7 @@ import {
 } from "./DFWhole";
 
 import * as _ from "lodash-es";
-import { getTextCellRenderer } from "./OtherRenderers";
+import { getTextCellRenderer, getHighlightTextCellRenderer } from "./OtherRenderers";
 import { getStyler } from "./Styler";
 import { DFData, SDFMeasure, SDFT } from "./DFWhole";
 
@@ -51,6 +51,20 @@ export function getCellRendererorFormatter(
     if (dispArgs.displayer === "compact_number" && formatter !== undefined) {
         return {
             valueFormatter: formatter,
+            tooltipValueGetter: (params) => params.value != null ? String(params.value) : "",
+        };
+    }
+    if (
+        dispArgs.displayer === "string" &&
+        formatter !== undefined &&
+        (dispArgs.highlight_phrase !== undefined || dispArgs.highlight_regex !== undefined)
+    ) {
+        return {
+            cellRenderer: getHighlightTextCellRenderer(
+                formatter,
+                { phrase: dispArgs.highlight_phrase, regex: dispArgs.highlight_regex },
+                dispArgs.highlight_color,
+            ),
             tooltipValueGetter: (params) => params.value != null ? String(params.value) : "",
         };
     }
