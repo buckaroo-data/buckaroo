@@ -374,8 +374,14 @@ export function DFViewerInfiniteInner({
             : { backgroundColor: themeConfig?.backgroundColor || "#ffffff", oddRowBackgroundColor: themeConfig?.oddRowBackgroundColor || '#f0f0f0' }),
     }), [resolvedScheme, themeConfig]);
     const gridOptions: GridOptions = useMemo( () => {
+        // pinnedRowHeight is a buckaroo-only knob (not a real AG-Grid option); synthesize getRowHeight from it.
+        const pinnedRowHeight = (df_viewer_config.extra_grid_config as any)?.pinnedRowHeight;
+        const getRowHeight = pinnedRowHeight !== undefined
+            ? (params: any) => params.node.rowPinned ? pinnedRowHeight : null
+            : undefined;
         return {
         ...outerGridOptions(setActiveCol, df_viewer_config.extra_grid_config),
+        ...(getRowHeight ? { getRowHeight } : {}),
         domLayout:  hs.domLayout,
         autoSizeStrategy: df_viewer_config.extra_grid_config?.autoSizeStrategy || getAutoSize(styledColumns.length),
         onFirstDataRendered: (_params) => {
