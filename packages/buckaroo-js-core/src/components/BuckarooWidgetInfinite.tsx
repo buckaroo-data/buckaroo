@@ -200,6 +200,7 @@ export function BuckarooInfiniteWidget({
         df_display: buckaroo_state.df_display,
         post_processing: buckaroo_state.post_processing,
         cleaning_method: buckaroo_state.cleaning_method,
+        quick_command_args: buckaroo_state.quick_command_args,
         dataframe_id,
         opsLen: operations.length,
     });
@@ -209,8 +210,13 @@ export function BuckarooInfiniteWidget({
 
     const outerTime = new Date();
     const mainDs = useMemo(() => {
-	//@ts-ignore
-        console.log("recreating data source because operations changed", outerTime, ((new Date()) - outerTime))
+            bkLog("mainDs useMemo recomputed", {
+                post_processing: buckaroo_state.post_processing,
+                cleaning_method: buckaroo_state.cleaning_method,
+                quick_command_args: buckaroo_state.quick_command_args,
+                opsLen: operations.length,
+                outerTime,
+            });
             src.debugCacheState();
             return getDs(src);
             // getting a new datasource when operations or post-processing changes - necessary for forcing ag-grid complete updated
@@ -248,7 +254,13 @@ export function BuckarooInfiniteWidget({
         //the data source. dataframe_id participates so the SmartRowCache
         //sourceName picks up an explicit "different dataframe" event.
         const outsideDFParams = useMemo(
-            () => [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
+            () => {
+                bkLog("outsideDFParams useMemo recomputed", {
+                    quick_command_args: buckaroo_state.quick_command_args,
+                    df_display: buckaroo_state.df_display,
+                });
+                return [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id];
+            },
             [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
         );
 
@@ -267,12 +279,19 @@ export function BuckarooInfiniteWidget({
         // auto-bump pending follow-up work to let the Python side declare
         // per-command dataframe_id bumping (default bump, opt-out per command).
         const effectiveDataframeId = useMemo(
-            () => JSON.stringify([
-                dataframe_id,
-                operations,
-                buckaroo_state.post_processing,
-                buckaroo_state.cleaning_method,
-            ]),
+            () => {
+                const v = JSON.stringify([
+                    dataframe_id,
+                    operations,
+                    buckaroo_state.post_processing,
+                    buckaroo_state.cleaning_method,
+                ]);
+                // If this log fires on a search keystroke, the PR #743 fix
+                // regressed — quick_command_args is intentionally NOT in this
+                // memo's deps so search must not bump the remount key.
+                bkLog("effectiveDataframeId useMemo recomputed (REMOUNT)", { value: v });
+                return v;
+            },
             [dataframe_id, operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method],
         );
         return (
