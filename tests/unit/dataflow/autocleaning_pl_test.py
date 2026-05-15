@@ -202,6 +202,50 @@ def test_transform_can_return_sd_updates_via_2tuple():
     assert cleaning_sd.get('a', {}).get('note') == 'hello'
 
 
+class SearchConf(AutocleaningConfig):
+    autocleaning_analysis_klasses = []
+    command_klasses = [Search]
+    name = ""
+
+
+def test_search_threads_highlight_regex_into_cleaning_sd_under_rename():
+    """Search plumbs its search term into cleaning_sd as highlight_regex on
+    every polars-String column. The rest of the sd is keyed by buckaroo's
+    internal a/b/c names, so autocleaning rewrites the op-supplied keys to
+    match — otherwise the entries would sit alongside as orphans without
+    a `_type` and trip the styling fallback."""
+    ac = PolarsAutocleaning([SearchConf])
+    # 'businessname' becomes 'a', 'rating' becomes 'b' under buckaroo renaming.
+    df = pl.DataFrame({'businessname': ['pizza', 'sushi'], 'rating': [5, 4]})
+    search_op = [{'symbol': 'search'}, s('df'), 'col', 'pizza']
+
+    _cleaned, cleaning_sd, _gen, _ops = ac.handle_ops_and_clean(
+        df, cleaning_method='', quick_command_args={}, existing_operations=[search_op])
+
+    # keyed by the *renamed* col, not by 'businessname'
+    assert cleaning_sd.get('a', {}).get('highlight_regex') == 'pizza'
+    assert 'businessname' not in cleaning_sd
+    # non-string column ('b' / 'rating') must not receive the highlight
+    assert 'highlight_regex' not in cleaning_sd.get('b', {})
+
+
+def test_default_main_styling_emits_highlight_regex_into_displayer_args():
+    """style_column copies highlight_regex out of col_meta and into the
+    string displayer_args, where the JS-side displayer reads it."""
+    col_meta = {'_type': 'string', 'highlight_regex': 'pizza', 'orig_col_name': 'a'}
+    cc = DefaultMainStyling.style_column('a', col_meta)
+    assert cc['displayer_args']['displayer'] == 'string'
+    assert cc['displayer_args']['highlight_regex'] == 'pizza'
+
+
+def test_style_column_handles_col_meta_missing_type():
+    """A col_meta lacking `_type` (e.g. a stray sd entry contributed by an
+    op when the matching summary-stats entry is keyed differently) should
+    fall back to obj rather than KeyError."""
+    cc = DefaultMainStyling.style_column('whatever', {'highlight_regex': 'x'})
+    assert cc['displayer_args']['displayer'] == 'obj'
+
+
 def test_autoclean_codegen():
     ac = PolarsAutocleaning([ACConf, NoCleaning])
     df = pl.DataFrame({'a': ["30", "40"]})
