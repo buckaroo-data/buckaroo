@@ -256,15 +256,24 @@ export function BuckarooInfiniteWidget({
         // row-content-changing state fields so any of them triggers a full
         // grid remount. See the dataframe_id prop docs above for rationale —
         // in-place updates aren't safe when row identity isn't stable.
+        //
+        // quick_command_args is deliberately excluded: every command routed
+        // through it today is filter-like (Search, OnlyOutliers) — row
+        // identity prefixes stay stable across the filter, only ordering and
+        // membership change. The purge effect from #729 (fires when
+        // outside_df_params changes) + namespaced getRowId from #739 give
+        // correct cell-update-in-place semantics for that case. The remaining
+        // bundled fields (operations, post_processing, cleaning_method) still
+        // auto-bump pending follow-up work to let the Python side declare
+        // per-command dataframe_id bumping (default bump, opt-out per command).
         const effectiveDataframeId = useMemo(
             () => JSON.stringify([
                 dataframe_id,
                 operations,
                 buckaroo_state.post_processing,
                 buckaroo_state.cleaning_method,
-                buckaroo_state.quick_command_args,
             ]),
-            [dataframe_id, operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args],
+            [dataframe_id, operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method],
         );
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
