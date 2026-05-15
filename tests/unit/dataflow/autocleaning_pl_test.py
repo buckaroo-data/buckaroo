@@ -6,8 +6,10 @@ from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.dataflow.autocleaning import merge_ops, format_ops, AutocleaningConfig
 from buckaroo.polars_buckaroo import PolarsAutocleaning
 from buckaroo.customizations.polars_commands import (
-    PlSafeInt, DropCol, FillNA, GroupBy, NoOp
+    Command, PlSafeInt, DropCol, FillNA, GroupBy, NoOp, Search
 )
+from buckaroo.customizations.styling import DefaultMainStyling
+from buckaroo.jlisp.lisp_utils import s
 
 
 dirty_df = pl.DataFrame(
@@ -167,6 +169,83 @@ def test_handle_clean_df():
 EXPECTED_GEN_CODE = """def clean(df):
     df = df.with_columns(pl.col('a').cast(pl.Int64, strict=False))
     return df"""
+
+class TaggingCommand(Command):
+    """A Command whose transform returns the 2-tuple (df, sd_updates)."""
+    command_default = [s('tag'), s('df'), 'col', '']
+    command_pattern = [[3, 'tag', 'type', 'string']]
+
+    @staticmethod
+    def transform(df, col, val):
+        return df, {col: {'note': val}}
+
+    @staticmethod
+    def transform_to_py(df, col, val):
+        return "    # tag"
+
+
+class TagConf(AutocleaningConfig):
+    autocleaning_analysis_klasses = []
+    command_klasses = [TaggingCommand]
+    name = ""
+
+
+def test_transform_can_return_sd_updates_via_2tuple():
+    """A Command's transform may return (df, sd_updates); the interpreter
+    accumulates sd_updates and autocleaning merges them into cleaning_sd."""
+    ac = PolarsAutocleaning([TagConf])
+    df = pl.DataFrame({'a': [1, 2, 3]})
+    op = [{'symbol': 'tag'}, s('df'), 'a', 'hello']
+
+    _df, cleaning_sd, _gen, _ops = ac.handle_ops_and_clean(
+        df, cleaning_method='', quick_command_args={}, existing_operations=[op])
+
+    assert cleaning_sd.get('a', {}).get('note') == 'hello'
+
+
+class SearchConf(AutocleaningConfig):
+    autocleaning_analysis_klasses = []
+    command_klasses = [Search]
+    name = ""
+
+
+def test_search_threads_highlight_regex_into_cleaning_sd_under_rename():
+    """Search plumbs its search term into cleaning_sd as highlight_regex on
+    every polars-String column. The rest of the sd is keyed by buckaroo's
+    internal a/b/c names, so autocleaning rewrites the op-supplied keys to
+    match — otherwise the entries would sit alongside as orphans without
+    a `_type` and trip the styling fallback."""
+    ac = PolarsAutocleaning([SearchConf])
+    # 'businessname' becomes 'a', 'rating' becomes 'b' under buckaroo renaming.
+    df = pl.DataFrame({'businessname': ['pizza', 'sushi'], 'rating': [5, 4]})
+    search_op = [{'symbol': 'search'}, s('df'), 'col', 'pizza']
+
+    _cleaned, cleaning_sd, _gen, _ops = ac.handle_ops_and_clean(
+        df, cleaning_method='', quick_command_args={}, existing_operations=[search_op])
+
+    # keyed by the *renamed* col, not by 'businessname'
+    assert cleaning_sd.get('a', {}).get('highlight_regex') == 'pizza'
+    assert 'businessname' not in cleaning_sd
+    # non-string column ('b' / 'rating') must not receive the highlight
+    assert 'highlight_regex' not in cleaning_sd.get('b', {})
+
+
+def test_default_main_styling_emits_highlight_regex_into_displayer_args():
+    """style_column copies highlight_regex out of col_meta and into the
+    string displayer_args, where the JS-side displayer reads it."""
+    col_meta = {'_type': 'string', 'highlight_regex': 'pizza', 'orig_col_name': 'a'}
+    cc = DefaultMainStyling.style_column('a', col_meta)
+    assert cc['displayer_args']['displayer'] == 'string'
+    assert cc['displayer_args']['highlight_regex'] == 'pizza'
+
+
+def test_style_column_handles_col_meta_missing_type():
+    """A col_meta lacking `_type` (e.g. a stray sd entry contributed by an
+    op when the matching summary-stats entry is keyed differently) should
+    fall back to obj rather than KeyError."""
+    cc = DefaultMainStyling.style_column('whatever', {'highlight_regex': 'x'})
+    assert cc['displayer_args']['displayer'] == 'obj'
+
 
 def test_autoclean_codegen():
     ac = PolarsAutocleaning([ACConf, NoCleaning])

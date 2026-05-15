@@ -200,6 +200,19 @@ class PandasAutocleaning:
 
         cleaned_df = self._run_df_interpreter(df, final_ops)
         merged_cleaned_df = self.make_origs(df, cleaned_df, cleaning_sd)
+        # Transforms that return (df, sd_updates) get their sd_updates collected
+        # by the interpreter wrapper. Apply them *after* make_origs (which indexes
+        # cleaned_df by original column names) — and rewrite keys onto buckaroo's
+        # internal a/b/c names because the rest of the sd (summary_sd) is keyed
+        # that way; otherwise op contributions sit as orphans without a `_type`
+        # and trip the styling fallback.
+        op_sd_updates = getattr(self.df_interpreter, 'get_last_sd_updates', lambda: {})()
+        if op_sd_updates:
+            from .styling_core import merge_sds
+            from ..df_util import old_col_new_col
+            rewrites = dict(old_col_new_col(cleaned_df))
+            renamed = {rewrites.get(col, col): kv for col, kv in op_sd_updates.items()}
+            cleaning_sd = merge_sds(cleaning_sd, renamed)
         generated_code = self._run_code_generator(final_ops)
         return [merged_cleaned_df, cleaning_sd, generated_code, final_ops]
 

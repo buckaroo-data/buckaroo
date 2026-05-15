@@ -6,12 +6,19 @@ from ..jlisp.lisp_utils import s
 #from ..auto_clean.cleaning_commands import (to_bool, to_datetime, to_int, to_float, to_string)
 
 class Command(object):
-    @staticmethod 
+    """A Command's `transform` returns either the new df, or a 2-tuple
+    `(df, sd_updates)` where sd_updates is a partial SDType
+    ({col: {key: value}}) to be merged into cleaning_sd. The 2-tuple form
+    lets a Command thread styling-relevant metadata (e.g. a search term
+    that becomes a highlight phrase downstream) without round-tripping
+    through the df."""
+
+    @staticmethod
     def transform(df, col, val):
         return df.with_columns(pl.col(col).fill_null(val))
         return df
 
-    @staticmethod 
+    @staticmethod
     def transform_to_py(df, col, val):
         return "    df = df.with_columns(pl.col('%s').fill_null(%r))" % (col, val)
 
@@ -129,11 +136,18 @@ class Search(Command):
     command_pattern = [[3, 'term', 'type', 'string']]
     quick_args_pattern = [[3, 'term', 'type', 'string']]
 
-    @staticmethod 
+    @staticmethod
     def transform(df, col, val):
-        return df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
+        filtered = df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
+        if not val:
+            return filtered
+        # `.str.contains(val)` treats val as a regex, so we expose it as
+        # highlight_regex (not _phrase) for consistent semantics on the JS side.
+        string_cols = [c for c, dt in zip(df.columns, df.dtypes) if dt == pl.String]
+        sd_updates = {c: {'highlight_regex': val} for c in string_cols}
+        return filtered, sd_updates
 
 
-    @staticmethod 
+    @staticmethod
     def transform_to_py(df, col, val):
         return f"    df = df.filter(pl.any_horizontal(pl.col(pl.String).str.contains('{val}')))"
