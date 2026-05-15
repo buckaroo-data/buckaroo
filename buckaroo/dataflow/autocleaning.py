@@ -199,6 +199,12 @@ class PandasAutocleaning:
 
 
         cleaned_df = self._run_df_interpreter(df, final_ops)
+        # Transforms that return (df, sd_updates) get their sd_updates collected
+        # by the interpreter wrapper; pull them out and merge into cleaning_sd.
+        op_sd_updates = getattr(self.df_interpreter, 'get_last_sd_updates', lambda: {})()
+        if op_sd_updates:
+            from .styling_core import merge_sds
+            cleaning_sd = merge_sds(cleaning_sd, op_sd_updates)
         merged_cleaned_df = self.make_origs(df, cleaned_df, cleaning_sd)
         generated_code = self._run_code_generator(final_ops)
         return [merged_cleaned_df, cleaning_sd, generated_code, final_ops]

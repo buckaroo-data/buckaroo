@@ -6,8 +6,9 @@ from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.dataflow.autocleaning import merge_ops, format_ops, AutocleaningConfig
 from buckaroo.polars_buckaroo import PolarsAutocleaning
 from buckaroo.customizations.polars_commands import (
-    PlSafeInt, DropCol, FillNA, GroupBy, NoOp
+    Command, PlSafeInt, DropCol, FillNA, GroupBy, NoOp
 )
+from buckaroo.jlisp.lisp_utils import s
 
 
 dirty_df = pl.DataFrame(
@@ -167,6 +168,39 @@ def test_handle_clean_df():
 EXPECTED_GEN_CODE = """def clean(df):
     df = df.with_columns(pl.col('a').cast(pl.Int64, strict=False))
     return df"""
+
+class TaggingCommand(Command):
+    """A Command whose transform returns the 2-tuple (df, sd_updates)."""
+    command_default = [s('tag'), s('df'), 'col', '']
+    command_pattern = [[3, 'tag', 'type', 'string']]
+
+    @staticmethod
+    def transform(df, col, val):
+        return df, {col: {'note': val}}
+
+    @staticmethod
+    def transform_to_py(df, col, val):
+        return "    # tag"
+
+
+class TagConf(AutocleaningConfig):
+    autocleaning_analysis_klasses = []
+    command_klasses = [TaggingCommand]
+    name = ""
+
+
+def test_transform_can_return_sd_updates_via_2tuple():
+    """A Command's transform may return (df, sd_updates); the interpreter
+    accumulates sd_updates and autocleaning merges them into cleaning_sd."""
+    ac = PolarsAutocleaning([TagConf])
+    df = pl.DataFrame({'a': [1, 2, 3]})
+    op = [{'symbol': 'tag'}, s('df'), 'a', 'hello']
+
+    _df, cleaning_sd, _gen, _ops = ac.handle_ops_and_clean(
+        df, cleaning_method='', quick_command_args={}, existing_operations=[op])
+
+    assert cleaning_sd.get('a', {}).get('note') == 'hello'
+
 
 def test_autoclean_codegen():
     ac = PolarsAutocleaning([ACConf, NoCleaning])
