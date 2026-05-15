@@ -1,7 +1,6 @@
 import * as React from "react";
 import * as ReactDOM from "react-dom/client";
-import srt from "buckaroo-js-core";
-import { WebSocketModel } from "./WebSocketModel";
+import srt, { WebSocketModel } from "buckaroo-js-core";
 import "./widget.css";
 import "../buckaroo-js-core/dist/style.css";
 
