@@ -106,6 +106,13 @@ class DefaultMainStyling(StylingAnalysis):
             for k in ('highlight_phrase', 'highlight_regex', 'highlight_color'):
                 if k in column_metadata:
                     disp[k] = column_metadata[k]
+        # init_sd users may pass the same nested shape they'd use in
+        # column_config_overrides — e.g. {'comments': {'displayer_args':
+        # {'max_length': 2000}}}. Shallow-merge that into disp so init_sd
+        # augments (rather than replaces) styling's computed displayer_args
+        # AND coexists with op-supplied highlights. Caller wins per-key.
+        if isinstance(column_metadata.get('displayer_args'), dict):
+            disp.update(column_metadata['displayer_args'])
         base_config['displayer_args'] = disp
 
         # Compute content-aware minWidth
@@ -115,6 +122,11 @@ class DefaultMainStyling(StylingAnalysis):
             for pr in kls.pinned_rows)
         min_w = estimate_min_width_px(disp, header_name, column_metadata, has_histogram)
         base_config['ag_grid_specs'] = {'minWidth': min_w}
+        # ag_grid_specs from column_metadata (e.g. init_sd carrying
+        # {'wrapText': True, 'width': 400}) overlay on top of styling's
+        # computed minWidth. Shallow merge — caller wins per-key.
+        if 'ag_grid_specs' in column_metadata:
+            base_config['ag_grid_specs'].update(column_metadata['ag_grid_specs'])
 
         return base_config
 
