@@ -394,7 +394,13 @@ export function DFViewerInfiniteInner({
         getRowId,
         rowModelType: "clientSide"}
 
-    }, [styledColumns.length, JSON.stringify(styledColumns), hs, df_viewer_config.extra_grid_config, setActiveCol, getRowId]);
+    // NOTE: gating on `styledColumns` reference (which only changes when
+    // df_viewer_config changes) rather than `JSON.stringify(styledColumns)` —
+    // JSON.stringify drops function values, so it can't tell apart a colDef
+    // with `valueFormatter: fn` from one with `cellRenderer: fn` (e.g. when a
+    // search op adds highlight_regex to displayer_args). See highlight.test.tsx
+    // "function-prop blind spot" tests.
+    }, [styledColumns, hs, df_viewer_config.extra_grid_config, setActiveCol, getRowId]);
 
         // Extract datasource separately to ensure it updates when data_wrapper changes
         const datasource = useMemo(() => {
