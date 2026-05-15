@@ -69,8 +69,10 @@ class DefaultMainStyling(StylingAnalysis):
     @classmethod
     def style_column(kls, col:str, column_metadata: Any) -> Any:
         #print(col, list(sd.keys()))
-        if len(column_metadata.keys()) == 0:
-            #I'm still having problems with index and polars
+        # `_type` is the discriminator for displayer choice. If it's absent
+        # (e.g. a transient sd entry contributed by a lowcode op before the
+        # summary stats land), fall back to obj rather than KeyError-ing.
+        if len(column_metadata.keys()) == 0 or '_type' not in column_metadata:
             return {'col_name':col, 'displayer_args': {'displayer': 'obj'}}
 
         digits = 3
