@@ -89,9 +89,13 @@ def to_parquet(df):
 
 class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget):
     def _handle_payload_args(self, new_payload_args):
+        from .buckaroo_widget import _bk_flash
         start, end = new_payload_args['start'], new_payload_args['end']
+        _bk_flash("infinite_request ← JS", start=start, end=end,
+                  sort=new_payload_args.get('sort'))
         _unused, processed_df, merged_sd = self.dataflow.widget_args_tuple
         if processed_df is None:
+            _bk_flash("infinite_request — processed_df is None, no resp sent")
             return
 
         try:
@@ -103,29 +107,33 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
                 converted_sort_column = processed_sd[sort]['orig_col_name']
                 sorted_df = processed_df.with_row_index().sort(converted_sort_column, descending=not ascending)
                 slice_df = sorted_df[start:end]
-                #slice_df['index'] = slice_df.index
                 self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)},
                     [to_parquet(slice_df)])
+                _bk_flash("infinite_resp → JS (sorted)", rows=len(slice_df),
+                          total=len(processed_df))
             else:
                 slice_df = processed_df.with_row_index()[start:end]
-                #slice_df['index'] = slice_df.index
                 self.send({ "type": "infinite_resp", 'key':new_payload_args,
                     'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
-    
+                _bk_flash("infinite_resp → JS", rows=len(slice_df),
+                          total=len(processed_df))
+
                 second_pa = new_payload_args.get('second_request')
                 if not second_pa:
                     return
-                
+
                 extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
                 extra_df = processed_df.with_row_index()[extra_start:extra_end]
                 extra_df['index'] = extra_df.index
                 self.send(
                     {"type": "infinite_resp", 'key':second_pa, 'data':[], 'length':len(processed_df)},
                     [to_parquet(extra_df)])
+                _bk_flash("infinite_resp → JS (second)", rows=len(extra_df))
         except Exception as e:
             print(e)
             stack_trace = traceback.format_exc()
             self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'error_info':stack_trace, 'length':0})
+            _bk_flash("infinite_resp → JS (ERROR)", error=str(e))
             raise
 
 

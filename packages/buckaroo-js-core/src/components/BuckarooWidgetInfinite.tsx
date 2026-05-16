@@ -20,15 +20,24 @@ import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "
 import { parquetRead, parquetMetadata } from 'hyparquet'
 import { MessageBox } from "./MessageBox";
 
-// Shared label for the swap-tracing console.logs added to debug summary-stats
-// toggle issues. grep "[bk-flash]" in the browser console to see the timeline.
-const bkLog = (event: string, extra?: Record<string, unknown>): void => {
-    // Use performance.now for sub-ms ordering across the React render → AG-Grid
-    // commit boundary. Logs are intentionally chatty — pull them out once the
-    // toggle path is confirmed working.
-    // eslint-disable-next-line no-console
-    console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
+// Trace memo/render boundaries on the search + df_display toggle paths.
+// Opt-in: set `globalThis.__BK_FLASH__ = true` before bundle load to enable.
+// Wall-clock HH:MM:SS.mmm timestamps so the browser timeline can be
+// correlated with Python's [bk-flash-py …] prints across the anywidget
+// sync boundary. grep "[bk-flash" in the browser console + kernel output.
+export const bkTs = (): string => {
+    const d = new Date();
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    const p3 = (n: number) => String(n).padStart(3, "0");
+    return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${p3(d.getMilliseconds())}`;
 };
+const BK_FLASH = typeof globalThis !== "undefined" && (globalThis as { __BK_FLASH__?: boolean }).__BK_FLASH__ === true;
+const bkLog: (event: string, extra?: Record<string, unknown>) => void = BK_FLASH
+    ? (event, extra) => {
+          // eslint-disable-next-line no-console
+          console.log(`[bk-flash ${bkTs()}] ${event}`, extra ?? "");
+      }
+    : () => {};
 
 // Wrap a static DFData array in a fake IDatasource. Used for summary stats
 // and other small pre-loaded datasets so they can share the same AG-Grid
@@ -36,24 +45,12 @@ const bkLog = (event: string, extra?: Record<string, unknown>): void => {
 // df_display from "main" to "summary" flips data_wrapper.data_type from
 // DataSource to Raw and forces an AG-Grid remount (rowModelType can't be
 // reconfigured live). With this, headers stay mounted across the swap.
-export const makeStaticInfiniteDs = (data: DFData, label?: string): IDatasource => {
-    bkLog("makeStaticInfiniteDs constructed", { label, dataLen: data.length });
+export const makeStaticInfiniteDs = (data: DFData, _label?: string): IDatasource => {
     return {
         rowCount: data.length,
         getRows: (params: IGetRowsParams) => {
-            // Static data is always available — respond synchronously, no loading
-            // state, no network round-trip.
             const slice = data.slice(params.startRow, params.endRow);
-            bkLog("fakeDs.getRows ENTER", {
-                label,
-                startRow: params.startRow,
-                endRow: params.endRow,
-                sortModel: params.sortModel,
-                sliceLen: slice.length,
-                lastRow: data.length,
-            });
             params.successCallback(slice, data.length);
-            bkLog("fakeDs.getRows EXIT (successCallback called)", { label });
         },
     };
 };
@@ -64,11 +61,6 @@ export const getDataWrapper = (
     ds: IDatasource,
     total_rows?: number
 ): DatasourceOrRaw => {
-    bkLog("getDataWrapper called", {
-        data_key,
-        hasKeyInDict: df_data_dict[data_key] !== undefined,
-        total_rows,
-    });
     if (data_key === "main") {
         return {
             data_type: "DataSource",
@@ -99,45 +91,33 @@ const gensym = () => {
 export const getKeySmartRowCache = (model: any, setRespError:any) => {
     //const symNum = counter();
     const reqFn: RequestFN = (pa: PayloadArgs) => {
+        bkLog("model.send infinite_request → Python", { start: pa.start, end: pa.end });
         model.send({ type: 'infinite_request', payload_args: pa })
     }
     const src = new KeyAwareSmartRowCache(reqFn)
 
     model.on("msg:custom", (msg: any, buffers: any[]) => {
-        console.log("got a message", msg);
         if (msg?.type !== "infinite_resp") {
-            console.log("bailing not infinite_resp")
             return
         }
         if (msg.data === undefined) {
-            console.log("bailing no data", msg)
             return
         }
         const payload_response = msg as PayloadResponse;
+        bkLog("model.on infinite_resp ← Python", {
+            start: payload_response.key?.start,
+            end: payload_response.key?.end,
+            length: payload_response.length,
+            hasError: payload_response.error_info !== undefined,
+        });
         if (payload_response.error_info !== undefined) {
-            console.log("there was a problem with the request, not adding to the cache")
             src.addErrorResponse(payload_response);
-            console.log(payload_response.error_info)
+            console.error("[buckaroo] infinite_resp error:", payload_response.error_info)
             setRespError(payload_response.error_info)
             return
         }
-        /*
-        console.log("92 got a response for ", symNum, 
-            //creationTime.getUTCSeconds(), creationTime.getUTCMilliseconds() ,
-            payload_response.key);
-        */
-
-        if(payload_response.key.request_time !== undefined ) {
-
-            //@ts-ignore
-            const now = (new Date()) - 1 as number
-            const respTime = now - payload_response.key.request_time;
-            console.log(`response before ${[payload_response.key.start, payload_response.key.origEnd, payload_response.key.end]} parse took ${respTime}`)
-        }
-        console.log("about to read buffers[0]", buffers[0])            
         const table_bytes = buffers[0]
         const metadata = parquetMetadata(table_bytes.buffer)
-        console.log("metadata", metadata)
         parquetRead({
             file: table_bytes.buffer,
             metadata:metadata,
@@ -196,31 +176,21 @@ export function BuckarooInfiniteWidget({
         // still get the in-place update path.
         dataframe_id?: string;
     }) {
-    bkLog("BuckarooInfiniteWidget render", {
-        df_display: buckaroo_state.df_display,
-        post_processing: buckaroo_state.post_processing,
-        cleaning_method: buckaroo_state.cleaning_method,
-        dataframe_id,
-        opsLen: operations.length,
-    });
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
         // so having it live between relaods is key
         //const [respError, setRespError] = useState<string | undefined>(undefined);
 
-    const outerTime = new Date();
     const mainDs = useMemo(() => {
-	//@ts-ignore
-        console.log("recreating data source because operations changed", outerTime, ((new Date()) - outerTime))
-            src.debugCacheState();
+            // getDs(src) returns a closure that pulls rows from `src` (the
+            // KeyAwareSmartRowCache). State changes (operations,
+            // post_processing, cleaning_method, quick_command_args) flow into
+            // requests via `outside_df_params` context at getRows time — they
+            // are NOT captured by this closure. So mainDs is structurally
+            // invariant under those state changes; refresh is driven by
+            // effectiveDataframeId (remount) and outsideDFSig (purge).
+            bkLog("mainDs useMemo recomputed");
             return getDs(src);
-            // getting a new datasource when operations or post-processing changes - necessary for forcing ag-grid complete updated
-            // updating via post-processing changes appropriately.
-            // forces re-render and dataload when not completely necessary if other
-            // buckaroo_state props change
-            //
-            // putting buckaroo_state.post_processing doesn't work properly
-        //}, [operations, buckaroo_state]);
-        }, [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, JSON.stringify(buckaroo_state.quick_command_args)]);
+        }, [src]);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 
         // Reset activeCol on dataframe_id change. The DFViewerInfinite key below
@@ -243,28 +213,59 @@ export function BuckarooInfiniteWidget({
             [cDisp, df_data_dict, mainDs, df_meta.total_rows],
         );
 
-        //used to denote "this dataframe has been transformed", This is
-        //evantually spliced back into the request args from scrolling/
-        //the data source. dataframe_id participates so the SmartRowCache
-        //sourceName picks up an explicit "different dataframe" event.
+        // Operations minus filter-like ops (search, OnlyOutliers — Python
+        // marks them with meta.quick_command=true). These don't change row
+        // identity; quick_command_args already carries the same info, so
+        // including them in outsideDFParams/effectiveDataframeId would cause:
+        //   - effectiveDataframeId: remount the grid milliseconds after the
+        //     keystroke result already painted (the original PR #743 bug)
+        //   - outsideDFParams: fire a second purgeInfiniteCache and a second
+        //     server fetch into a different SmartRowCache partition
+        // The full-row-content ops (post_processing, cleaning_method, regular
+        // operations) still go through remountOperations and auto-bump.
+        const remountOperations = useMemo(
+            () => operations.filter((op) => !op[0]?.meta?.quick_command),
+            [operations],
+        );
+
+        // Used to denote "this dataframe has been transformed" — eventually
+        // spliced back into request args from scrolling. dataframe_id
+        // participates so SmartRowCache sourceName picks up an explicit
+        // "different dataframe" event.
         const outsideDFParams = useMemo(
-            () => [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
-            [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
+            () => {
+                bkLog("outsideDFParams useMemo recomputed", {
+                    quick_command_args: buckaroo_state.quick_command_args,
+                    df_display: buckaroo_state.df_display,
+                });
+                return [remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id];
+            },
+            [remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
         );
 
         // Effective remount key. Bundles dataframe_id with the
         // row-content-changing state fields so any of them triggers a full
         // grid remount. See the dataframe_id prop docs above for rationale —
         // in-place updates aren't safe when row identity isn't stable.
+        const effectiveDataframeIdPrev = useRef<string | null>(null);
         const effectiveDataframeId = useMemo(
-            () => JSON.stringify([
-                dataframe_id,
-                operations,
-                buckaroo_state.post_processing,
-                buckaroo_state.cleaning_method,
-                buckaroo_state.quick_command_args,
-            ]),
-            [dataframe_id, operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args],
+            () => {
+                const v = JSON.stringify([
+                    dataframe_id,
+                    remountOperations,
+                    buckaroo_state.post_processing,
+                    buckaroo_state.cleaning_method,
+                ]);
+                const prev = effectiveDataframeIdPrev.current;
+                effectiveDataframeIdPrev.current = v;
+                if (prev === null) {
+                    bkLog("effectiveDataframeId computed (initial)", { value: v });
+                } else if (prev !== v) {
+                    bkLog("effectiveDataframeId CHANGED (REMOUNT)", { from: prev, to: v });
+                }
+                return v;
+            },
+            [dataframe_id, remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method],
         );
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
@@ -334,17 +335,7 @@ export function DFViewerInfiniteDS({
         //const [respError, setRespError] = useState<string | undefined>(undefined);
 
 
-        const mainDs = useMemo(() => {
-            console.log("recreating data source because operations changed", new Date());
-            src.debugCacheState();
-            return getDs(src);
-            // getting a new datasource when operations or post-processing changes - necessary for forcing ag-grid complete updated
-            // updating via post-processing changes appropriately.
-            // forces re-render and dataload when not completely necessary if other
-            // buckaroo_state props change
-            //
-            // putting buckaroo_state.post_processing doesn't work properly
-        }, []);
+        const mainDs = useMemo(() => getDs(src), [src]);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 
         const cDisp = df_display_args["main"];
@@ -376,19 +367,6 @@ export function DFViewerInfiniteDS({
             return msgs;
         }, [message_log?.messages]);
         
-        // Debug: Log when messages change
-        React.useEffect(() => {
-            console.log("[DFViewerInfiniteDS] Message box state changed:", {
-                messagesEnabled,
-                messageCount: messages.length,
-                message_log_type: typeof message_log,
-                message_log_keys: message_log ? Object.keys(message_log) : null,
-                message_log_messages_type: message_log?.messages ? typeof message_log.messages : null,
-                message_log_messages_isArray: Array.isArray(message_log?.messages),
-                firstFewMessages: messages.slice(0, 3),
-            });
-        }, [messages, messagesEnabled, message_log]);
-
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
              style={{ width: "100%", height: "100%" }}>
