@@ -400,7 +400,6 @@ export const getDs = (
                 sort: sm.length === 1 ? sm[0].colId : undefined,
                 sort_direction: sm.length === 1 ? sm[0].sort : undefined,
             };
-            console.log(`[bk-flash ${performance.now().toFixed(1)}ms] getRows`, { start: dsPayloadArgs.start, end: dsPayloadArgs.end, sourceName: outside_params_string });
             const failWrapper = () => {
                 console.error("[buckaroo] getRows request failed", dsPayloadArgs)
                 params.failCallback()

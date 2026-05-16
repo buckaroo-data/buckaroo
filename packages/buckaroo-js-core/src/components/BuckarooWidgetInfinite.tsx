@@ -20,15 +20,16 @@ import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "
 import { parquetRead, parquetMetadata } from 'hyparquet'
 import { MessageBox } from "./MessageBox";
 
-// Shared label for the swap-tracing console.logs added to debug summary-stats
-// toggle issues. grep "[bk-flash]" in the browser console to see the timeline.
-const bkLog = (event: string, extra?: Record<string, unknown>): void => {
-    // Use performance.now for sub-ms ordering across the React render → AG-Grid
-    // commit boundary. Logs are intentionally chatty — pull them out once the
-    // toggle path is confirmed working.
-    // eslint-disable-next-line no-console
-    console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
-};
+// Trace memo/render boundaries on the search + df_display toggle paths. Opt-in:
+// set `globalThis.__BK_FLASH__ = true` before bundle load to enable. Grep
+// "[bk-flash]" in the console to see the timeline.
+const BK_FLASH = typeof globalThis !== "undefined" && (globalThis as { __BK_FLASH__?: boolean }).__BK_FLASH__ === true;
+const bkLog: (event: string, extra?: Record<string, unknown>) => void = BK_FLASH
+    ? (event, extra) => {
+          // eslint-disable-next-line no-console
+          console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
+      }
+    : () => {};
 
 // Wrap a static DFData array in a fake IDatasource. Used for summary stats
 // and other small pre-loaded datasets so they can share the same AG-Grid
