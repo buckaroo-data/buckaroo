@@ -247,9 +247,67 @@ whole page, skip ``to_html()`` and grab the artifact dict directly:
     # serve json_str to your page however you want
 
 The artifact contains the parquet-encoded data, the column display
-config, and (in Buckaroo mode) the status-bar state. On the JS side,
-import ``BuckarooStaticTable`` and ``resolveDFDataAsync`` from
-``buckaroo-js-core`` and feed it the resolved artifact:
+config, and (in Buckaroo mode) the status-bar state. There are two
+ways to feed it to the JS side: drop it into a page that loads the
+prebuilt ``static-embed.js`` bundle (no build step), or import the
+React components from ``buckaroo-js-core`` and render them yourself.
+
+**Raw JS — prebuilt bundle (works today).** The
+``static-embed.js`` bundle that ships with the wheel
+(``buckaroo/static/static-embed.js``) is an ESM module that
+auto-initialises on load. Its contract is two DOM hooks: a
+``<script id="buckaroo-data" type="application/json">`` containing
+the artifact JSON, and a ``<div id="root">`` to mount into. Any HTML
+file matching that contract will render — no JS to write:
+
+.. code-block:: html
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <link rel="stylesheet" href="static-embed.css">
+      <style>#root { width: 100%; height: 100vh; }</style>
+    </head>
+    <body>
+      <div id="root"></div>
+      <script id="buckaroo-data" type="application/json">
+        {{ artifact_json_from_python }}
+      </script>
+      <script type="module" src="static-embed.js"></script>
+    </body>
+    </html>
+
+That is exactly what ``to_html()`` produces — embedding into an
+existing page is the same template assembled around your own
+``<head>`` and surrounding markup. Server-render the JSON into the
+``#buckaroo-data`` block from your backend (Flask, Django, Sphinx
+extension, etc.) and the bundle does the rest.
+
+For *late-bound* data (fetch from an endpoint after page load), set
+``#buckaroo-data`` from JS *before* loading the module, since the
+bundle reads it once at startup:
+
+.. code-block:: html
+
+    <div id="root"></div>
+    <script id="buckaroo-data" type="application/json"></script>
+    <link rel="stylesheet" href="/static/static-embed.css">
+    <script type="module">
+      const r = await fetch("/api/my-table.json");
+      document.getElementById("buckaroo-data").textContent = await r.text();
+      await import("/static/static-embed.js");
+    </script>
+
+Copy ``static-embed.js`` and ``static-embed.css`` from
+``buckaroo/static/`` into whatever your site serves as static
+assets. The bundle is built with
+``pnpm --filter buckaroo-widget run build:static``; released wheels
+include it.
+
+**TypeScript — ``buckaroo-js-core`` (coming with npm publish).**
+If you're building your own JS app and want the React components
+directly, import ``BuckarooStaticTable`` and ``resolveDFDataAsync``
+and feed them the resolved artifact:
 
 .. code-block:: typescript
 
@@ -265,18 +323,18 @@ import ``BuckarooStaticTable`` and ``resolveDFDataAsync`` from
     const resolved = { ...artifact, df_data: dfData, summary_stats_data: summaryStats };
     // <BuckarooStaticTable artifact={resolved} />
 
-This is the same path ``static-embed.tsx`` uses; you're substituting
-your own page shell. Same eager-only limitations as static HTML.
+This is the same path ``static-embed.tsx`` uses internally; you're
+substituting your own page shell.
 
 .. note::
 
-   ``buckaroo-js-core`` is not yet published to npm. Until then, the
-   options are: (1) consume the prebuilt ``static-embed.js`` bundle
-   that ships with the wheel under ``buckaroo/static/`` and call
-   ``window.BuckarooStaticEmbed`` rather than importing modules; or
-   (2) work inside this monorepo and resolve ``buckaroo-js-core`` via
-   the pnpm workspace. The npm publication is tracked under the
-   "future" entry in the quick chooser below.
+   ``buckaroo-js-core`` is not yet published to npm. Until then,
+   the supported routes are (1) the raw-JS / prebuilt-bundle path
+   above, or (2) working inside this monorepo and resolving
+   ``buckaroo-js-core`` via the pnpm workspace. The npm publication
+   is tracked under the "future" entry in the quick chooser below.
+
+Same eager-only limitations as static HTML in either path.
 
 When to use it: embedding into a Sphinx docs page, a marketing site,
 a CMS-rendered article, a multi-table dashboard. You control the
