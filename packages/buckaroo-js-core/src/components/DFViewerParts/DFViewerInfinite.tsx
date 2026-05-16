@@ -51,13 +51,16 @@ ModuleRegistry.registerModules([
 
 const AccentColor = "#2196F3"
 
-// Shared label for swap-tracing console.logs. grep "[bk-flash]" in the
-// browser console to see the timeline of a df_display toggle. Temporary —
-// remove once the toggle path is confirmed working in production.
-const bkLog = (event: string, extra?: Record<string, unknown>): void => {
-    // eslint-disable-next-line no-console
-    console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
-};
+// Trace memo/render boundaries on the search + df_display toggle paths. Opt-in:
+// set `globalThis.__BK_FLASH__ = true` before bundle load to enable. Grep
+// "[bk-flash]" in the console to see the timeline.
+const BK_FLASH = typeof globalThis !== "undefined" && (globalThis as { __BK_FLASH__?: boolean }).__BK_FLASH__ === true;
+const bkLog: (event: string, extra?: Record<string, unknown>) => void = BK_FLASH
+    ? (event, extra) => {
+          // eslint-disable-next-line no-console
+          console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
+      }
+    : () => {};
 
 export interface DatasourceWrapper {
     datasource: IDatasource;
@@ -605,13 +608,6 @@ const getDsGridOptions = (origGridOptions: GridOptions, maxRowsWithoutScrolling:
         suppressNoRowsOverlay: true,
         onSortChanged: (event: SortChangedEvent) => {
             const api: GridApi = event.api;
-	    //@ts-ignore
-            console.log(
-                "sortChanged",
-                api.getFirstDisplayedRowIndex(),
-                api.getLastDisplayedRowIndex(),
-                event,
-            );
             // every time the sort is changed, scroll back to the top row.
             // Setting a sort and being in the middle of it makes no sense
             api.ensureIndexVisible(0);
@@ -637,9 +633,7 @@ const getDsGridOptions = (origGridOptions: GridOptions, maxRowsWithoutScrolling:
     activeCol?: [string, string];
     setActiveCol?: SetColumnFunc;
 }) {
-  const defaultSetColumnFunc = (newCol:[string, string]):void => {
-        console.log("defaultSetColumnFunc", newCol)
-    }
+  const defaultSetColumnFunc = (_newCol:[string, string]):void => {}
     const sac:SetColumnFunc = setActiveCol || defaultSetColumnFunc;
     
     return (
