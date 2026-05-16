@@ -284,6 +284,19 @@ def test_init_sd_displayer_args_and_search_highlight_coexist_on_same_column():
     assert cc['ag_grid_specs']['wrapText'] is True
 
 
+def test_style_column_delete_keys_drops_tooltip():
+    """init_sd's delete_keys lets a user drop top-level keys that style_column
+    adds by default. The motivating case: a string column where the user
+    doesn't want a tooltip permanently attached to the cell."""
+    col_meta = {'_type': 'string', 'orig_col_name': 'comments',
+                'delete_keys': ['tooltip_config']}
+    cc = DefaultMainStyling.style_column('a', col_meta)
+    assert 'tooltip_config' not in cc
+    # Other styled keys unaffected
+    assert cc['displayer_args']['displayer'] == 'string'
+    assert 'minWidth' in cc['ag_grid_specs']
+
+
 def test_autoclean_codegen():
     ac = PolarsAutocleaning([ACConf, NoCleaning])
     df = pl.DataFrame({'a': ["30", "40"]})
