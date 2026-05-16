@@ -120,24 +120,110 @@ const showCommandsCell = function (params: any) {
     );
 };
 
+// Debounce delay for live search. 300ms is above the typical inter-keystroke
+// pause (~150ms) so it doesn't fire mid-word, but well below the "feels slow"
+// threshold. Server-side filter cost on a ~900k-row df is ~80-230ms.
+const SEARCH_DEBOUNCE_MS = 300;
+
+// Wall-clock HH:MM:SS.mmm for [bk-flash …] correlation with the rest of the
+// search-flow timeline (BuckarooWidgetInfinite, DFViewerInfinite, Python).
+// Same opt-in gate, dynamic — flip `globalThis.__BK_FLASH__ = true` in
+// DevTools at any time to enable.
+const bkTs = (): string => {
+    const d = new Date();
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    const p3 = (n: number) => String(n).padStart(3, "0");
+    return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${p3(d.getMilliseconds())}`;
+};
+const bkFlashOn = (): boolean =>
+    typeof globalThis !== "undefined" && (globalThis as { __BK_FLASH__?: boolean }).__BK_FLASH__ === true;
+const bkSearchLog = (event: string): void => {
+    if (!bkFlashOn()) return;
+    // eslint-disable-next-line no-console
+    console.log(`[bk-flash ${bkTs()}] ${event}`);
+};
+const describe = (el: Element | null): string => {
+    if (!el) return "null";
+    const tag = el.tagName.toLowerCase();
+    const cls = (el.getAttribute("class") || "").split(/\s+/).filter(Boolean).slice(0, 2).join(".");
+    const role = el.getAttribute("role");
+    const colid = (el as HTMLElement).getAttribute("col-id");
+    const parts = [tag];
+    if (cls) parts.push(`.${cls}`);
+    if (role) parts.push(`[role=${role}]`);
+    if (colid) parts.push(`[col-id=${colid}]`);
+    return parts.join("");
+};
+let _fsc_instance_seq = 0;
+// AG-Grid destroys and recreates the cellRenderer instance on every
+// onCellValueChanged (the status-bar grid regenerates row data on each
+// buckarooState change). Component-scoped useRef is wiped each remount, so
+// we hoist engagement state to module scope. Same browser tab can only show
+// one BuckarooWidget search at a time in practice, so a single shared
+// timestamp is fine.
+let _fsc_engagedAt = 0;          // ms timestamp of last user typing/focus
+let _fsc_carryoverCaret = 0;     // selection caret from the dying instance,
+                                 // so the new instance can restore it
+const _FSC_REFOCUS_WINDOW_MS = 5000;
+
 export const fakeSearchCell = function (_params: any) {
     const value = _params.value;
 
     const [searchVal, setSearchVal] = useState<string>(value||'');
-    const setVal = () => {
-        _params.setValue(searchVal === '' ? null : searchVal)
+    const inputRef = useRef<HTMLInputElement>(null);
+    const instIdRef = useRef<number | null>(null);
+    if (instIdRef.current === null) instIdRef.current = ++_fsc_instance_seq;
+    const iid = instIdRef.current;
+
+    // Component mount / unmount. On mount, if the user was recently typing
+    // into the search box (any previous instance), restore focus to this
+    // new input. setTimeout defers past AG-Grid's remount finalization;
+    // rAF is the backup.
+    useEffect(() => {
+        const recentlyEngaged = Date.now() - _fsc_engagedAt < _FSC_REFOCUS_WINDOW_MS;
+        bkSearchLog(`fakeSearchCell MOUNT  iid=${iid}  value="${value || ""}"  recentlyEngaged=${recentlyEngaged}`);
+        if (recentlyEngaged) {
+            const refocus = (stage: string) => {
+                if (document.activeElement !== inputRef.current) {
+                    inputRef.current?.focus();
+                    if (inputRef.current && _fsc_carryoverCaret >= 0) {
+                        const len = inputRef.current.value.length;
+                        const pos = Math.min(_fsc_carryoverCaret, len);
+                        try { inputRef.current.setSelectionRange(pos, pos); } catch { /* ignore */ }
+                    }
+                }
+                bkSearchLog(`mount-refocus ${stage}  iid=${iid}  after=${describe(document.activeElement)}  matches=${document.activeElement === inputRef.current}`);
+            };
+            setTimeout(() => refocus("setTimeout(0)"), 0);
+            requestAnimationFrame(() => refocus("rAF"));
+        }
+        return () => {
+            // Capture caret before AG-Grid tears down the input.
+            if (inputRef.current && document.activeElement === inputRef.current) {
+                _fsc_carryoverCaret = inputRef.current.selectionStart ?? inputRef.current.value.length;
+            }
+            bkSearchLog(`fakeSearchCell UNMOUNT iid=${iid}  carryoverCaret=${_fsc_carryoverCaret}`);
+        };
+    }, []);
+
+    const submit = (v: string) => {
+        _params.setValue(v === '' ? null : v)
     }
 
+    // Live search: after SEARCH_DEBOUNCE_MS of no keystrokes, push the term
+    // upstream. Buttons / Enter bypass the debounce and fire immediately.
+    useEffect(() => {
+        if (searchVal === (value || '')) return;  // initial mount, no-op
+        const t = setTimeout(() => submit(searchVal), SEARCH_DEBOUNCE_MS);
+        return () => clearTimeout(t);
+    }, [searchVal, value]);
+
     const keyPressHandler = (event:React.KeyboardEvent<HTMLInputElement> ) => {
-        // If the user presses the "Enter" key on the keyboard
-    if (event.key === "Enter") {
-      // Cancel the default action, if needed
-      event.preventDefault();
-      setVal()
-      // Trigger the button element with a click
-      //document.getElementById("myBtn").click();
+        if (event.key === "Enter") {
+            event.preventDefault();
+            submit(searchVal);
+        }
     }
-  } 
     return (
         <div
             className={"FakeSearchEditor"}
@@ -145,18 +231,36 @@ export const fakeSearchCell = function (_params: any) {
             style={{ display: "flex", flexDirection: "row", width: "100%" }}
         >
             <input
+                ref={inputRef}
                 type="text"
                 style={{ flex: "1 1 auto", minWidth: 0 }}
                 value={searchVal}
-                onChange={({ target: { value }}) => setSearchVal(value)}
-                onSubmit={setVal}
+                onFocus={() => {
+                    _fsc_engagedAt = Date.now();
+                    bkSearchLog(`input onFocus  iid=${iid}`);
+                }}
+                onChange={({ target: { value }}) => { _fsc_engagedAt = Date.now(); setSearchVal(value); }}
+                onBlur={(e) => {
+                    const next = e.relatedTarget as HTMLElement | null;
+                    const inside = next && e.currentTarget.parentElement?.contains(next);
+                    bkSearchLog(`input onBlur  iid=${iid}  relatedTarget=${describe(next)}  insideSearchCell=${!!inside}`);
+                    // Only un-engage when the user intentionally clicked
+                    // outside the search cell. AG-Grid's remount-driven blur
+                    // (relatedTarget === null, AG-Grid tearing the input out
+                    // from under us) does NOT un-engage — that's the whole
+                    // point of the module-level engagedAt.
+                    if (next && !inside) {
+                        _fsc_engagedAt = 0;
+                    }
+                }}
+                onSubmit={() => submit(searchVal)}
                 onKeyDown={keyPressHandler}
             />
-            <button style={{ flex: "none" }} onClick={setVal}>&#x1F50D;</button>
+            <button style={{ flex: "none" }} onClick={() => submit(searchVal)}>&#x1F50D;</button>
             <button style={{ flex: "none" }}
-                    onClick={(clickParams) => {
-                        console.log("clickParams", clickParams)
-                        _params.setValue("")
+                    onClick={() => {
+                        setSearchVal('');
+                        _params.setValue('');
                     }}
             >X</button>
         </div>
@@ -255,7 +359,7 @@ export function StatusBar({
     const handleSearchCellChange = useCallback((params: { oldValue: any; newValue: any }) => {
         const { oldValue, newValue } = params;
         if (oldValue !== newValue && newValue !== null) {
-            //console.log('Edited cell:', newValue);
+            bkSearchLog(`search term set → buckarooState.quick_command_args.search  oldValue="${oldValue ?? ""}"  newValue="${newValue}"`);
             const newState = {
                 ...buckarooState,
                 quick_command_args: { search: [newValue] },
@@ -337,6 +441,7 @@ export function StatusBar({
 
     const rowData = [
         {
+            id: "statusbar",  // stable id consumed by getRowId below
             total_rows: basicIntFormatter.format(dfMeta.total_rows),
             columns: dfMeta.columns,
             rows_shown: basicIntFormatter.format(dfMeta.rows_shown),
@@ -352,6 +457,14 @@ export function StatusBar({
 
     const gridOptions: GridOptions = {
         suppressRowClickSelection: true,
+        // Stable row identity. Without this, every parent re-render (every
+        // buckarooState change) gives AG-Grid a fresh rowData array literal
+        // with no way to recognize "this is the same row" — so it destroys
+        // and recreates every cellRenderer instance, blowing away the
+        // search input's focus, selection, and any in-flight typing. With
+        // getRowId pinned, AG-Grid passes new props to the existing
+        // cellRenderer instances instead.
+        getRowId: () => "statusbar",
     };
 
     const gridRef = useRef<AgGridReact<unknown>>(null);
