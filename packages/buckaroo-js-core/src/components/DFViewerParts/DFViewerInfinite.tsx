@@ -51,13 +51,16 @@ ModuleRegistry.registerModules([
 
 const AccentColor = "#2196F3"
 
-// Shared label for swap-tracing console.logs. grep "[bk-flash]" in the
-// browser console to see the timeline of a df_display toggle. Temporary —
-// remove once the toggle path is confirmed working in production.
-const bkLog = (event: string, extra?: Record<string, unknown>): void => {
-    // eslint-disable-next-line no-console
-    console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
-};
+// Trace memo/render boundaries on the search + df_display toggle paths. Opt-in:
+// set `globalThis.__BK_FLASH__ = true` before bundle load to enable. Grep
+// "[bk-flash]" in the console to see the timeline.
+const BK_FLASH = typeof globalThis !== "undefined" && (globalThis as { __BK_FLASH__?: boolean }).__BK_FLASH__ === true;
+const bkLog: (event: string, extra?: Record<string, unknown>) => void = BK_FLASH
+    ? (event, extra) => {
+          // eslint-disable-next-line no-console
+          console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
+      }
+    : () => {};
 
 export interface DatasourceWrapper {
     datasource: IDatasource;
