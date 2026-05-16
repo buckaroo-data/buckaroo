@@ -129,6 +129,12 @@ class DefaultMainStyling(StylingAnalysis):
         if 'ag_grid_specs' in column_metadata:
             base_config['ag_grid_specs'].update(column_metadata['ag_grid_specs'])
 
+        # init_sd's delete_keys drops top-level keys that style_column added
+        # by default — e.g. the tooltip_config that string / time / binary /
+        # categorical / fallback branches unconditionally attach.
+        for k in column_metadata.get('delete_keys', ()):
+            base_config.pop(k, None)
+
         return base_config
 
 
