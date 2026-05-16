@@ -222,46 +222,40 @@ export function BuckarooInfiniteWidget({
             [cDisp, df_data_dict, mainDs, df_meta.total_rows],
         );
 
-        //used to denote "this dataframe has been transformed", This is
-        //evantually spliced back into the request args from scrolling/
-        //the data source. dataframe_id participates so the SmartRowCache
-        //sourceName picks up an explicit "different dataframe" event.
+        // Operations minus filter-like ops (search, OnlyOutliers — Python
+        // marks them with meta.quick_command=true). These don't change row
+        // identity; quick_command_args already carries the same info, so
+        // including them in outsideDFParams/effectiveDataframeId would cause:
+        //   - effectiveDataframeId: remount the grid milliseconds after the
+        //     keystroke result already painted (the original PR #743 bug)
+        //   - outsideDFParams: fire a second purgeInfiniteCache and a second
+        //     server fetch into a different SmartRowCache partition
+        // The full-row-content ops (post_processing, cleaning_method, regular
+        // operations) still go through remountOperations and auto-bump.
+        const remountOperations = useMemo(
+            () => operations.filter((op) => !op[0]?.meta?.quick_command),
+            [operations],
+        );
+
+        // Used to denote "this dataframe has been transformed" — eventually
+        // spliced back into request args from scrolling. dataframe_id
+        // participates so SmartRowCache sourceName picks up an explicit
+        // "different dataframe" event.
         const outsideDFParams = useMemo(
             () => {
                 bkLog("outsideDFParams useMemo recomputed", {
                     quick_command_args: buckaroo_state.quick_command_args,
                     df_display: buckaroo_state.df_display,
                 });
-                return [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id];
+                return [remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id];
             },
-            [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
+            [remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
         );
 
         // Effective remount key. Bundles dataframe_id with the
         // row-content-changing state fields so any of them triggers a full
         // grid remount. See the dataframe_id prop docs above for rationale —
         // in-place updates aren't safe when row identity isn't stable.
-        //
-        // quick_command_args is deliberately excluded: every command routed
-        // through it today is filter-like (Search, OnlyOutliers) — row
-        // identity prefixes stay stable across the filter, only ordering and
-        // membership change. The purge effect from #729 (fires when
-        // outside_df_params changes) + namespaced getRowId from #739 give
-        // correct cell-update-in-place semantics for that case. The remaining
-        // bundled fields (operations, post_processing, cleaning_method) still
-        // auto-bump pending follow-up work to let the Python side declare
-        // per-command dataframe_id bumping (default bump, opt-out per command).
-        // Filter out filter-like ops (search, OnlyOutliers — Python marks them
-        // with meta.quick_command=true) so they don't bump the remount key.
-        // Those ops normalize from quick_command_args; the grid already
-        // refreshes via outsideDFSig → purgeInfiniteCache and they don't
-        // change row identity prefixes, so remounting would be wasteful churn.
-        // Full-row-content ops (post_processing, cleaning_method, regular
-        // operations) still remount per the auto-bump contract.
-        const remountOperations = useMemo(
-            () => operations.filter((op) => !op[0]?.meta?.quick_command),
-            [operations],
-        );
         const effectiveDataframeIdPrev = useRef<string | null>(null);
         const effectiveDataframeId = useMemo(
             () => {

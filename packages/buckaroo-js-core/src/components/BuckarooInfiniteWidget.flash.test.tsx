@@ -262,6 +262,79 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     expect(getSpyCalls().purgeInfiniteCache).toBeGreaterThan(purgesBefore);
   });
 
+  it("Python's two-stage search update fires only ONE purgeInfiniteCache total", () => {
+    // The real-world keystroke flow from the [bk-flash] trace:
+    //   stage 1: quick_command_args.search = [val] arrives first
+    //   stage 2: ~150ms later, operations gains a meta.quick_command=true
+    //            entry for the same search (Python normalizing qca to an op)
+    //
+    // Both stages mutate outsideDFParams, so without filtering the second one
+    // out, the outsideDFSig effect fires twice and we send two server
+    // requests per keystroke — landing in two distinct SmartRowCache
+    // partitions because sourceName differs (operations was [] then
+    // [search-op]). Invisible to the user but doubles request load.
+    //
+    // Fix: filter meta.quick_command ops out of outsideDFParams too, so the
+    // second push produces the same outsideDFSig as the first → no second
+    // purge → no second fetch.
+    const src = mkSrc();
+    const propsA = {
+      df_data_dict: { summary_stats: [] },
+      df_display_args: baseDisplayArgs,
+      df_meta: baseDfMeta,
+      on_operations: jest.fn(),
+      operation_results: {} as any,
+      command_config: { argspecs: {}, defaultArgs: {} },
+      buckaroo_options: baseOptions,
+      src,
+      on_buckaroo_state: jest.fn(),
+    };
+    const { rerender } = render(
+      <BuckarooInfiniteWidget
+        {...propsA}
+        operations={[]}
+        buckaroo_state={{ ...initialState, quick_command_args: {} }}
+      />,
+    );
+    const purgesAtStart = getSpyCalls().purgeInfiniteCache;
+
+    // Stage 1: qca arrives, operations still empty
+    rerender(
+      <BuckarooInfiniteWidget
+        {...propsA}
+        operations={[]}
+        buckaroo_state={{
+          ...initialState,
+          quick_command_args: { search: ["was"] },
+        }}
+      />,
+    );
+    const purgesAfterStage1 = getSpyCalls().purgeInfiniteCache;
+    expect(purgesAfterStage1).toBeGreaterThan(purgesAtStart);
+
+    // Stage 2: operations gains the normalized search op; qca unchanged
+    const searchOp: any = [
+      { symbol: "search", meta: { auto_clean: true, quick_command: true } },
+      { symbol: "df" },
+      "col",
+      "was",
+    ];
+    rerender(
+      <BuckarooInfiniteWidget
+        {...propsA}
+        operations={[searchOp]}
+        buckaroo_state={{
+          ...initialState,
+          quick_command_args: { search: ["was"] },
+        }}
+      />,
+    );
+    // No additional purge: meta.quick_command ops are filtered out of
+    // outsideDFParams, so outsideDFSig is unchanged from stage 1.
+    expect(getSpyCalls().purgeInfiniteCache).toBe(purgesAfterStage1);
+    expect(getSpyCalls().mountCount).toBe(1);
+  });
+
   it("operations entry WITHOUT meta.quick_command DOES remount (existing autobump behavior)", () => {
     // Regression guard: a regular (non-quick) op still bumps the remount key,
     // because its row content really does change.
