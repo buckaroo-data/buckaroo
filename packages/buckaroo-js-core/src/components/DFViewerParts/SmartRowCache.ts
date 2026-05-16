@@ -458,7 +458,6 @@ export type FailCB = () => void;
 
 
 function verifyResp(resp: PayloadResponse):boolean {
-    debugger;
     if (resp.data.length === 0) {
         return false
     }

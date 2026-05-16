@@ -20,14 +20,22 @@ import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "
 import { parquetRead, parquetMetadata } from 'hyparquet'
 import { MessageBox } from "./MessageBox";
 
-// Trace memo/render boundaries on the search + df_display toggle paths. Opt-in:
-// set `globalThis.__BK_FLASH__ = true` before bundle load to enable. Grep
-// "[bk-flash]" in the console to see the timeline.
+// Trace memo/render boundaries on the search + df_display toggle paths.
+// Opt-in: set `globalThis.__BK_FLASH__ = true` before bundle load to enable.
+// Wall-clock HH:MM:SS.mmm timestamps so the browser timeline can be
+// correlated with Python's [bk-flash-py …] prints across the anywidget
+// sync boundary. grep "[bk-flash" in the browser console + kernel output.
+export const bkTs = (): string => {
+    const d = new Date();
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    const p3 = (n: number) => String(n).padStart(3, "0");
+    return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${p3(d.getMilliseconds())}`;
+};
 const BK_FLASH = typeof globalThis !== "undefined" && (globalThis as { __BK_FLASH__?: boolean }).__BK_FLASH__ === true;
 const bkLog: (event: string, extra?: Record<string, unknown>) => void = BK_FLASH
     ? (event, extra) => {
           // eslint-disable-next-line no-console
-          console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
+          console.log(`[bk-flash ${bkTs()}] ${event}`, extra ?? "");
       }
     : () => {};
 
@@ -37,24 +45,12 @@ const bkLog: (event: string, extra?: Record<string, unknown>) => void = BK_FLASH
 // df_display from "main" to "summary" flips data_wrapper.data_type from
 // DataSource to Raw and forces an AG-Grid remount (rowModelType can't be
 // reconfigured live). With this, headers stay mounted across the swap.
-export const makeStaticInfiniteDs = (data: DFData, label?: string): IDatasource => {
-    bkLog("makeStaticInfiniteDs constructed", { label, dataLen: data.length });
+export const makeStaticInfiniteDs = (data: DFData, _label?: string): IDatasource => {
     return {
         rowCount: data.length,
         getRows: (params: IGetRowsParams) => {
-            // Static data is always available — respond synchronously, no loading
-            // state, no network round-trip.
             const slice = data.slice(params.startRow, params.endRow);
-            bkLog("fakeDs.getRows ENTER", {
-                label,
-                startRow: params.startRow,
-                endRow: params.endRow,
-                sortModel: params.sortModel,
-                sliceLen: slice.length,
-                lastRow: data.length,
-            });
             params.successCallback(slice, data.length);
-            bkLog("fakeDs.getRows EXIT (successCallback called)", { label });
         },
     };
 };
@@ -65,11 +61,6 @@ export const getDataWrapper = (
     ds: IDatasource,
     total_rows?: number
 ): DatasourceOrRaw => {
-    bkLog("getDataWrapper called", {
-        data_key,
-        hasKeyInDict: df_data_dict[data_key] !== undefined,
-        total_rows,
-    });
     if (data_key === "main") {
         return {
             data_type: "DataSource",
@@ -100,6 +91,7 @@ const gensym = () => {
 export const getKeySmartRowCache = (model: any, setRespError:any) => {
     //const symNum = counter();
     const reqFn: RequestFN = (pa: PayloadArgs) => {
+        bkLog("model.send infinite_request → Python", { start: pa.start, end: pa.end });
         model.send({ type: 'infinite_request', payload_args: pa })
     }
     const src = new KeyAwareSmartRowCache(reqFn)
@@ -112,6 +104,12 @@ export const getKeySmartRowCache = (model: any, setRespError:any) => {
             return
         }
         const payload_response = msg as PayloadResponse;
+        bkLog("model.on infinite_resp ← Python", {
+            start: payload_response.key?.start,
+            end: payload_response.key?.end,
+            length: payload_response.length,
+            hasError: payload_response.error_info !== undefined,
+        });
         if (payload_response.error_info !== undefined) {
             src.addErrorResponse(payload_response);
             console.error("[buckaroo] infinite_resp error:", payload_response.error_info)
@@ -178,14 +176,6 @@ export function BuckarooInfiniteWidget({
         // still get the in-place update path.
         dataframe_id?: string;
     }) {
-    bkLog("BuckarooInfiniteWidget render", {
-        df_display: buckaroo_state.df_display,
-        post_processing: buckaroo_state.post_processing,
-        cleaning_method: buckaroo_state.cleaning_method,
-        quick_command_args: buckaroo_state.quick_command_args,
-        dataframe_id,
-        opsLen: operations.length,
-    });
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
         // so having it live between relaods is key
         //const [respError, setRespError] = useState<string | undefined>(undefined);

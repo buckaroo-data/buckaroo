@@ -24,6 +24,7 @@ import {
     RowSelectionModule,
     TooltipModule,
     TextFilterModule,
+    ScrollApiModule,
     SortChangedEvent,
     CellClassParams,
     RefreshCellsParams,
@@ -47,18 +48,27 @@ ModuleRegistry.registerModules([
     RowSelectionModule,
     TooltipModule,
     TextFilterModule,
+    ScrollApiModule,
 ]);
 
 const AccentColor = "#2196F3"
 
-// Trace memo/render boundaries on the search + df_display toggle paths. Opt-in:
-// set `globalThis.__BK_FLASH__ = true` before bundle load to enable. Grep
-// "[bk-flash]" in the console to see the timeline.
+// Trace memo/render boundaries on the search + df_display toggle paths.
+// Opt-in: set `globalThis.__BK_FLASH__ = true` before bundle load to enable.
+// Wall-clock HH:MM:SS.mmm for cross-stream correlation with Python's
+// [bk-flash-py …] prints. grep "[bk-flash" in the browser console + kernel
+// output to assemble the round-trip.
+const bkTs = (): string => {
+    const d = new Date();
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    const p3 = (n: number) => String(n).padStart(3, "0");
+    return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${p3(d.getMilliseconds())}`;
+};
 const BK_FLASH = typeof globalThis !== "undefined" && (globalThis as { __BK_FLASH__?: boolean }).__BK_FLASH__ === true;
 const bkLog: (event: string, extra?: Record<string, unknown>) => void = BK_FLASH
     ? (event, extra) => {
           // eslint-disable-next-line no-console
-          console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
+          console.log(`[bk-flash ${bkTs()}] ${event}`, extra ?? "");
       }
     : () => {};
 
@@ -163,12 +173,6 @@ export function DFViewerInfinite({
     // different record than row 0 in summary).
     data_key?: string;
 }) {
-    bkLog("DFViewerInfinite render", {
-        view_name,
-        data_key,
-        data_type: data_wrapper.data_type,
-        length: data_wrapper.length,
-    });
     /*
     The idea is to do some pre-setup here for
     */
@@ -262,15 +266,6 @@ export function DFViewerInfiniteInner({
     view_name?: string;
     data_key?: string;
 }) {
-    bkLog("DFViewerInfiniteInner render", {
-        view_name,
-        data_key,
-        data_type: data_wrapper.data_type,
-        length: data_wrapper.length,
-        outside_df_params,
-    });
-
-
     /*
     const lastProps = useRef<any>(null);
 
@@ -384,14 +379,8 @@ export function DFViewerInfiniteInner({
         onFirstDataRendered: (_params) => {
             bkLog("AgGrid onFirstDataRendered");
         },
-        onModelUpdated: (_params) => {
-            bkLog("AgGrid onModelUpdated");
-        },
         onRowDataUpdated: (_params) => {
-            bkLog("AgGrid onRowDataUpdated");
-        },
-        onSortChanged: (_event) => {
-            bkLog("AgGrid onSortChanged", { sortModel: _event.api.getColumnState().filter((c: any) => c.sort) });
+            bkLog("AgGrid onRowDataUpdated (cells repainted)");
         },
         columnDefs:styledColumns,
         getRowId,
@@ -401,10 +390,6 @@ export function DFViewerInfiniteInner({
 
         // Extract datasource separately to ensure it updates when data_wrapper changes
         const datasource = useMemo(() => {
-            bkLog("datasource useMemo recomputing", {
-                data_type: data_wrapper.data_type,
-                length: data_wrapper.length,
-            });
             return data_wrapper.data_type === "DataSource" ? data_wrapper.datasource : {
                 rowCount: data_wrapper.length,
                 getRows: (_params: any) => {
@@ -498,8 +483,14 @@ export function DFViewerInfiniteInner({
             try {
                 api.purgeInfiniteCache();
                 bkLog("outsideDFSig effect — purgeInfiniteCache called");
+                // Scroll back to row 0 — AG-Grid's infinite model doesn't
+                // auto-adjust scroll when row count drops, so a viewport
+                // sitting deep in the unfiltered df keeps requesting rows
+                // past the new filter's end and the user sees blank rows.
+                api.ensureIndexVisible(0, 'top');
+                bkLog("outsideDFSig effect — scrolled to row 0");
             } catch (e) {
-                bkLog("outsideDFSig effect — purgeInfiniteCache threw", { error: String(e) });
+                bkLog("outsideDFSig effect — purge/scroll threw", { error: String(e) });
             }
         }, [outsideDFSig, data_wrapper.data_type]);
 
@@ -513,12 +504,11 @@ export function DFViewerInfiniteInner({
         const viewStateRef = useRef<Record<string, { columnState: any[] }>>({});
         const prevViewNameRef = useRef<string | undefined>(view_name);
         useEffect(() => {
+            if (prevViewNameRef.current === view_name) return;
             bkLog("view_name effect fired", {
                 from: prevViewNameRef.current,
                 to: view_name,
-                same: prevViewNameRef.current === view_name,
             });
-            if (prevViewNameRef.current === view_name) return;
             const api = gridRef.current?.api;
             const prev = prevViewNameRef.current;
             prevViewNameRef.current = view_name;
@@ -568,7 +558,6 @@ export function DFViewerInfiniteInner({
                     datasource={datasource}
                     columnDefs={styledColumns}
                     onGridReady={(params) => {
-                        bkLog("AgGrid onGridReady", { view_name, data_key });
                         try {
                             // Ensure pinned rows are applied once API is ready
                             params.api.setGridOption('pinnedTopRowData', topRowsRef.current || []);
