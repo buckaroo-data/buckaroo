@@ -2,6 +2,7 @@ import polars as pl
 #import numpy as np
 
 from ..jlisp.lisp_utils import s
+from ..jlisp.configure_utils import SDResult  # noqa: F401 (re-export for command authors)
 #from ..jlisp.configure_utils import configure_buckaroo
 #from ..auto_clean.cleaning_commands import (to_bool, to_datetime, to_int, to_float, to_string)
 
@@ -129,8 +130,15 @@ class Search(Command):
     command_pattern = [[3, 'term', 'type', 'string']]
     quick_args_pattern = [[3, 'term', 'type', 'string']]
 
-    @staticmethod 
+    @staticmethod
     def transform(df, col, val):
+        # Mirror pandas Search guard (pandas_commands.py:478). The widget's
+        # filter-like quick_command_args.search path (PR #743) sends the
+        # current box value on every keystroke; on clear that arrives as
+        # None or "", and pl.col(pl.String).str.contains(None) drops every
+        # row.
+        if val is None or val == "":
+            return df
         return df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
 
 

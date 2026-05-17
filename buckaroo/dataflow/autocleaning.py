@@ -107,20 +107,37 @@ class PandasAutocleaning:
         self.quick_command_klasses = conf.quick_command_klasses
 
 
-    def _run_df_interpreter(self, df, operations):
+    def _run_df_interpreter(self, df, operations, initial_sd):
         full_ops = [{'symbol': 'begin'}]
 
         def wrap_set_df(form):
             """
-            wrap each passed in form with a set! call to update the df symbol
+            Wrap each form so its result threads through apply-result! before
+            updating df. apply-result! is a per-call closure (built inside
+            buckaroo_transform) that merges any SDResult into the live sd
+            and returns the bare df; bare-df returns pass through unchanged.
             """
-            return [s("set!"), s("df"), form]
+            return [s("set!"), s("df"),
+                [s("apply-result!"), s("sd"), form]]
         full_ops.extend(map(wrap_set_df, operations))
         full_ops.append(s("df"))
-        if len(full_ops) == 1:
-            return df
-        
-        return self.df_interpreter(full_ops , df)
+        if not operations:
+            # No-op short-circuit. Load-bearing for two reasons:
+            #   1. self.df_interpreter does df.copy()/clone() unconditionally;
+            #      a fresh df object churns DfTrait identity (`is not`
+            #      comparison), fires traitlets observers, and triggers a
+            #      frontend resync of unchanged data over the anywidget
+            #      boundary.
+            #   2. During widget init, where the `df` and `operations` traits
+            #      can be set in either order, creating fresh objects on the
+            #      no-op path cascaded into observer-chain infinite loops.
+            #      Returning by reference here was the stable fix.
+            # Return df and initial_sd untouched — nothing ran, nothing to
+            # copy. Do NOT add deepcopy here "to preserve the contract"; the
+            # contract is precisely "no ops → caller's objects come back as-is".
+            return df, initial_sd
+
+        return self.df_interpreter(full_ops, df, initial_sd)
 
     def _run_code_generator(self, operations):
         if len(operations) == 0:
@@ -193,12 +210,15 @@ class PandasAutocleaning:
         else:
             final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, existing_operations)
         if ops_eq(final_ops,[]) and cleaning_method == "":
-            #nothing to be done here, no point in running the interpreter
-            #this also has the nice effect of not copying the DF, which the interpreter does
+            # No-op short-circuit. Returns `df` by reference — load-bearing
+            # for the same reasons as _run_df_interpreter's short-circuit:
+            # avoids df.copy() identity churn (traitlets + frontend resync)
+            # and avoids the init-order observer-loop hazard. See the longer
+            # explanation in _run_df_interpreter above.
             return [df, {}, "", []]
 
 
-        cleaned_df = self._run_df_interpreter(df, final_ops)
+        cleaned_df, cleaning_sd = self._run_df_interpreter(df, final_ops, cleaning_sd)
         merged_cleaned_df = self.make_origs(df, cleaned_df, cleaning_sd)
         generated_code = self._run_code_generator(final_ops)
         return [merged_cleaned_df, cleaning_sd, generated_code, final_ops]

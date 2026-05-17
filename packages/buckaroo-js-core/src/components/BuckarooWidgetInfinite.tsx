@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as _ from "lodash-es";
 import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
@@ -15,10 +15,49 @@ import {
     IDisplayArgs
 } from "./DFViewerParts/gridUtils";
 import { DatasourceOrRaw, DFViewerInfinite } from "./DFViewerParts/DFViewerInfinite";
-import { IDatasource } from "ag-grid-community";
+import { IDatasource, IGetRowsParams } from "ag-grid-community";
 import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "./DFViewerParts/SmartRowCache";
 import { parquetRead, parquetMetadata } from 'hyparquet'
 import { MessageBox } from "./MessageBox";
+
+// Trace memo/render boundaries on the search + df_display toggle paths. Opt-in:
+// set `globalThis.__BK_FLASH__ = true` before bundle load to enable. Grep
+// "[bk-flash]" in the console to see the timeline.
+const BK_FLASH = typeof globalThis !== "undefined" && (globalThis as { __BK_FLASH__?: boolean }).__BK_FLASH__ === true;
+const bkLog: (event: string, extra?: Record<string, unknown>) => void = BK_FLASH
+    ? (event, extra) => {
+          // eslint-disable-next-line no-console
+          console.log(`[bk-flash ${performance.now().toFixed(1)}ms] ${event}`, extra ?? "");
+      }
+    : () => {};
+
+// Wrap a static DFData array in a fake IDatasource. Used for summary stats
+// and other small pre-loaded datasets so they can share the same AG-Grid
+// rowModelType ("infinite") as the live main dataset. Without this, swapping
+// df_display from "main" to "summary" flips data_wrapper.data_type from
+// DataSource to Raw and forces an AG-Grid remount (rowModelType can't be
+// reconfigured live). With this, headers stay mounted across the swap.
+export const makeStaticInfiniteDs = (data: DFData, label?: string): IDatasource => {
+    bkLog("makeStaticInfiniteDs constructed", { label, dataLen: data.length });
+    return {
+        rowCount: data.length,
+        getRows: (params: IGetRowsParams) => {
+            // Static data is always available — respond synchronously, no loading
+            // state, no network round-trip.
+            const slice = data.slice(params.startRow, params.endRow);
+            bkLog("fakeDs.getRows ENTER", {
+                label,
+                startRow: params.startRow,
+                endRow: params.endRow,
+                sortModel: params.sortModel,
+                sliceLen: slice.length,
+                lastRow: data.length,
+            });
+            params.successCallback(slice, data.length);
+            bkLog("fakeDs.getRows EXIT (successCallback called)", { label });
+        },
+    };
+};
 
 export const getDataWrapper = (
     data_key: string,
@@ -26,20 +65,27 @@ export const getDataWrapper = (
     ds: IDatasource,
     total_rows?: number
 ): DatasourceOrRaw => {
+    bkLog("getDataWrapper called", {
+        data_key,
+        hasKeyInDict: df_data_dict[data_key] !== undefined,
+        total_rows,
+    });
     if (data_key === "main") {
         return {
             data_type: "DataSource",
             datasource: ds,
             length: total_rows || 50,
         };
-    } else {
-        const data = df_data_dict[data_key];
-        return {
-            data_type: "Raw",
-            data: data,
-            length: data.length,
-        };
     }
+    const data = df_data_dict[data_key];
+    if (data === undefined) {
+        bkLog("getDataWrapper WARNING — data is undefined", { data_key, availableKeys: Object.keys(df_data_dict) });
+    }
+    return {
+        data_type: "DataSource",
+        datasource: makeStaticInfiniteDs(data || [], data_key),
+        length: (data || []).length,
+    };
 };
 /*
 const gensym = () => {
@@ -59,40 +105,21 @@ export const getKeySmartRowCache = (model: any, setRespError:any) => {
     const src = new KeyAwareSmartRowCache(reqFn)
 
     model.on("msg:custom", (msg: any, buffers: any[]) => {
-        console.log("got a message", msg);
         if (msg?.type !== "infinite_resp") {
-            console.log("bailing not infinite_resp")
             return
         }
         if (msg.data === undefined) {
-            console.log("bailing no data", msg)
             return
         }
         const payload_response = msg as PayloadResponse;
         if (payload_response.error_info !== undefined) {
-            console.log("there was a problem with the request, not adding to the cache")
             src.addErrorResponse(payload_response);
-            console.log(payload_response.error_info)
+            console.error("[buckaroo] infinite_resp error:", payload_response.error_info)
             setRespError(payload_response.error_info)
             return
         }
-        /*
-        console.log("92 got a response for ", symNum, 
-            //creationTime.getUTCSeconds(), creationTime.getUTCMilliseconds() ,
-            payload_response.key);
-        */
-
-        if(payload_response.key.request_time !== undefined ) {
-
-            //@ts-ignore
-            const now = (new Date()) - 1 as number
-            const respTime = now - payload_response.key.request_time;
-            console.log(`response before ${[payload_response.key.start, payload_response.key.origEnd, payload_response.key.end]} parse took ${respTime}`)
-        }
-        console.log("about to read buffers[0]", buffers[0])            
         const table_bytes = buffers[0]
         const metadata = parquetMetadata(table_bytes.buffer)
-        console.log("metadata", metadata)
         parquetRead({
             file: table_bytes.buffer,
             metadata:metadata,
@@ -119,7 +146,8 @@ export function BuckarooInfiniteWidget({
         buckaroo_state,
         on_buckaroo_state,
         buckaroo_options,
-        src
+        src,
+        dataframe_id,
     }: {
         df_meta: DFMeta;
         df_data_dict: Record<string, DFData>;
@@ -131,28 +159,59 @@ export function BuckarooInfiniteWidget({
         buckaroo_state: BuckarooState;
         on_buckaroo_state: React.Dispatch<React.SetStateAction<BuckarooState>>;
         buckaroo_options: BuckarooOptions;
-        src: KeyAwareSmartRowCache
+        src: KeyAwareSmartRowCache;
+        // Opaque opt-in identity for the underlying dataframe. When the value
+        // changes the widget treats it as a "different dataframe" event:
+        //   - activeCol resets to default
+        //   - dataframe_id participates in outside_df_params so SmartRowCache
+        //     sourceName picks up the new identity
+        //
+        // NOTE: in addition to this explicit prop, the widget internally derives
+        // an *effective* dataframe id that also bumps on row-content-changing
+        // state: operations, post_processing, cleaning_method, and
+        // quick_command_args (which carries sort/search/etc.). Those state
+        // changes legitimately alter row identity, so we cannot do in-place
+        // cell updates safely — getRowId=String(index) would match the wrong
+        // record. The naive correct behavior is to remount the grid on those
+        // changes too. This means the visible flash returns for those specific
+        // operations; UI-only state changes (show_commands, theme, etc.)
+        // still get the in-place update path.
+        dataframe_id?: string;
     }) {
-    console.log("132 BuckarooInfiniteWidget");
+    bkLog("BuckarooInfiniteWidget render", {
+        df_display: buckaroo_state.df_display,
+        post_processing: buckaroo_state.post_processing,
+        cleaning_method: buckaroo_state.cleaning_method,
+        quick_command_args: buckaroo_state.quick_command_args,
+        dataframe_id,
+        opsLen: operations.length,
+    });
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
         // so having it live between relaods is key
         //const [respError, setRespError] = useState<string | undefined>(undefined);
 
-    const outerTime = new Date();
     const mainDs = useMemo(() => {
-	//@ts-ignore
-        console.log("recreating data source because operations changed", outerTime, ((new Date()) - outerTime))
-            src.debugCacheState();
+            // getDs(src) returns a closure that pulls rows from `src` (the
+            // KeyAwareSmartRowCache). State changes (operations,
+            // post_processing, cleaning_method, quick_command_args) flow into
+            // requests via `outside_df_params` context at getRows time — they
+            // are NOT captured by this closure. So mainDs is structurally
+            // invariant under those state changes; refresh is driven by
+            // effectiveDataframeId (remount) and outsideDFSig (purge).
+            bkLog("mainDs useMemo recomputed");
             return getDs(src);
-            // getting a new datasource when operations or post-processing changes - necessary for forcing ag-grid complete updated
-            // updating via post-processing changes appropriately.
-            // forces re-render and dataload when not completely necessary if other
-            // buckaroo_state props change
-            //
-            // putting buckaroo_state.post_processing doesn't work properly
-        //}, [operations, buckaroo_state]);
-        }, [operations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, JSON.stringify(buckaroo_state.quick_command_args)]);
+        }, [src]);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
+
+        // Reset activeCol on dataframe_id change. The DFViewerInfinite key below
+        // remounts the grid; this handles the bit of state that lives above it.
+        const prevDfIdRef = useRef(dataframe_id);
+        useEffect(() => {
+            if (prevDfIdRef.current !== dataframe_id) {
+                prevDfIdRef.current = dataframe_id;
+                setActiveCol(["a", "stoptime"]);
+            }
+        }, [dataframe_id]);
 
         const cDisp = df_display_args[buckaroo_state.df_display];
 
@@ -161,13 +220,63 @@ export function BuckarooInfiniteWidget({
                 getDataWrapper(cDisp.data_key, df_data_dict, mainDs, df_meta.total_rows),
                 df_data_dict[cDisp.summary_stats_key],
             ],
-            [cDisp, operations, buckaroo_state, df_data_dict],
+            [cDisp, df_data_dict, mainDs, df_meta.total_rows],
         );
 
-        //used to denote "this dataframe has been transformed", This is
-        //evantually spliced back into the request args from scrolling/
-        //the data source
-        const outsideDFParams = [operations, buckaroo_state.post_processing, buckaroo_state.quick_command_args, buckaroo_state.df_display];
+        // Operations minus filter-like ops (search, OnlyOutliers — Python
+        // marks them with meta.quick_command=true). These don't change row
+        // identity; quick_command_args already carries the same info, so
+        // including them in outsideDFParams/effectiveDataframeId would cause:
+        //   - effectiveDataframeId: remount the grid milliseconds after the
+        //     keystroke result already painted (the original PR #743 bug)
+        //   - outsideDFParams: fire a second purgeInfiniteCache and a second
+        //     server fetch into a different SmartRowCache partition
+        // The full-row-content ops (post_processing, cleaning_method, regular
+        // operations) still go through remountOperations and auto-bump.
+        const remountOperations = useMemo(
+            () => operations.filter((op) => !op[0]?.meta?.quick_command),
+            [operations],
+        );
+
+        // Used to denote "this dataframe has been transformed" — eventually
+        // spliced back into request args from scrolling. dataframe_id
+        // participates so SmartRowCache sourceName picks up an explicit
+        // "different dataframe" event.
+        const outsideDFParams = useMemo(
+            () => {
+                bkLog("outsideDFParams useMemo recomputed", {
+                    quick_command_args: buckaroo_state.quick_command_args,
+                    df_display: buckaroo_state.df_display,
+                });
+                return [remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id];
+            },
+            [remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
+        );
+
+        // Effective remount key. Bundles dataframe_id with the
+        // row-content-changing state fields so any of them triggers a full
+        // grid remount. See the dataframe_id prop docs above for rationale —
+        // in-place updates aren't safe when row identity isn't stable.
+        const effectiveDataframeIdPrev = useRef<string | null>(null);
+        const effectiveDataframeId = useMemo(
+            () => {
+                const v = JSON.stringify([
+                    dataframe_id,
+                    remountOperations,
+                    buckaroo_state.post_processing,
+                    buckaroo_state.cleaning_method,
+                ]);
+                const prev = effectiveDataframeIdPrev.current;
+                effectiveDataframeIdPrev.current = v;
+                if (prev === null) {
+                    bkLog("effectiveDataframeId computed (initial)", { value: v });
+                } else if (prev !== v) {
+                    bkLog("effectiveDataframeId CHANGED (REMOUNT)", { from: prev, to: v });
+                }
+                return v;
+            },
+            [dataframe_id, remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method],
+        );
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
              style={{ width: "100%", height: "100%" }}>
@@ -186,6 +295,7 @@ export function BuckarooInfiniteWidget({
                         themeConfig={cDisp.df_viewer_config?.component_config?.theme}
                     />
                     <DFViewerInfinite
+                        key={effectiveDataframeId}
                         data_wrapper={data_wrapper}
                         df_viewer_config={cDisp.df_viewer_config}
                         summary_stats_data={summaryStatsData}
@@ -193,6 +303,8 @@ export function BuckarooInfiniteWidget({
                         activeCol={activeCol}
                         setActiveCol={setActiveCol}
                         error_info={""}
+                        view_name={buckaroo_state.df_display}
+                        data_key={cDisp.data_key}
                     />
                 </div>
                 {buckaroo_state.show_commands ? (
@@ -233,17 +345,7 @@ export function DFViewerInfiniteDS({
         //const [respError, setRespError] = useState<string | undefined>(undefined);
 
 
-        const mainDs = useMemo(() => {
-            console.log("recreating data source because operations changed", new Date());
-            src.debugCacheState();
-            return getDs(src);
-            // getting a new datasource when operations or post-processing changes - necessary for forcing ag-grid complete updated
-            // updating via post-processing changes appropriately.
-            // forces re-render and dataload when not completely necessary if other
-            // buckaroo_state props change
-            //
-            // putting buckaroo_state.post_processing doesn't work properly
-        }, []);
+        const mainDs = useMemo(() => getDs(src), [src]);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 
         const cDisp = df_display_args["main"];
@@ -275,19 +377,6 @@ export function DFViewerInfiniteDS({
             return msgs;
         }, [message_log?.messages]);
         
-        // Debug: Log when messages change
-        React.useEffect(() => {
-            console.log("[DFViewerInfiniteDS] Message box state changed:", {
-                messagesEnabled,
-                messageCount: messages.length,
-                message_log_type: typeof message_log,
-                message_log_keys: message_log ? Object.keys(message_log) : null,
-                message_log_messages_type: message_log?.messages ? typeof message_log.messages : null,
-                message_log_messages_isArray: Array.isArray(message_log?.messages),
-                firstFewMessages: messages.slice(0, 3),
-            });
-        }, [messages, messagesEnabled, message_log]);
-
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
              style={{ width: "100%", height: "100%" }}>

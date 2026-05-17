@@ -3,6 +3,7 @@ import numpy as np
 
 
 from ..jlisp.lisp_utils import s
+from ..jlisp.configure_utils import SDResult  # noqa: F401 (re-export for command authors)
 
 class Command(object):
     @staticmethod 

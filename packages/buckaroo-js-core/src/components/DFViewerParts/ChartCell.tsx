@@ -129,7 +129,13 @@ export const getChartCell = (multiChartCellProps: ChartDisplayerA) => {
             return <span></span>;
         }
         const histogramArr = potentialHistogramArr as LineObservation[];
-        return TypedChartCellInner({ histogramArr });
+        // Render as a child component (not a function call) so the useState
+        // in TypedChartCellInner lives on its own fiber. Mirrors the fix
+        // applied to HistogramCell in ba4e2394 — same structural risk
+        // (React #300/#310 on value-shape flips with cell-fiber reuse), even
+        // though the bug is currently latent here because ChartCell has no
+        // unconditional hook above its early-return branches.
+        return <TypedChartCellInner histogramArr={histogramArr} />;
     }
 
     const TypedChartCellInner = ({ histogramArr }: { histogramArr: LineObservation[] }) => {

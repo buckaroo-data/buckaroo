@@ -798,5 +798,56 @@ describe('KeyAwareSmartRowCache tests', () => {
 
 
     })
-    
+
+    test('two sourceNames are isolated — a late response to source A does not contaminate source B', () => {
+        // Flash-matrix edge case: outside_df_params changes from A to B while
+        // a request for A is in flight. When A's response finally arrives, it
+        // must NOT appear under B (which the user is now viewing). The cache
+        // routes responses by sourceName, so this is really a contract test.
+        let src: KeyAwareSmartRowCache;
+        const requestLog: PayloadArgs[] = [];
+        const mockRequestFn = jest.fn((pa: PayloadArgs) => {
+            requestLog.push(pa);
+        });
+        src = new KeyAwareSmartRowCache(mockRequestFn);
+
+        // 1. AG-Grid (sourceName A) asks for rows
+        const cbA = jest.fn();
+        src.getRequestRows({ sourceName: "A", start: 0, end: 20, origEnd: 20 }, cbA, () => {});
+        // 2. Outside_df_params changes; AG-Grid (sourceName B) asks for rows
+        const cbB = jest.fn();
+        src.getRequestRows({ sourceName: "B", start: 0, end: 20, origEnd: 20 }, cbB, () => {});
+
+        // Two requests fired, one per source
+        expect(requestLog).toHaveLength(2);
+        expect(requestLog[0].sourceName).toBe("A");
+        expect(requestLog[1].sourceName).toBe("B");
+
+        // 3. B's response arrives first (normal); cbB fires with B-data.
+        //    genRows uses its 3rd arg as the *column name*, so we can later
+        //    tell A-rows from B-rows by checking which key is present.
+        src.addPayloadResponse({
+            key: requestLog[1],
+            data: genRows(0, 20, "B_col")[1],
+            length: 100,
+        });
+        expect(cbB).toHaveBeenCalledTimes(1);
+        const [bData] = cbB.mock.calls[0];
+        expect(Object.keys(bData[0])).toContain("B_col");
+        expect(Object.keys(bData[0])).not.toContain("A_col");
+
+        // 4. A's stale response arrives late. It fires cbA (the old callback,
+        //    keyed by source A) but MUST NOT be re-delivered to cbB.
+        src.addPayloadResponse({
+            key: requestLog[0],
+            data: genRows(0, 20, "A_col")[1],
+            length: 100,
+        });
+        expect(cbB).toHaveBeenCalledTimes(1);  // unchanged
+        expect(cbA).toHaveBeenCalledTimes(1);
+        const [aData] = cbA.mock.calls[0];
+        expect(Object.keys(aData[0])).toContain("A_col");
+        expect(Object.keys(aData[0])).not.toContain("B_col");
+    });
+
 });

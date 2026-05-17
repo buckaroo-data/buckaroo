@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 from ..jlisp.lisp_utils import s
-from ..jlisp.configure_utils import configure_buckaroo
+from ..jlisp.configure_utils import configure_buckaroo, SDResult  # noqa: F401 (SDResult re-exported for command authors)
 from ..auto_clean.cleaning_commands import (to_bool, to_datetime, to_int, to_float, to_string)
 
 class Command(object):
