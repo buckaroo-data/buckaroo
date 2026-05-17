@@ -8,7 +8,7 @@ from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.dataflow.autocleaning import PandasAutocleaning, generate_quick_ops
 from buckaroo.jlisp.lisp_utils import (s, sA, sQ)
-from buckaroo.customizations.pandas_commands import (Command, SafeInt, DropCol, FillNA, GroupBy, NoOp, Search, OnlyOutliers, SDResult)
+from buckaroo.customizations.pandas_commands import (Command, SafeInt, DropCol, FillNA, GroupBy, NoOp, Search, OnlyOutliers)
 from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)
 from buckaroo.dataflow.dataflow import CustomizableDataflow
 
