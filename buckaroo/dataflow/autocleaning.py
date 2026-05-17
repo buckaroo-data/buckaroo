@@ -1,4 +1,3 @@
-import copy
 import pandas as pd
 from buckaroo.jlisp.lisp_utils import s, sQ, merge_ops, format_ops, ops_eq
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
@@ -123,7 +122,11 @@ class PandasAutocleaning:
         full_ops.extend(map(wrap_set_df, operations))
         full_ops.append(s("df"))
         if not operations:
-            return df, copy.deepcopy(initial_sd)
+            # Skip the interpreter call when there's no work to do: avoids
+            # df.copy()/clone() (which churns df identity → traitlets fires →
+            # frontend re-syncs unchanged data). sd identity preserved too —
+            # nothing mutated it.
+            return df, initial_sd
 
         return self.df_interpreter(full_ops, df, initial_sd)
 
