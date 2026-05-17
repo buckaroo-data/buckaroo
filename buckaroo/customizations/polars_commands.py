@@ -142,7 +142,11 @@ class Search(Command):
         filtered = df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
         # `.str.contains(val)` treats val as a regex, so expose it as
         # highlight_regex (not _phrase) for consistent semantics on the JS side.
-        string_cols = [c for c, dt in zip(df.columns, df.dtypes) if dt == pl.String]
+        # collect_schema avoids polars's PerformanceWarning when df is a
+        # LazyFrame (the interpreter threads LazyFrame between ops on the
+        # polars path); also works on eager DataFrames.
+        schema = df.collect_schema()
+        string_cols = [name for name, dt in schema.items() if dt == pl.String]
         sd_updates = {c: {'highlight_regex': val} for c in string_cols}
         return SDResult(filtered, sd_updates)
 
