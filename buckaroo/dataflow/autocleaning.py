@@ -12,16 +12,22 @@ def _rekey_op_sd_to_internal(cleaning_sd, cleaned_df):
     matching analysis entry instead of sitting alongside as orphans.
 
     A Command's transform only sees orig column names, so an SDResult it
-    returns is keyed by those. The rest of cleaning_sd is keyed by the
-    positional letter the analysis pipeline assigns. Without this pass the
-    styling layer would receive two entries per touched column — one with
-    _type/orig_col_name and one with the op contribution — and the op
-    contribution would never reach the displayer_args.
+    returns is keyed by those. Analysis entries are keyed by the positional
+    letter assigned by the analysis pipeline and always carry
+    `rewritten_col_name` (set by both pandas and polars analysis
+    management). The marker lets us skip analysis entries even when their
+    key happens to equal an orig name elsewhere in the frame — e.g. cols
+    ['b', 'foo'] yield internal a='b' and b='foo'; without the check, the
+    analysis entry for internal 'b' would get merged into 'a' because
+    rewrites['b']=='a', corrupting metadata.
     """
     rewrites = dict(old_col_new_col(cleaned_df))
     out = {}
     for col, kv in cleaning_sd.items():
-        target = rewrites.get(col, col)
+        if 'rewritten_col_name' in kv:
+            target = col
+        else:
+            target = rewrites.get(col, col)
         if target in out:
             out[target] = merge_sds({target: out[target]}, {target: kv})[target]
         else:
