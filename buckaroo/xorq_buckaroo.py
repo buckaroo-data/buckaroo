@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import traceback
 from io import BytesIO
-from typing import Any
+from typing import Any, Dict, Tuple
 
 import pandas as pd
 import pyarrow as pa
@@ -175,14 +175,19 @@ class XorqAutocleaning(PandasAutocleaning):
         # Rekey op-supplied sd entries from orig col names onto buckaroo's
         # internal a/b/c letter keys, so they merge cleanly with the
         # summary_sd that XorqDataflow._get_summary_sd produces (also
-        # keyed by letter). Mapping uses the input expr's columns —
-        # filter ops preserve column identity, and orig→letter is the
-        # same on both sides of the filter for any current handler.
+        # keyed by letter). Every current handler preserves column
+        # identity (filter ops), so orig→letter is the same on the input
+        # and the result. The assert guards against a future handler that
+        # renames/drops/reorders columns silently corrupting the rekey.
+        assert list(result_expr.columns) == list(df.columns), (
+            "xorq op changed column identity — _rekey_op_sd_to_internal "
+            "would mis-map sd entries; rekey against result_expr or "
+            "thread the orig→letter mapping through _apply_xorq_ops")
         cleaning_sd = _rekey_op_sd_to_internal(sd_updates, df)
         return [result_expr, cleaning_sd, "", final_ops]
 
     @staticmethod
-    def _apply_xorq_ops(expr, ops):
+    def _apply_xorq_ops(expr, ops) -> Tuple[Any, Dict[str, Dict[str, Any]]]:
         """Apply ops to ``expr``; accumulate op-contributed sd entries.
 
         Each handler may return either a bare expr (legacy) or an
@@ -190,7 +195,7 @@ class XorqAutocleaning(PandasAutocleaning):
         running sd_updates dict so multiple ops touching the same
         column compose.
         """
-        sd_updates: dict = {}
+        sd_updates: Dict[str, Dict[str, Any]] = {}
         for op in ops:
             sym_name = op[0]['symbol'] if isinstance(op[0], dict) else op[0]
             handler = _XORQ_OP_HANDLERS.get(sym_name)
@@ -201,9 +206,7 @@ class XorqAutocleaning(PandasAutocleaning):
             if isinstance(result, tuple):
                 expr, op_sd = result
                 for col, updates in op_sd.items():
-                    merged = sd_updates.get(col, {})
-                    merged.update(updates)
-                    sd_updates[col] = merged
+                    sd_updates.setdefault(col, {}).update(updates)
             else:
                 expr = result
         return expr, sd_updates
