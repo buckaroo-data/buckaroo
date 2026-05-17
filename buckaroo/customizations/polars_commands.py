@@ -129,8 +129,15 @@ class Search(Command):
     command_pattern = [[3, 'term', 'type', 'string']]
     quick_args_pattern = [[3, 'term', 'type', 'string']]
 
-    @staticmethod 
+    @staticmethod
     def transform(df, col, val):
+        # Mirror pandas Search guard (pandas_commands.py:478). The widget's
+        # filter-like quick_command_args.search path (PR #743) sends the
+        # current box value on every keystroke; on clear that arrives as
+        # None or "", and pl.col(pl.String).str.contains(None) drops every
+        # row.
+        if val is None or val == "":
+            return df
         return df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
 
 

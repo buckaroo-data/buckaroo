@@ -420,17 +420,13 @@ export class SmartRowCache {
 
     public hasRows(needSeg: Segment): RequestArgs {
         if(needSeg[0] === 0 && needSeg[1] === 0) {
-            console.log("setting lastRequest to [0,0] in hasRows, this is unexpected")
+            console.warn("[SmartRowCache.hasRows] needSeg=[0,0] is unexpected")
         }
 	if (this.sentLength > -1 && needSeg[1] > this.sentLength) {
 	    const newSeg:Segment = [needSeg[0], this.sentLength]
 	    return this.hasRows(newSeg)
 	}
         this.lastRequest = needSeg;
-        // debug visibility
-        try {
-            console.log("[SmartRowCache.hasRows] need", needSeg, "extents", this.safeGetExtents(), "lastRequest", this.lastRequest);
-        } catch (_e) {}
         for (const ourSeg of this.segments) {
             if (segmentsOverlap(ourSeg, needSeg)) {
                 return minimumFillArgs(ourSeg, needSeg)
@@ -440,15 +436,12 @@ export class SmartRowCache {
     }
 
     public getRows(range: Segment): DFData {
-        try {
-            console.log("[SmartRowCache.getRows] range", range, "extents", this.safeGetExtents(), "segments", this.segments);
-        } catch (_e) {}
         if (this.sentLength > 0 && range[1] > this.sentLength) {
             return this.getRows([range[0], this.sentLength]);
         }
         if (this.hasRows(range) === true) {
             if(range[0] === 0 && range[1] === 0) {
-                console.log("unexpected setting lastRequest to [0,0] in getRows")
+                console.warn("[SmartRowCache.getRows] range=[0,0] is unexpected")
             }
             this.lastRequest = range;
             return getRange(this.segments, this.dfs, range)
@@ -509,7 +502,6 @@ export class KeyAwareSmartRowCache {
         const srcKey = getSourcePayloadKey(pa)
         const seg: Segment = [pa.start, pa.origEnd];
 	if (!this.srcAccesses.has(srcKey)) {
-	    console.log("500 hasRows, returning False because couldn't find srcKey")
             return false
         }
 	const src = this.srcAccesses.get(srcKey);
@@ -521,7 +513,6 @@ export class KeyAwareSmartRowCache {
         if (reqArgs === true) {
             return true
         }
-	console.log("500 hasRows, returning False because src didn't have rows")
         return false
     }
 
@@ -556,12 +547,10 @@ export class KeyAwareSmartRowCache {
         const src = this.ensureRowCacheForPa(pa)
         const ex = src.safeGetExtents()
         if (ex[1] == src.sentLength) {
-            console.log("not making extra request because already have to the end of the available data", ex, src.sentLength)
-            return 
+            return
         }
 
         const exDist:number = segmentEndDist(reqSeg, ex);
-        console.log("maybeMakeLeadingRequest", exDist, reqSeg, ex)
         if (exDist > 0  && exDist < this.reUpDist) {
             // only try to eagerly make requests when scrolling down
             // scrolling up happens when exDist is negative
@@ -582,20 +571,15 @@ export class KeyAwareSmartRowCache {
         // this function fires off a request for the rows, and when
         // that request is filled calls cb
         const cbKey = getPayloadKey(pa)
-        const src =  this.ensureRowCacheForPa(pa);
+        const src = this.ensureRowCacheForPa(pa);
         //@ts-ignore
         const reqTime = (new Date()) - 1 as number
         pa.request_time = reqTime;
-        try {
-            console.log("[KeyAware.getRequestRows] pa", pa, "cbKey", cbKey, "extents", src.safeGetExtents(), "sentLength", src.sentLength);
-        } catch (_e) {}
         if (this.hasRows(pa)) {
-            console.log(`request for ${[pa.start, pa.origEnd, pa.end]} in cache, extents ${src.getExtents()}`)
             // Only return rows guaranteed in cache: [start, origEnd].
             // Do NOT expand to [start, sentLength] here, as sentLength is dataset size, not cache extent.
             const seg: Segment = [pa.start, pa.origEnd];
             cb(src.getRows(seg), src.sentLength);
-            const cbKey = getPayloadKey(pa)
             delete this.waitingCallbacks[cbKey]
             this.maybeMakeLeadingRequest(pa)
             return;
@@ -608,7 +592,6 @@ export class KeyAwareSmartRowCache {
 
     public ensureRowCacheForPa(pa:PayloadArgs): SmartRowCache {
         const srcKey = getSourcePayloadKey(pa)
-	console.log("592 ensureRowCacheForPa", srcKey, this.srcAccesses.has(srcKey))
 	if (!this.srcAccesses.has(srcKey)){
             this.srcAccesses.set(srcKey, new SmartRowCache());
         }

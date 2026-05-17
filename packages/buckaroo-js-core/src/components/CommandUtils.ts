@@ -10,7 +10,10 @@ export type ArgSpec = TypeSpec | EnumSpec | ColEnumSpec | NoArgs;
 
 export interface SymbolT {
     symbol: string;
-    meta?: {auto_clean?:boolean, clean_strategy?:string};
+    // quick_command=true marks the op as filter-like (search, OnlyOutliers):
+    // BuckarooInfiniteWidget excludes these from effectiveDataframeId so they
+    // refresh via purgeInfiniteCache instead of remounting the grid.
+    meta?: {auto_clean?:boolean, clean_strategy?:string, quick_command?:boolean};
 }
 
 export interface SymbolDf {

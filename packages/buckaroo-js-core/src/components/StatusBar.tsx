@@ -356,9 +356,7 @@ export function StatusBar({
 
     const gridRef = useRef<AgGridReact<unknown>>(null);
 
-    const onGridReady = useCallback((params: {api:GridApi}) => {
-        console.log("StatusBar252 onGridReady statusbar", params)
-    }, []);
+    const onGridReady = useCallback((_params: {api:GridApi}) => {}, []);
 
     const defaultColDef = {
         sortable:false,
