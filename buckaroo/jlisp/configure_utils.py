@@ -70,8 +70,14 @@ def configure_buckaroo(transforms):
         """
         if isinstance(df, pd.DataFrame):
             df_copy = df.copy()
-        else: # hack we know it's polars here... just getting something working for now
+        elif hasattr(df, "clone") and callable(df.clone):
+            # polars DataFrame / LazyFrame
             df_copy = df.clone()
+        else:
+            # ibis/xorq expressions are immutable — transforms must return
+            # a new expr, so a defensive copy is both unavailable and
+            # unnecessary.
+            df_copy = df
 
         sd_dict = copy.deepcopy(initial_sd)
         sd_view = MappingProxyType(sd_dict)
