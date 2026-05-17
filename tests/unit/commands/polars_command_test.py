@@ -28,7 +28,7 @@ def assert_to_py_same_transform_df(command_kls, operations, test_df):
     _a, _b, transform_df, transform_to_py = configure_buckaroo([command_kls])
     tdf_ops = [{'symbol': 'begin'}]
     tdf_ops.extend(operations)
-    tdf = transform_df(tdf_ops, test_df.clone())
+    tdf, _sd = transform_df(tdf_ops, test_df.clone(), {})
     py_code_string = transform_to_py(operations)
 
     edf = result_from_exec(py_code_string, test_df.clone())

@@ -1,5 +1,5 @@
 from ..jlisp.lisp_utils import s
-from ..jlisp.configure_utils import configure_buckaroo
+from ..jlisp.configure_utils import configure_buckaroo, SDResult  # noqa: F401 (SDResult re-exported for command authors)
 from .auto_clean import smart_to_int, get_auto_type_operations
 import pandas as pd
 
