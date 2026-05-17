@@ -581,3 +581,38 @@ def test_bstate_commands3():
         [sQ('search'), s('df'), "col", "needle"]]
     assert len(vcb.dataflow.processed_df) == 2
     assert vcb.df_meta['filtered_rows'] == 2
+
+
+def _find_cc(column_config, col_name):
+    for entry in column_config:
+        if entry.get('col_name') == col_name:
+            return entry
+    raise AssertionError(f"col_name {col_name!r} not in column_config")
+
+
+def test_search_op_delivers_highlight_phrase_into_displayer_args():
+    """End-to-end: a `search` operation on the widget should plumb its
+    search term into `displayer_args.highlight_phrase` for every string
+    column in the final df_viewer_config that gets sent to the JS side.
+    pandas Search uses literal str.find, so the search term flows as
+    highlight_phrase (not highlight_regex)."""
+    df = pd.DataFrame({
+        'businessname': ['pizza', 'sushi', 'taco'],
+        'comments': ['area code', 'no match', 'area zone'],
+        'rating': [5, 4, 3]})
+
+    class VCBuckarooWidget(BuckarooInfiniteWidget):
+        autoclean_conf = tuple([NoCleaningConf])
+
+    w = VCBuckarooWidget(df, debug=False)
+    w.dataflow.operations = [[{'symbol': 'search'}, s('df'), 'col', 'area']]
+
+    cc = w.df_display_args['main']['df_viewer_config']['column_config']
+    a_args = _find_cc(cc, 'a')['displayer_args']
+    assert a_args['displayer'] == 'string'
+    assert a_args['highlight_phrase'] == ['area']
+    b_args = _find_cc(cc, 'b')['displayer_args']
+    assert b_args['displayer'] == 'string'
+    assert b_args['highlight_phrase'] == ['area']
+    c_args = _find_cc(cc, 'c')['displayer_args']
+    assert 'highlight_phrase' not in c_args
