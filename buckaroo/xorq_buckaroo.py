@@ -24,7 +24,8 @@ from .buckaroo_widget import BuckarooInfiniteWidget, BuckarooWidget
 from .customizations.styling import DefaultMainStyling, DefaultSummaryStatsStyling
 from .customizations.xorq_stats_v2 import XORQ_STATS_V2
 from .dataflow.autocleaning import (
-    AutocleaningConfig, PandasAutocleaning, generate_quick_ops, merge_ops, ops_eq)
+    AutocleaningConfig, PandasAutocleaning, _rekey_op_sd_to_internal,
+    generate_quick_ops, merge_ops, ops_eq)
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import Sampling
 from .df_util import old_col_new_col
@@ -90,11 +91,17 @@ class XorqSampling(Sampling):
 
 
 def _xorq_search(expr, _col, val):
-    """Filter rows where any string column contains ``val``.
+    """Filter rows where any string column contains ``val``, and emit
+    ``sd_updates`` so the JS-side string displayer highlights matches.
 
-    Mirrors the contract of the pandas / polars Search commands: an
-    empty value short-circuits to a no-op so the frontend can clear
-    the search by sending ``""``.
+    Return shape mirrors the SDResult contract from #758:
+      - bare expr      : empty value short-circuits to a no-op
+      - (expr, sd_updates) : filtered expr + per-string-column highlight
+
+    ibis ``StringValue.contains`` is a literal substring match (not
+    regex), so the term flows as ``highlight_phrase`` (list) rather
+    than ``highlight_regex`` — matching the filter semantics on the
+    JS-side string displayer.
     """
     if val is None or val == "":
         return expr
@@ -106,7 +113,8 @@ def _xorq_search(expr, _col, val):
     for c in string_cols:
         c_cond = expr[c].contains(val)
         cond = c_cond if cond is None else cond | c_cond
-    return expr.filter(cond)
+    sd_updates = {c: {'highlight_phrase': [val]} for c in string_cols}
+    return expr.filter(cond), sd_updates
 
 
 class XorqSearch:
@@ -163,19 +171,42 @@ class XorqAutocleaning(PandasAutocleaning):
         final_ops = merge_ops(existing_for_merge, quick_ops)
         if not final_ops:
             return [df, {}, "", []]
-        result = self._apply_xorq_ops(df, final_ops)
-        return [result, {}, "", final_ops]
+        result_expr, sd_updates = self._apply_xorq_ops(df, final_ops)
+        # Rekey op-supplied sd entries from orig col names onto buckaroo's
+        # internal a/b/c letter keys, so they merge cleanly with the
+        # summary_sd that XorqDataflow._get_summary_sd produces (also
+        # keyed by letter). Mapping uses the input expr's columns —
+        # filter ops preserve column identity, and orig→letter is the
+        # same on both sides of the filter for any current handler.
+        cleaning_sd = _rekey_op_sd_to_internal(sd_updates, df)
+        return [result_expr, cleaning_sd, "", final_ops]
 
     @staticmethod
     def _apply_xorq_ops(expr, ops):
+        """Apply ops to ``expr``; accumulate op-contributed sd entries.
+
+        Each handler may return either a bare expr (legacy) or an
+        ``(expr, sd_updates)`` tuple. Tuples merge col-by-col into the
+        running sd_updates dict so multiple ops touching the same
+        column compose.
+        """
+        sd_updates: dict = {}
         for op in ops:
             sym_name = op[0]['symbol'] if isinstance(op[0], dict) else op[0]
             handler = _XORQ_OP_HANDLERS.get(sym_name)
             if handler is None:
                 continue
             handler_args = op[2:]
-            expr = handler(expr, *handler_args)
-        return expr
+            result = handler(expr, *handler_args)
+            if isinstance(result, tuple):
+                expr, op_sd = result
+                for col, updates in op_sd.items():
+                    merged = sd_updates.get(col, {})
+                    merged.update(updates)
+                    sd_updates[col] = merged
+            else:
+                expr = result
+        return expr, sd_updates
 
 
 class XorqDataflow(CustomizableDataflow):
