@@ -112,6 +112,20 @@ xorq = [
     "xorq>=0.1.0 ; python_version < '3.14'",
 ]
 mcp = ["mcp", "tornado>=6.0", "polars"]
+
+# Runtime deps the buckaroo.server sidecar needs to start under the
+# buckaroo-tauri integration. NOT the Tauri shim itself (that lives at
+# buckaroo-data/buckaroo-tauri) — this is the Python-side runtime its
+# README's `pip install buckaroo[tauri-essentials]` instruction depends
+# on. Top-level imports in buckaroo.server require tornado (HTTP + WS
+# server) and both pandas and polars (data_loading.py imports both
+# unconditionally).
+tauri-essentials = [
+    "tornado>=6.0",
+    "polars>=1.24.0",
+    "pandas; python_version >= '3.13'",
+    "pandas>=1.3.5; python_version < '3.13'",
+]
 marimo = [
     "marimo>=0.19.7",
     "pandas; python_version >= '3.13'",
