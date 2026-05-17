@@ -139,7 +139,12 @@ class Search(Command):
         # row.
         if val is None or val == "":
             return df
-        return df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
+        filtered = df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
+        # `.str.contains(val)` treats val as a regex, so expose it as
+        # highlight_regex (not _phrase) for consistent semantics on the JS side.
+        string_cols = [c for c, dt in zip(df.columns, df.dtypes) if dt == pl.String]
+        sd_updates = {c: {'highlight_regex': val} for c in string_cols}
+        return SDResult(filtered, sd_updates)
 
 
     @staticmethod 

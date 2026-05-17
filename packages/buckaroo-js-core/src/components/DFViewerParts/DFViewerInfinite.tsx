@@ -24,6 +24,7 @@ import {
     RowSelectionModule,
     TooltipModule,
     TextFilterModule,
+    ScrollApiModule,
     SortChangedEvent,
     CellClassParams,
     RefreshCellsParams,
@@ -47,6 +48,7 @@ ModuleRegistry.registerModules([
     RowSelectionModule,
     TooltipModule,
     TextFilterModule,
+    ScrollApiModule,
 ]);
 
 const AccentColor = "#2196F3"
@@ -494,8 +496,13 @@ export function DFViewerInfiniteInner({
             try {
                 api.purgeInfiniteCache();
                 bkLog("outsideDFSig effect — purgeInfiniteCache called");
+                // Scroll back to row 0 — AG-Grid's infinite model doesn't
+                // auto-adjust scroll when row count drops, so a viewport
+                // sitting deep in the unfiltered df keeps requesting rows
+                // past the new filter's end and the user sees blank rows.
+                api.ensureIndexVisible(0, 'top');
             } catch (e) {
-                bkLog("outsideDFSig effect — purgeInfiniteCache threw", { error: String(e) });
+                bkLog("outsideDFSig effect — purge/scroll threw", { error: String(e) });
             }
         }, [outsideDFSig, data_wrapper.data_type]);
 
