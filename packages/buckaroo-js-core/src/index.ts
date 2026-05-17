@@ -16,6 +16,7 @@ import { parquetRead, parquetMetadata } from 'hyparquet';
 import { resolveDFData, resolveDFDataAsync, preResolveDFDataDict } from './components/DFViewerParts/resolveDFData';
 import { BuckarooStaticTable } from './components/BuckarooStaticTable';
 import { BuckarooServerView, buckarooWsUrl } from './server/BuckarooServerView';
+import { BuckarooView } from './server/BuckarooView';
 import { WebSocketModel } from './server/WebSocketModel';
 
 import { HistogramCell } from "./components/DFViewerParts/HistogramCell";
@@ -57,6 +58,7 @@ export default {
     preResolveDFDataDict,
     BuckarooStaticTable,
     BuckarooServerView,
+    BuckarooView,
     buckarooWsUrl,
     WebSocketModel,
 };
@@ -86,6 +88,11 @@ export {
     preResolveDFDataDict,
     BuckarooStaticTable,
     BuckarooServerView,
+    BuckarooView,
     buckarooWsUrl,
     WebSocketModel,
 };
+
+export type { IModel } from './server/IModel';
+export type { BuckarooViewProps, BuckarooServerMode, BuckarooServerMetadata } from './server/BuckarooView';
+export type { BuckarooServerViewProps } from './server/BuckarooServerView';
