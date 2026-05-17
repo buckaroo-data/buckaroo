@@ -20,3 +20,22 @@ repos:
         language: system
         files: ^packages/buckaroo-js-core/.*\.(ts|tsx)$
         pass_filenames: false
+      # Pre-push gate: re-run CI's Python / Lint job locally before push.
+      # The pre-commit `paddy-format` hook above only sees staged files,
+      # so drift in a file you didn't touch (e.g. introduced by a recent
+      # merge to main) slips through and only surfaces on CI. Mirrors
+      # the `LintPython` job in .github/workflows/checks.yml.
+      - id: ruff-check-full
+        name: ruff check (full tree)
+        entry: uv run ruff check
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
+      - id: paddy-format-check-full
+        name: paddy-format --check (full tree)
+        entry: bash -c 'find buckaroo tests scripts -type f -name "*.py" -not -path "buckaroo/jlisp/lispy.py" -print0 | xargs -0 uv run python scripts/paddy_format.py --check'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
