@@ -5,6 +5,7 @@ import platform
 import sys
 import time
 import traceback
+import uuid
 
 import tornado.web
 
@@ -136,14 +137,21 @@ class LoadHandler(tornado.web.RequestHandler):
         """Validate and extract session_id, path, mode, prompt, no_browser, and component_config from request.
 
         Returns (session_id, path, mode, prompt, no_browser, component_config) or a tuple of Nones on error.
+
+        ``session`` is optional — when omitted the server mints a UUID and
+        returns it in the response. Lets Tauri/Electron-style hosts call /load
+        without inventing session IDs.
         """
         session_id = body.get("session")
         path = body.get("path")
 
-        if not session_id or not path:
+        if not path:
             self.set_status(400)
-            self.write({"error": "Missing 'session' or 'path'"})
+            self.write({"error": "Missing 'path'"})
             return None, None, None, None, None, None
+
+        if not session_id:
+            session_id = uuid.uuid4().hex
 
         mode = body.get("mode", "viewer")
         prompt = body.get("prompt", "")
@@ -183,7 +191,7 @@ class LoadHandler(tornado.web.RequestHandler):
         if not self.application.settings.get("open_browser", True):
             return "disabled"
 
-        port = self.application.settings.get("port", 8888)
+        port = self.application.settings["port"]
         return find_or_create_session_window(session_id, port, reload_if_found=True)
 
     def _load_file_with_error_handling(self, path: str, is_lazy: bool):
