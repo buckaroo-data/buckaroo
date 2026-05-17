@@ -2,6 +2,37 @@ import pandas as pd
 from buckaroo.jlisp.lisp_utils import s, sQ, merge_ops, format_ops, ops_eq
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from ..customizations.all_transforms import configure_buckaroo, DefaultCommandKlsList
+from ..df_util import old_col_new_col
+from .styling_core import merge_sds
+
+
+def _rekey_op_sd_to_internal(cleaning_sd, cleaned_df):
+    """Rewrite orig-name keys (from op-contributed SDResult entries) onto
+    buckaroo's internal a/b/c letter keys, so the updates merge into the
+    matching analysis entry instead of sitting alongside as orphans.
+
+    A Command's transform only sees orig column names, so an SDResult it
+    returns is keyed by those. Analysis entries are keyed by the positional
+    letter assigned by the analysis pipeline and always carry
+    `rewritten_col_name` (set by both pandas and polars analysis
+    management). The marker lets us skip analysis entries even when their
+    key happens to equal an orig name elsewhere in the frame — e.g. cols
+    ['b', 'foo'] yield internal a='b' and b='foo'; without the check, the
+    analysis entry for internal 'b' would get merged into 'a' because
+    rewrites['b']=='a', corrupting metadata.
+    """
+    rewrites = dict(old_col_new_col(cleaned_df))
+    out = {}
+    for col, kv in cleaning_sd.items():
+        if 'rewritten_col_name' in kv:
+            target = col
+        else:
+            target = rewrites.get(col, col)
+        if target in out:
+            out[target] = merge_sds({target: out[target]}, {target: kv})[target]
+        else:
+            out[target] = kv
+    return out
 
 def dumb_merge_ops(existing_ops, cleaning_ops):
     """ strip cleaning_ops from existing_ops, reinsert cleaning_ops at the beginning """
@@ -220,6 +251,12 @@ class PandasAutocleaning:
 
         cleaned_df, cleaning_sd = self._run_df_interpreter(df, final_ops, cleaning_sd)
         merged_cleaned_df = self.make_origs(df, cleaned_df, cleaning_sd)
+        # Run rekey AFTER make_origs: the polars make_origs walks cleaning_sd
+        # keys as actual column names on cleaned_df, so it needs op-supplied
+        # entries to still be keyed by orig col name. After make_origs is
+        # done with the df, rewrite the orig-keyed entries onto buckaroo's
+        # internal a/b/c keys for the styling layer.
+        cleaning_sd = _rekey_op_sd_to_internal(cleaning_sd, cleaned_df)
         generated_code = self._run_code_generator(final_ops)
         return [merged_cleaned_df, cleaning_sd, generated_code, final_ops]
 
