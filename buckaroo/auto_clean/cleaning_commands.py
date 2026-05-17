@@ -1,6 +1,6 @@
 from ..jlisp.lisp_utils import s
-from ..jlisp.configure_utils import configure_buckaroo, SDResult  # noqa: F401 (SDResult re-exported for command authors)
-from .auto_clean import smart_to_int, get_auto_type_operations
+from ..jlisp.configure_utils import SDResult  # noqa: F401 (re-exported for command authors)
+from .auto_clean import smart_to_int
 import pandas as pd
 
 class Command(object):
@@ -91,14 +91,3 @@ class to_string(Command):
 
 
 
-cleaning_classes = [to_bool, to_datetime, to_int, to_float, to_string]
-
-def auto_type_df2(df):
-    _command_defaults, _command_patterns, transform, buckaroo_to_py_core = configure_buckaroo(
-        cleaning_classes)
-
-    cleaning_operations = get_auto_type_operations(df)
-
-    full_ops  = [{'symbol': 'begin'}]
-    full_ops.extend(cleaning_operations)
-    return transform(full_ops, df)
