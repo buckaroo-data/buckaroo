@@ -1,24 +1,29 @@
-import { BuckarooServerMetadata, BuckarooServerMode } from './BuckarooView';
 import * as React from "react";
-export type { BuckarooServerMetadata, BuckarooServerMode };
 /**
  * BuckarooServerView — embed a Buckaroo server session inside a React tree.
  *
  * This is the npm-module alternative to iframing `/s/<session-id>` from the
  * Buckaroo server. The component opens a WebSocket to the server, waits for
  * the `initial_state` message, builds the same model + row cache the
- * standalone bundle uses, and delegates rendering to {@link BuckarooView}.
+ * standalone bundle uses, and renders the appropriate widget based on the
+ * server-reported `mode`.
  *
  *   import { BuckarooServerView } from "buckaroo-js-core";
  *   import "buckaroo-js-core/style.css";
  *
  *   <BuckarooServerView wsUrl="ws://localhost:8700/ws/my-session" />
  *
- * Hosts that need to keep WebSockets out of the renderer (Tauri, Electron,
- * Wails) should instead construct an {@link IModel} via their IPC adapter
- * and mount {@link BuckarooView} directly — see the docstring on that
- * component for the no-WebSocket path.
+ * The server's session decides the widget — pass `mode="viewer"` to
+ * /load for DFViewerInfiniteDS, `mode="buckaroo"` for the full UI. The host
+ * app does no widget-class selection; it only cares about which session to
+ * connect to.
  */
+export type BuckarooServerMode = "viewer" | "buckaroo";
+export interface BuckarooServerMetadata {
+    path?: string;
+    rows?: number;
+    [k: string]: unknown;
+}
 export interface BuckarooServerViewProps {
     /** Full WebSocket URL (ws:// or wss://). For a server at host H serving
      *  session S, this is `ws://H/ws/S`. Use {@link buckarooWsUrl} if you
