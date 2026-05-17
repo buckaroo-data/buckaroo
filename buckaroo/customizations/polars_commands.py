@@ -2,6 +2,7 @@ import polars as pl
 #import numpy as np
 
 from ..jlisp.lisp_utils import s
+from ..jlisp.configure_utils import SDResult  # noqa: F401 (re-export for command authors)
 #from ..jlisp.configure_utils import configure_buckaroo
 #from ..auto_clean.cleaning_commands import (to_bool, to_datetime, to_int, to_float, to_string)
 
