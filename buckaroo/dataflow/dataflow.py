@@ -404,8 +404,8 @@ class CustomizableDataflow(DataFlow):
     def add_command(self, incomingCommandKls):
         return self.ac_obj.add_command(incomingCommandKls)
 
-    def _run_df_interpreter(self, df, operations):
-        self.ac_obj._run_df_interpreter(df, operations)
+    def _run_df_interpreter(self, df, operations, initial_sd):
+        return self.ac_obj._run_df_interpreter(df, operations, initial_sd)
 
     def run_code_generator(self, operations):
         self.ac_obj.run_code_generator(operations)

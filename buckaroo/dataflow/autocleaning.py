@@ -107,20 +107,23 @@ class PandasAutocleaning:
         self.quick_command_klasses = conf.quick_command_klasses
 
 
-    def _run_df_interpreter(self, df, operations):
+    def _run_df_interpreter(self, df, operations, initial_sd):
         full_ops = [{'symbol': 'begin'}]
 
         def wrap_set_df(form):
             """
-            wrap each passed in form with a set! call to update the df symbol
+            Wrap each form so its result passes through apply-result! before
+            updating df. apply-result! threads any (df, sd_updates) tuple into
+            the sd binding bound in the lisp env and returns the bare df.
             """
-            return [s("set!"), s("df"), form]
+            return [s("set!"), s("df"),
+                    [s("apply-result!"), s("sd"), form]]
         full_ops.extend(map(wrap_set_df, operations))
         full_ops.append(s("df"))
-        if len(full_ops) == 1:
-            return df
-        
-        return self.df_interpreter(full_ops , df)
+        if not operations:
+            return df, dict(initial_sd)
+
+        return self.df_interpreter(full_ops, df, initial_sd)
 
     def _run_code_generator(self, operations):
         if len(operations) == 0:
@@ -198,7 +201,10 @@ class PandasAutocleaning:
             return [df, {}, "", []]
 
 
-        cleaned_df = self._run_df_interpreter(df, final_ops)
+        cleaned_df, op_sd = self._run_df_interpreter(df, final_ops, {})
+        if op_sd:
+            from .styling_core import merge_sds
+            cleaning_sd = merge_sds(cleaning_sd, op_sd)
         merged_cleaned_df = self.make_origs(df, cleaned_df, cleaning_sd)
         generated_code = self._run_code_generator(final_ops)
         return [merged_cleaned_df, cleaning_sd, generated_code, final_ops]

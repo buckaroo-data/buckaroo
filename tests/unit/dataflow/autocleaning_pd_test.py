@@ -202,10 +202,11 @@ def test_run_df_interpreter():
     ac = PandasAutocleaning([ACErrorConf])
     df = pd.DataFrame({'a': ["30", "40"]})
 
-    output_df = ac._run_df_interpreter(
+    output_df, _sd = ac._run_df_interpreter(
         df,
         [
-            [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']])
+            [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']],
+        {})
     expected = pd.DataFrame({'a': [30, 40]})
     assert output_df.to_dict() == expected.to_dict()
 
