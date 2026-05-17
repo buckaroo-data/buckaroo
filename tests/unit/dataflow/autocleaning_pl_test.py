@@ -255,8 +255,8 @@ def test_style_column_merges_nested_displayer_args_and_ag_grid_specs():
     overrides styling's 35, wrapText/width overlay on minWidth, and any
     other styled keys (e.g. highlight_regex) survive."""
     col_meta = {'_type': 'string', 'orig_col_name': 'comments',
-                'displayer_args': {'displayer': 'string', 'max_length': 2000},
-                'ag_grid_specs': {'wrapText': True, 'width': 400, 'maxWidth': 400}}
+        'displayer_args': {'displayer': 'string', 'max_length': 2000},
+        'ag_grid_specs': {'wrapText': True, 'width': 400, 'maxWidth': 400}}
     cc = DefaultMainStyling.style_column('a', col_meta)
     assert cc['displayer_args']['max_length'] == 2000
     assert cc['ag_grid_specs']['wrapText'] is True
@@ -274,8 +274,8 @@ def test_init_sd_displayer_args_and_search_highlight_coexist_on_same_column():
     have clobbered the highlight by replacing displayer_args wholesale."""
     from buckaroo.dataflow.styling_core import merge_sds
     init_sd = {'a': {'_type': 'string', 'orig_col_name': 'comments',
-                     'displayer_args': {'displayer': 'string', 'max_length': 2000},
-                     'ag_grid_specs': {'wrapText': True}}}
+        'displayer_args': {'displayer': 'string', 'max_length': 2000},
+        'ag_grid_specs': {'wrapText': True}}}
     search_contribution = {'a': {'highlight_regex': 'pizza'}}
     merged = merge_sds(init_sd, search_contribution)
     cc = DefaultMainStyling.style_column('a', merged['a'])
@@ -289,7 +289,7 @@ def test_style_column_delete_keys_drops_tooltip():
     adds by default. The motivating case: a string column where the user
     doesn't want a tooltip permanently attached to the cell."""
     col_meta = {'_type': 'string', 'orig_col_name': 'comments',
-                'delete_keys': ['tooltip_config']}
+        'delete_keys': ['tooltip_config']}
     cc = DefaultMainStyling.style_column('a', col_meta)
     assert 'tooltip_config' not in cc
     # Other styled keys unaffected

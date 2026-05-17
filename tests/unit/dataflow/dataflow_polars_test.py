@@ -257,11 +257,8 @@ def test_search_op_delivers_highlight_regex_into_displayer_args():
     """End-to-end: a `search` operation on the widget should plumb its
     search term into `displayer_args.highlight_regex` for every polars-String
     column in the final df_viewer_config that gets sent to the JS side."""
-    df = pl.DataFrame({
-        'businessname': ['pizza', 'sushi', 'taco'],
-        'comments': ['area code', 'no match', 'area zone'],
-        'rating': [5, 4, 3],
-    })
+    df = pl.DataFrame({'businessname': ['pizza', 'sushi', 'taco'], 'comments': ['area code', 'no match', 'area zone'],
+        'rating': [5, 4, 3]})
     w = PolarsBuckarooInfiniteWidget(df)
     w.dataflow.operations = [[{'symbol': 'search'}, s('df'), 'col', 'area']]
 
@@ -283,20 +280,9 @@ def test_column_config_overrides_preserves_highlight_phrase_and_color():
     """End-to-end: a user-supplied column_config_overrides carrying
     highlight_phrase + highlight_color should survive the merge_column_config
     step and land in the final displayer_args."""
-    df = pl.DataFrame({
-        'businessname': ['pizza', 'sushi'],
-        'comments': ['area code', 'no match'],
-    })
-    overrides = {
-        'comments': {
-            'displayer_args': {
-                'displayer': 'string',
-                'max_length': 2000,
-                'highlight_phrase': ['area'],
-                'highlight_color': 'red',
-            },
-        },
-    }
+    df = pl.DataFrame({'businessname': ['pizza', 'sushi'], 'comments': ['area code', 'no match']})
+    overrides = {'comments': {'displayer_args': {'displayer': 'string', 'max_length': 2000,
+        'highlight_phrase': ['area'], 'highlight_color': 'red'}}}
     w = PolarsBuckarooInfiniteWidget(df, column_config_overrides=overrides)
 
     cc = w.df_display_args['main']['df_viewer_config']['column_config']
