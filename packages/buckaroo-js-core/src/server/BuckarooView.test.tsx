@@ -65,6 +65,27 @@ describe("BuckarooView (injectable IModel — #759)", () => {
         expect(events.get("metadata")?.size).toBe(1);
     });
 
+    it("does not hand raw parquet_b64 payloads to the widget on first render (codex P2)", () => {
+        const { model } = makeFakeModel();
+        const initialState = {
+            df_meta: { total_rows: 1, columns: 1, filtered_rows: 1, rows_shown: 1 },
+            // Raw payload — what a host adapter would pass straight from the wire.
+            df_data_dict: { main: { format: "parquet_b64", data: "ZmFrZQ==" } },
+            df_display_args: { main: { df_viewer_config: { pinned_rows: [], left_col_configs: [], column_config: [] }, summary_stats_key: "all_stats" } },
+        };
+
+        // Render synchronously — no act() wrapper. We want to see the very
+        // first commit, before the resolve effect fires.
+        const { queryByTestId, getByText } = render(
+            <BuckarooView model={model} initialState={initialState} mode="viewer" />,
+        );
+
+        // The widget must NOT receive the raw payload — otherwise
+        // makeStaticInfiniteDs crashes on data.slice(...).
+        expect(queryByTestId("viewer-widget-stub")).toBeNull();
+        expect(getByText(/Preparing/)).toBeTruthy();
+    });
+
     it("fires onMetadata for the initial payload", async () => {
         const { model } = makeFakeModel();
         const onMetadata = jest.fn();

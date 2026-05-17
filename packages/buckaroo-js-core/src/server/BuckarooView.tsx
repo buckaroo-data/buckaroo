@@ -36,6 +36,24 @@ const DEFAULT_BUCKAROO_OPTIONS: BuckarooOptions = {
 };
 const DEFAULT_COMMAND_CONFIG: CommandConfigT = { argspecs: {}, defaultArgs: {} };
 
+// Inline check — mirrors the (module-private) guard in resolveDFData.ts.
+// We can't import it directly without widening that module's API surface.
+function hasUnresolvedParquet(dict: unknown): boolean {
+    if (!dict || typeof dict !== "object") return false;
+    for (const v of Object.values(dict as Record<string, unknown>)) {
+        if (
+            v !== null &&
+            typeof v === "object" &&
+            !Array.isArray(v) &&
+            (v as any).format === "parquet_b64" &&
+            typeof (v as any).data === "string"
+        ) {
+            return true;
+        }
+    }
+    return false;
+}
+
 export interface BuckarooViewProps {
     /** An already-connected model implementing {@link IModel}. The caller is
      *  responsible for transport setup (WebSocket, Tauri IPC, etc.) and for
@@ -91,12 +109,26 @@ export function BuckarooView({
     style,
     className,
 }: BuckarooViewProps): React.ReactElement {
+    // If the caller passed raw initial_state straight off the wire,
+    // df_data_dict may still contain parquet_b64 payload objects. Those
+    // would crash makeStaticInfiniteDs (data.slice on a payload object),
+    // so block the widget render until the async resolution effect has
+    // populated dfDataDict. The BuckarooServerView wrapper pre-resolves
+    // before mounting, so it skips this path.
+    const initialNeedsResolution = React.useMemo(
+        () => hasUnresolvedParquet(initialState.df_data_dict),
+        [initialState],
+    );
+
     const [dfMeta, setDfMeta] = React.useState<DFMeta>(
         (initialState.df_meta as DFMeta) ?? DEFAULT_DF_META,
     );
     const [dfDataDict, setDfDataDict] = React.useState<Record<string, DFData>>(
-        (initialState.df_data_dict as Record<string, DFData>) ?? {},
+        initialNeedsResolution
+            ? {}
+            : ((initialState.df_data_dict as Record<string, DFData>) ?? {}),
     );
+    const [dataReady, setDataReady] = React.useState<boolean>(!initialNeedsResolution);
     const [dfDisplayArgs, setDfDisplayArgs] = React.useState<Record<string, IDisplayArgs>>(
         (initialState.df_display_args as Record<string, IDisplayArgs>) ?? {},
     );
@@ -121,16 +153,24 @@ export function BuckarooView({
 
     // Resolve any parquet-encoded payloads in df_data_dict. Pre-resolved
     // dicts (e.g. when BuckarooServerView already ran preResolveDFDataDict)
-    // pass through unchanged, so this is cheap in the common case.
+    // pass through unchanged, so this is cheap in the common case. Skip
+    // entirely when no resolution is needed — avoids a spurious re-render
+    // for the BuckarooServerView path.
     React.useEffect(() => {
+        if (!initialNeedsResolution) return;
         let cancelled = false;
         const dict = initialState.df_data_dict as Record<string, DFDataOrPayload> | undefined;
-        if (!dict) return;
+        if (!dict) {
+            setDataReady(true);
+            return;
+        }
         preResolveDFDataDict(dict).then((d) => {
-            if (!cancelled) setDfDataDict(d as Record<string, DFData>);
+            if (cancelled) return;
+            setDfDataDict(d as Record<string, DFData>);
+            setDataReady(true);
         });
         return () => { cancelled = true; };
-    }, [initialState]);
+    }, [initialState, initialNeedsResolution]);
 
     // Fire onMetadata for the initial payload, matching BuckarooServerView's
     // pre-split behavior.
@@ -210,7 +250,7 @@ export function BuckarooView({
 
     const wrapperStyle: React.CSSProperties = { width: "100%", height: "100%", ...(style ?? {}) };
 
-    if (!dfDisplayArgs?.main) {
+    if (!dfDisplayArgs?.main || !dataReady) {
         return (
             <div className={className} style={wrapperStyle}>
                 <div style={{ padding: 20, fontFamily: "sans-serif" }}>Preparing…</div>
