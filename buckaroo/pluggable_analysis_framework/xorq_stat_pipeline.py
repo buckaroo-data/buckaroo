@@ -105,6 +105,11 @@ class XorqStatPipeline:
     EXTERNAL_KEYS = frozenset(
         {"orig_col_name", "rewritten_col_name", "dtype", "length", "min", "max"})
 
+    # Result column for the table-level length scalar in the Phase-1
+    # aggregate expression. Exposed so callers of compile_batch_expr can
+    # locate the row count by name without hard-coding the literal.
+    TOTAL_LENGTH_KEY = "__total_length__"
+
     def __init__(self, stat_funcs: list, backend: Any = None, unit_test: bool = True):
         if not HAS_XORQ:
             raise ImportError(
@@ -165,6 +170,88 @@ class XorqStatPipeline:
         finally:
             self.backend = saved_backend
 
+    def _build_batch_agg_exprs(self, table) -> Tuple[List[Any], List[Tuple[str, StatFunc, Any]], List[StatError]]:
+        """Build the Phase-1 batch aggregate expressions for ``table``.
+
+        Returns ``(agg_exprs, batch_items, errors)``:
+          - ``agg_exprs``: list of ibis scalar expressions, starting with
+            ``table.count().name(TOTAL_LENGTH_KEY)`` and followed by one
+            named expression per (col, batch-stat) pair that survived the
+            column filter and constructed without raising.
+          - ``batch_items``: ``[(col, StatFunc, named_expr), ...]`` —
+            per-result attribution. ``process_table`` uses this to write
+            results back to the per-column accumulator.
+          - ``errors``: construction failures (``sf.func(col=table[c])``
+            raised, or ``.name(...)`` raised). One entry per (col, stat).
+
+        Pure expression building — no execution and no I/O. Safe to call
+        with an ``UnboundTable``.
+        """
+        schema = table.schema()
+        columns = list(table.columns)
+
+        agg_exprs: List[Any] = [table.count().name(self.TOTAL_LENGTH_KEY)]
+        batch_items: List[Tuple[str, StatFunc, Any]] = []
+        errors: List[StatError] = []
+
+        for sf in self.ordered_stat_funcs:
+            if not _is_batch_func(sf):
+                continue
+            xorq_col_param = next(r.name for r in sf.requires if r.type is XorqColumn)
+            stat_name = sf.provides[0].name
+            for col in columns:
+                col_dtype = schema[col]
+                if sf.column_filter is not None and not sf.column_filter(col_dtype):
+                    continue
+                try:
+                    expr = sf.func(**{xorq_col_param: table[col]})
+                except Exception as e:
+                    errors.append(StatError(
+                        column=col, stat_key=stat_name, error=e, stat_func=sf,
+                        inputs={"col": col}))
+                    continue
+                if expr is None:
+                    continue
+                try:
+                    expr = expr.name(f"{col}|{stat_name}")
+                except Exception as e:
+                    errors.append(StatError(
+                        column=col, stat_key=stat_name, error=e, stat_func=sf,
+                        inputs={"col": col}))
+                    continue
+                agg_exprs.append(expr)
+                batch_items.append((col, sf, expr))
+
+        return agg_exprs, batch_items, errors
+
+    def compile_batch_expr(self, table) -> Tuple[Any, List[StatError]]:
+        """Return the Phase-1 batch aggregate expression for ``table``.
+
+        ``table`` may be any ibis Table — including an UnboundTable from
+        ``xo.table(schema, name=...)``. The returned expression has shape
+        ``(1 row) × (1 + N_batch_results)`` with columns
+        ``TOTAL_LENGTH_KEY`` and ``<col>|<stat_name>``.
+
+        Only Phase-1 batched stats are folded in: those with an
+        ``XorqColumn`` parameter and no non-raw dependencies. Per-column
+        histograms (Phase 2) and Python-computed stats (``non_null_count``,
+        ``nan_per``, ``distinct_per``, ``_type``, ``typing_stats``) are NOT
+        in the result — histograms need the resolved scalar min/max from
+        Phase 1, and computed stats are pure Python on resolved values.
+
+        Returns ``(expr, errors)`` where ``errors`` collects construction
+        failures (typically empty).
+
+        Rebind to a concrete source before executing::
+
+            unbound = xo.table(schema, name="t")
+            expr, _ = pipeline.compile_batch_expr(unbound)
+            bound = expr.op().replace({unbound.op(): real_source.op()}).to_expr()
+            df = bound.execute()
+        """
+        agg_exprs, _batch_items, errors = self._build_batch_agg_exprs(table)
+        return table.aggregate(agg_exprs), errors
+
     def process_table(self, table) -> Tuple[SDType, List[StatError]]:
         schema = table.schema()
         columns = list(table.columns)
@@ -183,37 +270,17 @@ class XorqStatPipeline:
         # ``length`` is a table-level scalar (same value for every column),
         # so it goes in once as ``__total_length__`` rather than as N
         # per-column expressions.
-        TOTAL_LENGTH_KEY = "__total_length__"
-        batch_items: List[Tuple[str, StatFunc, Any]] = []
-        for sf in self.ordered_stat_funcs:
-            if not _is_batch_func(sf):
+        agg_exprs, batch_items, construction_errors = self._build_batch_agg_exprs(table)
+        # Mirror construction-time failures into per-column accumulators so
+        # downstream resolve sees the same Err shape it always has.
+        for se in construction_errors:
+            sf = se.stat_func
+            if sf is None:
                 continue
-            xorq_col_param = next(r.name for r in sf.requires if r.type is XorqColumn)
-            for col in columns:
-                col_dtype = schema[col]
-                if sf.column_filter is not None and not sf.column_filter(col_dtype):
-                    continue
-                try:
-                    expr = sf.func(**{xorq_col_param: table[col]})
-                except Exception as e:
-                    for sk in sf.provides:
-                        accumulators[col][sk.name] = Err(error=e, stat_func_name=sf.name, column_name=col,
-                            inputs={"col": col})
-                    continue
-                if expr is None:
-                    continue
-                stat_name = sf.provides[0].name
-                try:
-                    expr = expr.name(f"{col}|{stat_name}")
-                except Exception as e:
-                    for sk in sf.provides:
-                        accumulators[col][sk.name] = Err(error=e, stat_func_name=sf.name, column_name=col,
-                            inputs={"col": col})
-                    continue
-                batch_items.append((col, sf, expr))
-
-        agg_exprs = [table.count().name(TOTAL_LENGTH_KEY)]
-        agg_exprs.extend(e for _, _, e in batch_items)
+            for sk in sf.provides:
+                accumulators[se.column][sk.name] = Err(
+                    error=se.error, stat_func_name=sf.name,
+                    column_name=se.column, inputs={"col": se.column})
 
         try:
             result_df = self._execute(table.aggregate(agg_exprs))
@@ -224,7 +291,7 @@ class XorqStatPipeline:
                 for sk in sf.provides:
                     accumulators[col][sk.name] = Err(error=e, stat_func_name=sf.name, column_name=col, inputs={})
         else:
-            total_length = _to_python_scalar(result_df[TOTAL_LENGTH_KEY].iloc[0])
+            total_length = _to_python_scalar(result_df[self.TOTAL_LENGTH_KEY].iloc[0])
             if total_length is None:
                 total_length = 0
             for col in columns:
