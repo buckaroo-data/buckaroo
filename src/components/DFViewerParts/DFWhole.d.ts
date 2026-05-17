@@ -11,9 +11,6 @@ export interface BooleanDisplayerA {
 export interface StringDisplayerA {
     displayer: "string";
     max_length?: number;
-    highlight_phrase?: string | string[];
-    highlight_regex?: string;
-    highlight_color?: string;
 }
 export interface FloatDisplayerA {
     displayer: "float";
