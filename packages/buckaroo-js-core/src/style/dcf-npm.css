@@ -690,4 +690,9 @@ Then set the `style_block` property from ptyhon.
 }
 */
 
+mark.buckaroo-highlight {
+    background-color: yellow;
+    padding: 0;
+}
+
 

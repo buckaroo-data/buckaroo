@@ -1,5 +1,5 @@
 import { render } from "@testing-library/react";
-import { ColDef, ValueFormatterParams } from "ag-grid-community";
+import { ColDef, ICellRendererParams } from "ag-grid-community";
 
 import { getHighlightTextCellRenderer } from "./OtherRenderers";
 import { getStringFormatter } from "./Displayer";
@@ -7,7 +7,7 @@ import { dfToAgrid } from "./gridUtils";
 import { DFViewerConfig } from "./DFWhole";
 
 const plainFmt = getStringFormatter({ displayer: "string" });
-const mkProps = (value: unknown) => ({ value } as ValueFormatterParams);
+const mkProps = (value: unknown) => ({ value } as unknown as ICellRendererParams);
 
 describe("string displayer highlight", () => {
     it("highlights phrase matches", () => {
@@ -26,6 +26,57 @@ describe("string displayer highlight", () => {
             (m) => m.textContent,
         );
         expect(marks).toEqual(["42", "7"]);
+    });
+
+    it("regex wins when both highlight_phrase and highlight_regex are supplied", () => {
+        const R = getHighlightTextCellRenderer(plainFmt, {
+            phrase: "error",
+            regex: "\\d+",
+        });
+        const { container } = render(<R {...mkProps("error 42 fail")} />);
+        const marks = Array.from(container.querySelectorAll("mark")).map(
+            (m) => m.textContent,
+        );
+        // If regex won, only the digit run is wrapped. If phrase had won,
+        // we'd see "error" wrapped instead.
+        expect(marks).toEqual(["42"]);
+    });
+
+    it("falls back to plain rendering when highlight_regex is invalid", () => {
+        const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const R = getHighlightTextCellRenderer(plainFmt, { regex: "(" });
+            const { container } = render(<R {...mkProps("error 42")} />);
+            expect(container.querySelectorAll("mark")).toHaveLength(0);
+            expect(container.textContent).toBe("error 42");
+            expect(warn).toHaveBeenCalled();
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it("applies max_length truncation before matching (matches past the cutoff are not highlighted)", () => {
+        // max_length=12 → "X needle Y n" — the second "needle" is past the
+        // cutoff and only the first should be wrapped. This guards the
+        // contract: formatter (truncation) runs before pattern matching.
+        const truncFmt = getStringFormatter({ displayer: "string", max_length: 12 });
+        const R = getHighlightTextCellRenderer(truncFmt, { phrase: "needle" });
+        const { container } = render(
+            <R {...mkProps("X needle Y needle Z")} />,
+        );
+        const marks = Array.from(container.querySelectorAll("mark")).map(
+            (m) => m.textContent,
+        );
+        expect(marks).toEqual(["needle"]);
+        expect(container.textContent).toBe("X needle Y n");
+    });
+
+    it("omits inline backgroundColor when highlight_color is unset (CSS class default applies)", () => {
+        const R = getHighlightTextCellRenderer(plainFmt, { phrase: "x" });
+        const { container } = render(<R {...mkProps("x")} />);
+        const mark = container.querySelector("mark") as HTMLElement;
+        expect(mark.classList.contains("buckaroo-highlight")).toBe(true);
+        expect(mark.style.backgroundColor).toBe("");
     });
 
     it("dfToAgrid wires cellRenderer (not just valueFormatter) when highlight_regex is set", () => {

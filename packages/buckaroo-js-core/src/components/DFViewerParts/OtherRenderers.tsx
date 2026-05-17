@@ -1,5 +1,5 @@
 import * as _ from "lodash-es";
-import { ValueFormatterFunc } from "ag-grid-community";
+import { ICellRendererParams, ValueFormatterFunc, ValueFormatterParams } from "ag-grid-community";
 
 export const getTextCellRenderer = (formatter: ValueFormatterFunc<any>) => {
     const TextCellRenderer = (props: any) => {
@@ -39,7 +39,7 @@ const buildRegexPattern = (source: string): RegExp | undefined => {
 export const getHighlightTextCellRenderer = (
     formatter: ValueFormatterFunc<any>,
     spec: { phrase?: string | string[]; regex?: string },
-    color: string = "yellow",
+    color?: string,
 ) => {
     // regex wins if both are supplied (documented as mutually exclusive).
     const pattern =
@@ -51,8 +51,12 @@ export const getHighlightTextCellRenderer = (
     if (pattern === undefined) {
         return getTextCellRenderer(formatter);
     }
-    const HighlightTextCellRenderer = (props: any) => {
-        const raw = formatter(props);
+    // Default color + padding live on .buckaroo-highlight in dcf-npm.css so
+    // themes can restyle; user-supplied highlight_color flows through inline
+    // and wins over the class default.
+    const markStyle = color ? { backgroundColor: color } : undefined;
+    const HighlightTextCellRenderer = (props: ICellRendererParams<any, any, any>) => {
+        const raw = formatter(props as unknown as ValueFormatterParams);
         if (typeof raw !== "string" || raw.length === 0) {
             return <span>{raw}</span>;
         }
@@ -61,7 +65,7 @@ export const getHighlightTextCellRenderer = (
             <span>
                 {parts.map((part, i) =>
                     i % 2 === 1 ? (
-                        <mark key={i} style={{ backgroundColor: color, padding: 0 }}>
+                        <mark key={i} className="buckaroo-highlight" style={markStyle}>
                             {part}
                         </mark>
                     ) : (
