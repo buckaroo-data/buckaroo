@@ -118,7 +118,7 @@ class PandasAutocleaning:
             and returns the bare df; bare-df returns pass through unchanged.
             """
             return [s("set!"), s("df"),
-                    [s("apply-result!"), s("sd"), form]]
+                [s("apply-result!"), s("sd"), form]]
         full_ops.extend(map(wrap_set_df, operations))
         full_ops.append(s("df"))
         if not operations:

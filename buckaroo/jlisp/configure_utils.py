@@ -84,11 +84,7 @@ def configure_buckaroo(transforms):
                 return result.df
             return result
 
-        extra_env = {
-            'df': df_copy,
-            'sd': sd_view,
-            'apply-result!': _apply_result,
-        }
+        extra_env = {'df': df_copy, 'sd': sd_view, 'apply-result!': _apply_result}
         ret_df = buckaroo_eval(instructions, extra_env)
         return ret_df, sd_dict
 

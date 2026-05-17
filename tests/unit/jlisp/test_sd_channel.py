@@ -56,11 +56,7 @@ def test_sdresult_merges_via_apply_result_closure():
     # Build the wrapped form by hand mirroring autocleaning's _run_df_interpreter:
     # (begin (set! df (apply-result! sd <op>)) df)
     op = [{'symbol': 'sdresult_op'}, s('df'), 'a', 'hello']
-    instructions = [
-        s('begin'),
-        [s('set!'), s('df'), [s('apply-result!'), s('sd'), op]],
-        s('df'),
-    ]
+    instructions = [s('begin'), [s('set!'), s('df'), [s('apply-result!'), s('sd'), op]], s('df')]
     _ret_df, sd_after = buckaroo_transform(instructions, df, {})
     assert sd_after.get('a', {}).get('note') == 'hello'
 
@@ -88,11 +84,7 @@ def test_sd_arg_is_read_only_mappingproxy():
     buckaroo_transform = _build_transform(ReadOnlyAttemptCommand)
     df = pl.DataFrame({'a': [1, 2, 3]})
     op = [{'symbol': 'mutate_attempt'}, s('df'), s('sd'), 'a', 'hello']
-    instructions = [
-        s('begin'),
-        [s('set!'), s('df'), [s('apply-result!'), s('sd'), op]],
-        s('df'),
-    ]
+    instructions = [s('begin'), [s('set!'), s('df'), [s('apply-result!'), s('sd'), op]], s('df')]
     with pytest.raises(TypeError):
         buckaroo_transform(instructions, df, {})
 
@@ -138,12 +130,8 @@ def test_sd_arg_sees_upstream_sdresult_mutations():
     df = pl.DataFrame({'a': [1, 2, 3]})
     seed_op = [{'symbol': 'seed'}, s('df'), 'a', 1]
     read_op = [{'symbol': 'read_assert'}, s('df'), s('sd'), 'a', 1]
-    instructions = [
-        s('begin'),
-        [s('set!'), s('df'), [s('apply-result!'), s('sd'), seed_op]],
-        [s('set!'), s('df'), [s('apply-result!'), s('sd'), read_op]],
-        s('df'),
-    ]
+    instructions = [s('begin'), [s('set!'), s('df'), [s('apply-result!'), s('sd'), seed_op]],
+        [s('set!'), s('df'), [s('apply-result!'), s('sd'), read_op]], s('df')]
     _ret_df, sd_after = buckaroo_transform(instructions, df, {})
     assert sd_after['a']['seed'] == 1
     assert sd_after['a']['after'] == 2
