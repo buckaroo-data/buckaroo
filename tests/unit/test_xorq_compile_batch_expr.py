@@ -42,14 +42,18 @@ def _rebind(expr, unbound, real):
 
 class TestCompileBatchExpr:
     def test_returns_unbound_when_given_unbound(self):
+        from xorq.vendor.ibis.expr.operations.relations import UnboundTable
+
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
         unbound = _unbound()
         expr, errors = pipeline.compile_batch_expr(unbound)
         assert errors == []
-        # Should still contain the UnboundTable op — proves we didn't bind.
-        # repr(expr.op()) prints an opaque object id, so walk the expr tree
-        # via repr(expr) which prints the op graph.
-        assert "UnboundTable" in repr(expr)
+        # Walk the op tree directly — the expression must still reference
+        # the UnboundTable. Using ``op.find`` rather than repr-matching so
+        # the test doesn't depend on ibis' printable format.
+        found = expr.op().find(UnboundTable)
+        assert found, "compile_batch_expr should not bind the input table"
+        assert unbound.op() in found
 
     def test_output_columns_have_expected_names(self):
         pipeline = XorqStatPipeline(XORQ_STATS_V2)

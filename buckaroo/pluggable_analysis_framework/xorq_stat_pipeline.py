@@ -197,6 +197,15 @@ class XorqStatPipeline:
         for sf in self.ordered_stat_funcs:
             if not _is_batch_func(sf):
                 continue
+            # Batch funcs are expected to provide exactly one stat — the
+            # named aggregate column ``<col>|<stat_name>`` is keyed by
+            # ``sf.provides[0].name``. If a batch func ever provides more
+            # than one, only the first would round-trip through the
+            # aggregate, so flag it loudly rather than silently dropping
+            # the rest.
+            assert len(sf.provides) == 1, (
+                f"batch stat {sf.name!r} provides {len(sf.provides)} keys; "
+                f"batch funcs must provide exactly one")
             xorq_col_param = next(r.name for r in sf.requires if r.type is XorqColumn)
             stat_name = sf.provides[0].name
             for col in columns:
@@ -228,7 +237,8 @@ class XorqStatPipeline:
         """Return the Phase-1 batch aggregate expression for ``table``.
 
         ``table`` may be any ibis Table — including an UnboundTable from
-        ``xo.table(schema, name=...)``. The returned expression has shape
+        ``xo.table(schema, name=...)``. The returned expression is already
+        wrapped in ``table.aggregate(...)`` and has shape
         ``(1 row) × (1 + N_batch_results)`` with columns
         ``TOTAL_LENGTH_KEY`` and ``<col>|<stat_name>``.
 
@@ -242,7 +252,10 @@ class XorqStatPipeline:
         Returns ``(expr, errors)`` where ``errors`` collects construction
         failures (typically empty).
 
-        Rebind to a concrete source before executing::
+        Rebind to a concrete source before executing. The replacement
+        source must be schema-compatible — same column names and dtypes
+        the unbound table was built with — or execute will fail when the
+        backend tries to resolve the per-column expressions::
 
             unbound = xo.table(schema, name="t")
             expr, _ = pipeline.compile_batch_expr(unbound)
@@ -272,7 +285,11 @@ class XorqStatPipeline:
         # per-column expressions.
         agg_exprs, batch_items, construction_errors = self._build_batch_agg_exprs(table)
         # Mirror construction-time failures into per-column accumulators so
-        # downstream resolve sees the same Err shape it always has.
+        # downstream resolve sees the same Err shape it always has. The
+        # errors aren't appended to ``all_errors`` directly here — they
+        # reach the caller via ``resolve_accumulator`` (below), which
+        # converts every Err entry it walks into a StatError. Writing them
+        # twice would double-report.
         for se in construction_errors:
             sf = se.stat_func
             if sf is None:
