@@ -28,10 +28,13 @@
 #        a. The captured output shows a passing pytest summary.
 #        b. No `failed` / `error` lines appear in the summary.
 #        c. The captured output contains a known signature of the
-#           polars-stream / pyo3 shutdown race (the FATAL line plus a
-#           pyo3/polars-stream panic frame). Without this signature
-#           guard, an unrelated native crash producing exit 134 after a
-#           passing summary would silently get reported as success.
+#           polars-stream / pyo3 shutdown race — either the pyo3 FATAL
+#           line OR a Rust panic frame from pyo3/polars-stream. We've
+#           seen runs where the panic frame is lost from the captured
+#           output (process is racing SIGABRT against tee), so requiring
+#           both was too strict. Either one alone is still specific
+#           enough to rule out unrelated SIGABRTs (malloc corruption,
+#           other C-extension crashes) that produce neither string.
 #   3. Otherwise propagates the original exit code unchanged.
 #
 # Real failures (pytest exit 1, crashes before the summary, errored
@@ -51,13 +54,15 @@ trap 'rm -f "$LOG"' EXIT
 "$@" 2>&1 | tee "$LOG"
 status=${PIPESTATUS[0]}
 
-# Signature of the known polars-stream / pyo3 shutdown race. We require
-# both the FATAL marker AND a Rust panic frame from pyo3 OR polars-stream.
-# An unrelated SIGABRT (e.g. malloc corruption, a different C extension
-# crashing) would not produce these strings.
+# Signature of the known polars-stream / pyo3 shutdown race. Either the
+# pyo3 FATAL marker OR a Rust panic frame from pyo3/polars-stream is
+# sufficient — observed runs lose one or the other from captured output
+# depending on which fd flushes first before SIGABRT. An unrelated SIGABRT
+# (malloc corruption, a different C extension crashing) would produce
+# neither string.
 has_known_signature() {
     grep -qE "FATAL: exception not rethrown" "$LOG" \
-        && grep -qE "panicked at .*(pyo3|polars-stream|polars_stream)" "$LOG"
+        || grep -qE "panicked at .*(pyo3|polars-stream|polars_stream)" "$LOG"
 }
 
 if [ "$status" -eq 134 ] \
@@ -67,7 +72,7 @@ if [ "$status" -eq 134 ] \
    && has_known_signature; then
     echo ""
     echo "::warning::pytest exited 134 (SIGABRT) but the summary shows all tests passed"
-    echo "::warning::AND the polars-stream / pyo3 shutdown signature was present in output."
+    echo "::warning::AND a polars-stream / pyo3 shutdown signature was present in output."
     echo "::warning::Treating as success. See scripts/run_pytest_tolerant.sh for context."
     exit 0
 fi
