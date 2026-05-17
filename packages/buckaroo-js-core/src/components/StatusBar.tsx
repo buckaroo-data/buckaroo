@@ -158,9 +158,11 @@ let _fsc_instance_seq = 0;
 // AG-Grid destroys and recreates the cellRenderer instance on every
 // onCellValueChanged (the status-bar grid regenerates row data on each
 // buckarooState change). Component-scoped useRef is wiped each remount, so
-// we hoist engagement state to module scope. Same browser tab can only show
-// one BuckarooWidget search at a time in practice, so a single shared
-// timestamp is fine.
+// we hoist engagement state to module scope. Caveat: if two BuckarooWidgets
+// are visible in the same tab, a recent typing event in widget A could
+// cause widget B's next mount to grab focus within _FSC_REFOCUS_WINDOW_MS.
+// Acceptable in practice — users search one widget at a time — but worth
+// scoping by widget id if multi-widget search becomes common.
 let _fsc_engagedAt = 0;          // ms timestamp of last user typing/focus
 let _fsc_carryoverCaret = 0;     // selection caret from the dying instance,
                                  // so the new instance can restore it
@@ -206,8 +208,11 @@ export const fakeSearchCell = function (_params: any) {
         };
     }, []);
 
+    // Pass the value through as-is. All clear paths (X button,
+    // debounce-clear, Enter / 🔍 with empty input) send '' so the upstream
+    // handleSearchCellChange dispatches search: [''] consistently.
     const submit = (v: string) => {
-        _params.setValue(v === '' ? null : v)
+        _params.setValue(v)
     }
 
     // Live search: after SEARCH_DEBOUNCE_MS of no keystrokes, push the term
@@ -253,14 +258,13 @@ export const fakeSearchCell = function (_params: any) {
                         _fsc_engagedAt = 0;
                     }
                 }}
-                onSubmit={() => submit(searchVal)}
                 onKeyDown={keyPressHandler}
             />
             <button style={{ flex: "none" }} onClick={() => submit(searchVal)}>&#x1F50D;</button>
             <button style={{ flex: "none" }}
                     onClick={() => {
                         setSearchVal('');
-                        _params.setValue('');
+                        submit('');
                     }}
             >X</button>
         </div>
