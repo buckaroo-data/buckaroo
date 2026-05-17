@@ -3,7 +3,9 @@ from buckaroo.customizations.polars_analysis import (
     VCAnalysis, PLCleaningStats, BasicAnalysis)
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
-from buckaroo.dataflow.autocleaning import merge_ops, format_ops, AutocleaningConfig
+from buckaroo.dataflow.autocleaning import (
+    merge_ops, format_ops, AutocleaningConfig, _rekey_op_sd_to_internal,
+)
 from buckaroo.polars_buckaroo import PolarsAutocleaning
 from buckaroo.customizations.polars_commands import (
     Command, PlSafeInt, DropCol, FillNA, GroupBy, NoOp, Search, SDResult
@@ -245,6 +247,32 @@ def test_default_main_styling_emits_highlight_regex_into_displayer_args():
     cc = DefaultMainStyling.style_column('a', col_meta)
     assert cc['displayer_args']['displayer'] == 'string'
     assert cc['displayer_args']['highlight_regex'] == 'pizza'
+
+
+def test_rekey_preserves_analysis_entries_when_orig_names_collide_with_letters():
+    """Regression for codex review on #758. If an orig col name happens
+    to equal an internal letter (e.g. df cols ['b', 'foo'] → internal
+    a='b', b='foo'), the rekey must not merge the analysis entry for
+    internal 'b' into 'a' just because rewrites['b']=='a'. Analysis
+    entries (marked by `rewritten_col_name`) pass through untouched;
+    only op-contributed (orig-keyed) entries get rekeyed."""
+    cleaned_df = pl.DataFrame({'b': [1], 'foo': [2]})
+    cleaning_sd = {
+        'a': {'rewritten_col_name': 'a', 'orig_col_name': 'b', '_type': 'integer'},
+        'b': {'rewritten_col_name': 'b', 'orig_col_name': 'foo', '_type': 'integer'},
+        # op-contributed entry keyed by orig name 'foo'
+        'foo': {'highlight_regex': 'x'},
+    }
+    out = _rekey_op_sd_to_internal(cleaning_sd, cleaned_df)
+    # analysis entries untouched, in place
+    assert out['a']['orig_col_name'] == 'b'
+    assert out['a']['_type'] == 'integer'
+    assert out['b']['orig_col_name'] == 'foo'
+    assert out['b']['_type'] == 'integer'
+    # op-contributed entry rekeyed onto the matching internal letter
+    assert out['b']['highlight_regex'] == 'x'
+    # no stray orig-keyed entry left behind
+    assert 'foo' not in out
 
 
 def test_style_column_handles_col_meta_missing_type():
