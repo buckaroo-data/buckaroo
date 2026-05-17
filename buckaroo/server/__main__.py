@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import sys
+import threading
 
 import tornado.httpserver
 import tornado.ioloop
@@ -47,15 +48,18 @@ def main():
 
     if args.stdio_control:
         # Background thread blocks on stdin; when the parent closes the pipe,
-        # the read returns empty and we exit. macOS/Linux only in v1; Windows
-        # has different stdin-pipe semantics and is deferred with the platform.
-        import threading
+        # the read returns empty (EOF) and we exit. macOS/Linux only in v1;
+        # Windows has different stdin-pipe semantics and is deferred with the
+        # platform. On read exception, log to stderr before exiting so a
+        # misconfigured supervisor (e.g. stdin not piped) is diagnosable
+        # instead of silently terminating.
         def _stdin_watchdog():
             try:
                 while sys.stdin.read(1):
                     pass
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"buckaroo.server: --stdio-control watchdog read failed: {exc!r}; exiting",
+                    file=sys.stderr)
             os._exit(0)
         threading.Thread(target=_stdin_watchdog, daemon=True).start()
 
@@ -71,7 +75,8 @@ def main():
     server.add_sockets(sockets)
 
     # Handshake line for parent-process supervisors (Tauri sidecar, etc.).
-    print(f"BUCKAROO_PORT={bound_port}", flush=True)
+    # stdout was reconfigured to line_buffering above, so the newline flushes.
+    print(f"BUCKAROO_PORT={bound_port}")
     log.info("Server listening on http://127.0.0.1:%d", bound_port)
 
     tornado.ioloop.IOLoop.current().start()

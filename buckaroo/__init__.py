@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import inspect
 import platform
+import sys
 from ._version import __version__
 from .buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, AutocleaningBuckaroo
 from .dataflow.widget_extension_utils import DFViewer
@@ -112,8 +113,7 @@ try:
         if not is_running_in_mp_timeout() and not has_initted:
             # Route to stderr so the buckaroo.server stdout handshake stays unambiguous
             # (the Tauri sidecar parses stdout for BUCKAROO_PORT=<n>).
-            import sys as _sys
-            print("must be running inside ipython to enable default display via enable()", file=_sys.stderr)
+            print("must be running inside ipython to enable default display via enable()", file=sys.stderr)
             warn_on_incompatible()
     try:
         import polars

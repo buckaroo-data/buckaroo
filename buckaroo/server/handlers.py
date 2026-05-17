@@ -5,6 +5,7 @@ import platform
 import sys
 import time
 import traceback
+import uuid
 
 import tornado.web
 
@@ -150,7 +151,6 @@ class LoadHandler(tornado.web.RequestHandler):
             return None, None, None, None, None, None
 
         if not session_id:
-            import uuid
             session_id = uuid.uuid4().hex
 
         mode = body.get("mode", "viewer")
@@ -191,7 +191,7 @@ class LoadHandler(tornado.web.RequestHandler):
         if not self.application.settings.get("open_browser", True):
             return "disabled"
 
-        port = self.application.settings.get("port", 8888)
+        port = self.application.settings["port"]
         return find_or_create_session_window(session_id, port, reload_if_found=True)
 
     def _load_file_with_error_handling(self, path: str, is_lazy: bool):

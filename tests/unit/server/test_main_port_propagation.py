@@ -15,11 +15,6 @@ that ``main()`` now uses.
 """
 
 import socket
-import sys
-
-import pytest
-
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Uses POSIX bind_sockets semantics")
 
 
 def _close_all(sockets):
