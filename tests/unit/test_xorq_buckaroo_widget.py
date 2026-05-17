@@ -182,6 +182,58 @@ class TestSearch:
         assert w.df_meta["filtered_rows"] == 5
 
 
+def _find_cc(column_config, col_name):
+    for entry in column_config:
+        if entry.get("col_name") == col_name:
+            return entry
+    raise AssertionError(f"col_name {col_name!r} not in column_config")
+
+
+class TestSearchHighlight:
+    """Equivalent of the polars-search highlight wiring from #758, ported
+    to the xorq backend. ibis ``StringValue.contains`` is a literal
+    substring match, so the search term flows to the JS displayer as
+    ``highlight_phrase`` (list), not ``highlight_regex``."""
+
+    def test_search_op_delivers_highlight_phrase_into_displayer_args(self):
+        """End-to-end through XorqBuckarooWidget — a `search` op should
+        plumb its term into ``displayer_args.highlight_phrase`` for every
+        ibis-String column and skip non-string columns."""
+        w = XorqBuckarooWidget(_searchable_expr())
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": ["admin"]}
+        w.buckaroo_state = state
+
+        cc = w.df_display_args["main"]["df_viewer_config"]["column_config"]
+        # 'a' is name (string)
+        a_args = _find_cc(cc, "a")["displayer_args"]
+        assert a_args["displayer"] == "string"
+        assert a_args["highlight_phrase"] == ["admin"]
+        # 'b' is role (string)
+        b_args = _find_cc(cc, "b")["displayer_args"]
+        assert b_args["displayer"] == "string"
+        assert b_args["highlight_phrase"] == ["admin"]
+        # 'c' is score (integer) — no highlight
+        c_args = _find_cc(cc, "c")["displayer_args"]
+        assert "highlight_phrase" not in c_args
+
+    def test_empty_search_drops_highlight_from_displayer_args(self):
+        """Clearing the search box (``""``) should remove the highlight
+        from displayer_args, matching the filter going back to no-op."""
+        w = XorqBuckarooWidget(_searchable_expr())
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": ["admin"]}
+        w.buckaroo_state = state
+
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": [""]}
+        w.buckaroo_state = state
+
+        cc = w.df_display_args["main"]["df_viewer_config"]["column_config"]
+        a_args = _find_cc(cc, "a")["displayer_args"]
+        assert "highlight_phrase" not in a_args
+
+
 def _paginated_expr():
     return xo.memtable(
         {"a": [3, 1, 4, 1, 5, 9, 2, 6, 5, 3], "b": ["p", "q", "r", "s", "t", "u", "v", "w", "x", "y"]})
