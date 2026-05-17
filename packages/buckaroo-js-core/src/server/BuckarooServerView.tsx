@@ -3,6 +3,34 @@ import * as React from "react";
 import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from "../components/BuckarooWidgetInfinite";
 import { preResolveDFDataDict } from "../components/DFViewerParts/resolveDFData";
 import { WebSocketModel } from "./WebSocketModel";
+import { DFMeta, BuckarooState, BuckarooOptions } from "../components/WidgetTypes";
+import { CommandConfigT } from "../components/CommandUtils";
+import { Operation } from "../components/OperationUtils";
+import { OperationResult, baseOperationResults } from "../components/DependentTabs";
+import { DFData, DFDataOrPayload } from "../components/DFViewerParts/DFWhole";
+import { IDisplayArgs } from "../components/DFViewerParts/gridUtils";
+
+// Defaults are only visible to the widgets if the server sends partial
+// initial_state (it should always send these keys, but useState wants a
+// fully-typed initializer, and the render guard below means the widgets
+// never actually see these values).
+const DEFAULT_DF_META: DFMeta = { total_rows: 0, columns: 0, filtered_rows: 0, rows_shown: 0 };
+const DEFAULT_BUCKAROO_STATE: BuckarooState = {
+    sampled: false,
+    cleaning_method: false,
+    quick_command_args: {},
+    post_processing: false,
+    df_display: "main",
+    show_commands: false,
+};
+const DEFAULT_BUCKAROO_OPTIONS: BuckarooOptions = {
+    sampled: [],
+    cleaning_method: [],
+    post_processing: [],
+    df_display: [],
+    show_commands: [],
+};
+const DEFAULT_COMMAND_CONFIG: CommandConfigT = { argspecs: {}, defaultArgs: {} };
 
 /**
  * BuckarooServerView — embed a Buckaroo server session inside a React tree.
@@ -64,7 +92,15 @@ interface ReadyState {
     model: WebSocketModel;
     src: ReturnType<typeof getKeySmartRowCache>;
     mode: BuckarooServerMode;
-    initialState: Record<string, any>;
+    initialState: Record<string, unknown>;
+}
+
+function pickMode(rawMode: unknown): BuckarooServerMode {
+    if (rawMode === "buckaroo" || rawMode === "viewer") return rawMode;
+    if (rawMode !== undefined && rawMode !== null) {
+        console.warn(`[BuckarooServerView] unknown mode ${JSON.stringify(rawMode)} — falling back to "viewer".`);
+    }
+    return "viewer";
 }
 
 /** Derive a Buckaroo server WebSocket URL from an HTTP server URL + session
@@ -87,14 +123,14 @@ export function BuckarooServerView({
     const [error, setError] = React.useState<Error | null>(null);
 
     // Re-fired state values so React re-renders when the model emits change events.
-    const [dfMeta, setDfMeta] = React.useState<any>({ total_rows: 0 });
-    const [dfDataDict, setDfDataDict] = React.useState<Record<string, any>>({});
-    const [dfDisplayArgs, setDfDisplayArgs] = React.useState<Record<string, any>>({});
-    const [buckarooState, setBuckarooStateLocal] = React.useState<any>({});
-    const [buckarooOptions, setBuckarooOptions] = React.useState<any>({});
-    const [commandConfig, setCommandConfig] = React.useState<any>({});
-    const [operationResults, setOperationResults] = React.useState<any>({});
-    const [operations, setOperations] = React.useState<any[]>([]);
+    const [dfMeta, setDfMeta] = React.useState<DFMeta>(DEFAULT_DF_META);
+    const [dfDataDict, setDfDataDict] = React.useState<Record<string, DFData>>({});
+    const [dfDisplayArgs, setDfDisplayArgs] = React.useState<Record<string, IDisplayArgs>>({});
+    const [buckarooState, setBuckarooStateLocal] = React.useState<BuckarooState>(DEFAULT_BUCKAROO_STATE);
+    const [buckarooOptions, setBuckarooOptions] = React.useState<BuckarooOptions>(DEFAULT_BUCKAROO_OPTIONS);
+    const [commandConfig, setCommandConfig] = React.useState<CommandConfigT>(DEFAULT_COMMAND_CONFIG);
+    const [operationResults, setOperationResults] = React.useState<OperationResult>(baseOperationResults);
+    const [operations, setOperations] = React.useState<Operation[]>([]);
 
     // Keep the latest onMetadata in a ref so we don't reconnect when the
     // host passes a fresh callback identity each render.
@@ -123,7 +159,10 @@ export function BuckarooServerView({
                 });
 
                 const initialState = await new Promise<Record<string, any>>((resolve, reject) => {
-                    const onClose = () => reject(new Error("WebSocket closed before initial_state was received"));
+                    const onClose = () => {
+                        ws!.removeEventListener("message", handler);
+                        reject(new Error("WebSocket closed before initial_state was received"));
+                    };
                     const handler = (event: MessageEvent) => {
                         if (typeof event.data !== "string") return;
                         try {
@@ -148,19 +187,19 @@ export function BuckarooServerView({
                 }
 
                 const model = new WebSocketModel(ws, initialState);
-                const src = getKeySmartRowCache(model, (a: any, b: any) => console.error("[BuckarooServerView] cache error:", a, b));
-                const mode: BuckarooServerMode = (initialState.mode === "buckaroo" ? "buckaroo" : "viewer");
+                const src = getKeySmartRowCache(model, (a: unknown, b: unknown) => console.error("[BuckarooServerView] cache error:", a, b));
+                const mode: BuckarooServerMode = pickMode(initialState.mode);
 
-                setDfMeta(initialState.df_meta || { total_rows: 0 });
-                setDfDataDict(initialState.df_data_dict || {});
-                setDfDisplayArgs(initialState.df_display_args || {});
-                setBuckarooStateLocal(initialState.buckaroo_state || {});
-                setBuckarooOptions(initialState.buckaroo_options || {});
-                setCommandConfig(initialState.command_config || {});
-                setOperationResults(initialState.operation_results || {});
-                setOperations(initialState.operations || []);
+                setDfMeta((initialState.df_meta as DFMeta) ?? DEFAULT_DF_META);
+                setDfDataDict((initialState.df_data_dict as Record<string, DFData>) ?? {});
+                setDfDisplayArgs((initialState.df_display_args as Record<string, IDisplayArgs>) ?? {});
+                setBuckarooStateLocal((initialState.buckaroo_state as BuckarooState) ?? DEFAULT_BUCKAROO_STATE);
+                setBuckarooOptions((initialState.buckaroo_options as BuckarooOptions) ?? DEFAULT_BUCKAROO_OPTIONS);
+                setCommandConfig((initialState.command_config as CommandConfigT) ?? DEFAULT_COMMAND_CONFIG);
+                setOperationResults((initialState.operation_results as OperationResult) ?? baseOperationResults);
+                setOperations((initialState.operations as Operation[]) ?? []);
 
-                if (initialState.metadata) onMetadataRef.current?.(initialState.metadata, initialState.prompt);
+                if (initialState.metadata) onMetadataRef.current?.(initialState.metadata as BuckarooServerMetadata, initialState.prompt as string | undefined);
 
                 setReady({ model, src, mode, initialState });
             } catch (e) {
@@ -181,25 +220,28 @@ export function BuckarooServerView({
         if (!ready) return;
         const { model } = ready;
 
-        const onMeta = (metadata: any, prompt?: string) => {
+        const onMeta = (metadata: BuckarooServerMetadata, prompt?: string) => {
             onMetadataRef.current?.(metadata, prompt);
-            setDfMeta(model.get("df_meta") || { total_rows: metadata?.rows || 0 });
-            preResolveDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
-            setDfDisplayArgs(model.get("df_display_args") || {});
-            setBuckarooStateLocal(model.get("buckaroo_state") || {});
-            setBuckarooOptions(model.get("buckaroo_options") || {});
-            setCommandConfig(model.get("command_config") || {});
-            setOperationResults(model.get("operation_results") || {});
-            setOperations(model.get("operations") || []);
+            setDfMeta((model.get("df_meta") as DFMeta | undefined) ?? { ...DEFAULT_DF_META, total_rows: metadata?.rows ?? 0 });
+            preResolveDFDataDict((model.get("df_data_dict") as Record<string, DFDataOrPayload> | undefined) ?? {})
+                .then((d) => setDfDataDict(d as Record<string, DFData>));
+            setDfDisplayArgs((model.get("df_display_args") as Record<string, IDisplayArgs> | undefined) ?? {});
+            setBuckarooStateLocal((model.get("buckaroo_state") as BuckarooState | undefined) ?? DEFAULT_BUCKAROO_STATE);
+            setBuckarooOptions((model.get("buckaroo_options") as BuckarooOptions | undefined) ?? DEFAULT_BUCKAROO_OPTIONS);
+            setCommandConfig((model.get("command_config") as CommandConfigT | undefined) ?? DEFAULT_COMMAND_CONFIG);
+            setOperationResults((model.get("operation_results") as OperationResult | undefined) ?? baseOperationResults);
+            setOperations((model.get("operations") as Operation[] | undefined) ?? []);
         };
-        const onDfMeta = (v: any) => setDfMeta(v);
-        const onDfDataDict = (v: any) => { preResolveDFDataDict(v).then(setDfDataDict); };
-        const onDfDisplayArgs = (v: any) => setDfDisplayArgs(v);
-        const onBState = (v: any) => setBuckarooStateLocal(v);
-        const onBOpts = (v: any) => setBuckarooOptions(v);
-        const onCmdCfg = (v: any) => setCommandConfig(v);
-        const onOpRes = (v: any) => setOperationResults(v);
-        const onOps = (v: any) => setOperations(v);
+        const onDfMeta = (v: DFMeta) => setDfMeta(v);
+        const onDfDataDict = (v: Record<string, DFDataOrPayload>) => {
+            preResolveDFDataDict(v).then((d) => setDfDataDict(d as Record<string, DFData>));
+        };
+        const onDfDisplayArgs = (v: Record<string, IDisplayArgs>) => setDfDisplayArgs(v);
+        const onBState = (v: BuckarooState) => setBuckarooStateLocal(v);
+        const onBOpts = (v: BuckarooOptions) => setBuckarooOptions(v);
+        const onCmdCfg = (v: CommandConfigT) => setCommandConfig(v);
+        const onOpRes = (v: OperationResult) => setOperationResults(v);
+        const onOps = (v: Operation[]) => setOperations(v);
 
         model.on("metadata", onMeta);
         model.on("change:df_meta", onDfMeta);
@@ -224,14 +266,16 @@ export function BuckarooServerView({
         };
     }, [ready]);
 
-    const onBuckarooState = React.useCallback((newState: any) => {
+    const onBuckarooState = React.useCallback<React.Dispatch<React.SetStateAction<BuckarooState>>>((newState) => {
         if (!ready) return;
-        const resolved = typeof newState === "function" ? newState(buckarooState) : newState;
+        const resolved = typeof newState === "function"
+            ? (newState as (prev: BuckarooState) => BuckarooState)(buckarooState)
+            : newState;
         ready.model.set("buckaroo_state", resolved);
         ready.model.save_changes();
     }, [ready, buckarooState]);
 
-    const onOperations = React.useCallback((newOps: any) => {
+    const onOperations = React.useCallback((newOps: Operation[]) => {
         if (!ready) return;
         ready.model.set("operations", newOps);
         ready.model.save_changes();
