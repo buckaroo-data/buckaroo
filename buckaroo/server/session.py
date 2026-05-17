@@ -43,6 +43,13 @@ class SessionState:
         self.last_accessed = time.time()
 
 
+PROTOCOL_VERSION = 1
+"""Bumped when the WebSocket protocol changes incompatibly. Clients
+(WebSocketModel, TauriIPCModel) read this from initial_state and warn on
+mismatch. Lockstep with the buckaroo PyPI version is the documented expectation;
+this field is the runtime escape hatch."""
+
+
 def build_state_message(session: "SessionState", metadata: dict | None = None) -> dict:
     """Build the full ``initial_state`` WebSocket payload from a session.
 
@@ -53,7 +60,8 @@ def build_state_message(session: "SessionState", metadata: dict | None = None) -
     Returns:
         A dict ready to be JSON-serialised and sent to WebSocket clients.
     """
-    msg: dict = {"type": "initial_state", "metadata": metadata if metadata is not None else session.metadata,
+    msg: dict = {"type": "initial_state", "protocol_version": PROTOCOL_VERSION,
+        "metadata": metadata if metadata is not None else session.metadata,
         "prompt": session.prompt, "df_display_args": session.df_display_args, "df_data_dict": session.df_data_dict,
         "df_meta": session.df_meta, "mode": session.mode}
     if session.mode == "buckaroo":
