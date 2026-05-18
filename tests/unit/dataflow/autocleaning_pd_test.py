@@ -8,10 +8,7 @@ from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.dataflow.autocleaning import PandasAutocleaning, generate_quick_ops
 from buckaroo.jlisp.lisp_utils import (s, sA, sQ)
-from buckaroo.customizations.pandas_commands import (
-    Command,
-    SafeInt, DropCol, FillNA, GroupBy, NoOp, Search, OnlyOutliers
-)
+from buckaroo.customizations.pandas_commands import (Command, SafeInt, DropCol, FillNA, GroupBy, NoOp, Search, OnlyOutliers)
 from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)
 from buckaroo.dataflow.dataflow import CustomizableDataflow
 
@@ -624,3 +621,29 @@ def test_two_arg_quick_command():
 
 
 
+
+
+class SearchConf(AutocleaningConfig):
+    autocleaning_analysis_klasses = []
+    command_klasses = [Search]
+    name = ""
+
+
+def test_search_threads_highlight_phrase_into_cleaning_sd_under_rename():
+    """Search plumbs its search term into cleaning_sd as highlight_phrase on
+    every string/object column. The rest of the sd is keyed by buckaroo's
+    internal a/b/c names, so autocleaning rewrites the op-supplied keys to
+    match — otherwise the entries would sit alongside as orphans without
+    a `_type` and trip the styling fallback. pandas Search uses literal
+    str.find, so highlight_phrase (not _regex) matches the filter semantics."""
+    ac = PandasAutocleaning([SearchConf])
+    # 'businessname' (object) becomes 'a', 'rating' (int) becomes 'b'.
+    df = pd.DataFrame({'businessname': ['pizza', 'sushi'], 'rating': [5, 4]})
+    search_op = [{'symbol': 'search'}, s('df'), 'col', 'pizza']
+
+    _cleaned, cleaning_sd, _gen, _ops = ac.handle_ops_and_clean(
+        df, cleaning_method='', quick_command_args={}, existing_operations=[search_op])
+
+    assert cleaning_sd.get('a', {}).get('highlight_phrase') == ['pizza']
+    assert 'businessname' not in cleaning_sd
+    assert 'highlight_phrase' not in cleaning_sd.get('b', {})

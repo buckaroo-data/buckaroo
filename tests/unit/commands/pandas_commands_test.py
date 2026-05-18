@@ -378,12 +378,15 @@ def test_search_none_needle():
 
 
 def test_search_with_match():
-    """Test Search filters rows containing the needle."""
+    """Test Search filters rows containing the needle. Search returns
+    SDResult(filtered_df, sd_updates) so the JS side can highlight the
+    search term — unwrap the df for the length assertion."""
     base_df = pd.DataFrame({
         'name': pd.Series(['Alice', 'Bob', 'Charlie'], dtype='object'),
         'b': [1, 2, 3]})
     result = Search.transform(base_df.copy(), 'name', 'Bob')
-    assert len(result) == 1
+    assert len(result.df) == 1
+    assert result.sd_updates['name'] == {'highlight_phrase': ['Bob']}
 
 
 def test_search_to_py():

@@ -473,16 +473,21 @@ class Search(Command):
     command_pattern = [[3, 'term', 'type', 'string']]
     quick_args_pattern = [[3, 'term', 'type', 'string']]
 
-    @staticmethod 
+    @staticmethod
     def transform(df, col, val):
-        #print("search_df", val)
         if val is None or val == "":
-            #print("no search term set")
             return df
-        return search_df_str(df, val)
+        filtered = search_df_str(df, val)
+        # search_df_str uses literal `Series.str.find`, so expose the term
+        # as highlight_phrase (list) — not highlight_regex — for matching
+        # filter semantics on the JS-side string displayer.
+        str_cols = list(df.select_dtypes("string").columns)
+        str_cols.extend(list(df.select_dtypes("object").columns))
+        sd_updates = {c: {'highlight_phrase': [val]} for c in str_cols}
+        return SDResult(filtered, sd_updates)
 
 
-    @staticmethod 
+    @staticmethod
     def transform_to_py(df, col, val):
         return f"""    from buckaroo.customizations.pandas_commands import search_df_str
     return search_df_str(df, '{val}')"""
