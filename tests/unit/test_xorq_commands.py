@@ -120,10 +120,7 @@ class TestPipelining:
     def test_dropcol_then_fillna(self):
         ac = _ac()
         expr = _expr()
-        ops = [
-            [s("dropcol"), {"symbol": "df"}, "b"],
-            [s("fillna"), {"symbol": "df"}, "a", 0],
-        ]
+        ops = [[s("dropcol"), {"symbol": "df"}, "b"], [s("fillna"), {"symbol": "df"}, "a", 0]]
         cleaned, *_ = _run(ac, expr, ops)
         result = cleaned.execute().sort_values("c").reset_index(drop=True)
         assert "b" not in cleaned.columns
