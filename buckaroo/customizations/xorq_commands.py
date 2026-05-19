@@ -49,7 +49,7 @@ class DropCol(Command):
 
     @staticmethod
     def transform_to_py(expr, col):
-        return f"    expr = expr.drop('{col}')"
+        return f"    df = df.drop('{col}')"
 
 
 class FillNA(Command):
@@ -62,7 +62,7 @@ class FillNA(Command):
 
     @staticmethod
     def transform_to_py(expr, col, val):
-        return f"    expr = expr.mutate({col}=expr['{col}'].fill_null({val!r}))"
+        return f"    df = df.mutate({col}=df['{col}'].fill_null({val!r}))"
 
 
 class DropDuplicates(Command):
@@ -75,7 +75,7 @@ class DropDuplicates(Command):
 
     @staticmethod
     def transform_to_py(expr, col):
-        return f"    expr = expr.distinct(on=['{col}'])"
+        return f"    df = df.distinct(on=['{col}'])"
 
 
 def _search_expr(expr, val):
@@ -111,4 +111,4 @@ class Search(Command):
     def transform_to_py(expr, col, val):
         return (
             "    from buckaroo.customizations.xorq_commands import _search_expr\n"
-            f"    expr = _search_expr(expr, '{val}')")
+            f"    df = _search_expr(df, '{val}')")
