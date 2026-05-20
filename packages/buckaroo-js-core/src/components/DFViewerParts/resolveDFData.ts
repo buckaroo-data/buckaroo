@@ -41,20 +41,27 @@ function b64ToArrayBuffer(b64: string): ArrayBuffer {
 }
 
 /**
- * JSON-parse each cell value in a row from parquet-decoded data.
+ * Convert a hyparquet BigInt cell to Number when safe, stringify otherwise.
+ * hyparquet decodes parquet INT64 as JS BigInt; using Number when it fits
+ * keeps downstream code BigInt-unaware, and stringifying preserves precision
+ * for the rare out-of-range case (fixes #627).
+ */
+function bigintToCell(val: bigint): number | string {
+    const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+    return val >= -MAX_SAFE && val <= MAX_SAFE ? Number(val) : String(val);
+}
+
+/**
+ * JSON-parse each cell value in a row from row-layout parquet data.
  *
- * The Python side JSON-encodes every cell before writing to parquet
- * (because summary stats have mixed types per column). We need to
- * JSON.parse each value back to its original type.
- *
- * The 'index' column is left as a plain string (stat name like 'mean', 'dtype').
+ * For non-wide payloads (the main DataFrame artifact), object/category
+ * columns are JSON-encoded on the Python side and must be parsed back.
+ * The 'index' and 'level_0' columns are kept as-is.
  */
 function parseParquetRow(row: Record<string, any>): DFDataRow {
     const parsed: DFDataRow = {};
     for (const [key, val] of Object.entries(row)) {
         if (key === 'index' || key === 'level_0') {
-            // index/level_0 columns are stat names — keep as-is
-            // BigInt from hyparquet INT64 columns must be converted to Number
             parsed[key] = typeof val === 'bigint' ? Number(val) : val;
         } else if (typeof val === 'string') {
             try {
@@ -63,16 +70,83 @@ function parseParquetRow(row: Record<string, any>): DFDataRow {
                 parsed[key] = val;
             }
         } else if (typeof val === 'bigint') {
-            // hyparquet decodes INT64 as BigInt; use Number only if safe,
-            // otherwise stringify to preserve precision (fixes #627)
-            const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
-            parsed[key] = val >= -MAX_SAFE && val <= MAX_SAFE
-                ? Number(val) : String(val);
+            parsed[key] = bigintToCell(val);
         } else {
             parsed[key] = val;
         }
     }
     return parsed;
+}
+
+/**
+ * Pivot a wide single-row parquet result (col__stat columns) back to the
+ * row-based DFData shape that downstream consumers expect.
+ *
+ * Input: one row like ``{a__mean: 42, a__dtype: '"float64"', b__mean: 10, ...}``
+ * Output: ``[{index: 'mean', level_0: 'mean', a: 42, b: 10}, ...]``
+ *
+ * Encoding contract (mirrors ``_stat_value_to_pa_array`` in serialization_utils.py):
+ *   - numbers/bools/null arrive as native JS types and pass through
+ *   - BigInt cells (parquet INT64) are safe-converted
+ *   - strings are JSON.parsed unconditionally: the Python side always
+ *     JSON-encodes str/list/dict, so a plain string `"float64"` arrives
+ *     as the literal `"\"float64\""` and parses back to `"float64"`
+ */
+export function pivotWideSummaryStats(wideRow: Record<string, any>): DFData {
+    // stat -> col -> value
+    const statCols: Record<string, Record<string, any>> = {};
+    const allCols = new Set<string>();
+
+    for (const [key, rawVal] of Object.entries(wideRow)) {
+        const sepIdx = key.indexOf('__');
+        if (sepIdx === -1) continue;
+        const col = key.substring(0, sepIdx);
+        const stat = key.substring(sepIdx + 2);
+        allCols.add(col);
+        if (!statCols[stat]) statCols[stat] = {};
+
+        let val: any = rawVal;
+        if (typeof val === 'bigint') {
+            val = bigintToCell(val);
+        } else if (typeof val === 'string') {
+            try {
+                val = JSON.parse(val);
+            } catch {
+                // Not valid JSON — keep raw. Should not happen for values
+                // produced by _stat_value_to_pa_array, but guard anyway so
+                // a corrupt cell doesn't take the whole pivot down.
+            }
+        }
+        statCols[stat][col] = val;
+    }
+
+    const colList = Array.from(allCols);
+    const rows: DFData = [];
+    for (const [stat, cols] of Object.entries(statCols)) {
+        // level_0 is duplicated alongside index for legacy row-format parity;
+        // a future cleanup can drop level_0 once consumers stop reading it.
+        const row: DFDataRow = { index: stat, level_0: stat };
+        for (const col of colList) {
+            row[col] = cols[col] ?? null;
+        }
+        rows.push(row);
+    }
+    return rows;
+}
+
+function isWideFormat(payload: ParquetB64Payload): boolean {
+    return payload.layout === 'wide';
+}
+
+function decodeParquetRows(
+    payload: ParquetB64Payload,
+    rows: Record<string, any>[],
+): DFData {
+    if (isWideFormat(payload)) {
+        // Wide layout always serializes a single row.
+        return rows.length === 0 ? [] : pivotWideSummaryStats(rows[0]);
+    }
+    return (rows as DFDataRow[]).map(parseParquetRow);
 }
 
 /**
@@ -106,8 +180,7 @@ export function resolveDFData(val: DFDataOrPayload | undefined | null): DFData {
                 metadata,
                 rowFormat: 'object',
                 onComplete: (data: any[]) => {
-                    // JSON-parse each cell to recover typed values
-                    result = (data as DFDataRow[]).map(parseParquetRow);
+                    result = decodeParquetRows(val, data);
                     cacheSet(val.data, result);
                 },
             });
@@ -156,7 +229,7 @@ export async function resolveDFDataAsync(val: DFDataOrPayload | undefined | null
                     reject(e);
                 }
             });
-            const result = (data as DFDataRow[]).map(parseParquetRow);
+            const result = decodeParquetRows(val, data);
             cacheSet(val.data, result);
             return result;
         } catch (e) {
