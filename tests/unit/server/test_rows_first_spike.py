@@ -18,7 +18,6 @@ rebroadcast path while we evaluate the perf characteristics.
 """
 import io
 import json
-import os
 import shutil
 import sys
 import tempfile
