@@ -189,6 +189,44 @@ def test_quick_commands_run():
     #assert bw.operations == [[sQ('search'), s('df'), "col", "aa"]]
 
 
+def test_quick_command_args_change_does_not_double_fire_operation_result():
+    """Regression for #780.
+
+    ``DataFlow._operation_result`` is registered as an ``@observe`` callback
+    on ``('sampled_df', 'cleaning_method', 'quick_command_args', 'operations')``
+    and sets ``self.operations = result[3]`` inside its own body. Without a
+    reentry guard, the trait observer re-fires the method inside its own
+    execution, doubling all downstream work (``handle_ops_and_clean``,
+    ``_processed_result``, ``_get_summary_sd``, ``populate_df_meta``). On a
+    500k-row xorq frame this manifested as ~2× search latency.
+
+    Assert that handle_ops_and_clean runs exactly once per
+    ``quick_command_args`` change (it's the per-fire workhorse — counting
+    its invocations is the cleanest proxy for "_operation_result fired").
+    """
+    df = pd.DataFrame({'a': ["foo", "bar", "baz"], 'b': [1, 2, 3]})
+    bw = BuckarooWidget(df)
+
+    # Patch after construction so the init-time invocations don't count.
+    call_count = {'n': 0}
+    original_handle = bw.dataflow.ac_obj.handle_ops_and_clean
+
+    def counting_handle(*args, **kwargs):
+        call_count['n'] += 1
+        return original_handle(*args, **kwargs)
+
+    bw.dataflow.ac_obj.handle_ops_and_clean = counting_handle
+
+    # Single external trait change.
+    bw.dataflow.quick_command_args = {'search': ['ba']}
+
+    assert call_count['n'] == 1, (
+        f"_operation_result fired {call_count['n']} times for one "
+        "quick_command_args change; see #780 — the observer re-enters via "
+        "``self.operations = result[3]`` and doubles all downstream work."
+    )
+
+
 def test_multi_index_cols() -> None:
     df = get_multiindex_cols_df()
     bw = BuckarooWidget(df)
