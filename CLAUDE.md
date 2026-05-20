@@ -36,19 +36,6 @@ cd packages/buckaroo-js-core && pnpm storybook
 
 Test suite should complete in under 40 seconds. If it doesn't, something is wrong.
 
-## Git hooks
-
-Hooks live under `.githooks/` and are activated per clone with:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-Shims defer to `pre-commit` against `.pre-commit-config.yaml`. The pre-push
-hook runs CI's `Python / Lint` job locally (ruff + `paddy_format --check`
-full-tree), so a push that would fail CI fails locally first. See
-CONTRIBUTING.md for installation.
-
 ## CI
 
 Runs on push to main and PRs. Key jobs: LintPython, TestJS, BuildWheel, TestPython (3.11-3.14), Playwright (Storybook, Jupyter, Marimo, WASM). Uses `depot-ubuntu-latest` runners.
