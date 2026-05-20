@@ -9,6 +9,13 @@ import tornado.websocket
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
 from buckaroo.server.session import build_state_message
 
+
+def _handle_infinite_request_xorq(xorq_dataflow, payload_args):
+    """Lazy delegate so the server stays importable without buckaroo[xorq]."""
+    from buckaroo.server.xorq_loading import handle_infinite_request_xorq
+    return handle_infinite_request_xorq(xorq_dataflow, payload_args)
+
+
 log = logging.getLogger("buckaroo.server.websocket")
 
 _BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
@@ -25,7 +32,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
 
         # Send initial state if session already has data loaded
         session = sessions.get(session_id)
-        if session and (session.df is not None or session.ldf is not None):
+        if session and (session.df is not None or session.ldf is not None or session.xorq_dataflow is not None):
             self.write_message(json.dumps(build_state_message(session)))
 
     def on_message(self, message):
@@ -44,7 +51,10 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
     def _handle_buckaroo_state_change(self, new_state):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
-        if not session or session.mode != "buckaroo" or not session.dataflow:
+        if not session or session.mode != "buckaroo":
+            return
+        dataflow = session.xorq_dataflow if session.backend == "xorq" else session.dataflow
+        if dataflow is None:
             return
 
         old_state = session.buckaroo_state
@@ -61,14 +71,15 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
 
             # Propagate changes to the dataflow (mirrors BuckarooWidgetBase._buckaroo_state)
             if old_state.get("post_processing") != new_state.get("post_processing"):
-                session.dataflow.post_processing_method = new_state.get("post_processing", "")
+                dataflow.post_processing_method = new_state.get("post_processing", "")
             if old_state.get("cleaning_method") != new_state.get("cleaning_method"):
-                session.dataflow.cleaning_method = new_state.get("cleaning_method", "")
+                dataflow.cleaning_method = new_state.get("cleaning_method", "")
             if old_state.get("quick_command_args") != new_state.get("quick_command_args"):
-                session.dataflow.quick_command_args = new_state.get("quick_command_args", {})
+                dataflow.quick_command_args = new_state.get("quick_command_args", {})
 
-            # Re-extract state from the dataflow
-            buckaroo_state = get_buckaroo_display_state(session.dataflow)
+            # Re-extract state from the dataflow — same helper works for both
+            # ServerDataflow and XorqServerDataflow (verified by probe).
+            buckaroo_state = get_buckaroo_display_state(dataflow)
             session.df_display_args = buckaroo_state["df_display_args"]
             session.df_data_dict = buckaroo_state["df_data_dict"]
             session.df_meta = buckaroo_state["df_meta"]
@@ -105,21 +116,23 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
 
-        if not session or (session.df is None and session.ldf is None):
+        if not session or (session.df is None and session.ldf is None and session.xorq_dataflow is None):
             self.write_message(json.dumps({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0,
                 "error_info": "No data loaded for this session"}))
             return
 
-        try:
+        def _dispatch(pa):
             if session.mode == "lazy" and session.ldf is not None:
-                resp_msg, parquet_bytes = handle_infinite_request_lazy(session.ldf, session.orig_to_rw,
-                    session.rw_to_orig, session.metadata.get("rows", 0), payload_args)
-            elif session.mode == "buckaroo" and session.dataflow:
-                resp_msg, parquet_bytes = handle_infinite_request_buckaroo(
-                    session.dataflow, payload_args)
-            else:
-                resp_msg, parquet_bytes = handle_infinite_request(session.df, payload_args)
+                return handle_infinite_request_lazy(session.ldf, session.orig_to_rw,
+                    session.rw_to_orig, session.metadata.get("rows", 0), pa)
+            if session.mode == "buckaroo" and session.backend == "xorq" and session.xorq_dataflow:
+                return _handle_infinite_request_xorq(session.xorq_dataflow, pa)
+            if session.mode == "buckaroo" and session.dataflow:
+                return handle_infinite_request_buckaroo(session.dataflow, pa)
+            return handle_infinite_request(session.df, pa)
 
+        try:
+            resp_msg, parquet_bytes = _dispatch(payload_args)
             # Two-frame sequence: JSON text frame, then binary Parquet frame
             self.write_message(json.dumps(resp_msg))
             if parquet_bytes:
@@ -128,14 +141,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # Handle second_request (eager loading)
             second_pa = payload_args.get("second_request")
             if second_pa:
-                if session.mode == "lazy" and session.ldf is not None:
-                    resp2, parquet2 = handle_infinite_request_lazy(session.ldf, session.orig_to_rw, session.rw_to_orig,
-                        session.metadata.get("rows", 0), second_pa)
-                elif session.mode == "buckaroo" and session.dataflow:
-                    resp2, parquet2 = handle_infinite_request_buckaroo(
-                        session.dataflow, second_pa)
-                else:
-                    resp2, parquet2 = handle_infinite_request(session.df, second_pa)
+                resp2, parquet2 = _dispatch(second_pa)
                 self.write_message(json.dumps(resp2))
                 if parquet2:
                     self.write_message(parquet2, binary=True)
