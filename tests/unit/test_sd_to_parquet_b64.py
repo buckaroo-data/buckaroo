@@ -136,3 +136,43 @@ def test_empty_sd_round_trips():
     assert result['layout'] == 'wide'
     table = _decode(result)
     assert table.num_columns == 0
+
+
+def test_uint64_max_does_not_raise():
+    """A ``np.uint64`` stat above int64 range must not raise (regression).
+
+    Column maxes on uint64 dtypes routinely exceed ``2**63 - 1``. The encoder
+    used to coerce every int to ``pa.int64()`` unconditionally, which overflowed
+    in Arrow *before* ``sd_to_parquet_b64`` entered its try/except, so summary
+    serialization would crash instead of degrading gracefully.
+    """
+    big = np.uint64(2**63 + 7)  # one past int64 max
+    sd = {'col_a': {'max': big, 'dtype': 'uint64'}}
+    result = sd_to_parquet_b64(sd)
+    # Either the wide parquet path or the JSON fallback is acceptable — both
+    # are graceful. What's not acceptable is raising.
+    assert result['format'] in ('parquet_b64', 'table')
+
+
+def test_uint64_max_round_trips_in_wide_layout():
+    """uint64 stats survive the wide parquet round-trip via pa.uint64()."""
+    big = np.uint64(2**63 + 7)
+    sd = {'col_a': {'max': big, 'dtype': 'uint64'}}
+    table = _decode(sd_to_parquet_b64(sd))
+    schema = {f.name: str(f.type) for f in table.schema}
+    assert schema['a__max'] == 'uint64'
+    assert table.to_pydict()['a__max'] == [2**63 + 7]
+
+
+def test_negative_int_beyond_int64_falls_back_to_json_string():
+    """Ints outside both int64 and uint64 range fall back to JSON-encoded string.
+
+    The JS side already JSON.parses every string cell, so a stringified bignum
+    is the safest universal fallback (precision is JS's problem at that point).
+    """
+    huge_neg = -(2**70)
+    sd = {'col_a': {'min': huge_neg, 'dtype': 'int64'}}
+    table = _decode(sd_to_parquet_b64(sd))
+    schema = {f.name: str(f.type) for f in table.schema}
+    assert schema['a__min'] == 'string'
+    assert json.loads(table.to_pydict()['a__min'][0]) == huge_neg
