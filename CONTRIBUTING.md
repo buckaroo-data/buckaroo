@@ -31,28 +31,6 @@ pnpm install
 ./scripts/full_build.sh
 ```
 
-### Git hooks
-
-The repo ships pre-commit / pre-push hooks under `.githooks/`. Point git at
-them once per clone:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-The shims defer to [pre-commit](https://pre-commit.com/) to run the checks
-declared in `.pre-commit-config.yaml` (lint on commit, full-tree ruff +
-`paddy_format --check` on push — same as CI's `Python / Lint` job). Make
-sure pre-commit is on your PATH:
-
-```bash
-uv tool install pre-commit
-```
-
-Tracking the hooks under `.githooks/` instead of relying on `pre-commit
-install`'s generated shims means every clone runs identical hook code,
-and updates propagate via `git pull`.
-
 
 ## Running tests
 
