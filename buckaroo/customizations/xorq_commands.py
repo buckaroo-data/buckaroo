@@ -17,6 +17,7 @@ that values containing quotes, backslashes, etc. round-trip safely into
 the generated snippet.
 """
 
+from ..jlisp.configure_utils import SDResult  # noqa: F401 (re-export for command authors)
 from ..jlisp.lisp_utils import s
 
 
@@ -102,7 +103,17 @@ class Search:
 
     @staticmethod
     def transform(expr, col, val):
-        return search_expr(expr, val)
+        filtered = search_expr(expr, val)
+        if val is None or val == "":
+            return filtered
+        # ibis ``StringValue.contains`` is a literal substring match (not
+        # regex), so expose the term as highlight_phrase (list) — matching
+        # pandas Search (#764). Polars uses highlight_regex (#758) because
+        # its ``str.contains`` is a regex match.
+        schema = expr.schema()
+        string_cols = [name for name in expr.columns if schema[name].is_string()]
+        sd_updates = {c: {'highlight_phrase': [val]} for c in string_cols}
+        return SDResult(filtered, sd_updates)
 
     @staticmethod
     def transform_to_py(expr, col, val):
