@@ -1,5 +1,20 @@
 import { DFData, DFDataOrPayload } from './DFWhole';
 /**
+ * Pivot a wide single-row parquet result (col__stat columns) back to the
+ * row-based DFData shape that downstream consumers expect.
+ *
+ * Input: one row like ``{a__mean: 42, a__dtype: '"float64"', b__mean: 10, ...}``
+ * Output: ``[{index: 'mean', level_0: 'mean', a: 42, b: 10}, ...]``
+ *
+ * Encoding contract (mirrors ``_stat_value_to_pa_array`` in serialization_utils.py):
+ *   - numbers/bools/null arrive as native JS types and pass through
+ *   - BigInt cells (parquet INT64) are safe-converted
+ *   - strings are JSON.parsed unconditionally: the Python side always
+ *     JSON-encodes str/list/dict, so a plain string `"float64"` arrives
+ *     as the literal `"\"float64\""` and parses back to `"float64"`
+ */
+export declare function pivotWideSummaryStats(wideRow: Record<string, any>): DFData;
+/**
  * Synchronously resolve a DFDataOrPayload to DFData.
  *
  * - If the input is already a plain DFData array, return it as-is.
