@@ -44,8 +44,10 @@ def load_expr_build_dir(build_dir: str):
     a default (e.g. DuckDB), respect that."""
     from xorq.api import connect, load_expr  # noqa: PLC0415  (lazy, see module docstring)
     from xorq.vendor import ibis  # noqa: PLC0415
+    # Direct option assignment — `ibis.set_backend(...)` was removed in
+    # xorq 0.3.25; the option is the stable cross-version contract.
     if ibis.options.default_backend is None:
-        ibis.set_backend(connect())
+        ibis.options.default_backend = connect()
     return load_expr(build_dir)
 
 
