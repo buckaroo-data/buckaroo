@@ -98,3 +98,41 @@ def test_loaded_stat_executes_against_an_ibis_column(tmp_path: Path):
     table = xo.memtable({"a": [1, 2, 3]}, name="t")
     expr = klasses[0](table["a"])
     assert int(expr.execute()) == 3
+
+
+def test_dataflow_extra_klasses_extends_analysis_klasses(tmp_path: Path):
+    """XorqServerDataflow's per-instance extra_klasses appends to
+    _XORQ_ANALYSIS_KLASSES without mutating the class-level list.
+    This is the surface the /load_expr handler uses to inject project
+    stats — the test pins it so handler-only changes can't silently
+    bypass the extension path."""
+    from buckaroo.server.xorq_loading import (
+        XorqServerDataflow, _XORQ_ANALYSIS_KLASSES)
+
+    stats = tmp_path / "stats"
+    stats.mkdir()
+    (stats / "n_rows.py").write_text("def compute(col): return col.count()\n")
+    extra = load_project_stat_klasses(tmp_path)
+    assert len(extra) == 1
+
+    expr = xo.memtable({"a": [1, 2, 3]}, name="t")
+    dataflow = XorqServerDataflow(expr, skip_main_serial=True, extra_klasses=extra)
+
+    # Instance attr extends; class attr untouched.
+    assert dataflow.analysis_klasses is not _XORQ_ANALYSIS_KLASSES
+    assert len(dataflow.analysis_klasses) == len(_XORQ_ANALYSIS_KLASSES) + 1
+    assert extra[0] in dataflow.analysis_klasses
+    # All built-ins still there.
+    for builtin in _XORQ_ANALYSIS_KLASSES:
+        assert builtin in dataflow.analysis_klasses
+
+
+def test_dataflow_without_extra_klasses_keeps_class_default(tmp_path: Path):
+    """No extra_klasses → instance falls back to the class-level
+    _XORQ_ANALYSIS_KLASSES (the existing behaviour, must not regress)."""
+    from buckaroo.server.xorq_loading import (
+        XorqServerDataflow, _XORQ_ANALYSIS_KLASSES)
+
+    expr = xo.memtable({"a": [1, 2, 3]}, name="t")
+    dataflow = XorqServerDataflow(expr, skip_main_serial=True)
+    assert dataflow.analysis_klasses is _XORQ_ANALYSIS_KLASSES
