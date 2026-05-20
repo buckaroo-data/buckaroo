@@ -61,13 +61,10 @@ async def _post(port, path, body):
 
 @pytest.fixture(autouse=True)
 def enable_spike(monkeypatch):
-    """Flip the spike gate on for every test in this module; the
-    handler reads the env at request time so this works without a
-    fresh import."""
-    monkeypatch.setenv("BUCKAROO_ROWS_FIRST_SPIKE", "1")
-    # Re-import the constant from the handler module so subsequent
-    # handler invocations see the gate as on. The flag is read at
-    # module-import-time, so we patch the resolved value directly.
+    """Flip the spike gate on for every test in this module. The
+    ``_ROWS_FIRST_SPIKE`` constant is resolved from the env at module
+    import, so patching the env at test time has no effect — patch the
+    resolved module attribute directly."""
     from buckaroo.server import websocket_handler as wh
     monkeypatch.setattr(wh, "_ROWS_FIRST_SPIKE", True)
 
