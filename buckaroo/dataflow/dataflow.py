@@ -151,19 +151,30 @@ class DataFlow(ABCDataflow):
 
         These merged operations are then set back onto the "self.operations" trait.
 
-        Obviously this can lead to cycles so this code must be approached carefully
-
+        Obviously this can lead to cycles so this code must be approached carefully.
+        Concretely: this method sets ``self.operations = result[3]`` while
+        also observing the ``operations`` trait, so the observer re-fires
+        inside its own execution. Without the reentry guard below, every
+        downstream observer (cleaned → processed_result → _summary_sd →
+        populate_df_meta) runs twice per single ``quick_command_args``
+        change — measured as ~2× search latency for a 500k-row xorq frame.
         """
-        result = self.ac_obj.handle_ops_and_clean(
-            self.sampled_df, self.cleaning_method, self.quick_command_args, self.operations)
-
-        if result is None:
+        if getattr(self, '_in_operation_result', False):
             return
-        else:
-            self.cleaned = result
-            self.operations = result[3]
-        self.operation_results = {'transformed_df':None,
-            'generated_py_code': self.generated_code}
+        self._in_operation_result = True
+        try:
+            result = self.ac_obj.handle_ops_and_clean(
+                self.sampled_df, self.cleaning_method, self.quick_command_args, self.operations)
+
+            if result is None:
+                return
+            else:
+                self.cleaned = result
+                self.operations = result[3]
+            self.operation_results = {'transformed_df':None,
+                'generated_py_code': self.generated_code}
+        finally:
+            self._in_operation_result = False
 
     @property
     def cleaned_df(self):
