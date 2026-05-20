@@ -371,7 +371,16 @@ def _stat_value_to_pa_array(val):
     if isinstance(val, (bool, np.bool_)):
         return pa.array([bool(val)], type=pa.bool_())
     if isinstance(val, (int, np.integer)):
-        return pa.array([int(val)], type=pa.int64())
+        iv = int(val)
+        # uint64 stats (e.g. a column max on an unsigned dtype) routinely exceed
+        # int64 max. Promote to uint64, then to a JSON-encoded string for
+        # bignums that don't fit either — pyarrow would otherwise raise here,
+        # before sd_to_parquet_b64 reaches its JSON fallback.
+        if -(2**63) <= iv <= 2**63 - 1:
+            return pa.array([iv], type=pa.int64())
+        if 0 <= iv <= 2**64 - 1:
+            return pa.array([iv], type=pa.uint64())
+        return pa.array([_json_encode_cell(iv)], type=pa.string())
     if isinstance(val, (float, np.floating)):
         v = float(val)
         # NaN sentinel -> parquet null so the JS side sees null, not "NaN".
