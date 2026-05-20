@@ -103,6 +103,12 @@ class DataFlow(ABCDataflow):
 
     analysis_klasses = None
     summary_sd = Any()
+    # Scoped summary stats — see docs/plans/async-stats.md. `summary_sd_raw`
+    # is computed on `sampled_df` (pre-cleaning, pre-filter) and is always
+    # populated. The filtered scope reuses today's `summary_sd` (which runs
+    # on `processed_df`). The cleaned scope is computed on a separate
+    # cleaned-but-unfiltered df below.
+    summary_sd_raw = Any({})
     df_meta = Any()
 
     merged_sd = Any()
@@ -223,6 +229,41 @@ class DataFlow(ABCDataflow):
         return ret_summary, {}
 
     _summary_sd_cache_key = (None, None)
+    _summary_sd_raw_cache_key = (None, None)
+
+    @observe('summary_sd', 'quick_command_args')
+    @exception_protect('raw_summary_sd-protector')
+    def _raw_summary_sd(self, _change):
+        """Compute the bare-key (pre-filter) sd.
+
+        When no search filter is active, the pre-filter view equals the
+        post-filter view, so we reuse `summary_sd` by reference. When a
+        filter is active, we re-run the autocleaning pipeline with empty
+        quick_command_args to materialize the unfiltered df, then compute
+        stats on that.
+
+        See docs/plans/async-stats.md for the scope design. The bare keys
+        in `merged_sd` come from this trait; `filtered_*` keys come from
+        `summary_sd` directly when the filter is on.
+        """
+        if not self.quick_command_args:
+            # No filter: bare keys == today's summary_sd. Reference, not copy.
+            self.summary_sd_raw = self.summary_sd or {}
+            return
+        if self.sampled_df is None:
+            self.summary_sd_raw = {}
+            return
+        # Filter active: compute stats on the cleaned-but-unfiltered df.
+        # (Post-processing is currently a no-op in DataFlow base, so cleaning
+        # output suffices. When post-processing becomes meaningful it should
+        # also be applied here.)
+        unfiltered_result = self.ac_obj.handle_ops_and_clean(self.sampled_df, self.cleaning_method, {}, self.operations)
+        if unfiltered_result is None:
+            self.summary_sd_raw = {}
+            return
+        cleaned_df_unfiltered = unfiltered_result[0]
+        sd, _errs = self._get_summary_sd(cleaned_df_unfiltered)
+        self.summary_sd_raw = sd
 
     @observe('processed_result', 'analysis_klasses')
     @exception_protect('summary_sd-protector')
@@ -242,16 +283,21 @@ class DataFlow(ABCDataflow):
         self.summary_sd = result_summary_sd
         self.errs = errs
 
-    @observe('summary_sd', 'processed_result')
+    @observe('summary_sd', 'summary_sd_raw', 'quick_command_args', 'processed_result')
     @exception_protect('merged_sd-protector')
     def _merged_sd(self, change):
-        #slightly inconsitent that processed_sd gets priority over
-        #summary_sd, given that processed_df is computed first. My
-        #thinking was that processed_sd has greater total knowledge
-        #and should supersede summary_sd.
+        # Bare keys come from the raw scope (summary_sd_raw, computed on
+        # sampled_df). filtered_* keys are layered on top from
+        # summary_sd (post-everything) when a filter is active.
+        raw_summary = self.summary_sd_raw or {}
+        base = merge_sds(self.cleaned_sd, raw_summary, self.processed_sd)
+        if self.quick_command_args and self.summary_sd:
+            for col, stats in self.summary_sd.items():
+                target = base.setdefault(col, {})
+                for stat_name, val in stats.items():
+                    target[f'filtered_{stat_name}'] = val
+        self.merged_sd = base
 
-        self.merged_sd = merge_sds(self.cleaned_sd, self.summary_sd, self.processed_sd)
-        
 
     @observe('merged_sd', 'style_method')
     @exception_protect('widget_config-protector')
@@ -379,24 +425,38 @@ class CustomizableDataflow(DataFlow):
     df_data_dict = Any({'empty':[]}).tag(sync=True)
 
 
-    @observe('summary_sd', 'processed_result')
+    @observe('summary_sd', 'summary_sd_raw', 'quick_command_args', 'processed_result')
     @exception_protect('merged_sd-protector')
     def _merged_sd(self, change):
-        #slightly inconsitent that processed_sd gets priority over
-        #summary_sd, given that processed_df is computed first. My
-        #thinking was that processed_sd has greater total knowledge
-        #and should supersede summary_sd.
+        # Bare keys come from the raw scope (`summary_sd_raw`, computed on
+        # `sampled_df` — pre-cleaning, pre-filter). When a filter is active,
+        # `filtered_*` keys are layered on top from `summary_sd` (which runs
+        # on `processed_df`, the post-everything view).
+        raw_summary = self.summary_sd_raw or {}
 
         if self.processed_df is None:
             #on initial startup
-            self.merged_sd = merge_sds(self.init_sd, self.cleaned_sd, self.summary_sd, self.processed_sd)
+            self.merged_sd = merge_sds(self.init_sd, self.cleaned_sd, raw_summary, self.processed_sd)
             return
+
+        # summary_sd_raw is computed by DFStatsClass on sampled_df, which
+        # already rewrites column names internally before returning the sd.
+        # So raw_summary's keys are already in the a/b/c namespace and align
+        # with processed_df directly — no extra rewrite needed.
 
         #we do this to get rewrtten keys for init_sd
         rewritten_init_sd = merge_sd_overrides({}, self.processed_df, self.init_sd)
-        intermediate_sd = merge_sds(rewritten_init_sd, self.cleaned_sd, self.summary_sd)
-        self.merged_sd  = merge_sd_overrides(
-            intermediate_sd, self.processed_df, self.processed_sd)
+        intermediate_sd = merge_sds(rewritten_init_sd, self.cleaned_sd, raw_summary)
+        base = merge_sd_overrides(intermediate_sd, self.processed_df, self.processed_sd)
+
+        # Layer filtered_* keys on top when a search filter is active.
+        if self.quick_command_args and self.summary_sd:
+            for col, stats in self.summary_sd.items():
+                target = base.setdefault(col, {})
+                for stat_name, val in stats.items():
+                    target[f'filtered_{stat_name}'] = val
+
+        self.merged_sd = base
 
 
 
