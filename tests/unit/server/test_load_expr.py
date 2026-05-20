@@ -2,10 +2,12 @@
 XorqBuckarooInfiniteWidget over a xorq/ibis expression."""
 import io
 import json
+import os
 import shutil
 import sys
 import tempfile
 
+import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 import tornado.httpclient
@@ -138,3 +140,42 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             ws.close()
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_session_reuse_xorq_then_pandas(self):
+        """A client that POSTs /load_expr and then POSTs /load with the
+        same session id should see the pandas data on subsequent
+        infinite_requests — not stale xorq results. Regression for the
+        Codex P1 finding: backend / xorq_dataflow were sticky across
+        session reuse."""
+        builds_root = tempfile.mkdtemp()
+        csv_fd, csv_path = tempfile.mkstemp(suffix=".csv")
+        os.close(csv_fd)
+        try:
+            build_path = _build_expr_dir(builds_root)
+            pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}).to_csv(csv_path, index=False)
+
+            sid = "lx-reuse"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path})
+            await _post(self.get_http_port(), "/load",
+                {"session": sid, "path": csv_path, "mode": "buckaroo"})
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+            await ws.read_message()  # initial_state
+
+            ws.write_message(json.dumps({
+                "type": "infinite_request",
+                "payload_args": {"start": 0, "end": 10,
+                    "sourceName": "default", "origEnd": 10}}))
+
+            r = json.loads(await ws.read_message())
+            self.assertEqual(r["type"], "infinite_resp")
+            # CSV fixture has 3 rows; xorq fixture has 10. A failure here
+            # (length == 10) means dispatch is still serving xorq state.
+            self.assertEqual(r["length"], 3)
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            os.unlink(csv_path)
