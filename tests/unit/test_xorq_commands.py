@@ -54,7 +54,7 @@ class TestCommandsViaInterpreter:
         ac = _ac()
         expr = _expr()
         op = [s("noop"), {"symbol": "df"}, "a"]
-        cleaned, _sd, _code, final_ops = _run(ac, expr, [op])
+        cleaned, _sd, _code, final_ops, *_ = _run(ac, expr, [op])
         assert cleaned.count().execute() == 5
         assert final_ops == [op]
 

@@ -54,7 +54,7 @@ def test_autoclean_codegen():
     df = pd.DataFrame({'a': ["30", "40"]})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
+    cleaned_df, cleaning_sd, generated_code, merged_operations, *_ = cleaning_result
 
     assert generated_code == EXPECTED_GEN_CODE
 
@@ -172,6 +172,6 @@ def test_heuristic_autoclean_codegen():
     df = pd.DataFrame({'a': ["30", "40"]})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
+    cleaned_df, cleaning_sd, generated_code, merged_operations, *_ = cleaning_result
 
     assert generated_code == EXPECTED_GEN_CODE2

@@ -68,7 +68,8 @@ class SentinelAutocleaning:
             cleaned_df = SENTINEL_DF_2
         else:
             cleaned_df = df
-        return [cleaned_df, {}, generated_code, merged_operations]
+        # Sentinel stub: filtered and unfiltered views are identical.
+        return [cleaned_df, {}, generated_code, merged_operations, cleaned_df]
 
 class AutocleaningConfig:
     command_klasses = [DefaultCommandKlsList]
@@ -226,6 +227,21 @@ class PandasAutocleaning:
     
 
     def handle_ops_and_clean(self, df, cleaning_method, quick_command_args, existing_operations):
+        """Run cleaning + quick ops; return the filtered df plus the
+        unfiltered-baseline df as a 5-tuple.
+
+        Return shape: ``[cleaned_df, cleaning_sd, generated_code, final_ops,
+        cleaned_df_unfiltered]``. ``cleaned_df`` is the post-everything view
+        (today's behavior). ``cleaned_df_unfiltered`` is the same pipeline
+        with ``quick_command_args={}`` — i.e. cleaning applied, search
+        filter NOT applied. When no quick ops are present, the two dfs are
+        identical by reference (no extra interpreter run).
+
+        Both dfs come out of a single call so the dataflow observer
+        cascade fires ``handle_ops_and_clean`` exactly once per state
+        change (see #780). The raw-scope sd is computed downstream by
+        reading the unfiltered df from this return value.
+        """
         if df is None:
             #on first instantiation df is likely to be None,  do nothing and return
             return None
@@ -233,20 +249,23 @@ class PandasAutocleaning:
         cleaning_ops, cleaning_sd = self.produce_cleaning_ops(df, cleaning_method)
         # [{'meta':'no-op'}] is a sentinel for the initial state
         if ops_eq(existing_operations, [{'meta':'no-op'}]) and cleaning_method == "":
-            final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, [])
+            base_existing = []
+        else:
+            base_existing = existing_operations
+        final_ops = self.produce_final_ops(list(cleaning_ops), quick_command_args, base_existing)
+        unfiltered_final_ops = self.produce_final_ops(list(cleaning_ops), {}, base_existing)
+        if ops_eq(existing_operations, [{'meta':'no-op'}]) and cleaning_method == "":
             #FIXME, a little bit of a hack to reset cleaning_sd, but it helps tests pass. I
             # don't know how any other properties could really be set
             # when 'no-op' the initial state is true
             cleaning_sd = {}
-        else:
-            final_ops = self.produce_final_ops(cleaning_ops, quick_command_args, existing_operations)
         if ops_eq(final_ops,[]) and cleaning_method == "":
             # No-op short-circuit. Returns `df` by reference — load-bearing
             # for the same reasons as _run_df_interpreter's short-circuit:
             # avoids df.copy() identity churn (traitlets + frontend resync)
             # and avoids the init-order observer-loop hazard. See the longer
             # explanation in _run_df_interpreter above.
-            return [df, {}, "", []]
+            return [df, {}, "", [], df]
 
 
         cleaned_df, cleaning_sd = self._run_df_interpreter(df, final_ops, cleaning_sd)
@@ -258,5 +277,19 @@ class PandasAutocleaning:
         # internal a/b/c keys for the styling layer.
         cleaning_sd = _rekey_op_sd_to_internal(cleaning_sd, cleaned_df)
         generated_code = self._run_code_generator(final_ops)
-        return [merged_cleaned_df, cleaning_sd, generated_code, final_ops]
+
+        # Compute the unfiltered baseline (cleaning ops only, no search
+        # filter). When no quick ops were generated, unfiltered_final_ops
+        # equals final_ops; skip the second interpreter run and reuse the
+        # filtered result (preserves df identity per the short-circuit
+        # invariant — see feedback_short_circuit_identity).
+        if ops_eq(unfiltered_final_ops, final_ops):
+            merged_cleaned_df_unfiltered = merged_cleaned_df
+        else:
+            unfiltered_sd = {}
+            cleaned_df_unfiltered, unfiltered_sd = self._run_df_interpreter(df, unfiltered_final_ops, unfiltered_sd)
+            merged_cleaned_df_unfiltered = self.make_origs(df, cleaned_df_unfiltered, unfiltered_sd)
+
+        return [merged_cleaned_df, cleaning_sd, generated_code, final_ops,
+            merged_cleaned_df_unfiltered]
 
