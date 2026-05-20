@@ -28,7 +28,10 @@ class SessionState:
     rw_to_orig: dict = field(default_factory=dict)
     # Buckaroo mode fields
     mode: str = "viewer"  # "viewer", "buckaroo", or "lazy"
-    dataflow: Any = None  # ServerDataflow instance when mode="buckaroo"
+    backend: str = "pandas"  # "pandas" | "xorq"; meaningful when mode="buckaroo"
+    dataflow: Any = None  # ServerDataflow when backend="pandas"
+    xorq_dataflow: Any = None  # XorqServerDataflow when backend="xorq"
+    expr: Any = None  # ibis/xorq expression when backend="xorq"
     buckaroo_state: dict = field(default_factory=dict)
     buckaroo_options: dict = field(default_factory=dict)
     command_config: dict = field(default_factory=dict)

@@ -235,6 +235,12 @@ class LoadHandler(tornado.web.RequestHandler):
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
+        # Loading via /load is always pandas — clear any xorq state left
+        # by a prior /load_expr on the same session so WS dispatch routes
+        # to the new pandas dataflow rather than a stale xorq one.
+        session.backend = "pandas"
+        session.xorq_dataflow = None
+        session.expr = None
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
@@ -284,6 +290,136 @@ class LoadHandler(tornado.web.RequestHandler):
         log.info("load session=%s path=%s rows=%d browser=%s", session_id, path, metadata["rows"], browser_action)
 
         self.write({"session": session_id, "server_pid": os.getpid(), "browser_action": browser_action, **metadata})
+
+
+class LoadExprHandler(tornado.web.RequestHandler):
+    """POST /load_expr — load a xorq/ibis expression from a build dir
+    and serve it via the xorq-backed buckaroo dataflow.
+
+    Counterpart to ``LoadHandler`` for the xorq path. Reads
+    ``build_dir`` (the output of ``xorq build`` / ``xo.build_expr``)
+    rather than a file path, since the xorq widget's value is
+    push-down query execution against the underlying backend, not
+    paging over a materialised parquet.
+
+    ``mode`` on the session is still ``"buckaroo"`` (the frontend
+    renders identically); ``session.backend = "xorq"`` discriminates
+    inside the WS dispatch."""
+
+    def _parse_request_body(self) -> dict | None:
+        try:
+            body = json.loads(self.request.body)
+        except (json.JSONDecodeError, TypeError):
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body"})
+            return None
+        if not isinstance(body, dict):
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body"})
+            return None
+        return body
+
+    async def post(self):
+        body = self._parse_request_body()
+        if body is None:
+            return
+
+        build_dir = body.get("build_dir")
+        if not build_dir:
+            self.set_status(400)
+            self.write({"error": "Missing 'build_dir'"})
+            return
+
+        try:
+            from buckaroo.server import xorq_loading
+        except ImportError:
+            self.set_status(501)
+            self.write({"error_code": "xorq_not_installed",
+                "message": "xorq is not installed on this server. "
+                "Install with `pip install buckaroo[xorq]`."})
+            return
+
+        session_id = body.get("session") or uuid.uuid4().hex
+        prompt = body.get("prompt", "")
+        no_browser = bool(body.get("no_browser", False))
+        component_config = body.get("component_config")
+
+        try:
+            expr = xorq_loading.load_expr_build_dir(build_dir)
+            xorq_dataflow = xorq_loading.XorqServerDataflow(expr, skip_main_serial=True)
+            metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, build_dir)
+        except FileNotFoundError:
+            self.set_status(404)
+            self.write({"error_code": "build_dir_not_found",
+                "message": f"Build directory not found: {build_dir}"})
+            return
+        except Exception:
+            tb = traceback.format_exc()
+            log.error("load_expr error build_dir=%s: %s", build_dir, tb)
+            resp: dict = {"error_code": "load_expr_error",
+                "message": "Failed to load xorq expression"}
+            if _BUCKAROO_DEBUG:
+                resp["details"] = tb
+            self.set_status(500)
+            self.write(resp)
+            return
+
+        sessions = self.application.settings["sessions"]
+        session = sessions.get_or_create(session_id, build_dir)
+        session.mode = "buckaroo"
+        session.backend = "xorq"
+        session.expr = expr
+        session.xorq_dataflow = xorq_dataflow
+        # Clear pandas-side state left by a prior /load on the same
+        # session so WS dispatch can no longer reach a stale dataflow.
+        session.df = None
+        session.dataflow = None
+        session.ldf = None
+        session.metadata = metadata
+        session.prompt = prompt
+        if component_config:
+            session.component_config = component_config
+
+        session.df_display_args = xorq_dataflow.df_display_args
+        session.df_data_dict = xorq_dataflow.df_data_dict
+        session.df_meta = xorq_dataflow.df_meta
+        session.buckaroo_state = {
+            "cleaning_method": "", "post_processing": "", "sampled": False,
+            "show_commands": False, "df_display": "main",
+            "search_string": "", "quick_command_args": {}}
+        session.buckaroo_options = xorq_dataflow.buckaroo_options
+        session.command_config = xorq_dataflow.command_config
+        session.operation_results = {
+            "transformed_df": {"schema": {"fields": []}, "data": []},
+            "generated_py_code": "# server mode"}
+        session.operations = []
+
+        if component_config and session.df_display_args:
+            for key in session.df_display_args:
+                dvc = session.df_display_args[key].get("df_viewer_config")
+                if dvc is not None:
+                    dvc["component_config"] = {
+                        **dvc.get("component_config", {}),
+                        **component_config}
+
+        if session.ws_clients:
+            push_msg = json.dumps(build_state_message(session, metadata=metadata))
+            for client in list(session.ws_clients):
+                try:
+                    client.write_message(push_msg)
+                except Exception:
+                    session.ws_clients.discard(client)
+
+        if no_browser or not self.application.settings.get("open_browser", True):
+            browser_action = "skipped"
+        else:
+            port = self.application.settings["port"]
+            browser_action = find_or_create_session_window(session_id, port, reload_if_found=True)
+
+        log.info("load_expr session=%s build_dir=%s rows=%d backend=xorq",
+            session_id, build_dir, metadata["rows"])
+        self.write({"session": session_id, "server_pid": os.getpid(),
+            "browser_action": browser_action, **metadata})
 
 
 class LoadCompareHandler(tornado.web.RequestHandler):
