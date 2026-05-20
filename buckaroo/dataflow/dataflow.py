@@ -21,6 +21,7 @@ from .styling_core import (
 
 
 from .abc_dataflow import ABCDataflow
+from .sd_cache import hash_chain, split_chain_by_scope
 
 
 class DfTrait(Any):
@@ -106,6 +107,15 @@ class DataFlow(ABCDataflow):
     df_meta = Any()
 
     merged_sd = Any()
+
+    # Keyed summary-stats cache. The three pointer traitlets carry short
+    # opaque hashes of the op chain that produced each scope's df; the
+    # frontend reads <scope>_sd_key and looks the matching SD blob up in
+    # summary_stats_cache. See sd_cache.py for the encoding.
+    raw_sd_key = Unicode('').tag(sync=True)
+    clean_sd_key = Unicode('').tag(sync=True)
+    filt_sd_key = Unicode('').tag(sync=True)
+    summary_stats_cache = Dict({}).tag(sync=True)
 
     style_method = Unicode('simple')
     column_config = Any()
@@ -398,7 +408,76 @@ class CustomizableDataflow(DataFlow):
         self.merged_sd  = merge_sd_overrides(
             intermediate_sd, self.processed_df, self.processed_sd)
 
+    def _compute_scope_df(self, scope: str):
+        """Return the df that scope's SD should be computed against.
 
+        Subclasses with a real autocleaning interpreter can produce a
+        clean-without-filter df; the base case (no real cleaning) falls
+        back to sampled_df for raw/clean and processed_df for filt.
+        """
+        if scope == 'filt':
+            return self.processed_df
+        if scope == 'raw':
+            return self.sampled_df
+        # scope == 'clean'
+        clean_ops = split_chain_by_scope(self.operations)['clean']
+        run_interp = getattr(self.ac_obj, '_run_df_interpreter', None)
+        if not clean_ops or run_interp is None:
+            return self.sampled_df
+        try:
+            cleaned_df, _sd = run_interp(self.sampled_df, clean_ops, {})
+        except Exception:
+            return self.sampled_df
+        return cleaned_df
+
+    @observe('summary_sd', 'operations', 'analysis_klasses')
+    @exception_protect('sd-cache-protector')
+    def _populate_sd_cache(self, _change):
+        """Write per-scope SD blobs into ``summary_stats_cache``.
+
+        Each scope's chain hashes to a stable opaque key; entries already
+        present are skipped (cache hit), so a ``quick_command_args`` flip
+        recomputes only the filtered scope's contribution while raw/clean
+        ride the existing entries. Pointer traitlets are always
+        overwritten so the frontend can switch which entry it's looking
+        at without waiting for a new SD computation.
+
+        Observes ``summary_sd`` (not ``processed_result``) so we can
+        reuse the value that ``_summary_sd`` just computed for the
+        filtered scope — no second pass through the analysis pipeline.
+        Raw and clean scopes are computed from scratch, but only when
+        their chain hashes are new to the cache, and only when their
+        hash differs from the filt scope's (so a widget with no
+        cleaning and no filter does one SD compute total).
+        """
+        if self.processed_df is None:
+            return
+        chains = split_chain_by_scope(self.operations)
+        keys = {scope: hash_chain(chain) for scope, chain in chains.items()}
+        new_cache = dict(self.summary_stats_cache)
+        cache_grew = False
+
+        # filt scope reuses the SD that _summary_sd just produced.
+        if keys['filt'] not in new_cache:
+            new_cache[keys['filt']] = self._sd_to_jsondf(self.summary_sd or {})
+            cache_grew = True
+
+        # raw + clean: fresh compute, but only on cache miss.
+        for scope in ('raw', 'clean'):
+            if keys[scope] in new_cache:
+                continue
+            scope_df = self._compute_scope_df(scope)
+            if scope_df is None:
+                continue
+            sd, _errs = self._get_summary_sd(scope_df)
+            new_cache[keys[scope]] = self._sd_to_jsondf(sd)
+            cache_grew = True
+
+        if cache_grew:
+            self.summary_stats_cache = new_cache
+        self.raw_sd_key = keys['raw']
+        self.clean_sd_key = keys['clean']
+        self.filt_sd_key = keys['filt']
 
     ### start code interpreter block
     def add_command(self, incomingCommandKls):
