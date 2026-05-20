@@ -235,6 +235,12 @@ class LoadHandler(tornado.web.RequestHandler):
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
+        # Loading via /load is always pandas — clear any xorq state left
+        # by a prior /load_expr on the same session so WS dispatch routes
+        # to the new pandas dataflow rather than a stale xorq one.
+        session.backend = "pandas"
+        session.xorq_dataflow = None
+        session.expr = None
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
@@ -364,6 +370,11 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.backend = "xorq"
         session.expr = expr
         session.xorq_dataflow = xorq_dataflow
+        # Clear pandas-side state left by a prior /load on the same
+        # session so WS dispatch can no longer reach a stale dataflow.
+        session.df = None
+        session.dataflow = None
+        session.ldf = None
         session.metadata = metadata
         session.prompt = prompt
         if component_config:
