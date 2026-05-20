@@ -11,22 +11,16 @@ xorq is an optional dependency; this module is import-safe without it,
 because nothing here imports xorq at module load. Transforms call methods
 on the passed-in expression (duck typing), so the module only matters
 when an ibis/xorq expression actually flows through.
+
+Code-gen quoting: ``transform_to_py`` uses ``{val!r}`` / ``{col!r}`` so
+that values containing quotes, backslashes, etc. round-trip safely into
+the generated snippet.
 """
 
 from ..jlisp.lisp_utils import s
 
 
-class Command:
-    @staticmethod
-    def transform(expr, col, val):
-        return expr
-
-    @staticmethod
-    def transform_to_py(expr, col, val):
-        return "    # no op"
-
-
-class NoOp(Command):
+class NoOp:
     command_default = [s('noop'), s('df'), "col"]
     command_pattern = [None]
 
@@ -36,10 +30,10 @@ class NoOp(Command):
 
     @staticmethod
     def transform_to_py(expr, col):
-        return "    #noop"
+        return "    # no op"
 
 
-class DropCol(Command):
+class DropCol:
     command_default = [s('dropcol'), s('df'), "col"]
     command_pattern = [None]
 
@@ -49,10 +43,10 @@ class DropCol(Command):
 
     @staticmethod
     def transform_to_py(expr, col):
-        return f"    df = df.drop('{col}')"
+        return f"    df = df.drop({col!r})"
 
 
-class FillNA(Command):
+class FillNA:
     command_default = [s('fillna'), s('df'), "col", 0]
     command_pattern = [[3, 'fillVal', 'type', 'integer']]
 
@@ -62,10 +56,10 @@ class FillNA(Command):
 
     @staticmethod
     def transform_to_py(expr, col, val):
-        return f"    df = df.mutate({col}=df['{col}'].fill_null({val!r}))"
+        return f"    df = df.mutate({col}=df[{col!r}].fill_null({val!r}))"
 
 
-class DropDuplicates(Command):
+class DropDuplicates:
     command_default = [s('drop_duplicates'), s('df'), "col"]
     command_pattern = [None]
 
@@ -75,15 +69,18 @@ class DropDuplicates(Command):
 
     @staticmethod
     def transform_to_py(expr, col):
-        return f"    df = df.distinct(on=['{col}'])"
+        return f"    df = df.distinct(on=[{col!r}])"
 
 
-def _search_expr(expr, val):
+def search_expr(expr, val):
     """Filter rows where any string column contains ``val``.
 
     Empty / None val short-circuits — the frontend sends "" to clear the
     quick-search box, and pl.col-style ``contains(None)`` would drop every
     row on the polars side; mirror that contract here.
+
+    Public because ``Search.transform_to_py`` emits an import of this
+    function into the generated user-facing code.
     """
     if val is None or val == "":
         return expr
@@ -98,17 +95,17 @@ def _search_expr(expr, val):
     return expr.filter(cond)
 
 
-class Search(Command):
+class Search:
     command_default = [s('search'), s('df'), "col", ""]
     command_pattern = [[3, 'term', 'type', 'string']]
     quick_args_pattern = [[3, 'term', 'type', 'string']]
 
     @staticmethod
     def transform(expr, col, val):
-        return _search_expr(expr, val)
+        return search_expr(expr, val)
 
     @staticmethod
     def transform_to_py(expr, col, val):
         return (
-            "    from buckaroo.customizations.xorq_commands import _search_expr\n"
-            f"    df = _search_expr(df, '{val}')")
+            "    from buckaroo.customizations.xorq_commands import search_expr\n"
+            f"    df = search_expr(df, {val!r})")

@@ -70,13 +70,18 @@ def configure_buckaroo(transforms):
         """
         if isinstance(df, pd.DataFrame):
             df_copy = df.copy()
-        elif hasattr(df, "clone") and callable(df.clone):
-            # polars DataFrame / LazyFrame
+        elif type(df).__module__.startswith("polars."):
+            # polars DataFrame / LazyFrame — detected by module path rather
+            # than ``hasattr(df, "clone")`` so a third-party DataFrame that
+            # happens to expose a ``.clone()`` method can't be misrouted
+            # through the polars branch. Avoids importing polars (optional
+            # dep) on the hot path.
             df_copy = df.clone()
         else:
             # ibis/xorq expressions are immutable — transforms must return
             # a new expr, so a defensive copy is both unavailable and
-            # unnecessary.
+            # unnecessary. Anything else that lands here is assumed to
+            # follow the same return-a-new-value contract.
             df_copy = df
 
         sd_dict = copy.deepcopy(initial_sd)

@@ -93,27 +93,18 @@ class XorqAutocleaning(PandasAutocleaning):
 
     Inherits the full ``PandasAutocleaning.handle_ops_and_clean`` pipeline
     (quick-ops → merge → run lisp interpreter → make_origs → code
-    generation). Two pieces stay xorq-flavoured:
-
-    * ``autocleaning_analysis_klasses`` on the conf is empty — the
-      pandas-flavoured cleaning analyses (HeuristicFracs, etc.) don't
-      work against ibis exprs.
-    * ``make_origs`` is overridden because the pandas version builds a
-      new ``pd.DataFrame`` from columns, which would force-materialise
-      an expression. For xorq we never add an _orig column today.
+    generation) unchanged. The xorq-flavoured piece is on the conf side:
+    ``autocleaning_analysis_klasses`` is empty because the pandas-flavoured
+    cleaning analyses (HeuristicFracs, etc.) don't work against ibis exprs,
+    which keeps ``cleaning_sd`` empty for this conf today — so the base
+    ``make_origs`` correctly short-circuits to ``cleaned_df`` without ever
+    constructing a ``pd.DataFrame`` from columns.
 
     The interpreter itself runs unmodified: ``buckaroo_transform`` in
-    ``jlisp.configure_utils`` detects that an ibis expr has neither
-    ``.copy()`` (pandas) nor ``.clone()`` (polars) and passes it through
-    unchanged. Each xorq Command's ``transform`` returns a new expr.
+    ``jlisp.configure_utils`` routes anything that isn't pandas or polars
+    through a pass-through copy, and each xorq Command's ``transform``
+    returns a new expr.
     """
-
-    @staticmethod
-    def make_origs(raw_df, cleaned_df, cleaning_sd):
-        # No _orig column support today — returning the cleaned expr
-        # unchanged avoids pulling rows through pd.DataFrame(...) just to
-        # paper over the pandas-shaped helper on the base class.
-        return cleaned_df
 
 
 class XorqDataflow(CustomizableDataflow):
