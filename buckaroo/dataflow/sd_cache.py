@@ -35,15 +35,23 @@ def _canonical_chain_repr(chain: List[Any]) -> str:
     return json.dumps(chain, sort_keys=True, default=str)
 
 
-def hash_chain(chain: List[Any]) -> str:
+def hash_chain(chain: List[Any], extra: Any = None) -> str:
     """Short opaque hash of an op chain — used as a cache key.
 
     blake2b with an 8-byte digest gives 16 hex chars: enough headroom for
     collision-free identification within a session, short enough not to
     bloat the wire when many cache entries accumulate.
+
+    ``extra``, if provided, is appended to the canonical repr before
+    hashing. Callers fold non-chain identity into the key this way —
+    e.g. ``id(sampled_df)`` so a ``raw_df`` swap with an unchanged chain
+    doesn't collide with the previous dataset's cache entry (codex P1
+    on #783).
     """
-    return hashlib.blake2b(
-        _canonical_chain_repr(chain).encode(), digest_size=8).hexdigest()
+    payload = _canonical_chain_repr(chain)
+    if extra is not None:
+        payload = payload + '|' + str(extra)
+    return hashlib.blake2b(payload.encode(), digest_size=8).hexdigest()
 
 
 def _is_real_op(op: Any) -> bool:
