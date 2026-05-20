@@ -432,7 +432,14 @@ class CustomizableDataflow(DataFlow):
         if filt_sd is None:
             filt_sd = self.summary_sd or {}
 
-        filter_active = self.filt_sd_key != self.raw_sd_key and self.filt_sd_key != ''
+        # ``filtered_*`` keys reflect "search filter applied on top of
+        # cleaning", so the gate is "filt chain has ops the clean chain
+        # doesn't" — i.e. at least one quick-command op is present. Keying
+        # off ``filt_sd_key != raw_sd_key`` would also fire for
+        # cleaning-only states, mislabelling cleaned stats as filtered
+        # until the deferred ``cleaned_*`` scope lands.
+        chains = split_chain_by_scope(self.operations)
+        filter_active = chains['filt'] != chains['clean']
 
         if self.processed_df is None:
             #on initial startup
