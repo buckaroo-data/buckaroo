@@ -20,6 +20,20 @@ log = logging.getLogger("buckaroo.server.websocket")
 
 _BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
 
+# Spike: opt-in two-message "rows first" state-change response. When set,
+# the state-change handler sends a fast initial_state with deferred stats,
+# then an IOLoop.add_callback fires the stats compute and sends a second
+# initial_state with fresh stats. Off by default so existing tests
+# (which assume a single rebroadcast frame) keep working.
+_ROWS_FIRST_SPIKE = os.environ.get("BUCKAROO_ROWS_FIRST_SPIKE", "").lower() in ("1", "true")
+# Delay between phase 1 (skeleton + deferred stats) and phase 2 (stats
+# compute + push). Long enough to be larger than typical browser-to-server
+# WS round-trip + any AG-Grid-fired ``infinite_request`` so the row data
+# reliably comes back first; short enough that the user perceives the
+# stats arriving "right after" the rows. 10ms is a starting point.
+_ROWS_FIRST_SPIKE_PHASE2_DELAY_S = float(
+    os.environ.get("BUCKAROO_ROWS_FIRST_SPIKE_DELAY_S", "0.01"))
+
 # Fields in buckaroo_state that drive dataflow changes; others are ignored.
 _DATAFLOW_FIELDS = ("post_processing", "cleaning_method", "quick_command_args")
 
@@ -77,9 +91,23 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             if old_state.get("quick_command_args") != new_state.get("quick_command_args"):
                 dataflow.quick_command_args = new_state.get("quick_command_args", {})
 
-            # Re-extract state from the dataflow — same helper works for both
-            # ServerDataflow and XorqServerDataflow (verified by probe).
-            buckaroo_state = get_buckaroo_display_state(dataflow)
+            # Spike-gated "rows first" two-message response: when on, the
+            # state-change handler returns ``initial_state`` with deferred
+            # stats first, then a second ``initial_state`` once the
+            # analysis-pipeline pass has finished. Default (flag off) is
+            # today's single-message rebroadcast.
+            if _ROWS_FIRST_SPIKE:
+                # Phase 1: drive the dataflow far enough to know the new
+                # ``df_meta`` + ``df_display_args``, but skip the
+                # analysis-pipeline pass that produces ``summary_sd``.
+                dataflow._defer_summary_sd = True
+                try:
+                    buckaroo_state = get_buckaroo_display_state(dataflow)
+                finally:
+                    dataflow._defer_summary_sd = False
+            else:
+                buckaroo_state = get_buckaroo_display_state(dataflow)
+
             session.df_display_args = buckaroo_state["df_display_args"]
             session.df_data_dict = buckaroo_state["df_data_dict"]
             session.df_meta = buckaroo_state["df_meta"]
@@ -104,6 +132,17 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                     client.write_message(update_payload)
                 except Exception:
                     session.ws_clients.discard(client)
+
+            # Phase 2 (spike only): schedule the stats compute with a
+            # short delay so any ``infinite_request`` the client fires
+            # in response to phase 1 has a real time window to arrive
+            # and get serviced before the (potentially expensive) stats
+            # compute starts. ``add_callback`` alone fires on the very
+            # next loop iteration, which beats inbound socket reads in
+            # an in-process test and can pre-empt them in production too.
+            if _ROWS_FIRST_SPIKE:
+                from tornado.ioloop import IOLoop
+                IOLoop.current().call_later(_ROWS_FIRST_SPIKE_PHASE2_DELAY_S, self._send_stats_update, session)
         except Exception:
             tb = traceback.format_exc()
             log.error("buckaroo_state_change error session=%s: %s", self.session_id, tb)
@@ -111,6 +150,50 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             if _BUCKAROO_DEBUG:
                 err["details"] = tb
             self.write_message(json.dumps(err))
+
+    def _send_stats_update(self, session):
+        """Phase 2 of the spike rows-first protocol: run the stats compute
+        that the state-change handler deliberately deferred, then push the
+        updated state to all clients of this session.
+
+        Runs synchronously on the IOLoop thread (so does block while
+        compute is in flight) — the point of the ``add_callback`` is just
+        to yield once between phase 1 and this, so any pending
+        ``infinite_request`` from the client gets served between them.
+        """
+        try:
+            dataflow = session.xorq_dataflow if session.backend == "xorq" else session.dataflow
+            if dataflow is None:
+                return
+            # Lift the spike's ``_defer_summary_sd`` short-circuit and run
+            # the analysis pipeline that phase 1 skipped.
+            dataflow.recompute_summary_sd()
+
+            # Re-extract the full state (now with fresh ``summary_sd``
+            # / ``merged_sd`` / cache + scope pointers).
+            buckaroo_state = get_buckaroo_display_state(dataflow)
+            session.df_display_args = buckaroo_state["df_display_args"]
+            session.df_data_dict = buckaroo_state["df_data_dict"]
+            session.df_meta = buckaroo_state["df_meta"]
+            session.buckaroo_options = buckaroo_state["buckaroo_options"]
+            session.command_config = buckaroo_state["command_config"]
+            if session.component_config and session.df_display_args:
+                for key in session.df_display_args:
+                    dvc = session.df_display_args[key].get("df_viewer_config")
+                    if dvc is not None:
+                        dvc["component_config"] = {
+                            **dvc.get("component_config", {}),
+                            **session.component_config,
+                        }
+            payload = json.dumps(build_state_message(session))
+            for client in list(session.ws_clients):
+                try:
+                    client.write_message(payload)
+                except Exception:
+                    session.ws_clients.discard(client)
+        except Exception:
+            tb = traceback.format_exc()
+            log.error("stats_update error session=%s: %s", self.session_id, tb)
 
     def _handle_infinite_request(self, payload_args):
         sessions = self.application.settings["sessions"]
