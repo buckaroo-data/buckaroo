@@ -22,13 +22,12 @@ from traitlets import Unicode
 
 from .buckaroo_widget import BuckarooInfiniteWidget, BuckarooWidget
 from .customizations.styling import DefaultMainStyling, DefaultSummaryStatsStyling
+from .customizations.xorq_autoclean_conf import NoCleaningConfXorq
 from .customizations.xorq_stats_v2 import XORQ_STATS_V2
-from .dataflow.autocleaning import (
-    AutocleaningConfig, PandasAutocleaning, generate_quick_ops, merge_ops, ops_eq)
+from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import Sampling
 from .df_util import old_col_new_col
-from .jlisp.lisp_utils import s
 from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from .pluggable_analysis_framework.xorq_stat_pipeline import XorqDfStatsV2
 from .serialization_utils import pd_to_obj, to_parquet
@@ -89,93 +88,23 @@ class XorqSampling(Sampling):
         return df_or_expr.limit(cls.serialize_limit).execute()
 
 
-def _xorq_search(expr, _col, val):
-    """Filter rows where any string column contains ``val``.
-
-    Mirrors the contract of the pandas / polars Search commands: an
-    empty value short-circuits to a no-op so the frontend can clear
-    the search by sending ``""``.
-    """
-    if val is None or val == "":
-        return expr
-    schema = expr.schema()
-    string_cols = [name for name in expr.columns if schema[name].is_string()]
-    if not string_cols:
-        return expr
-    cond = None
-    for c in string_cols:
-        c_cond = expr[c].contains(val)
-        cond = c_cond if cond is None else cond | c_cond
-    return expr.filter(cond)
-
-
-class XorqSearch:
-    """Search command for xorq exprs — symbol/pattern only.
-
-    Defines the lisp symbol (``search``) and the quick-args pattern
-    that the frontend uses for the search box. The actual filter is
-    applied directly by ``XorqAutocleaning`` (see ``_XORQ_OP_HANDLERS``)
-    rather than going through ``configure_buckaroo``'s pandas/polars
-    interpreter, since ibis exprs are immutable and can't ``.copy()``.
-    """
-
-    command_default = [s('search'), s('df'), "col", ""]
-    command_pattern = [[3, 'term', 'type', 'string']]
-    quick_args_pattern = [[3, 'term', 'type', 'string']]
-
-    @staticmethod
-    def transform(expr, col, val):
-        return _xorq_search(expr, col, val)
-
-    @staticmethod
-    def transform_to_py(expr, col, val):
-        return f"    expr = expr.filter(... contains('{val}'))"
-
-
-_XORQ_OP_HANDLERS = {'search': _xorq_search}
-
-
-class NoCleaningConfXorq(AutocleaningConfig):
-    autocleaning_analysis_klasses = []
-    command_klasses = [XorqSearch]
-    quick_command_klasses = [XorqSearch]
-    name = ""
-
-
 class XorqAutocleaning(PandasAutocleaning):
-    """Cleaning is skipped for ibis exprs (the lisp interpreter targets
-    pandas), but quick commands like Search are applied directly.
+    """Autocleaning + interpreter for xorq/ibis expressions.
 
-    Each quick op is dispatched through ``_XORQ_OP_HANDLERS`` —
-    expression-to-expression transforms — so the result is still a
-    pushed-down xorq expr that downstream stats and pagination consume
-    unchanged.
+    Inherits the full ``PandasAutocleaning.handle_ops_and_clean`` pipeline
+    (quick-ops → merge → run lisp interpreter → make_origs → code
+    generation) unchanged. The xorq-flavoured piece is on the conf side:
+    ``autocleaning_analysis_klasses`` is empty because the pandas-flavoured
+    cleaning analyses (HeuristicFracs, etc.) don't work against ibis exprs,
+    which keeps ``cleaning_sd`` empty for this conf today — so the base
+    ``make_origs`` correctly short-circuits to ``cleaned_df`` without ever
+    constructing a ``pd.DataFrame`` from columns.
+
+    The interpreter itself runs unmodified: ``buckaroo_transform`` in
+    ``jlisp.configure_utils`` routes anything that isn't pandas or polars
+    through a pass-through copy, and each xorq Command's ``transform``
+    returns a new expr.
     """
-
-    def handle_ops_and_clean(self, df, cleaning_method, quick_command_args, existing_operations):
-        if df is None:
-            return None
-        quick_ops = generate_quick_ops(self.quick_command_klasses, quick_command_args)
-        if ops_eq(existing_operations, [{'meta': 'no-op'}]):
-            existing_for_merge = []
-        else:
-            existing_for_merge = existing_operations
-        final_ops = merge_ops(existing_for_merge, quick_ops)
-        if not final_ops:
-            return [df, {}, "", []]
-        result = self._apply_xorq_ops(df, final_ops)
-        return [result, {}, "", final_ops]
-
-    @staticmethod
-    def _apply_xorq_ops(expr, ops):
-        for op in ops:
-            sym_name = op[0]['symbol'] if isinstance(op[0], dict) else op[0]
-            handler = _XORQ_OP_HANDLERS.get(sym_name)
-            if handler is None:
-                continue
-            handler_args = op[2:]
-            expr = handler(expr, *handler_args)
-        return expr
 
 
 class XorqDataflow(CustomizableDataflow):
