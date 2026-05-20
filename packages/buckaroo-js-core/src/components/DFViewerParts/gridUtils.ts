@@ -84,8 +84,30 @@ export function getCellRendererorFormatter(
 }
 
 
+// A `?` prefix on PinnedRowConfig.primary_key_val marks an optional row:
+// the unprefixed key is looked up in the data, and if absent the entry is
+// skipped entirely (rather than emitting undefined). Used to declare
+// pinned rows for scopes like `cleaned_*` / `filtered_*` that only exist
+// when their scope is active.
+export function isOptionalPinnedKey(key: string): boolean {
+    return key.startsWith("?");
+}
+
+export function stripOptionalPinnedKey(key: string): string {
+    return isOptionalPinnedKey(key) ? key.slice(1) : key;
+}
+
 export function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]) {
-    return _.map(_.map(prc, "primary_key_val"), (x) => _.find(sdf, { index: x }));
+    const result: (DFData[number] | undefined)[] = [];
+    for (const cfg of prc) {
+        const raw = cfg.primary_key_val;
+        const found = _.find(sdf, { index: stripOptionalPinnedKey(raw) });
+        if (found === undefined && isOptionalPinnedKey(raw)) {
+            continue;
+        }
+        result.push(found);
+    }
+    return result;
 }
 
 export function extractSingleSeriesSummary(
@@ -318,9 +340,10 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[], column_c
             if (pk === undefined) {
                 return anyRenderer; // default renderer
             }
-            const maybePrc: PinnedRowConfig | undefined = _.find(pinned_rows, {
-                primary_key_val: pk,
-            });
+            const maybePrc: PinnedRowConfig | undefined = _.find(
+                pinned_rows,
+                (cfg) => stripOptionalPinnedKey(cfg.primary_key_val) === pk,
+            );
             if (maybePrc === undefined) {
                 return anyRenderer;
             }
