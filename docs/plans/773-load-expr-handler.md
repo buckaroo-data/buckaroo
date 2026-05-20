@@ -73,10 +73,9 @@ staticmethod to module level so the server can call it too).
    buckaroo[xorq]` hint. Other endpoints unaffected.
 
 7. **Stats latency**: synchronous in v1, matching pandas/polars
-   `/load`. Async streaming stats (esp. for search) tracked
-   separately in [`async-stats.md`](./async-stats.md) — biggest
-   payoff is search-on-remote-backend where each keystroke
-   re-runs the stats pipeline.
+   `/load`. Async streaming stats (esp. for search) are a
+   follow-up — biggest payoff is search-on-remote-backend where
+   each keystroke re-runs the stats pipeline.
 
 8. **Dispatch shape**: branch inside each existing `mode == "buckaroo"`
    arm at three sites:
