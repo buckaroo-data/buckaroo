@@ -266,38 +266,166 @@ def _json_encode_cell(val):
     return json.dumps(_make_json_safe(val), default=str)
 
 
+def resolve_summary_stats_payload(payload: Any) -> List[Dict[str, Any]]:
+    """Decode a summary stats payload back to row-form ``DFData``.
+
+    Mirror of the JS ``resolveDFDataAsync`` for summary stats: returns the
+    list of ``{'index': stat_name, <col>: value, ...}`` rows that the grid
+    consumes. Handles all three on-wire shapes:
+
+    * Plain list (already resolved) — returned as-is.
+    * Tagged parquet-b64 with ``layout='wide'`` — pivoted from wide format.
+    * Tagged parquet-b64 with row layout (legacy fallback) — decoded and
+      cell-by-cell JSON-parsed like the original ``parseParquetRow``.
+
+    Useful for Python-side test assertions that want to inspect exactly
+    what the JS side will render.
+    """
+    import pyarrow.parquet as pq
+
+    if isinstance(payload, list):
+        return payload
+    if not (isinstance(payload, dict) and payload.get('format') == 'parquet_b64'):
+        return payload  # unknown shape — caller decides
+
+    raw = base64.b64decode(payload['data'])
+    table = pq.read_table(BytesIO(raw))
+    rows = table.to_pylist()
+
+    if payload.get('layout') == 'wide':
+        if not rows:
+            return []
+        return _pivot_wide_sd_row(rows[0])
+
+    # Row layout: every non-index cell is a JSON string.
+    parsed = []
+    for row in rows:
+        out = {}
+        for k, v in row.items():
+            if k in ('index', 'level_0'):
+                out[k] = v
+            elif isinstance(v, str):
+                try:
+                    out[k] = json.loads(v)
+                except (json.JSONDecodeError, ValueError):
+                    out[k] = v
+            else:
+                out[k] = v
+        parsed.append(out)
+    return parsed
+
+
+def _pivot_wide_sd_row(wide_row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Pivot a single wide-layout SD row into row-form ``DFData``.
+
+    Inverse of ``sd_to_parquet_b64``'s encoding step. Native parquet scalars
+    pass through; JSON-encoded strings (the only string form the encoder
+    emits) are parsed back to their original Python value.
+    """
+    stat_cols: Dict[str, Dict[str, Any]] = {}
+    all_cols: List[str] = []
+    seen = set()
+
+    for key, raw_val in wide_row.items():
+        sep = key.find('__')
+        if sep == -1:
+            continue
+        col = key[:sep]
+        stat = key[sep + 2:]
+        if col not in seen:
+            seen.add(col)
+            all_cols.append(col)
+        stat_cols.setdefault(stat, {})
+
+        if isinstance(raw_val, str):
+            try:
+                val = json.loads(raw_val)
+            except (json.JSONDecodeError, ValueError):
+                val = raw_val
+        else:
+            val = raw_val
+        stat_cols[stat][col] = val
+
+    rows = []
+    for stat, cols in stat_cols.items():
+        row_out: Dict[str, Any] = {'index': stat, 'level_0': stat}
+        for col in all_cols:
+            row_out[col] = cols.get(col)
+        rows.append(row_out)
+    return rows
+
+
+def _stat_value_to_pa_array(val):
+    """Encode a single SD stat value as a one-element typed pyarrow array.
+
+    Scalars (int / float / bool) ride native parquet types — no JSON round-trip.
+    Strings, lists, dicts go through JSON so the JS side can unambiguously
+    JSON.parse every string cell back to its original type.
+
+    NaN floats become parquet nulls; None becomes a null string cell.
+    """
+    import numpy as np
+    import pyarrow as pa
+
+    # bool BEFORE int — np.bool_ and Python bool both pass isinstance(_, int).
+    if isinstance(val, (bool, np.bool_)):
+        return pa.array([bool(val)], type=pa.bool_())
+    if isinstance(val, (int, np.integer)):
+        iv = int(val)
+        # uint64 stats (e.g. a column max on an unsigned dtype) routinely exceed
+        # int64 max. Promote to uint64, then to a JSON-encoded string for
+        # bignums that don't fit either — pyarrow would otherwise raise here,
+        # before sd_to_parquet_b64 reaches its JSON fallback.
+        if -(2**63) <= iv <= 2**63 - 1:
+            return pa.array([iv], type=pa.int64())
+        if 0 <= iv <= 2**64 - 1:
+            return pa.array([iv], type=pa.uint64())
+        return pa.array([_json_encode_cell(iv)], type=pa.string())
+    if isinstance(val, (float, np.floating)):
+        v = float(val)
+        # NaN sentinel -> parquet null so the JS side sees null, not "NaN".
+        return pa.array([None if v != v else v], type=pa.float64())
+    if val is None:
+        return pa.array([None], type=pa.string())
+    # str / list / dict / anything else: JSON-encoded string.
+    return pa.array([_json_encode_cell(val)], type=pa.string())
+
+
 def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
     """Convert a summary stats dict to a tagged parquet-b64 payload.
 
-    Summary stats DataFrames have mixed-type columns (strings, numbers, lists)
-    which fastparquet can't handle directly. We JSON-encode every cell value
-    first so each column becomes a pure string column, then use pyarrow for
-    parquet serialization. The JS side decodes parquet then JSON.parse's each cell.
+    Wide-column layout: one parquet column per ``{short_col}__{stat_name}``
+    pair (e.g. ``a__mean``, ``a__histogram``), with a single row. Scalars
+    (numbers, bools) ride native parquet types — the JSON round-trip that
+    used to apply to every cell now only applies to strings and to
+    list/dict values (histograms, value_counts).
 
-    Returns {'format': 'parquet_b64', 'data': '<base64 string>'}
-    Falls back to JSON if parquet serialization fails.
+    Returns ``{'format': 'parquet_b64', 'layout': 'wide', 'data': '<base64>'}``.
+    Falls back to the JSON/row payload if parquet serialization fails — the
+    absence of ``layout: 'wide'`` is how the JS side picks the row decoder.
     """
-    # JSON-encode every value so parquet sees only string columns
-    json_sd: Dict[str, Any] = {}
-    for col, stats in sd.items():
-        if isinstance(stats, dict):
-            json_sd[col] = {k: _json_encode_cell(v) for k, v in stats.items()}
-        else:
-            json_sd[col] = stats
+    import pyarrow as pa
+    import pyarrow.parquet as pq
 
-    df = pd.DataFrame(json_sd)
-    df2 = prepare_df_for_serialization(df)
-    # Add level_0 for backwards compatibility with JSON path (pd_to_obj adds it)
-    if not isinstance(df.index, pd.MultiIndex):
-        df2['level_0'] = df2['index']
+    col_mapping = [(orig, to_chars(i)) for i, orig in enumerate(sd.keys())]
+    names: List[str] = []
+    arrays: List[Any] = []
+
+    for orig_col, short_col in col_mapping:
+        stats = sd[orig_col]
+        if not isinstance(stats, dict):
+            continue
+        for stat_name, val in stats.items():
+            names.append(f"{short_col}__{stat_name}")
+            arrays.append(_stat_value_to_pa_array(val))
 
     try:
-        data = BytesIO()
-        df2.to_parquet(data, engine='pyarrow')
-        data.seek(0)
-        raw_bytes = data.read()
-        b64 = base64.b64encode(raw_bytes).decode('ascii')
-        return {'format': 'parquet_b64', 'data': b64}
+        table = pa.table(dict(zip(names, arrays)))
+        buf = BytesIO()
+        pq.write_table(table, buf)
+        buf.seek(0)
+        b64 = base64.b64encode(buf.read()).decode('ascii')
+        return {'format': 'parquet_b64', 'layout': 'wide', 'data': b64}
     except Exception as e:
         logger.warning("Failed to serialize summary stats as parquet, falling back to JSON: %r", e)
         return pd_to_obj(pd.DataFrame(sd))

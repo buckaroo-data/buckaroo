@@ -248,6 +248,11 @@ export type DFData = DFDataRow[];
 export interface ParquetB64Payload {
     format: 'parquet_b64';
     data: string;  // base64-encoded parquet bytes
+    // 'wide' = summary stats laid out as {col}__{stat} columns × 1 row,
+    // with native parquet types for numeric/bool scalars and JSON-encoded
+    // strings for str/list/dict values. Absent or 'row' = the legacy
+    // row-per-stat layout where every non-index cell is a JSON string.
+    layout?: 'wide' | 'row';
 }
 
 // A value in df_data_dict can be plain JSON (DFData) or a tagged parquet payload

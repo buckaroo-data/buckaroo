@@ -1,42 +1,12 @@
 import polars as pl
-import pandas as pd
-import base64
-from io import BytesIO
-import json
 
 from buckaroo.lazy_infinite_polars_widget import LazyInfinitePolarsBuckarooWidget
 from buckaroo.file_cache.base import FileCache
 from buckaroo.read_utils import read_df
 from pathlib import Path
 from buckaroo.file_cache.base import Executor as _Exec
+from buckaroo.serialization_utils import resolve_summary_stats_payload as _resolve_all_stats
 from tests.unit.file_cache.executor_test_utils import wait_for_nested_executor_finish
-
-
-def _resolve_all_stats(all_stats):
-    """Resolve all_stats to a list of row dicts, whether it's JSON or parquet_b64."""
-    if isinstance(all_stats, list):
-        return all_stats
-    if isinstance(all_stats, dict) and all_stats.get('format') == 'parquet_b64':
-        raw = base64.b64decode(all_stats['data'])
-        df = pd.read_parquet(BytesIO(raw), engine='pyarrow')
-        rows = json.loads(df.to_json(orient='records'))
-        # JSON-parse each cell (they were JSON-encoded on the Python side)
-        parsed_rows = []
-        for row in rows:
-            parsed = {}
-            for k, v in row.items():
-                if k in ('index', 'level_0'):
-                    parsed[k] = v
-                elif isinstance(v, str):
-                    try:
-                        parsed[k] = json.loads(v)
-                    except (json.JSONDecodeError, ValueError):
-                        parsed[k] = v
-                else:
-                    parsed[k] = v
-            parsed_rows.append(parsed)
-        return parsed_rows
-    return all_stats
 
 
 def _capture_sends(widget):

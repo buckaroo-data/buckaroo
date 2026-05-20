@@ -6,16 +6,13 @@ These tests catch regressions where:
 - Parquet serialization fails for period/interval/timedelta/binary columns
 - v1 TypingStats misclassifies types (Duration→datetime→blank cells)
 """
-import base64
-import json
-from io import BytesIO
-
 import pandas as pd
 import polars as pl
 
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget
 from buckaroo.ddd_library import df_with_weird_types, pl_df_with_weird_types
+from buckaroo.serialization_utils import resolve_summary_stats_payload as _resolve_all_stats
 
 
 def _get_column_configs(bw):
@@ -26,32 +23,6 @@ def _get_column_configs(bw):
 def _get_merged_sd(bw):
     """Extract merged_sd from a widget's dataflow."""
     return bw.dataflow.merged_sd
-
-
-def _resolve_all_stats(all_stats):
-    """Resolve all_stats (parquet_b64 or JSON) to list of row dicts."""
-    if isinstance(all_stats, list):
-        return all_stats
-    if isinstance(all_stats, dict) and all_stats.get('format') == 'parquet_b64':
-        raw = base64.b64decode(all_stats['data'])
-        df = pd.read_parquet(BytesIO(raw), engine='pyarrow')
-        rows = json.loads(df.to_json(orient='records'))
-        parsed_rows = []
-        for row in rows:
-            parsed = {}
-            for k, v in row.items():
-                if k in ('index', 'level_0'):
-                    parsed[k] = v
-                elif isinstance(v, str):
-                    try:
-                        parsed[k] = json.loads(v)
-                    except (json.JSONDecodeError, ValueError):
-                        parsed[k] = v
-                else:
-                    parsed[k] = v
-            parsed_rows.append(parsed)
-        return parsed_rows
-    return all_stats
 
 
 # ============================================================================
