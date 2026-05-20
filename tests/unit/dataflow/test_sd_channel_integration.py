@@ -77,7 +77,7 @@ def test_three_shapes_compose_through_handle_ops_and_clean():
     df = pl.DataFrame({'a': [10, 20, 30]})
     ops = [[{'symbol': 'sd_seed'}, s('df'), 'a', 'hello'], [{'symbol': 'sd_rw'}, s('df'), s('sd'), 'a', 'world'],
         [{'symbol': 'add_one'}, s('df'), 'a']]
-    cleaned_df, cleaning_sd, _gen, _ops = ac.handle_ops_and_clean(
+    cleaned_df, cleaning_sd, _gen, _ops, *_ = ac.handle_ops_and_clean(
         df, cleaning_method='', quick_command_args={}, existing_operations=ops)
 
     assert cleaned_df['a'].to_list() == [11, 21, 31]

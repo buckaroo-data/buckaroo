@@ -57,7 +57,7 @@ def test_handle_user_ops():
     df = pd.DataFrame({'a': [10, 20, 30]})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    _cleaned_df, _cleaning_sd, _generated_code, merged_operations = cleaning_result
+    _cleaned_df, _cleaning_sd, _generated_code, merged_operations, *_ = cleaning_result
     assert merged_operations == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
 
@@ -65,7 +65,7 @@ def test_handle_user_ops():
         [{'symbol': 'old_safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
     cleaning_result2 = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=existing_ops)
-    _cleaned_df, _cleaning_sd, _generated_code, merged_operations2 = cleaning_result2
+    _cleaned_df, _cleaning_sd, _generated_code, merged_operations2, *_ = cleaning_result2
     assert merged_operations2 == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
 
@@ -73,7 +73,7 @@ def test_handle_user_ops():
         [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
     cleaning_result3 = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=user_ops)
-    _cleaned_df, _cleaning_sd, _generated_code, merged_operations3 = cleaning_result3
+    _cleaned_df, _cleaning_sd, _generated_code, merged_operations3, *_ = cleaning_result3
     assert merged_operations3 == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a'],
         [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
@@ -148,7 +148,7 @@ def test_handle_clean_df():
     df = pd.DataFrame({'a': ["30", "40"]})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
+    cleaned_df, cleaning_sd, generated_code, merged_operations, *_ = cleaning_result
     expected = pd.DataFrame({
         'a': [30, 40],
         'a_orig': ["30",  "40"]})
@@ -325,7 +325,7 @@ def test_quick_commands_run():
     df = pd.DataFrame({'a': ["30", "40"], 'b': ['aa', 'bb']})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method="", quick_command_args={'search':['aa']}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
+    cleaned_df, cleaning_sd, generated_code, merged_operations, *_ = cleaning_result
 
     expected = pd.DataFrame({
         'a': ["30"],
@@ -345,7 +345,7 @@ def Xtest_origs_quick_commands():
     df = pd.DataFrame({'a': ["30", "40"], 'b': ['aa', 'bb']})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={'search':['aa']}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
+    cleaned_df, cleaning_sd, generated_code, merged_operations, *_ = cleaning_result
     expected = pd.DataFrame({
         'a': [30.0, np.nan],
         'a_orig': ["30", "40"],
@@ -365,7 +365,7 @@ def test_autoclean_codegen():
     df = pd.DataFrame({'a': ["30", "40"]})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
+    cleaned_df, cleaning_sd, generated_code, merged_operations, *_ = cleaning_result
 
     assert generated_code == EXPECTED_GEN_CODE
 
@@ -641,7 +641,7 @@ def test_search_threads_highlight_phrase_into_cleaning_sd_under_rename():
     df = pd.DataFrame({'businessname': ['pizza', 'sushi'], 'rating': [5, 4]})
     search_op = [{'symbol': 'search'}, s('df'), 'col', 'pizza']
 
-    _cleaned, cleaning_sd, _gen, _ops = ac.handle_ops_and_clean(
+    _cleaned, cleaning_sd, _gen, _ops, *_ = ac.handle_ops_and_clean(
         df, cleaning_method='', quick_command_args={}, existing_operations=[search_op])
 
     assert cleaning_sd.get('a', {}).get('highlight_phrase') == ['pizza']

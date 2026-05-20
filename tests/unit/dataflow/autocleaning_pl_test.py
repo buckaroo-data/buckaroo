@@ -104,7 +104,7 @@ def test_handle_user_ops():
     df = pl.DataFrame({'a': [10, 20, 30]})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
+    cleaned_df, cleaning_sd, generated_code, merged_operations, *_ = cleaning_result
     assert merged_operations == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
 
@@ -112,7 +112,7 @@ def test_handle_user_ops():
         [{'symbol': 'old_safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
     cleaning_result2 = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=existing_ops)
-    cleaned_df, cleaning_sd, generated_code, merged_operations2 = cleaning_result2
+    cleaned_df, cleaning_sd, generated_code, merged_operations2, *_ = cleaning_result2
     assert merged_operations2 == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
 
@@ -120,7 +120,7 @@ def test_handle_user_ops():
         [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
     cleaning_result3 = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=user_ops)
-    cleaned_df, cleaning_sd, generated_code, merged_operations3 = cleaning_result3
+    cleaned_df, cleaning_sd, generated_code, merged_operations3, *_ = cleaning_result3
     assert merged_operations3 == [
         [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a'],
         [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
@@ -159,7 +159,7 @@ def test_handle_clean_df():
     df = pl.DataFrame({'a': ["30", "40"]})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
+    cleaned_df, cleaning_sd, generated_code, merged_operations, *_ = cleaning_result
     expected = pl.DataFrame({
         'a': [30, 40],
         'a_orig': ["30",  "40"]})
@@ -175,7 +175,7 @@ def test_autoclean_codegen():
     df = pl.DataFrame({'a': ["30", "40"]})
     cleaning_result = ac.handle_ops_and_clean(
         df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
+    cleaned_df, cleaning_sd, generated_code, merged_operations, *_ = cleaning_result
 
     assert generated_code == EXPECTED_GEN_CODE
 
@@ -205,7 +205,7 @@ def test_sdresult_lands_in_cleaning_sd_through_handle_ops_and_clean():
     df = pl.DataFrame({'a': [1, 2, 3]})
     op = [{'symbol': 'tag'}, s('df'), 'a', 'hello']
 
-    _df, cleaning_sd, _gen, _ops = ac.handle_ops_and_clean(
+    _df, cleaning_sd, _gen, _ops, *_ = ac.handle_ops_and_clean(
         df, cleaning_method='', quick_command_args={}, existing_operations=[op])
 
     assert cleaning_sd.get('a', {}).get('note') == 'hello'
@@ -228,7 +228,7 @@ def test_search_threads_highlight_regex_into_cleaning_sd_under_rename():
     df = pl.DataFrame({'businessname': ['pizza', 'sushi'], 'rating': [5, 4]})
     search_op = [{'symbol': 'search'}, s('df'), 'col', 'pizza']
 
-    _cleaned, cleaning_sd, _gen, _ops = ac.handle_ops_and_clean(
+    _cleaned, cleaning_sd, _gen, _ops, *_ = ac.handle_ops_and_clean(
         df, cleaning_method='', quick_command_args={}, existing_operations=[search_op])
 
     # keyed by the *renamed* col, not by 'businessname'

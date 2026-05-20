@@ -192,6 +192,18 @@ class DataFlow(ABCDataflow):
         if self.cleaned is not None:
             return self.cleaned[3]
 
+    @property
+    def cleaned_df_unfiltered(self):
+        """Cleaned df with search filter (quick_command_args) NOT applied.
+
+        Used as the source for the raw-scope summary stats. When no quick
+        ops are present, this is the same object as `cleaned_df` (by
+        reference) — preserves the no-op short-circuit identity invariant.
+        """
+        if self.cleaned is not None and len(self.cleaned) >= 5:
+            return self.cleaned[4]
+        return self.cleaned_df
+
     def _compute_processed_result(self, cleaned_df, post_processing_method):
         return [cleaned_df, {}]
 
@@ -229,41 +241,6 @@ class DataFlow(ABCDataflow):
         return ret_summary, {}
 
     _summary_sd_cache_key = (None, None)
-    _summary_sd_raw_cache_key = (None, None)
-
-    @observe('summary_sd', 'quick_command_args')
-    @exception_protect('raw_summary_sd-protector')
-    def _raw_summary_sd(self, _change):
-        """Compute the bare-key (pre-filter) sd.
-
-        When no search filter is active, the pre-filter view equals the
-        post-filter view, so we reuse `summary_sd` by reference. When a
-        filter is active, we re-run the autocleaning pipeline with empty
-        quick_command_args to materialize the unfiltered df, then compute
-        stats on that.
-
-        See docs/plans/async-stats.md for the scope design. The bare keys
-        in `merged_sd` come from this trait; `filtered_*` keys come from
-        `summary_sd` directly when the filter is on.
-        """
-        if not self.quick_command_args:
-            # No filter: bare keys == today's summary_sd. Reference, not copy.
-            self.summary_sd_raw = self.summary_sd or {}
-            return
-        if self.sampled_df is None:
-            self.summary_sd_raw = {}
-            return
-        # Filter active: compute stats on the cleaned-but-unfiltered df.
-        # (Post-processing is currently a no-op in DataFlow base, so cleaning
-        # output suffices. When post-processing becomes meaningful it should
-        # also be applied here.)
-        unfiltered_result = self.ac_obj.handle_ops_and_clean(self.sampled_df, self.cleaning_method, {}, self.operations)
-        if unfiltered_result is None:
-            self.summary_sd_raw = {}
-            return
-        cleaned_df_unfiltered = unfiltered_result[0]
-        sd, _errs = self._get_summary_sd(cleaned_df_unfiltered)
-        self.summary_sd_raw = sd
 
     @observe('processed_result', 'analysis_klasses')
     @exception_protect('summary_sd-protector')
@@ -279,9 +256,23 @@ class DataFlow(ABCDataflow):
         if (id(df), id(klasses)) == self._summary_sd_cache_key:
             return
         self._summary_sd_cache_key = (id(df), id(klasses))
-        result_summary_sd, errs  = self._get_summary_sd(df)
+        result_summary_sd, errs = self._get_summary_sd(df)
         self.summary_sd = result_summary_sd
         self.errs = errs
+
+        # Raw scope: stats on the unfiltered cleaned df with post-processing
+        # applied. handle_ops_and_clean already materialized the unfiltered
+        # cleaned df in `self.cleaned[4]`. When that df is the same object
+        # as `cleaned_df` (no filter active or short-circuit identity), the
+        # full processed path matches and we reuse the filtered-scope
+        # result — both cheaper and avoids a redundant pipeline run on xorq.
+        unfiltered_cleaned = self.cleaned_df_unfiltered
+        if unfiltered_cleaned is None or unfiltered_cleaned is self.cleaned_df:
+            self.summary_sd_raw = result_summary_sd
+        else:
+            unfiltered_processed, _ = self._compute_processed_result(unfiltered_cleaned, self.post_processing_method)
+            raw_sd, _ = self._get_summary_sd(unfiltered_processed)
+            self.summary_sd_raw = raw_sd
 
     @observe('summary_sd', 'summary_sd_raw', 'quick_command_args', 'processed_result')
     @exception_protect('merged_sd-protector')
