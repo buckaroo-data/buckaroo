@@ -162,6 +162,58 @@ describe("testing utility functions in gridUtils ", () => {
         undefined
       ]);
     });
+
+    it("includes an optional `?`-prefixed pinned row when the unprefixed key exists in data", () => {
+      const data: DFData = [
+        { index: "histogram_bins", value: 1 },
+        { index: "filtered_histogram_bins", value: 2 }
+      ];
+      const pinnedConfig: PinnedRowConfig[] = [
+        { primary_key_val: "histogram_bins", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "?filtered_histogram_bins", displayer_args: { displayer: "obj" } }
+      ];
+      const result = extractPinnedRows(data, pinnedConfig);
+      expect(result).toStrictEqual([
+        { index: "histogram_bins", value: 1 },
+        { index: "filtered_histogram_bins", value: 2 }
+      ]);
+    });
+
+    it("omits an optional `?`-prefixed pinned row when the unprefixed key is absent (not undefined)", () => {
+      const data: DFData = [
+        { index: "histogram_bins", value: 1 }
+      ];
+      const pinnedConfig: PinnedRowConfig[] = [
+        { primary_key_val: "histogram_bins", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "?filtered_histogram_bins", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "?cleaned_histogram_bins", displayer_args: { displayer: "obj" } }
+      ];
+      const result = extractPinnedRows(data, pinnedConfig);
+      expect(result.length).toBe(1);
+      expect(result).toStrictEqual([
+        { index: "histogram_bins", value: 1 }
+      ]);
+    });
+
+    it("still emits undefined for an unprefixed required pinned row when its key is absent", () => {
+      // Backward-compat: required (no `?`) rows preserve the existing
+      // "kept as undefined when absent" behavior so callers that depend on
+      // positional alignment with pinned_rows config keep working.
+      const data: DFData = [
+        { index: "histogram_bins", value: 1 }
+      ];
+      const pinnedConfig: PinnedRowConfig[] = [
+        { primary_key_val: "histogram_bins", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "missing", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "?cleaned_histogram_bins", displayer_args: { displayer: "obj" } }
+      ];
+      const result = extractPinnedRows(data, pinnedConfig);
+      expect(result.length).toBe(2);
+      expect(result).toStrictEqual([
+        { index: "histogram_bins", value: 1 },
+        undefined
+      ]);
+    });
   });
 
   describe("dfToAgrid", () => {

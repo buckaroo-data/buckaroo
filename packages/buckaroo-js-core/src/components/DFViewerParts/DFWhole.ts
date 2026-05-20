@@ -186,6 +186,11 @@ export type ColumnConfig = NormalColumnConfig | MultiIndexColumnConfig;
 
 
 export type PinnedRowConfig = {
+    // A leading `?` marks an optional row: the unprefixed key is looked up
+    // in the summary stats, and if absent the row is omitted entirely
+    // (rather than rendered with undefined values). Used for scoped stats
+    // like `?cleaned_histogram_bins` / `?filtered_histogram_bins` that
+    // only exist when their scope is active.
     primary_key_val: string;
     displayer_args: DisplayerArgs;
     //used to render index column values with string not the specified displayer, otherwise the column will be listed as NaN or blank
