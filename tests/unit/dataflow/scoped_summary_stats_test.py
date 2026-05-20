@@ -13,7 +13,6 @@ This is a deliberate breaking change to bare-name semantics: today
 cleaning and filter). After this change it is the raw mean.
 """
 import pandas as pd
-import pytest
 
 from buckaroo.customizations.analysis import DefaultSummaryStats, PdCleaningStats
 from buckaroo.customizations.pandas_commands import (DropCol, FillNA, GroupBy, NoOp, SafeInt, Search)
