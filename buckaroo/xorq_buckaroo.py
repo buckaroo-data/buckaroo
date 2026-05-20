@@ -222,6 +222,58 @@ class XorqInfiniteSampling(XorqSampling):
     serialize_limit = -1
 
 
+def window_to_parquet(processed_df, start, end, sort_col=None, ascending=True) -> bytes:
+    """Materialise rows ``[start, end)`` and serialise to parquet — *no
+    pandas detour for the ibis path*.
+
+    Mirrors the polars infinite widget's wire path: arrow → parquet,
+    not arrow → pandas → fastparquet. The bounded query
+    ``expr.limit(end - start, offset=start)`` (after ``order_by`` when
+    ``sort_col`` is set) goes straight to ``to_pyarrow()``; the
+    resulting ``pyarrow.Table`` is column-renamed to buckaroo's
+    rewritten ``a, b, c`` space, an ``index`` column with absolute
+    offsets ``[start, start + n)`` is appended, and the table is
+    written with ``pyarrow.parquet.write_table``.
+
+    For a pandas DataFrame (postprocessor materialised, or
+    error-frame fallback) we still go through the pandas
+    ``to_parquet`` helper — there's no expression to push down.
+
+    Shared by ``XorqBuckarooInfiniteWidget`` (Jupyter, sends via
+    widget comm) and the standalone server's
+    ``handle_infinite_request_xorq`` (WebSocket binary frame). Lifted
+    to module level so both transports drive one push-down path.
+    """
+    if _is_pandas(processed_df):
+        if sort_col is not None:
+            processed_df = processed_df.sort_values(by=[sort_col], ascending=ascending)
+        df = processed_df[start:end].copy()
+        df.index = pd.RangeIndex(start, start + len(df))
+        return to_parquet(df)
+
+    expr = processed_df
+    if sort_col is not None:
+        expr = expr.order_by(
+            expr[sort_col].asc() if ascending else expr[sort_col].desc())
+    # Rename original columns to the rewritten 'a, b, c' space the
+    # frontend works in. Done at the expression level — and *before*
+    # the limit — so the outermost op stays ``Limit`` (the bounded
+    # plan stays observable for spies / query inspection).
+    rename_select = [
+        expr[orig].name(rew)
+        for orig, rew in old_col_new_col(processed_df)]
+    renamed = expr.select(rename_select)
+    windowed = renamed.limit(end - start, offset=start)
+    table = windowed.to_pyarrow()
+    # Append absolute-offset index column for the frontend.
+    index_arr = pa.array(
+        list(range(start, start + len(table))), type=pa.int64())
+    table = table.append_column('index', index_arr)
+    out = BytesIO()
+    pq.write_table(table, out, compression='none')
+    return out.getvalue()
+
+
 class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
     """Infinite-scroll buckaroo over an ibis/xorq expression.
 
@@ -260,7 +312,7 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
                 sort_col = processed_sd[sort]['orig_col_name']
                 ascending = new_payload_args.get('sort_direction') == 'asc'
 
-            window_bytes = self._window_to_parquet(processed_df, start, end, sort_col, ascending)
+            window_bytes = window_to_parquet(processed_df, start, end, sort_col, ascending)
             self.send(
                 {"type": "infinite_resp", 'key': new_payload_args,
                  'data': [], 'length': total_length},
@@ -273,7 +325,7 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
             if not second_pa:
                 return
             extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
-            extra_bytes = self._window_to_parquet(processed_df, extra_start, extra_end)
+            extra_bytes = window_to_parquet(processed_df, extra_start, extra_end)
             self.send(
                 {"type": "infinite_resp", 'key': second_pa,
                  'data': [], 'length': total_length},
@@ -285,50 +337,3 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
                 {"type": "infinite_resp", 'key': new_payload_args,
                  'data': [], 'error_info': stack_trace, 'length': 0})
             raise
-
-    @staticmethod
-    def _window_to_parquet(processed_df, start, end, sort_col=None, ascending=True) -> bytes:
-        """Materialise rows ``[start, end)`` and serialise to parquet — *no
-        pandas detour for the ibis path*.
-
-        Mirrors the polars infinite widget's wire path: arrow → parquet,
-        not arrow → pandas → fastparquet. The bounded query
-        ``expr.limit(end - start, offset=start)`` (after ``order_by`` when
-        ``sort_col`` is set) goes straight to ``to_pyarrow()``; the
-        resulting ``pyarrow.Table`` is column-renamed to buckaroo's
-        rewritten ``a, b, c`` space, an ``index`` column with absolute
-        offsets ``[start, start + n)`` is appended, and the table is
-        written with ``pyarrow.parquet.write_table``.
-
-        For a pandas DataFrame (postprocessor materialised, or
-        error-frame fallback) we still go through the pandas
-        ``to_parquet`` helper — there's no expression to push down.
-        """
-        if _is_pandas(processed_df):
-            if sort_col is not None:
-                processed_df = processed_df.sort_values(by=[sort_col], ascending=ascending)
-            df = processed_df[start:end].copy()
-            df.index = pd.RangeIndex(start, start + len(df))
-            return to_parquet(df)
-
-        expr = processed_df
-        if sort_col is not None:
-            expr = expr.order_by(
-                expr[sort_col].asc() if ascending else expr[sort_col].desc())
-        # Rename original columns to the rewritten 'a, b, c' space the
-        # frontend works in. Done at the expression level — and *before*
-        # the limit — so the outermost op stays ``Limit`` (the bounded
-        # plan stays observable for spies / query inspection).
-        rename_select = [
-            expr[orig].name(rew)
-            for orig, rew in old_col_new_col(processed_df)]
-        renamed = expr.select(rename_select)
-        windowed = renamed.limit(end - start, offset=start)
-        table = windowed.to_pyarrow()
-        # Append absolute-offset index column for the frontend.
-        index_arr = pa.array(
-            list(range(start, start + len(table))), type=pa.int64())
-        table = table.append_column('index', index_arr)
-        out = BytesIO()
-        pq.write_table(table, out, compression='none')
-        return out.getvalue()
