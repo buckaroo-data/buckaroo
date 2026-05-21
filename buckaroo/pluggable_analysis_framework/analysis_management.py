@@ -286,7 +286,12 @@ class DfStats(object):
         kls.ap_class(col_analysis_objs)
 
     def __init__(self, df_stats_df:pd.DataFrame, col_analysis_objs:AObjs,
-        operating_df_name:str=None, debug:bool=False) -> None:
+        operating_df_name:str=None, debug:bool=False, skip_stat_names=None) -> None:
+        # ``skip_stat_names`` is accepted for API parity with DfStatsV2 /
+        # XorqDfStatsV2 (it's threaded through from the dataflow's
+        # ``skip_stats_by_scope`` config). The v1 ``AnalysisPipeline``
+        # doesn't support per-stat skipping, so we strip at the output
+        # level instead.
         self.df = self.get_operating_df(df_stats_df, force_full_eval=False)
         self.col_order = self.df.columns
         self.ap = self.ap_class(col_analysis_objs)
@@ -294,6 +299,11 @@ class DfStats(object):
         self.debug = debug
 
         self.sdf, self.errs = self.ap.process_df(self.df, self.debug)
+        if skip_stat_names:
+            for col_stats in self.sdf.values():
+                for k in list(col_stats.keys()):
+                    if k in skip_stat_names:
+                        del col_stats[k]
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)
         

@@ -40,15 +40,17 @@ class DfStatsV2:
         cls.ap_class(col_analysis_objs)
 
     def __init__(self, df_stats_df: pd.DataFrame, col_analysis_objs: AObjs, operating_df_name: str = None,
-            debug: bool = False) -> None:
+            debug: bool = False, skip_stat_names=None) -> None:
         self.df = self.get_operating_df(df_stats_df, force_full_eval=False)
         self.col_order = self.df.columns
         self.ap = self.ap_class(col_analysis_objs)
         self.operating_df_name = operating_df_name
         self.debug = debug
 
-        # Process using v1-compatible output format
-        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, self.debug)
+        # ``skip_stat_names`` is the per-scope skiplist threaded through
+        # from the dataflow's ``skip_stats_by_scope`` config.
+        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, self.debug,
+            skip_stat_names=skip_stat_names)
         self.stat_errors = []
 
         if self.errs:
@@ -94,10 +96,12 @@ class PlDfStatsV2:
             return df.sample(n=min(50_000, rows), seed=42)
         return df
 
-    def __init__(self, df, col_analysis_objs, operating_df_name=None, debug=False):
+    def __init__(self, df, col_analysis_objs, operating_df_name=None, debug=False,
+            skip_stat_names=None):
         self.df = self.get_operating_df(df)
         self.ap = StatPipeline(col_analysis_objs, unit_test=False)
-        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, debug)
+        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, debug,
+            skip_stat_names=skip_stat_names)
         self.stat_errors = []
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)
