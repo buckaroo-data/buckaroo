@@ -142,6 +142,57 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_ws_infinite_request_clamps_oversized_window(self):
+        """Regression for #797: a request with ``end >> total_rows``
+        must clamp to ``MAX_INFINITE_WINDOW``. Pre-fix the xorq path
+        returned the entire underlying table in one parquet frame —
+        92 MB on the boston dataset.
+
+        For test ergonomics ``MAX_INFINITE_WINDOW`` is lowered to 3
+        and the existing 10-row fixture exposes the clamp without
+        needing an 11k-row fixture.
+        """
+        from buckaroo.server import window as W
+        original_max = W.MAX_INFINITE_WINDOW
+        W.MAX_INFINITE_WINDOW = 3
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-clamp", "build_dir": build_path})
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/lx-clamp")
+            await ws.read_message()  # discard initial_state
+
+            ws.write_message(json.dumps({
+                "type": "infinite_request",
+                "payload_args": {"start": 0, "end": 99_999_999,
+                    "sourceName": "default", "origEnd": 99_999_999}}))
+
+            r = json.loads(await ws.read_message())
+            self.assertEqual(r["type"], "infinite_resp")
+            # `length` reports total table rows (unclamped) — that's
+            # the contract clients depend on for the virtual-scroll
+            # heuristic. Only the *window* must be clamped.
+            self.assertEqual(r["length"], 10)
+
+            binary_frame = await ws.read_message()
+            self.assertIsInstance(binary_frame, bytes)
+            table = pq.read_table(io.BytesIO(binary_frame))
+            # 10-row table, end=99_999_999, MAX_INFINITE_WINDOW=3
+            # → clamp(0, 99_999_999, 10) = (0, 10), then cap window
+            # to 3 → window of 3 rows.
+            self.assertEqual(table.num_rows, 3,
+                f"window must clamp to MAX_INFINITE_WINDOW=3; "
+                f"got {table.num_rows} (pre-fix: 10)")
+
+            ws.close()
+        finally:
+            W.MAX_INFINITE_WINDOW = original_max
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_session_reuse_xorq_then_pandas(self):
         """A client that POSTs /load_expr and then POSTs /load with the
         same session id should see the pandas data on subsequent
