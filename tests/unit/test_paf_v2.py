@@ -200,6 +200,25 @@ class TestStatDecorator:
             def bad(ser: RawSeries) -> float:
                 return float(ser.mean())
 
+    def test_known_expensive_stats_marked_aggregate(self):
+        """The expensive built-in stat funcs (histogram producers across
+        all three engines) are tagged ``cost="aggregate"`` so a
+        downstream router can schedule them on the slow path."""
+        from buckaroo.customizations.pd_stats_v2 import histogram as pd_histogram
+        from buckaroo.customizations.pd_stats_v2 import histogram_series as pd_hs
+        from buckaroo.customizations.pl_stats_v2 import pl_histogram_series
+
+        assert pd_histogram._stat_func.cost == "aggregate"
+        assert pd_hs._stat_func.cost == "aggregate"
+        assert pl_histogram_series._stat_func.cost == "aggregate"
+
+        # xorq histogram (optional dep — skip if not installed)
+        try:
+            from buckaroo.customizations.xorq_stats_v2 import histogram as xq_histogram
+        except ImportError:
+            return
+        assert xq_histogram._stat_func.cost == "aggregate"
+
 
 class _MultiSizeStats(MultipleProvides):
     row_count: int

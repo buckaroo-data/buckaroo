@@ -132,6 +132,9 @@ class StatKey:
 # StatFunc — a registered stat computation
 # ---------------------------------------------------------------------------
 
+VALID_COSTS = ("scalar", "aggregate")
+
+
 @dataclass
 class StatFunc:
     """A registered stat computation.
@@ -145,6 +148,11 @@ class StatFunc:
         column_filter: optional predicate on column dtype
         quiet: suppress error reporting
         default: fallback value on failure (MISSING = no fallback)
+        cost: cost class — ``"scalar"`` (cheap, ships in the initial
+            state_change response) or ``"aggregate"`` (slow path that the
+            JS orchestrator fetches via a separate round-trip after a
+            debounce). Histograms, value_counts and other per-column
+            queries belong in ``"aggregate"``.
     """
     name: str
     func: Callable
@@ -154,6 +162,7 @@ class StatFunc:
     column_filter: Optional[Callable] = None
     quiet: bool = False
     default: Any = field(default_factory=lambda: MISSING)
+    cost: str = "scalar"
     spread_dict_result: bool = False  # v1 compat: spread all dict keys into accumulator
     v1_computed: bool = False  # v1 compat: pass full accumulator as single dict arg
 
@@ -250,7 +259,7 @@ def _get_requires_from_params(sig: inspect.Signature, hints: dict) -> tuple:
 # @stat decorator
 # ---------------------------------------------------------------------------
 
-def stat(column_filter=None, quiet=False, default=MISSING):
+def stat(column_filter=None, quiet=False, default=MISSING, cost="scalar"):
     """Decorator that converts a function into a StatFunc.
 
     The function signature IS the contract:
@@ -262,6 +271,12 @@ def stat(column_filter=None, quiet=False, default=MISSING):
     Single-provider stats: name the function the same as the accumulator
     key the rest of the DAG expects. Use ``MultipleProvides`` (a TypedDict
     alias) when one function should write several keys.
+
+    ``cost=`` declares the compute-cost class. ``"scalar"`` (default)
+    means cheap — ships in the initial state_change response. ``"aggregate"``
+    means slow (histograms, value_counts, per-column queries) — the JS
+    orchestrator fetches these via a separate round-trip after a debounce.
+    See plans/js-driven-stat-debounce.md.
 
     Usage::
 
@@ -277,6 +292,10 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         def safe_ratio(a: int, b: int) -> float:
             return a / b
 
+        @stat(cost="aggregate")
+        def histogram(...) -> list:
+            ...
+
         class TypingResult(MultipleProvides):
             is_numeric: bool
             is_integer: bool
@@ -285,6 +304,10 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         def typing_stats(dtype: str) -> TypingResult:
             ...
     """
+    if cost not in VALID_COSTS:
+        raise ValueError(
+            f"@stat(cost={cost!r}): invalid cost class. "
+            f"Must be one of {VALID_COSTS}.")
     def decorator(func):
         sig = inspect.signature(func)
         try:
@@ -298,7 +321,8 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         provides_keys = _get_provides_from_return_type(func.__name__, return_type)
 
         stat_func = StatFunc(name=func.__name__, func=func, requires=requires, provides=provides_keys,
-            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default)
+            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default,
+            cost=cost)
 
         # Attach metadata to the function so pipeline can find it
         func._stat_func = stat_func
