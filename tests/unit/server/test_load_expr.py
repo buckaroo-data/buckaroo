@@ -193,6 +193,46 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_xorq_infinite_request_error_info_no_traceback(self):
+        """Regression for #798: the xorq path put ``traceback.format_exc()``
+        into ``error_info`` unconditionally — leaking server-side source
+        paths to WS clients. Pandas path gates this behind
+        ``BUCKAROO_DEBUG``; xorq must too.
+
+        Trigger the exception with a sort column that doesn't exist in
+        ``merged_sd`` — raises ``KeyError`` inside
+        ``handle_infinite_request_xorq``.
+        """
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-leak", "build_dir": build_path})
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/lx-leak")
+            await ws.read_message()  # discard initial_state
+
+            ws.write_message(json.dumps({
+                "type": "infinite_request",
+                "payload_args": {"start": 0, "end": 5,
+                    "sort": "nonexistent_col", "sort_direction": "asc",
+                    "sourceName": "default", "origEnd": 5}}))
+
+            r = json.loads(await ws.read_message())
+            self.assertEqual(r["type"], "infinite_resp")
+            self.assertIn("error_info", r)
+            # The bug: pre-fix this carries a full traceback starting
+            # with "Traceback (most recent call last):\n  File ...".
+            # Production runs shouldn't leak source paths to clients.
+            self.assertFalse(r["error_info"].startswith("Traceback"),
+                f"error_info leaked traceback to client (first 200 chars): "
+                f"{r['error_info'][:200]!r}")
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_session_reuse_xorq_then_pandas(self):
         """A client that POSTs /load_expr and then POSTs /load with the
         same session id should see the pandas data on subsequent
