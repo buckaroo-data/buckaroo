@@ -250,6 +250,49 @@ class DataFlow(ABCDataflow):
 
     _summary_sd_cache_key = (None, None)
 
+    def _scope_cache_key(self, chain):
+        """Hash that identifies a scope's SD-input identity.
+
+        Includes the op chain *and* an identifier for the source
+        dataframe (``id(sampled_df)``) *and* the post-processing method
+        — all three are inputs to the scope df, and a cache hit must
+        mean "same SD-producing inputs" not just "same chain".
+
+        - sampled_df identity addresses codex P1 on #783: a ``raw_df``
+          swap with an unchanged chain must invalidate.
+        - post_processing_method addresses the
+          ``test_hide_column_config_post_processing`` invariant: when
+          post-processing replaces the df entirely (e.g. ``hide_post``
+          → ``SENTINEL_DF``), the raw scope's SD must reflect that
+          new df, not the pre-post-processing one.
+
+        Lives on ``DataFlow`` rather than ``CustomizableDataflow`` so
+        ``_summary_sd`` (also on ``DataFlow``) can compute the same key
+        ``_populate_sd_cache`` (on ``CustomizableDataflow``) uses,
+        without a layering wart.
+        """
+        sampled_id = id(self.sampled_df) if self.sampled_df is not None else 0
+        pp = getattr(self, 'post_processing_method', '') or ''
+        return hash_chain(chain, extra=f"{sampled_id}|{pp}")
+
+    def _current_filt_chain(self):
+        """Return the filt-scope chain for the just-set state.
+
+        Reads ``self.cleaned[3]`` via the ``merged_operations`` property
+        rather than ``self.operations`` — at the moment ``_summary_sd``
+        fires, ``self.operations`` still holds the PRIOR state's chain
+        (the parent ``_operation_result`` sets ``self.cleaned = result``
+        BEFORE ``self.operations = result[3]``; see #814). The merged
+        chain from the result tuple is already current.
+
+        Falls back to ``self.operations`` for pre-cascade states (e.g.
+        an ``analysis_klasses`` change before any cascade has run).
+        """
+        ops = self.merged_operations
+        if ops is None:
+            ops = self.operations
+        return split_chain_by_scope(ops)['filt']
+
     @observe('processed_result', 'analysis_klasses')
     @exception_protect('summary_sd-protector')
     def _summary_sd(self, change):
@@ -264,6 +307,22 @@ class DataFlow(ABCDataflow):
         if (id(df), id(klasses)) == self._summary_sd_cache_key:
             return
         self._summary_sd_cache_key = (id(df), id(klasses))
+        # Cache short-circuit (#814): if ``summary_stats_cache`` already
+        # holds an entry for the current filt chain, reuse it instead of
+        # paying ~300ms+ to re-run the full analysis pipeline. ~half of
+        # state_change latency on xorq backends is this recompute.
+        #
+        # Key off ``_current_filt_chain()`` — which reads from
+        # ``self.cleaned[3]`` (already the new chain), NOT
+        # ``self.operations`` (still the prior chain at this point in
+        # the cascade). Keying off ``self.operations`` is the bug the
+        # original lookup-removal (5bc7bbfb) was guarding against.
+        filt_key = self._scope_cache_key(self._current_filt_chain())
+        cache = self.summary_stats_cache or {}
+        if filt_key in cache:
+            self.summary_sd = cache[filt_key]
+            self.errs = {}
+            return
         result_summary_sd, errs  = self._get_summary_sd(df)
         self.summary_sd = result_summary_sd
         self.errs = errs
@@ -438,7 +497,17 @@ class CustomizableDataflow(DataFlow):
         # off ``filt_sd_key != raw_sd_key`` would also fire for
         # cleaning-only states, mislabelling cleaned stats as filtered
         # until the deferred ``cleaned_*`` scope lands.
-        chains = split_chain_by_scope(self.operations)
+        #
+        # Read the chain from ``self.merged_operations`` (== freshly-set
+        # ``self.cleaned[3]``) rather than ``self.operations``: this
+        # observer fires on ``summary_sd``, which is set BEFORE the
+        # parent ``_operation_result`` reaches ``self.operations =
+        # result[3]``. ``self.operations`` is therefore the PRIOR
+        # state's chain at first-fire time. See #814.
+        ops = self.merged_operations
+        if ops is None:
+            ops = self.operations
+        chains = split_chain_by_scope(ops)
         filter_active = chains['filt'] != chains['clean']
 
         if self.processed_df is None:
@@ -500,29 +569,6 @@ class CustomizableDataflow(DataFlow):
             return base
         return pp_result[0] if pp_result else base
 
-    def _scope_cache_key(self, chain):
-        """Hash that identifies a scope's SD-input identity.
-
-        Includes the op chain *and* an identifier for the source
-        dataframe (``id(sampled_df)``) *and* the post-processing method
-        — all three are inputs to the scope df, and a cache hit must
-        mean "same SD-producing inputs" not just "same chain".
-
-        - sampled_df identity addresses codex P1 on #783: a ``raw_df``
-          swap with an unchanged chain must invalidate.
-        - post_processing_method addresses the
-          ``test_hide_column_config_post_processing`` invariant: when
-          post-processing replaces the df entirely (e.g. ``hide_post``
-          → ``SENTINEL_DF``), the raw scope's SD must reflect that
-          new df, not the pre-post-processing one.
-
-        analysis_klasses is *not* included here; that's a separate
-        invariant (codex P2, deferred — see follow-up issue).
-        """
-        sampled_id = id(self.sampled_df) if self.sampled_df is not None else 0
-        pp = self.post_processing_method or ''
-        return hash_chain(chain, extra=f"{sampled_id}|{pp}")
-
     @observe('summary_sd', 'operations', 'analysis_klasses')
     @exception_protect('sd-cache-protector')
     def _populate_sd_cache(self, _change):
@@ -540,6 +586,11 @@ class CustomizableDataflow(DataFlow):
         no second pass through the analysis pipeline. Raw and clean
         scopes recompute, but only on cache miss.
 
+        Reads the chain from ``self.merged_operations`` (== freshly-set
+        ``self.cleaned[3]``) so this observer sees the new chain even
+        when fired through the ``summary_sd`` path that runs before
+        ``self.operations = result[3]`` lands. See #814.
+
         Cache stores in-process dicts (not the parquet-b64 wire form);
         ``_merged_sd`` reads them directly. The cache + pointer traits
         are un-synced — the frontend consumes only the merged
@@ -547,7 +598,10 @@ class CustomizableDataflow(DataFlow):
         """
         if self.processed_df is None:
             return
-        chains = split_chain_by_scope(self.operations)
+        ops = self.merged_operations
+        if ops is None:
+            ops = self.operations
+        chains = split_chain_by_scope(ops)
         keys = {scope: self._scope_cache_key(chain)
                 for scope, chain in chains.items()}
         new_cache = dict(self.summary_stats_cache)
