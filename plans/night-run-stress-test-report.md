@@ -8,7 +8,7 @@ should be reproducible from the smorg branch.
 ## TL;DR
 
 - **11 bugs filed** (#791–#795, #797–#801, #805).
-- **4 PRs opened** (#796, #802, #803, #804) — small, focused, with
+- **5 PRs opened** (#796, #802, #803, #804, #806) — small, focused, with
   failing-test-then-fix commit pairs each.
 - **Server perf root cause identified**: 6.5 s of every 9 s
   state_change goes to per-column histogram queries in
@@ -45,8 +45,9 @@ should be reproducible from the smorg branch.
 |---|---|---|---|
 | [#796](https://github.com/buckaroo-data/buckaroo/pull/796) | `fix(xorq): memoize _expr_count by expression identity` | #795 | CI green |
 | [#802](https://github.com/buckaroo-data/buckaroo/pull/802) | `fix(server): clamp infinite_request window — DoS guard` | #797 | CI green |
-| [#803](https://github.com/buckaroo-data/buckaroo/pull/803) | `fix(server): gate xorq infinite_request error_info on BUCKAROO_DEBUG` | #798 | pending |
-| [#804](https://github.com/buckaroo-data/buckaroo/pull/804) | `fix(server): explicit error for state_change on read-only modes` | #793 | pending |
+| [#803](https://github.com/buckaroo-data/buckaroo/pull/803) | `fix(server): gate xorq infinite_request error_info on BUCKAROO_DEBUG` | #798 | CI green |
+| [#804](https://github.com/buckaroo-data/buckaroo/pull/804) | `fix(server): explicit error for state_change on read-only modes` | #793 | CI green |
+| [#806](https://github.com/buckaroo-data/buckaroo/pull/806) | `fix(server): guard WS on_message against non-dict JSON + unknown types` | #805 | pending |
 
 Each PR has the test-failing-on-CI-first commit pair per the global
 TDD rule. Each PR is independent and branched from `main` — they can
@@ -200,6 +201,25 @@ observer fires during phase 1 and the phase-2 `recompute_summary_sd`
 re-runs the same work. The spike's whole premise (phase 1 ships
 display state cheaply, phase 2 does the heavy lift) is broken on
 xorq until the cache-observer gate is wired up.
+
+I also tested the spike on the **pandas** backend (`mode=buckaroo`)
+end-to-end via WS:
+
+```
+single search 'PIZZA', pandas-mode boston:
+
+spike OFF: 1 frame at 1031 ms.
+spike ON:  2 frames at 1021 ms and 1056 ms.
+```
+
+Same total latency. The spike adds a redundant second frame, no UX
+win. The cache observer issue (#787's open question on xorq path
+coverage) is the same on pandas — just smaller in absolute terms,
+because process_df is 400ms instead of 7 s.
+
+Net: **the spike doesn't help any backend in its current shape**.
+Fixing the cache observer gate (per `plans/0787-xorq-rows-first-coverage.md`)
+is the prerequisite for the spike to do anything useful.
 
 ## Least surprising finding
 
