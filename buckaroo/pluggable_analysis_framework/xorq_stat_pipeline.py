@@ -19,6 +19,8 @@ Optional dependency: install with ``buckaroo[xorq]``.
 
 from __future__ import annotations
 
+import math
+import uuid
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -114,6 +116,14 @@ class XorqStatPipeline:
         self.all_stat_funcs = _normalize_inputs(stat_funcs)
         self._original_inputs = list(stat_funcs)
         self.backend = backend
+        # 1-slot LRU: keyed by id(input_table). When process_table is
+        # called repeatedly with the same input (common in benchmarks,
+        # test loops, and dashboard refreshes that haven't changed the
+        # underlying expression), the materialized table and the
+        # categorical UNION-ALL expression survive between calls.
+        self._cache_key: Any = None
+        self._cache_materialized = None  # (table, (backend, name) or None)
+        self._cache_cat: Any = None      # (cat_cols_tuple, union_expr)
 
         # Validate the full DAG up front (raises DAGConfigError on misconfig).
         self.ordered_stat_funcs = build_typed_dag(
@@ -139,6 +149,234 @@ class XorqStatPipeline:
         if self.backend is not None:
             return self.backend.execute(query)
         return query.execute()
+
+    def _maybe_materialize(self, table):
+        """Materialize a lazy expression to a fresh base table.
+
+        Lazy filter/clean chains (filt/clean scopes in the buckaroo
+        dataflow) re-execute on every per-column query. With N columns
+        and a histogram per column, that's N+1 filter evaluations.
+        Materializing once turns each subsequent query into a simple
+        table scan against an in-memory base table.
+
+        Only runs for in-process xorq-datafusion backends. Remote
+        backends would pay the cost of pulling all data over the wire.
+        Returns (table_to_use, cleanup) where cleanup is (backend, name)
+        for later drop, or None if no materialization happened.
+        """
+        try:
+            underlying = table._find_backend()
+        except Exception:
+            return table, None
+        if "xorq_datafusion" not in type(underlying).__module__:
+            return table, None
+        # Skip when the table is already a base table on the backend —
+        # materializing it again is pure overhead (full table read +
+        # re-register) with no filter chain to amortize.
+        try:
+            from xorq.vendor.ibis.expr import operations as _ibis_ops
+            if isinstance(table.op(), (_ibis_ops.DatabaseTable, _ibis_ops.InMemoryTable)):
+                return table, None
+        except Exception:
+            pass
+        # If no per-column work follows the batch aggregate (i.e. nothing
+        # would re-execute the filter chain), materialization is just
+        # wasted work — skip it.
+        if not any(not _is_batch_func(sf) for sf in self.ordered_stat_funcs):
+            return table, None
+        name = f"__buckaroo_histo_mat_{uuid.uuid4().hex[:12]}"
+        try:
+            # Pass the ibis expression directly to create_table — xorq
+            # materializes it in DataFusion without round-tripping through
+            # pandas (~3-4× cheaper than execute() + create_table(df)).
+            new_table = underlying.create_table(name, table, overwrite=True)
+        except Exception:
+            return table, None
+        return new_table, (underlying, name)
+
+    @staticmethod
+    def _is_numeric_dtype_str(dtype_str: str) -> bool:
+        # Mirrors typing_stats in xorq_stats_v2 (kept duplicated rather than
+        # imported to avoid coupling the pipeline to a specific stat module).
+        is_bool = dtype_str == "boolean"
+        is_int = any(dtype_str.startswith(p) for p in ("int", "uint"))
+        is_float = any(dtype_str.startswith(p) for p in ("float", "double", "decimal"))
+        return is_int or is_float or is_bool
+
+    @staticmethod
+    def _would_route_categorical(dtype_str: str, distinct_count) -> bool:
+        is_bool = dtype_str == "boolean"
+        is_int = any(dtype_str.startswith(p) for p in ("int", "uint"))
+        is_float = any(dtype_str.startswith(p) for p in ("float", "double", "decimal"))
+        is_numeric = is_int or is_float or is_bool
+        if not is_numeric or is_bool:
+            return True
+        # Low-cardinality numeric → categorical branch (matches histogram()).
+        return distinct_count is not None and distinct_count <= 5
+
+    def _batch_numeric_histograms(self, table, accumulators, columns, schema):
+        """Pre-populate accumulator['histogram'] for every numeric column
+        that would route to the numeric branch, via one UNION ALL query.
+
+        Each subquery produces (col_idx, bucket_idx, count) rows for the
+        10 bucket bands derived from the column's min/max (already resolved
+        in Phase 1). Routing matches histogram() in xorq_stats_v2.
+        """
+        if not any(sf.name == "histogram" for sf in self.ordered_stat_funcs):
+            return
+        num_cols = []
+        col_minmax = {}
+        for col in columns:
+            length_r = accumulators[col].get("length")
+            if not isinstance(length_r, Ok) or not length_r.value:
+                continue
+            dc_r = accumulators[col].get("distinct_count")
+            dc = dc_r.value if isinstance(dc_r, Ok) else None
+            if self._would_route_categorical(str(schema[col]), dc):
+                continue  # handled by categorical batch
+            mn_r = accumulators[col].get("min")
+            mx_r = accumulators[col].get("max")
+            mn = mn_r.value if isinstance(mn_r, Ok) else None
+            mx = mx_r.value if isinstance(mx_r, Ok) else None
+            if mn is None or mx is None:
+                continue
+            if (isinstance(mn, float) and math.isnan(mn)) or (
+                isinstance(mx, float) and math.isnan(mx)
+            ):
+                continue
+            if mn == mx:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            num_cols.append(col)
+            col_minmax[col] = (mn, mx)
+        if not num_cols:
+            return
+        try:
+            parts = []
+            for i, col in enumerate(num_cols):
+                mn, mx = col_minmax[col]
+                bucket = (
+                    ((table[col].cast("float64") - mn) / (mx - mn) * 10)
+                    .cast("int64")
+                    .clip(lower=0, upper=9)
+                )
+                p = (table.mutate(__bucket=bucket)
+                     .group_by("__bucket")
+                     .aggregate(__count=lambda tt: tt.count())
+                     .mutate(__col_idx=xo.literal(i))
+                     .select("__col_idx", "__bucket", "__count"))
+                parts.append(p)
+            combined = parts[0]
+            for p in parts[1:]:
+                combined = combined.union(p)
+            df = self._execute(combined)
+        except Exception:
+            return
+
+        for i, col in enumerate(num_cols):
+            col_df = df[df["__col_idx"] == i]
+            # Drop NULL bucket rows (rows where col was NULL); the count
+            # of null source rows lands under __bucket = NULL.
+            col_df = col_df[col_df["__bucket"].notna()]
+            if len(col_df) == 0:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            total = float(col_df["__count"].sum())
+            if total == 0:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            mn, mx = col_minmax[col]
+            width = (mx - mn) / 10
+            col_df = col_df.sort_values("__bucket")
+            out = []
+            for _, r in col_df.iterrows():
+                idx = int(r["__bucket"])
+                low = mn + idx * width
+                high = low + width
+                out.append({"name": f"{low:.3g}-{high:.3g}",
+                    "cat_pop": float(r["__count"]) / total})
+            accumulators[col]["histogram"] = Ok(out)
+
+    def _batch_categorical_histograms(self, table, accumulators, columns, schema):
+        """Pre-populate accumulator['histogram'] for every column that would
+        route to the categorical branch, via one UNION ALL query.
+
+        Only fires when the user's stat list contains a stat named
+        ``histogram`` (the convention used by ``XORQ_STATS_V2``). Silently
+        falls back to per-column Phase 2 execution on any error — Phase 2
+        sees a missing accumulator entry and computes the histogram itself.
+        """
+        if not any(sf.name == "histogram" for sf in self.ordered_stat_funcs):
+            return
+        cat_cols = []
+        for col in columns:
+            length_r = accumulators[col].get("length")
+            if not isinstance(length_r, Ok) or not length_r.value:
+                continue
+            dc_r = accumulators[col].get("distinct_count")
+            dc = dc_r.value if isinstance(dc_r, Ok) else None
+            if self._would_route_categorical(str(schema[col]), dc):
+                cat_cols.append(col)
+        if not cat_cols:
+            return
+        cat_cols_key = tuple(cat_cols)
+        try:
+            if (self._cache_cat is not None
+                    and self._cache_cat[0] == cat_cols_key):
+                combined = self._cache_cat[1]
+            else:
+                parts = []
+                for i, col in enumerate(cat_cols):
+                    tk = table[col].topk(10)
+                    # topk() emits the value column under its original
+                    # name and the count under "CountStar(<table>)" —
+                    # rename to a stable name before union, since UNION
+                    # ALL is positional but the downstream df accessor
+                    # uses column names.
+                    count_col_name = tk.columns[1]
+                    p = (tk
+                         .mutate(__col_idx=xo.literal(i),
+                        __value=lambda tt, c=col: tt[c].cast("string"))
+                         .rename({"__count": count_col_name})
+                         .select("__col_idx", "__value", "__count"))
+                    parts.append(p)
+                combined = parts[0]
+                for p in parts[1:]:
+                    combined = combined.union(p)
+                self._cache_cat = (cat_cols_key, combined)
+            df = self._execute(combined)
+        except Exception:
+            return  # fall back to per-column histogram in Phase 2
+
+        for i, col in enumerate(cat_cols):
+            col_df = df[df["__col_idx"] == i]
+            if len(col_df) == 0:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            col_df = col_df.sort_values("__count", ascending=False)
+            # Denominator is the non-null row count so the bars sum to 1
+            # across (top-K + longtail) and don't drift when there are many
+            # nulls. ``length`` and ``null_count`` are populated by Phase 1.
+            length_v = accumulators[col].get("length")
+            length_v = length_v.value if isinstance(length_v, Ok) else 0
+            null_v = accumulators[col].get("null_count")
+            null_v = null_v.value if isinstance(null_v, Ok) else 0
+            non_null = max(0, (length_v or 0) - (null_v or 0))
+            top_sum = float(col_df["__count"].sum())
+            denom = float(non_null) if non_null else top_sum
+            if denom == 0:
+                accumulators[col]["histogram"] = Ok([])
+                continue
+            out = [
+                {"name": str(r["__value"]), "cat_pop": float(r["__count"]) / denom}
+                for _, r in col_df.iterrows()
+            ]
+            # Values not in top-K (including unique singletons) collapse
+            # into one longtail bar so the column's coverage is visible.
+            longtail = max(0.0, float(non_null) - top_sum) if non_null else 0.0
+            if longtail > 0:
+                out.append({"name": "longtail", "cat_pop": longtail / denom})
+            accumulators[col]["histogram"] = Ok(out)
 
     def unit_test(self) -> Tuple[bool, List[StatError]]:
         """Run pipeline against PERVERSE_DF wrapped as a xorq memtable.
@@ -166,6 +404,35 @@ class XorqStatPipeline:
             self.backend = saved_backend
 
     def process_table(self, table) -> Tuple[SDType, List[StatError]]:
+        cache_key = id(table)
+        if self._cache_key != cache_key:
+            self._evict_cache()
+            self._cache_key = cache_key
+            materialized, cleanup = self._maybe_materialize(table)
+            self._cache_materialized = (materialized, cleanup)
+        materialized, _ = self._cache_materialized
+        return self._process_table_impl(materialized)
+
+    def _evict_cache(self):
+        if self._cache_materialized is not None:
+            _, cleanup = self._cache_materialized
+            if cleanup is not None:
+                backend, name = cleanup
+                try:
+                    backend.drop_table(name)
+                except Exception:
+                    pass
+        self._cache_materialized = None
+        self._cache_cat = None
+        self._cache_key = None
+
+    def __del__(self):
+        try:
+            self._evict_cache()
+        except Exception:
+            pass
+
+    def _process_table_impl(self, table) -> Tuple[SDType, List[StatError]]:
         schema = table.schema()
         columns = list(table.columns)
 
@@ -238,6 +505,16 @@ class XorqStatPipeline:
                 else:
                     accumulators[col][stat_name] = Err(error=KeyError(
                         f"missing aggregate column {col_stat!r} in result"), stat_func_name=sf.name, column_name=col, inputs={})
+
+        # ---- Phase 1.5: batched categorical histogram ------------------
+        # The per-column GROUP BY/LIMIT pattern that the histogram stat
+        # issues in Phase 2 pays ~5 ms of per-query overhead in DataFusion
+        # regardless of cardinality. With many string columns (e.g. 24 on
+        # boston) that overhead dominates. Fold every column that would
+        # route to the categorical branch into a single UNION ALL query
+        # and pre-populate the accumulator so Phase 2 skips them.
+        self._batch_categorical_histograms(table, accumulators, columns, schema)
+        self._batch_numeric_histograms(table, accumulators, columns, schema)
 
         # ---- Phase 2: per-column post-batch ----------------------------
         all_errors: List[StatError] = []

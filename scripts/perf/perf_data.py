@@ -51,6 +51,20 @@ def make_pandas(n_rows: int, *, seed: int = 42) -> pd.DataFrame:
     })
 
 
+def make_numeric_heavy(n_rows: int, n_cols: int = 24, *, seed: int = 42) -> pd.DataFrame:
+    """Heavy-numeric df: ``n_cols`` float columns + 2 categorical for mix.
+
+    Used to stress the per-column histogram path on the numeric branch
+    the way boston-restaurants stresses the categorical branch.
+    """
+    rng = _rng(seed)
+    cols = {f"f_{i}": rng.normal(loc=i * 0.1, scale=1.0 + i * 0.05, size=n_rows)
+            for i in range(n_cols)}
+    cols["cat_a"] = _repeating_strings(n_rows, 10, rng)
+    cols["cat_b"] = _repeating_strings(n_rows, 100, rng)
+    return pd.DataFrame(cols)
+
+
 def make_polars(n_rows: int, *, seed: int = 42) -> pl.DataFrame:
     """Build a polars df from the same arrays as make_pandas."""
     return pl.from_pandas(make_pandas(n_rows, seed=seed))

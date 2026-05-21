@@ -468,3 +468,74 @@ class TestBackendThreading:
         assert (
             backend.calls <= 5
         ), f"histogram is recomputing min/max; saw {backend.calls} queries"
+
+
+class TestBatchedHistograms:
+    """Phase 1.5 collapses per-column histograms into UNION ALL queries."""
+
+    def test_batched_cat_and_num_collapse_to_two_queries(self):
+        """One batched aggregate + one cat UNION ALL + one num UNION ALL = 3."""
+
+        class TrackingBackend:
+            def __init__(self):
+                self.calls = 0
+            def execute(self, query):
+                self.calls += 1
+                return query.execute()
+
+        backend = TrackingBackend()
+        pipeline = XorqStatPipeline(XORQ_STATS_V2, backend=backend)
+        pipeline.process_table(_make_table())
+        # _make_table has 2 numerics + 2 cats. With per-col histograms that
+        # would be 1 + 4 = 5 queries. With batching: 1 batch + 1 cat union
+        # + 1 num union = 3 queries.
+        assert backend.calls == 3, f"expected 3 batched queries, saw {backend.calls}"
+
+    def test_categorical_histogram_emits_longtail(self):
+        """When cardinality exceeds the top-K cap, the leftover non-null
+        rows collapse into a single ``longtail`` bar so coverage is visible."""
+        # 11 distinct values forces a longtail (top-10 cap leaves one out).
+        df = pd.DataFrame({"cat": list("abcdefghijk") * 3 + ["a"] * 100})
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, _ = pipeline.process_table(xo.memtable(df))
+        h = stats["cat"]["histogram"]
+        names = [b["name"] for b in h]
+        assert "longtail" in names
+        # cat_pops sum to ~1 across top-K + longtail
+        total = sum(b["cat_pop"] for b in h)
+        assert abs(total - 1.0) < 1e-6, f"cat_pops sum to {total}, expected ~1.0"
+
+    def test_categorical_histogram_no_longtail_when_few_distinct(self):
+        """Top-K covers everything → no longtail bar."""
+        df = pd.DataFrame({"cat": ["a", "b", "c", "a", "b", "a"]})
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, _ = pipeline.process_table(xo.memtable(df))
+        h = stats["cat"]["histogram"]
+        assert "longtail" not in [b["name"] for b in h]
+
+    def test_materialization_skipped_for_base_tables(self):
+        """A registered base table on xorq-datafusion shouldn't be re-materialized."""
+        con = xo.connect()
+        df = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6, 7], "y": ["a", "b", "a", "b", "c", "d", "e"]})
+        t = con.create_table("t_mat_skip", df)
+        before = set(con.list_tables())
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        pipeline.process_table(t)
+        after = set(con.list_tables())
+        # No __buckaroo_histo_mat_* tables should remain (or have been created).
+        new = after - before
+        leaked = [n for n in new if n.startswith("__buckaroo_histo_mat")]
+        assert leaked == [], f"materialization fired for a base table: {leaked}"
+
+    def test_cache_reused_on_repeat_call(self):
+        """Calling process_table twice with the same input hits the cache."""
+        df = pd.DataFrame({"x": [1.0, 2, 3, 4, 5, 6, 7], "y": list("abcdefg")})
+        t = xo.memtable(df)
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        pipeline.process_table(t)
+        first_mat = pipeline._cache_materialized
+        first_cat = pipeline._cache_cat
+        pipeline.process_table(t)
+        # Same input → same cache slot, identical objects retained.
+        assert pipeline._cache_materialized is first_mat
+        assert pipeline._cache_cat is first_cat
