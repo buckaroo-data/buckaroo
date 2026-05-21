@@ -621,7 +621,61 @@ SESSION_HTML = """\
 <body>
     <div id="filename-bar"></div>
     <div id="prompt-bar"></div>
+    <div id="engine-bar" style="padding: 4px 10px; font-family: sans-serif; font-size: 12px; color: #ccc; background: #1f1f24; border-bottom: 1px solid #333; flex-shrink: 0;">
+        Engine:
+        <select id="engine-select" style="background: #2a2a30; color: #ddd; border: 1px solid #444; padding: 2px 6px; margin-left: 6px;">
+            <option value="">— switch backend —</option>
+            <option value="pandas">pandas (mode=buckaroo)</option>
+            <option value="lazy">lazy polars (mode=lazy)</option>
+            <option value="xorq">xorq (/load_expr)</option>
+        </select>
+        <span id="engine-status" style="margin-left: 12px; color: #888;"></span>
+    </div>
     <div id="root"></div>
+    <script>
+    // Hard-coded engine config — points each option at the prepared
+    // boston-restaurant resources. Adjust paths via query params for
+    // other datasets (?pd=/path&pl=/path&xq=/build_dir).
+    const ENGINES = (() => {
+        const qs = new URLSearchParams(window.location.search);
+        return {
+            pandas: { mode: "buckaroo", path: qs.get("pd") || "/tmp/restaurant-complaints-pandas.parquet" },
+            lazy:   { mode: "lazy",     path: qs.get("pl") || "/Users/paddy/buckaroo/restaurant-complaints.parquet" },
+            xorq:   {                    build_dir: qs.get("xq") || "/tmp/buckaroo-builds-boston/6b46951d9ac1" },
+        };
+    })();
+    const SESSION_ID = "__SESSION_ID__";
+    const sel = document.getElementById("engine-select");
+    const status = document.getElementById("engine-status");
+    sel.addEventListener("change", async (e) => {
+        const choice = e.target.value;
+        if (!choice) return;
+        const cfg = ENGINES[choice];
+        const url = cfg.build_dir ? "/load_expr" : "/load";
+        const body = { session: SESSION_ID, no_browser: true, ...cfg };
+        const t0 = performance.now();
+        status.textContent = `loading ${choice}…`;
+        try {
+            const r = await fetch(url, { method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body) });
+            const dt = Math.round(performance.now() - t0);
+            if (r.ok) {
+                const d = await r.json();
+                status.textContent = `${choice} loaded (${d.rows ?? "?"} rows, ${dt} ms) — reloading…`;
+                // The widget reads its initial state on WS open. Reload
+                // forces a clean reconnection rather than reasoning
+                // about deep widget-level swap.
+                setTimeout(() => window.location.reload(), 600);
+            } else {
+                const err = await r.text();
+                status.textContent = `${choice} failed (${r.status}): ${err.slice(0, 200)}`;
+            }
+        } catch (ex) {
+            status.textContent = `${choice} error: ${ex.message}`;
+        }
+    });
+    </script>
     <script type="module" src="/static/standalone.js?v=__VERSION__"></script>
 </body>
 </html>

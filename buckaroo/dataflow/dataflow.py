@@ -177,6 +177,10 @@ class DataFlow(ABCDataflow):
         if getattr(self, '_in_operation_result', False):
             return
         self._in_operation_result = True
+        import time as _t
+        import logging as _l
+        _ctlog = _l.getLogger("buckaroo.dataflow.cache_timing")
+        _t0 = _t.perf_counter()
         try:
             result = self.ac_obj.handle_ops_and_clean(
                 self.sampled_df, self.cleaning_method, self.quick_command_args, self.operations)
@@ -188,6 +192,8 @@ class DataFlow(ABCDataflow):
                 self.operations = result[3]
             self.operation_results = {'transformed_df':None,
                 'generated_py_code': self.generated_code}
+            _ctlog.info("[cache-timing] _operation_result: %.0fms qca=%s",
+                (_t.perf_counter()-_t0)*1000, self.quick_command_args)
         finally:
             self._in_operation_result = False
 
@@ -259,15 +265,39 @@ class DataFlow(ABCDataflow):
     _defer_summary_sd = False
 
     def recompute_summary_sd(self):
-        """Force a (re-)compute of ``summary_sd`` against the current
-        ``processed_df``. Used by the spike state-change handler to lift
+        """(Re-)compute ``summary_sd`` against the current ``processed_df``,
+        or short-circuit to the scope cache if the filt scope's SD is
+        already there. Used by the spike state-change handler to lift
         the ``_defer_summary_sd`` short-circuit after the row-data has
         been pushed to the client.
         """
+        import time as _t
+        import logging as _l
+        _ctlog = _l.getLogger("buckaroo.dataflow.cache_timing")
         df = self.processed_df
         if df is None:
             return
+        # Mirror the _summary_sd observer's cache check: if the filt
+        # scope's chain hashes to a cached entry (e.g. clearing search
+        # reverts to the initial empty-filter state), reuse the cached
+        # SD instead of paying ~7s for a fresh compute. Pre-fix this
+        # was the dominant cost of every state_change with the spike on.
+        try:
+            chains = split_chain_by_scope(self.operations)
+            filt_key = self._scope_cache_key(chains['filt'])
+        except Exception:
+            filt_key = None
+        if filt_key and filt_key in (self.summary_stats_cache or {}):
+            cached_sd = self.summary_stats_cache[filt_key]
+            _ctlog.info("[cache-timing] recompute_summary_sd CACHE HIT key=%s",
+                filt_key[:8])
+            self.summary_sd = cached_sd
+            self.errs = {}
+            return
+        _t0 = _t.perf_counter()
         result_summary_sd, errs = self._get_summary_sd(df)
+        _ctlog.info("[cache-timing] recompute_summary_sd compute=%.0fms key=%s",
+            (_t.perf_counter()-_t0)*1000, filt_key[:8] if filt_key else "?")
         self.summary_sd = result_summary_sd
         self.errs = errs
 
@@ -280,17 +310,46 @@ class DataFlow(ABCDataflow):
         # construction even when processed_df identity is unchanged.
         # Skip when neither the dataframe nor analysis_klasses has actually
         # changed since the last run. See issue #709.
+        import time as _t
+        import logging as _l
+        _ctlog = _l.getLogger("buckaroo.dataflow.cache_timing")
         if self._defer_summary_sd:
-            # Spike: caller will trigger recompute after sending the row-data
-            # message. Leaves ``self.summary_sd`` at its prior value so
-            # downstream cache observer still wires up a coherent state.
+            _ctlog.info("[cache-timing] _summary_sd deferred")
             return
         df = self.processed_df
         klasses = self.analysis_klasses
         if (id(df), id(klasses)) == self._summary_sd_cache_key:
+            _ctlog.info("[cache-timing] _summary_sd dedupe hit (same df+klasses id)")
             return
         self._summary_sd_cache_key = (id(df), id(klasses))
-        result_summary_sd, errs  = self._get_summary_sd(df)
+        # Cache lookup BEFORE the expensive _get_summary_sd call: the
+        # scope cache from #783 may already have this filt-scope's SD
+        # from a previous state (e.g. clearing search reverts to the
+        # initial empty-filter state). If so, reuse it instead of
+        # paying the full pipeline cost again.
+        try:
+            chains = split_chain_by_scope(self.operations)
+            filt_key = self._scope_cache_key(chains['filt'])
+        except Exception:
+            filt_key = None
+        if filt_key and filt_key in (self.summary_stats_cache or {}):
+            cached_sd = self.summary_stats_cache[filt_key]
+            _ctlog.info("[cache-timing] _summary_sd CACHE HIT key=%s (saved compute)",
+                filt_key[:8])
+            self.summary_sd = cached_sd
+            self.errs = {}
+            return
+        _t1 = _t.perf_counter()
+        result_summary_sd, errs = self._get_summary_sd(df)
+        # ``len(df)`` works on pandas but raises on ibis expressions —
+        # leave the row-count off the log line on non-pandas backends.
+        try:
+            n_rows = len(df) if df is not None else 0
+        except Exception:
+            n_rows = "?"
+        _ctlog.info("[cache-timing] _summary_sd compute=%.0fms key=%s rows=%s",
+            (_t.perf_counter() - _t1) * 1000,
+            (filt_key[:8] if filt_key else "?"), n_rows)
         self.summary_sd = result_summary_sd
         self.errs = errs
 
@@ -588,6 +647,10 @@ class CustomizableDataflow(DataFlow):
         are un-synced — the frontend consumes only the merged
         prefixed-key ``merged_sd``.
         """
+        import time as _t
+        import logging as _l
+        _ctlog = _l.getLogger("buckaroo.dataflow.cache_timing")
+        _t0 = _t.perf_counter()
         if self.processed_df is None:
             return
         chains = split_chain_by_scope(self.operations)
@@ -600,23 +663,32 @@ class CustomizableDataflow(DataFlow):
         if keys['filt'] not in new_cache:
             new_cache[keys['filt']] = dict(self.summary_sd or {})
             cache_grew = True
+            _ctlog.info("[cache-timing] populate: filt MISS key=%s", keys['filt'][:8])
+        else:
+            _ctlog.info("[cache-timing] populate: filt HIT key=%s", keys['filt'][:8])
 
         # raw + clean: fresh compute, but only on cache miss.
         for scope in ('raw', 'clean'):
             if keys[scope] in new_cache:
+                _ctlog.info("[cache-timing] populate: %s HIT key=%s", scope, keys[scope][:8])
                 continue
+            _ts = _t.perf_counter()
             scope_df = self._compute_scope_df(scope)
             if scope_df is None:
                 continue
             sd, _errs = self._get_summary_sd(scope_df)
             new_cache[keys[scope]] = sd
             cache_grew = True
+            _ctlog.info("[cache-timing] populate: %s MISS+compute=%.0fms key=%s",
+                scope, (_t.perf_counter()-_ts)*1000, keys[scope][:8])
 
         if cache_grew:
             self.summary_stats_cache = new_cache
         self.raw_sd_key = keys['raw']
         self.clean_sd_key = keys['clean']
         self.filt_sd_key = keys['filt']
+        _ctlog.info("[cache-timing] populate: TOTAL=%.0fms grew=%s",
+            (_t.perf_counter()-_t0)*1000, cache_grew)
 
     ### start code interpreter block
     def add_command(self, incomingCommandKls):
