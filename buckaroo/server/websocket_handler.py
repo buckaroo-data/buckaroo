@@ -70,7 +70,21 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
     def _handle_buckaroo_state_change(self, new_state):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
-        if not session or session.mode != "buckaroo":
+        if not session:
+            return
+        if session.mode != "buckaroo":
+            # Lazy mode (and any future read-only mode) doesn't currently
+            # plumb state_change → filter into its dataflow. Return a
+            # structured error rather than the pre-#793 silent drop so the
+            # client can render "filtering not supported in this mode"
+            # instead of hanging on the WS read.
+            self.write_message(json.dumps({
+                "type": "error",
+                "error_code": "state_change_unsupported_mode",
+                "message": (
+                    f"buckaroo_state_change is not supported in "
+                    f"mode={session.mode!r}; this reader is read-only "
+                    "(no filter / cleaning / post-processing).")}))
             return
         dataflow = session.xorq_dataflow if session.backend == "xorq" else session.dataflow
         if dataflow is None:
