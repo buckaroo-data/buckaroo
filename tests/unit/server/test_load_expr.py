@@ -1,5 +1,6 @@
 """End-to-end tests for POST /load_expr — server load path for
 XorqBuckarooInfiniteWidget over a xorq/ibis expression."""
+import asyncio
 import io
 import json
 import os
@@ -155,19 +156,19 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
 
         This test sends each malformed shape and asserts the server
         returns a structured error frame, NOT a silent drop or a
-        crashed WS.
+        crashed WS. After the barrage, a well-formed infinite_request
+        confirms the WS is still alive — the headline pre-fix bug was
+        that ``null`` permanently killed the stream.
+
+        No ``/load`` setup: the guards run before any session lookup,
+        so the test works against an empty session and is portable
+        across machines.
         """
-        import asyncio
-        await _post(self.get_http_port(), "/load",
-            {"session": "ws-guard",
-             "path": "/tmp/restaurant-complaints-pandas.parquet",
-             "mode": "buckaroo", "no_browser": True})
         ws = await tornado.websocket.websocket_connect(
             f"ws://localhost:{self.get_http_port()}/ws/ws-guard")
-        await ws.read_message()  # discard initial_state
 
         # Each entry: (label, raw_ws_message). Server must respond
-        # to each with a structured error frame within 2s.
+        # to each with a structured error frame within 3s.
         cases = [
             ("bare_null", "null"),
             ("bare_array", "[1,2,3]"),
@@ -187,6 +188,19 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
                 f"{label}: expected error frame, got {d.get('type')!r}")
             self.assertIn("error_code", d,
                 f"{label}: error frame missing error_code")
+
+        # Liveness: WS survived the malformed barrage. Send a well-formed
+        # request and confirm we still get a response. With no session
+        # data loaded, _handle_infinite_request returns an infinite_resp
+        # with empty data — what matters is that *any* frame arrives.
+        ws.write_message(json.dumps({
+            "type": "infinite_request",
+            "payload_args": {"start": 0, "end": 10,
+                "sourceName": "default", "origEnd": 10}}))
+        frame = await asyncio.wait_for(ws.read_message(), timeout=3.0)
+        self.assertIsNotNone(frame, "WS died after malformed barrage")
+        d = json.loads(frame)
+        self.assertEqual(d.get("type"), "infinite_resp")
         ws.close()
 
     @tornado.testing.gen_test
