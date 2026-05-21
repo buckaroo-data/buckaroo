@@ -142,6 +142,48 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_lazy_state_change_returns_explicit_error(self):
+        """Regression for #793: ``_handle_buckaroo_state_change``
+        returned silently for ``mode != "buckaroo"`` — lazy-polars
+        sessions had their state_change messages dropped on the floor
+        with no response, hanging the client until its read timed out.
+
+        Must return a structured error instead so callers can render
+        a sensible "not supported" message.
+        """
+        import asyncio
+        csv_fd, csv_path = tempfile.mkstemp(suffix=".csv")
+        os.close(csv_fd)
+        try:
+            pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}).to_csv(csv_path, index=False)
+            await _post(self.get_http_port(), "/load",
+                {"session": "lazy-sc", "path": csv_path, "mode": "lazy"})
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/lazy-sc")
+            await ws.read_message()  # discard initial_state
+
+            ws.write_message(json.dumps({
+                "type": "buckaroo_state_change",
+                "new_state": {
+                    "post_processing": "", "cleaning_method": "",
+                    "quick_command_args": {"search": ["x"]},
+                    "df_display": "main", "show_commands": False,
+                    "sampled": False, "search_string": "x",
+                }}))
+
+            # Today: nothing comes back; client times out.
+            # After fix: a structured error frame within a couple seconds.
+            frame = await asyncio.wait_for(ws.read_message(), timeout=3.0)
+            self.assertIsNotNone(frame)
+            d = json.loads(frame)
+            self.assertEqual(d.get("type"), "error")
+            self.assertIn("error_code", d)
+            ws.close()
+        finally:
+            os.unlink(csv_path)
+
+    @tornado.testing.gen_test
     async def test_session_reuse_xorq_then_pandas(self):
         """A client that POSTs /load_expr and then POSTs /load with the
         same session id should see the pandas data on subsequent
