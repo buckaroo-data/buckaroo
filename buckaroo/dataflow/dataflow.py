@@ -250,6 +250,27 @@ class DataFlow(ABCDataflow):
 
     _summary_sd_cache_key = (None, None)
 
+    # Spike (rows-first WS protocol): when set, the next firing of the
+    # ``_summary_sd`` observer is short-circuited so the cascade lands
+    # ``processed_df`` + ``df_meta`` (the cheap parts) without paying the
+    # analysis-pipeline cost. Caller is responsible for clearing the flag
+    # and re-running ``_summary_sd`` via an explicit ``recompute_summary_sd()``
+    # call once the row-data has been shipped. **Not for production paths.**
+    _defer_summary_sd = False
+
+    def recompute_summary_sd(self):
+        """Force a (re-)compute of ``summary_sd`` against the current
+        ``processed_df``. Used by the spike state-change handler to lift
+        the ``_defer_summary_sd`` short-circuit after the row-data has
+        been pushed to the client.
+        """
+        df = self.processed_df
+        if df is None:
+            return
+        result_summary_sd, errs = self._get_summary_sd(df)
+        self.summary_sd = result_summary_sd
+        self.errs = errs
+
     @observe('processed_result', 'analysis_klasses')
     @exception_protect('summary_sd-protector')
     def _summary_sd(self, change):
@@ -259,6 +280,11 @@ class DataFlow(ABCDataflow):
         # construction even when processed_df identity is unchanged.
         # Skip when neither the dataframe nor analysis_klasses has actually
         # changed since the last run. See issue #709.
+        if self._defer_summary_sd:
+            # Spike: caller will trigger recompute after sending the row-data
+            # message. Leaves ``self.summary_sd`` at its prior value so
+            # downstream cache observer still wires up a coherent state.
+            return
         df = self.processed_df
         klasses = self.analysis_klasses
         if (id(df), id(klasses)) == self._summary_sd_cache_key:
