@@ -142,6 +142,54 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_ws_message_robustness(self):
+        """Regression for #805: ``on_message`` did ``msg.get(...)`` on
+        whatever ``json.loads`` returned, which is unsafe when the JSON
+        is not an object (``null``, bare arrays, scalars). ``null`` in
+        particular killed the WS — ``None.get`` raises ``AttributeError``,
+        Tornado swallows it, the stream closes.
+
+        Adjacent: unknown message types (``{"type": 42}``, missing
+        ``type``, empty ``{}``) were silently dropped. Clients couldn't
+        debug because no response came.
+
+        This test sends each malformed shape and asserts the server
+        returns a structured error frame, NOT a silent drop or a
+        crashed WS.
+        """
+        import asyncio
+        await _post(self.get_http_port(), "/load",
+            {"session": "ws-guard",
+             "path": "/tmp/restaurant-complaints-pandas.parquet",
+             "mode": "buckaroo", "no_browser": True})
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/ws-guard")
+        await ws.read_message()  # discard initial_state
+
+        # Each entry: (label, raw_ws_message). Server must respond
+        # to each with a structured error frame within 2s.
+        cases = [
+            ("bare_null", "null"),
+            ("bare_array", "[1,2,3]"),
+            ("bare_scalar", "42"),
+            ("empty_object", "{}"),
+            ("missing_type", json.dumps({"payload": "x"})),
+            ("type_as_int", json.dumps({"type": 42, "payload": "x"})),
+            ("unknown_type",
+                json.dumps({"type": "buckaroo_invented_command"})),
+        ]
+        for label, raw in cases:
+            ws.write_message(raw)
+            frame = await asyncio.wait_for(ws.read_message(), timeout=3.0)
+            self.assertIsNotNone(frame, f"{label}: no response (silent drop)")
+            d = json.loads(frame)
+            self.assertEqual(d.get("type"), "error",
+                f"{label}: expected error frame, got {d.get('type')!r}")
+            self.assertIn("error_code", d,
+                f"{label}: error frame missing error_code")
+        ws.close()
+
+    @tornado.testing.gen_test
     async def test_session_reuse_xorq_then_pandas(self):
         """A client that POSTs /load_expr and then POSTs /load with the
         same session id should see the pandas data on subsequent
