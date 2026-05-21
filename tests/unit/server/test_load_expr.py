@@ -142,6 +142,81 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_reset_clears_xorq_session(self):
+        """POST /reset after /load_expr must clear xorq_dataflow / expr /
+        backend so the dataclass defaults are restored — same contract as
+        the pandas reset test in test_server.py, exercised over the xorq
+        path. Regression for issue #812."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-reset", "build_dir": build_path})
+
+            sessions = self._app.settings["sessions"]
+            session = sessions.get("lx-reset")
+            self.assertEqual(session.backend, "xorq")
+            self.assertIsNotNone(session.xorq_dataflow)
+
+            resp = await _post(self.get_http_port(), "/reset",
+                {"session": "lx-reset"})
+            self.assertEqual(resp.code, 200)
+
+            session = sessions.get("lx-reset")
+            self.assertIsNone(session.xorq_dataflow)
+            self.assertIsNone(session.expr)
+            self.assertIsNone(session.dataflow)
+            self.assertIsNone(session.df)
+            self.assertEqual(session.backend, "pandas")
+            self.assertEqual(session.mode, "viewer")
+            self.assertEqual(session.metadata, {})
+            self.assertEqual(session.df_data_dict, {})
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_reset_between_xorq_and_pandas_load(self):
+        """Engine swap via reset: /load_expr (xorq) -> /reset -> /load
+        (pandas) leaves no stale xorq state behind. WS infinite_request
+        returns pandas-shaped data."""
+        builds_root = tempfile.mkdtemp()
+        csv_fd, csv_path = tempfile.mkstemp(suffix=".csv")
+        os.close(csv_fd)
+        try:
+            build_path = _build_expr_dir(builds_root)
+            pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}).to_csv(csv_path, index=False)
+
+            sid = "lx-reset-swap"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path})
+            await _post(self.get_http_port(), "/reset", {"session": sid})
+            await _post(self.get_http_port(), "/load",
+                {"session": sid, "path": csv_path, "mode": "buckaroo"})
+
+            sessions = self._app.settings["sessions"]
+            session = sessions.get(sid)
+            self.assertIsNone(session.xorq_dataflow)
+            self.assertIsNone(session.expr)
+            self.assertEqual(session.backend, "pandas")
+            self.assertIsNotNone(session.dataflow)
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+            await ws.read_message()  # initial_state
+
+            ws.write_message(json.dumps({
+                "type": "infinite_request",
+                "payload_args": {"start": 0, "end": 10,
+                    "sourceName": "default", "origEnd": 10}}))
+            r = json.loads(await ws.read_message())
+            self.assertEqual(r["type"], "infinite_resp")
+            self.assertEqual(r["length"], 3)
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            os.unlink(csv_path)
+
+    @tornado.testing.gen_test
     async def test_session_reuse_xorq_then_pandas(self):
         """A client that POSTs /load_expr and then POSTs /load with the
         same session id should see the pandas data on subsequent

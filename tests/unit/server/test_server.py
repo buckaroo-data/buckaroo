@@ -243,6 +243,118 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
         ws.close()
 
 
+class TestReset(tornado.testing.AsyncHTTPTestCase):
+    """POST /reset clears a populated session back to the empty state
+    without restarting the server (issue #812)."""
+
+    def get_app(self):
+        return make_app()
+
+    def test_reset_missing_session(self):
+        resp = self.fetch("/reset", method="POST", body=json.dumps({}),
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 400)
+
+    def test_reset_bad_json(self):
+        resp = self.fetch("/reset", method="POST", body="not json",
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 400)
+
+    def test_reset_unknown_session_is_noop(self):
+        """Reset on a session that doesn't exist must not 500; it should
+        report cleared=False so callers can blindly invoke it on startup
+        without first checking whether the session has been populated."""
+        resp = self.fetch("/reset", method="POST",
+            body=json.dumps({"session": "never-existed"}),
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 200)
+        body = json.loads(resp.body)
+        self.assertEqual(body["cleared"], False)
+
+    def test_reset_clears_loaded_pandas_session(self):
+        """/load populates df / dataflow / metadata. /reset must wipe
+        those back to the dataclass defaults so a subsequent WS
+        infinite_request reports 'No data loaded'."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                # Populate
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "reset-1", "path": f.name,
+                        "mode": "buckaroo"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+
+                sessions = self._app.settings["sessions"]
+                session = sessions.get("reset-1")
+                self.assertIsNotNone(session.df)
+                self.assertIsNotNone(session.dataflow)
+                self.assertTrue(session.df_data_dict)
+                self.assertTrue(session.metadata)
+
+                # Reset
+                resp = self.fetch("/reset", method="POST",
+                    body=json.dumps({"session": "reset-1"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+                body = json.loads(resp.body)
+                self.assertEqual(body["session"], "reset-1")
+                self.assertEqual(body["cleared"], True)
+
+                # The session row still exists (WS clients survive) but the
+                # data attributes must all be cleared.
+                session = sessions.get("reset-1")
+                self.assertIsNotNone(session, "reset must not evict the session")
+                self.assertIsNone(session.df)
+                self.assertIsNone(session.ldf)
+                self.assertIsNone(session.dataflow)
+                self.assertIsNone(session.xorq_dataflow)
+                self.assertIsNone(session.expr)
+                self.assertEqual(session.metadata, {})
+                self.assertEqual(session.df_display_args, {})
+                self.assertEqual(session.df_data_dict, {})
+                self.assertEqual(session.df_meta, {})
+                self.assertEqual(session.buckaroo_state, {})
+                self.assertEqual(session.operations, [])
+                self.assertEqual(session.mode, "viewer")
+                self.assertEqual(session.backend, "pandas")
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_reset_then_ws_request_reports_no_data(self):
+        """After reset, an existing WS connection sending an
+        infinite_request must get the 'No data loaded' branch — proving
+        the dispatch can no longer reach any stale dataflow."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": "reset-ws", "path": f.name}))
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/reset-ws")
+                await ws.read_message()  # discard initial_state
+
+                resp = await _async_fetch(self.get_http_port(), "/reset",
+                    method="POST",
+                    body=json.dumps({"session": "reset-ws"}))
+                self.assertEqual(resp.code, 200)
+
+                ws.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {"start": 0, "end": 5,
+                        "sourceName": "default", "origEnd": 5}}))
+                r = json.loads(await ws.read_message())
+                self.assertEqual(r["type"], "infinite_resp")
+                self.assertEqual(r["length"], 0)
+                self.assertIn("error_info", r)
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+
 class TestLoadPushesToWebSocket(tornado.testing.AsyncHTTPTestCase):
     def get_app(self):
         return make_app()
