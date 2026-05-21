@@ -7,7 +7,7 @@ should be reproducible from the smorg branch.
 
 ## TL;DR
 
-- **11 bugs filed** (#791–#795, #797–#801, #805).
+- **12 bugs filed** (#791–#795, #797–#801, #805, #807).
 - **5 PRs opened** (#796, #802, #803, #804, #806) — small, focused, with
   failing-test-then-fix commit pairs each.
 - **Server perf root cause identified**: 6.5 s of every 9 s
@@ -18,7 +18,19 @@ should be reproducible from the smorg branch.
   the existing `plans/0787-xorq-rows-first-coverage.md`.
 - **`?filtered_histogram` pinned row** (per your earlier ask) is wired
   into the smorg branch's `DefaultMainStyling.pinned_rows` and works
-  on both pandas-mode and xorq-mode server paths.
+  on both pandas-mode and xorq-mode server paths. End-to-end verified
+  via in-process widget construction:
+
+  ```
+  pinned_rows config:
+    dtype              → obj
+    histogram          → histogram
+    ?filtered_histogram → histogram
+
+  pre-filter:   merged_sd['a'] has 'histogram', no 'filtered_*' keys
+  post-filter:  merged_sd['a'] has both 'histogram' and
+                'filtered_histogram', plus filtered_mean / filtered_min / ...
+  ```
 - **Polars-lazy mode is more broken than it looks** — see #793.
 
 ---
@@ -38,6 +50,7 @@ should be reproducible from the smorg branch.
 | [#800](https://github.com/buckaroo-data/buckaroo/issues/800) | Xorq stats fail silently on int64 values > 2^53 (JSON-safe-integer limit) | xorq | medium |
 | [#801](https://github.com/buckaroo-data/buckaroo/issues/801) | Polars histogram stat fails silently on Decimal columns | polars | low |
 | [#805](https://github.com/buckaroo-data/buckaroo/issues/805) | WS `on_message` crashes / silently drops on malformed JSON shapes (null, bare array, unknown type) | all | medium |
+| [#807](https://github.com/buckaroo-data/buckaroo/issues/807) | Compare tool error handling inconsistencies (HTTP 500 on user error, session required) | compare | low |
 
 ## PRs opened
 
