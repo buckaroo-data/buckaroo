@@ -176,7 +176,7 @@ def computed_default_summary_stats(length: int, value_counts: pd.Series, null_co
 HistogramSeriesResult = TypedDict('HistogramSeriesResult', {'histogram_args': dict, 'histogram_bins': list})
 
 
-@stat()
+@stat(cost="aggregate")
 def histogram_series(ser: RawSeries) -> HistogramSeriesResult:
     """Compute histogram args from raw series (numeric path)."""
     if not pd.api.types.is_numeric_dtype(ser):
@@ -210,7 +210,7 @@ def histogram_series(ser: RawSeries) -> HistogramSeriesResult:
     }
 
 
-@stat()
+@stat(cost="aggregate")
 def histogram(value_counts: pd.Series, nan_per: float, is_numeric: bool, length: int, min: Any, max: Any,
         histogram_args: dict) -> list:
     """Compute histogram from summary stats and histogram args."""

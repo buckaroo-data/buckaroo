@@ -132,6 +132,9 @@ class StatKey:
 # StatFunc — a registered stat computation
 # ---------------------------------------------------------------------------
 
+VALID_COSTS = ("scalar", "aggregate")
+
+
 @dataclass
 class StatFunc:
     """A registered stat computation.
@@ -149,6 +152,11 @@ class StatFunc:
             engines can compute this stat via aggregation push-down without
             in-process materialization. Empty default means pandas-only /
             requires materialization.
+        cost: cost class — ``"scalar"`` (cheap, ships in the initial
+            state_change response) or ``"aggregate"`` (slow path that the
+            JS orchestrator fetches via a separate round-trip after a
+            debounce). Histograms, value_counts and other per-column
+            queries belong in ``"aggregate"``.
     """
     name: str
     func: Callable
@@ -159,6 +167,7 @@ class StatFunc:
     quiet: bool = False
     default: Any = field(default_factory=lambda: MISSING)
     pushdown: Tuple[str, ...] = ()
+    cost: str = "scalar"
     spread_dict_result: bool = False  # v1 compat: spread all dict keys into accumulator
     v1_computed: bool = False  # v1 compat: pass full accumulator as single dict arg
 
@@ -255,7 +264,7 @@ def _get_requires_from_params(sig: inspect.Signature, hints: dict) -> tuple:
 # @stat decorator
 # ---------------------------------------------------------------------------
 
-def stat(column_filter=None, quiet=False, default=MISSING, pushdown=()):
+def stat(column_filter=None, quiet=False, default=MISSING, pushdown=(), cost="scalar"):
     """Decorator that converts a function into a StatFunc.
 
     The function signature IS the contract:
@@ -273,6 +282,12 @@ def stat(column_filter=None, quiet=False, default=MISSING, pushdown=()):
     Empty default means pandas-only / requires materialization. Recognised
     identifiers: ``"xorq"``, ``"polars"``. Normalised to a tuple so callers
     may pass a list.
+
+    ``cost=`` declares the compute-cost class. ``"scalar"`` (default)
+    means cheap — ships in the initial state_change response. ``"aggregate"``
+    means slow (histograms, value_counts, per-column queries) — the JS
+    orchestrator fetches these via a separate round-trip after a debounce.
+    See plans/js-driven-stat-debounce.md.
 
     Usage::
 
@@ -292,6 +307,10 @@ def stat(column_filter=None, quiet=False, default=MISSING, pushdown=()):
         def mean(col):
             return col.mean()
 
+        @stat(cost="aggregate")
+        def histogram(...) -> list:
+            ...
+
         class TypingResult(MultipleProvides):
             is_numeric: bool
             is_integer: bool
@@ -300,6 +319,10 @@ def stat(column_filter=None, quiet=False, default=MISSING, pushdown=()):
         def typing_stats(dtype: str) -> TypingResult:
             ...
     """
+    if cost not in VALID_COSTS:
+        raise ValueError(
+            f"@stat(cost={cost!r}): invalid cost class. "
+            f"Must be one of {VALID_COSTS}.")
     def decorator(func):
         sig = inspect.signature(func)
         try:
@@ -317,7 +340,7 @@ def stat(column_filter=None, quiet=False, default=MISSING, pushdown=()):
         pushdown_norm = (pushdown,) if isinstance(pushdown, str) else tuple(pushdown)
         stat_func = StatFunc(name=func.__name__, func=func, requires=requires, provides=provides_keys,
             needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default,
-            pushdown=pushdown_norm)
+            pushdown=pushdown_norm, cost=cost)
 
         # Attach metadata to the function so pipeline can find it
         func._stat_func = stat_func
