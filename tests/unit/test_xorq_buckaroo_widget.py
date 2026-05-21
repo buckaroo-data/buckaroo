@@ -60,6 +60,82 @@ class TestQueryCount:
         )
 
 
+class TestCostClassFilter:
+    """Phase 2 of the JS-driven progressive-stats router. The
+    ``process_table_scalars`` / ``process_table_aggregates`` entry
+    points filter by ``StatFunc.cost`` so the JS orchestrator can
+    fetch cheap stats immediately on state_change and slow stats
+    after a debounce.
+    """
+
+    def test_scalars_only_skips_histogram_queries(self):
+        """``process_table_scalars`` skips the expensive per-column
+        histogram path entirely. Spy on ``_execute`` and assert the
+        query count drops vs the full pipeline."""
+        from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
+        from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2
+
+        full_queries: list = []
+        scalar_queries: list = []
+        orig = XorqStatPipeline._execute
+
+        def counting(self, q, sink):
+            sink.append(q)
+            return orig(self, q)
+
+        expr = _expr()
+
+        # Full pipeline reference count
+        XorqStatPipeline._execute = lambda self, q: counting(self, q, full_queries)
+        try:
+            p1 = XorqStatPipeline(list(XORQ_STATS_V2), unit_test=False)
+            p1.process_table(expr)
+        finally:
+            XorqStatPipeline._execute = orig
+
+        # Scalars-only count — must be strictly fewer
+        XorqStatPipeline._execute = lambda self, q: counting(self, q, scalar_queries)
+        try:
+            p2 = XorqStatPipeline(list(XORQ_STATS_V2), unit_test=False)
+            p2.process_table_scalars(expr)
+        finally:
+            XorqStatPipeline._execute = orig
+
+        assert len(scalar_queries) < len(full_queries), (
+            f"scalars-only must issue fewer queries than full pipeline; "
+            f"got scalars={len(scalar_queries)} full={len(full_queries)}")
+
+    def test_scalars_only_omits_histogram_key(self):
+        """``process_table_scalars`` output has no ``histogram`` key for
+        any column — that stat is cost=aggregate."""
+        from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
+        from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2
+
+        pipeline = XorqStatPipeline(list(XORQ_STATS_V2), unit_test=False)
+        summary, errs = pipeline.process_table_scalars(_expr())
+        for col, stats in summary.items():
+            assert "histogram" not in stats, (
+                f"col {col} has histogram in scalars-only output: "
+                f"{list(stats.keys())}")
+
+    def test_aggregates_only_ships_only_aggregate_keys(self):
+        """``process_table_aggregates`` returns only aggregate-cost
+        stat provides. Scalars are computed (as dependencies) but
+        filtered out of the response."""
+        from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
+        from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2
+
+        pipeline = XorqStatPipeline(list(XORQ_STATS_V2), unit_test=False)
+        summary, errs = pipeline.process_table_aggregates(_expr())
+        for col, stats in summary.items():
+            # The boston-style histogram stat is aggregate.
+            if "histogram" in stats:
+                # Other obvious scalar keys must NOT be there.
+                assert "length" not in stats, (
+                    f"col {col} aggregate response leaks scalar 'length'")
+                assert "min" not in stats
+
+
 class TestInstantiation:
     def test_smoke(self):
         XorqBuckarooWidget(_expr())

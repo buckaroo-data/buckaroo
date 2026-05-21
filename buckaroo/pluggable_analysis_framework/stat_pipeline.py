@@ -234,13 +234,18 @@ class StatPipeline:
             self._unit_test_result = self.unit_test()
 
     def process_column(self, column_name: str, column_dtype, raw_series=None, sampled_series=None, raw_dataframe=None,
-            initial_stats: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[StatError]]:
+            initial_stats: Optional[Dict[str, Any]] = None,
+            cost_classes=None) -> Tuple[Dict[str, Any], List[StatError]]:
         """Process a single column through the stat DAG.
 
         1. Filters stat functions by column dtype
-        2. Executes in topological order with Ok/Err accumulator
-        3. Returns (plain_dict, errors)
+        2. Filters by ``cost_classes`` (default: all costs) — used by
+           the JS-driven progressive-stats router to run scalars only
+        3. Executes in topological order with Ok/Err accumulator
+        4. Returns (plain_dict, errors)
         """
+        if cost_classes is None:
+            cost_classes = {"scalar", "aggregate"}
         # Build column-specific DAG (filters by dtype)
         external = set(self.EXTERNAL_KEYS)
         if initial_stats:
@@ -255,6 +260,8 @@ class StatPipeline:
                 accumulator[k] = Ok(v)
         record_timings = self.record_timings
         for sf in column_funcs:
+            if sf.cost not in cost_classes:
+                continue
             if record_timings:
                 t0 = time.perf_counter()
             _execute_stat_func(sf, accumulator, column_name, raw_series=raw_series, sampled_series=sampled_series,
@@ -270,8 +277,11 @@ class StatPipeline:
 
         return resolve_accumulator(accumulator, column_name, col_key_to_func)
 
-    def process_df(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, List[StatError]]:
+    def process_df(self, df: pd.DataFrame, debug: bool = False, cost_classes=None) -> Tuple[SDType, List[StatError]]:
         """Process all columns of a DataFrame.
+
+        ``cost_classes`` (default: all) restricts which stat funcs run.
+        Used by the JS-driven progressive-stats router.
 
         Returns:
             (summary_dict, all_errors) where summary_dict is SDType-compatible
@@ -292,12 +302,38 @@ class StatPipeline:
 
             col_result, col_errors = self.process_column(column_name=rewritten_col_name, column_dtype=col_dtype,
                 raw_series=ser, sampled_series=ser, raw_dataframe=df,
-                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name})
+                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name},
+                cost_classes=cost_classes)
 
             summary[rewritten_col_name] = col_result
             all_errors.extend(col_errors)
 
         return summary, all_errors
+
+    def process_df_scalars(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, List[StatError]]:
+        """Run only cost=scalar stats — the fast path used by the
+        JS-driven progressive-stats router. Histograms etc. are
+        skipped."""
+        return self.process_df(df, debug=debug, cost_classes={"scalar"})
+
+    def process_df_aggregates(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, List[StatError]]:
+        """Run the full pipeline, return only aggregate-cost stats.
+
+        Aggregates depend on scalar inputs, so the full pipeline runs;
+        the response is filtered to ship just the aggregate provides
+        (typically histograms). Caching scalars across this and
+        ``process_df_scalars`` is a future PR.
+        """
+        summary, errs = self.process_df(df, debug=debug)
+        agg_provides = {sk.name for sf in self.ordered_stat_funcs
+            if sf.cost == "aggregate" for sk in sf.provides}
+        filtered = {col: {k: v for k, v in stats.items() if k in agg_provides}
+            for col, stats in summary.items()}
+        agg_func_names = {sf.name for sf in self.ordered_stat_funcs
+            if sf.cost == "aggregate"}
+        filtered_errs = [e for e in errs
+            if e.stat_func is not None and e.stat_func.name in agg_func_names]
+        return filtered, filtered_errs
 
     def process_df_v1_compat(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, ErrDict]:
         """Process DataFrame with v1-compatible error format.

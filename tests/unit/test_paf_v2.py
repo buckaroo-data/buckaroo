@@ -600,6 +600,54 @@ class TestStatPipeline:
         assert 'distinct_per' in pipeline.provided_summary_facts_set
         assert 'length' in pipeline.provided_summary_facts_set
 
+    def test_process_df_cost_class_filter_scalars(self):
+        """Scalars-only path: ``process_df_scalars`` runs only cost=scalar
+        stats. Aggregate funcs (and stats that depend on them) are
+        skipped. The fast path the JS router uses for the initial
+        state_change response."""
+        @stat(cost="aggregate")
+        def expensive_stat(ser: RawSeries) -> int:
+            return 999  # would be slow in real life
+
+        df = pd.DataFrame({'a': [1, 2, 3, 1, 2]})
+        pipeline = StatPipeline([length, expensive_stat], unit_test=False)
+        summary, errs = pipeline.process_df_scalars(df)
+
+        assert summary['a']['length'] == 5
+        # The aggregate stat was filtered out — it did not run.
+        assert 'expensive_stat' not in summary['a']
+
+    def test_process_df_cost_class_filter_aggregates(self):
+        """Aggregates-only path: ``process_df_aggregates`` runs the
+        pipeline but ships only aggregate provides. Used by the JS
+        router for the slow follow-up after a debounce."""
+        @stat(cost="aggregate")
+        def expensive_stat(ser: RawSeries) -> int:
+            return 999
+
+        df = pd.DataFrame({'a': [1, 2, 3, 1, 2]})
+        pipeline = StatPipeline([length, expensive_stat], unit_test=False)
+        summary, errs = pipeline.process_df_aggregates(df)
+
+        # Only aggregate-cost stat is shipped.
+        assert summary['a']['expensive_stat'] == 999
+        # Scalar 'length' is computed but filtered out of the response.
+        assert 'length' not in summary['a']
+
+    def test_process_df_default_runs_all_costs(self):
+        """Default ``process_df()`` (no ``cost_classes`` arg) runs all
+        cost classes — back-compat for every existing caller."""
+        @stat(cost="aggregate")
+        def expensive_stat(ser: RawSeries) -> int:
+            return 999
+
+        df = pd.DataFrame({'a': [1, 2, 3]})
+        pipeline = StatPipeline([length, expensive_stat], unit_test=False)
+        summary, errs = pipeline.process_df(df)
+
+        assert summary['a']['length'] == 3
+        assert summary['a']['expensive_stat'] == 999
+
     def test_process_column(self):
         pipeline = StatPipeline([length, distinct_count, distinct_per], unit_test=False)
         ser = pd.Series([1, 2, 3, 1, 2])

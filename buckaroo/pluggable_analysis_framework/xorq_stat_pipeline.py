@@ -165,7 +165,48 @@ class XorqStatPipeline:
         finally:
             self.backend = saved_backend
 
-    def process_table(self, table) -> Tuple[SDType, List[StatError]]:
+    def process_table_scalars(self, table) -> Tuple[SDType, List[StatError]]:
+        """Run only cost=scalar stats — the fast path.
+
+        Filters out cost=aggregate funcs (histograms, per-column-query
+        stats) before running the pipeline. Used by the JS-driven
+        progressive-stats router to ship cheap stats immediately on
+        state_change. See plans/js-driven-stat-debounce.md.
+
+        Aggregate stats that depend only on scalars (e.g. a downstream
+        compute that consumes ``histogram``) get their inputs missing
+        and produce ``Err`` upstream — that's the expected shape; the
+        consumer should ignore those when asking for scalars only.
+        """
+        return self.process_table(table, cost_classes={"scalar"})
+
+    def process_table_aggregates(self, table) -> Tuple[SDType, List[StatError]]:
+        """Run the full pipeline, return only aggregate-cost stats.
+
+        Aggregates typically depend on scalar inputs (e.g. ``histogram``
+        consumes ``value_counts``, ``length``), so the full pipeline
+        has to run. Output is filtered to just aggregate-cost provides
+        so the response payload is small. Caching of the scalar half
+        across this and ``process_table_scalars`` is a future PR; here
+        the compute is whole, only the shipping is filtered.
+        """
+        summary, errs = self.process_table(table)
+        agg_provides = {sk.name for sf in self.ordered_stat_funcs
+            if sf.cost == "aggregate" for sk in sf.provides}
+        filtered = {col: {k: v for k, v in stats.items() if k in agg_provides}
+            for col, stats in summary.items()}
+        # Errors are per-stat-func; keep only those from aggregate funcs.
+        agg_func_names = {sf.name for sf in self.ordered_stat_funcs
+            if sf.cost == "aggregate"}
+        filtered_errs = [e for e in errs
+            if e.stat_func is not None and e.stat_func.name in agg_func_names]
+        return filtered, filtered_errs
+
+    def process_table(self, table, cost_classes=None) -> Tuple[SDType, List[StatError]]:
+        """Run the pipeline; ``cost_classes`` filter restricts which
+        stat funcs execute (default: all costs)."""
+        if cost_classes is None:
+            cost_classes = {"scalar", "aggregate"}
         schema = table.schema()
         columns = list(table.columns)
 
@@ -187,6 +228,8 @@ class XorqStatPipeline:
         batch_items: List[Tuple[str, StatFunc, Any]] = []
         for sf in self.ordered_stat_funcs:
             if not _is_batch_func(sf):
+                continue
+            if sf.cost not in cost_classes:
                 continue
             xorq_col_param = next(r.name for r in sf.requires if r.type is XorqColumn)
             for col in columns:
@@ -252,6 +295,10 @@ class XorqStatPipeline:
                 # Skip stats whose results are already in the accumulator
                 # (typically the batch-phase stats).
                 if sf.provides and all(sk.name in col_accum for sk in sf.provides):
+                    continue
+                # Cost-class filter — the JS-driven router runs scalars
+                # first, aggregates after a debounce.
+                if sf.cost not in cost_classes:
                     continue
                 _execute_stat_func(sf, col_accum, col, raw_series=None, sampled_series=None, raw_dataframe=None,
                     xorq_expr=table, xorq_execute=self._execute)
