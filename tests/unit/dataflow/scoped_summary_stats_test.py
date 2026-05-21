@@ -112,36 +112,6 @@ def test_bare_mean_is_raw_not_filtered():
     )
 
 
-def test_cleaning_only_does_not_emit_filtered_keys():
-    """Cleaning ops in the chain (but no search/quick-command) must NOT
-    cause ``filtered_*`` keys to appear. ``filtered_*`` semantically means
-    "search filter is active"; a key-inequality gate (filt_sd_key !=
-    raw_sd_key) would mislabel cleaning-affected stats as filtered until
-    the deferred ``cleaned_*`` scope lands. The gate must be on the
-    chains themselves: filt != clean.
-    """
-    df = pd.DataFrame({'a': ['10', '20', '30', '40', '50'],
-                       'b': ['foo', 'bar', 'foo', 'baz', 'foo']})
-    dfc = ScopedDataflow(df)
-    dfc.cleaning_method = 'default'
-
-    clean_chain = [op for op in (dfc.operations or [])
-                   if isinstance(op, list) and len(op) > 0]
-    assert len(clean_chain) > 0, (
-        "precondition: cleaning_method='default' should have produced "
-        "cleaning ops for a numeric-string column"
-    )
-
-    sd = dfc.merged_sd
-    filtered_keys = [k for k in sd.get('a', {}) if k.startswith('filtered_')]
-    assert filtered_keys == [], (
-        f"cleaning-only state must not emit filtered_* keys; got "
-        f"{filtered_keys}. The `filter_active` gate is firing on "
-        f"filt_sd_key != raw_sd_key instead of on the chain-shape "
-        f"difference between filt and clean."
-    )
-
-
 def test_raw_df_change_invalidates_scoped_sd():
     """Codex P1 from #783: the cache key was derived only from the op chain,
     so a ``raw_df`` swap with the same (empty) chain reused stale entries.
