@@ -155,6 +155,45 @@ class TestSessionPageConfiguredDatasets(tornado.testing.AsyncHTTPTestCase):
                 f"dataset target {ds['target']!r} missing from /s/ HTML")
 
 
+_SCRIPT_BREAKOUT_DATASETS = [{"label": "evil", "kind": "pandas",
+    "target": "</script><script>window.__pwned=1</script>"}]
+
+
+class TestSessionPageScriptTagSafety(tornado.testing.AsyncHTTPTestCase):
+    """Dataset targets are embedded inline in a ``<script
+    type=\"application/json\">`` block. A target containing
+    ``</script>`` must not break out — operator CLI args are
+    low-trust, but escaping is cheap and unconditional."""
+
+    def get_app(self):
+        return _make_app(open_browser=False, datasets=_SCRIPT_BREAKOUT_DATASETS)
+
+    def test_script_tag_in_target_does_not_break_out(self):
+        resp = self.fetch("/s/sess-evil")
+        self.assertEqual(resp.code, 200)
+        body = resp.body.decode("utf-8")
+        # Extract whatever the browser would see between the JSON-data
+        # script's open tag and the FIRST ``</script>`` after it (which is
+        # what the HTML parser uses as the terminator — there is no
+        # nesting in raw text script content). If the operator-supplied
+        # target was JSON-encoded but not HTML-script-escaped, the first
+        # ``</script>`` is the one *inside* the target string, and the
+        # extracted slice is truncated invalid JSON. ``json_encode``
+        # rewrites ``</`` to ``<\\/``, so the only ``</script>`` after
+        # the open tag is the legitimate terminator.
+        open_tag = '<script id="buckaroo-datasets" type="application/json">'
+        start = body.index(open_tag) + len(open_tag)
+        end = body.index("</script>", start)
+        payload = body[start:end]
+        # If json_encode is in use, the payload is the entire dataset list
+        # encoded as valid JSON — must parse cleanly and round-trip the
+        # original target.
+        parsed = json.loads(payload)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["target"],
+            "</script><script>window.__pwned=1</script>")
+
+
 class TestDatasetCLIParsing(tornado.testing.AsyncHTTPTestCase):
     """``--dataset NAME=KIND:PATH`` (repeatable) parses into the list of
     dicts that ``make_app(datasets=...)`` consumes. Centralising the
