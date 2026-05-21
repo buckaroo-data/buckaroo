@@ -195,6 +195,15 @@ class TestStatDecorator:
         assert pushdown_sum._stat_func.pushdown == ("xorq",)
         assert isinstance(pushdown_sum._stat_func.pushdown, tuple)
 
+    def test_stat_pushdown_accepts_bare_string(self):
+        # A bare string is the natural form for one backend.
+        # ``tuple("xorq")`` would silently store ``('x','o','r','q')``.
+        @stat(pushdown="xorq")
+        def pushdown_count(ser: RawSeries) -> int:
+            return int(ser.count())
+
+        assert pushdown_count._stat_func.pushdown == ("xorq",)
+
 
 class _MultiSizeStats(MultipleProvides):
     row_count: int
