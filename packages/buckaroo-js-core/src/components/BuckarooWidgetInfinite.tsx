@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as _ from "lodash-es";
 import { OperationResult } from "./DependentTabs";
 import { ColumnsEditor } from "./ColumnsEditor";
@@ -269,6 +269,46 @@ export function BuckarooInfiniteWidget({
             },
             [dataframe_id, remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method],
         );
+
+        // In-flight indicator for the status bar (#813). Set when the user
+        // dispatches a buckaroo_state change that touches a dataflow field
+        // (post_processing / cleaning_method / quick_command_args — mirrors
+        // _DATAFLOW_FIELDS in buckaroo/server/websocket_handler.py). Cleared
+        // when df_data_dict comes back with a new reference, indicating the
+        // backend has returned the recomputed result. show_commands /
+        // df_display / sampled toggles do not trigger backend recompute, so
+        // they don't set in-flight.
+        const [inFlight, setInFlight] = useState<boolean>(false);
+        // Track the df_data_dict reference at the moment we entered in-flight,
+        // so we don't accidentally clear on the same dict the user was looking
+        // at when they fired the change. Cleared on the *next* dict reference.
+        const inFlightAtDictRef = useRef<typeof df_data_dict | null>(null);
+        useEffect(() => {
+            if (inFlight && inFlightAtDictRef.current !== null
+                    && df_data_dict !== inFlightAtDictRef.current) {
+                setInFlight(false);
+                inFlightAtDictRef.current = null;
+            }
+        }, [df_data_dict, inFlight]);
+
+        const wrappedOnBuckarooState = useCallback<
+            React.Dispatch<React.SetStateAction<BuckarooState>>
+        >((updater) => {
+            const next = typeof updater === "function"
+                ? (updater as (prev: BuckarooState) => BuckarooState)(buckaroo_state)
+                : updater;
+            const dataflowChanged =
+                next.post_processing !== buckaroo_state.post_processing
+                || next.cleaning_method !== buckaroo_state.cleaning_method
+                || JSON.stringify(next.quick_command_args)
+                       !== JSON.stringify(buckaroo_state.quick_command_args);
+            if (dataflowChanged) {
+                inFlightAtDictRef.current = df_data_dict;
+                setInFlight(true);
+            }
+            on_buckaroo_state(next);
+        }, [buckaroo_state, df_data_dict, on_buckaroo_state]);
+
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
              style={{ width: "100%", height: "100%" }}>
@@ -282,9 +322,10 @@ export function BuckarooInfiniteWidget({
                     <StatusBar
                         dfMeta={df_meta}
                         buckarooState={buckaroo_state}
-                        setBuckarooState={on_buckaroo_state}
+                        setBuckarooState={wrappedOnBuckarooState}
                         buckarooOptions={buckaroo_options}
                         themeConfig={cDisp.df_viewer_config?.component_config?.theme}
+                        inFlight={inFlight}
                     />
                     <DFViewerInfinite
                         key={effectiveDataframeId}

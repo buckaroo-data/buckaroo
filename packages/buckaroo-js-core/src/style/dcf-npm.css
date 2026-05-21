@@ -398,7 +398,42 @@ div.dependent-tabs ul.tabs li.active {
     background:orange;
 
    */
+    position: relative;
+}
 
+/* In-flight indicator (#813). Positioned over the status-bar header strip so
+ * it's visible when a state_change is still being computed; without it, an
+ * empty grid is ambiguous between "filter returned zero rows" and "still
+ * computing" (most acute on slow xorq backends, ~7s per change). */
+.bk-status-inflight {
+    position: absolute;
+    top: 2px;
+    right: 6px;
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 1;
+    color: var(--bk-fg-color, #555);
+    pointer-events: none;
+}
+.bk-status-inflight-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #2b8aef;
+    animation: bk-status-inflight-pulse 1s ease-in-out infinite;
+}
+.bk-status-inflight-label {
+    opacity: 0.75;
+}
+@keyframes bk-status-inflight-pulse {
+    0%, 100% { opacity: 0.3; }
+    50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .bk-status-inflight-dot { animation: none; opacity: 1; }
 }
 .status-bar .ag-center-cols-viewport {
     min-height: unset !important;
