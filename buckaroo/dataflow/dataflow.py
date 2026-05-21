@@ -1,3 +1,7 @@
+from contextlib import contextmanager
+import itertools
+import logging
+import time
 from typing import List, Literal, Tuple, Type, TypedDict, Dict as TDict, Any as TAny, Union
 from typing_extensions import override
 import six
@@ -22,6 +26,30 @@ from .styling_core import (
 
 from .abc_dataflow import ABCDataflow
 from .sd_cache import hash_chain, split_chain_by_scope
+
+
+# Cascade observability — issue #822.
+#
+# Every cascade observer in this module emits one DEBUG line on the
+# ``buckaroo.dataflow.cache_timing`` channel per fire, with a stable
+# per-cascade correlation id (``cid``) so the lines from one external
+# trait change can be grouped — and so the known double-fire patterns
+# (e.g. ``_populate_sd_cache`` running twice per state_change because it
+# observes both ``summary_sd`` and ``operations``) become visible.
+#
+# A "cascade" is the synchronous tree of observer notifications rooted
+# at one external trait set. traitlets dispatches observers
+# synchronously from inside ``set()``, so the tree maps onto a single
+# call stack — the outermost observer mints a new ``cid`` and every
+# observer nested inside it (via the trait sets it performs) reuses
+# the same id. When the outermost observer returns, the id is cleared.
+#
+# ``itertools.count`` is atomic for inc in CPython, so the counter is
+# safe across threads; the per-instance ``_cascade_id`` attribute is
+# only mutated from the cascade root, which is single-threaded with
+# respect to the cascade it owns.
+cache_timing_logger = logging.getLogger("buckaroo.dataflow.cache_timing")
+_cascade_counter = itertools.count(1)
 
 
 class DfTrait(Any):
@@ -68,6 +96,7 @@ class DataFlow(ABCDataflow):
     """
     def __init__(self, raw_df):
         self.exception = None
+        self._cascade_id = None
         super().__init__()
         self.summary_sd = {}
         self.existing_operations = []
@@ -77,6 +106,39 @@ class DataFlow(ABCDataflow):
             self.raw_df = raw_df
         except Exception:
             six.reraise(self.exception[0], self.exception[1], self.exception[2])
+
+    @contextmanager
+    def _cascade_step(self, observer_name, change):
+        """Time one cascade observer and emit one log line on exit.
+
+        First observer in a cascade mints a fresh correlation id from
+        the module-level monotonic counter; nested observers (the
+        synchronous tree of further trait sets) reuse the same id.
+        The cascade root clears the id on exit so the next external
+        trait change starts a fresh cascade.
+
+        ``change`` is the traitlets observer payload — we only read
+        ``change['name']`` (the trait that fired this observer); the
+        helper tolerates any falsy/missing change so the same call
+        site works for synthetic invocations.
+        """
+        started_cascade = self._cascade_id is None
+        if started_cascade:
+            self._cascade_id = next(_cascade_counter)
+        cid = self._cascade_id
+        trait_name = ''
+        if isinstance(change, dict):
+            trait_name = change.get('name', '') or ''
+        t0 = time.perf_counter()
+        try:
+            yield cid
+        finally:
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            cache_timing_logger.debug(
+                "cascade cid=%d observer=%s trait=%s elapsed_ms=%.3f",
+                cid, observer_name, trait_name, elapsed_ms)
+            if started_cascade:
+                self._cascade_id = None
 
     autocleaning_klass = SentinelAutocleaning
     autoclean_conf = tuple()
@@ -142,7 +204,8 @@ class DataFlow(ABCDataflow):
     @observe('raw_df', 'sample_method')
     @exception_protect('sampled_df-protector')
     def _sampled_df(self, _change:Any) -> None:
-        self.sampled_df = self._compute_sampled_df(self.raw_df, self.sample_method)
+        with self._cascade_step('_sampled_df', _change):
+            self.sampled_df = self._compute_sampled_df(self.raw_df, self.sample_method)
 
     @observe('sampled_df', 'cleaning_method', 'quick_command_args', 'operations')
     @exception_protect('operation_result-protector')
@@ -178,16 +241,17 @@ class DataFlow(ABCDataflow):
             return
         self._in_operation_result = True
         try:
-            result = self.ac_obj.handle_ops_and_clean(
-                self.sampled_df, self.cleaning_method, self.quick_command_args, self.operations)
+            with self._cascade_step('_operation_result', _change):
+                result = self.ac_obj.handle_ops_and_clean(
+                    self.sampled_df, self.cleaning_method, self.quick_command_args, self.operations)
 
-            if result is None:
-                return
-            else:
-                self.cleaned = result
-                self.operations = result[3]
-            self.operation_results = {'transformed_df':None,
-                'generated_py_code': self.generated_code}
+                if result is None:
+                    return
+                else:
+                    self.cleaned = result
+                    self.operations = result[3]
+                self.operation_results = {'transformed_df':None,
+                    'generated_py_code': self.generated_code}
         finally:
             self._in_operation_result = False
 
@@ -221,9 +285,10 @@ class DataFlow(ABCDataflow):
     @observe('cleaned', 'post_processing_method')
     @exception_protect('processed_result-protector')
     def _processed_result(self, change):
-        #for now this is a no-op because I don't have a post_processing_function or mechanism
-        self.processed_result = self._compute_processed_result(self.cleaned_df, self.post_processing_method)
-        self.populate_df_meta()
+        with self._cascade_step('_processed_result', change):
+            #for now this is a no-op because I don't have a post_processing_function or mechanism
+            self.processed_result = self._compute_processed_result(self.cleaned_df, self.post_processing_method)
+            self.populate_df_meta()
 
     @property
     def processed_df(self):
@@ -253,39 +318,42 @@ class DataFlow(ABCDataflow):
     @observe('processed_result', 'analysis_klasses')
     @exception_protect('summary_sd-protector')
     def _summary_sd(self, change):
-        # Dedupe: the autocleaning operations cascade re-fires
-        # _operation_result → cleaned → processed_result with a freshly-built
-        # tuple wrapper, which makes this observer fire twice per widget
-        # construction even when processed_df identity is unchanged.
-        # Skip when neither the dataframe nor analysis_klasses has actually
-        # changed since the last run. See issue #709.
-        df = self.processed_df
-        klasses = self.analysis_klasses
-        if (id(df), id(klasses)) == self._summary_sd_cache_key:
-            return
-        self._summary_sd_cache_key = (id(df), id(klasses))
-        result_summary_sd, errs  = self._get_summary_sd(df)
-        self.summary_sd = result_summary_sd
-        self.errs = errs
+        with self._cascade_step('_summary_sd', change):
+            # Dedupe: the autocleaning operations cascade re-fires
+            # _operation_result → cleaned → processed_result with a freshly-built
+            # tuple wrapper, which makes this observer fire twice per widget
+            # construction even when processed_df identity is unchanged.
+            # Skip when neither the dataframe nor analysis_klasses has actually
+            # changed since the last run. See issue #709.
+            df = self.processed_df
+            klasses = self.analysis_klasses
+            if (id(df), id(klasses)) == self._summary_sd_cache_key:
+                return
+            self._summary_sd_cache_key = (id(df), id(klasses))
+            result_summary_sd, errs  = self._get_summary_sd(df)
+            self.summary_sd = result_summary_sd
+            self.errs = errs
 
     @observe('summary_sd', 'processed_result')
     @exception_protect('merged_sd-protector')
     def _merged_sd(self, change):
-        #slightly inconsitent that processed_sd gets priority over
-        #summary_sd, given that processed_df is computed first. My
-        #thinking was that processed_sd has greater total knowledge
-        #and should supersede summary_sd.
+        with self._cascade_step('_merged_sd', change):
+            #slightly inconsitent that processed_sd gets priority over
+            #summary_sd, given that processed_df is computed first. My
+            #thinking was that processed_sd has greater total knowledge
+            #and should supersede summary_sd.
 
-        self.merged_sd = merge_sds(self.cleaned_sd, self.summary_sd, self.processed_sd)
-        
+            self.merged_sd = merge_sds(self.cleaned_sd, self.summary_sd, self.processed_sd)
+
 
     @observe('merged_sd', 'style_method')
     @exception_protect('widget_config-protector')
     def _widget_config(self, change):
-        #how to control ordering of column_config???
-        # dfviewer_config = self._get_dfviewer_config(self.merged_sd, self.style_method)
-        # self.widget_args_tuple = [self.processed_df, self.merged_sd, dfviewer_config]
-        self.widget_args_tuple = (id(self.processed_df), self.processed_df, self.merged_sd)
+        with self._cascade_step('_widget_config', change):
+            #how to control ordering of column_config???
+            # dfviewer_config = self._get_dfviewer_config(self.merged_sd, self.style_method)
+            # self.widget_args_tuple = [self.processed_df, self.merged_sd, dfviewer_config]
+            self.widget_args_tuple = (id(self.processed_df), self.processed_df, self.merged_sd)
 
 BuckarooOptions = TypedDict('BuckarooOptions', {
     'sampled': List[str],
@@ -408,57 +476,58 @@ class CustomizableDataflow(DataFlow):
     @observe('summary_sd', 'processed_result', 'filt_sd_key')
     @exception_protect('merged_sd-protector')
     def _merged_sd(self, change):
-        # Bare keys come from the raw scope's SD (computed on
-        # sampled_df). ``filtered_*`` keys are layered on top from the
-        # filt scope's SD when the filter is active. Scope SDs are read
-        # from the keyed cache (#783) — the cache observer
-        # ``_populate_sd_cache`` is what computes and stores them; this
-        # observer just assembles the wire shape #777's `?key` JS
-        # consumes.
-        #
-        # filt_sd_key is in the observed set so this fires after
-        # ``_populate_sd_cache`` has updated the pointer (which it
-        # always does, even on a pure cache hit) — guarantees the
-        # cache lookups below see the right keys for the current state.
+        with self._cascade_step('_merged_sd', change):
+            # Bare keys come from the raw scope's SD (computed on
+            # sampled_df). ``filtered_*`` keys are layered on top from the
+            # filt scope's SD when the filter is active. Scope SDs are read
+            # from the keyed cache (#783) — the cache observer
+            # ``_populate_sd_cache`` is what computes and stores them; this
+            # observer just assembles the wire shape #777's `?key` JS
+            # consumes.
+            #
+            # filt_sd_key is in the observed set so this fires after
+            # ``_populate_sd_cache`` has updated the pointer (which it
+            # always does, even on a pure cache hit) — guarantees the
+            # cache lookups below see the right keys for the current state.
 
-        # Resolve scope SDs. Falls back to summary_sd / cleaned_sd
-        # for pre-cache-population states (initial startup, the brief
-        # window before _populate_sd_cache has fired).
-        cache = self.summary_stats_cache or {}
-        raw_sd = cache.get(self.raw_sd_key) if self.raw_sd_key else None
-        if raw_sd is None:
-            raw_sd = self.summary_sd or {}
-        filt_sd = cache.get(self.filt_sd_key) if self.filt_sd_key else None
-        if filt_sd is None:
-            filt_sd = self.summary_sd or {}
+            # Resolve scope SDs. Falls back to summary_sd / cleaned_sd
+            # for pre-cache-population states (initial startup, the brief
+            # window before _populate_sd_cache has fired).
+            cache = self.summary_stats_cache or {}
+            raw_sd = cache.get(self.raw_sd_key) if self.raw_sd_key else None
+            if raw_sd is None:
+                raw_sd = self.summary_sd or {}
+            filt_sd = cache.get(self.filt_sd_key) if self.filt_sd_key else None
+            if filt_sd is None:
+                filt_sd = self.summary_sd or {}
 
-        # ``filtered_*`` keys reflect "search filter applied on top of
-        # cleaning", so the gate is "filt chain has ops the clean chain
-        # doesn't" — i.e. at least one quick-command op is present. Keying
-        # off ``filt_sd_key != raw_sd_key`` would also fire for
-        # cleaning-only states, mislabelling cleaned stats as filtered
-        # until the deferred ``cleaned_*`` scope lands.
-        chains = split_chain_by_scope(self.operations)
-        filter_active = chains['filt'] != chains['clean']
+            # ``filtered_*`` keys reflect "search filter applied on top of
+            # cleaning", so the gate is "filt chain has ops the clean chain
+            # doesn't" — i.e. at least one quick-command op is present. Keying
+            # off ``filt_sd_key != raw_sd_key`` would also fire for
+            # cleaning-only states, mislabelling cleaned stats as filtered
+            # until the deferred ``cleaned_*`` scope lands.
+            chains = split_chain_by_scope(self.operations)
+            filter_active = chains['filt'] != chains['clean']
 
-        if self.processed_df is None:
-            #on initial startup
-            self.merged_sd = merge_sds(self.init_sd, self.cleaned_sd, raw_sd, self.processed_sd)
-            return
+            if self.processed_df is None:
+                #on initial startup
+                self.merged_sd = merge_sds(self.init_sd, self.cleaned_sd, raw_sd, self.processed_sd)
+                return
 
-        #we do this to get rewrtten keys for init_sd
-        rewritten_init_sd = merge_sd_overrides({}, self.processed_df, self.init_sd)
-        intermediate_sd = merge_sds(rewritten_init_sd, self.cleaned_sd, raw_sd)
-        base = merge_sd_overrides(intermediate_sd, self.processed_df, self.processed_sd)
+            #we do this to get rewrtten keys for init_sd
+            rewritten_init_sd = merge_sd_overrides({}, self.processed_df, self.init_sd)
+            intermediate_sd = merge_sds(rewritten_init_sd, self.cleaned_sd, raw_sd)
+            base = merge_sd_overrides(intermediate_sd, self.processed_df, self.processed_sd)
 
-        # Layer ``filtered_*`` keys on top when a filter is active.
-        if filter_active and filt_sd:
-            for col, stats in filt_sd.items():
-                col_dict = base.setdefault(col, {})
-                for stat_name, val in stats.items():
-                    col_dict[f'filtered_{stat_name}'] = val
+            # Layer ``filtered_*`` keys on top when a filter is active.
+            if filter_active and filt_sd:
+                for col, stats in filt_sd.items():
+                    col_dict = base.setdefault(col, {})
+                    for stat_name, val in stats.items():
+                        col_dict[f'filtered_{stat_name}'] = val
 
-        self.merged_sd = base
+            self.merged_sd = base
 
     def _compute_scope_df(self, scope: str):
         """Return the df that scope's SD should be computed against.
@@ -545,35 +614,36 @@ class CustomizableDataflow(DataFlow):
         are un-synced — the frontend consumes only the merged
         prefixed-key ``merged_sd``.
         """
-        if self.processed_df is None:
-            return
-        chains = split_chain_by_scope(self.operations)
-        keys = {scope: self._scope_cache_key(chain)
-                for scope, chain in chains.items()}
-        new_cache = dict(self.summary_stats_cache)
-        cache_grew = False
+        with self._cascade_step('_populate_sd_cache', _change):
+            if self.processed_df is None:
+                return
+            chains = split_chain_by_scope(self.operations)
+            keys = {scope: self._scope_cache_key(chain)
+                    for scope, chain in chains.items()}
+            new_cache = dict(self.summary_stats_cache)
+            cache_grew = False
 
-        # filt scope reuses the SD that _summary_sd just produced.
-        if keys['filt'] not in new_cache:
-            new_cache[keys['filt']] = dict(self.summary_sd or {})
-            cache_grew = True
+            # filt scope reuses the SD that _summary_sd just produced.
+            if keys['filt'] not in new_cache:
+                new_cache[keys['filt']] = dict(self.summary_sd or {})
+                cache_grew = True
 
-        # raw + clean: fresh compute, but only on cache miss.
-        for scope in ('raw', 'clean'):
-            if keys[scope] in new_cache:
-                continue
-            scope_df = self._compute_scope_df(scope)
-            if scope_df is None:
-                continue
-            sd, _errs = self._get_summary_sd(scope_df)
-            new_cache[keys[scope]] = sd
-            cache_grew = True
+            # raw + clean: fresh compute, but only on cache miss.
+            for scope in ('raw', 'clean'):
+                if keys[scope] in new_cache:
+                    continue
+                scope_df = self._compute_scope_df(scope)
+                if scope_df is None:
+                    continue
+                sd, _errs = self._get_summary_sd(scope_df)
+                new_cache[keys[scope]] = sd
+                cache_grew = True
 
-        if cache_grew:
-            self.summary_stats_cache = new_cache
-        self.raw_sd_key = keys['raw']
-        self.clean_sd_key = keys['clean']
-        self.filt_sd_key = keys['filt']
+            if cache_grew:
+                self.summary_stats_cache = new_cache
+            self.raw_sd_key = keys['raw']
+            self.clean_sd_key = keys['clean']
+            self.filt_sd_key = keys['filt']
 
     ### start code interpreter block
     def add_command(self, incomingCommandKls):
@@ -658,46 +728,47 @@ class CustomizableDataflow(DataFlow):
         """
        put together df_dict for consumption by the frontend
         """
-       # Tuple[TAny, pd.DataFrame, SDType]
-        _unused, processed_df, merged_sd = self.widget_args_tuple
-        if processed_df is None:
-            return
+        with self._cascade_step('_handle_widget_change', change):
+           # Tuple[TAny, pd.DataFrame, SDType]
+            _unused, processed_df, merged_sd = self.widget_args_tuple
+            if processed_df is None:
+                return
 
-        # df_data_dict is still hardcoded for now
-        # eventually processed_df will be able to add or alter values of df_data_dict
-        # correlation would be added, filtered would probably be altered
+            # df_data_dict is still hardcoded for now
+            # eventually processed_df will be able to add or alter values of df_data_dict
+            # correlation would be added, filtered would probably be altered
 
-        # to expedite processing maybe future provided dfs from
-        # postprcoessing could default to empty until that is
-        # selected, optionally
-        if self.skip_main_serial:
-            self.df_data_dict = {'main': [],
-                'all_stats': self._sd_to_jsondf(merged_sd),
-                'empty': []}
-        else:
-            self.df_data_dict = {'main': self._df_to_obj(processed_df),
-                'all_stats': self._sd_to_jsondf(merged_sd),
-                'empty': []}
+            # to expedite processing maybe future provided dfs from
+            # postprcoessing could default to empty until that is
+            # selected, optionally
+            if self.skip_main_serial:
+                self.df_data_dict = {'main': [],
+                    'all_stats': self._sd_to_jsondf(merged_sd),
+                    'empty': []}
+            else:
+                self.df_data_dict = {'main': self._df_to_obj(processed_df),
+                    'all_stats': self._sd_to_jsondf(merged_sd),
+                    'empty': []}
 
-        temp_display_args = {}
-        for display_name, A_Klass in self.df_display_klasses.items():
-            df_viewer_config = A_Klass.get_dfviewer_config(merged_sd, processed_df)
-            base_column_config = df_viewer_config['column_config']
-            df_viewer_config['column_config'] =  merge_column_config(
-                base_column_config, self.processed_df, self.column_config_overrides)
-            disp_arg = {'data_key': A_Klass.data_key,
-                'df_viewer_config': df_viewer_config,
-                'summary_stats_key': A_Klass.summary_stats_key}
-            temp_display_args[display_name] = disp_arg
+            temp_display_args = {}
+            for display_name, A_Klass in self.df_display_klasses.items():
+                df_viewer_config = A_Klass.get_dfviewer_config(merged_sd, processed_df)
+                base_column_config = df_viewer_config['column_config']
+                df_viewer_config['column_config'] =  merge_column_config(
+                    base_column_config, self.processed_df, self.column_config_overrides)
+                disp_arg = {'data_key': A_Klass.data_key,
+                    'df_viewer_config': df_viewer_config,
+                    'summary_stats_key': A_Klass.summary_stats_key}
+                temp_display_args[display_name] = disp_arg
 
-        if self.pinned_rows is not None:
-            temp_display_args['main']['df_viewer_config']['pinned_rows'] = self.pinned_rows
-        if self.extra_grid_config:
-            temp_display_args['main']['df_viewer_config']['extra_grid_config'] = self.extra_grid_config
-        if self.component_config:
-            temp_display_args['main']['df_viewer_config']['component_config'] = self.component_config
+            if self.pinned_rows is not None:
+                temp_display_args['main']['df_viewer_config']['pinned_rows'] = self.pinned_rows
+            if self.extra_grid_config:
+                temp_display_args['main']['df_viewer_config']['extra_grid_config'] = self.extra_grid_config
+            if self.component_config:
+                temp_display_args['main']['df_viewer_config']['component_config'] = self.component_config
 
-        self.df_display_args = temp_display_args
+            self.df_display_args = temp_display_args
    
 """
 
