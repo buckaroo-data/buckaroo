@@ -120,6 +120,67 @@ class TestExprCountMemoization:
         df = pd.DataFrame({"a": [1, 2, 3, 4]})
         assert xorq_buckaroo._expr_count(df) == 4
 
+    def test_expr_count_does_not_cache_failures(self):
+        """Codex P1 follow-up to #796: a transient backend failure on
+        ``expr.count().execute()`` must not poison the cache. The
+        original memoization commit caught ``Exception`` and stored
+        ``0`` in ``_expr_count_cache`` — so every subsequent call for
+        the same expression object returned 0 forever, even after the
+        backend recovered.
+
+        Contract: failures are not cached. The next call retries the
+        backend; on recovery the real count is returned and stored.
+        """
+        from buckaroo import xorq_buckaroo
+
+        xorq_buckaroo._expr_count_cache.clear()
+
+        class _StubCount:
+            def __init__(self, value):
+                self._value = value
+
+            def execute(self):
+                return self._value
+
+        class _StubExpr:
+            """Mimics the ibis-expression duck-type: not a pd.DataFrame,
+            exposes ``.count().execute()``. Counter flips from raising
+            to succeeding to simulate backend recovery."""
+
+            def __init__(self):
+                self.calls = 0
+
+            def count(self):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("simulated backend failure")
+                return _StubCount(42)
+
+        stub = _StubExpr()
+
+        first = xorq_buckaroo._expr_count(stub)
+        assert id(stub) not in xorq_buckaroo._expr_count_cache, (
+            "failed _expr_count call must not write to the cache; "
+            f"found cached value {xorq_buckaroo._expr_count_cache.get(id(stub))!r}"
+        )
+
+        second = xorq_buckaroo._expr_count(stub)
+        assert second == 42, (
+            f"after backend recovery, _expr_count must return the real "
+            f"count, not a cached failure sentinel; got {second!r}"
+        )
+        assert xorq_buckaroo._expr_count_cache.get(id(stub)) == 42, (
+            "successful call following a failure must populate the cache "
+            "with the real count"
+        )
+
+        # Sanity: the first call returned _something_ — but the contract
+        # this test pins is "don't cache failures", not "what the failure
+        # return value is". Leave the first-call value out of the assert
+        # so the test stays stable if we later switch from "return 0" to
+        # "re-raise".
+        del first
+
 
 class TestInstantiation:
     def test_smoke(self):
