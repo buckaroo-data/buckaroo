@@ -100,15 +100,57 @@ def test_none_serializes_as_null():
     assert row['a__mean'] == [None]
 
 
-def test_multiple_columns_get_short_name_prefix():
-    """Column names follow the to_chars() rename: first col is 'a', second 'b'."""
-    sd = {'x': {'mean': np.float64(1.0), 'dtype': 'float64'}, 'y': {'mean': np.float64(2.0), 'dtype': 'int64'}}
+def test_multiple_columns_use_provided_short_names():
+    """``sd_to_parquet_b64`` is called with an SD already keyed by the
+    pipeline-rewritten short col names ('a', 'b', ...). Keys must
+    pass through unchanged: ``sd['a']`` ends up at parquet col
+    ``a__mean``, not re-mapped by enumeration position. (The previous
+    behaviour re-keyed by position and silently mis-aligned every
+    column whenever ``sd.keys()`` arrived in non-positional order —
+    e.g. when ``init_sd`` injected an override before the raw scope's
+    insertion, see ``test_init_sd_reordering_preserves_short_col_keys``.)
+    """
+    sd = {'a': {'mean': np.float64(1.0), 'dtype': 'float64'}, 'b': {'mean': np.float64(2.0), 'dtype': 'int64'}}
     table = _decode(sd_to_parquet_b64(sd))
     row = table.to_pydict()
     assert row['a__mean'] == [1.0]
     assert row['b__mean'] == [2.0]
     assert json.loads(row['a__dtype'][0]) == 'float64'
     assert json.loads(row['b__dtype'][0]) == 'int64'
+
+
+def test_init_sd_reordering_preserves_short_col_keys():
+    """Real-world misalignment from PolarsBuckarooInfiniteWidget with
+    ``init_sd`` overrides: ``_merged_sd`` builds its result by
+    iterating ``rewritten_init_sd`` first and ``raw_sd`` after — so an
+    override on column 'b' (e.g. ``comments``) lands in ``merged_sd``
+    BEFORE the bare 'a' entry from the raw scope. ``merged_sd.keys()``
+    becomes ``['b', 'a', 'c', ...]``.
+
+    The previous ``sd_to_parquet_b64`` reassigned short_col by
+    enumeration position, so the value under ``sd['b']`` (comments'
+    histogram) ended up at parquet column ``a__histogram``. The grid's
+    column_config maps 'a' to the FIRST df column (businessname), so
+    AG-Grid rendered comments' histogram under the businessname slot
+    and vice versa — exactly the alignment bug the user reported.
+
+    Contract: keys are short col names already, pass them through.
+    """
+    sd_with_swapped_order = {'b': {'orig_col_name': 'comments', 'histogram': 'COMMENTS_HIST'},
+        'a': {'orig_col_name': 'businessname', 'histogram': 'BIZ_HIST'},
+        'c': {'orig_col_name': 'violation', 'histogram': 'VIOL_HIST'}}
+    table = _decode(sd_to_parquet_b64(sd_with_swapped_order))
+    row = table.to_pydict()
+    assert json.loads(row['a__histogram'][0]) == 'BIZ_HIST', (
+        f"sd['a'] (businessname) must end up at parquet col 'a__histogram'; "
+        f"got {row.get('a__histogram')!r} (likely got re-keyed by iteration "
+        f"position, putting sd['b']'s value here)"
+    )
+    assert json.loads(row['b__histogram'][0]) == 'COMMENTS_HIST', (
+        f"sd['b'] (comments) must end up at parquet col 'b__histogram'; "
+        f"got {row.get('b__histogram')!r}"
+    )
+    assert json.loads(row['c__histogram'][0]) == 'VIOL_HIST'
 
 
 def test_categorical_histogram_round_trips():
