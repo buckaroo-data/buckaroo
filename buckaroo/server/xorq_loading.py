@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import traceback
 
+from buckaroo.server.window import clamp_window
 from buckaroo.xorq_buckaroo import (
     NoCleaningConfXorq, XorqAutocleaning, XorqDataflow, XorqDfStatsV2,
     XorqInfiniteSampling, _XORQ_ANALYSIS_KLASSES, _expr_count,
@@ -68,8 +69,6 @@ def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
     ``window_to_parquet`` helper, and returns the
     ``(json_msg, parquet_bytes)`` pair the WebSocket handler ships as
     a text + binary frame pair (matching the pandas/polars paths)."""
-    start = int(payload_args["start"])
-    end = int(payload_args["end"])
     _unused, processed_df, merged_sd = xorq_dataflow.widget_args_tuple
     if processed_df is None:
         return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0}, b"")
@@ -83,6 +82,11 @@ def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
             ascending = payload_args.get("sort_direction") == "asc"
 
         total_length = _expr_count(processed_df)
+        # Clamp the request window to a bounded slice — protects
+        # against ``end >> total_rows`` requests that would otherwise
+        # ship the entire table in a single WS frame. See #797.
+        start, end = clamp_window(
+            payload_args.get("start"), payload_args.get("end"), total_length)
         parquet_bytes = window_to_parquet(processed_df, start, end, sort_col, ascending)
         return ({"type": "infinite_resp", "key": payload_args, "data": [],
             "length": total_length}, parquet_bytes)
