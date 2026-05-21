@@ -322,12 +322,9 @@ export function StatusBar({
     // True while a buckaroo_state_change is in flight to the backend
     // (search / cleaning_method / post_processing). Issue #813: an empty
     // grid is otherwise ambiguous between "zero rows" and "still computing".
-    // No-op until the fix commit hooks up the visual indicator.
+    // When set, renders a small "computing…" dot in the status-bar chrome.
     inFlight?: boolean;
 }) {
-    // Reference inFlight so TS doesn't complain about an unused prop in the
-    // failing-test commit. Rendering arrives in the fix.
-    void inFlight;
     if (false) {
 	console.log("heightOverride", heightOverride);
     }
@@ -499,6 +496,24 @@ export function StatusBar({
     const themeClass = effectiveScheme === 'light' ? 'ag-theme-alpine' : 'ag-theme-alpine-dark';
     return (
         <div className="status-bar">
+            {inFlight ? (
+                // Minimal "computing…" indicator (#813). Lives above the
+                // AG-Grid header strip so it shows whether the grid is empty
+                // because a filter excluded everything or because the
+                // dataflow is still in flight. aria-live so screen readers
+                // also escape the empty-grid ambiguity.
+                <div
+                    className="bk-status-inflight"
+                    data-testid="status-bar-inflight"
+                    role="status"
+                    aria-live="polite"
+                    aria-label="Computing"
+                    title="Computing…"
+                >
+                    <span className="bk-status-inflight-dot" aria-hidden="true" />
+                    <span className="bk-status-inflight-label">computing…</span>
+                </div>
+            ) : null}
             <div
             className={`theme-hanger ${themeClass}`}>
                 <AgGridReact
