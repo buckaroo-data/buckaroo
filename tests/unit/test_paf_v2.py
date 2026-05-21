@@ -176,6 +176,30 @@ class TestStatDecorator:
         sf = distinct_per._stat_func
         assert sf.default is MISSING
 
+    def test_stat_default_cost_is_scalar(self):
+        # Default cost class is "scalar" — the bulk of stats are cheap.
+        # Only known-expensive ones opt in to "aggregate".
+        sf = length._stat_func
+        assert sf.cost == "scalar"
+
+    def test_stat_explicit_cost_aggregate(self):
+        @stat(cost="aggregate")
+        def big_compute(ser: RawSeries) -> float:
+            return float(ser.mean())
+
+        assert big_compute._stat_func.cost == "aggregate"
+
+    def test_stat_invalid_cost_rejected(self):
+        # Only "scalar" and "aggregate" are recognised. A typo should
+        # fail loud at decoration time — silently dropping an invalid
+        # cost would leak into the cost-class router as an unscheduled
+        # stat group.
+        import pytest as _pt
+        with _pt.raises(ValueError, match="cost"):
+            @stat(cost="bigly")
+            def bad(ser: RawSeries) -> float:
+                return float(ser.mean())
+
 
 class _MultiSizeStats(MultipleProvides):
     row_count: int
