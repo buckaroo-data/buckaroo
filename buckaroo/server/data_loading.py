@@ -84,11 +84,13 @@ def handle_infinite_request_buckaroo(
     dataflow: ServerDataflow, payload_args: dict
 ) -> tuple[dict, bytes]:
     """Infinite scroll handler using the dataflow's processed_df and merged_sd."""
-    start = payload_args["start"]
-    end = payload_args["end"]
+    from buckaroo.server.window import clamp_window
     _unused, processed_df, merged_sd = dataflow.widget_args_tuple
     if processed_df is None:
         return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0}, b"")
+    # Clamp window against the (post-filter) processed_df size — see #797.
+    start, end = clamp_window(
+        payload_args.get("start"), payload_args.get("end"), len(processed_df))
 
     try:
         sort = payload_args.get("sort")
@@ -164,8 +166,11 @@ def get_display_state_lazy(ldf: pl.LazyFrame) -> tuple[dict, dict, dict]:
 def handle_infinite_request_lazy(ldf: pl.LazyFrame, orig_to_rw: dict, rw_to_orig: dict, total_rows: int,
         payload_args: dict) -> tuple[dict, bytes]:
     """Serve an infinite-scroll slice from a Polars LazyFrame."""
-    start = int(payload_args.get("start", 0))
-    end = int(payload_args.get("end", 0))
+    from buckaroo.server.window import clamp_window
+    # Clamp window against total_rows so end >> total doesn't ship
+    # the entire LazyFrame in one parquet frame. See #797.
+    start, end = clamp_window(
+        payload_args.get("start", 0), payload_args.get("end", 0), total_rows)
 
     base = ldf.select(pl.all())
     sort_col = payload_args.get("sort")
@@ -273,8 +278,10 @@ def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[dict,
     (a, b, c, ...) since that's what the Parquet data uses. We need to
     map it back to the original column name for sorting.
     """
-    start = payload_args["start"]
-    end = payload_args["end"]
+    from buckaroo.server.window import clamp_window
+    # Clamp window against df length — see #797.
+    start, end = clamp_window(
+        payload_args.get("start"), payload_args.get("end"), len(df))
 
     sort = payload_args.get("sort")
     if sort:
