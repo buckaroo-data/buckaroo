@@ -400,6 +400,17 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
     used to apply to every cell now only applies to strings and to
     list/dict values (histograms, value_counts).
 
+    The input ``sd`` is expected to already be keyed by the pipeline-
+    rewritten short col names (``'a'``, ``'b'``, ...) — every caller
+    in the codebase reaches this function via ``DfStatsV2`` /
+    ``XorqDfStatsV2`` / ``merged_sd``, all of which use rewritten
+    names. Keys pass through unchanged. (Earlier versions re-keyed by
+    enumeration position via ``to_chars(i)``; that silently
+    mis-aligned every column whenever ``sd.keys()`` arrived in non-
+    positional order — see ``_merged_sd`` iterating
+    ``rewritten_init_sd`` before the raw scope, which puts ``'b'``
+    ahead of ``'a'`` in the result dict.)
+
     Returns ``{'format': 'parquet_b64', 'layout': 'wide', 'data': '<base64>'}``.
     Falls back to the JSON/row payload if parquet serialization fails — the
     absence of ``layout: 'wide'`` is how the JS side picks the row decoder.
@@ -407,12 +418,10 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    col_mapping = [(orig, to_chars(i)) for i, orig in enumerate(sd.keys())]
     names: List[str] = []
     arrays: List[Any] = []
 
-    for orig_col, short_col in col_mapping:
-        stats = sd[orig_col]
+    for short_col, stats in sd.items():
         if not isinstance(stats, dict):
             continue
         for stat_name, val in stats.items():
