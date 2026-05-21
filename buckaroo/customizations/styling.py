@@ -1,6 +1,6 @@
 from buckaroo.dataflow.dataflow import StylingAnalysis
 from typing import Any
-from buckaroo.styling_helpers import obj_, float_, inherit_, pinned_histogram
+from buckaroo.styling_helpers import obj_, float_, inherit_, pinned_histogram, pinned_filt_histogram
 
 # Pixel-width estimation constants, calibrated to AG-Grid theme with
 # spacing:5, cellHorizontalPaddingScale:0.3, fontSize:12, headerFontSize:14
@@ -63,7 +63,7 @@ def estimate_min_width_px(displayer_args, header_name, column_metadata, has_hist
 
 class DefaultMainStyling(StylingAnalysis):
     requires_summary = ["histogram", "is_numeric", "dtype", "_type"]
-    pinned_rows = [obj_('dtype'), pinned_histogram()]
+    pinned_rows = [obj_('dtype'), pinned_histogram(), pinned_filt_histogram()]
 
 
     @classmethod
