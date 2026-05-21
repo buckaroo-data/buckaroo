@@ -25,7 +25,7 @@ def _decode(result):
 
 
 def test_tagged_payload_carries_wide_layout():
-    sd = {'col': {'mean': 5.0, 'dtype': 'float64'}}
+    sd = {'a': {'mean': 5.0, 'dtype': 'float64'}}
     result = sd_to_parquet_b64(sd)
     assert result['format'] == 'parquet_b64'
     assert result['layout'] == 'wide'
@@ -37,7 +37,7 @@ def test_numeric_scalars_use_native_parquet_types():
 
     No JSON round-trip for numeric values — they ride the parquet schema.
     """
-    sd = {'col_a': {'mean': np.float64(42.0), 'length': 50, 'is_numeric': True, 'dtype': 'float64'}}
+    sd = {'a': {'mean': np.float64(42.0), 'length': 50, 'is_numeric': True, 'dtype': 'float64'}}
     table = _decode(sd_to_parquet_b64(sd))
     schema = {f.name: str(f.type) for f in table.schema}
     assert schema['a__mean'] == 'double'
@@ -47,7 +47,7 @@ def test_numeric_scalars_use_native_parquet_types():
 
 
 def test_native_scalars_round_trip_without_json():
-    sd = {'col_a': {'mean': np.float64(42.5), 'length': 50, 'is_numeric': True}}
+    sd = {'a': {'mean': np.float64(42.5), 'length': 50, 'is_numeric': True}}
     table = _decode(sd_to_parquet_b64(sd))
     row = table.to_pydict()
     # Values come out as native Python types — not JSON strings.
@@ -62,7 +62,7 @@ def test_string_values_remain_json_encoded():
 
     A plain ``"float64"`` round-trips as the JSON literal ``'"float64"'``.
     """
-    sd = {'col_a': {'dtype': 'float64'}}
+    sd = {'a': {'dtype': 'float64'}}
     table = _decode(sd_to_parquet_b64(sd))
     raw_cell = table.to_pydict()['a__dtype'][0]
     assert raw_cell == '"float64"'
@@ -71,7 +71,7 @@ def test_string_values_remain_json_encoded():
 
 def test_histogram_round_trips_as_json_string():
     histogram = [{'name': '0-20', 'population': np.float64(15.0)}, {'name': '20-40', 'population': np.float64(25.0)}]
-    sd = {'col_a': {'histogram': histogram, 'dtype': 'float64'}}
+    sd = {'a': {'histogram': histogram, 'dtype': 'float64'}}
     table = _decode(sd_to_parquet_b64(sd))
     raw_cell = table.to_pydict()['a__histogram'][0]
     assert isinstance(raw_cell, str)
@@ -87,14 +87,14 @@ def test_nan_becomes_parquet_null():
     On the JS side this surfaces as ``null``, which is what consumers expect
     for "no value" stats like mean of an all-NaN column.
     """
-    sd = {'col_a': {'mean': math.nan, 'dtype': 'float64'}}
+    sd = {'a': {'mean': math.nan, 'dtype': 'float64'}}
     table = _decode(sd_to_parquet_b64(sd))
     row = table.to_pydict()
     assert row['a__mean'] == [None]
 
 
 def test_none_serializes_as_null():
-    sd = {'col_a': {'mean': None, 'dtype': 'float64'}}
+    sd = {'a': {'mean': None, 'dtype': 'float64'}}
     table = _decode(sd_to_parquet_b64(sd))
     row = table.to_pydict()
     assert row['a__mean'] == [None]
@@ -156,7 +156,7 @@ def test_init_sd_reordering_preserves_short_col_keys():
 def test_categorical_histogram_round_trips():
     histogram = [{'name': 'foo', 'cat_pop': np.float64(40.0)}, {'name': 'bar', 'cat_pop': np.float64(35.0)},
         {'name': 'longtail', 'longtail': np.float64(15.0)}, {'name': 'unique', 'unique': np.float64(10.0)}]
-    sd = {'col': {'histogram': histogram, 'dtype': 'object'}}
+    sd = {'a': {'histogram': histogram, 'dtype': 'object'}}
     table = _decode(sd_to_parquet_b64(sd))
     parsed = json.loads(table.to_pydict()['a__histogram'][0])
     assert parsed[0] == {'name': 'foo', 'cat_pop': 40.0}
@@ -166,7 +166,7 @@ def test_categorical_histogram_round_trips():
 
 def test_single_row_layout():
     """Wide layout writes exactly one row regardless of stat count."""
-    sd = {'col_a': {'mean': 1.0, 'min': 0.0, 'max': 2.0, 'dtype': 'float64'}}
+    sd = {'a': {'mean': 1.0, 'min': 0.0, 'max': 2.0, 'dtype': 'float64'}}
     table = _decode(sd_to_parquet_b64(sd))
     assert table.num_rows == 1
 
@@ -189,7 +189,7 @@ def test_uint64_max_does_not_raise():
     serialization would crash instead of degrading gracefully.
     """
     big = np.uint64(2**63 + 7)  # one past int64 max
-    sd = {'col_a': {'max': big, 'dtype': 'uint64'}}
+    sd = {'a': {'max': big, 'dtype': 'uint64'}}
     result = sd_to_parquet_b64(sd)
     # Either the wide parquet path or the JSON fallback is acceptable — both
     # are graceful. What's not acceptable is raising.
@@ -199,7 +199,7 @@ def test_uint64_max_does_not_raise():
 def test_uint64_max_round_trips_in_wide_layout():
     """uint64 stats survive the wide parquet round-trip via pa.uint64()."""
     big = np.uint64(2**63 + 7)
-    sd = {'col_a': {'max': big, 'dtype': 'uint64'}}
+    sd = {'a': {'max': big, 'dtype': 'uint64'}}
     table = _decode(sd_to_parquet_b64(sd))
     schema = {f.name: str(f.type) for f in table.schema}
     assert schema['a__max'] == 'uint64'
@@ -213,7 +213,7 @@ def test_negative_int_beyond_int64_falls_back_to_json_string():
     is the safest universal fallback (precision is JS's problem at that point).
     """
     huge_neg = -(2**70)
-    sd = {'col_a': {'min': huge_neg, 'dtype': 'int64'}}
+    sd = {'a': {'min': huge_neg, 'dtype': 'int64'}}
     table = _decode(sd_to_parquet_b64(sd))
     schema = {f.name: str(f.type) for f in table.schema}
     assert schema['a__min'] == 'string'
