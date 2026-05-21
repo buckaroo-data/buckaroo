@@ -8,12 +8,20 @@ installed still imports cleanly.
 """
 from __future__ import annotations
 
+import logging
+import os
 import traceback
 
 from buckaroo.xorq_buckaroo import (
     NoCleaningConfXorq, XorqAutocleaning, XorqDataflow, XorqDfStatsV2,
     XorqInfiniteSampling, _XORQ_ANALYSIS_KLASSES, _expr_count,
     window_to_parquet)
+
+# Mirrors ``websocket_handler._BUCKAROO_DEBUG`` — when set, error_info
+# carries the full traceback for local debugging. Without it, clients see
+# a generic message so source paths and stack frames don't leak.
+_BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
+log = logging.getLogger("buckaroo.server.xorq_loading")
 
 
 class XorqServerDataflow(XorqDataflow):
@@ -87,5 +95,11 @@ def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
         return ({"type": "infinite_resp", "key": payload_args, "data": [],
             "length": total_length}, parquet_bytes)
     except Exception:
+        tb = traceback.format_exc()
+        log.error("xorq infinite_request error: %s", tb)
+        # Mirrors the pandas-path gate in websocket_handler.py — clients
+        # in production runs see a generic message; only ``BUCKAROO_DEBUG``
+        # opens the source-leak channel.
         return ({"type": "infinite_resp", "key": payload_args, "data": [],
-            "length": 0, "error_info": traceback.format_exc()}, b"")
+            "length": 0,
+            "error_info": tb if _BUCKAROO_DEBUG else "Request failed"}, b"")
