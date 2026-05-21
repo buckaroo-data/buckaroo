@@ -345,9 +345,15 @@ class LoadExprHandler(tornado.web.RequestHandler):
         no_browser = bool(body.get("no_browser", False))
         component_config = body.get("component_config")
 
+        project_root = body.get("project_root")
+
         try:
             expr = xorq_loading.load_expr_build_dir(build_dir)
-            xorq_dataflow = xorq_loading.XorqServerDataflow(expr, skip_main_serial=True)
+            extra_klasses = (
+                xorq_loading.load_project_stat_klasses(project_root)
+                if project_root else [])
+            xorq_dataflow = xorq_loading.XorqServerDataflow(
+                expr, skip_main_serial=True, extra_klasses=extra_klasses)
             metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, build_dir)
         except FileNotFoundError:
             self.set_status(404)
