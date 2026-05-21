@@ -235,17 +235,21 @@ class StatPipeline:
 
     def process_column(self, column_name: str, column_dtype, raw_series=None, sampled_series=None, raw_dataframe=None,
             initial_stats: Optional[Dict[str, Any]] = None,
-            cost_classes=None) -> Tuple[Dict[str, Any], List[StatError]]:
+            cost_classes=None, skip_stat_names=None) -> Tuple[Dict[str, Any], List[StatError]]:
         """Process a single column through the stat DAG.
 
         1. Filters stat functions by column dtype
         2. Filters by ``cost_classes`` (default: all costs) — used by
            the JS-driven progressive-stats router to run scalars only
-        3. Executes in topological order with Ok/Err accumulator
-        4. Returns (plain_dict, errors)
+        3. Filters by ``skip_stat_names`` — explicit per-stat-name
+           skiplist used by the dataflow's ``skip_stats_by_scope``
+           config (e.g. histograms off on filt/clean for xorq)
+        4. Executes in topological order with Ok/Err accumulator
+        5. Returns (plain_dict, errors)
         """
         if cost_classes is None:
             cost_classes = {"scalar", "aggregate"}
+        skip_stat_names = skip_stat_names or set()
         # Build column-specific DAG (filters by dtype)
         external = set(self.EXTERNAL_KEYS)
         if initial_stats:
@@ -262,6 +266,8 @@ class StatPipeline:
         for sf in column_funcs:
             if sf.cost not in cost_classes:
                 continue
+            if sf.name in skip_stat_names:
+                continue
             if record_timings:
                 t0 = time.perf_counter()
             _execute_stat_func(sf, accumulator, column_name, raw_series=raw_series, sampled_series=sampled_series,
@@ -277,11 +283,15 @@ class StatPipeline:
 
         return resolve_accumulator(accumulator, column_name, col_key_to_func)
 
-    def process_df(self, df: pd.DataFrame, debug: bool = False, cost_classes=None) -> Tuple[SDType, List[StatError]]:
+    def process_df(self, df: pd.DataFrame, debug: bool = False,
+            cost_classes=None, skip_stat_names=None) -> Tuple[SDType, List[StatError]]:
         """Process all columns of a DataFrame.
 
         ``cost_classes`` (default: all) restricts which stat funcs run.
         Used by the JS-driven progressive-stats router.
+
+        ``skip_stat_names`` is the per-stat-name skiplist threaded
+        through from the dataflow's ``skip_stats_by_scope`` config.
 
         Returns:
             (summary_dict, all_errors) where summary_dict is SDType-compatible
@@ -303,7 +313,7 @@ class StatPipeline:
             col_result, col_errors = self.process_column(column_name=rewritten_col_name, column_dtype=col_dtype,
                 raw_series=ser, sampled_series=ser, raw_dataframe=df,
                 initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name},
-                cost_classes=cost_classes)
+                cost_classes=cost_classes, skip_stat_names=skip_stat_names)
 
             summary[rewritten_col_name] = col_result
             all_errors.extend(col_errors)
@@ -335,7 +345,8 @@ class StatPipeline:
             if e.stat_func is not None and e.stat_func.name in agg_func_names]
         return filtered, filtered_errs
 
-    def process_df_v1_compat(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, ErrDict]:
+    def process_df_v1_compat(self, df: pd.DataFrame, debug: bool = False,
+            skip_stat_names=None) -> Tuple[SDType, ErrDict]:
         """Process DataFrame with v1-compatible error format.
 
         Returns (SDType, ErrDict) matching the v1 AnalysisPipeline interface.
@@ -343,7 +354,7 @@ class StatPipeline:
         that mixes ColAnalysis subclasses into the input list — DataFlow,
         autocleaning, server.data_loading, polars_buckaroo).
         """
-        summary, errors = self.process_df(df, debug=debug)
+        summary, errors = self.process_df(df, debug=debug, skip_stat_names=skip_stat_names)
 
         # Convert StatError list to v1 ErrDict format
         errs: ErrDict = {}

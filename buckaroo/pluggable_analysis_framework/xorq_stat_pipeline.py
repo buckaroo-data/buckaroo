@@ -202,11 +202,15 @@ class XorqStatPipeline:
             if e.stat_func is not None and e.stat_func.name in agg_func_names]
         return filtered, filtered_errs
 
-    def process_table(self, table, cost_classes=None) -> Tuple[SDType, List[StatError]]:
+    def process_table(self, table, cost_classes=None, skip_stat_names=None) -> Tuple[SDType, List[StatError]]:
         """Run the pipeline; ``cost_classes`` filter restricts which
-        stat funcs execute (default: all costs)."""
+        stat funcs execute (default: all costs). ``skip_stat_names``
+        is an explicit per-stat-name skiplist — used by the dataflow's
+        ``skip_stats_by_scope`` config (e.g. histograms on filt/clean
+        scopes for xorq)."""
         if cost_classes is None:
             cost_classes = {"scalar", "aggregate"}
+        skip_stat_names = skip_stat_names or set()
         schema = table.schema()
         columns = list(table.columns)
 
@@ -230,6 +234,8 @@ class XorqStatPipeline:
             if not _is_batch_func(sf):
                 continue
             if sf.cost not in cost_classes:
+                continue
+            if sf.name in skip_stat_names:
                 continue
             xorq_col_param = next(r.name for r in sf.requires if r.type is XorqColumn)
             for col in columns:
@@ -299,6 +305,10 @@ class XorqStatPipeline:
                 # Cost-class filter — the JS-driven router runs scalars
                 # first, aggregates after a debounce.
                 if sf.cost not in cost_classes:
+                    continue
+                # Per-scope name skiplist (e.g. ``histogram`` not run
+                # on filt scope for xorq).
+                if sf.name in skip_stat_names:
                     continue
                 _execute_stat_func(sf, col_accum, col, raw_series=None, sampled_series=None, raw_dataframe=None,
                     xorq_expr=table, xorq_execute=self._execute)
@@ -393,7 +403,8 @@ class XorqDfStatsV2:
         # (issue #709). DAG validation still runs as part of __init__.
         XorqStatPipeline(objs, unit_test=False)
 
-    def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False):
+    def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False,
+            skip_stat_names=None):
         self.table = table
         # Skip the unit_test PERVERSE_DF run on each widget construction —
         # it doubles the SQL query count (issue #709). The DAG-validation
@@ -402,7 +413,20 @@ class XorqDfStatsV2:
         self.ap = XorqStatPipeline(col_analysis_objs, unit_test=False)
         self.operating_df_name = operating_df_name
         self.debug = debug
-        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
+        # skip_stat_names is the per-scope "don't run this stat" filter
+        # the dataflow passes when e.g. histograms are excluded from the
+        # filt scope. None means run everything.
+        if skip_stat_names:
+            summary, errors = self.ap.process_table(self.table, skip_stat_names=skip_stat_names)
+            errs = {}
+            for se in errors:
+                from .stat_pipeline import _find_v1_class
+                kls = _find_v1_class(se.stat_func, self.ap._original_inputs) if se.stat_func else None
+                err_key = (se.column, se.stat_func.name if se.stat_func else "unknown")
+                errs[err_key] = (se.error, kls)
+            self.sdf, self.errs = summary, errs
+        else:
+            self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
         self.stat_errors = []
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)

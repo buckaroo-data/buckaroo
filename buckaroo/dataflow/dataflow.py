@@ -264,6 +264,24 @@ class DataFlow(ABCDataflow):
     # call once the row-data has been shipped. **Not for production paths.**
     _defer_summary_sd = False
 
+    # Generic per-scope stat skiplist. Maps scope name → set of stat
+    # names that should NOT run when computing that scope's SD. Used
+    # to keep expensive stats (e.g. ``histogram`` on xorq, where per-
+    # column queries dominate latency) out of the hot path while still
+    # rendering on the cached raw scope.
+    #
+    # Example::
+    #
+    #     class XorqDataflow(CustomizableDataflow):
+    #         skip_stats_by_scope = {
+    #             "filt":  {"histogram"},
+    #             "clean": {"histogram"},
+    #         }
+    #
+    # Honoured by ``_summary_sd`` (filt scope) and ``_populate_sd_cache``
+    # (raw + clean scopes). Default empty = run everything.
+    skip_stats_by_scope: TDict[str, set] = {}
+
     def recompute_summary_sd(self):
         """Force a (re-)compute of ``summary_sd`` against the current
         ``processed_df``. Used by the spike state-change handler to lift
@@ -284,7 +302,8 @@ class DataFlow(ABCDataflow):
         if df is None:
             return
         _t0 = _t.perf_counter()
-        result_summary_sd, errs = self._get_summary_sd(df)
+        filt_skip = self.skip_stats_by_scope.get("filt") if self.skip_stats_by_scope else None
+        result_summary_sd, errs = self._get_summary_sd(df, skip_stat_names=filt_skip)
         _ctlog.info("[cache-timing] recompute_summary_sd compute=%.0fms",
             (_t.perf_counter()-_t0)*1000)
         self.summary_sd = result_summary_sd
@@ -323,7 +342,8 @@ class DataFlow(ABCDataflow):
         # values. Don't reintroduce this without first fixing the
         # cascade ordering.
         _t1 = _t.perf_counter()
-        result_summary_sd, errs = self._get_summary_sd(df)
+        filt_skip = self.skip_stats_by_scope.get("filt") if self.skip_stats_by_scope else None
+        result_summary_sd, errs = self._get_summary_sd(df, skip_stat_names=filt_skip)
         try:
             n_rows = len(df) if df is not None else 0
         except Exception:
@@ -666,11 +686,13 @@ class CustomizableDataflow(DataFlow):
             scope_df = self._compute_scope_df(scope)
             if scope_df is None:
                 continue
-            sd, _errs = self._get_summary_sd(scope_df)
+            scope_skip = self.skip_stats_by_scope.get(scope) if self.skip_stats_by_scope else None
+            sd, _errs = self._get_summary_sd(scope_df, skip_stat_names=scope_skip)
             new_cache[keys[scope]] = sd
             cache_grew = True
-            _ctlog.info("[cache-timing] populate: %s MISS+compute=%.0fms key=%s",
-                scope, (_t.perf_counter()-_ts)*1000, keys[scope][:8])
+            _ctlog.info("[cache-timing] populate: %s MISS+compute=%.0fms key=%s skip=%s",
+                scope, (_t.perf_counter()-_ts)*1000, keys[scope][:8],
+                sorted(scope_skip) if scope_skip else "-")
 
         if cache_grew:
             self.summary_stats_cache = new_cache
@@ -710,11 +732,15 @@ class CustomizableDataflow(DataFlow):
     ### start summary stats block
     #TAny closer to some error type
     @override
-    def _get_summary_sd(self, processed_df:pd.DataFrame) -> Tuple[SDType, TDict[str, TAny]]:
+    def _get_summary_sd(self, processed_df:pd.DataFrame, skip_stat_names=None) -> Tuple[SDType, TDict[str, TAny]]:
+        # ``skip_stat_names`` is threaded through from the per-scope
+        # ``skip_stats_by_scope`` config — lets a dataflow declare
+        # "don't run stat X on scope Y" without touching analysis_klasses
+        # globally. Pipelines accept the kwarg via #809's plumbing.
         stats = self.DFStatsClass(
             processed_df,
             self.analysis_klasses,
-            self.df_name, debug=self.debug)
+            self.df_name, debug=self.debug, skip_stat_names=skip_stat_names)
         sdf = stats.sdf
         if stats.errs:
             if self.debug:

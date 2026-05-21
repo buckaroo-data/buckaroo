@@ -132,7 +132,16 @@ class XorqDataflow(CustomizableDataflow):
     2. ``_get_summary_sd`` re-keys the summary dict from original column
        names (what ``XorqStatPipeline`` produces) to the rewritten
        ``a, b, c`` names that ``pd_to_obj`` and the styling layer expect.
+
+    Histogram is skipped on the filt + clean scopes (see
+    ``skip_stats_by_scope``). On xorq the per-column histogram queries
+    dominate state_change latency (~6.5 s of every 9 s on the boston
+    dataset). The bare ``histogram`` pinned row still renders from
+    the raw scope. To re-enable filt/clean histograms, clear the
+    class attribute.
     """
+
+    skip_stats_by_scope = {"filt": {"histogram"}, "clean": {"histogram"}}
 
     def populate_df_meta(self) -> None:
         if self.processed_df is None:
@@ -149,7 +158,7 @@ class XorqDataflow(CustomizableDataflow):
             'rows_shown': rows_shown,
             'total_rows': _expr_count(self.orig_df)}
 
-    def _get_summary_sd(self, processed_df):
+    def _get_summary_sd(self, processed_df, skip_stat_names=None):
         if _is_pandas(processed_df):
             # The error path (and any postprocessor that returns a pandas
             # DataFrame) doesn't go through XorqStatPipeline. Return a
@@ -160,7 +169,7 @@ class XorqDataflow(CustomizableDataflow):
                     'orig_col_name': orig_col,
                     'rewritten_col_name': rewritten_col}
             return empty, {}
-        sdf, errs = super()._get_summary_sd(processed_df)
+        sdf, errs = super()._get_summary_sd(processed_df, skip_stat_names=skip_stat_names)
         rewritten = {}
         for orig_col, rewritten_col in old_col_new_col(processed_df):
             col_meta = dict(sdf.get(orig_col, {}))
