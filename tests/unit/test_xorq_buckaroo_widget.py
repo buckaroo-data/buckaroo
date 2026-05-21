@@ -578,8 +578,13 @@ class TestLazyPostprocessor:
         assert "a_squared" in orig_names
 
     def test_lazy_step_paginates_with_bounded_execution(self, monkeypatch):
-        """End-to-end: lazy step + paginated request → only count + limit
-        executes hit the backend, never a bare table fetch."""
+        """End-to-end: lazy step + paginated request → only a bounded
+        limit executes hit the backend, never a bare table fetch.
+
+        Post-#795: the CountStar is memoized after ``add_processing``
+        triggers ``populate_df_meta`` (which calls ``_expr_count`` on
+        the new processed_df). Spy starts after that, so pagination
+        only emits ``Limit``."""
         w = XorqBuckarooInfiniteWidget(_paginated_expr())
 
         def lazy_step(expr):
@@ -592,8 +597,9 @@ class TestLazyPostprocessor:
         captured = _capture_send(w)
         w._handle_payload_args({"start": 2, "end": 5})
 
-        # Exactly one count + one limit; no full-table fetch.
-        assert ops == ["CountStar", "Limit"]
+        # Exactly one limit; count is memoized from add_processing →
+        # populate_df_meta cascade. No full-table fetch.
+        assert ops == ["Limit"]
         df = pd.read_parquet(BytesIO(captured[0][1][0]))
         assert len(df) == 3
 
@@ -627,12 +633,15 @@ class TestInfiniteBoundedExecution:
         return ops_seen
 
     def test_unsorted_window_only_emits_count_and_limit(self, monkeypatch):
+        """Post-#795: spy starts after widget construction, by which time
+        ``populate_df_meta`` has already memoized the CountStar. Pagination
+        emits only ``Limit`` — no full-table fetch."""
         w = XorqBuckarooInfiniteWidget(_paginated_expr())
         captured = _capture_send(w)
         ops = self._make_spy(monkeypatch)
         w._handle_payload_args({"start": 5, "end": 8})
-        # Exactly two executes: aggregate (count) + bounded window (limit).
-        assert ops == ["CountStar", "Limit"]
+        # Just the bounded window. Count was cached at construction.
+        assert ops == ["Limit"]
         # And the slice respected the bound.
         df = pd.read_parquet(BytesIO(captured[0][1][0]))
         assert len(df) == 3
@@ -646,8 +655,8 @@ class TestInfiniteBoundedExecution:
         w._handle_payload_args(
             {"start": 0, "end": 4, "sort": sort_key, "sort_direction": "asc"})
         # Sort wraps the table in Sort -> Limit; we only execute the Limit
-        # (the outermost op), never a bare Table fetch.
-        assert ops == ["CountStar", "Limit"]
+        # (the outermost op), never a bare Table fetch. Count cached.
+        assert ops == ["Limit"]
         assert len(pd.read_parquet(BytesIO(captured[0][1][0]))) == 4
 
     def test_no_full_table_execute_on_large_expr(self, monkeypatch):
@@ -662,12 +671,13 @@ class TestInfiniteBoundedExecution:
         # The processed_df is ``big`` (an InMemoryTable op). A bare
         # ``processed_df.execute()`` would show up here as 'InMemoryTable'.
         assert "InMemoryTable" not in ops
-        assert ops == ["CountStar", "Limit"]
+        assert ops == ["Limit"]
 
     def test_separate_window_requests_each_emit_one_bounded_query(self, monkeypatch):
         """Two non-adjacent windows on a 5k-row expression: each request
-        emits exactly one CountStar (total length) and one Limit
-        (windowed slice) — never a full-table fetch.
+        emits exactly one Limit (windowed slice) — never a full-table
+        fetch. Post-#795 the CountStar is memoized once at widget
+        construction and reused.
 
         Pins down the infinite-loading contract: the frontend can
         scroll-jump (not just paginate sequentially) without the widget
@@ -686,8 +696,8 @@ class TestInfiniteBoundedExecution:
         # Second window: jump to [300, 350) — non-adjacent.
         w._handle_payload_args({"start": 300, "end": 350})
 
-        # Two requests → two count + two limit. No InMemoryTable fetch.
-        assert ops == ["CountStar", "Limit", "CountStar", "Limit"]
+        # Two requests → two limits. Count is memoized. No InMemoryTable fetch.
+        assert ops == ["Limit", "Limit"]
         assert "InMemoryTable" not in ops
 
         # Both responses sent.
@@ -739,8 +749,9 @@ class TestInfiniteBoundedExecution:
 
         w._handle_payload_args({"start": 2, "end": 5})
 
-        # The aggregate (count) goes through .execute() — that's a scalar
-        # round-trip, not the wire payload.
-        assert execute_ops == ["CountStar"]
+        # Post-#795: CountStar is memoized at construction time and not
+        # re-executed during pagination. The .execute() spy therefore
+        # sees zero calls here.
+        assert execute_ops == []
         # The row window goes through .to_pyarrow() — never .execute().
         assert to_pyarrow_ops == ["Limit"]

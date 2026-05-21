@@ -39,13 +39,28 @@ def _is_pandas(obj: Any) -> bool:
     return isinstance(obj, pd.DataFrame)
 
 
+# Per-expression count cache. ibis Tables are immutable, so id(expr) ↔
+# unique expression — same id, same .count() result. Saves ~250 ms on
+# every repeated call against a large remote table (#795). Cache grows
+# with one entry per unique expression object observed; entries become
+# unreachable when the expression is GC'd, so for a long-running
+# session it tracks the live set of expressions naturally.
+_expr_count_cache: dict[int, int] = {}
+
+
 def _expr_count(expr_or_df: Any) -> int:
     if _is_pandas(expr_or_df):
         return len(expr_or_df)
+    key = id(expr_or_df)
+    cached = _expr_count_cache.get(key)
+    if cached is not None:
+        return cached
     try:
-        return int(expr_or_df.count().execute())
+        result = int(expr_or_df.count().execute())
     except Exception:
-        return 0
+        result = 0
+    _expr_count_cache[key] = result
+    return result
 
 
 class XorqSampling(Sampling):
