@@ -13,8 +13,55 @@ from buckaroo.server.app import make_app
 LOG_DIR = os.path.join(os.path.expanduser("~"), ".buckaroo", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
+_VALID_DATASET_KINDS = ("pandas", "lazy", "xorq")
 
-def bind_and_make_app(port: int, open_browser: bool):
+
+def parse_dataset_spec(spec: str) -> dict:
+    """Parse a single ``--dataset NAME=KIND:PATH`` spec into a
+    ``{"label", "kind", "target"}`` dict.
+
+    ``KIND`` is one of ``pandas`` / ``lazy`` / ``xorq``. For pandas and
+    lazy, ``PATH`` is a data file (.csv/.parquet/...); for xorq it's a
+    build dir produced by ``xorq build``. Raises ``ValueError`` for
+    malformed specs and unknown kinds — argparse surfaces these as
+    user-facing CLI errors via ``argparse.ArgumentTypeError`` (see
+    ``_argparse_dataset`` below).
+
+    See issue #811 — replaces the hard-coded demo paths previously baked
+    into ``SESSION_HTML``."""
+    if "=" not in spec:
+        raise ValueError(
+            f"--dataset spec missing '=': expected NAME=KIND:PATH, got {spec!r}")
+    label, kind_and_target = spec.split("=", 1)
+    label = label.strip()
+    if not label:
+        raise ValueError(f"--dataset spec has empty NAME: {spec!r}")
+    if ":" not in kind_and_target:
+        raise ValueError(
+            f"--dataset spec missing ':' after KIND: expected NAME=KIND:PATH, got {spec!r}")
+    kind, target = kind_and_target.split(":", 1)
+    kind = kind.strip()
+    target = target.strip()
+    if kind not in _VALID_DATASET_KINDS:
+        raise ValueError(
+            f"--dataset spec has unknown kind {kind!r}: expected one of "
+            f"{_VALID_DATASET_KINDS}, got {spec!r}")
+    if not target:
+        raise ValueError(f"--dataset spec has empty PATH: {spec!r}")
+    return {"label": label, "kind": kind, "target": target}
+
+
+def _argparse_dataset(spec: str) -> dict:
+    """argparse adapter: convert ``ValueError`` from ``parse_dataset_spec``
+    into ``argparse.ArgumentTypeError`` so argparse can format a nice
+    ``usage:`` error and exit nonzero."""
+    try:
+        return parse_dataset_spec(spec)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from e
+
+
+def bind_and_make_app(port: int, open_browser: bool, datasets: list | None = None):
     """Bind the listening socket, then build the Application with the *bound*
     port stamped into ``settings``.
 
@@ -28,7 +75,7 @@ def bind_and_make_app(port: int, open_browser: bool):
     """
     sockets = tornado.netutil.bind_sockets(port, address="127.0.0.1")
     bound_port = sockets[0].getsockname()[1]
-    app = make_app(port=bound_port, open_browser=open_browser)
+    app = make_app(port=bound_port, open_browser=open_browser, datasets=datasets)
     return sockets, bound_port, app
 
 
@@ -40,6 +87,13 @@ def main():
         help="Exit when stdin closes. Used by parent supervisors (Tauri) to "
         "guarantee the sidecar dies when the parent does — closing stdin is "
         "more reliable than process-tree teardown across platforms.")
+    parser.add_argument("--dataset", type=_argparse_dataset, action="append", default=[],
+        metavar="NAME=KIND:PATH", dest="datasets",
+        help="Register a dataset for the /s/<id> demo dropdown. Repeatable. "
+        "KIND is one of pandas / lazy / xorq. PATH is a data file (pandas/lazy) "
+        "or a build dir (xorq). Examples: "
+        "--dataset boston-pandas=pandas:/data/boston.parquet "
+        "--dataset boston-xorq=xorq:/builds/boston-xorq")
     args = parser.parse_args()
 
     # Line-buffer stdout so the BUCKAROO_PORT handshake reaches a parent supervisor
@@ -70,7 +124,8 @@ def main():
     log = logging.getLogger("buckaroo.server")
     log.info("Server starting — port=%d open_browser=%s pid=%d", args.port, not args.no_browser, os.getpid())
 
-    sockets, bound_port, app = bind_and_make_app(port=args.port, open_browser=not args.no_browser)
+    sockets, bound_port, app = bind_and_make_app(port=args.port,
+        open_browser=not args.no_browser, datasets=args.datasets)
     server = tornado.httpserver.HTTPServer(app)
     server.add_sockets(sockets)
 

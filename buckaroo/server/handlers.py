@@ -7,6 +7,7 @@ import time
 import traceback
 import uuid
 
+import tornado.escape
 import tornado.web
 
 from buckaroo.server.data_loading import (load_file, get_metadata, get_display_state, create_dataflow, get_buckaroo_display_state, load_file_lazy, get_metadata_lazy, get_display_state_lazy)
@@ -569,13 +570,57 @@ class LoadCompareHandler(tornado.web.RequestHandler):
             "rows": len(merged_df), "columns": [str(c) for c in merged_df.columns], "eqs": eqs})
 
 
+def _render_engine_bar(datasets: list) -> tuple:
+    """Render the engine-dropdown HTML + JS-side dataset config for the
+    demo session page.
+
+    Returns ``(bar_html, datasets_json)``. ``bar_html`` is the inline
+    ``<div id="engine-bar">…</div>`` block, or the empty string when no
+    datasets are configured (so a vanilla server doesn't ship a dead
+    UI). ``datasets_json`` is the JSON-encoded list the inline ``<script>``
+    consumes — kept on a separate substitution so it stays alongside the
+    options it drives even when ``bar_html`` is empty.
+
+    See issue #811: the previous design hard-coded
+    ``/tmp/restaurant-complaints-pandas.parquet`` etc. inline; now the
+    operator supplies them via ``--dataset NAME=KIND:PATH``."""
+    datasets_json = json.dumps(datasets or [])
+    if not datasets:
+        return "", datasets_json
+    options = ["<option value=\"\">— switch dataset —</option>"]
+    for idx, ds in enumerate(datasets):
+        label = tornado.escape.xhtml_escape(ds["label"])
+        kind = tornado.escape.xhtml_escape(ds["kind"])
+        target = tornado.escape.xhtml_escape(ds["target"])
+        options.append(
+            f"<option value=\"{idx}\" data-kind=\"{kind}\" data-target=\"{target}\">"
+            f"{label} ({kind})</option>")
+    bar = (
+        "<div id=\"engine-bar\" style=\"padding: 4px 10px; font-family: sans-serif; "
+        "font-size: 12px; color: #ccc; background: #1f1f24; "
+        "border-bottom: 1px solid #333; flex-shrink: 0;\">"
+        "Dataset: "
+        "<select id=\"engine-select\" style=\"background: #2a2a30; color: #ddd; "
+        "border: 1px solid #444; padding: 2px 6px; margin-left: 6px;\">"
+        + "".join(options) + "</select>"
+        "<span id=\"engine-status\" style=\"margin-left: 12px; color: #888;\"></span>"
+        "</div>")
+    return bar, datasets_json
+
+
 class SessionPageHandler(tornado.web.RequestHandler):
     def get(self, session_id):
         self.set_header("Content-Type", "text/html")
         self.set_header("Cache-Control", "no-cache")
         import buckaroo
         ver = getattr(buckaroo, "__version__", "0")
-        html = SESSION_HTML.replace("__SESSION_ID__", session_id).replace("__VERSION__", ver)
+        datasets = self.application.settings.get("datasets", []) or []
+        engine_bar, datasets_json = _render_engine_bar(datasets)
+        html = (SESSION_HTML
+            .replace("__SESSION_ID__", session_id)
+            .replace("__VERSION__", ver)
+            .replace("__ENGINE_BAR__", engine_bar)
+            .replace("__DATASETS_JSON__", datasets_json))
         self.write(html)
 
 
@@ -621,7 +666,102 @@ SESSION_HTML = """\
 <body>
     <div id="filename-bar"></div>
     <div id="prompt-bar"></div>
+    __ENGINE_BAR__
     <div id="root"></div>
+    <script id="buckaroo-datasets" type="application/json">__DATASETS_JSON__</script>
+    <script>
+    // Engine dropdown wiring for /s/<session>. Reads the operator-supplied
+    // dataset list from the JSON ``<script>`` above (populated by
+    // ``_render_engine_bar``) and adds any ``?pd=&pl=&xq=`` query-string
+    // overrides as extra ``(from URL)`` options so URL-driven workflows
+    // survive. The dropdown element is only emitted when at least one
+    // operator dataset is registered — see issue #811.
+    (function () {
+        const sel = document.getElementById("engine-select");
+        const statusEl = document.getElementById("engine-status");
+        const SESSION_ID = "__SESSION_ID__";
+        const DATASETS = JSON.parse(
+            document.getElementById("buckaroo-datasets").textContent || "[]");
+        const qs = new URLSearchParams(window.location.search);
+        const qsOverrides = [];
+        if (qs.get("pd")) qsOverrides.push({label: "(from URL) pandas", kind: "pandas", target: qs.get("pd")});
+        if (qs.get("pl")) qsOverrides.push({label: "(from URL) lazy", kind: "lazy", target: qs.get("pl")});
+        if (qs.get("xq")) qsOverrides.push({label: "(from URL) xorq", kind: "xorq", target: qs.get("xq")});
+        const ENTRIES = DATASETS.concat(qsOverrides);
+        if (!sel) {
+            // No dropdown rendered (no datasets configured and no QS overrides).
+            // If only QS overrides are present, we still want them reachable —
+            // but the server didn't emit the bar. Inject a minimal bar now.
+            if (qsOverrides.length > 0) {
+                const bar = document.createElement("div");
+                bar.id = "engine-bar";
+                bar.style.cssText = "padding: 4px 10px; font-family: sans-serif; font-size: 12px; color: #ccc; background: #1f1f24; border-bottom: 1px solid #333; flex-shrink: 0;";
+                bar.innerHTML = 'Dataset: <select id="engine-select" style="background: #2a2a30; color: #ddd; border: 1px solid #444; padding: 2px 6px; margin-left: 6px;"><option value="">— switch dataset —</option></select><span id="engine-status" style="margin-left: 12px; color: #888;"></span>';
+                document.body.insertBefore(bar, document.getElementById("root"));
+            } else {
+                return;
+            }
+        }
+        const selNow = document.getElementById("engine-select");
+        const statusNow = document.getElementById("engine-status");
+        // Re-render options if we inserted the bar above, or append QS extras
+        // to a server-rendered list.
+        if (sel === null) {
+            ENTRIES.forEach((ds, i) => {
+                const opt = document.createElement("option");
+                opt.value = String(i);
+                opt.dataset.kind = ds.kind;
+                opt.dataset.target = ds.target;
+                opt.textContent = `${ds.label} (${ds.kind})`;
+                selNow.appendChild(opt);
+            });
+        } else {
+            qsOverrides.forEach((ds, i) => {
+                const opt = document.createElement("option");
+                opt.value = String(DATASETS.length + i);
+                opt.dataset.kind = ds.kind;
+                opt.dataset.target = ds.target;
+                opt.textContent = `${ds.label} (${ds.kind})`;
+                selNow.appendChild(opt);
+            });
+        }
+        selNow.addEventListener("change", async (e) => {
+            const idx = e.target.value;
+            if (idx === "") return;
+            const ds = ENTRIES[parseInt(idx, 10)];
+            if (!ds) return;
+            const url = ds.kind === "xorq" ? "/load_expr" : "/load";
+            const body = {session: SESSION_ID, no_browser: true};
+            if (ds.kind === "xorq") {
+                body.build_dir = ds.target;
+            } else {
+                body.path = ds.target;
+                body.mode = ds.kind === "lazy" ? "lazy" : "buckaroo";
+            }
+            const t0 = performance.now();
+            statusNow.textContent = `loading ${ds.label}…`;
+            try {
+                const r = await fetch(url, {method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(body)});
+                const dt = Math.round(performance.now() - t0);
+                if (r.ok) {
+                    const d = await r.json();
+                    statusNow.textContent = `${ds.label} loaded (${d.rows ?? "?"} rows, ${dt} ms) — reloading…`;
+                    // The widget reads its initial state on WS open. Reload
+                    // forces a clean reconnection rather than reasoning
+                    // about deep widget-level swap.
+                    setTimeout(() => window.location.reload(), 600);
+                } else {
+                    const err = await r.text();
+                    statusNow.textContent = `${ds.label} failed (${r.status}): ${err.slice(0, 200)}`;
+                }
+            } catch (ex) {
+                statusNow.textContent = `${ds.label} error: ${ex.message}`;
+            }
+        });
+    })();
+    </script>
     <script type="module" src="/static/standalone.js?v=__VERSION__"></script>
 </body>
 </html>

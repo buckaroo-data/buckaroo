@@ -6,8 +6,6 @@ import tempfile
 import pandas as pd
 import pytest
 import tornado.httpclient
-import tornado.httpserver
-import tornado.netutil
 import tornado.testing
 import tornado.websocket
 
@@ -115,52 +113,42 @@ class TestSessionPage(tornado.testing.AsyncHTTPTestCase):
         self.assertIn(b"<div id=\"root\">", resp.body)
 
 
-class TestSessionPageDatasets(tornado.testing.AsyncHTTPTestCase):
-    """The /s/<id> demo page exposes operator-supplied datasets in an
-    engine dropdown. No filesystem paths may be baked into shipped code:
-    the list is fed in at server startup, via ``--dataset`` CLI flags
-    (parsed by ``buckaroo.server.__main__``) and threaded through
-    ``make_app`` settings. See issue #811."""
+_OPERATOR_DATASETS = [{"label": "boston-pandas", "kind": "pandas",
+    "target": "/opt/data/boston-pandas.parquet"}, {"label": "boston-lazy", "kind": "lazy",
+        "target": "/opt/data/boston-lazy.parquet"}, {"label": "boston-xorq", "kind": "xorq",
+            "target": "/opt/builds/boston-xorq"}]
 
-    DATASETS = [{"label": "boston-pandas", "kind": "pandas",
-        "target": "/opt/data/boston-pandas.parquet"}, {"label": "boston-lazy", "kind": "lazy",
-            "target": "/opt/data/boston-lazy.parquet"}, {"label": "boston-xorq", "kind": "xorq",
-                "target": "/opt/builds/boston-xorq"}]
+
+class TestSessionPageNoHardCodedPaths(tornado.testing.AsyncHTTPTestCase):
+    """Vanilla server (no --dataset flags) must not ship the author's
+    personal paths. Pre-#811 the page baked in
+    ``/tmp/restaurant-complaints-pandas.parquet`` and
+    ``/Users/paddy/buckaroo/...`` as defaults."""
 
     def get_app(self):
-        return _make_app(open_browser=False, datasets=self.DATASETS)
+        return _make_app(open_browser=False)
 
     def test_default_no_hard_coded_paths_in_html(self):
-        """Vanilla server (no --dataset flags) must not ship the author's
-        personal paths. Pre-#811 the page baked in
-        ``/tmp/restaurant-complaints-pandas.parquet`` and
-        ``/Users/paddy/buckaroo/...`` as defaults."""
-        plain_app = _make_app(open_browser=False)
-        # Mount on its own port so this case doesn't collide with the
-        # configured-datasets app under test.
-        sock = tornado.netutil.bind_sockets(0, address="127.0.0.1")
-        port = sock[0].getsockname()[1]
-        server = tornado.httpserver.HTTPServer(plain_app)
-        server.add_sockets(sock)
-        try:
-            client = tornado.httpclient.HTTPClient()
-            resp = client.fetch(f"http://127.0.0.1:{port}/s/sess-plain")
-            body = resp.body.decode("utf-8")
-            self.assertNotIn("/tmp/restaurant-complaints-pandas.parquet", body)
-            self.assertNotIn("/Users/paddy/buckaroo/restaurant-complaints.parquet", body)
-            self.assertNotIn("/tmp/buckaroo-builds-boston/", body)
-        finally:
-            server.stop()
-            for s in sock:
-                s.close()
+        resp = self.fetch("/s/sess-plain")
+        self.assertEqual(resp.code, 200)
+        body = resp.body.decode("utf-8")
+        self.assertNotIn("/tmp/restaurant-complaints-pandas.parquet", body)
+        self.assertNotIn("/Users/paddy/buckaroo/restaurant-complaints.parquet", body)
+        self.assertNotIn("/tmp/buckaroo-builds-boston/", body)
+
+
+class TestSessionPageConfiguredDatasets(tornado.testing.AsyncHTTPTestCase):
+    """Operator-supplied datasets surface in the engine dropdown. See
+    issue #811."""
+
+    def get_app(self):
+        return _make_app(open_browser=False, datasets=_OPERATOR_DATASETS)
 
     def test_configured_datasets_appear_in_html(self):
-        """Operator-supplied dataset labels and targets must be reachable
-        from the rendered page so the dropdown can wire fetches."""
         resp = self.fetch("/s/sess-dropdown")
         self.assertEqual(resp.code, 200)
         body = resp.body.decode("utf-8")
-        for ds in self.DATASETS:
+        for ds in _OPERATOR_DATASETS:
             self.assertIn(ds["label"], body,
                 f"dataset label {ds['label']!r} missing from /s/ HTML")
             self.assertIn(ds["target"], body,
