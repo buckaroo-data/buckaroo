@@ -166,3 +166,118 @@ def test_raw_df_change_invalidates_scoped_sd():
         f"mean (400.0); got {dfc.merged_sd['a']['mean']} — likely a stale "
         f"cache entry keyed only by the (unchanged) op chain"
     )
+
+
+def test_cleaned_keys_appear_when_cleaning_active():
+    """When ``cleaning_method`` produces auto-clean ops, the clean scope's
+    SD must be layered into ``merged_sd`` with a ``cleaned_*`` prefix.
+
+    Column 'a' is numeric-string. ``safe_int`` casts it to a UInt8 column,
+    so the clean scope's ``mean`` is 30.0 (computed on ints) while the
+    raw scope's ``mean`` is the string-column fallback (0).
+    """
+    df = pd.DataFrame({'a': ['10', '20', '30', '40', '50'],
+                       'b': ['foo', 'bar', 'foo', 'baz', 'foo']})
+    dfc = ScopedDataflow(df)
+    dfc.cleaning_method = 'default'
+
+    sd = dfc.merged_sd
+    assert 'cleaned_mean' in sd['a'], (
+        f"cleaning active: `cleaned_mean` should be emitted alongside raw "
+        f"`mean`; got keys {sorted(sd['a'].keys())}"
+    )
+    assert sd['a']['cleaned_mean'] == 30.0, (
+        f"`cleaned_mean` should be the int-cast mean (30.0); got "
+        f"{sd['a']['cleaned_mean']}"
+    )
+
+
+def test_cleaning_only_does_not_emit_filtered_keys():
+    """The pre-#785 ``filter_active`` gate was keyed on
+    ``filt_sd_key != raw_sd_key``, which fires whenever the clean chain is
+    non-empty — even with no search filter. The right gate is on chain
+    shape: ``filtered_*`` only when ``filt`` differs from ``clean``.
+
+    With cleaning active but no quick-command args, ``merged_sd`` must
+    have ``cleaned_*`` keys and NO ``filtered_*`` keys.
+    """
+    df = pd.DataFrame({'a': ['10', '20', '30', '40', '50'],
+                       'b': ['foo', 'bar', 'foo', 'baz', 'foo']})
+    dfc = ScopedDataflow(df)
+    dfc.cleaning_method = 'default'
+
+    sd = dfc.merged_sd
+    filtered_keys = [k for k in sd['a'] if k.startswith('filtered_')]
+    assert filtered_keys == [], (
+        f"cleaning-only state must not emit filtered_* keys; got "
+        f"{filtered_keys}"
+    )
+    cleaned_keys = [k for k in sd['a'] if k.startswith('cleaned_')]
+    assert cleaned_keys, (
+        "cleaning-only state should emit cleaned_* keys; got none"
+    )
+
+
+def test_filter_and_clean_both_emit_correctly():
+    """With both cleaning and a search filter active, ``merged_sd``
+    carries bare raw keys, ``cleaned_*`` keys reflecting the clean scope,
+    and ``filtered_*`` keys reflecting the filt scope. The three layers
+    do not cross-talk.
+
+    'a' is numeric-string; safe_int casts it. Search 'foo' on 'b' keeps
+    the foo rows (length 4 in raw / clean scopes, with the filt scope
+    nulling out non-foo rows in 'a' → 3 nulls).
+    """
+    df = pd.DataFrame({'a': ['10', '20', '30', '40', '50', '60', '70'],
+                       'b': ['foo', 'bar', 'foo', 'baz', 'foo', 'bar', 'foo']})
+    dfc = ScopedDataflow(df)
+    dfc.cleaning_method = 'default'
+    dfc.quick_command_args = {'search': ['foo']}
+
+    sd = dfc.merged_sd['a']
+    cleaned_keys = [k for k in sd if k.startswith('cleaned_')]
+    filtered_keys = [k for k in sd if k.startswith('filtered_')]
+    assert cleaned_keys, f"both-active: cleaned_* keys missing; got {sorted(sd.keys())}"
+    assert filtered_keys, f"both-active: filtered_* keys missing; got {sorted(sd.keys())}"
+
+    # Cross-talk check: the filt scope nulls out non-foo rows in 'a' (3
+    # nulls), while the clean scope leaves all 7 rows intact (0 nulls).
+    assert sd['cleaned_null_count'] == 0, (
+        f"cleaned_null_count should reflect the clean scope (0); got "
+        f"{sd['cleaned_null_count']}"
+    )
+    assert sd['filtered_null_count'] == 3, (
+        f"filtered_null_count should reflect the filt scope (3 nulls); "
+        f"got {sd['filtered_null_count']}"
+    )
+
+
+def test_analysis_klasses_change_invalidates_scoped_sd():
+    """Codex P2 from #783: ``_scope_cache_key`` was hashed from chain +
+    sampled_df + post_processing_method only. Two dataflows with the
+    same df + chain but different ``analysis_klasses`` would collide on
+    the same cache key, so a klass swap left stale SD blobs in the
+    cache. Including ``id(analysis_klasses)`` in the cache key must
+    produce distinct keys for distinct klass lists.
+
+    Asserted at the ``_scope_cache_key`` level because ``analysis_klasses``
+    is a plain class attribute (not a traitlet) on ``DataFlow`` — setting
+    it on the instance doesn't fire observers, so the merged_sd-level
+    behavior can't be exercised end-to-end without an unrelated
+    architectural change. The cache-key contract is the load-bearing
+    invariant.
+    """
+    df = pd.DataFrame({'a': [10, 20, 30, 40, 50],
+                       'b': ['foo', 'bar', 'foo', 'baz', 'foo']})
+    dfc1 = ScopedDataflow(df)
+    key1 = dfc1._scope_cache_key([])
+
+    dfc2 = ScopedDataflow(df)
+    dfc2.analysis_klasses = [StylingAnalysis, DefaultSummaryStats, CleaningGenOps]
+    key2 = dfc2._scope_cache_key([])
+
+    assert key1 != key2, (
+        f"scope cache key must differ when analysis_klasses differs; "
+        f"got the same key {key1} for both — likely the cache key still "
+        f"omits analysis_klasses identity (Codex P2)"
+    )
