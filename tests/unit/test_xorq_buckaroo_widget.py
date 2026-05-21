@@ -60,6 +60,67 @@ class TestQueryCount:
         )
 
 
+class TestExprCountMemoization:
+    """Regression for #795: ``_expr_count`` issued a fresh
+    ``expr.count().execute()`` against the backend on every call, even
+    when the same expression was passed in. On the boston restaurant
+    data (883K rows over xorq datafusion) that's ~250 ms per call;
+    populate_df_meta + the cache observer cascade + per-pagination
+    invocations fired it 5-7× per state-change for ~1.5 s of pure
+    duplicate count work. The same expression has an invariant count;
+    once is enough.
+
+    Test asserts the memoization contract at the module-cache level
+    because spying on the actual ``execute`` is ibis-version-fragile.
+    """
+
+    def test_expr_count_memoizes_repeat_calls(self):
+        from buckaroo import xorq_buckaroo
+
+        expr = xo.memtable({"a": [1, 2, 3, 4, 5]})
+
+        # Reset for test isolation in case another test already populated
+        # the module cache (cache survives across tests in a session).
+        if hasattr(xorq_buckaroo, "_expr_count_cache"):
+            xorq_buckaroo._expr_count_cache.clear()
+
+        assert xorq_buckaroo._expr_count(expr) == 5
+        assert xorq_buckaroo._expr_count(expr) == 5
+        assert xorq_buckaroo._expr_count(expr) == 5
+
+        assert hasattr(xorq_buckaroo, "_expr_count_cache"), (
+            "_expr_count must memoize by expression identity; expected "
+            "a module-level _expr_count_cache dict. See #795."
+        )
+        assert len(xorq_buckaroo._expr_count_cache) == 1, (
+            f"expected exactly 1 cached entry for 3 calls on the same "
+            f"expression; got {len(xorq_buckaroo._expr_count_cache)}. "
+            f"The cache key must be id(expr)."
+        )
+
+    def test_expr_count_separate_expressions_cache_separately(self):
+        """Distinct expression objects must not collide in the cache."""
+        from buckaroo import xorq_buckaroo
+
+        if hasattr(xorq_buckaroo, "_expr_count_cache"):
+            xorq_buckaroo._expr_count_cache.clear()
+
+        e1 = xo.memtable({"a": [1, 2, 3]})
+        e2 = xo.memtable({"a": [1, 2, 3, 4, 5, 6, 7]})
+
+        assert xorq_buckaroo._expr_count(e1) == 3
+        assert xorq_buckaroo._expr_count(e2) == 7
+        assert len(xorq_buckaroo._expr_count_cache) == 2
+
+    def test_expr_count_pandas_path_unaffected(self):
+        """The pandas branch returns len(df) directly; memoization is
+        only for ibis-expression inputs."""
+        from buckaroo import xorq_buckaroo
+
+        df = pd.DataFrame({"a": [1, 2, 3, 4]})
+        assert xorq_buckaroo._expr_count(df) == 4
+
+
 class TestInstantiation:
     def test_smoke(self):
         XorqBuckarooWidget(_expr())
