@@ -113,6 +113,121 @@ class TestSessionPage(tornado.testing.AsyncHTTPTestCase):
         self.assertIn(b"<div id=\"root\">", resp.body)
 
 
+_OPERATOR_DATASETS = [{"label": "boston-pandas", "kind": "pandas",
+    "target": "/opt/data/boston-pandas.parquet"}, {"label": "boston-lazy", "kind": "lazy",
+        "target": "/opt/data/boston-lazy.parquet"}, {"label": "boston-xorq", "kind": "xorq",
+            "target": "/opt/builds/boston-xorq"}]
+
+
+class TestSessionPageNoHardCodedPaths(tornado.testing.AsyncHTTPTestCase):
+    """Vanilla server (no --dataset flags) must not ship the author's
+    personal paths. Pre-#811 the page baked in
+    ``/tmp/restaurant-complaints-pandas.parquet`` and
+    ``/Users/paddy/buckaroo/...`` as defaults."""
+
+    def get_app(self):
+        return _make_app(open_browser=False)
+
+    def test_default_no_hard_coded_paths_in_html(self):
+        resp = self.fetch("/s/sess-plain")
+        self.assertEqual(resp.code, 200)
+        body = resp.body.decode("utf-8")
+        self.assertNotIn("/tmp/restaurant-complaints-pandas.parquet", body)
+        self.assertNotIn("/Users/paddy/buckaroo/restaurant-complaints.parquet", body)
+        self.assertNotIn("/tmp/buckaroo-builds-boston/", body)
+
+
+class TestSessionPageConfiguredDatasets(tornado.testing.AsyncHTTPTestCase):
+    """Operator-supplied datasets surface in the engine dropdown. See
+    issue #811."""
+
+    def get_app(self):
+        return _make_app(open_browser=False, datasets=_OPERATOR_DATASETS)
+
+    def test_configured_datasets_appear_in_html(self):
+        resp = self.fetch("/s/sess-dropdown")
+        self.assertEqual(resp.code, 200)
+        body = resp.body.decode("utf-8")
+        for ds in _OPERATOR_DATASETS:
+            self.assertIn(ds["label"], body,
+                f"dataset label {ds['label']!r} missing from /s/ HTML")
+            self.assertIn(ds["target"], body,
+                f"dataset target {ds['target']!r} missing from /s/ HTML")
+
+
+_SCRIPT_BREAKOUT_DATASETS = [{"label": "evil", "kind": "pandas",
+    "target": "</script><script>window.__pwned=1</script>"}]
+
+
+class TestSessionPageScriptTagSafety(tornado.testing.AsyncHTTPTestCase):
+    """Dataset targets are embedded inline in a ``<script
+    type=\"application/json\">`` block. A target containing
+    ``</script>`` must not break out — operator CLI args are
+    low-trust, but escaping is cheap and unconditional."""
+
+    def get_app(self):
+        return _make_app(open_browser=False, datasets=_SCRIPT_BREAKOUT_DATASETS)
+
+    def test_script_tag_in_target_does_not_break_out(self):
+        resp = self.fetch("/s/sess-evil")
+        self.assertEqual(resp.code, 200)
+        body = resp.body.decode("utf-8")
+        # Extract whatever the browser would see between the JSON-data
+        # script's open tag and the FIRST ``</script>`` after it (which is
+        # what the HTML parser uses as the terminator — there is no
+        # nesting in raw text script content). If the operator-supplied
+        # target was JSON-encoded but not HTML-script-escaped, the first
+        # ``</script>`` is the one *inside* the target string, and the
+        # extracted slice is truncated invalid JSON. ``json_encode``
+        # rewrites ``</`` to ``<\\/``, so the only ``</script>`` after
+        # the open tag is the legitimate terminator.
+        open_tag = '<script id="buckaroo-datasets" type="application/json">'
+        start = body.index(open_tag) + len(open_tag)
+        end = body.index("</script>", start)
+        payload = body[start:end]
+        # If json_encode is in use, the payload is the entire dataset list
+        # encoded as valid JSON — must parse cleanly and round-trip the
+        # original target.
+        parsed = json.loads(payload)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["target"],
+            "</script><script>window.__pwned=1</script>")
+
+
+class TestDatasetCLIParsing(tornado.testing.AsyncHTTPTestCase):
+    """``--dataset NAME=KIND:PATH`` (repeatable) parses into the list of
+    dicts that ``make_app(datasets=...)`` consumes. Centralising the
+    parse in ``__main__`` keeps it covered by unit tests instead of
+    relying on a live argparse invocation."""
+
+    def get_app(self):
+        # We don't need a live server for the parse test, but
+        # AsyncHTTPTestCase still wants one.
+        return _make_app(open_browser=False)
+
+    def test_parse_dataset_spec_three_kinds(self):
+        from buckaroo.server.__main__ import parse_dataset_spec
+
+        specs = ["boston-pandas=pandas:/data/boston.parquet", "boston-lazy=lazy:/data/boston.parquet",
+            "boston-xorq=xorq:/builds/boston-xorq"]
+        parsed = [parse_dataset_spec(s) for s in specs]
+        assert parsed == [{"label": "boston-pandas", "kind": "pandas", "target": "/data/boston.parquet"},
+            {"label": "boston-lazy", "kind": "lazy", "target": "/data/boston.parquet"},
+            {"label": "boston-xorq", "kind": "xorq", "target": "/builds/boston-xorq"}]
+
+    def test_parse_dataset_spec_rejects_unknown_kind(self):
+        from buckaroo.server.__main__ import parse_dataset_spec
+        with pytest.raises(ValueError):
+            parse_dataset_spec("foo=duckdb:/data/foo.parquet")
+
+    def test_parse_dataset_spec_rejects_malformed(self):
+        from buckaroo.server.__main__ import parse_dataset_spec
+        with pytest.raises(ValueError):
+            parse_dataset_spec("just-a-label-no-equals")
+        with pytest.raises(ValueError):
+            parse_dataset_spec("label=no-colon-after-kind")
+
+
 class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
     def get_app(self):
         return make_app()
