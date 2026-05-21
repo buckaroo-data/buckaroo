@@ -312,9 +312,12 @@ def stat(column_filter=None, quiet=False, default=MISSING, pushdown=()):
         requires, needs_raw = _get_requires_from_params(sig, hints)
         provides_keys = _get_provides_from_return_type(func.__name__, return_type)
 
+        # A bare string is the natural single-backend form; ``tuple(str)``
+        # would silently expand it to a tuple of characters.
+        pushdown_norm = (pushdown,) if isinstance(pushdown, str) else tuple(pushdown)
         stat_func = StatFunc(name=func.__name__, func=func, requires=requires, provides=provides_keys,
             needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default,
-            pushdown=tuple(pushdown))
+            pushdown=pushdown_norm)
 
         # Attach metadata to the function so pipeline can find it
         func._stat_func = stat_func
