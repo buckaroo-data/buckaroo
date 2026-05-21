@@ -165,7 +165,12 @@ class XorqStatPipeline:
         finally:
             self.backend = saved_backend
 
-    def process_table(self, table) -> Tuple[SDType, List[StatError]]:
+    def process_table(self, table, skip_stat_names=None) -> Tuple[SDType, List[StatError]]:
+        """Run the pipeline. ``skip_stat_names`` is an explicit per-
+        stat-name skiplist — used by the dataflow's
+        ``skip_stats_by_scope`` config (e.g. histograms on filt/clean
+        scopes for xorq)."""
+        skip_stat_names = skip_stat_names or set()
         schema = table.schema()
         columns = list(table.columns)
 
@@ -187,6 +192,8 @@ class XorqStatPipeline:
         batch_items: List[Tuple[str, StatFunc, Any]] = []
         for sf in self.ordered_stat_funcs:
             if not _is_batch_func(sf):
+                continue
+            if sf.name in skip_stat_names:
                 continue
             xorq_col_param = next(r.name for r in sf.requires if r.type is XorqColumn)
             for col in columns:
@@ -253,6 +260,10 @@ class XorqStatPipeline:
                 # (typically the batch-phase stats).
                 if sf.provides and all(sk.name in col_accum for sk in sf.provides):
                     continue
+                # Per-scope name skiplist (e.g. ``histogram`` not run
+                # on filt/clean scopes for xorq).
+                if sf.name in skip_stat_names:
+                    continue
                 _execute_stat_func(sf, col_accum, col, raw_series=None, sampled_series=None, raw_dataframe=None,
                     xorq_expr=table, xorq_execute=self._execute)
 
@@ -306,14 +317,15 @@ class XorqStatPipeline:
 
         return True, []
 
-    def process_table_v1_compat(self, table) -> Tuple[SDType, ErrDict]:
+    def process_table_v1_compat(self, table, skip_stat_names=None) -> Tuple[SDType, ErrDict]:
         """Run process_table and convert errors to v1 ErrDict shape.
 
         Used by XorqDfStatsV2 / DataFlow consumers expecting the same
         ``{(col, stat): (Exception, kls)}`` shape that AnalysisPipeline
-        produced.
+        produced. ``skip_stat_names`` threads through the per-scope
+        skiplist.
         """
-        summary, errors = self.process_table(table)
+        summary, errors = self.process_table(table, skip_stat_names=skip_stat_names)
         errs: ErrDict = {}
         for se in errors:
             kls = _find_v1_class(se.stat_func, self._original_inputs) if se.stat_func else None
@@ -346,7 +358,8 @@ class XorqDfStatsV2:
         # (issue #709). DAG validation still runs as part of __init__.
         XorqStatPipeline(objs, unit_test=False)
 
-    def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False):
+    def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False,
+            skip_stat_names=None):
         self.table = table
         # Skip the unit_test PERVERSE_DF run on each widget construction —
         # it doubles the SQL query count (issue #709). The DAG-validation
@@ -355,7 +368,11 @@ class XorqDfStatsV2:
         self.ap = XorqStatPipeline(col_analysis_objs, unit_test=False)
         self.operating_df_name = operating_df_name
         self.debug = debug
-        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
+        # skip_stat_names is the per-scope "don't run this stat" filter
+        # the dataflow passes when e.g. histograms are excluded from the
+        # filt/clean scopes. None means run everything.
+        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table,
+            skip_stat_names=skip_stat_names)
         self.stat_errors = []
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)

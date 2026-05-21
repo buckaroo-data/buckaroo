@@ -81,6 +81,16 @@ class DataFlow(ABCDataflow):
     autocleaning_klass = SentinelAutocleaning
     autoclean_conf = tuple()
 
+    # Generic per-scope stat skiplist. Maps scope name → set of stat
+    # names that should NOT run when computing that scope's SD. Used
+    # to keep expensive stats (e.g. ``histogram`` on xorq, where per-
+    # column engine queries dominate latency) out of the hot path
+    # while still rendering on the cached raw scope. Honoured by
+    # ``_summary_sd`` (filt scope) and ``_populate_sd_cache`` (raw +
+    # clean scopes). Default empty = run everything; XorqDataflow
+    # overrides this to skip histograms on filt + clean.
+    skip_stats_by_scope: TDict[str, set] = {}
+
     command_config = Dict({}).tag(sync=True)
     operation_results = Dict({'transformed_df':None,
         'generated_py_code': ""})
@@ -237,7 +247,7 @@ class DataFlow(ABCDataflow):
             return self.processed_result[1]
         return {}
 
-    def _get_summary_sd(self, df:pd.DataFrame) -> Tuple[SDType, TAny]:
+    def _get_summary_sd(self, df:pd.DataFrame, skip_stat_names=None) -> Tuple[SDType, TAny]:
         analysis_klasses = self.analysis_klasses
         if analysis_klasses == "foo":
             return {'some-col': {'foo':8}}, {}
@@ -264,7 +274,20 @@ class DataFlow(ABCDataflow):
         if (id(df), id(klasses)) == self._summary_sd_cache_key:
             return
         self._summary_sd_cache_key = (id(df), id(klasses))
-        result_summary_sd, errs  = self._get_summary_sd(df)
+        # filt scope: ``summary_sd`` is what gets stored under the filt
+        # cache key in ``_populate_sd_cache``, so apply the filt skip
+        # here when a filter is active. We can't use ``operations`` for
+        # the filter check — it hasn't been updated yet in the cascade
+        # (``_operation_result`` sets ``self.cleaned`` first, triggering
+        # this observer via ``processed_result``, *then* sets
+        # ``self.operations``). ``quick_command_args`` is the upstream
+        # trait, set before ``_operation_result`` runs.
+        filter_active = bool(self.quick_command_args)
+        filt_skip = (
+            self.skip_stats_by_scope.get('filt')
+            if (filter_active and self.skip_stats_by_scope)
+            else None)
+        result_summary_sd, errs  = self._get_summary_sd(df, skip_stat_names=filt_skip)
         self.summary_sd = result_summary_sd
         self.errs = errs
 
@@ -500,13 +523,35 @@ class CustomizableDataflow(DataFlow):
             return base
         return pp_result[0] if pp_result else base
 
-    def _scope_cache_key(self, chain):
+    def _effective_skip(self, scope, chains):
+        """The skip list to apply for ``scope`` given the current
+        ``chains`` shape. Returns ``None`` when the scope is effectively
+        identical to its parent scope (no filter active → filt is filt-
+        of-clean; no cleaning → clean is just raw). In those degenerate
+        cases applying a separate per-scope skip would create a phantom
+        distinct cache entry, triggering unnecessary recomputes (e.g.
+        lazy postprocessor re-runs from ``_compute_scope_df``)."""
+        if not self.skip_stats_by_scope:
+            return None
+        if scope == 'raw':
+            return self.skip_stats_by_scope.get('raw')
+        if scope == 'clean':
+            if chains['clean'] == chains['raw']:
+                return None
+            return self.skip_stats_by_scope.get('clean')
+        if scope == 'filt':
+            if chains['filt'] == chains['clean']:
+                return None
+            return self.skip_stats_by_scope.get('filt')
+        return None
+
+    def _scope_cache_key(self, chain, scope=None, chains=None):
         """Hash that identifies a scope's SD-input identity.
 
         Includes the op chain *and* an identifier for the source
         dataframe (``id(sampled_df)``) *and* the post-processing method
-        — all three are inputs to the scope df, and a cache hit must
-        mean "same SD-producing inputs" not just "same chain".
+        *and* the per-scope effective skip — a cache hit must mean
+        "same SD-producing inputs" not just "same chain".
 
         - sampled_df identity addresses codex P1 on #783: a ``raw_df``
           swap with an unchanged chain must invalidate.
@@ -515,13 +560,19 @@ class CustomizableDataflow(DataFlow):
           post-processing replaces the df entirely (e.g. ``hide_post``
           → ``SENTINEL_DF``), the raw scope's SD must reflect that
           new df, not the pre-post-processing one.
+        - effective skip: keeps the no-filter / no-cleaning case
+          collapsing raw + clean + filt under one key (see
+          ``_effective_skip``) while still segregating when the skip
+          actually applies.
 
         analysis_klasses is *not* included here; that's a separate
         invariant (codex P2, deferred — see follow-up issue).
         """
         sampled_id = id(self.sampled_df) if self.sampled_df is not None else 0
         pp = self.post_processing_method or ''
-        return hash_chain(chain, extra=f"{sampled_id}|{pp}")
+        scope_skip = self._effective_skip(scope, chains) if (scope and chains is not None) else None
+        skip_part = '|'.join(sorted(scope_skip)) if scope_skip else ''
+        return hash_chain(chain, extra=f"{sampled_id}|{pp}|{skip_part}")
 
     @observe('summary_sd', 'operations', 'analysis_klasses')
     @exception_protect('sd-cache-protector')
@@ -548,7 +599,7 @@ class CustomizableDataflow(DataFlow):
         if self.processed_df is None:
             return
         chains = split_chain_by_scope(self.operations)
-        keys = {scope: self._scope_cache_key(chain)
+        keys = {scope: self._scope_cache_key(chain, scope=scope, chains=chains)
                 for scope, chain in chains.items()}
         new_cache = dict(self.summary_stats_cache)
         cache_grew = False
@@ -565,7 +616,8 @@ class CustomizableDataflow(DataFlow):
             scope_df = self._compute_scope_df(scope)
             if scope_df is None:
                 continue
-            sd, _errs = self._get_summary_sd(scope_df)
+            scope_skip = self._effective_skip(scope, chains)
+            sd, _errs = self._get_summary_sd(scope_df, skip_stat_names=scope_skip)
             new_cache[keys[scope]] = sd
             cache_grew = True
 
@@ -605,11 +657,16 @@ class CustomizableDataflow(DataFlow):
     ### start summary stats block
     #TAny closer to some error type
     @override
-    def _get_summary_sd(self, processed_df:pd.DataFrame) -> Tuple[SDType, TDict[str, TAny]]:
+    def _get_summary_sd(self, processed_df:pd.DataFrame, skip_stat_names=None) -> Tuple[SDType, TDict[str, TAny]]:
+        # ``skip_stat_names`` is threaded through from the per-scope
+        # ``skip_stats_by_scope`` config — lets a dataflow declare
+        # "don't run stat X on scope Y" without touching analysis_klasses
+        # globally. DfStatsV2 / XorqDfStatsV2 forward this to the
+        # underlying pipeline.
         stats = self.DFStatsClass(
             processed_df,
             self.analysis_klasses,
-            self.df_name, debug=self.debug)
+            self.df_name, debug=self.debug, skip_stat_names=skip_stat_names)
         sdf = stats.sdf
         if stats.errs:
             if self.debug:

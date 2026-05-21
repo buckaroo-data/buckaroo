@@ -234,13 +234,19 @@ class StatPipeline:
             self._unit_test_result = self.unit_test()
 
     def process_column(self, column_name: str, column_dtype, raw_series=None, sampled_series=None, raw_dataframe=None,
-            initial_stats: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[StatError]]:
+            initial_stats: Optional[Dict[str, Any]] = None,
+            skip_stat_names=None) -> Tuple[Dict[str, Any], List[StatError]]:
         """Process a single column through the stat DAG.
 
         1. Filters stat functions by column dtype
-        2. Executes in topological order with Ok/Err accumulator
-        3. Returns (plain_dict, errors)
+        2. Filters by ``skip_stat_names`` — explicit per-stat-name
+           skiplist threaded through from the dataflow's
+           ``skip_stats_by_scope`` config (e.g. histograms off on
+           filt/clean for xorq)
+        3. Executes in topological order with Ok/Err accumulator
+        4. Returns (plain_dict, errors)
         """
+        skip_stat_names = skip_stat_names or set()
         # Build column-specific DAG (filters by dtype)
         external = set(self.EXTERNAL_KEYS)
         if initial_stats:
@@ -255,6 +261,8 @@ class StatPipeline:
                 accumulator[k] = Ok(v)
         record_timings = self.record_timings
         for sf in column_funcs:
+            if sf.name in skip_stat_names:
+                continue
             if record_timings:
                 t0 = time.perf_counter()
             _execute_stat_func(sf, accumulator, column_name, raw_series=raw_series, sampled_series=sampled_series,
@@ -268,10 +276,25 @@ class StatPipeline:
             for sk in sf.provides:
                 col_key_to_func[sk.name] = sf
 
-        return resolve_accumulator(accumulator, column_name, col_key_to_func)
+        result, errors = resolve_accumulator(accumulator, column_name, col_key_to_func)
+        # Output-level strip — covers v1 ColAnalysis wrappers where one
+        # ``StatFunc.name`` (e.g. ``DefaultSummaryStats__series``)
+        # provides many keys (``mean``, ``max``, ...). The input-level
+        # skip above can't tell which wrapper to drop; the output-level
+        # strip removes any key the caller asked to skip regardless of
+        # which producing stat func it came from.
+        if skip_stat_names:
+            for k in list(result.keys()):
+                if k in skip_stat_names:
+                    del result[k]
+        return result, errors
 
-    def process_df(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, List[StatError]]:
+    def process_df(self, df: pd.DataFrame, debug: bool = False,
+            skip_stat_names=None) -> Tuple[SDType, List[StatError]]:
         """Process all columns of a DataFrame.
+
+        ``skip_stat_names`` is the per-stat-name skiplist threaded
+        through from the dataflow's ``skip_stats_by_scope`` config.
 
         Returns:
             (summary_dict, all_errors) where summary_dict is SDType-compatible
@@ -292,14 +315,16 @@ class StatPipeline:
 
             col_result, col_errors = self.process_column(column_name=rewritten_col_name, column_dtype=col_dtype,
                 raw_series=ser, sampled_series=ser, raw_dataframe=df,
-                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name})
+                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name},
+                skip_stat_names=skip_stat_names)
 
             summary[rewritten_col_name] = col_result
             all_errors.extend(col_errors)
 
         return summary, all_errors
 
-    def process_df_v1_compat(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, ErrDict]:
+    def process_df_v1_compat(self, df: pd.DataFrame, debug: bool = False,
+            skip_stat_names=None) -> Tuple[SDType, ErrDict]:
         """Process DataFrame with v1-compatible error format.
 
         Returns (SDType, ErrDict) matching the v1 AnalysisPipeline interface.
@@ -307,7 +332,7 @@ class StatPipeline:
         that mixes ColAnalysis subclasses into the input list — DataFlow,
         autocleaning, server.data_loading, polars_buckaroo).
         """
-        summary, errors = self.process_df(df, debug=debug)
+        summary, errors = self.process_df(df, debug=debug, skip_stat_names=skip_stat_names)
 
         # Convert StatError list to v1 ErrDict format
         errs: ErrDict = {}

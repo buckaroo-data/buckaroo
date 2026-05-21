@@ -182,6 +182,44 @@ class TestExprCountMemoization:
         del first
 
 
+class TestSkipStatsByScope:
+    """XorqDataflow opts out of computing the histogram stat on the
+    filt and clean scopes — those scope SDs feed ``filtered_histogram``
+    and ``cleaned_histogram`` keys that the user has chosen to not
+    render. On xorq each histogram is N per-column engine queries, so
+    the skiplist saves a multiple of state_change latency.
+
+    The polars / pandas dataflows leave ``skip_stats_by_scope`` at its
+    default ``{}`` — those backends keep computing filt/clean histograms
+    because materialising the scope df is cheap relative to the
+    per-column query cost on xorq."""
+
+    def test_xorq_dataflow_skips_histogram_on_filt_and_clean(self):
+        from buckaroo.xorq_buckaroo import XorqDataflow
+
+        assert XorqDataflow.skip_stats_by_scope == {
+            'filt': {'histogram'}, 'clean': {'histogram'}}, (
+            "XorqDataflow.skip_stats_by_scope must skip the `histogram` "
+            "stat on the filt and clean scopes; got "
+            f"{XorqDataflow.skip_stats_by_scope!r}"
+        )
+
+    def test_polars_dataflow_keeps_histogram(self):
+        """Polars side keeps the default empty skiplist — histograms
+        compute on every scope."""
+        import polars as pl
+
+        from buckaroo.polars_buckaroo import PolarsBuckarooWidget
+
+        df = pl.DataFrame({'a': [1, 2, 3, 4, 5]})
+        w = PolarsBuckarooWidget(df)
+        assert w.dataflow.skip_stats_by_scope == {}, (
+            "Polars dataflow must keep skip_stats_by_scope at the "
+            "default empty dict; got "
+            f"{w.dataflow.skip_stats_by_scope!r}"
+        )
+
+
 class TestInstantiation:
     def test_smoke(self):
         XorqBuckarooWidget(_expr())
