@@ -45,6 +45,40 @@ class SessionState:
         """Update the last-accessed timestamp."""
         self.last_accessed = time.time()
 
+    def reset(self) -> None:
+        """Wipe all data/display attributes back to their dataclass
+        defaults, leaving ``session_id``, ``ws_clients`` and
+        ``last_accessed`` (touched) intact.
+
+        Driven by issue #812: callers (interactive demo / playground)
+        need a way to "start over" on a session id without restarting
+        the server or tearing down the WebSocket. Mirrors the dataclass
+        field defaults exactly — when a new backend field is added to
+        ``SessionState`` it must be reset here too.
+        """
+        self.path = ""
+        self.df = None
+        self.metadata = {}
+        self.df_display_args = {}
+        self.df_data_dict = {}
+        self.df_meta = {}
+        self.ldf = None
+        self.orig_to_rw = {}
+        self.rw_to_orig = {}
+        self.mode = "viewer"
+        self.backend = "pandas"
+        self.dataflow = None
+        self.xorq_dataflow = None
+        self.expr = None
+        self.buckaroo_state = {}
+        self.buckaroo_options = {}
+        self.command_config = {}
+        self.operation_results = {}
+        self.operations = []
+        self.prompt = ""
+        self.component_config = None
+        self.touch()
+
 
 PROTOCOL_VERSION = 1
 """Bumped when the WebSocket protocol changes incompatibly. Clients

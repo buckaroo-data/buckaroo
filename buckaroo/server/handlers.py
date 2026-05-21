@@ -569,6 +569,52 @@ class LoadCompareHandler(tornado.web.RequestHandler):
             "rows": len(merged_df), "columns": [str(c) for c in merged_df.columns], "eqs": eqs})
 
 
+class ResetHandler(tornado.web.RequestHandler):
+    """POST /reset — clear a session's data attributes back to the
+    empty state without restarting the server (issue #812).
+
+    Body: ``{"session": "<session_id>"}``. Returns 200 with
+    ``{"session": ..., "cleared": bool}``. ``cleared=False`` when the
+    session id was never populated (no-op), so callers can blindly
+    reset on startup without first checking existence.
+
+    The WebSocket connection is intentionally left open; the next
+    ``infinite_request`` over it will take the "No data loaded"
+    branch in the dispatcher. We do not push a state update — there
+    is no meaningful state to send, and the contract is "the session
+    becomes indistinguishable from a freshly-created empty one"."""
+
+    async def post(self):
+        try:
+            body = json.loads(self.request.body)
+        except (json.JSONDecodeError, TypeError):
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body"})
+            return
+        if not isinstance(body, dict):
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body"})
+            return
+
+        session_id = body.get("session")
+        if not session_id:
+            self.set_status(400)
+            self.write({"error": "Missing 'session'"})
+            return
+
+        sessions = self.application.settings["sessions"]
+        session = sessions.get(session_id)
+        if session is None:
+            log.info("reset session=%s cleared=False (unknown)", session_id)
+            self.write({"session": session_id, "cleared": False})
+            return
+
+        session.reset()
+        log.info("reset session=%s cleared=True ws_clients=%d",
+            session_id, len(session.ws_clients))
+        self.write({"session": session_id, "cleared": True})
+
+
 class SessionPageHandler(tornado.web.RequestHandler):
     def get(self, session_id):
         self.set_header("Content-Type", "text/html")
