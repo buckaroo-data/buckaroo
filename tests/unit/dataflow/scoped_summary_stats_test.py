@@ -142,6 +142,91 @@ def test_cleaning_only_does_not_emit_filtered_keys():
     )
 
 
+class _SkipFiltMeanDataflow(ScopedDataflow):
+    """ScopedDataflow with the filt scope configured to skip the ``mean``
+    stat. Used to pin the ``skip_stats_by_scope`` plumbing on the cheap
+    pandas DefaultSummaryStats path."""
+
+    skip_stats_by_scope = {'filt': {'mean'}}
+
+
+class _SkipRawAndCleanMeanDataflow(ScopedDataflow):
+    skip_stats_by_scope = {'raw': {'mean'}, 'clean': {'mean'}}
+
+
+def test_skip_stats_by_scope_excludes_named_stat_from_filt():
+    """When ``skip_stats_by_scope = {'filt': {'mean'}}`` and a filter is
+    active, the dataflow must NOT compute ``mean`` on the filt scope —
+    so ``filtered_mean`` is absent from merged_sd. Other filtered_*
+    stats (e.g. ``filtered_length``) are unaffected. The bare raw
+    ``mean`` (from the raw scope) is still present.
+
+    Equivalent contract used by XorqDataflow to skip the expensive
+    per-column histogram queries on filt/clean scopes while still
+    rendering bare histograms from raw."""
+    df = pd.DataFrame({'a': [10, 20, 30, 40, 50],
+                       'b': ['foo', 'bar', 'foo', 'baz', 'foo']})
+    dfc = _SkipFiltMeanDataflow(df)
+    dfc.quick_command_args = {'search': ['foo']}
+
+    sd = dfc.merged_sd
+    assert 'mean' in sd['a'], (
+        "bare raw `mean` must still be present — skip list only applies "
+        "to filt scope, not raw"
+    )
+    assert 'filtered_length' in sd['a'], (
+        "precondition: filtered_* layering must be active "
+        "(non-skipped stats should still produce filtered_* keys)"
+    )
+    assert 'filtered_mean' not in sd['a'], (
+        f"filtered_mean must be absent when skip_stats_by_scope says "
+        f"to skip `mean` on filt scope; got {sd['a'].get('filtered_mean')!r}. "
+        f"merged_sd['a'] keys: {sorted(sd['a'].keys())}"
+    )
+
+
+def test_skip_stats_by_scope_excludes_from_raw_and_clean():
+    """``skip_stats_by_scope`` with raw/clean entries must keep those
+    stats out of the cached raw and clean scope SDs — so the bare
+    ``mean`` key (which comes from the raw scope) is absent. The filt
+    scope still computes ``mean``, so ``filtered_mean`` shows up when
+    a filter is active."""
+    df = pd.DataFrame({'a': [10, 20, 30, 40, 50],
+                       'b': ['foo', 'bar', 'foo', 'baz', 'foo']})
+    dfc = _SkipRawAndCleanMeanDataflow(df)
+    dfc.quick_command_args = {'search': ['foo']}
+
+    sd = dfc.merged_sd
+    assert 'mean' not in sd['a'], (
+        f"bare `mean` must be absent when skip_stats_by_scope skips it "
+        f"on raw/clean scopes; got {sd['a'].get('mean')!r}. "
+        f"merged_sd['a'] keys: {sorted(sd['a'].keys())}"
+    )
+    assert 'filtered_mean' in sd['a'], (
+        "filt scope is not in the skip dict, so filtered_mean should "
+        "still appear when filter is active"
+    )
+
+
+def test_skip_stats_by_scope_default_empty_runs_all_stats():
+    """Without any ``skip_stats_by_scope`` override (default {}), behaviour
+    must be unchanged: every scope computes every stat, all filtered_*
+    keys appear when filter is active."""
+    df = pd.DataFrame({'a': [10, 20, 30, 40, 50],
+                       'b': ['foo', 'bar', 'foo', 'baz', 'foo']})
+    dfc = ScopedDataflow(df)
+    assert dfc.skip_stats_by_scope == {}, (
+        "default skip_stats_by_scope on the base CustomizableDataflow "
+        "should be empty so existing dataflows keep their behaviour"
+    )
+    dfc.quick_command_args = {'search': ['foo']}
+    sd = dfc.merged_sd
+    assert 'mean' in sd['a']
+    assert 'filtered_mean' in sd['a']
+    assert 'length' in sd['a']
+    assert 'filtered_length' in sd['a']
+
+
 def test_raw_df_change_invalidates_scoped_sd():
     """Codex P1 from #783: the cache key was derived only from the op chain,
     so a ``raw_df`` swap with the same (empty) chain reused stale entries.
