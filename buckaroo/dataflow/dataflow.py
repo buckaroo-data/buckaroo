@@ -405,21 +405,23 @@ class CustomizableDataflow(DataFlow):
     df_data_dict = Any({'empty':[]}).tag(sync=True)
 
 
-    @observe('summary_sd', 'processed_result', 'filt_sd_key')
+    @observe('summary_sd', 'processed_result', 'clean_sd_key', 'filt_sd_key')
     @exception_protect('merged_sd-protector')
     def _merged_sd(self, change):
         # Bare keys come from the raw scope's SD (computed on
-        # sampled_df). ``filtered_*`` keys are layered on top from the
-        # filt scope's SD when the filter is active. Scope SDs are read
-        # from the keyed cache (#783) — the cache observer
-        # ``_populate_sd_cache`` is what computes and stores them; this
-        # observer just assembles the wire shape #777's `?key` JS
-        # consumes.
+        # sampled_df). ``cleaned_*`` keys are layered on top from the
+        # clean scope's SD when cleaning is active; ``filtered_*`` keys
+        # are layered on top from the filt scope's SD when a search
+        # filter is active. Scope SDs are read from the keyed cache
+        # (#783) — the cache observer ``_populate_sd_cache`` is what
+        # computes and stores them; this observer just assembles the
+        # wire shape #777's `?key` JS consumes.
         #
-        # filt_sd_key is in the observed set so this fires after
-        # ``_populate_sd_cache`` has updated the pointer (which it
-        # always does, even on a pure cache hit) — guarantees the
-        # cache lookups below see the right keys for the current state.
+        # clean_sd_key and filt_sd_key are in the observed set so this
+        # fires after ``_populate_sd_cache`` has updated the pointers
+        # (which it always does, even on a pure cache hit) — guarantees
+        # the cache lookups below see the right keys for the current
+        # state.
 
         # Resolve scope SDs. Falls back to summary_sd / cleaned_sd
         # for pre-cache-population states (initial startup, the brief
@@ -428,17 +430,23 @@ class CustomizableDataflow(DataFlow):
         raw_sd = cache.get(self.raw_sd_key) if self.raw_sd_key else None
         if raw_sd is None:
             raw_sd = self.summary_sd or {}
+        clean_sd = cache.get(self.clean_sd_key) if self.clean_sd_key else None
+        if clean_sd is None:
+            clean_sd = self.cleaned_sd or {}
         filt_sd = cache.get(self.filt_sd_key) if self.filt_sd_key else None
         if filt_sd is None:
             filt_sd = self.summary_sd or {}
 
-        # ``filtered_*`` keys reflect "search filter applied on top of
-        # cleaning", so the gate is "filt chain has ops the clean chain
-        # doesn't" — i.e. at least one quick-command op is present. Keying
-        # off ``filt_sd_key != raw_sd_key`` would also fire for
-        # cleaning-only states, mislabelling cleaned stats as filtered
-        # until the deferred ``cleaned_*`` scope lands.
+        # Gate each prefixed layer on a chain-shape diff between scopes.
+        # ``cleaned_*`` fires when the clean chain has ops the raw chain
+        # doesn't (cleaning is on); ``filtered_*`` fires when the filt
+        # chain has ops the clean chain doesn't (at least one
+        # quick-command op is present, i.e. a search filter is on).
+        # Keying off ``filt_sd_key != raw_sd_key`` would also fire
+        # ``filtered_*`` for cleaning-only states, mislabelling cleaned
+        # stats as filtered.
         chains = split_chain_by_scope(self.operations)
+        cleaning_active = chains['clean'] != chains['raw']
         filter_active = chains['filt'] != chains['clean']
 
         if self.processed_df is None:
@@ -450,6 +458,13 @@ class CustomizableDataflow(DataFlow):
         rewritten_init_sd = merge_sd_overrides({}, self.processed_df, self.init_sd)
         intermediate_sd = merge_sds(rewritten_init_sd, self.cleaned_sd, raw_sd)
         base = merge_sd_overrides(intermediate_sd, self.processed_df, self.processed_sd)
+
+        # Layer ``cleaned_*`` keys on top when cleaning is active.
+        if cleaning_active and clean_sd:
+            for col, stats in clean_sd.items():
+                col_dict = base.setdefault(col, {})
+                for stat_name, val in stats.items():
+                    col_dict[f'cleaned_{stat_name}'] = val
 
         # Layer ``filtered_*`` keys on top when a filter is active.
         if filter_active and filt_sd:
@@ -505,8 +520,9 @@ class CustomizableDataflow(DataFlow):
 
         Includes the op chain *and* an identifier for the source
         dataframe (``id(sampled_df)``) *and* the post-processing method
-        — all three are inputs to the scope df, and a cache hit must
-        mean "same SD-producing inputs" not just "same chain".
+        *and* the analysis-klasses identity — all four are inputs to
+        the scope's SD, and a cache hit must mean "same SD-producing
+        inputs" not just "same chain".
 
         - sampled_df identity addresses codex P1 on #783: a ``raw_df``
           swap with an unchanged chain must invalidate.
@@ -515,13 +531,14 @@ class CustomizableDataflow(DataFlow):
           post-processing replaces the df entirely (e.g. ``hide_post``
           → ``SENTINEL_DF``), the raw scope's SD must reflect that
           new df, not the pre-post-processing one.
-
-        analysis_klasses is *not* included here; that's a separate
-        invariant (codex P2, deferred — see follow-up issue).
+        - analysis_klasses identity addresses codex P2 on #783: a
+          klass-list swap with an unchanged chain must invalidate so
+          new stat klasses surface in ``merged_sd``.
         """
         sampled_id = id(self.sampled_df) if self.sampled_df is not None else 0
         pp = self.post_processing_method or ''
-        return hash_chain(chain, extra=f"{sampled_id}|{pp}")
+        klasses_id = id(self.analysis_klasses)
+        return hash_chain(chain, extra=f"{sampled_id}|{pp}|{klasses_id}")
 
     @observe('summary_sd', 'operations', 'analysis_klasses')
     @exception_protect('sd-cache-protector')
