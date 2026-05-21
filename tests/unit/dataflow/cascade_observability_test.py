@@ -122,15 +122,30 @@ def test_cache_timing_channel_silent_at_info_level(dirty_df, caplog):
 
 def test_every_cascade_observer_logs_during_state_change(dirty_df, caplog):
     """Each cascade observer must emit at least one cache_timing line
-    during a state_change cycle."""
+    during a state_change cycle.
+
+    Construction is performed outside ``caplog.at_level`` so its
+    initialization-time emissions don't satisfy the assertion. The
+    coverage claim is about the state_change cascade specifically — a
+    regression that silences (e.g.) ``_summary_sd`` during a filter flip
+    would otherwise hide behind its construction-time emission.
+    """
+    # Build outside caplog so only state_change emissions count.
+    bw = _CascadeWidget(dirty_df, debug=False)
+
     with caplog.at_level(logging.DEBUG, logger=CACHE_TIMING_CHANNEL):
-        bw = _CascadeWidget(dirty_df, debug=False)
         # A filter flip exercises the full cascade.
         bw.buckaroo_state = {**bw.buckaroo_state, 'quick_command_args': {'search': ['needle']}}
 
     parsed = _parse_lines(caplog.records)
     observers_seen = {p['observer'] for p in parsed}
-    missing = CASCADE_OBSERVERS - observers_seen
+    # ``_sampled_df`` only fires when ``raw_df`` or ``sample_method``
+    # changes — a ``quick_command_args`` flip leaves both alone, so it
+    # legitimately does not log during a state_change cascade. Drop it
+    # from the expected set so the assertion reflects what the
+    # state_change path is *supposed* to emit.
+    expected = CASCADE_OBSERVERS - {'_sampled_df'}
+    missing = expected - observers_seen
     assert not missing, (
         f"cascade observers missing cache_timing coverage: {sorted(missing)}; "
         f"saw {sorted(observers_seen)}"
