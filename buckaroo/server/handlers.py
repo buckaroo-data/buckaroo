@@ -583,8 +583,13 @@ def _render_engine_bar(datasets: list) -> tuple:
 
     See issue #811: the previous design hard-coded
     ``/tmp/restaurant-complaints-pandas.parquet`` etc. inline; now the
-    operator supplies them via ``--dataset NAME=KIND:PATH``."""
-    datasets_json = json.dumps(datasets or [])
+    operator supplies them via ``--dataset NAME=KIND:PATH``.
+
+    Uses ``tornado.escape.json_encode`` (not ``json.dumps``) because the
+    output is embedded inline in a ``<script>`` block: a target string
+    containing ``</script>`` would otherwise break out of the tag.
+    ``json_encode`` replaces ``</`` with ``<\\/``."""
+    datasets_json = tornado.escape.json_encode(datasets or [])
     if not datasets:
         return "", datasets_json
     options = ["<option value=\"\">— switch dataset —</option>"]
@@ -677,8 +682,6 @@ SESSION_HTML = """\
     // survive. The dropdown element is only emitted when at least one
     // operator dataset is registered — see issue #811.
     (function () {
-        const sel = document.getElementById("engine-select");
-        const statusEl = document.getElementById("engine-status");
         const SESSION_ID = "__SESSION_ID__";
         const DATASETS = JSON.parse(
             document.getElementById("buckaroo-datasets").textContent || "[]");
@@ -688,44 +691,37 @@ SESSION_HTML = """\
         if (qs.get("pl")) qsOverrides.push({label: "(from URL) lazy", kind: "lazy", target: qs.get("pl")});
         if (qs.get("xq")) qsOverrides.push({label: "(from URL) xorq", kind: "xorq", target: qs.get("xq")});
         const ENTRIES = DATASETS.concat(qsOverrides);
+        if (ENTRIES.length === 0) return;
+
+        // Find or inject the bar. The server emits it whenever it has
+        // operator-supplied datasets; we inject it when only QS overrides
+        // exist. Either way the rest of this function works against the
+        // same select element.
+        let sel = document.getElementById("engine-select");
         if (!sel) {
-            // No dropdown rendered (no datasets configured and no QS overrides).
-            // If only QS overrides are present, we still want them reachable —
-            // but the server didn't emit the bar. Inject a minimal bar now.
-            if (qsOverrides.length > 0) {
-                const bar = document.createElement("div");
-                bar.id = "engine-bar";
-                bar.style.cssText = "padding: 4px 10px; font-family: sans-serif; font-size: 12px; color: #ccc; background: #1f1f24; border-bottom: 1px solid #333; flex-shrink: 0;";
-                bar.innerHTML = 'Dataset: <select id="engine-select" style="background: #2a2a30; color: #ddd; border: 1px solid #444; padding: 2px 6px; margin-left: 6px;"><option value="">— switch dataset —</option></select><span id="engine-status" style="margin-left: 12px; color: #888;"></span>';
-                document.body.insertBefore(bar, document.getElementById("root"));
-            } else {
-                return;
-            }
+            const bar = document.createElement("div");
+            bar.id = "engine-bar";
+            bar.style.cssText = "padding: 4px 10px; font-family: sans-serif; font-size: 12px; color: #ccc; background: #1f1f24; border-bottom: 1px solid #333; flex-shrink: 0;";
+            bar.innerHTML = 'Dataset: <select id="engine-select" style="background: #2a2a30; color: #ddd; border: 1px solid #444; padding: 2px 6px; margin-left: 6px;"></select><span id="engine-status" style="margin-left: 12px; color: #888;"></span>';
+            document.body.insertBefore(bar, document.getElementById("root"));
+            sel = document.getElementById("engine-select");
         }
-        const selNow = document.getElementById("engine-select");
-        const statusNow = document.getElementById("engine-status");
-        // Re-render options if we inserted the bar above, or append QS extras
-        // to a server-rendered list.
-        if (sel === null) {
-            ENTRIES.forEach((ds, i) => {
-                const opt = document.createElement("option");
-                opt.value = String(i);
-                opt.dataset.kind = ds.kind;
-                opt.dataset.target = ds.target;
-                opt.textContent = `${ds.label} (${ds.kind})`;
-                selNow.appendChild(opt);
-            });
-        } else {
-            qsOverrides.forEach((ds, i) => {
-                const opt = document.createElement("option");
-                opt.value = String(DATASETS.length + i);
-                opt.dataset.kind = ds.kind;
-                opt.dataset.target = ds.target;
-                opt.textContent = `${ds.label} (${ds.kind})`;
-                selNow.appendChild(opt);
-            });
-        }
-        selNow.addEventListener("change", async (e) => {
+        const statusEl = document.getElementById("engine-status");
+
+        // Rebuild options from ENTRIES so the DOM and our index space stay
+        // in lockstep — regardless of whether the server pre-rendered the
+        // operator datasets or we just injected an empty select.
+        sel.innerHTML = '<option value="">— switch dataset —</option>';
+        ENTRIES.forEach((ds, i) => {
+            const opt = document.createElement("option");
+            opt.value = String(i);
+            opt.dataset.kind = ds.kind;
+            opt.dataset.target = ds.target;
+            opt.textContent = `${ds.label} (${ds.kind})`;
+            sel.appendChild(opt);
+        });
+
+        sel.addEventListener("change", async (e) => {
             const idx = e.target.value;
             if (idx === "") return;
             const ds = ENTRIES[parseInt(idx, 10)];
@@ -739,7 +735,7 @@ SESSION_HTML = """\
                 body.mode = ds.kind === "lazy" ? "lazy" : "buckaroo";
             }
             const t0 = performance.now();
-            statusNow.textContent = `loading ${ds.label}…`;
+            statusEl.textContent = `loading ${ds.label}…`;
             try {
                 const r = await fetch(url, {method: "POST",
                     headers: {"Content-Type": "application/json"},
@@ -747,17 +743,17 @@ SESSION_HTML = """\
                 const dt = Math.round(performance.now() - t0);
                 if (r.ok) {
                     const d = await r.json();
-                    statusNow.textContent = `${ds.label} loaded (${d.rows ?? "?"} rows, ${dt} ms) — reloading…`;
+                    statusEl.textContent = `${ds.label} loaded (${d.rows ?? "?"} rows, ${dt} ms) — reloading…`;
                     // The widget reads its initial state on WS open. Reload
                     // forces a clean reconnection rather than reasoning
                     // about deep widget-level swap.
                     setTimeout(() => window.location.reload(), 600);
                 } else {
                     const err = await r.text();
-                    statusNow.textContent = `${ds.label} failed (${r.status}): ${err.slice(0, 200)}`;
+                    statusEl.textContent = `${ds.label} failed (${r.status}): ${err.slice(0, 200)}`;
                 }
             } catch (ex) {
-                statusNow.textContent = `${ds.label} error: ${ex.message}`;
+                statusEl.textContent = `${ds.label} error: ${ex.message}`;
             }
         });
     })();
