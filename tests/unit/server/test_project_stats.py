@@ -100,6 +100,46 @@ def test_loaded_stat_executes_against_an_ibis_column(tmp_path: Path):
     assert int(expr.execute()) == 3
 
 
+def test_loaded_stat_can_use_module_level_constant(tmp_path: Path):
+    """A module-level constant defined in the stat file must be visible
+    to ``compute()`` when it runs. Codex P1: exec'ing with separate
+    globals / locals dicts puts top-level assignments into locals, but
+    the function captures globals as its ``__globals__`` — so the
+    constant is invisible at call time and the function NameErrors on
+    every column."""
+    stats = tmp_path / "stats"
+    stats.mkdir()
+    (stats / "above_threshold.py").write_text(
+        "THRESHOLD = 2\n"
+        "def compute(col): return (col > THRESHOLD).sum()\n")
+
+    klasses = load_project_stat_klasses(tmp_path)
+    assert len(klasses) == 1
+
+    table = xo.memtable({"a": [1, 2, 3]}, name="t")
+    expr = klasses[0](table["a"])
+    assert int(expr.execute()) == 1
+
+
+def test_loaded_stat_can_use_module_level_helper(tmp_path: Path):
+    """Same Codex P1 in helper-function form: a top-level ``def`` in
+    the stat file must be callable from ``compute()``."""
+    stats = tmp_path / "stats"
+    stats.mkdir()
+    (stats / "double_count.py").write_text(
+        "def _double(x):\n"
+        "    return x * 2\n"
+        "def compute(col):\n"
+        "    return _double(col.count())\n")
+
+    klasses = load_project_stat_klasses(tmp_path)
+    assert len(klasses) == 1
+
+    table = xo.memtable({"a": [1, 2, 3]}, name="t")
+    expr = klasses[0](table["a"])
+    assert int(expr.execute()) == 6
+
+
 def test_dataflow_extra_klasses_extends_analysis_klasses(tmp_path: Path):
     """XorqServerDataflow's per-instance extra_klasses appends to
     _XORQ_ANALYSIS_KLASSES without mutating the class-level list.
