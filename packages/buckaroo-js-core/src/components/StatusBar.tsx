@@ -310,7 +310,8 @@ export function StatusBar({
     setBuckarooState,
     buckarooOptions,
     heightOverride,
-    themeConfig
+    themeConfig,
+    inFlight,
 }: {
     dfMeta: DFMeta;
     buckarooState: BuckarooState;
@@ -318,7 +319,15 @@ export function StatusBar({
     buckarooOptions: BuckarooOptions;
     heightOverride?: number;
     themeConfig?: ThemeConfig;
+    // True while a buckaroo_state_change is in flight to the backend
+    // (search / cleaning_method / post_processing). Issue #813: an empty
+    // grid is otherwise ambiguous between "zero rows" and "still computing".
+    // No-op until the fix commit hooks up the visual indicator.
+    inFlight?: boolean;
 }) {
+    // Reference inFlight so TS doesn't complain about an unused prop in the
+    // failing-test commit. Rendering arrives in the fix.
+    void inFlight;
     if (false) {
 	console.log("heightOverride", heightOverride);
     }
