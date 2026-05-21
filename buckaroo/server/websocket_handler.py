@@ -61,11 +61,27 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             self.write_message(json.dumps({"type": "error", "error_code": "invalid_json", "message": "Invalid JSON"}))
             return
 
+        # Reject non-object JSON (null, arrays, scalars) explicitly.
+        # Without this guard, ``msg.get(...)`` below raises ``AttributeError``
+        # on ``None`` etc., Tornado swallows it, and the WS closes
+        # permanently. See #805.
+        if not isinstance(msg, dict):
+            self.write_message(json.dumps({"type": "error",
+                "error_code": "invalid_message_shape",
+                "message": f"WS messages must be JSON objects; got {type(msg).__name__}"}))
+            return
+
         msg_type = msg.get("type")
         if msg_type == "infinite_request":
             self._handle_infinite_request(msg.get("payload_args", {}))
         elif msg_type == "buckaroo_state_change":
             self._handle_buckaroo_state_change(msg.get("new_state") or {})
+        else:
+            # Pre-#805 unknown / missing ``type`` was silently dropped —
+            # clients had no way to debug. Tell them what they sent.
+            self.write_message(json.dumps({"type": "error",
+                "error_code": "unknown_message_type",
+                "message": f"Unknown WS message type: {msg_type!r}"}))
 
     def _handle_buckaroo_state_change(self, new_state):
         sessions = self.application.settings["sessions"]
