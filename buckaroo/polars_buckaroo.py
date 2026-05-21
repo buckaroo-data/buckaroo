@@ -15,12 +15,27 @@ from .customizations.pl_autocleaning_conf import NoCleaningConfPl
 from .dataflow.dataflow import Sampling
 from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.widget_extension_utils import configure_buckaroo
+from .styling_helpers import obj_, pinned_histogram, pinned_filtered_histogram
 
 class PLSampling(Sampling):
     pre_limit = False
     serialize_limit = 1_000_000
 
-local_analysis_klasses = list(PL_ANALYSIS_V2) + [DefaultSummaryStatsStyling, DefaultMainStyling]
+
+class PolarsMainStyling(DefaultMainStyling):
+    """Polars default styling — adds an optional ``?filtered_histogram``
+    pinned row alongside the bare raw ``histogram``. The ``?`` prefix
+    means JS only renders the row when at least one column has the
+    ``filtered_histogram`` key in ``merged_sd``, i.e. when a search
+    filter is active. Polars materialises the filt scope cheaply, so
+    showing both raw and filtered histograms side-by-side is the
+    default; xorq skips computing filtered_histogram (#829) and pandas
+    keeps the original ``[dtype, histogram]`` layout."""
+
+    pinned_rows = [obj_('dtype'), pinned_histogram(), pinned_filtered_histogram()]
+
+
+local_analysis_klasses = list(PL_ANALYSIS_V2) + [DefaultSummaryStatsStyling, PolarsMainStyling]
 
 
 class PolarsAutocleaning(PandasAutocleaning):
