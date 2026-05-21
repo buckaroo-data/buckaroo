@@ -163,10 +163,14 @@ def _compile_project_stat(name: str, path: Path, stat_decorator, XorqColumn):
     except ImportError:
         pass
 
-    ns: dict = {}
-    exec(compile(source, str(path), "exec"), globs, ns)
+    # Single shared namespace for globals + locals so top-level
+    # constants and helper functions in the stat file are visible to
+    # ``compute`` when it runs. With separate dicts, ``compute`` captures
+    # ``globs`` as its ``__globals__`` while module-level names land in
+    # ``locals`` — every call would NameError.
+    exec(compile(source, str(path), "exec"), globs)
 
-    compute = ns.get("compute")
+    compute = globs.get("compute")
     if not callable(compute):
         raise ValueError("no callable 'compute' defined")
 
