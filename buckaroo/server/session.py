@@ -26,10 +26,12 @@ class SessionState:
     ldf: Optional[Any] = None  # polars LazyFrame (mode="lazy")
     orig_to_rw: dict = field(default_factory=dict)
     rw_to_orig: dict = field(default_factory=dict)
+    # Eager polars mode (mode="polars") — full dataflow over a pl.DataFrame
+    pl_df: Optional[Any] = None
     # Buckaroo mode fields
-    mode: str = "viewer"  # "viewer", "buckaroo", or "lazy"
-    backend: str = "pandas"  # "pandas" | "xorq"; meaningful when mode="buckaroo"
-    dataflow: Any = None  # ServerDataflow when backend="pandas"
+    mode: str = "viewer"  # "viewer", "buckaroo", "lazy", or "polars"
+    backend: str = "pandas"  # "pandas" | "polars" | "xorq"
+    dataflow: Any = None  # ServerDataflow or PolarsServerDataflow
     xorq_dataflow: Any = None  # XorqServerDataflow when backend="xorq"
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     buckaroo_state: dict = field(default_factory=dict)

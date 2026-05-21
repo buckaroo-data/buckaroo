@@ -55,6 +55,110 @@ def create_dataflow(df: pd.DataFrame) -> ServerDataflow:
     return ServerDataflow(df, skip_main_serial=True)
 
 
+class PolarsServerSampling(Sampling):
+    """Sampling for headless polars server mode — no pre-sampling."""
+    serialize_limit = -1  # infinite mode; pagination drives data loading
+    pre_limit = False
+
+    @classmethod
+    def pre_stats_sample(kls, df):
+        # Cap column count to the framework default, but keep all rows.
+        if len(df.columns) > kls.max_columns:
+            df = df[df.columns[: kls.max_columns]]
+        return df
+
+
+def _build_polars_server_dataflow_klass():
+    """Lazy-construct ``PolarsServerDataflow`` so the polars-only
+    customisation imports happen behind ``import polars`` — kept out of
+    module top-level so a server without polars installed still imports
+    ``data_loading`` cleanly."""
+    from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+    from buckaroo.customizations.pl_stats_v2 import PL_ANALYSIS_V2
+    from buckaroo.customizations.pl_autocleaning_conf import NoCleaningConfPl
+
+    class PolarsServerDataflow(CustomizableDataflow):
+        """Headless polars dataflow — analogous to ``ServerDataflow`` but
+        stats run via the polars-native pipeline. Filters etc. apply
+        through the same state_change observer cascade the pandas
+        path uses; the underlying frame is a ``pl.DataFrame``."""
+        sampling_klass = PolarsServerSampling
+        autocleaning_klass = PandasAutocleaning
+        autoclean_conf = tuple([NoCleaningConfPl])
+        DFStatsClass = PlDfStatsV2
+        analysis_klasses = list(PL_ANALYSIS_V2) + [
+            DefaultSummaryStatsStyling, DefaultMainStyling]
+
+        def _df_to_obj(self, df):
+            # No sampling; df_data_dict feeds infinite-request pagination only.
+            # pd_to_obj wants a pandas frame for the rendered preview.
+            if isinstance(df, pd.DataFrame):
+                return pd_to_obj(df)
+            return pd_to_obj(df.to_pandas())
+
+    return PolarsServerDataflow
+
+
+def create_polars_dataflow(pl_df: "pl.DataFrame"):
+    """Instantiate the polars-native server dataflow."""
+    PolarsServerDataflow = _build_polars_server_dataflow_klass()
+    return PolarsServerDataflow(pl_df, skip_main_serial=True)
+
+
+def load_file_polars(path: str) -> "pl.DataFrame":
+    """Eagerly read a file as a polars DataFrame. Mirrors ``load_file``
+    but stays in polars (no pandas hop) for the polars dataflow mode."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".parquet", ".parq"):
+        return pl.read_parquet(path)
+    elif ext == ".csv":
+        return pl.read_csv(path)
+    elif ext == ".tsv":
+        return pl.read_csv(path, separator="\t")
+    elif ext == ".json":
+        return pl.read_ndjson(path)
+    else:
+        raise ValueError(f"Unsupported file format for polars mode: {ext}")
+
+
+def handle_infinite_request_polars(dataflow, payload_args: dict) -> tuple[dict, bytes]:
+    """Polars-mode pagination: slice ``processed_df`` (a ``pl.DataFrame``)
+    via polars-native ``df.slice``, serialise to parquet."""
+    from buckaroo.server.window import clamp_window
+    _unused, processed_df, merged_sd = dataflow.widget_args_tuple
+    if processed_df is None:
+        return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0}, b"")
+    # processed_df may be pandas (error frame) or polars
+    if isinstance(processed_df, pd.DataFrame):
+        return handle_infinite_request_buckaroo(dataflow, payload_args)
+    total = len(processed_df)
+    start, end = clamp_window(
+        payload_args.get("start"), payload_args.get("end"), total)
+    try:
+        sort = payload_args.get("sort")
+        if sort:
+            ascending = payload_args.get("sort_direction") == "asc"
+            orig_sort = merged_sd[sort]["orig_col_name"]
+            slice_df = processed_df.sort(orig_sort, descending=not ascending).slice(
+                start, end - start)
+        else:
+            slice_df = processed_df.slice(start, end - start)
+        # Rename to rewritten names for the wire, add absolute index col.
+        rename_clauses = []
+        for orig, rew in old_col_new_col(slice_df):
+            if orig in slice_df.columns:
+                rename_clauses.append(pl.col(orig).alias(rew))
+        slice_df = slice_df.with_row_index("index", offset=start).select(
+            [pl.col("index")] + rename_clauses)
+        out = BytesIO()
+        slice_df.write_parquet(out, compression="uncompressed")
+        return ({"type": "infinite_resp", "key": payload_args, "data": [],
+            "length": total}, out.getvalue())
+    except Exception:
+        return ({"type": "infinite_resp", "key": payload_args, "data": [],
+            "length": 0, "error_info": traceback.format_exc()}, b"")
+
+
 def get_buckaroo_display_state(dataflow: ServerDataflow) -> dict:
     """Extract all state needed by the JS BuckarooInfiniteWidget."""
     return {

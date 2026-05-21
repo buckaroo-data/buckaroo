@@ -88,7 +88,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         session = sessions.get(self.session_id)
         if not session:
             return
-        if session.mode != "buckaroo":
+        if session.mode not in ("buckaroo", "polars"):
             # Lazy mode (and any future read-only mode) doesn't currently
             # plumb state_change → filter into its dataflow. Return a
             # structured error rather than the pre-#793 silent drop so the
@@ -221,7 +221,8 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
 
-        if not session or (session.df is None and session.ldf is None and session.xorq_dataflow is None):
+        if not session or (session.df is None and session.ldf is None
+                and session.xorq_dataflow is None and session.pl_df is None):
             self.write_message(json.dumps({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0,
                 "error_info": "No data loaded for this session"}))
             return
@@ -232,6 +233,9 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                     session.rw_to_orig, session.metadata.get("rows", 0), pa)
             if session.mode == "buckaroo" and session.backend == "xorq" and session.xorq_dataflow:
                 return _handle_infinite_request_xorq(session.xorq_dataflow, pa)
+            if session.mode == "polars" and session.dataflow is not None:
+                from buckaroo.server.data_loading import handle_infinite_request_polars
+                return handle_infinite_request_polars(session.dataflow, pa)
             if session.mode == "buckaroo" and session.dataflow:
                 return handle_infinite_request_buckaroo(session.dataflow, pa)
             return handle_infinite_request(session.df, pa)

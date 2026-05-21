@@ -246,32 +246,63 @@ class LoadHandler(tornado.web.RequestHandler):
             session.component_config = component_config
 
         # Load data in appropriate mode
-        file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
-        if file_obj is None:
-            return
-
-        if mode == "lazy":
-            self._load_lazy_polars(session, path, file_obj, metadata)
+        if mode == "polars":
+            try:
+                from buckaroo.server.data_loading import load_file_polars, create_polars_dataflow
+                pl_df = load_file_polars(path)
+            except Exception:
+                tb = traceback.format_exc()
+                log.error("polars load error path=%s: %s", path, tb)
+                self.set_status(500)
+                self.write({"error_code": "load_error",
+                    "message": "Failed to load file as polars"})
+                return
+            session.df = None
+            session.ldf = None
+            session.pl_df = pl_df
+            session.metadata = {"path": path, "rows": len(pl_df),
+                "columns": [{"name": str(c), "dtype": str(pl_df[c].dtype)}
+                    for c in pl_df.columns]}
+            dataflow = create_polars_dataflow(pl_df)
+            session.dataflow = dataflow
+            session.backend = "polars"
+            buckaroo_state = get_buckaroo_display_state(dataflow)
+            session.df_display_args = buckaroo_state["df_display_args"]
+            session.df_data_dict = buckaroo_state["df_data_dict"]
+            session.df_meta = buckaroo_state["df_meta"]
+            session.buckaroo_state = buckaroo_state["buckaroo_state"]
+            session.buckaroo_options = buckaroo_state["buckaroo_options"]
+            session.command_config = buckaroo_state["command_config"]
+            session.operation_results = buckaroo_state["operation_results"]
+            session.operations = buckaroo_state["operations"]
+            metadata = session.metadata
         else:
-            session.df = file_obj
-            session.metadata = metadata
-            if mode == "buckaroo":
-                dataflow = create_dataflow(file_obj)
-                session.dataflow = dataflow
-                buckaroo_state = get_buckaroo_display_state(dataflow)
-                session.df_display_args = buckaroo_state["df_display_args"]
-                session.df_data_dict = buckaroo_state["df_data_dict"]
-                session.df_meta = buckaroo_state["df_meta"]
-                session.buckaroo_state = buckaroo_state["buckaroo_state"]
-                session.buckaroo_options = buckaroo_state["buckaroo_options"]
-                session.command_config = buckaroo_state["command_config"]
-                session.operation_results = buckaroo_state["operation_results"]
-                session.operations = buckaroo_state["operations"]
+            file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
+            if file_obj is None:
+                return
+
+            if mode == "lazy":
+                self._load_lazy_polars(session, path, file_obj, metadata)
             else:
-                display_state = get_display_state(file_obj, path)
-                session.df_display_args = display_state["df_display_args"]
-                session.df_data_dict = display_state["df_data_dict"]
-                session.df_meta = display_state["df_meta"]
+                session.df = file_obj
+                session.metadata = metadata
+                if mode == "buckaroo":
+                    dataflow = create_dataflow(file_obj)
+                    session.dataflow = dataflow
+                    buckaroo_state = get_buckaroo_display_state(dataflow)
+                    session.df_display_args = buckaroo_state["df_display_args"]
+                    session.df_data_dict = buckaroo_state["df_data_dict"]
+                    session.df_meta = buckaroo_state["df_meta"]
+                    session.buckaroo_state = buckaroo_state["buckaroo_state"]
+                    session.buckaroo_options = buckaroo_state["buckaroo_options"]
+                    session.command_config = buckaroo_state["command_config"]
+                    session.operation_results = buckaroo_state["operation_results"]
+                    session.operations = buckaroo_state["operations"]
+                else:
+                    display_state = get_display_state(file_obj, path)
+                    session.df_display_args = display_state["df_display_args"]
+                    session.df_data_dict = display_state["df_data_dict"]
+                    session.df_meta = display_state["df_meta"]
 
         # Merge component_config into df_display_args if provided
         if component_config and session.df_display_args:
@@ -569,6 +600,52 @@ class LoadCompareHandler(tornado.web.RequestHandler):
             "rows": len(merged_df), "columns": [str(c) for c in merged_df.columns], "eqs": eqs})
 
 
+class ClearSessionHandler(tornado.web.RequestHandler):
+    """POST /clear_session — wipe a session's data (df, ldf, pl_df,
+    dataflow, xorq_dataflow, caches). Doesn't drop the session itself
+    (the WS clients stay connected) — just resets it so the next
+    /load can start clean."""
+
+    async def post(self):
+        try:
+            body = json.loads(self.request.body)
+        except (json.JSONDecodeError, TypeError):
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body"})
+            return
+        session_id = body.get("session")
+        if not session_id:
+            self.set_status(400)
+            self.write({"error": "Missing 'session'"})
+            return
+        sessions = self.application.settings["sessions"]
+        session = sessions.get(session_id)
+        if not session:
+            self.set_status(404)
+            self.write({"error_code": "session_not_found",
+                "message": f"Session {session_id!r} not found"})
+            return
+        session.df = None
+        session.ldf = None
+        session.pl_df = None
+        session.dataflow = None
+        session.xorq_dataflow = None
+        session.expr = None
+        session.metadata = {}
+        session.mode = "viewer"
+        session.backend = "pandas"
+        session.df_display_args = {}
+        session.df_data_dict = {}
+        session.df_meta = {}
+        session.buckaroo_state = {}
+        session.buckaroo_options = {}
+        session.command_config = {}
+        session.operation_results = {}
+        session.operations = []
+        log.info("clear_session session=%s", session_id)
+        self.write({"session": session_id, "cleared": True})
+
+
 class SessionPageHandler(tornado.web.RequestHandler):
     def get(self, session_id):
         self.set_header("Content-Type", "text/html")
@@ -626,9 +703,11 @@ SESSION_HTML = """\
         <select id="engine-select" style="background: #2a2a30; color: #ddd; border: 1px solid #444; padding: 2px 6px; margin-left: 6px;">
             <option value="">— switch backend —</option>
             <option value="pandas">pandas (mode=buckaroo)</option>
-            <option value="lazy">lazy polars (mode=lazy)</option>
+            <option value="polars">polars (mode=polars)</option>
+            <option value="lazy">lazy polars (mode=lazy, read-only)</option>
             <option value="xorq">xorq (/load_expr)</option>
         </select>
+        <button id="clear-session" style="background: #4a2a30; color: #fdd; border: 1px solid #654; padding: 2px 10px; margin-left: 12px; cursor: pointer;">Clear session</button>
         <span id="engine-status" style="margin-left: 12px; color: #888;"></span>
     </div>
     <div id="root"></div>
@@ -638,15 +717,35 @@ SESSION_HTML = """\
     // other datasets (?pd=/path&pl=/path&xq=/build_dir).
     const ENGINES = (() => {
         const qs = new URLSearchParams(window.location.search);
+        const PD = qs.get("pd") || "/tmp/restaurant-complaints-pandas.parquet";
+        const PL = qs.get("pl") || "/Users/paddy/buckaroo/restaurant-complaints.parquet";
         return {
-            pandas: { mode: "buckaroo", path: qs.get("pd") || "/tmp/restaurant-complaints-pandas.parquet" },
-            lazy:   { mode: "lazy",     path: qs.get("pl") || "/Users/paddy/buckaroo/restaurant-complaints.parquet" },
-            xorq:   {                    build_dir: qs.get("xq") || "/tmp/buckaroo-builds-boston/6b46951d9ac1" },
+            pandas: { mode: "buckaroo", path: PD },
+            polars: { mode: "polars",   path: PL },
+            lazy:   { mode: "lazy",     path: PL },
+            xorq:   { build_dir: qs.get("xq") || "/tmp/buckaroo-builds-boston/6b46951d9ac1" },
         };
     })();
     const SESSION_ID = "__SESSION_ID__";
     const sel = document.getElementById("engine-select");
     const status = document.getElementById("engine-status");
+    const clearBtn = document.getElementById("clear-session");
+    clearBtn.addEventListener("click", async () => {
+        status.textContent = "clearing session…";
+        try {
+            const r = await fetch("/clear_session", { method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session: SESSION_ID }) });
+            if (r.ok) {
+                status.textContent = "cleared — reloading…";
+                setTimeout(() => window.location.reload(), 400);
+            } else {
+                status.textContent = `clear failed (${r.status})`;
+            }
+        } catch (ex) {
+            status.textContent = `clear error: ${ex.message}`;
+        }
+    });
     sel.addEventListener("change", async (e) => {
         const choice = e.target.value;
         if (!choice) return;

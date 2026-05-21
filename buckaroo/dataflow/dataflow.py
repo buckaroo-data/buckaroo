@@ -265,11 +265,17 @@ class DataFlow(ABCDataflow):
     _defer_summary_sd = False
 
     def recompute_summary_sd(self):
-        """(Re-)compute ``summary_sd`` against the current ``processed_df``,
-        or short-circuit to the scope cache if the filt scope's SD is
-        already there. Used by the spike state-change handler to lift
+        """Force a (re-)compute of ``summary_sd`` against the current
+        ``processed_df``. Used by the spike state-change handler to lift
         the ``_defer_summary_sd`` short-circuit after the row-data has
         been pushed to the client.
+
+        NOTE: an earlier version added a cache short-circuit here that
+        read back the filt scope cache entry. It was unsafe: that entry
+        gets populated by ``_populate_sd_cache`` using
+        ``self.summary_sd``, and during phase 1 of the spike that value
+        may be stale (from the prior state). Reusing it produced
+        unfiltered stats labelled as ``filtered_*``. Compute fresh.
         """
         import time as _t
         import logging as _l
@@ -277,27 +283,10 @@ class DataFlow(ABCDataflow):
         df = self.processed_df
         if df is None:
             return
-        # Mirror the _summary_sd observer's cache check: if the filt
-        # scope's chain hashes to a cached entry (e.g. clearing search
-        # reverts to the initial empty-filter state), reuse the cached
-        # SD instead of paying ~7s for a fresh compute. Pre-fix this
-        # was the dominant cost of every state_change with the spike on.
-        try:
-            chains = split_chain_by_scope(self.operations)
-            filt_key = self._scope_cache_key(chains['filt'])
-        except Exception:
-            filt_key = None
-        if filt_key and filt_key in (self.summary_stats_cache or {}):
-            cached_sd = self.summary_stats_cache[filt_key]
-            _ctlog.info("[cache-timing] recompute_summary_sd CACHE HIT key=%s",
-                filt_key[:8])
-            self.summary_sd = cached_sd
-            self.errs = {}
-            return
         _t0 = _t.perf_counter()
         result_summary_sd, errs = self._get_summary_sd(df)
-        _ctlog.info("[cache-timing] recompute_summary_sd compute=%.0fms key=%s",
-            (_t.perf_counter()-_t0)*1000, filt_key[:8] if filt_key else "?")
+        _ctlog.info("[cache-timing] recompute_summary_sd compute=%.0fms",
+            (_t.perf_counter()-_t0)*1000)
         self.summary_sd = result_summary_sd
         self.errs = errs
 
@@ -322,34 +311,25 @@ class DataFlow(ABCDataflow):
             _ctlog.info("[cache-timing] _summary_sd dedupe hit (same df+klasses id)")
             return
         self._summary_sd_cache_key = (id(df), id(klasses))
-        # Cache lookup BEFORE the expensive _get_summary_sd call: the
-        # scope cache from #783 may already have this filt-scope's SD
-        # from a previous state (e.g. clearing search reverts to the
-        # initial empty-filter state). If so, reuse it instead of
-        # paying the full pipeline cost again.
-        try:
-            chains = split_chain_by_scope(self.operations)
-            filt_key = self._scope_cache_key(chains['filt'])
-        except Exception:
-            filt_key = None
-        if filt_key and filt_key in (self.summary_stats_cache or {}):
-            cached_sd = self.summary_stats_cache[filt_key]
-            _ctlog.info("[cache-timing] _summary_sd CACHE HIT key=%s (saved compute)",
-                filt_key[:8])
-            self.summary_sd = cached_sd
-            self.errs = {}
-            return
+        # NOTE: an earlier version did a cache lookup here against
+        # ``summary_stats_cache`` keyed on the filt-scope chain hash.
+        # That was wrong: ``_summary_sd`` fires on ``processed_result``
+        # change, which happens DURING ``self.cleaned = result`` —
+        # BEFORE the parent ``_operation_result`` reaches
+        # ``self.operations = result[3]``. So ``self.operations`` still
+        # holds the prior state's filt chain at this point. The lookup
+        # would find the prior state's entry and reuse it for a NEW
+        # state. Visible bug: filtered_* keys reflected unfiltered
+        # values. Don't reintroduce this without first fixing the
+        # cascade ordering.
         _t1 = _t.perf_counter()
         result_summary_sd, errs = self._get_summary_sd(df)
-        # ``len(df)`` works on pandas but raises on ibis expressions —
-        # leave the row-count off the log line on non-pandas backends.
         try:
             n_rows = len(df) if df is not None else 0
         except Exception:
             n_rows = "?"
-        _ctlog.info("[cache-timing] _summary_sd compute=%.0fms key=%s rows=%s",
-            (_t.perf_counter() - _t1) * 1000,
-            (filt_key[:8] if filt_key else "?"), n_rows)
+        _ctlog.info("[cache-timing] _summary_sd compute=%.0fms rows=%s",
+            (_t.perf_counter() - _t1) * 1000, n_rows)
         self.summary_sd = result_summary_sd
         self.errs = errs
 
@@ -660,7 +640,17 @@ class CustomizableDataflow(DataFlow):
         cache_grew = False
 
         # filt scope reuses the SD that _summary_sd just produced.
-        if keys['filt'] not in new_cache:
+        # BUT: when the rows-first spike's ``_defer_summary_sd`` flag
+        # is on, ``self.summary_sd`` carries the PRIOR state's value
+        # (phase 1 short-circuited). Storing it under the new filt
+        # key would poison the cache with stale data; phase 2's
+        # ``recompute_summary_sd`` would then read it back instead of
+        # computing fresh. Skip the filt populate in that case — the
+        # phase 2 cascade will fire ``_populate_sd_cache`` again once
+        # ``summary_sd`` is fresh, which correctly populates filt.
+        if getattr(self, '_defer_summary_sd', False):
+            _ctlog.info("[cache-timing] populate: filt SKIP (defer flag on)")
+        elif keys['filt'] not in new_cache:
             new_cache[keys['filt']] = dict(self.summary_sd or {})
             cache_grew = True
             _ctlog.info("[cache-timing] populate: filt MISS key=%s", keys['filt'][:8])
