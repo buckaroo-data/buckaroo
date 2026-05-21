@@ -58,7 +58,13 @@ def _expr_count(expr_or_df: Any) -> int:
     try:
         result = int(expr_or_df.count().execute())
     except Exception:
-        result = 0
+        # Don't cache failures — a transient backend error would
+        # otherwise poison the cache for the lifetime of this
+        # expression object. Return 0 so callers don't break, log
+        # so the failure is visible, leave the cache empty so the
+        # next call retries the backend.
+        logger.exception("_expr_count: backend count failed; not caching")
+        return 0
     _expr_count_cache[key] = result
     return result
 
