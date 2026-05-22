@@ -850,4 +850,62 @@ describe('KeyAwareSmartRowCache tests', () => {
         expect(Object.keys(aData[0])).not.toContain("B_col");
     });
 
+    test('KeyAwareSmartRowCache empty-result search does not throw on re-request (#836)', () => {
+        // Search returns zero rows. AG-Grid re-renders and asks again for the
+        // same (now empty) source key. Before the fix, SmartRowCache.hasRows
+        // recursed to [0,0] against a [[0,0]] empty segment, lied "true", and
+        // SmartRowCache.getRows fell into getRange with an empty cache and threw
+        // "RequestSeg {requestSeg} not in {segments}" -- killing the datasource.
+        let src: KeyAwareSmartRowCache;
+        const mockRequestFn = jest.fn((pa: PayloadArgs) => {
+            const resp: PayloadResponse = { key: pa, data: [], length: 0 };
+            src.addPayloadResponse(resp);
+        });
+        src = new KeyAwareSmartRowCache(mockRequestFn);
+
+        const pa1: PayloadArgs = { sourceName: "empty-search", start: 0, end: 100, origEnd: 100 };
+        const cb1 = jest.fn();
+        const failCb1 = jest.fn();
+        src.getRequestRows(pa1, cb1, failCb1);
+        // The first request: verifyResp routes a length:0 response to failCb.
+        expect(failCb1).toHaveBeenCalledTimes(1);
+        expect(cb1).not.toHaveBeenCalled();
+
+        // The grid re-asks for the same range. This must NOT throw.
+        const pa2: PayloadArgs = { sourceName: "empty-search", start: 0, end: 100, origEnd: 100 };
+        const cb2 = jest.fn();
+        const failCb2 = jest.fn();
+        expect(() => {
+            src.getRequestRows(pa2, cb2, failCb2);
+        }).not.toThrow();
+        // No rows exist, so success must not have been called.
+        expect(cb2).not.toHaveBeenCalled();
+    });
+
+    test('SmartRowCache.hasRows on empty cache reports miss, not "true" (#836)', () => {
+        // Direct unit-level repro: after a zero-row response, segments may
+        // contain a zero-width [s,s] sentinel and sentLength === 0. hasRows
+        // for any positive-width range MUST report a cache miss (a RowRequest),
+        // not `true`, otherwise getRows would fall into getRange and throw.
+        const src = new SmartRowCache();
+        src.sentLength = 0;
+        src.addRows([0, 0], []);
+        expect(src.hasRows([0, 100])).not.toBe(true);
+    });
+
+    test('getRange throw message interpolates requestSeg and segments (#836)', () => {
+        // Secondary bug: the throw template used literal `{...}` instead of
+        // `${...}`, suppressing diagnostics for this whole class of failure.
+        const seg10: SegData = [[0, 10], genRows(0, 10)[1]];
+        let caught: Error | undefined;
+        try {
+            getRange([seg10[0]], [seg10[1]], [50, 60]);
+        } catch (e) {
+            caught = e as Error;
+        }
+        expect(caught).toBeDefined();
+        expect(caught!.message).not.toContain("{requestSeg}");
+        expect(caught!.message).not.toContain("{segments}");
+    });
+
 });
