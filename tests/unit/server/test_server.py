@@ -381,6 +381,58 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                 os.unlink(f.name)
 
     @tornado.testing.gen_test
+    async def test_search_string_resets_on_load_reuse(self):
+        """Codex P1 (#839): session.search_string must be cleared when
+        /load replaces data on an existing buckaroo-mode session — else
+        the stale term silently filters the newly loaded dataset."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-search-reuse"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name,
+                        "mode": "buckaroo"}))
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws.read_message()
+
+                ws.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": "Alice"}}))
+                await ws.read_message()
+                ws.close()
+
+                # Reload — fresh client state has empty search_string;
+                # the server must match.
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name,
+                        "mode": "buckaroo"}))
+
+                ws2 = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws2.read_message()
+
+                ws2.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {"start": 0, "end": 5,
+                        "sourceName": "default", "origEnd": 5}}))
+                r = json.loads(await ws2.read_message())
+                self.assertEqual(r["length"], 5,
+                    f"stale search_string carried across /load — "
+                    f"expected 5 rows, got {r['length']}")
+                await ws2.read_message()  # binary
+                ws2.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
     async def test_ws_request_no_data_loaded(self):
         ws = await tornado.websocket.websocket_connect(
             f"ws://localhost:{self.get_http_port()}/ws/no-data-session")
