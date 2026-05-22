@@ -292,13 +292,10 @@ packaging-tools = [
     { name = "twine" },
 ]
 polars = [
-    { name = "pl-series-hash" },
-    { name = "polars", extra = ["timezone"] },
-]
-tauri-essentials = [
     { name = "pandas", version = "2.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
-    { name = "polars" },
+    { name = "pl-series-hash" },
+    { name = "polars", extra = ["timezone"] },
     { name = "tornado" },
 ]
 test = [
@@ -317,6 +314,9 @@ test = [
     { name = "ruff" },
 ]
 xorq = [
+    { name = "pandas", version = "2.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
+    { name = "tornado" },
     { name = "xorq", marker = "python_full_version < '3.14'" },
 ]
 
@@ -379,20 +379,20 @@ requires-dist = [
     { name = "packaging", marker = "extra == 'test'" },
     { name = "pandas", marker = "python_full_version >= '3.13' and extra == 'dev'" },
     { name = "pandas", marker = "python_full_version >= '3.13' and extra == 'marimo'" },
-    { name = "pandas", marker = "python_full_version >= '3.13' and extra == 'tauri-essentials'" },
+    { name = "pandas", marker = "python_full_version >= '3.13' and extra == 'polars'" },
     { name = "pandas", marker = "python_full_version >= '3.13' and extra == 'test'" },
+    { name = "pandas", marker = "python_full_version >= '3.13' and extra == 'xorq'" },
     { name = "pandas", marker = "python_full_version < '3.13' and extra == 'dev'", specifier = ">=1.3.5" },
     { name = "pandas", marker = "python_full_version < '3.13' and extra == 'marimo'", specifier = ">=1.3.5" },
-    { name = "pandas", marker = "python_full_version < '3.13' and extra == 'tauri-essentials'", specifier = ">=1.3.5" },
+    { name = "pandas", marker = "python_full_version < '3.13' and extra == 'polars'", specifier = ">=1.3.5" },
     { name = "pandas", marker = "python_full_version < '3.13' and extra == 'test'", specifier = ">=1.3.5" },
+    { name = "pandas", marker = "python_full_version < '3.13' and extra == 'xorq'", specifier = ">=1.3.5" },
     { name = "pandera", marker = "extra == 'test'" },
     { name = "pl-series-hash", marker = "extra == 'dev'", specifier = "==0.2.1" },
     { name = "pl-series-hash", marker = "extra == 'polars'", specifier = "==0.2.1" },
     { name = "playwright", marker = "extra == 'dev'" },
     { name = "polars", marker = "extra == 'mcp'" },
-    { name = "polars", marker = "extra == 'polars'" },
     { name = "polars", marker = "extra == 'polars'", specifier = ">=1.24.0" },
-    { name = "polars", marker = "extra == 'tauri-essentials'", specifier = ">=1.24.0" },
     { name = "polars", extras = ["timezone"], marker = "extra == 'polars'" },
     { name = "pyarrow", marker = "python_full_version < '3.13'", specifier = ">=18.0.0" },
     { name = "pyarrow", marker = "python_full_version == '3.13.*'" },
@@ -412,12 +412,13 @@ requires-dist = [
     { name = "sphinx", marker = "extra == 'dev'", specifier = ">=1.5" },
     { name = "toml", marker = "extra == 'dev'" },
     { name = "tornado", marker = "extra == 'mcp'", specifier = ">=6.0" },
-    { name = "tornado", marker = "extra == 'tauri-essentials'", specifier = ">=6.0" },
+    { name = "tornado", marker = "extra == 'polars'", specifier = ">=6.0" },
+    { name = "tornado", marker = "extra == 'xorq'", specifier = ">=6.0" },
     { name = "twine", marker = "extra == 'packaging-tools'" },
     { name = "watchfiles", marker = "extra == 'dev'" },
     { name = "xorq", marker = "python_full_version < '3.14' and extra == 'xorq'", specifier = ">=0.3.25" },
 ]
-provides-extras = ["dev", "jupyterlab", "marimo", "mcp", "notebook", "packaging-tools", "polars", "tauri-essentials", "test", "xorq"]
+provides-extras = ["dev", "jupyterlab", "marimo", "mcp", "notebook", "packaging-tools", "polars", "test", "xorq"]
 
 [package.metadata.requires-dev]
 datacompy = [{ name = "datacompy", specifier = ">=0.15.0" }]

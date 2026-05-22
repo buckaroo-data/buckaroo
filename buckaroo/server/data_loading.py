@@ -1,8 +1,10 @@
 import os
 import traceback
 from io import BytesIO
+from typing import TYPE_CHECKING
 import pandas as pd
-import polars as pl
+if TYPE_CHECKING:
+    import polars as pl
 from buckaroo.serialization_utils import to_parquet, pd_to_obj, check_and_fix_df
 from buckaroo.df_util import old_col_new_col, to_chars
 
@@ -112,8 +114,9 @@ def handle_infinite_request_buckaroo(
             "error_info": traceback.format_exc()}, b"")
 
 
-def load_file_lazy(path: str) -> pl.LazyFrame:
+def load_file_lazy(path: str) -> "pl.LazyFrame":
     """Open a file as a Polars LazyFrame — no data read until sliced."""
+    import polars as pl
     ext = os.path.splitext(path)[1].lower()
     if ext in (".parquet", ".parq"):
         return pl.scan_parquet(path)
@@ -127,7 +130,8 @@ def load_file_lazy(path: str) -> pl.LazyFrame:
         raise ValueError(f"Unsupported file format for lazy loading: {ext}")
 
 
-def get_metadata_lazy(ldf: pl.LazyFrame, path: str) -> dict:
+def get_metadata_lazy(ldf: "pl.LazyFrame", path: str) -> dict:
+    import polars as pl
     schema = ldf.collect_schema()
     col_names = schema.names()
     col_dtypes = schema.dtypes()
@@ -136,7 +140,7 @@ def get_metadata_lazy(ldf: pl.LazyFrame, path: str) -> dict:
     return {"path": path, "rows": total_rows, "columns": columns}
 
 
-def get_display_state_lazy(ldf: pl.LazyFrame) -> tuple[dict, dict, dict]:
+def get_display_state_lazy(ldf: "pl.LazyFrame") -> tuple[dict, dict, dict]:
     """Return (display_state, orig_to_rw, rw_to_orig) for a lazy frame."""
     schema = ldf.collect_schema()
     col_names = schema.names()
@@ -163,9 +167,10 @@ def get_display_state_lazy(ldf: pl.LazyFrame) -> tuple[dict, dict, dict]:
     return display_state, orig_to_rw, rw_to_orig
 
 
-def handle_infinite_request_lazy(ldf: pl.LazyFrame, orig_to_rw: dict, rw_to_orig: dict, total_rows: int,
+def handle_infinite_request_lazy(ldf: "pl.LazyFrame", orig_to_rw: dict, rw_to_orig: dict, total_rows: int,
         payload_args: dict) -> tuple[dict, bytes]:
     """Serve an infinite-scroll slice from a Polars LazyFrame."""
+    import polars as pl
     from buckaroo.server.window import clamp_window
     # Clamp window against total_rows so end >> total doesn't ship
     # the entire LazyFrame in one parquet frame. See #797.
