@@ -82,6 +82,32 @@ def get_xorq_metadata(xorq_dataflow: XorqServerDataflow, build_dir: str) -> dict
     return {"path": build_dir, "rows": _expr_count(expr), "columns": columns}
 
 
+def load_expr_parquet_path(path: str):
+    """Wrap a local parquet file in a xorq deferred-read expression.
+
+    Counterpart to ``load_expr_build_dir`` for the case where the caller
+    holds a materialised parquet (e.g. a host that materialised a
+    catalog entry to a snapshot file via ``xorq catalog run``) and wants
+    XorqInfiniteBuckaroo's push-down query behaviour rather than the
+    eager pandas/polars load that ``data_loading.load_file`` does.
+
+    ``deferred_read_parquet`` wires the file into xorq's datafusion
+    backend without materialising it; ``XorqServerDataflow`` then takes
+    that expression and answers every ``infinite_request`` via
+    ``handle_infinite_request_xorq`` (the same code path the
+    build-dir-driven xorq loader uses).
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    from xorq.api import connect, deferred_read_parquet  # noqa: PLC0415
+    from xorq.vendor import ibis  # noqa: PLC0415
+
+    if ibis.options.default_backend is None:
+        ibis.options.default_backend = connect()
+    table_name = Path(path).stem.replace("-", "_") or "parquet"
+    return deferred_read_parquet(path, table_name=table_name)
+
+
 # ---------------------------------------------------------------------------
 # project-authored summary stats (loaded from <project_root>/stats/*.py)
 # ---------------------------------------------------------------------------
