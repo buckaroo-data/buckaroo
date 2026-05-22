@@ -142,6 +142,149 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_ws_search_string_rowfetch(self):
+        """Regression for #838: a ``buckaroo_state_change`` carrying only
+        ``search_string`` (no ``quick_command_args.search``) must filter
+        the row-fetch dispatch. The search_string path is the fast lane
+        for live typing — it sidesteps the dataflow stat pipeline, which
+        is too slow for ~10⁶-row parquet-backed exprs in pydata-app.
+
+        Fixture has `alpha` in 4 of 10 rows; ``length`` must drop to 4.
+        """
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-search", "build_dir": build_path})
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/lx-search")
+            await ws.read_message()  # discard initial_state
+
+            ws.write_message(json.dumps({
+                "type": "buckaroo_state_change",
+                "new_state": {
+                    "post_processing": "",
+                    "cleaning_method": "",
+                    "quick_command_args": {},
+                    "df_display": "main",
+                    "show_commands": False,
+                    "sampled": False,
+                    "search_string": "alpha",
+                }}))
+            await ws.read_message()  # discard rebroadcast initial_state
+
+            ws.write_message(json.dumps({
+                "type": "infinite_request",
+                "payload_args": {"start": 0, "end": 10,
+                    "sourceName": "default", "origEnd": 10}}))
+
+            r = json.loads(await ws.read_message())
+            self.assertEqual(r["type"], "infinite_resp")
+            self.assertEqual(r["length"], 4)
+
+            binary_frame = await ws.read_message()
+            table = pq.read_table(io.BytesIO(binary_frame))
+            self.assertEqual(table.num_rows, 4)
+
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_ws_search_string_cleared_returns_full_set(self):
+        """Clearing search_string (sending ``""``) must restore the full
+        row count. Mirrors the JS contract: an empty search box sends an
+        empty term on every keystroke after clear."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-search-clear", "build_dir": build_path})
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/lx-search-clear")
+            await ws.read_message()
+
+            for term, expected in (("alpha", 4), ("", 10)):
+                ws.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": term}}))
+                await ws.read_message()
+
+                ws.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {"start": 0, "end": 10,
+                        "sourceName": "default", "origEnd": 10}}))
+                r = json.loads(await ws.read_message())
+                self.assertEqual(r["length"], expected,
+                    f"search_string={term!r} expected length={expected}, got {r['length']}")
+                await ws.read_message()  # binary frame
+
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_search_string_resets_on_load_expr_reuse(self):
+        """Codex P1 (#839): session.search_string must be cleared when
+        /load_expr replaces data on an existing session. Otherwise the
+        stale term silently filters the newly loaded dataset even though
+        the rebroadcast buckaroo_state shows an empty search box.
+
+        Repro: set search_string="alpha" (filters to 4 rows), then
+        /load_expr the same fixture again on the same session id. The
+        next infinite_request must return length=10, not 4."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "lx-search-reuse"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path})
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+            await ws.read_message()
+
+            # Type a search term — filters to 4 rows.
+            ws.write_message(json.dumps({
+                "type": "buckaroo_state_change",
+                "new_state": {
+                    "post_processing": "", "cleaning_method": "",
+                    "quick_command_args": {}, "df_display": "main",
+                    "show_commands": False, "sampled": False,
+                    "search_string": "alpha"}}))
+            await ws.read_message()
+            ws.close()
+
+            # Reload the dataset on the same session. The client's view
+            # of buckaroo_state will be fresh (search_string=""), so the
+            # server's must also be — else the row fetch silently filters.
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path})
+
+            ws2 = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+            await ws2.read_message()
+
+            ws2.write_message(json.dumps({
+                "type": "infinite_request",
+                "payload_args": {"start": 0, "end": 10,
+                    "sourceName": "default", "origEnd": 10}}))
+            r = json.loads(await ws2.read_message())
+            self.assertEqual(r["length"], 10,
+                f"stale search_string carried across /load_expr — "
+                f"expected 10 rows, got {r['length']}")
+            await ws2.read_message()  # binary
+            ws2.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_ws_infinite_request_clamps_oversized_window(self):
         """Regression for #797: a request with ``end >> total_rows``
         must clamp to ``MAX_INFINITE_WINDOW``. Pre-fix the xorq path
