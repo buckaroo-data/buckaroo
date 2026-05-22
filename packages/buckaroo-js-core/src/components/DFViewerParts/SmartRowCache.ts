@@ -228,7 +228,7 @@ export const getRange = (segments: Segment[], dfs: DFData[], requestSeg: Segment
             return getSliceRange(seg, df, requestSeg);
         }
     }
-    throw new Error(`RequestSeg {requestSeg} not in {segments}`)
+    throw new Error(`RequestSeg ${JSON.stringify(requestSeg)} not in ${JSON.stringify(segments)}`)
 }
 
 export const segmentsSize = (segments: Segment[]): number => {
@@ -422,6 +422,13 @@ export class SmartRowCache {
         if(needSeg[0] === 0 && needSeg[1] === 0) {
             console.warn("[SmartRowCache.hasRows] needSeg=[0,0] is unexpected")
         }
+        // Dataset is known empty (sentLength === 0). Any positive-width
+        // request is unsatisfiable; without this short-circuit the recursion
+        // below collapses to hasRows([0,0]), which matches the [[0,0]]
+        // sentinel reflexively and falsely reports a hit (#836).
+        if (this.sentLength === 0 && needSeg[1] > needSeg[0]) {
+            return { start: needSeg[0], end: needSeg[1] }
+        }
 	if (this.sentLength > -1 && needSeg[1] > this.sentLength) {
 	    const newSeg:Segment = [needSeg[0], this.sentLength]
 	    return this.hasRows(newSeg)
@@ -436,6 +443,11 @@ export class SmartRowCache {
     }
 
     public getRows(range: Segment): DFData {
+        if (this.sentLength === 0) {
+            // dataset is empty; nothing to clamp toward
+            console.error("[SmartRowCache.getRows] empty dataset, requested", range);
+            throw new Error(`Missing rows for ${JSON.stringify(range)}: dataset is empty (sentLength === 0)`)
+        }
         if (this.sentLength > 0 && range[1] > this.sentLength) {
             return this.getRows([range[0], this.sentLength]);
         }
@@ -447,7 +459,7 @@ export class SmartRowCache {
             return getRange(this.segments, this.dfs, range)
         }
         console.error("[SmartRowCache.getRows] Missing rows error. range", range, "extents", this.safeGetExtents(), "segments", this.segments, "sentLength", this.sentLength);
-        throw new Error(`Missing rows for {range}`)
+        throw new Error(`Missing rows for ${JSON.stringify(range)}`)
     }
 }
 
@@ -616,12 +628,17 @@ export class KeyAwareSmartRowCache {
         //const preExtents = src.safeGetExtents()
 
         src.sentLength = resp.length;
-	if(resp.data.length < (seg[1] - seg[0])) {
-	    const actualSeg: Segment = [resp.key.start, resp.key.start + resp.data.length];
-            src.addRows(actualSeg, resp.data)
-	} else {
-            src.addRows(seg, resp.data)
-	}
+        // Skip addRows entirely for empty responses — adding a zero-width
+        // [start, start] segment would pollute the cache and trip a
+        // reflexive segmentSubset hit on the next hasRows() call (#836).
+        if (resp.data.length > 0) {
+            if(resp.data.length < (seg[1] - seg[0])) {
+                const actualSeg: Segment = [resp.key.start, resp.key.start + resp.data.length];
+                src.addRows(actualSeg, resp.data)
+            } else {
+                src.addRows(seg, resp.data)
+            }
+        }
         if (_.has(this.waitingCallbacks, cbKey)) {
             const [success, fail] = this.waitingCallbacks[cbKey];
             if(verifyResp(resp)) {
