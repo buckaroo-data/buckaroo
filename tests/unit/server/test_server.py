@@ -342,6 +342,45 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                 os.unlink(f.name)
 
     @tornado.testing.gen_test
+    async def test_ws_search_string_pandas_buckaroo(self):
+        """Regression for #838: ``search_string`` set via state_change
+        must filter the pandas-buckaroo row-fetch dispatch. Fixture has
+        5 rows; "Alice" appears 1x, so length drops to 1."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": "ws-search", "path": f.name,
+                        "mode": "buckaroo"}))
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/ws-search")
+                await ws.read_message()
+
+                ws.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": "Alice"}}))
+                await ws.read_message()
+
+                ws.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {"start": 0, "end": 5,
+                        "sourceName": "default", "origEnd": 5}}))
+                r = json.loads(await ws.read_message())
+                self.assertEqual(r["type"], "infinite_resp")
+                self.assertEqual(r["length"], 1)
+                await ws.read_message()  # binary frame
+
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
     async def test_ws_request_no_data_loaded(self):
         ws = await tornado.websocket.websocket_connect(
             f"ws://localhost:{self.get_http_port()}/ws/no-data-session")
