@@ -83,31 +83,40 @@ def get_buckaroo_display_state(dataflow: ServerDataflow) -> dict:
 
 
 def handle_infinite_request_buckaroo(
-    dataflow: ServerDataflow, payload_args: dict
+    dataflow: ServerDataflow, payload_args: dict, search_string: str = ""
 ) -> tuple[dict, bytes]:
-    """Infinite scroll handler using the dataflow's processed_df and merged_sd."""
+    """Infinite scroll handler using the dataflow's processed_df and merged_sd.
+
+    ``search_string`` (#838) is a live-typing filter applied here on top
+    of ``processed_df``; it intentionally bypasses the dataflow's
+    ``quick_command_args.search`` path so per-keystroke edits don't
+    invalidate the stats pipeline.
+    """
     from buckaroo.server.window import clamp_window
+    from buckaroo.customizations.pandas_commands import search_df_str
     _unused, processed_df, merged_sd = dataflow.widget_args_tuple
     if processed_df is None:
         return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0}, b"")
-    # Clamp window against the (post-filter) processed_df size — see #797.
-    start, end = clamp_window(
-        payload_args.get("start"), payload_args.get("end"), len(processed_df))
-
     try:
+        filtered_df = search_df_str(processed_df, search_string) if search_string else processed_df
+        # Clamp window against the *filtered* size so a search that
+        # shrinks the result set doesn't ship an oversized window.
+        start, end = clamp_window(
+            payload_args.get("start"), payload_args.get("end"), len(filtered_df))
+
         sort = payload_args.get("sort")
         if sort:
             ascending = payload_args.get("sort_direction") == "asc"
             # merged_sd maps renamed col -> stats dict with 'orig_col_name'
             converted_sort_column = merged_sd[sort]["orig_col_name"]
-            sorted_df = processed_df.sort_values(
+            sorted_df = filtered_df.sort_values(
                 by=[converted_sort_column], ascending=ascending)
             slice_df = sorted_df[start:end]
         else:
-            slice_df = processed_df[start:end]
+            slice_df = filtered_df[start:end]
 
         parquet_bytes = to_parquet(slice_df)
-        msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": len(processed_df)}
+        msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": len(filtered_df)}
         return msg, parquet_bytes
     except Exception:
         return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0,

@@ -294,19 +294,24 @@ def _compile_project_post_processing(name: str, path: Path):
 
 
 def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
-        payload_args: dict) -> tuple[dict, bytes]:
+        payload_args: dict, search_string: str = "") -> tuple[dict, bytes]:
     """Drive one infinite_request window against a xorq expression.
 
     Reads the current ``processed_df`` (the expression, post-filter)
-    from ``widget_args_tuple``, calls the shared
-    ``window_to_parquet`` helper, and returns the
+    from ``widget_args_tuple``, optionally applies a live ``search_string``
+    contains-filter on top (#838 — keeps per-keystroke edits off the
+    stat pipeline that ``quick_command_args.search`` triggers), then
+    delegates to ``window_to_parquet`` and returns the
     ``(json_msg, parquet_bytes)`` pair the WebSocket handler ships as
     a text + binary frame pair (matching the pandas/polars paths)."""
+    from buckaroo.customizations.xorq_commands import search_expr
     _unused, processed_df, merged_sd = xorq_dataflow.widget_args_tuple
     if processed_df is None:
         return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0}, b"")
 
     try:
+        filtered_expr = search_expr(processed_df, search_string) if search_string else processed_df
+
         sort = payload_args.get("sort")
         sort_col = None
         ascending = True
@@ -314,13 +319,13 @@ def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
             sort_col = merged_sd[sort]["orig_col_name"]
             ascending = payload_args.get("sort_direction") == "asc"
 
-        total_length = _expr_count(processed_df)
+        total_length = _expr_count(filtered_expr)
         # Clamp the request window to a bounded slice — protects
         # against ``end >> total_rows`` requests that would otherwise
         # ship the entire table in a single WS frame. See #797.
         start, end = clamp_window(
             payload_args.get("start"), payload_args.get("end"), total_length)
-        parquet_bytes = window_to_parquet(processed_df, start, end, sort_col, ascending)
+        parquet_bytes = window_to_parquet(filtered_expr, start, end, sort_col, ascending)
         return ({"type": "infinite_resp", "key": payload_args, "data": [],
             "length": total_length}, parquet_bytes)
     except Exception:

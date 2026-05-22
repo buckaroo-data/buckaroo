@@ -33,6 +33,11 @@ class SessionState:
     xorq_dataflow: Any = None  # XorqServerDataflow when backend="xorq"
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     buckaroo_state: dict = field(default_factory=dict)
+    # Live search term applied at row-fetch time (#838) — bypasses the
+    # dataflow stat pipeline that ``quick_command_args.search`` goes
+    # through, so per-keystroke filtering stays fast on parquet-backed
+    # exprs with ~10⁶ rows.
+    search_string: str = ""
     buckaroo_options: dict = field(default_factory=dict)
     command_config: dict = field(default_factory=dict)
     operation_results: dict = field(default_factory=dict)

@@ -10,10 +10,10 @@ from buckaroo.server.data_loading import (handle_infinite_request, handle_infini
 from buckaroo.server.session import build_state_message
 
 
-def _handle_infinite_request_xorq(xorq_dataflow, payload_args):
+def _handle_infinite_request_xorq(xorq_dataflow, payload_args, search_string=""):
     """Lazy delegate so the server stays importable without buckaroo[xorq]."""
     from buckaroo.server.xorq_loading import handle_infinite_request_xorq
-    return handle_infinite_request_xorq(xorq_dataflow, payload_args)
+    return handle_infinite_request_xorq(xorq_dataflow, payload_args, search_string=search_string)
 
 
 log = logging.getLogger("buckaroo.server.websocket")
@@ -21,7 +21,10 @@ log = logging.getLogger("buckaroo.server.websocket")
 _BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
 
 # Fields in buckaroo_state that drive dataflow changes; others are ignored.
-_DATAFLOW_FIELDS = ("post_processing", "cleaning_method", "quick_command_args")
+# search_string lives here too — it doesn't touch the dataflow itself but
+# the row-fetch dispatch reads ``session.search_string`` and applies a
+# literal-contains filter before paginating (#838).
+_DATAFLOW_FIELDS = ("post_processing", "cleaning_method", "quick_command_args", "search_string")
 
 
 class DataStreamHandler(tornado.websocket.WebSocketHandler):
@@ -76,6 +79,12 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 dataflow.cleaning_method = new_state.get("cleaning_method", "")
             if old_state.get("quick_command_args") != new_state.get("quick_command_args"):
                 dataflow.quick_command_args = new_state.get("quick_command_args", {})
+            # search_string is stored on the session — the row-fetch
+            # dispatch reads it instead of pushing it into the dataflow
+            # (#838). Coerce non-string to "" so a malformed payload can't
+            # crash the filter helpers downstream.
+            new_search = new_state.get("search_string", "")
+            session.search_string = new_search if isinstance(new_search, str) else ""
 
             # Re-extract state from the dataflow — same helper works for both
             # ServerDataflow and XorqServerDataflow (verified by probe).
@@ -122,13 +131,19 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             return
 
         def _dispatch(pa):
+            # search_string is the per-session live-typed filter (#838) —
+            # passed alongside payload_args rather than mixed into it so
+            # the WS-level row-fetch contract (start/end/sort) stays
+            # untouched and each backend can apply the filter in its
+            # native expression layer.
+            search = session.search_string or ""
             if session.mode == "lazy" and session.ldf is not None:
                 return handle_infinite_request_lazy(session.ldf, session.orig_to_rw,
                     session.rw_to_orig, session.metadata.get("rows", 0), pa)
             if session.mode == "buckaroo" and session.backend == "xorq" and session.xorq_dataflow:
-                return _handle_infinite_request_xorq(session.xorq_dataflow, pa)
+                return _handle_infinite_request_xorq(session.xorq_dataflow, pa, search_string=search)
             if session.mode == "buckaroo" and session.dataflow:
-                return handle_infinite_request_buckaroo(session.dataflow, pa)
+                return handle_infinite_request_buckaroo(session.dataflow, pa, search_string=search)
             return handle_infinite_request(session.df, pa)
 
         try:
