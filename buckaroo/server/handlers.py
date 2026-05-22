@@ -351,6 +351,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
             expr = xorq_loading.load_expr_build_dir(build_dir)
             extra_klasses = (
                 xorq_loading.load_project_stat_klasses(project_root)
+                + xorq_loading.load_project_post_processing_klasses(project_root)
                 if project_root else [])
             xorq_dataflow = xorq_loading.XorqServerDataflow(
                 expr, skip_main_serial=True, extra_klasses=extra_klasses)
