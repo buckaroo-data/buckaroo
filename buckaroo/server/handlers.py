@@ -242,6 +242,11 @@ class LoadHandler(tornado.web.RequestHandler):
         session.backend = "pandas"
         session.xorq_dataflow = None
         session.expr = None
+        # Reset the live-typed row-fetch filter so a search term carried
+        # over from a prior dataset on this session doesn't silently
+        # filter the new one (Codex P1 on #839). The client's fresh
+        # buckaroo_state has search_string="" — keep the server in sync.
+        session.search_string = ""
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
@@ -383,6 +388,9 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.df = None
         session.dataflow = None
         session.ldf = None
+        # Reset the live-typed row-fetch filter so a prior term doesn't
+        # silently filter the freshly loaded expression (Codex P1 on #839).
+        session.search_string = ""
         session.metadata = metadata
         session.prompt = prompt
         if component_config:
