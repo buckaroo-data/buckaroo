@@ -34,9 +34,10 @@ class XorqServerDataflow(XorqDataflow):
     ``extra_klasses`` is an optional list of additional ``@stat()``-decorated
     functions (or ``ColAnalysis`` subclasses) to fold into ``analysis_klasses``
     at the per-instance level. ``LoadExprHandler.post`` uses it to inject
-    project-authored stats discovered under ``<project_root>/stats/*.py``;
-    the built-in xorq stats are kept first so collisions resolve to the
-    built-in.
+    project-authored stats discovered under ``<project_root>/stats/*.py``
+    and project-authored post-processing classes discovered under
+    ``<project_root>/post_processing/*.py``; the built-in xorq stats are
+    kept first so collisions resolve to the built-in.
     """
 
     sampling_klass = XorqInfiniteSampling
@@ -189,6 +190,107 @@ def _compile_project_stat(name: str, path: Path, stat_decorator, XorqColumn):
     compute.__name__ = name
     compute.__qualname__ = name
     return stat_decorator()(compute)
+
+
+# ---------------------------------------------------------------------------
+# project-authored post-processing (loaded from <project_root>/post_processing/*.py)
+# ---------------------------------------------------------------------------
+
+
+def load_project_post_processing_klasses(project_root) -> list:
+    """Scan ``<project_root>/post_processing/*.py`` and return wrapped
+    ``ColAnalysis`` subclasses for use as post-processing methods.
+
+    Each file must define a callable ``process(expr)`` returning either
+    a new ibis expression or a pandas DataFrame — the same shape
+    ``XorqDataflow.add_processing`` accepts at the widget API. The
+    function is wrapped in a ``ColAnalysis`` subclass with
+    ``post_processing_method = <filename_stem>`` and a
+    ``post_process_df`` classmethod that delegates to ``process``;
+    ``filter_analysis(analysis_klasses, "post_processing_method")``
+    in ``CustomizableDataflow`` then surfaces it through
+    ``post_processing_klasses`` and the ``buckaroo_options`` dropdown.
+
+    Files whose name starts with ``_`` are skipped (parking convention).
+    Errors in any one file are logged and the file is skipped — one
+    bad post-processor shouldn't keep the rest from loading.
+    """
+    pp_dir = Path(project_root) / "post_processing"
+    if not pp_dir.is_dir():
+        return []
+
+    klasses: list = []
+    for path in sorted(pp_dir.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        name = path.stem
+        if not name.isidentifier():
+            log.warning(
+                "project post_processing %s: filename stem is not a valid python identifier; skipping",
+                path)
+            continue
+        try:
+            wrapped = _compile_project_post_processing(name, path)
+        except Exception as e:
+            log.warning("project post_processing %s skipped: %s", path, e)
+            continue
+        klasses.append(wrapped)
+    return klasses
+
+
+def _compile_project_post_processing(name: str, path: Path):
+    """Read, exec, validate, and wrap one post-processing file into a
+    ``ColAnalysis`` subclass. Mirror of ``_compile_project_stat`` for
+    the post-processing channel: instead of an ``@stat()``-decorated
+    function, returns a class shaped like the ``DecoratedXorqProcessing``
+    that ``XorqDataflow.add_processing`` builds at runtime —
+    ``post_processing_method = <stem>`` and a ``post_process_df``
+    classmethod returning ``[process(expr), {}]``.
+    """
+    # Local import — ColAnalysis lives in the pluggable framework and
+    # only the post-processing path needs it from this module.
+    from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: PLC0415
+
+    source = path.read_text()
+    globs: dict = {"__builtins__": _safe_builtins()}
+    # Same ibis / xorq exposure as the stat loader so post-processors
+    # can reach beyond bare expression methods (literals, case().when(),
+    # xorq.deferred_read_parquet, etc.).
+    try:
+        from xorq.vendor import ibis as _ibis  # noqa: PLC0415
+        globs["ibis"] = _ibis
+    except ImportError:
+        pass
+    try:
+        import xorq.api as _xo  # noqa: PLC0415
+        globs["xorq"] = _xo
+    except ImportError:
+        pass
+
+    # Single shared namespace so top-level constants and helper
+    # functions are visible at call time — same Codex P1 hazard the
+    # stat loader documents.
+    exec(compile(source, str(path), "exec"), globs)
+
+    process = globs.get("process")
+    if not callable(process):
+        raise ValueError("no callable 'process' defined")
+
+    sig = inspect.signature(process)
+    params = list(sig.parameters.values())
+    if len(params) != 1:
+        raise ValueError(
+            f"process() must take exactly one parameter, got {len(params)}")
+
+    # Default-arg capture (`_f=process`) on the lambda binds the loaded
+    # process function at class-construction time so a later iteration
+    # of the loader loop can't shadow it via the outer ``process`` name.
+    return type(f"ProjectPostProcessing_{name}", (ColAnalysis,), {
+        "provides_defaults": {},
+        "post_processing_method": name,
+        "post_process_df": classmethod(
+            lambda kls, expr, _f=process: [_f(expr), {}]),
+    })
 
 
 def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
