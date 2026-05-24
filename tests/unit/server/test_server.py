@@ -433,6 +433,97 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                 os.unlink(f.name)
 
     @tornado.testing.gen_test
+    async def test_search_string_echoed_in_overlay_buckaroo_state(self):
+        """Codex P1 on #854: when a client sends a search-only state change,
+        the server's overlay reply must carry that ``search_string`` inside
+        ``buckaroo_state``. Otherwise the JS ``WebSocketModel`` replaces
+        ``state.buckaroo_state`` wholesale with a copy missing the key,
+        React's local ``buckarooState.search_string`` resets to ``""`` and
+        the search box clears on every keystroke."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-search-echo"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws.read_message()  # initial_state on connect
+
+                ws.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": "Alice"}}))
+                msg = json.loads(await ws.read_message())
+                self.assertEqual(msg["type"], "initial_state")
+                self.assertEqual(msg["buckaroo_state"].get("search_string"), "Alice",
+                    "overlay reply must echo the client's search_string in buckaroo_state — "
+                    "missing key would clobber the React-local value on every keystroke")
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_search_string_per_client_in_dataflow_broadcast(self):
+        """Codex P1 on #854: when client A triggers a dataflow rebuild,
+        the broadcast ``initial_state`` must carry *A's* per-client
+        search_string back to A — and a separate client B sharing the
+        session must see *its own* search_string (here ``""``), not A's.
+        The session-level snapshot is search-agnostic; the per-client
+        value lives only on the handler."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-search-broadcast"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+
+                ws_a = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws_a.read_message()
+                ws_b = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws_b.read_message()
+
+                # A types a search — overlay-only, B unaffected.
+                ws_a.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": "Alice"}}))
+                await ws_a.read_message()  # consume A's overlay
+
+                # Now A triggers a dataflow change. Server rebuilds and
+                # broadcasts initial_state to both. Each client's msg
+                # should carry their own search_string.
+                ws_a.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {"sort": "name"},
+                        "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": "Alice"}}))
+                msg_a = json.loads(await ws_a.read_message())
+                msg_b = json.loads(await ws_b.read_message())
+                self.assertEqual(msg_a["buckaroo_state"].get("search_string"), "Alice",
+                    "A's broadcast copy must preserve A's per-client search_string")
+                self.assertEqual(msg_b["buckaroo_state"].get("search_string"), "",
+                    "B's broadcast copy must carry B's empty search_string, not A's")
+                ws_a.close()
+                ws_b.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
     async def test_ws_request_no_data_loaded(self):
         ws = await tornado.websocket.websocket_connect(
             f"ws://localhost:{self.get_http_port()}/ws/no-data-session")
