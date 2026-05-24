@@ -271,7 +271,7 @@ file matching that contract will render — no JS to write:
     <body>
       <div id="root"></div>
       <script id="buckaroo-data" type="application/json">
-        {{ artifact_json_from_python }}
+        <!-- artifact JSON written here verbatim; see note below -->
       </script>
       <script type="module" src="static-embed.js"></script>
     </body>
@@ -282,6 +282,33 @@ existing page is the same template assembled around your own
 ``<head>`` and surrounding markup. Server-render the JSON into the
 ``#buckaroo-data`` block from your backend (Flask, Django, Sphinx
 extension, etc.) and the bundle does the rest.
+
+**Don't HTML-escape the JSON.** The bundle reads ``#buckaroo-data``
+via ``textContent`` and hands it straight to ``JSON.parse``. Most
+server-side templating engines autoescape ``{{ ... }}`` by default,
+which turns ``"`` into ``&#34;`` and breaks parsing. Use your
+framework's "already safe" path and also defuse any ``</script>``
+sequence in the JSON so it cannot break out of the block:
+
+.. code-block:: python
+
+    # Flask / Jinja2
+    import json
+    artifact_json = json.dumps(artifact).replace("</", "<\\/")
+    return render_template("page.html", artifact_json=artifact_json)
+
+.. code-block:: jinja
+
+    {# page.html — `| safe` skips Jinja autoescaping #}
+    <script id="buckaroo-data" type="application/json">
+      {{ artifact_json | safe }}
+    </script>
+
+.. code-block:: django
+
+    {# Django: json_script emits the <script type="application/json">
+       wrapper itself and escapes "<", ">", "&" safely. #}
+    {{ artifact|json_script:"buckaroo-data" }}
 
 For *late-bound* data (fetch from an endpoint after page load), set
 ``#buckaroo-data`` from JS *before* loading the module, since the
@@ -304,27 +331,69 @@ assets. The bundle is built with
 ``pnpm --filter buckaroo-widget run build:static``; released wheels
 include it.
 
-**TypeScript — ``buckaroo-js-core`` (coming with npm publish).**
-If you're building your own JS app and want the React components
-directly, import ``BuckarooStaticTable`` and ``resolveDFDataAsync``
-and feed them the resolved artifact:
+**TypeScript — server embed with the React component (coming with npm publish).**
+If your page is already a React app (Next.js, Remix, a Vite SPA, an
+internal dashboard), you can skip the prebuilt bundle and mount the
+component yourself. The flow has two halves — a backend that
+serializes the artifact, and a React component that resolves it and
+hands it to ``BuckarooStaticTable``.
 
-.. code-block:: typescript
+The Python side is the same ``prepare_buckaroo_artifact`` /
+``artifact_to_json`` call shown above; serve the resulting JSON
+either inline in the page (the ``#buckaroo-data`` block, escaped
+exactly like the raw-JS path) or as a ``GET /api/<table>.json``
+endpoint your React code fetches.
+
+On the JS side, import ``BuckarooStaticTable`` and the resolver
+helpers and feed them the artifact:
+
+.. code-block:: tsx
 
     import {
         BuckarooStaticTable,
         resolveDFDataAsync,
         preResolveDFDataDict,
     } from "buckaroo-js-core";
+    import "buckaroo-js-core/dist/style.css";
 
-    const artifact = JSON.parse(jsonStrFromYourBackend);
-    const dfData = await resolveDFDataAsync(artifact.df_data);
-    const summaryStats = await resolveDFDataAsync(artifact.summary_stats_data);
-    const resolved = { ...artifact, df_data: dfData, summary_stats_data: summaryStats };
-    // <BuckarooStaticTable artifact={resolved} />
+    export async function loadArtifact(url: string) {
+        const artifact = await fetch(url).then((r) => r.json());
+        const [dfData, summaryStats] = await Promise.all([
+            resolveDFDataAsync(artifact.df_data),
+            resolveDFDataAsync(artifact.summary_stats_data),
+        ]);
+        const resolved: any = {
+            embed_type: artifact.embed_type ?? "DFViewer",
+            df_data: dfData,
+            df_viewer_config: artifact.df_viewer_config,
+            summary_stats_data: summaryStats,
+        };
+        if (artifact.embed_type === "Buckaroo" && artifact.df_data_dict) {
+            resolved.df_data_dict = await preResolveDFDataDict(artifact.df_data_dict);
+            resolved.df_data_dict.main = dfData;
+            resolved.df_display_args = artifact.df_display_args;
+            resolved.df_meta = artifact.df_meta;
+            resolved.buckaroo_options = artifact.buckaroo_options;
+            resolved.buckaroo_state = artifact.buckaroo_state;
+        }
+        return resolved;
+    }
 
-This is the same path ``static-embed.tsx`` uses internally; you're
-substituting your own page shell.
+    export function MyTable({ artifact }: { artifact: any }) {
+        return (
+            <div className="buckaroo_anywidget" style={{ width: "100%", height: "100vh" }}>
+                <BuckarooStaticTable artifact={artifact} />
+            </div>
+        );
+    }
+
+This is the same path ``static-embed.tsx`` uses internally
+(see ``packages/js/static-embed.tsx``); you're substituting your own
+page shell and your own backend transport. The parquet payload in
+``df_data`` (and the per-tab payloads in ``df_data_dict`` for the
+full Buckaroo UI) is what ``resolveDFDataAsync`` /
+``preResolveDFDataDict`` decode — skip that step and the table
+renders empty.
 
 .. note::
 
