@@ -52,9 +52,16 @@ class ServerDataflow(CustomizableDataflow):
         return pd_to_obj(df)
 
 
-def create_dataflow(df: pd.DataFrame) -> ServerDataflow:
-    """Instantiate the full Buckaroo analysis pipeline headlessly."""
-    return ServerDataflow(df, skip_main_serial=True)
+def create_dataflow(df: pd.DataFrame, column_config_overrides=None, extra_grid_config=None, init_sd=None) -> ServerDataflow:
+    """Instantiate the full Buckaroo analysis pipeline headlessly.
+
+    Accepts the same per-column / per-grid configuration kwargs that
+    ``BuckarooInfiniteWidget`` does so server-mode sessions can match the
+    look of a notebook widget. ``LoadHandler`` forwards the matching
+    request-body fields here.
+    """
+    return ServerDataflow(df, column_config_overrides=column_config_overrides, extra_grid_config=extra_grid_config,
+        init_sd=init_sd, skip_main_serial=True)
 
 
 def get_buckaroo_display_state(dataflow: ServerDataflow) -> dict:
