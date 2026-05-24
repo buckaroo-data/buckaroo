@@ -3,6 +3,11 @@ import * as ReactDOM from "react-dom/client";
 import { BuckarooStaticTable, resolveDFDataAsync, preResolveDFDataDict } from "buckaroo-js-core";
 import "../buckaroo-js-core/dist/style.css";
 
+// Named exports so callers can import parquetRead from static-embed.js directly
+// and feed raw ArrayBuffer parquet (e.g. from fetch()) without base64 encoding.
+export { parquetRead, parquetMetadata } from "hyparquet";
+export { resolveDFDataAsync, preResolveDFDataDict } from "buckaroo-js-core";
+
 async function main() {
     const dataEl = document.getElementById("buckaroo-data");
     if (!dataEl?.textContent) {
