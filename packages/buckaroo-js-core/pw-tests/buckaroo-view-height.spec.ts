@@ -65,6 +65,13 @@ interface CellMetrics {
     wrapper: { top: number; bottom: number; height: number } | null;
     dfViewer: { top: number; bottom: number; height: number; classMode: string } | null;
     agRoot: { top: number; bottom: number; height: number } | null;
+    // The rows-container — `.ag-center-cols-container`. AG-Grid sizes this
+    // box to exactly its rendered rows, so `rowsContainer.bottom -
+    // lastDataRow.bottom` is what catches a real "dead band inside the
+    // grid" regression. `agRoot.bottom` further includes AG-Grid chrome
+    // (horizontal scrollbar, status row) which is ~50-90px on Chromium
+    // and is not a "gap" from the user's perspective.
+    rowsContainer: { top: number; bottom: number; height: number } | null;
     lastDataRow: { top: number; bottom: number; height: number; rowIndex: number } | null;
     domLayout: "autoHeight" | "normal" | "print" | "other" | null;
     pageScrollHeight: number;
@@ -135,11 +142,16 @@ async function measure(page: Page, rootSelector?: string): Promise<CellMetrics> 
             else classMode = "unknown";
         }
 
+        const rowsContainer = (agRoot as Element | null)?.querySelector(
+            ".ag-center-cols-container",
+        ) ?? null;
+
         return {
             host: rectOf(host),
             wrapper: rectOf(wrapper),
             dfViewer: dfViewer ? { ...(rectOf(dfViewer) as any), classMode } : null,
             agRoot: rectOf(agRoot),
+            rowsContainer: rectOf(rowsContainer),
             lastDataRow,
             domLayout,
             pageScrollHeight: document.documentElement.scrollHeight,
@@ -151,10 +163,18 @@ async function measure(page: Page, rootSelector?: string): Promise<CellMetrics> 
 // Border/scrollbar slack we allow before declaring a gap a regression.
 // AG-Grid renders a 1-2px border around the root wrapper.
 const BORDER_SLACK = 4;
-// Last-row → ag-root-wrapper bottom: must include the horizontal scrollbar
-// strip (when rows overflow horizontally) and AG-Grid's status bar / footer
-// space. ag-grid + scrollbar accounts for ~20-30px in practice.
-const ROW_TO_GRID_SLACK_AUTOHEIGHT = 30;
+// Last row → rows-container bottom. The rows-container
+// (`.ag-center-cols-container`) is the box AG-Grid sizes to the rendered
+// rows themselves, so this gap captures any genuine "dead band" between
+// the last row and the end of the rows region. A few px of slack covers
+// row borders.
+const ROW_TO_ROWS_CONTAINER_SLACK = 6;
+// Last row → `.ag-root-wrapper` bottom. The root wrapper additionally
+// contains the horizontal scrollbar reserve and AG-Grid's status row,
+// which together are ~70-90px on Chromium even when no dead band exists.
+// We assert a *bounded* difference, not a small one — anything beyond
+// ~120px would indicate a real layout regression.
+const ROW_TO_GRID_SLACK_AUTOHEIGHT = 120;
 
 // =============================================================================
 // Single BuckarooView — small DF, autoHeight=true (the #847 use case)
@@ -178,7 +198,11 @@ test.describe("BuckarooView height — small DF autoHeight", () => {
         // AG-Grid switched to autoHeight layout.
         expect(m.domLayout).toBe("autoHeight");
 
-        // Inner gap: last row bottom → grid bottom should be small.
+        // Rows-container hugs the last row — this is the real "no dead
+        // band inside the grid" assertion.
+        const rowsGap = m.rowsContainer!.bottom - m.lastDataRow!.bottom;
+        expect(rowsGap).toBeLessThanOrEqual(ROW_TO_ROWS_CONTAINER_SLACK);
+        // Looser bound on the AG-Grid wrapper (includes scrollbar / status).
         const innerGap = m.agRoot!.bottom - m.lastDataRow!.bottom;
         expect(innerGap).toBeLessThanOrEqual(ROW_TO_GRID_SLACK_AUTOHEIGHT);
 
@@ -221,7 +245,10 @@ test.describe("BuckarooView height — small DF autoHeight=false (default)", () 
         expect(m.domLayout).toBe("autoHeight");
         expect(m.dfViewer?.classMode).toBe("short-mode");
 
-        // Inner gap is tight (grid hugs its rows).
+        // Rows-container hugs the last row.
+        const rowsGap = m.rowsContainer!.bottom - m.lastDataRow!.bottom;
+        expect(rowsGap).toBeLessThanOrEqual(ROW_TO_ROWS_CONTAINER_SLACK);
+        // Looser bound on the wrapper (includes scrollbar / status).
         const innerGap = m.agRoot!.bottom - m.lastDataRow!.bottom;
         expect(innerGap).toBeLessThanOrEqual(ROW_TO_GRID_SLACK_AUTOHEIGHT);
 
@@ -304,6 +331,8 @@ test.describe("BuckarooView height — short host (400px container, short viewpo
         console.log("smallShortAuto metrics:", JSON.stringify(m, null, 2));
 
         expect(m.domLayout).toBe("autoHeight");
+        const rowsGap = m.rowsContainer!.bottom - m.lastDataRow!.bottom;
+        expect(rowsGap).toBeLessThanOrEqual(ROW_TO_ROWS_CONTAINER_SLACK);
         const innerGap = m.agRoot!.bottom - m.lastDataRow!.bottom;
         expect(innerGap).toBeLessThanOrEqual(ROW_TO_GRID_SLACK_AUTOHEIGHT);
 
@@ -373,8 +402,13 @@ test.describe("BuckarooView height — stacked cells (#847 use case)", () => {
         for (const m of [cell0, cell1]) {
             const wrapperGap = m.wrapper!.bottom - m.agRoot!.bottom;
             expect(wrapperGap).toBeLessThanOrEqual(BORDER_SLACK);
-            const innerGap = m.agRoot!.bottom - m.lastDataRow!.bottom;
-            expect(innerGap).toBeLessThanOrEqual(ROW_TO_GRID_SLACK_AUTOHEIGHT);
+            // Rows-container hugs the last visible row.
+            if (m.lastDataRow) {
+                const rowsGap = m.rowsContainer!.bottom - m.lastDataRow.bottom;
+                expect(rowsGap).toBeLessThanOrEqual(ROW_TO_ROWS_CONTAINER_SLACK);
+                const innerGap = m.agRoot!.bottom - m.lastDataRow.bottom;
+                expect(innerGap).toBeLessThanOrEqual(ROW_TO_GRID_SLACK_AUTOHEIGHT);
+            }
         }
     });
 

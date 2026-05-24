@@ -48,12 +48,14 @@ async function openAndRunNotebook(page: Page) {
   await page.waitForLoadState("domcontentloaded", { timeout: 10_000 });
   await page.locator(".jp-Notebook").first().waitFor({ state: "attached", timeout: 10_000 });
 
-  // Focus notebook then "Run All Cells" via the menu.
+  // Focus notebook then "Run All Cells" via the menu. JupyterLab's UI
+  // surfaces the same "Run All Cells" label in both the menu dropdown
+  // and the command palette — `.first()` picks the visible menu entry.
   await page.locator(".jp-Notebook").first().dispatchEvent("click");
   await page.waitForTimeout(300);
   await page.locator("text=Run").first().click();
   await page.waitForTimeout(300);
-  const runAll = page.locator("text=Run All Cells");
+  const runAll = page.locator("text=Run All Cells").first();
   if (await runAll.isVisible()) {
     await runAll.click();
   } else {

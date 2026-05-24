@@ -35,8 +35,15 @@ function patchDisplayArgsHeight(displayArgs: any): any {
     const fb = document.getElementById("filename-bar");
     const pb = document.getElementById("prompt-bar");
     const barsHeight = (fb?.offsetHeight || 0) + (pb?.offsetHeight || 0);
-    // 20px bottom gap — CSS flex: 1 on .theme-hanger handles the actual fill,
-    // but dfvHeight tells heightStyle() to use domLayout: "normal" (not autoHeight)
+    // 20px bottom gap; the CSS `flex: 1 !important` on .theme-hanger lets
+    // the wrapper fill the available space, but for small dataframes
+    // gridUtils.heightStyle() defaults to `domLayout: "autoHeight"` —
+    // which makes AG-Grid size to its row count, leaving a large dead
+    // band below the grid (issue surfaced by
+    // pw-tests/server-standalone-layout.spec.ts "small DF" tests). Force
+    // `layoutType: "normal"` so the standalone single-frame tab always
+    // fills the viewport. Embedded hosts that want autoHeight go through
+    // BuckarooServerView's `autoHeight` prop instead (PR #847).
     const available = window.innerHeight - barsHeight - 20;
     const patched = { ...displayArgs };
     for (const key of Object.keys(patched)) {
@@ -49,6 +56,7 @@ function patchDisplayArgsHeight(displayArgs: any): any {
                     component_config: {
                         ...view.df_viewer_config?.component_config,
                         dfvHeight: available,
+                        layoutType: "normal",
                     },
                 },
             };
