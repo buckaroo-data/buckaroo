@@ -233,11 +233,9 @@ class LoadHandler(tornado.web.RequestHandler):
         if session_id is None:
             return
 
-        # New since the path-only /load_expr distinction: callers can opt
-        # /load into the xorq push-down backend (XorqInfiniteBuckaroo)
-        # without having a build_dir handy — they provide a parquet path
-        # and we wrap it in a deferred-read expression. Default stays
-        # "pandas" so existing callers are unaffected.
+        # Optional backend="xorq" routes /load through the same push-down
+        # path as /load_expr but sourced from a parquet rather than a
+        # build_dir. Default "pandas" keeps existing callers unaffected.
         backend_arg = body.get("backend", "pandas")
         if backend_arg not in ("pandas", "xorq"):
             self.set_status(400)

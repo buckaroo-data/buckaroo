@@ -97,8 +97,6 @@ def load_expr_parquet_path(path: str):
     ``handle_infinite_request_xorq`` (the same code path the
     build-dir-driven xorq loader uses).
     """
-    from pathlib import Path  # noqa: PLC0415
-
     from xorq.api import connect, deferred_read_parquet  # noqa: PLC0415
     from xorq.vendor import ibis  # noqa: PLC0415
 

@@ -373,3 +373,67 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
             os.unlink(csv_path)
+
+
+class TestLoadBackendXorq(tornado.testing.AsyncHTTPTestCase):
+    """POST /load with backend="xorq" — wraps a parquet path in a
+    deferred-read xorq expression and serves it through the same
+    push-down path as /load_expr."""
+
+    def get_app(self):
+        return make_app()
+
+    def test_invalid_backend_returns_400(self):
+        resp = self.fetch("/load", method="POST",
+            body=json.dumps({"session": "lb-bad", "path": "/tmp/x.parquet",
+                "backend": "bogus"}),
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(json.loads(resp.body)["error_code"], "invalid_backend")
+
+    def test_xorq_backend_requires_buckaroo_mode(self):
+        resp = self.fetch("/load", method="POST",
+            body=json.dumps({"session": "lb-mode", "path": "/tmp/x.parquet",
+                "backend": "xorq", "mode": "lazy"}),
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(json.loads(resp.body)["error_code"],
+            "invalid_mode_for_backend")
+
+    @tornado.testing.gen_test
+    async def test_load_parquet_via_xorq_backend(self):
+        """Happy path: POST /load with backend=xorq, then issue an
+        infinite_request — the row count must come from the parquet via
+        XorqServerDataflow, proving routing went through the xorq path."""
+        d = tempfile.mkdtemp()
+        parquet_path = os.path.join(d, "lb_fixture.parquet")
+        try:
+            pd.DataFrame({"idx": list(range(7)), "name": ["a", "b", "c", "d", "e", "f", "g"]}).to_parquet(parquet_path)
+
+            resp = await _post(self.get_http_port(), "/load",
+                {"session": "lb-ok", "path": parquet_path,
+                 "mode": "buckaroo", "backend": "xorq"})
+            self.assertEqual(resp.code, 200)
+            body = json.loads(resp.body)
+            self.assertEqual(body["session"], "lb-ok")
+            self.assertEqual(body["rows"], 7)
+            self.assertEqual({c["name"] for c in body["columns"]}, {"idx", "name"})
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/lb-ok")
+            await ws.read_message()  # initial_state
+
+            ws.write_message(json.dumps({
+                "type": "infinite_request",
+                "payload_args": {"start": 0, "end": 10,
+                    "sourceName": "default", "origEnd": 10}}))
+            r = json.loads(await ws.read_message())
+            self.assertEqual(r["type"], "infinite_resp")
+            self.assertEqual(r["length"], 7)
+
+            binary_frame = await ws.read_message()
+            table = pq.read_table(io.BytesIO(binary_frame))
+            self.assertEqual(table.num_rows, 7)
+            ws.close()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
