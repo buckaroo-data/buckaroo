@@ -64,6 +64,11 @@ Each table below renders a small fixture with a different
 ``displayer_args`` config. The code block above each iframe is the exact
 ``column_config_overrides`` that produced it.
 
+The pinned summary band (``dtype`` row + inline histogram, on by
+default) is suppressed in every embed below — these examples are about
+column styling, not summary stats. See `Pinned summary rows`_ for how
+to configure or restore it.
+
 
 Datetime displayers
 ~~~~~~~~~~~~~~~~~~~
@@ -473,6 +478,60 @@ or when one column annotates another.
 
    <iframe src="../styling/tooltip.html"
            style="width:100%; height:320px; border:1px solid #e0e0e0; border-radius:4px; margin:1em 0;">
+   </iframe>
+
+
+Pinned summary rows
+-------------------
+
+Every other embed on this page passes ``pinned_rows=[]`` to keep the
+focus on the column styling. The default is *not* empty — buckaroo
+pins a ``dtype`` row and an inline ``histogram`` above the data.
+
+The pinned summary band is configured per-widget, alongside
+``column_config_overrides``:
+
+.. code-block:: python
+
+    from buckaroo.styling_helpers import (
+        obj_, float_, inherit_, pinned_histogram)
+
+    buckaroo.BuckarooInfiniteWidget(df,
+        pinned_rows=[
+            obj_("dtype"),
+            pinned_histogram(),
+            float_("mean", 2),
+            float_("std", 2),
+            inherit_("min"),
+            inherit_("max"),
+        ])
+
+Each helper returns a dict with the same shape as ``column_config``:
+
+- ``primary_key_val`` — the summary-stat key (``dtype``, ``mean``,
+  ``std``, ``min``, ``max``, ``unique_count``, ``null_count``, ``most_freq``,
+  …). The values come from buckaroo's analysis pipeline, so any stat
+  produced by a registered ``ColAnalysis`` can be pinned.
+- ``displayer_args`` — how the pinned value is rendered. ``obj_`` is
+  the catch-all (Python ``repr``-style); ``float_(key, digits)``
+  formats to a fixed number of fraction digits; ``inherit_`` reuses
+  the column's own ``displayer`` so the pinned value is formatted the
+  same way as the data; ``pinned_histogram()`` renders the inline
+  histogram.
+
+Two arguments control the list:
+
+- ``pinned_rows=[…]`` — *replaces* the defaults. Pass ``[]`` to hide
+  the summary band entirely.
+- ``extra_pinned_rows=[…]`` — *appends* to the defaults. Useful when
+  you want the built-in dtype + histogram pair plus a few extra stats.
+
+Passing both raises ``ValueError`` — pick one.
+
+.. raw:: html
+
+   <iframe src="../styling/pinned-rows.html"
+           style="width:100%; height:340px; border:1px solid #e0e0e0; border-radius:4px; margin:1em 0;">
    </iframe>
 
 

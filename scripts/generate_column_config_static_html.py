@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from buckaroo.artifact import (prepare_buckaroo_artifact, artifact_to_json, _HTML_TEMPLATE)
+from buckaroo.styling_helpers import obj_, float_, pinned_histogram, inherit_
 
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "docs", "extra-html", "styling")
@@ -210,31 +211,55 @@ def tooltip_fixture():
     return df, cfg
 
 
-# (filename, title, fixture_callable)
+# ---------------------------------------------------------------------------
+# Pinned-rows demo — the only example that overrides the default
+# ``pinned_rows=[]`` used by every other entry. Documents the
+# ``pinned_rows=`` argument by showing a non-default value alongside the
+# stats it pins (dtype, histogram, mean, std, min, max).
+# ---------------------------------------------------------------------------
+
+PINNED_ROWS_DEMO = [obj_("dtype"), pinned_histogram(), float_("mean", 2), float_("std", 2), inherit_("min"),
+    inherit_("max")]
+
+
+def pinned_rows_fixture():
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"int_col": rng.integers(0, 100, 200), "float_col": rng.normal(50, 15, 200),
+        "str_col": rng.choice(["alpha", "beta", "gamma"], 200)})
+    # No column_config_overrides — this example is only about pinned_rows.
+    return df, {}
+
+
+# (filename, title, fixture_callable, pinned_rows_override)
+# pinned_rows_override defaults to [] so the rendered table has no
+# summary band — the article's whole point is showing only what the
+# column_config does, not the default dtype/histogram pair.
 ENTRIES = [
-    ("datetime", "Datetime Displayers", datetime_fixture),
-    ("string", "String Displayer", string_fixture),
-    ("float", "Float Displayer", float_fixture),
-    ("link", "Link Displayer", link_fixture),
-    ("histogram", "Histogram Displayer", histogram_fixture),
-    ("chart", "Chart Displayer", chart_fixture),
-    ("image", "Image Displayer", image_fixture),
-    ("color-map-continuous", "Color Map (Continuous)", color_map_continuous_fixture),
-    ("color-map-explicit", "Color Map (Explicit Palette)", color_map_explicit_fixture),
-    ("color-from-column", "Color From Column", color_from_column_fixture),
-    ("error-highlight", "Error Highlighting", error_highlight_fixture),
-    ("tooltip", "Tooltip", tooltip_fixture),
+    ("datetime", "Datetime Displayers", datetime_fixture, []),
+    ("string", "String Displayer", string_fixture, []),
+    ("float", "Float Displayer", float_fixture, []),
+    ("link", "Link Displayer", link_fixture, []),
+    ("histogram", "Histogram Displayer", histogram_fixture, []),
+    ("chart", "Chart Displayer", chart_fixture, []),
+    ("image", "Image Displayer", image_fixture, []),
+    ("color-map-continuous", "Color Map (Continuous)", color_map_continuous_fixture, []),
+    ("color-map-explicit", "Color Map (Explicit Palette)", color_map_explicit_fixture, []),
+    ("color-from-column", "Color From Column", color_from_column_fixture, []),
+    ("error-highlight", "Error Highlighting", error_highlight_fixture, []),
+    ("tooltip", "Tooltip", tooltip_fixture, []),
+    ("pinned-rows", "Pinned Summary Rows", pinned_rows_fixture, PINNED_ROWS_DEMO),
 ]
 
 
-def styled_html(df, title, column_config_overrides):
+def styled_html(df, title, column_config_overrides, pinned_rows):
     artifact = prepare_buckaroo_artifact(
-        df, column_config_overrides=column_config_overrides, embed_type="DFViewer")
+        df, column_config_overrides=column_config_overrides,
+        pinned_rows=pinned_rows, embed_type="DFViewer")
     return _HTML_TEMPLATE.format(title=title, artifact_json=artifact_to_json(artifact))
 
 
-def generate_embed(filename, title, df, column_config_overrides):
-    html = styled_html(df, title, column_config_overrides)
+def generate_embed(filename, title, df, column_config_overrides, pinned_rows):
+    html = styled_html(df, title, column_config_overrides, pinned_rows)
     path = os.path.join(OUT_DIR, f"{filename}.html")
     with open(path, "w") as f:
         f.write(html)
@@ -258,7 +283,7 @@ def copy_static_assets():
 if __name__ == "__main__":
     print("Generating column-config styling static embeds...")
     copy_static_assets()
-    for filename, title, fixture in ENTRIES:
+    for filename, title, fixture, pinned_rows in ENTRIES:
         df, cfg = fixture()
-        generate_embed(filename, title, df, cfg)
+        generate_embed(filename, title, df, cfg, pinned_rows)
     print(f"\nDone. Files in {OUT_DIR}")
