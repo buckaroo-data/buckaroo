@@ -198,6 +198,116 @@ test.describe('Standalone layout: filename, prompt, fill, bottom gap', () => {
   });
 });
 
+// ---------- short-viewport coverage ------------------------------------------
+// Companion to #847: the standalone server doesn't expose autoHeight via URL,
+// but it DOES compute heightStyle() from window.innerHeight. A very short
+// viewport drives dfvHeight = innerHeight/2 to tiny values; we want to make
+// sure the layout still fills the page (no large dead band at the bottom)
+// and the bars stay visible.
+test.describe('Standalone layout — short viewports', () => {
+  let csvPath: string;
+  const PROMPT_TEXT = 'short-viewport';
+
+  test.beforeAll(() => {
+    csvPath = writeTempCsv(500);
+  });
+
+  test.afterAll(() => {
+    cleanupFile(csvPath);
+  });
+
+  const SHORT_SIZES = [
+    { width: 1280, height: 500 },
+    { width: 1280, height: 400 },
+  ];
+
+  for (const size of SHORT_SIZES) {
+    test(`large DF, viewport ${size.width}x${size.height} — grid fills the page`, async ({
+      page,
+      request,
+    }) => {
+      const session = `layout-short-${size.height}-${Date.now()}`;
+      await loadBuckaroo(request, session, csvPath, PROMPT_TEXT);
+      await page.setViewportSize(size);
+      await page.goto(`${BASE}/s/${session}`);
+      await waitForBuckarooGrid(page);
+
+      await page.screenshot({
+        path: path.join(screenshotsDir, `layout-short-${size.width}x${size.height}.png`),
+      });
+
+      const m = await measureLayout(page);
+      console.log(`Layout (large DF) at ${size.width}x${size.height}:`, JSON.stringify(m, null, 2));
+
+      // Bars stay visible even at 400px.
+      expect(m.filenameBar?.visible).toBe(true);
+      expect(m.promptBar?.visible).toBe(true);
+
+      // Grid still fills most of the viewport. We loosen the percent
+      // floor a bit for very short heights — bars eat a larger fraction.
+      expect(m.gridFillPercent).toBeGreaterThan(55);
+
+      // Bottom gap stays bounded — no dead band larger than ~35px.
+      expect(m.bottomGapFromGrid).toBeGreaterThanOrEqual(15);
+      expect(m.bottomGapFromGrid).toBeLessThanOrEqual(35);
+    });
+  }
+});
+
+// ---------- small DF (#847 territory) ----------------------------------------
+// The 500-row csv above always lands the grid in regular-mode. A 4-row csv
+// triggers heightStyle()'s short-mode branch (numRows < maxRowsWithoutScrolling)
+// — gridUtils auto-flips domLayout to "autoHeight" even without an explicit
+// prop. The standalone server's CSS (.theme-hanger { flex: 1 !important }) is
+// supposed to keep the grid stretched anyway. This test catches the case
+// where short-mode CSS would otherwise collapse the grid to ~84px and leave
+// the rest of the viewport empty.
+test.describe('Standalone layout — small DF', () => {
+  let csvPath: string;
+  const PROMPT_TEXT = 'small-df';
+
+  test.beforeAll(() => {
+    csvPath = writeTempCsv(4);
+  });
+
+  test.afterAll(() => {
+    cleanupFile(csvPath);
+  });
+
+  const SIZES = [
+    { width: 1280, height: 720 },
+    { width: 1280, height: 500 },
+  ];
+
+  for (const size of SIZES) {
+    test(`4-row CSV at ${size.width}x${size.height} — grid still fills viewport`, async ({
+      page,
+      request,
+    }) => {
+      const session = `layout-small-${size.height}-${Date.now()}`;
+      await loadBuckaroo(request, session, csvPath, PROMPT_TEXT);
+      await page.setViewportSize(size);
+      await page.goto(`${BASE}/s/${session}`);
+      await waitForBuckarooGrid(page);
+
+      await page.screenshot({
+        path: path.join(screenshotsDir, `layout-small-${size.width}x${size.height}.png`),
+      });
+
+      const m = await measureLayout(page);
+      console.log(`Layout (small DF) at ${size.width}x${size.height}:`, JSON.stringify(m, null, 2));
+
+      // The grid is bigger than 4 rows × 21px = ~84px because the
+      // standalone server's CSS stretches .theme-hanger with flex: 1.
+      // If this regresses (eg. flex: 1 override removed), the assertion
+      // catches a < 55% grid fill.
+      expect(m.gridFillPercent).toBeGreaterThan(55);
+      expect(m.bottomGapFromGrid).toBeGreaterThanOrEqual(15);
+      expect(m.bottomGapFromGrid).toBeLessThanOrEqual(35);
+    });
+  }
+});
+
 // ---------- browser_action response field ------------------------------------
 
 test.describe('POST /load response fields', () => {
