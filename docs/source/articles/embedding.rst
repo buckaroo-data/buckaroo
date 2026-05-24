@@ -331,10 +331,10 @@ assets. The bundle is built with
 include it.
 
 **Raw JS — CDN-hosted npm (no local files, no build step).**
-Since ``buckaroo-js-core`` is on npm, you can load it from any
-ESM-friendly CDN (esm.sh, jsDelivr, unpkg) and skip both the
-prebuilt static-embed bundle *and* the local file copy. The page
-below is fully self-contained — drop it on any static host, fill in
+Since ``buckaroo-js-core`` is on npm, you can load it from esm.sh
+(or jsDelivr / unpkg) and skip both the prebuilt static-embed
+bundle *and* the local file copy. The page below is fully
+self-contained — drop it on any static host, fill in
 ``#buckaroo-data`` from your backend, and it renders:
 
 .. code-block:: html
@@ -344,6 +344,17 @@ below is fully self-contained — drop it on any static host, fill in
     <head>
       <link rel="stylesheet" href="https://esm.sh/buckaroo-js-core@0.14.5/dist/style.css">
       <style>#root { width: 100%; height: 100vh; }</style>
+      <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.3.1",
+          "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+          "react-dom": "https://esm.sh/react-dom@18.3.1",
+          "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+          "buckaroo-js-core": "https://esm.sh/*buckaroo-js-core@0.14.5"
+        }
+      }
+      </script>
     </head>
     <body>
       <div id="root"></div>
@@ -351,13 +362,13 @@ below is fully self-contained — drop it on any static host, fill in
         <!-- artifact JSON written here verbatim by your backend -->
       </script>
       <script type="module">
-        import { createElement } from "https://esm.sh/react@18.3.1";
-        import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
+        import { createElement } from "react";
+        import { createRoot } from "react-dom/client";
         import {
           BuckarooStaticTable,
           resolveDFDataAsync,
           preResolveDFDataDict,
-        } from "https://esm.sh/buckaroo-js-core@0.14.5";
+        } from "buckaroo-js-core";
 
         const artifact = JSON.parse(
           document.getElementById("buckaroo-data").textContent
@@ -387,14 +398,26 @@ below is fully self-contained — drop it on any static host, fill in
     </body>
     </html>
 
-Swap ``esm.sh`` for ``cdn.jsdelivr.net/npm`` or ``unpkg.com`` if you
-prefer — the URL shape is the same
-(``https://cdn.jsdelivr.net/npm/buckaroo-js-core@0.14.5/+esm`` for
-jsDelivr's ESM-rewritten variant). esm.sh has the advantage of
-auto-resolving the React peer dependency, so the package's internal
-``import "react"`` Just Works without an import map. Pin the version
-in production — ``@0.14.5`` instead of ``@latest`` — so a future
-release can't break your page silently.
+Two non-obvious bits that make this work:
+
+- **Import map + esm.sh's "starred" build** (``https://esm.sh/*buckaroo-js-core@0.14.5``).
+  Without these, you end up with two React module instances — one
+  that ``createRoot`` renders with, another that the components
+  inside ``buckaroo-js-core`` call ``useState`` on — and the package
+  blows up with ``TypeError: can't access property "useState", i.H
+  is null``. The starred URL tells esm.sh to leave every bare
+  import (``react``, ``react-dom``, ``react/jsx-runtime``)
+  unresolved; the import map then points all of them at the same
+  pinned React, so the package and the page share one instance.
+- **Pin the version.** Use ``@0.14.5``, not ``@latest`` — esm.sh
+  caches aggressively and a future minor can change the package's
+  internal API or React-version range without warning.
+
+Swap ``esm.sh`` for ``cdn.jsdelivr.net/npm/buckaroo-js-core@0.14.5/+esm``
+or ``unpkg.com`` if you prefer; esm.sh is the easiest default
+because it serves the un-resolved (starred) build for you. With
+jsDelivr / unpkg you'd need a bundler-style build or your own
+peer-dep shim — they don't have an equivalent of the ``*`` prefix.
 
 **TypeScript — server embed with the React component.**
 If your page is already a React app (Next.js, Remix, a Vite SPA, an
