@@ -185,11 +185,15 @@ class LoadHandler(tornado.web.RequestHandler):
         if not session.ws_clients:
             return
 
-        push_msg = json.dumps(build_state_message(session, metadata=metadata))
         for client in list(session.ws_clients):
             try:
+                # Reset per-client live search first (dataset changed),
+                # then build the msg so the injected ``buckaroo_state``
+                # mirrors the post-reset value.
                 client.search_string = ""
-                client.write_message(push_msg)
+                msg = build_state_message(session, metadata=metadata,
+                    search_string=client.search_string)
+                client.write_message(json.dumps(msg))
             except Exception:
                 session.ws_clients.discard(client)
 
@@ -417,13 +421,14 @@ class LoadExprHandler(tornado.web.RequestHandler):
                         **component_config}
 
         if session.ws_clients:
-            push_msg = json.dumps(build_state_message(session, metadata=metadata))
             for client in list(session.ws_clients):
                 try:
                     # Reset per-client live search (#851): a term from
                     # the prior expression would silently filter the new one.
                     client.search_string = ""
-                    client.write_message(push_msg)
+                    msg = build_state_message(session, metadata=metadata,
+                        search_string=client.search_string)
+                    client.write_message(json.dumps(msg))
                 except Exception:
                     session.ws_clients.discard(client)
 
@@ -565,12 +570,13 @@ class LoadCompareHandler(tornado.web.RequestHandler):
 
         # Push to WebSocket clients
         if session.ws_clients:
-            push_msg = json.dumps(build_state_message(session))
             for client in list(session.ws_clients):
                 try:
                     # Reset per-client live search (#851).
                     client.search_string = ""
-                    client.write_message(push_msg)
+                    msg = build_state_message(session,
+                        search_string=client.search_string)
+                    client.write_message(json.dumps(msg))
                 except Exception:
                     session.ws_clients.discard(client)
 

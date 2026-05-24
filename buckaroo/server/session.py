@@ -58,12 +58,20 @@ mismatch. Lockstep with the buckaroo PyPI version is the documented expectation;
 this field is the runtime escape hatch."""
 
 
-def build_state_message(session: "SessionState", metadata: dict | None = None) -> dict:
+def build_state_message(session: "SessionState", metadata: dict | None = None,
+                         search_string: str = "") -> dict:
     """Build the full ``initial_state`` WebSocket payload from a session.
 
     Args:
         session: The session whose state to serialise.
         metadata: Override metadata to include; defaults to ``session.metadata``.
+        search_string: The *recipient client's* per-client live-typed
+            search term (#851). Injected into ``buckaroo_state`` so the
+            JS ``WebSocketModel`` — which replaces ``buckaroo_state``
+            wholesale on receipt — doesn't silently clear the recipient's
+            search box. The session itself never owns this value; callers
+            must pass the right value per recipient (typically
+            ``handler.search_string``).
 
     Returns:
         A dict ready to be JSON-serialised and sent to WebSocket clients.
@@ -73,7 +81,10 @@ def build_state_message(session: "SessionState", metadata: dict | None = None) -
         "prompt": session.prompt, "df_display_args": session.df_display_args, "df_data_dict": session.df_data_dict,
         "df_meta": session.df_meta, "mode": session.mode}
     if session.mode == "buckaroo":
-        msg["buckaroo_state"] = session.buckaroo_state
+        # Per-client search_string overlay (#851 Codex P1): the snapshot
+        # on the session is search-agnostic; we re-inject the recipient's
+        # value here so a missing key can't wipe it on the client.
+        msg["buckaroo_state"] = {**session.buckaroo_state, "search_string": search_string}
         msg["buckaroo_options"] = session.buckaroo_options
         msg["command_config"] = session.command_config
         msg["operation_results"] = session.operation_results
