@@ -8,6 +8,7 @@ for compact transport. The JS side decodes them via resolveDFDataAsync().
 """
 import base64
 import json
+import re
 from io import BytesIO
 from pathlib import Path
 
@@ -241,20 +242,44 @@ def to_html(df, title="Buckaroo", embed_type="DFViewer",
     return html
 
 
+# Per HTML5, a script-data / style-data block ends at "</" + tag-name
+# followed by any of TAB / LF / FF / SPACE / "/" / ">", matched
+# case-insensitively. Plain string.replace("</script>", ...) misses
+# variants like "</Script>", "</script >", "</script/", so use a regex
+# with a lookahead that mirrors the spec.
+_CLOSE_TAG_PATTERNS = {
+    name: re.compile(rf"</({name})(?=[\t\n\f />])", re.IGNORECASE)
+    for name in ("script", "style")
+}
+
+
+def _defuse_close_tag(tag_name: str, body: str) -> str:
+    """Defuse any HTML-recognisable closing form of <tag_name> in `body`.
+
+    Inserts a backslash between ``<`` and ``/`` so the HTML parser no
+    longer sees a tag terminator while the contained JS/CSS is unchanged
+    semantically (``<\\/script>`` in a JS string literal still evaluates
+    to ``"</script>"``; ``<\\/style>`` in a CSS rule is just an escaped
+    forward slash).
+    """
+    return _CLOSE_TAG_PATTERNS[tag_name].sub(r"<\\/\1", body)
+
+
 def _inline_static_assets(html: str) -> str:
     """Replace external ``static-embed.{js,css}`` references with inline blocks.
 
-    The bundled assets may contain literal ``</script>`` or ``</style>``
-    sequences (rare, but possible after minification). These are defused
-    so they cannot prematurely terminate the inline tags.
+    The bundled assets may contain a close-tag sequence (case-insensitive
+    ``</script`` or ``</style`` followed by whitespace, ``/``, or ``>``)
+    that would prematurely terminate an inline ``<script>`` / ``<style>``
+    block. ``_defuse_close_tag`` handles all such variants.
     """
     from pathlib import Path
     static_dir = Path(__file__).parent / "static"
     css_body = (static_dir / "static-embed.css").read_text()
     js_body = (static_dir / "static-embed.js").read_text()
 
-    css_inline = css_body.replace("</style>", "<\\/style>")
-    js_inline = js_body.replace("</script>", "<\\/script>")
+    css_inline = _defuse_close_tag("style", css_body)
+    js_inline = _defuse_close_tag("script", js_body)
 
     html = html.replace('<link rel="stylesheet" href="static-embed.css">', f"<style>{css_inline}</style>")
     html = html.replace('<script type="module" src="static-embed.js"></script>',

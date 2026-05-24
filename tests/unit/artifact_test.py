@@ -5,7 +5,7 @@ from io import BytesIO
 import pandas as pd
 import pytest
 
-from buckaroo.artifact import (prepare_buckaroo_artifact, artifact_to_json, to_html, _df_to_parquet_b64_tagged)
+from buckaroo.artifact import (prepare_buckaroo_artifact, artifact_to_json, to_html, _df_to_parquet_b64_tagged, _defuse_close_tag)
 
 
 simple_df = pd.DataFrame({'int_col': [1, 2, 3], 'str_col': ['a', 'b', 'c'], 'float_col': [1.1, 2.2, 3.3]})
@@ -193,6 +193,39 @@ class TestToHtml:
         if css_body.strip():
             assert css_body.splitlines()[0] in html, \
                 "inlined CSS body should be present in output"
+
+    @pytest.mark.parametrize("variant", [
+        "</script>",       # canonical lowercase
+        "</Script>",       # mixed case
+        "</SCRIPT>",       # uppercase
+        "</script >",      # trailing space before >
+        "</script\t>",     # trailing tab
+        "</script/>",      # self-closing-ish
+        "</script\n>",     # trailing LF
+    ])
+    def test_defuse_close_tag_script_variants(self, variant):
+        """Per HTML5, the script-data-end-tag-name state ends on </script
+        followed by tab/LF/FF/space/'/'/'>' (case-insensitive). The defuser
+        must escape every such variant or self_contained=True can produce
+        broken HTML if a bundled JS string ever contains one of them."""
+        defused = _defuse_close_tag("script", f"console.log('{variant}');")
+        assert variant not in defused, \
+            f"variant {variant!r} survived defusing: {defused!r}"
+        # The defused form should contain a backslash between < and /
+        assert "<\\/" in defused
+
+    @pytest.mark.parametrize("variant", ["</style>", "</Style>", "</STYLE>", "</style >", "</style/>"])
+    def test_defuse_close_tag_style_variants(self, variant):
+        defused = _defuse_close_tag("style", f".a {{ content: '{variant}'; }}")
+        assert variant not in defused
+        assert "<\\/" in defused
+
+    def test_defuse_close_tag_leaves_unrelated_text_alone(self):
+        """</scripts> (with trailing 's') is NOT a tag close per HTML5 —
+        the terminator must be whitespace/'/'/'>'. Don't over-eagerly defuse."""
+        body = "var x = '</scripts>'; var y = '</scripto>';"
+        defused = _defuse_close_tag("script", body)
+        assert defused == body, f"defuser modified unrelated text: {defused!r}"
 
     def test_self_contained_defuses_close_script(self):
         """Bundled JS containing literal </script> must not break out of the inline tag."""
