@@ -80,6 +80,7 @@ NOTEBOOKS=(
     "test_polars_dfviewer_infinite.ipynb"
     "test_infinite_scroll_transcript.ipynb"
     "test_xorq_infinite_scroll.ipynb"
+    "test_buckaroo_widget_height.ipynb"
 )
 
 # If specific notebook(s) provided, test only those (comma-separated)
@@ -388,6 +389,9 @@ for notebook in "${NOTEBOOKS[@]}"; do
         PW_TIMEOUT=45000
     elif [[ "$notebook" == "test_xorq_infinite_scroll.ipynb" ]]; then
         PW_TEST_FILE="pw-tests/xorq-infinite-scroll.spec.ts"
+        PW_TIMEOUT=60000
+    elif [[ "$notebook" == "test_buckaroo_widget_height.ipynb" ]]; then
+        PW_TEST_FILE="pw-tests/jupyter-buckaroo-height.spec.ts"
         PW_TIMEOUT=60000
     else
         PW_TEST_FILE="pw-tests/integration.spec.ts"
