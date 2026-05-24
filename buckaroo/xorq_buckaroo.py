@@ -22,13 +22,12 @@ from traitlets import Unicode
 
 from .buckaroo_widget import BuckarooInfiniteWidget, BuckarooWidget
 from .customizations.styling import DefaultMainStyling, DefaultSummaryStatsStyling
+from .customizations.xorq_autoclean_conf import NoCleaningConfXorq
 from .customizations.xorq_stats_v2 import XORQ_STATS_V2
-from .dataflow.autocleaning import (
-    AutocleaningConfig, PandasAutocleaning, generate_quick_ops, merge_ops, ops_eq)
+from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import Sampling
 from .df_util import old_col_new_col
-from .jlisp.lisp_utils import s
 from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from .pluggable_analysis_framework.xorq_stat_pipeline import XorqDfStatsV2
 from .serialization_utils import pd_to_obj, to_parquet
@@ -40,13 +39,34 @@ def _is_pandas(obj: Any) -> bool:
     return isinstance(obj, pd.DataFrame)
 
 
+# Per-expression count cache. ibis Tables are immutable, so id(expr) ↔
+# unique expression — same id, same .count() result. Saves ~250 ms on
+# every repeated call against a large remote table (#795). Cache grows
+# with one entry per unique expression object observed; entries become
+# unreachable when the expression is GC'd, so for a long-running
+# session it tracks the live set of expressions naturally.
+_expr_count_cache: dict[int, int] = {}
+
+
 def _expr_count(expr_or_df: Any) -> int:
     if _is_pandas(expr_or_df):
         return len(expr_or_df)
+    key = id(expr_or_df)
+    cached = _expr_count_cache.get(key)
+    if cached is not None:
+        return cached
     try:
-        return int(expr_or_df.count().execute())
+        result = int(expr_or_df.count().execute())
     except Exception:
+        # Don't cache failures — a transient backend error would
+        # otherwise poison the cache for the lifetime of this
+        # expression object. Return 0 so callers don't break, log
+        # so the failure is visible, leave the cache empty so the
+        # next call retries the backend.
+        logger.exception("_expr_count: backend count failed; not caching")
         return 0
+    _expr_count_cache[key] = result
+    return result
 
 
 class XorqSampling(Sampling):
@@ -89,93 +109,23 @@ class XorqSampling(Sampling):
         return df_or_expr.limit(cls.serialize_limit).execute()
 
 
-def _xorq_search(expr, _col, val):
-    """Filter rows where any string column contains ``val``.
-
-    Mirrors the contract of the pandas / polars Search commands: an
-    empty value short-circuits to a no-op so the frontend can clear
-    the search by sending ``""``.
-    """
-    if val is None or val == "":
-        return expr
-    schema = expr.schema()
-    string_cols = [name for name in expr.columns if schema[name].is_string()]
-    if not string_cols:
-        return expr
-    cond = None
-    for c in string_cols:
-        c_cond = expr[c].contains(val)
-        cond = c_cond if cond is None else cond | c_cond
-    return expr.filter(cond)
-
-
-class XorqSearch:
-    """Search command for xorq exprs — symbol/pattern only.
-
-    Defines the lisp symbol (``search``) and the quick-args pattern
-    that the frontend uses for the search box. The actual filter is
-    applied directly by ``XorqAutocleaning`` (see ``_XORQ_OP_HANDLERS``)
-    rather than going through ``configure_buckaroo``'s pandas/polars
-    interpreter, since ibis exprs are immutable and can't ``.copy()``.
-    """
-
-    command_default = [s('search'), s('df'), "col", ""]
-    command_pattern = [[3, 'term', 'type', 'string']]
-    quick_args_pattern = [[3, 'term', 'type', 'string']]
-
-    @staticmethod
-    def transform(expr, col, val):
-        return _xorq_search(expr, col, val)
-
-    @staticmethod
-    def transform_to_py(expr, col, val):
-        return f"    expr = expr.filter(... contains('{val}'))"
-
-
-_XORQ_OP_HANDLERS = {'search': _xorq_search}
-
-
-class NoCleaningConfXorq(AutocleaningConfig):
-    autocleaning_analysis_klasses = []
-    command_klasses = [XorqSearch]
-    quick_command_klasses = [XorqSearch]
-    name = ""
-
-
 class XorqAutocleaning(PandasAutocleaning):
-    """Cleaning is skipped for ibis exprs (the lisp interpreter targets
-    pandas), but quick commands like Search are applied directly.
+    """Autocleaning + interpreter for xorq/ibis expressions.
 
-    Each quick op is dispatched through ``_XORQ_OP_HANDLERS`` —
-    expression-to-expression transforms — so the result is still a
-    pushed-down xorq expr that downstream stats and pagination consume
-    unchanged.
+    Inherits the full ``PandasAutocleaning.handle_ops_and_clean`` pipeline
+    (quick-ops → merge → run lisp interpreter → make_origs → code
+    generation) unchanged. The xorq-flavoured piece is on the conf side:
+    ``autocleaning_analysis_klasses`` is empty because the pandas-flavoured
+    cleaning analyses (HeuristicFracs, etc.) don't work against ibis exprs,
+    which keeps ``cleaning_sd`` empty for this conf today — so the base
+    ``make_origs`` correctly short-circuits to ``cleaned_df`` without ever
+    constructing a ``pd.DataFrame`` from columns.
+
+    The interpreter itself runs unmodified: ``buckaroo_transform`` in
+    ``jlisp.configure_utils`` routes anything that isn't pandas or polars
+    through a pass-through copy, and each xorq Command's ``transform``
+    returns a new expr.
     """
-
-    def handle_ops_and_clean(self, df, cleaning_method, quick_command_args, existing_operations):
-        if df is None:
-            return None
-        quick_ops = generate_quick_ops(self.quick_command_klasses, quick_command_args)
-        if ops_eq(existing_operations, [{'meta': 'no-op'}]):
-            existing_for_merge = []
-        else:
-            existing_for_merge = existing_operations
-        final_ops = merge_ops(existing_for_merge, quick_ops)
-        if not final_ops:
-            return [df, {}, "", []]
-        result = self._apply_xorq_ops(df, final_ops)
-        return [result, {}, "", final_ops]
-
-    @staticmethod
-    def _apply_xorq_ops(expr, ops):
-        for op in ops:
-            sym_name = op[0]['symbol'] if isinstance(op[0], dict) else op[0]
-            handler = _XORQ_OP_HANDLERS.get(sym_name)
-            if handler is None:
-                continue
-            handler_args = op[2:]
-            expr = handler(expr, *handler_args)
-        return expr
 
 
 class XorqDataflow(CustomizableDataflow):
@@ -293,6 +243,58 @@ class XorqInfiniteSampling(XorqSampling):
     serialize_limit = -1
 
 
+def window_to_parquet(processed_df, start, end, sort_col=None, ascending=True) -> bytes:
+    """Materialise rows ``[start, end)`` and serialise to parquet — *no
+    pandas detour for the ibis path*.
+
+    Mirrors the polars infinite widget's wire path: arrow → parquet,
+    not arrow → pandas → fastparquet. The bounded query
+    ``expr.limit(end - start, offset=start)`` (after ``order_by`` when
+    ``sort_col`` is set) goes straight to ``to_pyarrow()``; the
+    resulting ``pyarrow.Table`` is column-renamed to buckaroo's
+    rewritten ``a, b, c`` space, an ``index`` column with absolute
+    offsets ``[start, start + n)`` is appended, and the table is
+    written with ``pyarrow.parquet.write_table``.
+
+    For a pandas DataFrame (postprocessor materialised, or
+    error-frame fallback) we still go through the pandas
+    ``to_parquet`` helper — there's no expression to push down.
+
+    Shared by ``XorqBuckarooInfiniteWidget`` (Jupyter, sends via
+    widget comm) and the standalone server's
+    ``handle_infinite_request_xorq`` (WebSocket binary frame). Lifted
+    to module level so both transports drive one push-down path.
+    """
+    if _is_pandas(processed_df):
+        if sort_col is not None:
+            processed_df = processed_df.sort_values(by=[sort_col], ascending=ascending)
+        df = processed_df[start:end].copy()
+        df.index = pd.RangeIndex(start, start + len(df))
+        return to_parquet(df)
+
+    expr = processed_df
+    if sort_col is not None:
+        expr = expr.order_by(
+            expr[sort_col].asc() if ascending else expr[sort_col].desc())
+    # Rename original columns to the rewritten 'a, b, c' space the
+    # frontend works in. Done at the expression level — and *before*
+    # the limit — so the outermost op stays ``Limit`` (the bounded
+    # plan stays observable for spies / query inspection).
+    rename_select = [
+        expr[orig].name(rew)
+        for orig, rew in old_col_new_col(processed_df)]
+    renamed = expr.select(rename_select)
+    windowed = renamed.limit(end - start, offset=start)
+    table = windowed.to_pyarrow()
+    # Append absolute-offset index column for the frontend.
+    index_arr = pa.array(
+        list(range(start, start + len(table))), type=pa.int64())
+    table = table.append_column('index', index_arr)
+    out = BytesIO()
+    pq.write_table(table, out, compression='none')
+    return out.getvalue()
+
+
 class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
     """Infinite-scroll buckaroo over an ibis/xorq expression.
 
@@ -331,7 +333,7 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
                 sort_col = processed_sd[sort]['orig_col_name']
                 ascending = new_payload_args.get('sort_direction') == 'asc'
 
-            window_bytes = self._window_to_parquet(processed_df, start, end, sort_col, ascending)
+            window_bytes = window_to_parquet(processed_df, start, end, sort_col, ascending)
             self.send(
                 {"type": "infinite_resp", 'key': new_payload_args,
                  'data': [], 'length': total_length},
@@ -344,7 +346,7 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
             if not second_pa:
                 return
             extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
-            extra_bytes = self._window_to_parquet(processed_df, extra_start, extra_end)
+            extra_bytes = window_to_parquet(processed_df, extra_start, extra_end)
             self.send(
                 {"type": "infinite_resp", 'key': second_pa,
                  'data': [], 'length': total_length},
@@ -356,50 +358,3 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
                 {"type": "infinite_resp", 'key': new_payload_args,
                  'data': [], 'error_info': stack_trace, 'length': 0})
             raise
-
-    @staticmethod
-    def _window_to_parquet(processed_df, start, end, sort_col=None, ascending=True) -> bytes:
-        """Materialise rows ``[start, end)`` and serialise to parquet — *no
-        pandas detour for the ibis path*.
-
-        Mirrors the polars infinite widget's wire path: arrow → parquet,
-        not arrow → pandas → fastparquet. The bounded query
-        ``expr.limit(end - start, offset=start)`` (after ``order_by`` when
-        ``sort_col`` is set) goes straight to ``to_pyarrow()``; the
-        resulting ``pyarrow.Table`` is column-renamed to buckaroo's
-        rewritten ``a, b, c`` space, an ``index`` column with absolute
-        offsets ``[start, start + n)`` is appended, and the table is
-        written with ``pyarrow.parquet.write_table``.
-
-        For a pandas DataFrame (postprocessor materialised, or
-        error-frame fallback) we still go through the pandas
-        ``to_parquet`` helper — there's no expression to push down.
-        """
-        if _is_pandas(processed_df):
-            if sort_col is not None:
-                processed_df = processed_df.sort_values(by=[sort_col], ascending=ascending)
-            df = processed_df[start:end].copy()
-            df.index = pd.RangeIndex(start, start + len(df))
-            return to_parquet(df)
-
-        expr = processed_df
-        if sort_col is not None:
-            expr = expr.order_by(
-                expr[sort_col].asc() if ascending else expr[sort_col].desc())
-        # Rename original columns to the rewritten 'a, b, c' space the
-        # frontend works in. Done at the expression level — and *before*
-        # the limit — so the outermost op stays ``Limit`` (the bounded
-        # plan stays observable for spies / query inspection).
-        rename_select = [
-            expr[orig].name(rew)
-            for orig, rew in old_col_new_col(processed_df)]
-        renamed = expr.select(rename_select)
-        windowed = renamed.limit(end - start, offset=start)
-        table = windowed.to_pyarrow()
-        # Append absolute-offset index column for the frontend.
-        index_arr = pa.array(
-            list(range(start, start + len(table))), type=pa.int64())
-        table = table.append_column('index', index_arr)
-        out = BytesIO()
-        pq.write_table(table, out, compression='none')
-        return out.getvalue()

@@ -10,15 +10,17 @@ const StatusBarWrap = ({
     dfMeta,
     buckarooState,
     buckarooOptions,
+    inFlight,
 }: {
     dfMeta: DFMeta;
     buckarooState: BuckarooState;
     buckarooOptions: BuckarooOptions;
+    inFlight?: boolean;
 }) => {
   const [bState, setBuckarooState] = useState<BuckarooState>(buckarooState);
 
   return (
-      <div className="dcf-root flex flex-col" 
+      <div className="dcf-root flex flex-col"
       style={{ width: "800px", height: "300px", border:"1px solid red" }}>
             <div
                 className="orig-df"
@@ -34,6 +36,7 @@ const StatusBarWrap = ({
       setBuckarooState={setBuckarooState}
       buckarooOptions={buckarooOptions}
       heightOverride={150}
+      inFlight={inFlight}
       />
       </div>
       <pre> {JSON.stringify(bState, undefined, 4)}</pre>
@@ -114,5 +117,17 @@ export const NoCleaningNoPostProcessing: Story = {
       df_display: ["main", "summary"],
       show_commands: ["on", "off"]
     }
+  }
+}
+
+// #813: status bar shows the in-flight indicator while a state_change is
+// being computed on the backend. Visible signal that distinguishes
+// "computing" from "filter returned zero rows" on slow xorq backends.
+export const InFlight: Story = {
+  args: {
+    dfMeta:dfm,
+    buckarooState:bs,
+    buckarooOptions:bo,
+    inFlight: true,
   }
 }

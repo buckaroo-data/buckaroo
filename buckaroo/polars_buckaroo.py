@@ -4,7 +4,7 @@ import traceback
 import polars as pl
 from traitlets import Unicode
 
-from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, RawDFViewerWidget
+from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, RawDFViewerWidget, _bk_flash, _BK_FLASH_ENABLED
 from buckaroo.df_util import old_col_new_col
 from .pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
 from .pluggable_analysis_framework.polars_analysis_management import PlDfStats
@@ -15,11 +15,27 @@ from .customizations.pl_autocleaning_conf import NoCleaningConfPl
 from .dataflow.dataflow import Sampling
 from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.widget_extension_utils import configure_buckaroo
+from .styling_helpers import obj_, pinned_histogram, pinned_filtered_histogram
 
 class PLSampling(Sampling):
     pre_limit = False
+    serialize_limit = 1_000_000
 
-local_analysis_klasses = list(PL_ANALYSIS_V2) + [DefaultSummaryStatsStyling, DefaultMainStyling]
+
+class PolarsMainStyling(DefaultMainStyling):
+    """Polars default styling — adds an optional ``?filtered_histogram``
+    pinned row alongside the bare raw ``histogram``. The ``?`` prefix
+    means JS only renders the row when at least one column has the
+    ``filtered_histogram`` key in ``merged_sd``, i.e. when a search
+    filter is active. Polars materialises the filt scope cheaply, so
+    showing both raw and filtered histograms side-by-side is the
+    default; xorq skips computing filtered_histogram (#829) and pandas
+    keeps the original ``[dtype, histogram]`` layout."""
+
+    pinned_rows = [obj_('dtype'), pinned_histogram(), pinned_filtered_histogram()]
+
+
+local_analysis_klasses = list(PL_ANALYSIS_V2) + [DefaultSummaryStatsStyling, PolarsMainStyling]
 
 
 class PolarsAutocleaning(PandasAutocleaning):
@@ -90,8 +106,11 @@ def to_parquet(df):
 class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget):
     def _handle_payload_args(self, new_payload_args):
         start, end = new_payload_args['start'], new_payload_args['end']
+        _bk_flash("infinite_request ← JS", start=start, end=end,
+            sort=new_payload_args.get('sort'))
         _unused, processed_df, merged_sd = self.dataflow.widget_args_tuple
         if processed_df is None:
+            _bk_flash("infinite_request — processed_df is None, no resp sent")
             return
 
         try:
@@ -103,29 +122,36 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
                 converted_sort_column = processed_sd[sort]['orig_col_name']
                 sorted_df = processed_df.with_row_index().sort(converted_sort_column, descending=not ascending)
                 slice_df = sorted_df[start:end]
-                #slice_df['index'] = slice_df.index
                 self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)},
                     [to_parquet(slice_df)])
+                if _BK_FLASH_ENABLED:
+                    _bk_flash("infinite_resp → JS (sorted)", rows=len(slice_df),
+                        total=len(processed_df))
             else:
                 slice_df = processed_df.with_row_index()[start:end]
-                #slice_df['index'] = slice_df.index
                 self.send({ "type": "infinite_resp", 'key':new_payload_args,
                     'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
-    
+                if _BK_FLASH_ENABLED:
+                    _bk_flash("infinite_resp → JS", rows=len(slice_df),
+                        total=len(processed_df))
+
                 second_pa = new_payload_args.get('second_request')
                 if not second_pa:
                     return
-                
+
                 extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
                 extra_df = processed_df.with_row_index()[extra_start:extra_end]
                 extra_df['index'] = extra_df.index
                 self.send(
                     {"type": "infinite_resp", 'key':second_pa, 'data':[], 'length':len(processed_df)},
                     [to_parquet(extra_df)])
+                if _BK_FLASH_ENABLED:
+                    _bk_flash("infinite_resp → JS (second)", rows=len(extra_df))
         except Exception as e:
             print(e)
             stack_trace = traceback.format_exc()
             self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'error_info':stack_trace, 'length':0})
+            _bk_flash("infinite_resp → JS (ERROR)", error=str(e))
             raise
 
 

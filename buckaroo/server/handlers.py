@@ -5,7 +5,9 @@ import platform
 import sys
 import time
 import traceback
+import uuid
 
+import tornado.escape
 import tornado.web
 
 from buckaroo.server.data_loading import (load_file, get_metadata, get_display_state, create_dataflow, get_buckaroo_display_state, load_file_lazy, get_metadata_lazy, get_display_state_lazy)
@@ -136,14 +138,21 @@ class LoadHandler(tornado.web.RequestHandler):
         """Validate and extract session_id, path, mode, prompt, no_browser, and component_config from request.
 
         Returns (session_id, path, mode, prompt, no_browser, component_config) or a tuple of Nones on error.
+
+        ``session`` is optional — when omitted the server mints a UUID and
+        returns it in the response. Lets Tauri/Electron-style hosts call /load
+        without inventing session IDs.
         """
         session_id = body.get("session")
         path = body.get("path")
 
-        if not session_id or not path:
+        if not path:
             self.set_status(400)
-            self.write({"error": "Missing 'session' or 'path'"})
+            self.write({"error": "Missing 'path'"})
             return None, None, None, None, None, None
+
+        if not session_id:
+            session_id = uuid.uuid4().hex
 
         mode = body.get("mode", "viewer")
         prompt = body.get("prompt", "")
@@ -183,7 +192,7 @@ class LoadHandler(tornado.web.RequestHandler):
         if not self.application.settings.get("open_browser", True):
             return "disabled"
 
-        port = self.application.settings.get("port", 8888)
+        port = self.application.settings["port"]
         return find_or_create_session_window(session_id, port, reload_if_found=True)
 
     def _load_file_with_error_handling(self, path: str, is_lazy: bool):
@@ -227,6 +236,17 @@ class LoadHandler(tornado.web.RequestHandler):
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
+        # Loading via /load is always pandas — clear any xorq state left
+        # by a prior /load_expr on the same session so WS dispatch routes
+        # to the new pandas dataflow rather than a stale xorq one.
+        session.backend = "pandas"
+        session.xorq_dataflow = None
+        session.expr = None
+        # Reset the live-typed row-fetch filter so a search term carried
+        # over from a prior dataset on this session doesn't silently
+        # filter the new one (Codex P1 on #839). The client's fresh
+        # buckaroo_state has search_string="" — keep the server in sync.
+        session.search_string = ""
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
@@ -276,6 +296,146 @@ class LoadHandler(tornado.web.RequestHandler):
         log.info("load session=%s path=%s rows=%d browser=%s", session_id, path, metadata["rows"], browser_action)
 
         self.write({"session": session_id, "server_pid": os.getpid(), "browser_action": browser_action, **metadata})
+
+
+class LoadExprHandler(tornado.web.RequestHandler):
+    """POST /load_expr — load a xorq/ibis expression from a build dir
+    and serve it via the xorq-backed buckaroo dataflow.
+
+    Counterpart to ``LoadHandler`` for the xorq path. Reads
+    ``build_dir`` (the output of ``xorq build`` / ``xo.build_expr``)
+    rather than a file path, since the xorq widget's value is
+    push-down query execution against the underlying backend, not
+    paging over a materialised parquet.
+
+    ``mode`` on the session is still ``"buckaroo"`` (the frontend
+    renders identically); ``session.backend = "xorq"`` discriminates
+    inside the WS dispatch."""
+
+    def _parse_request_body(self) -> dict | None:
+        try:
+            body = json.loads(self.request.body)
+        except (json.JSONDecodeError, TypeError):
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body"})
+            return None
+        if not isinstance(body, dict):
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body"})
+            return None
+        return body
+
+    async def post(self):
+        body = self._parse_request_body()
+        if body is None:
+            return
+
+        build_dir = body.get("build_dir")
+        if not build_dir:
+            self.set_status(400)
+            self.write({"error": "Missing 'build_dir'"})
+            return
+
+        try:
+            from buckaroo.server import xorq_loading
+        except ImportError:
+            self.set_status(501)
+            self.write({"error_code": "xorq_not_installed",
+                "message": "xorq is not installed on this server. "
+                "Install with `pip install buckaroo[xorq]`."})
+            return
+
+        session_id = body.get("session") or uuid.uuid4().hex
+        prompt = body.get("prompt", "")
+        no_browser = bool(body.get("no_browser", False))
+        component_config = body.get("component_config")
+
+        project_root = body.get("project_root")
+
+        try:
+            expr = xorq_loading.load_expr_build_dir(build_dir)
+            extra_klasses = (
+                xorq_loading.load_project_stat_klasses(project_root)
+                + xorq_loading.load_project_post_processing_klasses(project_root)
+                if project_root else [])
+            xorq_dataflow = xorq_loading.XorqServerDataflow(
+                expr, skip_main_serial=True, extra_klasses=extra_klasses)
+            metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, build_dir)
+        except FileNotFoundError:
+            self.set_status(404)
+            self.write({"error_code": "build_dir_not_found",
+                "message": f"Build directory not found: {build_dir}"})
+            return
+        except Exception:
+            tb = traceback.format_exc()
+            log.error("load_expr error build_dir=%s: %s", build_dir, tb)
+            resp: dict = {"error_code": "load_expr_error",
+                "message": "Failed to load xorq expression"}
+            if _BUCKAROO_DEBUG:
+                resp["details"] = tb
+            self.set_status(500)
+            self.write(resp)
+            return
+
+        sessions = self.application.settings["sessions"]
+        session = sessions.get_or_create(session_id, build_dir)
+        session.mode = "buckaroo"
+        session.backend = "xorq"
+        session.expr = expr
+        session.xorq_dataflow = xorq_dataflow
+        # Clear pandas-side state left by a prior /load on the same
+        # session so WS dispatch can no longer reach a stale dataflow.
+        session.df = None
+        session.dataflow = None
+        session.ldf = None
+        # Reset the live-typed row-fetch filter so a prior term doesn't
+        # silently filter the freshly loaded expression (Codex P1 on #839).
+        session.search_string = ""
+        session.metadata = metadata
+        session.prompt = prompt
+        if component_config:
+            session.component_config = component_config
+
+        session.df_display_args = xorq_dataflow.df_display_args
+        session.df_data_dict = xorq_dataflow.df_data_dict
+        session.df_meta = xorq_dataflow.df_meta
+        session.buckaroo_state = {
+            "cleaning_method": "", "post_processing": "", "sampled": False,
+            "show_commands": False, "df_display": "main",
+            "search_string": "", "quick_command_args": {}}
+        session.buckaroo_options = xorq_dataflow.buckaroo_options
+        session.command_config = xorq_dataflow.command_config
+        session.operation_results = {
+            "transformed_df": {"schema": {"fields": []}, "data": []},
+            "generated_py_code": "# server mode"}
+        session.operations = []
+
+        if component_config and session.df_display_args:
+            for key in session.df_display_args:
+                dvc = session.df_display_args[key].get("df_viewer_config")
+                if dvc is not None:
+                    dvc["component_config"] = {
+                        **dvc.get("component_config", {}),
+                        **component_config}
+
+        if session.ws_clients:
+            push_msg = json.dumps(build_state_message(session, metadata=metadata))
+            for client in list(session.ws_clients):
+                try:
+                    client.write_message(push_msg)
+                except Exception:
+                    session.ws_clients.discard(client)
+
+        if no_browser or not self.application.settings.get("open_browser", True):
+            browser_action = "skipped"
+        else:
+            port = self.application.settings["port"]
+            browser_action = find_or_create_session_window(session_id, port, reload_if_found=True)
+
+        log.info("load_expr session=%s build_dir=%s rows=%d backend=xorq",
+            session_id, build_dir, metadata["rows"])
+        self.write({"session": session_id, "server_pid": os.getpid(),
+            "browser_action": browser_action, **metadata})
 
 
 class LoadCompareHandler(tornado.web.RequestHandler):
@@ -425,13 +585,62 @@ class LoadCompareHandler(tornado.web.RequestHandler):
             "rows": len(merged_df), "columns": [str(c) for c in merged_df.columns], "eqs": eqs})
 
 
+def _render_engine_bar(datasets: list) -> tuple:
+    """Render the engine-dropdown HTML + JS-side dataset config for the
+    demo session page.
+
+    Returns ``(bar_html, datasets_json)``. ``bar_html`` is the inline
+    ``<div id="engine-bar">…</div>`` block, or the empty string when no
+    datasets are configured (so a vanilla server doesn't ship a dead
+    UI). ``datasets_json`` is the JSON-encoded list the inline ``<script>``
+    consumes — kept on a separate substitution so it stays alongside the
+    options it drives even when ``bar_html`` is empty.
+
+    See issue #811: the previous design hard-coded
+    ``/tmp/restaurant-complaints-pandas.parquet`` etc. inline; now the
+    operator supplies them via ``--dataset NAME=KIND:PATH``.
+
+    Uses ``tornado.escape.json_encode`` (not ``json.dumps``) because the
+    output is embedded inline in a ``<script>`` block: a target string
+    containing ``</script>`` would otherwise break out of the tag.
+    ``json_encode`` replaces ``</`` with ``<\\/``."""
+    datasets_json = tornado.escape.json_encode(datasets or [])
+    if not datasets:
+        return "", datasets_json
+    options = ["<option value=\"\">— switch dataset —</option>"]
+    for idx, ds in enumerate(datasets):
+        label = tornado.escape.xhtml_escape(ds["label"])
+        kind = tornado.escape.xhtml_escape(ds["kind"])
+        target = tornado.escape.xhtml_escape(ds["target"])
+        options.append(
+            f"<option value=\"{idx}\" data-kind=\"{kind}\" data-target=\"{target}\">"
+            f"{label} ({kind})</option>")
+    bar = (
+        "<div id=\"engine-bar\" style=\"padding: 4px 10px; font-family: sans-serif; "
+        "font-size: 12px; color: #ccc; background: #1f1f24; "
+        "border-bottom: 1px solid #333; flex-shrink: 0;\">"
+        "Dataset: "
+        "<select id=\"engine-select\" style=\"background: #2a2a30; color: #ddd; "
+        "border: 1px solid #444; padding: 2px 6px; margin-left: 6px;\">"
+        + "".join(options) + "</select>"
+        "<span id=\"engine-status\" style=\"margin-left: 12px; color: #888;\"></span>"
+        "</div>")
+    return bar, datasets_json
+
+
 class SessionPageHandler(tornado.web.RequestHandler):
     def get(self, session_id):
         self.set_header("Content-Type", "text/html")
         self.set_header("Cache-Control", "no-cache")
         import buckaroo
         ver = getattr(buckaroo, "__version__", "0")
-        html = SESSION_HTML.replace("__SESSION_ID__", session_id).replace("__VERSION__", ver)
+        datasets = self.application.settings.get("datasets", []) or []
+        engine_bar, datasets_json = _render_engine_bar(datasets)
+        html = (SESSION_HTML
+            .replace("__SESSION_ID__", session_id)
+            .replace("__VERSION__", ver)
+            .replace("__ENGINE_BAR__", engine_bar)
+            .replace("__DATASETS_JSON__", datasets_json))
         self.write(html)
 
 
@@ -477,7 +686,93 @@ SESSION_HTML = """\
 <body>
     <div id="filename-bar"></div>
     <div id="prompt-bar"></div>
+    __ENGINE_BAR__
     <div id="root"></div>
+    <script id="buckaroo-datasets" type="application/json">__DATASETS_JSON__</script>
+    <script>
+    // Engine dropdown wiring for /s/<session>. Reads the operator-supplied
+    // dataset list from the JSON ``<script>`` above (populated by
+    // ``_render_engine_bar``) and adds any ``?pd=&pl=&xq=`` query-string
+    // overrides as extra ``(from URL)`` options so URL-driven workflows
+    // survive. The dropdown element is only emitted when at least one
+    // operator dataset is registered — see issue #811.
+    (function () {
+        const SESSION_ID = "__SESSION_ID__";
+        const DATASETS = JSON.parse(
+            document.getElementById("buckaroo-datasets").textContent || "[]");
+        const qs = new URLSearchParams(window.location.search);
+        const qsOverrides = [];
+        if (qs.get("pd")) qsOverrides.push({label: "(from URL) pandas", kind: "pandas", target: qs.get("pd")});
+        if (qs.get("pl")) qsOverrides.push({label: "(from URL) lazy", kind: "lazy", target: qs.get("pl")});
+        if (qs.get("xq")) qsOverrides.push({label: "(from URL) xorq", kind: "xorq", target: qs.get("xq")});
+        const ENTRIES = DATASETS.concat(qsOverrides);
+        if (ENTRIES.length === 0) return;
+
+        // Find or inject the bar. The server emits it whenever it has
+        // operator-supplied datasets; we inject it when only QS overrides
+        // exist. Either way the rest of this function works against the
+        // same select element.
+        let sel = document.getElementById("engine-select");
+        if (!sel) {
+            const bar = document.createElement("div");
+            bar.id = "engine-bar";
+            bar.style.cssText = "padding: 4px 10px; font-family: sans-serif; font-size: 12px; color: #ccc; background: #1f1f24; border-bottom: 1px solid #333; flex-shrink: 0;";
+            bar.innerHTML = 'Dataset: <select id="engine-select" style="background: #2a2a30; color: #ddd; border: 1px solid #444; padding: 2px 6px; margin-left: 6px;"></select><span id="engine-status" style="margin-left: 12px; color: #888;"></span>';
+            document.body.insertBefore(bar, document.getElementById("root"));
+            sel = document.getElementById("engine-select");
+        }
+        const statusEl = document.getElementById("engine-status");
+
+        // Rebuild options from ENTRIES so the DOM and our index space stay
+        // in lockstep — regardless of whether the server pre-rendered the
+        // operator datasets or we just injected an empty select.
+        sel.innerHTML = '<option value="">— switch dataset —</option>';
+        ENTRIES.forEach((ds, i) => {
+            const opt = document.createElement("option");
+            opt.value = String(i);
+            opt.dataset.kind = ds.kind;
+            opt.dataset.target = ds.target;
+            opt.textContent = `${ds.label} (${ds.kind})`;
+            sel.appendChild(opt);
+        });
+
+        sel.addEventListener("change", async (e) => {
+            const idx = e.target.value;
+            if (idx === "") return;
+            const ds = ENTRIES[parseInt(idx, 10)];
+            if (!ds) return;
+            const url = ds.kind === "xorq" ? "/load_expr" : "/load";
+            const body = {session: SESSION_ID, no_browser: true};
+            if (ds.kind === "xorq") {
+                body.build_dir = ds.target;
+            } else {
+                body.path = ds.target;
+                body.mode = ds.kind === "lazy" ? "lazy" : "buckaroo";
+            }
+            const t0 = performance.now();
+            statusEl.textContent = `loading ${ds.label}…`;
+            try {
+                const r = await fetch(url, {method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(body)});
+                const dt = Math.round(performance.now() - t0);
+                if (r.ok) {
+                    const d = await r.json();
+                    statusEl.textContent = `${ds.label} loaded (${d.rows ?? "?"} rows, ${dt} ms) — reloading…`;
+                    // The widget reads its initial state on WS open. Reload
+                    // forces a clean reconnection rather than reasoning
+                    // about deep widget-level swap.
+                    setTimeout(() => window.location.reload(), 600);
+                } else {
+                    const err = await r.text();
+                    statusEl.textContent = `${ds.label} failed (${r.status}): ${err.slice(0, 200)}`;
+                }
+            } catch (ex) {
+                statusEl.textContent = `${ds.label} error: ${ex.message}`;
+            }
+        });
+    })();
+    </script>
     <script type="module" src="/static/standalone.js?v=__VERSION__"></script>
 </body>
 </html>

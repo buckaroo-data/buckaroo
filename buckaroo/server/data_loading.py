@@ -1,8 +1,10 @@
 import os
 import traceback
 from io import BytesIO
+from typing import TYPE_CHECKING
 import pandas as pd
-import polars as pl
+if TYPE_CHECKING:
+    import polars as pl
 from buckaroo.serialization_utils import to_parquet, pd_to_obj, check_and_fix_df
 from buckaroo.df_util import old_col_new_col, to_chars
 
@@ -81,37 +83,49 @@ def get_buckaroo_display_state(dataflow: ServerDataflow) -> dict:
 
 
 def handle_infinite_request_buckaroo(
-    dataflow: ServerDataflow, payload_args: dict
+    dataflow: ServerDataflow, payload_args: dict, search_string: str = ""
 ) -> tuple[dict, bytes]:
-    """Infinite scroll handler using the dataflow's processed_df and merged_sd."""
-    start = payload_args["start"]
-    end = payload_args["end"]
+    """Infinite scroll handler using the dataflow's processed_df and merged_sd.
+
+    ``search_string`` (#838) is a live-typing filter applied here on top
+    of ``processed_df``; it intentionally bypasses the dataflow's
+    ``quick_command_args.search`` path so per-keystroke edits don't
+    invalidate the stats pipeline.
+    """
+    from buckaroo.server.window import clamp_window
+    from buckaroo.customizations.pandas_commands import search_df_str
     _unused, processed_df, merged_sd = dataflow.widget_args_tuple
     if processed_df is None:
         return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0}, b"")
-
     try:
+        filtered_df = search_df_str(processed_df, search_string) if search_string else processed_df
+        # Clamp window against the *filtered* size so a search that
+        # shrinks the result set doesn't ship an oversized window.
+        start, end = clamp_window(
+            payload_args.get("start"), payload_args.get("end"), len(filtered_df))
+
         sort = payload_args.get("sort")
         if sort:
             ascending = payload_args.get("sort_direction") == "asc"
             # merged_sd maps renamed col -> stats dict with 'orig_col_name'
             converted_sort_column = merged_sd[sort]["orig_col_name"]
-            sorted_df = processed_df.sort_values(
+            sorted_df = filtered_df.sort_values(
                 by=[converted_sort_column], ascending=ascending)
             slice_df = sorted_df[start:end]
         else:
-            slice_df = processed_df[start:end]
+            slice_df = filtered_df[start:end]
 
         parquet_bytes = to_parquet(slice_df)
-        msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": len(processed_df)}
+        msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": len(filtered_df)}
         return msg, parquet_bytes
     except Exception:
         return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0,
             "error_info": traceback.format_exc()}, b"")
 
 
-def load_file_lazy(path: str) -> pl.LazyFrame:
+def load_file_lazy(path: str) -> "pl.LazyFrame":
     """Open a file as a Polars LazyFrame — no data read until sliced."""
+    import polars as pl
     ext = os.path.splitext(path)[1].lower()
     if ext in (".parquet", ".parq"):
         return pl.scan_parquet(path)
@@ -125,7 +139,8 @@ def load_file_lazy(path: str) -> pl.LazyFrame:
         raise ValueError(f"Unsupported file format for lazy loading: {ext}")
 
 
-def get_metadata_lazy(ldf: pl.LazyFrame, path: str) -> dict:
+def get_metadata_lazy(ldf: "pl.LazyFrame", path: str) -> dict:
+    import polars as pl
     schema = ldf.collect_schema()
     col_names = schema.names()
     col_dtypes = schema.dtypes()
@@ -134,7 +149,7 @@ def get_metadata_lazy(ldf: pl.LazyFrame, path: str) -> dict:
     return {"path": path, "rows": total_rows, "columns": columns}
 
 
-def get_display_state_lazy(ldf: pl.LazyFrame) -> tuple[dict, dict, dict]:
+def get_display_state_lazy(ldf: "pl.LazyFrame") -> tuple[dict, dict, dict]:
     """Return (display_state, orig_to_rw, rw_to_orig) for a lazy frame."""
     schema = ldf.collect_schema()
     col_names = schema.names()
@@ -161,11 +176,15 @@ def get_display_state_lazy(ldf: pl.LazyFrame) -> tuple[dict, dict, dict]:
     return display_state, orig_to_rw, rw_to_orig
 
 
-def handle_infinite_request_lazy(ldf: pl.LazyFrame, orig_to_rw: dict, rw_to_orig: dict, total_rows: int,
+def handle_infinite_request_lazy(ldf: "pl.LazyFrame", orig_to_rw: dict, rw_to_orig: dict, total_rows: int,
         payload_args: dict) -> tuple[dict, bytes]:
     """Serve an infinite-scroll slice from a Polars LazyFrame."""
-    start = int(payload_args.get("start", 0))
-    end = int(payload_args.get("end", 0))
+    import polars as pl
+    from buckaroo.server.window import clamp_window
+    # Clamp window against total_rows so end >> total doesn't ship
+    # the entire LazyFrame in one parquet frame. See #797.
+    start, end = clamp_window(
+        payload_args.get("start", 0), payload_args.get("end", 0), total_rows)
 
     base = ldf.select(pl.all())
     sort_col = payload_args.get("sort")
@@ -273,8 +292,10 @@ def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[dict,
     (a, b, c, ...) since that's what the Parquet data uses. We need to
     map it back to the original column name for sorting.
     """
-    start = payload_args["start"]
-    end = payload_args["end"]
+    from buckaroo.server.window import clamp_window
+    # Clamp window against df length — see #797.
+    start, end = clamp_window(
+        payload_args.get("start"), payload_args.get("end"), len(df))
 
     sort = payload_args.get("sort")
     if sort:

@@ -12,3 +12,6 @@ def inherit_(pkey):
 
 def pinned_histogram():
     return {'primary_key_val': 'histogram', 'displayer_args': {'displayer': 'histogram'}}
+
+def pinned_filtered_histogram():
+    return {'primary_key_val': '?filtered_histogram', 'displayer_args': {'displayer': 'histogram'}}

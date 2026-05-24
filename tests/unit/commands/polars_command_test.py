@@ -5,7 +5,7 @@ import numpy as np
 from polars.testing import assert_frame_equal
 from buckaroo.jlisp.configure_utils import configure_buckaroo
 from buckaroo.customizations.polars_commands import (
-    DropCol, FillNA, GroupBy #, OneHot, GroupBy, reindex
+    DropCol, FillNA, GroupBy, Search #, OneHot, GroupBy, reindex
 )
 from buckaroo.jlisp.lisp_utils import s
 
@@ -28,7 +28,7 @@ def assert_to_py_same_transform_df(command_kls, operations, test_df):
     _a, _b, transform_df, transform_to_py = configure_buckaroo([command_kls])
     tdf_ops = [{'symbol': 'begin'}]
     tdf_ops.extend(operations)
-    tdf = transform_df(tdf_ops, test_df.clone())
+    tdf, _sd = transform_df(tdf_ops, test_df.clone(), {})
     py_code_string = transform_to_py(operations)
 
     edf = result_from_exec(py_code_string, test_df.clone())
@@ -65,6 +65,36 @@ def Xtest_groupby():
          'c(sum)':   [  50,   40,   60]},
         schema=OrderedDict([('a', pl.Utf8), ('b(count)', pl.UInt32), ('c(sum)', pl.Int64)]))
     assert_frame_equal(output_df, expected)
+
+
+# ============================================================================
+# Search command tests — parity with pandas Search (see pandas_commands_test.py)
+# ============================================================================
+
+def test_polars_search_none_needle():
+    """Polars Search returns full df unchanged when needle is None.
+
+    Mirrors the pandas Search guard at pandas_commands.py:478. The widget's
+    quick_command_args.search path (per PR #743) treats Search as filter-like
+    and refetches via getRows on each keystroke — when the user clears the
+    box the term arrives as None, and polars's str.contains(None) drops every
+    row instead of returning the full df.
+    """
+    base_df = pl.DataFrame({'a': ['Alice', 'Bob'], 'b': [1, 2]})
+    result = Search.transform(base_df.clone(), 'a', None)
+    assert_frame_equal(result, base_df)
+
+
+def test_polars_search_empty_needle():
+    """Polars Search returns full df unchanged when needle is empty.
+
+    Regression guard. Today pl.col(pl.String).str.contains("") happens to
+    match every row, but that's an implementation detail of polars; the
+    explicit guard in Search.transform pins parity with pandas Search.
+    """
+    base_df = pl.DataFrame({'a': ['Alice', 'Bob'], 'b': [1, 2]})
+    result = Search.transform(base_df.clone(), 'a', '')
+    assert_frame_equal(result, base_df)
 
 
 '''

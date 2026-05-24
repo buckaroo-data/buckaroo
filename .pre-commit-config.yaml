@@ -3,6 +3,11 @@ repos:
     rev: v1.7.11
     hooks:
       - id: actionlint
+        # Without an explicit `stages`, pre-commit's default is "all
+        # stages" — which would (mis)fire this on `git push` as well.
+        # Pin to pre-commit so the pre-push gate stays scoped to the
+        # full-tree lint hooks below.
+        stages: [pre-commit]
   - repo: local
     hooks:
       - id: paddy-format
@@ -12,3 +17,34 @@ repos:
         types: [python]
         files: ^(buckaroo|tests|scripts)/.*\.py$
         exclude: ^buckaroo/jlisp/lispy\.py$
+        # Rewriting variant — must not run on push. The push-time check
+        # is `paddy-format-check-full` below.
+        stages: [pre-commit]
+      - id: tsc-buckaroo-js-core
+        name: tsc buckaroo-js-core
+        # Type-check the whole project, not just staged files — TS needs
+        # to resolve imports across the project graph. ~0.65s warm.
+        entry: pnpm --filter buckaroo-js-core exec tsc -b
+        language: system
+        files: ^packages/buckaroo-js-core/.*\.(ts|tsx)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # Pre-push gate: re-run CI's Python / Lint job locally before push.
+      # The pre-commit `paddy-format` hook above only sees staged files,
+      # so drift in a file you didn't touch (e.g. introduced by a recent
+      # merge to main) slips through and only surfaces on CI. Mirrors
+      # the `LintPython` job in .github/workflows/checks.yml.
+      - id: ruff-check-full
+        name: ruff check (full tree)
+        entry: uv run ruff check
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
+      - id: paddy-format-check-full
+        name: paddy-format --check (full tree)
+        entry: bash -c 'find buckaroo tests scripts -type f -name "*.py" -not -path "buckaroo/jlisp/lispy.py" -print0 | xargs -0 uv run python scripts/paddy_format.py --check'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true

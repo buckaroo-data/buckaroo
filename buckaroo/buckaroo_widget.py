@@ -7,7 +7,10 @@
 """
 TODO: Add module docstring
 """
+import os
+import sys
 import traceback
+from datetime import datetime
 from typing import Literal, Union
 import pandas as pd
 import json
@@ -34,6 +37,21 @@ from .dataflow.autocleaning import PandasAutocleaning
 from pathlib import Path
 
 logger = logging.getLogger()
+
+# Opt-in cross-boundary tracing. Set BUCKAROO_BK_FLASH=1 in the kernel
+# environment AND globalThis.__BK_FLASH__ = true in the browser before
+# bundle load to see Python `[bk-flash-py HH:MM:SS.mmm]` and JS
+# `[bk-flash …]` lines interleaved for the same widget interaction.
+_BK_FLASH_ENABLED = os.environ.get("BUCKAROO_BK_FLASH", "").lower() in ("1", "true", "yes")
+
+
+def _bk_flash(event, **extra):
+    if not _BK_FLASH_ENABLED:
+        return
+    ts = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+    extras = ' '.join(f"{k}={v!r}" for k, v in extra.items())
+    suffix = f" {extras}" if extras else ""
+    print(f"[bk-flash-py {ts}] {event}{suffix}", file=sys.stderr, flush=True)
 
 class PdSampling(Sampling):
     @classmethod
@@ -201,6 +219,11 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     @exception_protect('buckaroo_state-protector')
     def _buckaroo_state(self, change):
         old, new = change['old'], change['new']
+        if _BK_FLASH_ENABLED:
+            changed = [k for k in new if old.get(k) != new.get(k)]
+            if changed:
+                _bk_flash("buckaroo_state ← JS", changed=changed,
+                    quick_command_args=new.get('quick_command_args'))
         if not old['post_processing'] == new['post_processing']:
             self.dataflow.post_processing_method = new['post_processing']
         if not old['cleaning_method'] == new['cleaning_method']:
@@ -321,8 +344,10 @@ class BuckarooInfiniteWidget(BuckarooWidget):
         """
        put together df_dict for consumption by the frontend
         """
+        _bk_flash("_handle_widget_change ENTER")
         _unused, processed_df, merged_sd = self.dataflow.widget_args_tuple
         if processed_df is None:
+            _bk_flash("_handle_widget_change EXIT — processed_df is None")
             return
 
         # df_data_dict is still hardcoded for now
@@ -358,6 +383,7 @@ class BuckarooInfiniteWidget(BuckarooWidget):
             temp_display_args['main']['df_viewer_config']['component_config'] = self.dataflow.component_config
 
         self.df_display_args = temp_display_args
+        _bk_flash("_handle_widget_change EXIT (df_display_args → JS)")
 
 
     def __init__(self, orig_df, debug=False,
@@ -381,8 +407,11 @@ class BuckarooInfiniteWidget(BuckarooWidget):
 
     def _handle_payload_args(self, new_payload_args):
         start, end = new_payload_args['start'], new_payload_args['end']
+        _bk_flash("infinite_request ← JS", start=start, end=end,
+            sort=new_payload_args.get('sort'))
         _unused, processed_df, merged_sd = self.dataflow.widget_args_tuple
         if processed_df is None:
+            _bk_flash("infinite_request — processed_df is None, no resp sent")
             return
 
         try:
@@ -396,15 +425,21 @@ class BuckarooInfiniteWidget(BuckarooWidget):
                 slice_df = sorted_df[start:end]
                 self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'length':len(processed_df)},
                     [to_parquet(slice_df)])
+                if _BK_FLASH_ENABLED:
+                    _bk_flash("infinite_resp → JS (sorted)", rows=len(slice_df),
+                        total=len(processed_df))
             else:
                 slice_df = processed_df[start:end]
                 self.send({ "type": "infinite_resp", 'key':new_payload_args,
                     'data': [], 'length':len(processed_df)}, [to_parquet(slice_df) ])
-    
+                if _BK_FLASH_ENABLED:
+                    _bk_flash("infinite_resp → JS", rows=len(slice_df),
+                        total=len(processed_df))
+
                 second_pa = new_payload_args.get('second_request')
                 if not second_pa:
                     return
-                
+
                 extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
                 extra_df = processed_df[extra_start:extra_end]
                 self.send(
@@ -414,6 +449,7 @@ class BuckarooInfiniteWidget(BuckarooWidget):
             logger.error(e)
             stack_trace = traceback.format_exc()
             self.send({ "type": "infinite_resp", 'key':new_payload_args, 'data':[], 'error_info':stack_trace, 'length':0})
+            _bk_flash("infinite_resp → JS (ERROR)", error=str(e))
             raise
 
 

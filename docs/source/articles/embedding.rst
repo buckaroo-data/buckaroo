@@ -551,16 +551,92 @@ want to revisit; integration with external tools (MCP, scripts,
 5. Full JS embedding via npm
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``npm install buckaroo-js-core`` and import the React components
-directly — no Python required at any point. Build the
-``df_viewer_config`` and the row data on the JS side (typically from
-a parquet file fetched over HTTP, or from your own backend) and feed
-it to ``DFViewer`` or ``BuckarooStaticTable``. This is the same set
-of components the static-embed bundle and the server-embed path
-above use.
+``buckaroo-js-core`` ships the React components, the
+``WebSocketModel`` glue, and a ready-made ``BuckarooServerView`` that
+talks to a running Buckaroo server. JS apps can ``npm install
+buckaroo-js-core`` and embed Buckaroo straight into their React tree —
+**no iframe**. The component renders inline, inherits the host's CSS
+context, and lets you control sizing and lifecycle with regular React
+props.
 
-The Storybook stories drive the components from raw JS data with no
-Python on the other end. Run them locally with:
+There are two flavors of embedding, depending on whether you have a
+live server.
+
+**5a. Server-backed (infinite scroll, live data)**
+
+Start a Buckaroo server somewhere reachable:
+
+.. code-block:: bash
+
+    python -m buckaroo.server --port 8700
+    curl -X POST http://localhost:8700/load \
+        -H 'Content-Type: application/json' \
+        -d '{"session":"sales", "path":"/data/sales.parquet", "mode":"buckaroo"}'
+
+Then in your React app:
+
+.. code-block:: tsx
+
+    import { BuckarooServerView, buckarooWsUrl } from "buckaroo-js-core";
+    import "buckaroo-js-core/style.css";
+
+    function SalesPanel() {
+      return (
+        <div style={{ height: 600 }}>
+          <BuckarooServerView
+            wsUrl={buckarooWsUrl("http://localhost:8700", "sales")}
+            onMetadata={(m) => console.log("loaded:", m.path)}
+          />
+        </div>
+      );
+    }
+
+The component opens the WebSocket, waits for the server's
+``initial_state``, decodes the embedded parquet, and renders the same
+``BuckarooInfiniteWidget`` or ``DFViewerInfiniteDS`` the standalone
+page uses — selected by the session's ``mode``. Sort, infinite
+scroll, search, and post-processing all work the way they do in the
+standalone page; the server is doing the same things either way.
+
+The server's ``check_origin`` is permissive by default — cross-origin
+embedding works without configuration. Set ``BUCKAROO_STRICT_ORIGIN=1``
+on the server to restrict to localhost.
+
+**5b. Static (no server, no Python at view time)**
+
+For a fully static embed, build the artifact in Python and render it
+on the JS side:
+
+.. code-block:: python
+
+    from buckaroo import prepare_buckaroo_artifact, artifact_to_json
+
+    artifact = prepare_buckaroo_artifact(df, embed_type="DFViewer")
+    json_str = artifact_to_json(artifact)
+    # serve json_str to your page however you want
+
+.. code-block:: typescript
+
+    import {
+        BuckarooStaticTable,
+        resolveDFDataAsync,
+        preResolveDFDataDict,
+    } from "buckaroo-js-core";
+    import "buckaroo-js-core/style.css";
+
+    const artifact = JSON.parse(jsonStrFromYourBackend);
+    const dfData = await resolveDFDataAsync(artifact.df_data);
+    const summary = await resolveDFDataAsync(artifact.summary_stats_data);
+    const resolved = { ...artifact, df_data: dfData, summary_stats_data: summary };
+    // <BuckarooStaticTable artifact={resolved} />
+
+Same eager-only limitations as the static-HTML deployment — full
+sampled dataframe in the page, no command UI without Python.
+
+**Storybook reference**
+
+For an exhaustive demo of the components, the Storybook stories drive
+the same React entry points from raw JS data. Run locally with:
 
 .. code-block:: bash
 
@@ -570,21 +646,19 @@ Python on the other end. Run them locally with:
 The most directly relevant stories:
 
 - `DFViewer.stories.tsx <https://github.com/buckaroo-data/buckaroo/blob/main/packages/buckaroo-js-core/src/stories/DFViewer.stories.tsx>`_ —
-  plain table fed by a JS ``df_data`` array and a ``df_viewer_config``
-  object. Closest match to what an npm consumer will write.
+  plain table fed by a JS ``df_data`` array and ``df_viewer_config``.
 - `DFViewerInfiniteShadow.stories.tsx <https://github.com/buckaroo-data/buckaroo/blob/main/packages/buckaroo-js-core/src/stories/DFViewerInfiniteShadow.stories.tsx>`_ —
-  the infinite-scroll variant with a JS-side mock datasource, showing
-  the row-fetch contract you'd implement against your backend.
+  the infinite-scroll variant with a JS-side mock datasource. Useful
+  for understanding the row-fetch contract that
+  ``BuckarooServerView`` implements against the Buckaroo server.
 - `BuckarooWidgetTest.stories.tsx <https://github.com/buckaroo-data/buckaroo/blob/main/packages/buckaroo-js-core/src/stories/BuckarooWidgetTest.stories.tsx>`_ —
   the full BuckarooWidget with status bar, summary stats, and a JS-side
-  shim that handles search via ``quick_command_args``. Useful for
-  understanding what the widget expects from the host app once Python
-  is out of the picture.
+  shim that handles search via ``quick_command_args``.
 - `Styling.stories.tsx <https://github.com/buckaroo-data/buckaroo/blob/main/packages/buckaroo-js-core/src/stories/Styling.stories.tsx>`_
   and
   `ThemeCustomization.stories.tsx <https://github.com/buckaroo-data/buckaroo/blob/main/packages/buckaroo-js-core/src/stories/ThemeCustomization.stories.tsx>`_ —
-  same theming and column-config dicts described in
-  :doc:`theme-customization` and :doc:`data_flow`, but assembled in JS.
+  theming and column-config dicts from :doc:`theme-customization` and
+  :doc:`data_flow`, assembled in JS.
 
 
 Interactive features and where they work
@@ -672,8 +746,10 @@ Quick chooser
      - ``XorqBuckarooInfiniteWidget`` (notebook, push-down stats)
    * - Letting Claude Code view data files
      - Buckaroo server via MCP (``buckaroo[mcp]``)
-   * - JS app, no Python at view time, npm install
-     - ``buckaroo-js-core`` (npm) — see "Full JS embedding via npm"
+   * - React app embedding a live Buckaroo session
+     - ``BuckarooServerView`` from ``buckaroo-js-core`` (mode 5a)
+   * - React app, no Python at view time
+     - ``BuckarooStaticTable`` from ``buckaroo-js-core`` (mode 5b)
    * - Read-only table inside an existing app
      - ``DFViewer`` family (any deployment)
    * - Full clean-and-explore UI

@@ -468,3 +468,35 @@ class TestBackendThreading:
         assert (
             backend.calls <= 5
         ), f"histogram is recomputing min/max; saw {backend.calls} queries"
+
+
+class TestMaterialization:
+    """Lazy filter/clean chains get materialized to a fresh DataFusion table
+    so per-column histogram queries don't re-execute the chain N times."""
+
+    def test_skipped_for_base_tables(self):
+        """A registered base table shouldn't be re-materialized — that's
+        pure overhead with no filter chain to amortize."""
+        con = xo.connect()
+        df = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6, 7], "y": list("abcdefg")})
+        t = con.create_table("t_mat_skip", df)
+        before = set(con.list_tables())
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        pipeline.process_table(t)
+        new = set(con.list_tables()) - before
+        leaked = [n for n in new if n.startswith("__buckaroo_histo_mat")]
+        assert leaked == [], f"materialization fired for a base table: {leaked}"
+
+    def test_materialized_table_dropped_after_call(self):
+        """Materialized tables created for filter chains are cleaned up
+        so the backend connection doesn't accumulate temp tables."""
+        con = xo.connect()
+        df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
+        t = con.create_table("t_mat_filt", df)
+        filt = t.filter(t.v > 1)  # lazy chain → triggers materialization
+        before = set(con.list_tables())
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        pipeline.process_table(filt)
+        leaked = [n for n in (set(con.list_tables()) - before)
+                  if n.startswith("__buckaroo_histo_mat")]
+        assert leaked == [], f"materialized table not cleaned up: {leaked}"

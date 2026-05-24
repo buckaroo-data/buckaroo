@@ -46,6 +46,22 @@ def test_unhashable():
     assert     {'length': 2, 'null_count': 0,
         'mode': np.nan, 'min': np.nan, 'max': np.nan} == cleaned_result
 
+def test_unhashable_value_counts_empty():
+    # value_counts on a list/dict/set-typed Series is meaningless (each row is
+    # effectively unique) and pandas falls back to an O(n^2) pairwise compare.
+    # series_summary should short-circuit and return an empty value_counts. #843
+    list_ser = pd.Series([['a'], ['b'], ['a']])
+    result = DefaultSummaryStats.series_summary(list_ser, list_ser)
+    assert len(result['value_counts']) == 0
+
+    dict_ser = pd.Series([{'a': 1}, {'b': 2}])
+    result = DefaultSummaryStats.series_summary(dict_ser, dict_ser)
+    assert len(result['value_counts']) == 0
+
+    set_ser = pd.Series([{1, 2}, {3, 4}])
+    result = DefaultSummaryStats.series_summary(set_ser, set_ser)
+    assert len(result['value_counts']) == 0
+
 def test_unhashable3():
     ser = pd.Series([{'a':1, 'b':2}, {'b':10, 'c': 5}])
     DefaultSummaryStats.series_summary(ser, ser) # 'nan_per'

@@ -21,6 +21,7 @@ from .styling_core import (
 
 
 from .abc_dataflow import ABCDataflow
+from .sd_cache import hash_chain, split_chain_by_scope
 
 
 class DfTrait(Any):
@@ -107,6 +108,20 @@ class DataFlow(ABCDataflow):
 
     merged_sd = Any()
 
+    # Keyed summary-stats cache — Python-internal memoization. Three
+    # pointer traits carry an opaque hash of the op chain (and source-df
+    # identity) that produced each scope's df; ``summary_stats_cache``
+    # maps those hashes to the in-process SD dict. The dataflow merges
+    # the three scope SDs into the single prefixed ``merged_sd`` (bare
+    # keys from raw, ``filtered_*`` keys from filt) the frontend already
+    # consumes via the ``?`` optional-pinned-row mechanism (#777). The
+    # cache + pointer traits stay un-synced — the frontend never reads
+    # them directly.
+    raw_sd_key = Unicode('')
+    clean_sd_key = Unicode('')
+    filt_sd_key = Unicode('')
+    summary_stats_cache = Dict({})
+
     style_method = Unicode('simple')
     column_config = Any()
 
@@ -151,19 +166,30 @@ class DataFlow(ABCDataflow):
 
         These merged operations are then set back onto the "self.operations" trait.
 
-        Obviously this can lead to cycles so this code must be approached carefully
-
+        Obviously this can lead to cycles so this code must be approached carefully.
+        Concretely: this method sets ``self.operations = result[3]`` while
+        also observing the ``operations`` trait, so the observer re-fires
+        inside its own execution. Without the reentry guard below, every
+        downstream observer (cleaned → processed_result → _summary_sd →
+        populate_df_meta) runs twice per single ``quick_command_args``
+        change — measured as ~2× search latency for a 500k-row xorq frame.
         """
-        result = self.ac_obj.handle_ops_and_clean(
-            self.sampled_df, self.cleaning_method, self.quick_command_args, self.operations)
-
-        if result is None:
+        if getattr(self, '_in_operation_result', False):
             return
-        else:
-            self.cleaned = result
-            self.operations = result[3]
-        self.operation_results = {'transformed_df':None,
-            'generated_py_code': self.generated_code}
+        self._in_operation_result = True
+        try:
+            result = self.ac_obj.handle_ops_and_clean(
+                self.sampled_df, self.cleaning_method, self.quick_command_args, self.operations)
+
+            if result is None:
+                return
+            else:
+                self.cleaned = result
+                self.operations = result[3]
+            self.operation_results = {'transformed_df':None,
+                'generated_py_code': self.generated_code}
+        finally:
+            self._in_operation_result = False
 
     @property
     def cleaned_df(self):
@@ -379,33 +405,199 @@ class CustomizableDataflow(DataFlow):
     df_data_dict = Any({'empty':[]}).tag(sync=True)
 
 
-    @observe('summary_sd', 'processed_result')
+    @observe('summary_sd', 'processed_result', 'clean_sd_key', 'filt_sd_key')
     @exception_protect('merged_sd-protector')
     def _merged_sd(self, change):
-        #slightly inconsitent that processed_sd gets priority over
-        #summary_sd, given that processed_df is computed first. My
-        #thinking was that processed_sd has greater total knowledge
-        #and should supersede summary_sd.
+        # Bare keys come from the raw scope's SD (computed on
+        # sampled_df). ``cleaned_*`` keys are layered on top from the
+        # clean scope's SD when cleaning is active; ``filtered_*`` keys
+        # are layered on top from the filt scope's SD when a search
+        # filter is active. Scope SDs are read from the keyed cache
+        # (#783) — the cache observer ``_populate_sd_cache`` is what
+        # computes and stores them; this observer just assembles the
+        # wire shape #777's `?key` JS consumes.
+        #
+        # clean_sd_key and filt_sd_key are in the observed set so this
+        # fires after ``_populate_sd_cache`` has updated the pointers
+        # (which it always does, even on a pure cache hit) — guarantees
+        # the cache lookups below see the right keys for the current
+        # state.
+
+        # Resolve scope SDs. Falls back to summary_sd / cleaned_sd
+        # for pre-cache-population states (initial startup, the brief
+        # window before _populate_sd_cache has fired).
+        cache = self.summary_stats_cache or {}
+        raw_sd = cache.get(self.raw_sd_key) if self.raw_sd_key else None
+        if raw_sd is None:
+            raw_sd = self.summary_sd or {}
+        clean_sd = cache.get(self.clean_sd_key) if self.clean_sd_key else None
+        if clean_sd is None:
+            clean_sd = self.cleaned_sd or {}
+        filt_sd = cache.get(self.filt_sd_key) if self.filt_sd_key else None
+        if filt_sd is None:
+            filt_sd = self.summary_sd or {}
+
+        # Gate each prefixed layer on a chain-shape diff between scopes.
+        # ``cleaned_*`` fires when the clean chain has ops the raw chain
+        # doesn't (cleaning is on); ``filtered_*`` fires when the filt
+        # chain has ops the clean chain doesn't (at least one
+        # quick-command op is present, i.e. a search filter is on).
+        # Keying off ``filt_sd_key != raw_sd_key`` would also fire
+        # ``filtered_*`` for cleaning-only states, mislabelling cleaned
+        # stats as filtered.
+        chains = split_chain_by_scope(self.operations)
+        cleaning_active = chains['clean'] != chains['raw']
+        filter_active = chains['filt'] != chains['clean']
 
         if self.processed_df is None:
             #on initial startup
-            self.merged_sd = merge_sds(self.init_sd, self.cleaned_sd, self.summary_sd, self.processed_sd)
+            self.merged_sd = merge_sds(self.init_sd, self.cleaned_sd, raw_sd, self.processed_sd)
             return
 
         #we do this to get rewrtten keys for init_sd
         rewritten_init_sd = merge_sd_overrides({}, self.processed_df, self.init_sd)
-        intermediate_sd = merge_sds(rewritten_init_sd, self.cleaned_sd, self.summary_sd)
-        self.merged_sd  = merge_sd_overrides(
-            intermediate_sd, self.processed_df, self.processed_sd)
+        intermediate_sd = merge_sds(rewritten_init_sd, self.cleaned_sd, raw_sd)
+        base = merge_sd_overrides(intermediate_sd, self.processed_df, self.processed_sd)
 
+        # Layer ``cleaned_*`` keys on top when cleaning is active.
+        if cleaning_active and clean_sd:
+            for col, stats in clean_sd.items():
+                col_dict = base.setdefault(col, {})
+                for stat_name, val in stats.items():
+                    col_dict[f'cleaned_{stat_name}'] = val
 
+        # Layer ``filtered_*`` keys on top when a filter is active.
+        if filter_active and filt_sd:
+            for col, stats in filt_sd.items():
+                col_dict = base.setdefault(col, {})
+                for stat_name, val in stats.items():
+                    col_dict[f'filtered_{stat_name}'] = val
+
+        self.merged_sd = base
+
+    def _compute_scope_df(self, scope: str):
+        """Return the df that scope's SD should be computed against.
+
+        For raw + clean, also apply post-processing to the result —
+        post-processing isn't an op chain entry, but it does transform
+        the visible df. Without this, when a post-processing method
+        like ``hide_post`` replaces the frame entirely, the raw-scope
+        bare keys in ``merged_sd`` would carry the pre-post-processing
+        column metadata while ``processed_df`` shows the new columns.
+
+        Subclasses with a real autocleaning interpreter can produce a
+        clean-without-filter df; the base case (no real cleaning) falls
+        back to sampled_df for raw/clean and processed_df for filt.
+        """
+        if scope == 'filt':
+            return self.processed_df
+        if scope == 'raw':
+            base = self.sampled_df
+        else:
+            # scope == 'clean'
+            clean_ops = split_chain_by_scope(self.operations)['clean']
+            run_interp = getattr(self.ac_obj, '_run_df_interpreter', None)
+            if not clean_ops or run_interp is None:
+                base = self.sampled_df
+            else:
+                try:
+                    cleaned_df, _sd = run_interp(self.sampled_df, clean_ops, {})
+                except Exception:
+                    return self.sampled_df
+                base = cleaned_df
+        # Apply post-processing on top of the scope-specific base.
+        pp_method = self.post_processing_method
+        if not pp_method:
+            return base
+        try:
+            pp_result = self._compute_processed_result(base, pp_method)
+        except Exception:
+            return base
+        return pp_result[0] if pp_result else base
+
+    def _scope_cache_key(self, chain):
+        """Hash that identifies a scope's SD-input identity.
+
+        Includes the op chain *and* an identifier for the source
+        dataframe (``id(sampled_df)``) *and* the post-processing method
+        *and* the analysis-klasses identity — all four are inputs to
+        the scope's SD, and a cache hit must mean "same SD-producing
+        inputs" not just "same chain".
+
+        - sampled_df identity addresses codex P1 on #783: a ``raw_df``
+          swap with an unchanged chain must invalidate.
+        - post_processing_method addresses the
+          ``test_hide_column_config_post_processing`` invariant: when
+          post-processing replaces the df entirely (e.g. ``hide_post``
+          → ``SENTINEL_DF``), the raw scope's SD must reflect that
+          new df, not the pre-post-processing one.
+        - analysis_klasses identity addresses codex P2 on #783: a
+          klass-list swap with an unchanged chain must invalidate so
+          new stat klasses surface in ``merged_sd``.
+        """
+        sampled_id = id(self.sampled_df) if self.sampled_df is not None else 0
+        pp = self.post_processing_method or ''
+        klasses_id = id(self.analysis_klasses)
+        return hash_chain(chain, extra=f"{sampled_id}|{pp}|{klasses_id}")
+
+    @observe('summary_sd', 'operations', 'analysis_klasses')
+    @exception_protect('sd-cache-protector')
+    def _populate_sd_cache(self, _change):
+        """Write per-scope SD dicts into ``summary_stats_cache``.
+
+        Each scope's chain (paired with sampled_df identity) hashes to a
+        stable opaque key. Entries already present are skipped (cache
+        hit), so a ``quick_command_args`` flip recomputes only the
+        filtered scope's contribution while raw/clean ride the existing
+        entries. Pointer traits are always overwritten so ``_merged_sd``
+        downstream can pick the right cache entry per scope.
+
+        Observes ``summary_sd`` (not ``processed_result``) so the value
+        ``_summary_sd`` just computed is reused for the filt scope —
+        no second pass through the analysis pipeline. Raw and clean
+        scopes recompute, but only on cache miss.
+
+        Cache stores in-process dicts (not the parquet-b64 wire form);
+        ``_merged_sd`` reads them directly. The cache + pointer traits
+        are un-synced — the frontend consumes only the merged
+        prefixed-key ``merged_sd``.
+        """
+        if self.processed_df is None:
+            return
+        chains = split_chain_by_scope(self.operations)
+        keys = {scope: self._scope_cache_key(chain)
+                for scope, chain in chains.items()}
+        new_cache = dict(self.summary_stats_cache)
+        cache_grew = False
+
+        # filt scope reuses the SD that _summary_sd just produced.
+        if keys['filt'] not in new_cache:
+            new_cache[keys['filt']] = dict(self.summary_sd or {})
+            cache_grew = True
+
+        # raw + clean: fresh compute, but only on cache miss.
+        for scope in ('raw', 'clean'):
+            if keys[scope] in new_cache:
+                continue
+            scope_df = self._compute_scope_df(scope)
+            if scope_df is None:
+                continue
+            sd, _errs = self._get_summary_sd(scope_df)
+            new_cache[keys[scope]] = sd
+            cache_grew = True
+
+        if cache_grew:
+            self.summary_stats_cache = new_cache
+        self.raw_sd_key = keys['raw']
+        self.clean_sd_key = keys['clean']
+        self.filt_sd_key = keys['filt']
 
     ### start code interpreter block
     def add_command(self, incomingCommandKls):
         return self.ac_obj.add_command(incomingCommandKls)
 
-    def _run_df_interpreter(self, df, operations):
-        self.ac_obj._run_df_interpreter(df, operations)
+    def _run_df_interpreter(self, df, operations, initial_sd):
+        return self.ac_obj._run_df_interpreter(df, operations, initial_sd)
 
     def run_code_generator(self, operations):
         self.ac_obj.run_code_generator(operations)

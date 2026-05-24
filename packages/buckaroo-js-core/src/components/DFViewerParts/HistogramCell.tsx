@@ -95,8 +95,22 @@ export const HistogramCell = (props:
         return <span></span>;
     }
   const histogramArr = potentialHistogramArr as HistogramBar[];
-  //@ts-ignore
-  return TypedHistogramCell({histogramArr, context:props.context, className:props.colDef.cellClass|| "", colorScheme});
+  // cellClass is string | string[] | CellClassFunc; only the string form
+  // ever flows through here in practice, so narrow defensively.
+  const rawCellClass = props.colDef.cellClass;
+  const cellClass = typeof rawCellClass === "string" ? rawCellClass : "";
+  // Render as a child component (not a function call) so the useState in
+  // TypedHistogramCell lives on its own fiber. Otherwise its hook is
+  // counted on HistogramCell's hook list and the count differs between
+  // the early-return branch and this one — tripping React error #310
+  // when AG-Grid reuses a cell instance and value flips between an
+  // array and the literal string "histogram" (e.g. on autoclean toggle).
+  return <TypedHistogramCell
+    histogramArr={histogramArr}
+    context={props.context}
+    className={cellClass}
+    colorScheme={colorScheme}
+  />;
 }
 
 export const TypedHistogramCell = ({histogramArr, context, className, colorScheme = 'dark'}:

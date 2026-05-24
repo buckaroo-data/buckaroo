@@ -26,6 +26,31 @@ def probable_datetime(ser):
         return False
 
 
+def _has_unhashable_values(ser):
+    """True if ser is object dtype and its first non-null value is unhashable.
+
+    Used to skip value_counts/mode on list/dict/set columns where pandas
+    falls back to an O(n^2) pairwise compare and the result is meaningless
+    anyway (each row is effectively a unique container). #843
+    """
+    if ser.dtype != object:
+        return False
+    for v in ser:
+        if v is None:
+            continue
+        try:
+            if pd.isna(v):
+                continue
+        except (TypeError, ValueError):
+            pass
+        try:
+            hash(v)
+        except TypeError:
+            return True
+        return False
+    return False
+
+
 def get_mode(ser):
     try:
         from packaging.version import Version
@@ -128,7 +153,10 @@ class DefaultSummaryStats(ColAnalysis):
     @staticmethod
     def series_summary(sampled_ser, ser):
         l = len(ser)
-        value_counts = ser.value_counts()
+        if _has_unhashable_values(ser):
+            value_counts = pd.Series([], dtype='int64', name='count')
+        else:
+            value_counts = ser.value_counts()
         is_numeric = pd.api.types.is_numeric_dtype(ser)
         is_bool = pd.api.types.is_bool_dtype(ser)
 

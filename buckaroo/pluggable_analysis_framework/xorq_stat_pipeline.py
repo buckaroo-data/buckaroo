@@ -19,6 +19,7 @@ Optional dependency: install with ``buckaroo[xorq]``.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -140,6 +141,50 @@ class XorqStatPipeline:
             return self.backend.execute(query)
         return query.execute()
 
+    def _maybe_materialize(self, table):
+        """Materialize a lazy expression to a fresh base table.
+
+        Lazy filter/clean chains (filt/clean scopes in the buckaroo
+        dataflow) re-execute on every per-column query. With N columns
+        and a histogram per column, that's N+1 filter evaluations.
+        Materializing once turns each subsequent query into a simple
+        table scan against an in-memory base table.
+
+        Only runs for in-process xorq-datafusion backends. Remote
+        backends would pay the cost of pulling all data over the wire.
+        Returns (table_to_use, cleanup) where cleanup is (backend, name)
+        for later drop, or None if no materialization happened.
+        """
+        try:
+            underlying = table._find_backend()
+        except Exception:
+            return table, None
+        if "xorq_datafusion" not in type(underlying).__module__:
+            return table, None
+        # Skip when the table is already a base table on the backend —
+        # materializing it again is pure overhead (full table read +
+        # re-register) with no filter chain to amortize.
+        try:
+            from xorq.vendor.ibis.expr import operations as _ibis_ops
+            if isinstance(table.op(), (_ibis_ops.DatabaseTable, _ibis_ops.InMemoryTable)):
+                return table, None
+        except Exception:
+            pass
+        # If no per-column work follows the batch aggregate (i.e. nothing
+        # would re-execute the filter chain), materialization is just
+        # wasted work — skip it.
+        if not any(not _is_batch_func(sf) for sf in self.ordered_stat_funcs):
+            return table, None
+        name = f"__buckaroo_histo_mat_{uuid.uuid4().hex[:12]}"
+        try:
+            # Pass the ibis expression directly to create_table — xorq
+            # materializes it in DataFusion without round-tripping through
+            # pandas (~3-4× cheaper than execute() + create_table(df)).
+            new_table = underlying.create_table(name, table, overwrite=True)
+        except Exception:
+            return table, None
+        return new_table, (underlying, name)
+
     def unit_test(self) -> Tuple[bool, List[StatError]]:
         """Run pipeline against PERVERSE_DF wrapped as a xorq memtable.
 
@@ -166,6 +211,18 @@ class XorqStatPipeline:
             self.backend = saved_backend
 
     def process_table(self, table) -> Tuple[SDType, List[StatError]]:
+        materialized, cleanup = self._maybe_materialize(table)
+        try:
+            return self._process_table_impl(materialized)
+        finally:
+            if cleanup is not None:
+                backend, name = cleanup
+                try:
+                    backend.drop_table(name)
+                except Exception:
+                    pass
+
+    def _process_table_impl(self, table) -> Tuple[SDType, List[StatError]]:
         schema = table.schema()
         columns = list(table.columns)
 

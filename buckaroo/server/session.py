@@ -28,8 +28,16 @@ class SessionState:
     rw_to_orig: dict = field(default_factory=dict)
     # Buckaroo mode fields
     mode: str = "viewer"  # "viewer", "buckaroo", or "lazy"
-    dataflow: Any = None  # ServerDataflow instance when mode="buckaroo"
+    backend: str = "pandas"  # "pandas" | "xorq"; meaningful when mode="buckaroo"
+    dataflow: Any = None  # ServerDataflow when backend="pandas"
+    xorq_dataflow: Any = None  # XorqServerDataflow when backend="xorq"
+    expr: Any = None  # ibis/xorq expression when backend="xorq"
     buckaroo_state: dict = field(default_factory=dict)
+    # Live search term applied at row-fetch time (#838) — bypasses the
+    # dataflow stat pipeline that ``quick_command_args.search`` goes
+    # through, so per-keystroke filtering stays fast on parquet-backed
+    # exprs with ~10⁶ rows.
+    search_string: str = ""
     buckaroo_options: dict = field(default_factory=dict)
     command_config: dict = field(default_factory=dict)
     operation_results: dict = field(default_factory=dict)
@@ -43,6 +51,13 @@ class SessionState:
         self.last_accessed = time.time()
 
 
+PROTOCOL_VERSION = 1
+"""Bumped when the WebSocket protocol changes incompatibly. Clients
+(WebSocketModel, TauriIPCModel) read this from initial_state and warn on
+mismatch. Lockstep with the buckaroo PyPI version is the documented expectation;
+this field is the runtime escape hatch."""
+
+
 def build_state_message(session: "SessionState", metadata: dict | None = None) -> dict:
     """Build the full ``initial_state`` WebSocket payload from a session.
 
@@ -53,7 +68,8 @@ def build_state_message(session: "SessionState", metadata: dict | None = None) -
     Returns:
         A dict ready to be JSON-serialised and sent to WebSocket clients.
     """
-    msg: dict = {"type": "initial_state", "metadata": metadata if metadata is not None else session.metadata,
+    msg: dict = {"type": "initial_state", "protocol_version": PROTOCOL_VERSION,
+        "metadata": metadata if metadata is not None else session.metadata,
         "prompt": session.prompt, "df_display_args": session.df_display_args, "df_data_dict": session.df_data_dict,
         "df_meta": session.df_meta, "mode": session.mode}
     if session.mode == "buckaroo":

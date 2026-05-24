@@ -60,6 +60,128 @@ class TestQueryCount:
         )
 
 
+class TestExprCountMemoization:
+    """Regression for #795: ``_expr_count`` issued a fresh
+    ``expr.count().execute()`` against the backend on every call, even
+    when the same expression was passed in. On the boston restaurant
+    data (883K rows over xorq datafusion) that's ~250 ms per call;
+    populate_df_meta + the cache observer cascade + per-pagination
+    invocations fired it 5-7× per state-change for ~1.5 s of pure
+    duplicate count work. The same expression has an invariant count;
+    once is enough.
+
+    Test asserts the memoization contract at the module-cache level
+    because spying on the actual ``execute`` is ibis-version-fragile.
+    """
+
+    def test_expr_count_memoizes_repeat_calls(self):
+        from buckaroo import xorq_buckaroo
+
+        expr = xo.memtable({"a": [1, 2, 3, 4, 5]})
+
+        # Reset for test isolation in case another test already populated
+        # the module cache (cache survives across tests in a session).
+        if hasattr(xorq_buckaroo, "_expr_count_cache"):
+            xorq_buckaroo._expr_count_cache.clear()
+
+        assert xorq_buckaroo._expr_count(expr) == 5
+        assert xorq_buckaroo._expr_count(expr) == 5
+        assert xorq_buckaroo._expr_count(expr) == 5
+
+        assert hasattr(xorq_buckaroo, "_expr_count_cache"), (
+            "_expr_count must memoize by expression identity; expected "
+            "a module-level _expr_count_cache dict. See #795."
+        )
+        assert len(xorq_buckaroo._expr_count_cache) == 1, (
+            f"expected exactly 1 cached entry for 3 calls on the same "
+            f"expression; got {len(xorq_buckaroo._expr_count_cache)}. "
+            f"The cache key must be id(expr)."
+        )
+
+    def test_expr_count_separate_expressions_cache_separately(self):
+        """Distinct expression objects must not collide in the cache."""
+        from buckaroo import xorq_buckaroo
+
+        if hasattr(xorq_buckaroo, "_expr_count_cache"):
+            xorq_buckaroo._expr_count_cache.clear()
+
+        e1 = xo.memtable({"a": [1, 2, 3]})
+        e2 = xo.memtable({"a": [1, 2, 3, 4, 5, 6, 7]})
+
+        assert xorq_buckaroo._expr_count(e1) == 3
+        assert xorq_buckaroo._expr_count(e2) == 7
+        assert len(xorq_buckaroo._expr_count_cache) == 2
+
+    def test_expr_count_pandas_path_unaffected(self):
+        """The pandas branch returns len(df) directly; memoization is
+        only for ibis-expression inputs."""
+        from buckaroo import xorq_buckaroo
+
+        df = pd.DataFrame({"a": [1, 2, 3, 4]})
+        assert xorq_buckaroo._expr_count(df) == 4
+
+    def test_expr_count_does_not_cache_failures(self):
+        """Codex P1 follow-up to #796: a transient backend failure on
+        ``expr.count().execute()`` must not poison the cache. The
+        original memoization commit caught ``Exception`` and stored
+        ``0`` in ``_expr_count_cache`` — so every subsequent call for
+        the same expression object returned 0 forever, even after the
+        backend recovered.
+
+        Contract: failures are not cached. The next call retries the
+        backend; on recovery the real count is returned and stored.
+        """
+        from buckaroo import xorq_buckaroo
+
+        xorq_buckaroo._expr_count_cache.clear()
+
+        class _StubCount:
+            def __init__(self, value):
+                self._value = value
+
+            def execute(self):
+                return self._value
+
+        class _StubExpr:
+            """Mimics the ibis-expression duck-type: not a pd.DataFrame,
+            exposes ``.count().execute()``. Counter flips from raising
+            to succeeding to simulate backend recovery."""
+
+            def __init__(self):
+                self.calls = 0
+
+            def count(self):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("simulated backend failure")
+                return _StubCount(42)
+
+        stub = _StubExpr()
+
+        first = xorq_buckaroo._expr_count(stub)
+        assert id(stub) not in xorq_buckaroo._expr_count_cache, (
+            "failed _expr_count call must not write to the cache; "
+            f"found cached value {xorq_buckaroo._expr_count_cache.get(id(stub))!r}"
+        )
+
+        second = xorq_buckaroo._expr_count(stub)
+        assert second == 42, (
+            f"after backend recovery, _expr_count must return the real "
+            f"count, not a cached failure sentinel; got {second!r}"
+        )
+        assert xorq_buckaroo._expr_count_cache.get(id(stub)) == 42, (
+            "successful call following a failure must populate the cache "
+            "with the real count"
+        )
+
+        # Sanity: the first call returned _something_ — but the contract
+        # this test pins is "don't cache failures", not "what the failure
+        # return value is". Leave the first-call value out of the assert
+        # so the test stays stable if we later switch from "return 0" to
+        # "re-raise".
+        del first
+
+
 class TestInstantiation:
     def test_smoke(self):
         XorqBuckarooWidget(_expr())
@@ -180,6 +302,56 @@ class TestSearch:
         state["quick_command_args"] = {"search": [""]}
         w.buckaroo_state = state
         assert w.df_meta["filtered_rows"] == 5
+
+
+def _find_cc(column_config, col_name):
+    for entry in column_config:
+        if entry.get("col_name") == col_name:
+            return entry
+    raise AssertionError(f"col_name {col_name!r} not in column_config")
+
+
+class TestSearchHighlight:
+    """Equivalent of the polars-search highlight wiring from #758 and the
+    pandas-search version from #764, ported to the xorq backend. ibis
+    ``StringValue.contains`` is a literal substring match, so the search
+    term flows to the JS displayer as ``highlight_phrase`` (list), not
+    ``highlight_regex``."""
+
+    def test_search_op_delivers_highlight_phrase_into_displayer_args(self):
+        """End-to-end through XorqBuckarooWidget — a `search` op should
+        plumb its term into ``displayer_args.highlight_phrase`` for every
+        ibis-String column and skip non-string columns."""
+        w = XorqBuckarooWidget(_searchable_expr())
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": ["admin"]}
+        w.buckaroo_state = state
+
+        cc = w.df_display_args["main"]["df_viewer_config"]["column_config"]
+        a_args = _find_cc(cc, "a")["displayer_args"]
+        assert a_args["displayer"] == "string"
+        assert a_args["highlight_phrase"] == ["admin"]
+        b_args = _find_cc(cc, "b")["displayer_args"]
+        assert b_args["displayer"] == "string"
+        assert b_args["highlight_phrase"] == ["admin"]
+        c_args = _find_cc(cc, "c")["displayer_args"]
+        assert "highlight_phrase" not in c_args
+
+    def test_empty_search_drops_highlight_from_displayer_args(self):
+        """Clearing the search box (``""``) should remove the highlight
+        from displayer_args, matching the filter going back to no-op."""
+        w = XorqBuckarooWidget(_searchable_expr())
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": ["admin"]}
+        w.buckaroo_state = state
+
+        state = w.buckaroo_state.copy()
+        state["quick_command_args"] = {"search": [""]}
+        w.buckaroo_state = state
+
+        cc = w.df_display_args["main"]["df_viewer_config"]["column_config"]
+        a_args = _find_cc(cc, "a")["displayer_args"]
+        assert "highlight_phrase" not in a_args
 
 
 def _paginated_expr():
@@ -467,8 +639,13 @@ class TestLazyPostprocessor:
         assert "a_squared" in orig_names
 
     def test_lazy_step_paginates_with_bounded_execution(self, monkeypatch):
-        """End-to-end: lazy step + paginated request → only count + limit
-        executes hit the backend, never a bare table fetch."""
+        """End-to-end: lazy step + paginated request → only a bounded
+        limit executes hit the backend, never a bare table fetch.
+
+        Post-#795: the CountStar is memoized after ``add_processing``
+        triggers ``populate_df_meta`` (which calls ``_expr_count`` on
+        the new processed_df). Spy starts after that, so pagination
+        only emits ``Limit``."""
         w = XorqBuckarooInfiniteWidget(_paginated_expr())
 
         def lazy_step(expr):
@@ -481,8 +658,9 @@ class TestLazyPostprocessor:
         captured = _capture_send(w)
         w._handle_payload_args({"start": 2, "end": 5})
 
-        # Exactly one count + one limit; no full-table fetch.
-        assert ops == ["CountStar", "Limit"]
+        # Exactly one limit; count is memoized from add_processing →
+        # populate_df_meta cascade. No full-table fetch.
+        assert ops == ["Limit"]
         df = pd.read_parquet(BytesIO(captured[0][1][0]))
         assert len(df) == 3
 
@@ -516,12 +694,15 @@ class TestInfiniteBoundedExecution:
         return ops_seen
 
     def test_unsorted_window_only_emits_count_and_limit(self, monkeypatch):
+        """Post-#795: spy starts after widget construction, by which time
+        ``populate_df_meta`` has already memoized the CountStar. Pagination
+        emits only ``Limit`` — no full-table fetch."""
         w = XorqBuckarooInfiniteWidget(_paginated_expr())
         captured = _capture_send(w)
         ops = self._make_spy(monkeypatch)
         w._handle_payload_args({"start": 5, "end": 8})
-        # Exactly two executes: aggregate (count) + bounded window (limit).
-        assert ops == ["CountStar", "Limit"]
+        # Just the bounded window. Count was cached at construction.
+        assert ops == ["Limit"]
         # And the slice respected the bound.
         df = pd.read_parquet(BytesIO(captured[0][1][0]))
         assert len(df) == 3
@@ -535,8 +716,8 @@ class TestInfiniteBoundedExecution:
         w._handle_payload_args(
             {"start": 0, "end": 4, "sort": sort_key, "sort_direction": "asc"})
         # Sort wraps the table in Sort -> Limit; we only execute the Limit
-        # (the outermost op), never a bare Table fetch.
-        assert ops == ["CountStar", "Limit"]
+        # (the outermost op), never a bare Table fetch. Count cached.
+        assert ops == ["Limit"]
         assert len(pd.read_parquet(BytesIO(captured[0][1][0]))) == 4
 
     def test_no_full_table_execute_on_large_expr(self, monkeypatch):
@@ -551,12 +732,13 @@ class TestInfiniteBoundedExecution:
         # The processed_df is ``big`` (an InMemoryTable op). A bare
         # ``processed_df.execute()`` would show up here as 'InMemoryTable'.
         assert "InMemoryTable" not in ops
-        assert ops == ["CountStar", "Limit"]
+        assert ops == ["Limit"]
 
     def test_separate_window_requests_each_emit_one_bounded_query(self, monkeypatch):
         """Two non-adjacent windows on a 5k-row expression: each request
-        emits exactly one CountStar (total length) and one Limit
-        (windowed slice) — never a full-table fetch.
+        emits exactly one Limit (windowed slice) — never a full-table
+        fetch. Post-#795 the CountStar is memoized once at widget
+        construction and reused.
 
         Pins down the infinite-loading contract: the frontend can
         scroll-jump (not just paginate sequentially) without the widget
@@ -575,8 +757,8 @@ class TestInfiniteBoundedExecution:
         # Second window: jump to [300, 350) — non-adjacent.
         w._handle_payload_args({"start": 300, "end": 350})
 
-        # Two requests → two count + two limit. No InMemoryTable fetch.
-        assert ops == ["CountStar", "Limit", "CountStar", "Limit"]
+        # Two requests → two limits. Count is memoized. No InMemoryTable fetch.
+        assert ops == ["Limit", "Limit"]
         assert "InMemoryTable" not in ops
 
         # Both responses sent.
@@ -628,8 +810,9 @@ class TestInfiniteBoundedExecution:
 
         w._handle_payload_args({"start": 2, "end": 5})
 
-        # The aggregate (count) goes through .execute() — that's a scalar
-        # round-trip, not the wire payload.
-        assert execute_ops == ["CountStar"]
+        # Post-#795: CountStar is memoized at construction time and not
+        # re-executed during pagination. The .execute() spy therefore
+        # sees zero calls here.
+        assert execute_ops == []
         # The row window goes through .to_pyarrow() — never .execute().
         assert to_pyarrow_ops == ["Limit"]

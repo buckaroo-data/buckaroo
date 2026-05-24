@@ -1,11 +1,7 @@
 import os
-import base64
-import json
-from io import BytesIO
 import polars as pl
 from polars import functions as F
 import numpy as np
-import pandas as pd
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import (
     PolarsAnalysis, polars_produce_series_df)
 from buckaroo.pluggable_analysis_framework.col_analysis import (
@@ -15,33 +11,8 @@ from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget, to_parquet
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from buckaroo.dataflow.dataflow import StylingAnalysis
+from buckaroo.serialization_utils import resolve_summary_stats_payload as _resolve_all_stats
 from buckaroo.jlisp.lisp_utils import (s, sQ)
-
-
-def _resolve_all_stats(all_stats):
-    """Resolve all_stats to a list of row dicts, whether it's JSON or parquet_b64."""
-    if isinstance(all_stats, list):
-        return all_stats
-    if isinstance(all_stats, dict) and all_stats.get('format') == 'parquet_b64':
-        raw = base64.b64decode(all_stats['data'])
-        df = pd.read_parquet(BytesIO(raw), engine='pyarrow')
-        rows = json.loads(df.to_json(orient='records'))
-        parsed_rows = []
-        for row in rows:
-            parsed = {}
-            for k, v in row.items():
-                if k in ('index', 'level_0'):
-                    parsed[k] = v
-                elif isinstance(v, str):
-                    try:
-                        parsed[k] = json.loads(v)
-                    except (json.JSONDecodeError, ValueError):
-                        parsed[k] = v
-                else:
-                    parsed[k] = v
-            parsed_rows.append(parsed)
-        return parsed_rows
-    return all_stats
 
 def test_basic_instantiation():
     PolarsBuckarooWidget(

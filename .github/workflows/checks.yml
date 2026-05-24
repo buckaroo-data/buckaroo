@@ -304,7 +304,8 @@ jobs:
       - name: Install the project
         run: uv sync --all-extras --dev
       - name: Run tests
-        run: uv run --with pytest-cov pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
+        # Tolerant of the post-summary polars-stream / pyo3 SIGABRT — see scripts/run_pytest_tolerant.sh.
+        run: scripts/run_pytest_tolerant.sh uv run --with pytest-cov pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
       - uses: codecov/codecov-action@v6
 
   TestPythonMaxVersions:
@@ -330,7 +331,9 @@ jobs:
           uv sync --resolution=highest --all-extras --dev --no-group datacompy
           uv pip list | grep -i pandas
       - name: Run tests
-        run: .venv/bin/python -m pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
+        # Tolerant of the post-summary polars-stream / pyo3 SIGABRT — see scripts/run_pytest_tolerant.sh.
+        # This matrix hits it most because it pulls polars >= 1.38 + pyo3 0.27.
+        run: scripts/run_pytest_tolerant.sh .venv/bin/python -m pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
 
   TestPythonWindows:
     name: Python / Test (Windows)

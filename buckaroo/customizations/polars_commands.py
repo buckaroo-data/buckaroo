@@ -2,6 +2,7 @@ import polars as pl
 #import numpy as np
 
 from ..jlisp.lisp_utils import s
+from ..jlisp.configure_utils import SDResult  # noqa: F401 (re-export for command authors)
 #from ..jlisp.configure_utils import configure_buckaroo
 #from ..auto_clean.cleaning_commands import (to_bool, to_datetime, to_int, to_float, to_string)
 
@@ -129,9 +130,21 @@ class Search(Command):
     command_pattern = [[3, 'term', 'type', 'string']]
     quick_args_pattern = [[3, 'term', 'type', 'string']]
 
-    @staticmethod 
+    @staticmethod
     def transform(df, col, val):
-        return df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
+        # Mirror pandas Search guard (pandas_commands.py:478). The widget's
+        # filter-like quick_command_args.search path (PR #743) sends the
+        # current box value on every keystroke; on clear that arrives as
+        # None or "", and pl.col(pl.String).str.contains(None) drops every
+        # row.
+        if val is None or val == "":
+            return df
+        filtered = df.filter(pl.any_horizontal(pl.col(pl.String).str.contains(val)))
+        # `.str.contains(val)` treats val as a regex, so expose it as
+        # highlight_regex (not _phrase) for consistent semantics on the JS side.
+        string_cols = [c for c, dt in zip(df.columns, df.dtypes) if dt == pl.String]
+        sd_updates = {c: {'highlight_regex': val} for c in string_cols}
+        return SDResult(filtered, sd_updates)
 
 
     @staticmethod 

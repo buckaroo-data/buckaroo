@@ -1,7 +1,7 @@
 //import { add, multiply } from "../src/math";
 
-import { 
-    extractSDFT,  
+import {
+    extractSDFT,
     extractPinnedRows,
     dfToAgrid,
     getHeightStyle2,
@@ -9,12 +9,13 @@ import {
     getSubChildren,
     childColDef,
     multiIndexColToColDef,
+    getCellRendererSelector,
 
 } from './gridUtils';
 import * as _ from "lodash-es";
 import { DFData, DFViewerConfig, NormalColumnConfig, MultiIndexColumnConfig, PinnedRowConfig, ColumnConfig } from "./DFWhole";
 import { getFloatFormatter, getCompactNumberFormatter, formatDuration, formatIsoDuration, getDurationFormatter } from './Displayer';
-import { ColDef, ValueFormatterParams } from 'ag-grid-community';
+import { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 
 describe("testing utility functions in gridUtils ", () => {
   // mostly sanity checks to help develop gridUtils
@@ -161,6 +162,126 @@ describe("testing utility functions in gridUtils ", () => {
         { index: "row1", value: 1 },
         undefined
       ]);
+    });
+
+    it("includes an optional `?`-prefixed pinned row when the unprefixed key exists in data", () => {
+      const data: DFData = [
+        { index: "histogram_bins", value: 1 },
+        { index: "filtered_histogram_bins", value: 2 }
+      ];
+      const pinnedConfig: PinnedRowConfig[] = [
+        { primary_key_val: "histogram_bins", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "?filtered_histogram_bins", displayer_args: { displayer: "obj" } }
+      ];
+      const result = extractPinnedRows(data, pinnedConfig);
+      expect(result).toStrictEqual([
+        { index: "histogram_bins", value: 1 },
+        { index: "filtered_histogram_bins", value: 2 }
+      ]);
+    });
+
+    it("omits an optional `?`-prefixed pinned row when the unprefixed key is absent (not undefined)", () => {
+      const data: DFData = [
+        { index: "histogram_bins", value: 1 }
+      ];
+      const pinnedConfig: PinnedRowConfig[] = [
+        { primary_key_val: "histogram_bins", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "?filtered_histogram_bins", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "?cleaned_histogram_bins", displayer_args: { displayer: "obj" } }
+      ];
+      const result = extractPinnedRows(data, pinnedConfig);
+      expect(result.length).toBe(1);
+      expect(result).toStrictEqual([
+        { index: "histogram_bins", value: 1 }
+      ]);
+    });
+
+    it("still emits undefined for an unprefixed required pinned row when its key is absent", () => {
+      // Backward-compat: required (no `?`) rows preserve the existing
+      // "kept as undefined when absent" behavior so callers that depend on
+      // positional alignment with pinned_rows config keep working.
+      const data: DFData = [
+        { index: "histogram_bins", value: 1 }
+      ];
+      const pinnedConfig: PinnedRowConfig[] = [
+        { primary_key_val: "histogram_bins", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "missing", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "?cleaned_histogram_bins", displayer_args: { displayer: "obj" } }
+      ];
+      const result = extractPinnedRows(data, pinnedConfig);
+      expect(result.length).toBe(2);
+      expect(result).toStrictEqual([
+        { index: "histogram_bins", value: 1 },
+        undefined
+      ]);
+    });
+  });
+
+  describe("getCellRendererSelector with `?`-prefixed pinned keys", () => {
+    // The PR #777 strip must also apply at renderer-resolution time, not
+    // only at extract-row time. A `?filtered_histogram` config entry points
+    // at a data row whose `index` is the bare `"filtered_histogram"`, so
+    // the selector's lookup must compare against the stripped key.
+    //
+    // Using `displayer: "histogram"` because it routes through
+    // getCellRenderer to the stable HistogramCell export — the resulting
+    // `component` is reference-comparable across calls, unlike the
+    // closure-wrapped TextCellRenderer the `inherit` / formatter paths
+    // produce.
+    const columnConfigs: ColumnConfig[] = [
+      {
+        col_name: "temperature",
+        header_name: "temperature",
+        displayer_args: { displayer: "float", min_fraction_digits: 3, max_fraction_digits: 3 },
+      } as NormalColumnConfig,
+    ];
+
+    const makeParams = (indexVal: string, colId: string) =>
+      ({
+        node: { rowPinned: "bottom", data: { index: indexVal } },
+        column: { getColId: () => colId },
+      } as unknown as ICellRendererParams<any, any, any>);
+
+    it("resolves the same renderer for `?key` and `key` configs (strip applied at lookup time)", () => {
+      const prefixedSel = getCellRendererSelector(
+        [{ primary_key_val: "?filtered_histogram", displayer_args: { displayer: "histogram" } }],
+        columnConfigs,
+      );
+      const bareSel = getCellRendererSelector(
+        [{ primary_key_val: "filtered_histogram", displayer_args: { displayer: "histogram" } }],
+        columnConfigs,
+      );
+      const params = makeParams("filtered_histogram", "temperature");
+      const prefixedResult = prefixedSel(params);
+      const bareResult = bareSel(params);
+      // Both configs should hit the histogram cellRenderer branch.
+      // Without the strip in getCellRendererSelector, prefixedResult would
+      // fall through to the default (anyRenderer / objFormatter text
+      // cell) instead, and `.component` would NOT equal HistogramCell.
+      const { HistogramCell } = require("./HistogramCell");
+      expect(prefixedResult?.component).toBe(HistogramCell);
+      expect(bareResult?.component).toBe(HistogramCell);
+    });
+
+    it("does not match a config entry against a data row whose `index` literally contains the `?` prefix", () => {
+      // Codex-flagged corollary: `?` is a reserved control char in this
+      // namespace. A config `?filtered_histogram` strips to
+      // `filtered_histogram`, so a data row whose literal index is
+      // `"?filtered_histogram"` does NOT match — it falls through to the
+      // default renderer. This locks in the reserved-character semantics
+      // so any future change is intentional.
+      const prefixedSel = getCellRendererSelector(
+        [{ primary_key_val: "?filtered_histogram", displayer_args: { displayer: "histogram" } }],
+        columnConfigs,
+      );
+      const { HistogramCell } = require("./HistogramCell");
+
+      // Bare key in data → match → HistogramCell.
+      expect(prefixedSel(makeParams("filtered_histogram", "temperature"))?.component).toBe(HistogramCell);
+      // Literal `?key` in data → strip on config side searches for
+      // `filtered_histogram`, finds nothing matching `?filtered_histogram`
+      // in data → default renderer, NOT HistogramCell.
+      expect(prefixedSel(makeParams("?filtered_histogram", "temperature"))?.component).not.toBe(HistogramCell);
     });
   });
 
