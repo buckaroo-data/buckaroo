@@ -101,6 +101,92 @@ class TestLoad(tornado.testing.AsyncHTTPTestCase):
             finally:
                 os.unlink(f.name)
 
+    def test_load_buckaroo_with_column_config_overrides(self):
+        """POST /load with column_config_overrides should plumb through to
+        the headless ServerDataflow so server-mode sessions can match a
+        notebook widget's per-column display config (#860 demo case:
+        PolarsBuckarooInfiniteWidget(df, init_sd=column_config_overrides, ...))."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                overrides = {"name": {"displayer_args": {"displayer": "string", "max_length": 5000}}}
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "cco-1", "path": f.name, "mode": "buckaroo",
+                        "column_config_overrides": overrides}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+
+                sessions = self._app.settings["sessions"]
+                session = sessions.get("cco-1")
+                self.assertIsNotNone(session)
+                dvc = session.df_display_args["main"]["df_viewer_config"]
+                # header_name carries the original column name; col_name is
+                # the renamed (a/b/c/...) version.
+                name_col = next(cc for cc in dvc["column_config"]
+                    if cc.get("header_name") == "name")
+                self.assertEqual(name_col["displayer_args"]["displayer"], "string")
+                self.assertEqual(name_col["displayer_args"]["max_length"], 5000)
+            finally:
+                os.unlink(f.name)
+
+    def test_load_buckaroo_with_extra_grid_config(self):
+        """POST /load with extra_grid_config (rowHeight etc.) should
+        reach df_viewer_config so AG-Grid picks it up."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                grid_cfg = {"rowHeight": 70, "pinnedRowHeight": 21}
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "egc-1", "path": f.name, "mode": "buckaroo",
+                        "extra_grid_config": grid_cfg}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+
+                session = self._app.settings["sessions"].get("egc-1")
+                dvc = session.df_display_args["main"]["df_viewer_config"]
+                self.assertEqual(dvc.get("extra_grid_config"), grid_cfg)
+            finally:
+                os.unlink(f.name)
+
+    def test_load_buckaroo_with_init_sd(self):
+        """POST /load with init_sd should apply to the headless dataflow
+        the same way as the widget's init_sd kwarg."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                init_sd = {"name": {"displayer_args": {"displayer": "string", "max_length": 200}}}
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "isd-1", "path": f.name, "mode": "buckaroo", "init_sd": init_sd}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+
+                session = self._app.settings["sessions"].get("isd-1")
+                dvc = session.df_display_args["main"]["df_viewer_config"]
+                name_col = next(cc for cc in dvc["column_config"]
+                    if cc.get("header_name") == "name")
+                self.assertEqual(name_col["displayer_args"]["displayer"], "string")
+                self.assertEqual(name_col["displayer_args"]["max_length"], 200)
+            finally:
+                os.unlink(f.name)
+
+    def test_load_buckaroo_without_optional_configs_keeps_defaults(self):
+        """Default behaviour: omitting the new kwargs leaves
+        extra_grid_config as the empty-dict default the headless dataflow
+        already emits — same as a notebook BuckarooInfiniteWidget(df)."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "plain-1", "path": f.name, "mode": "buckaroo"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+
+                session = self._app.settings["sessions"].get("plain-1")
+                dvc = session.df_display_args["main"]["df_viewer_config"]
+                self.assertEqual(dvc.get("extra_grid_config"), {})
+            finally:
+                os.unlink(f.name)
+
 
 class TestSessionPage(tornado.testing.AsyncHTTPTestCase):
     def get_app(self):

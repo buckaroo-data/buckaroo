@@ -233,6 +233,14 @@ class LoadHandler(tornado.web.RequestHandler):
         if session_id is None:
             return
 
+        # Optional per-column / per-grid configuration that mirrors the
+        # matching kwargs on BuckarooInfiniteWidget. Only applied for
+        # mode="buckaroo" where the full dataflow is built (lazy/viewer
+        # paths don't carry merged_sd / extra_grid_config).
+        column_config_overrides = body.get("column_config_overrides")
+        extra_grid_config = body.get("extra_grid_config")
+        init_sd = body.get("init_sd")
+
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
@@ -262,7 +270,8 @@ class LoadHandler(tornado.web.RequestHandler):
             session.df = file_obj
             session.metadata = metadata
             if mode == "buckaroo":
-                dataflow = create_dataflow(file_obj)
+                dataflow = create_dataflow(file_obj, column_config_overrides=column_config_overrides,
+                    extra_grid_config=extra_grid_config, init_sd=init_sd)
                 session.dataflow = dataflow
                 buckaroo_state = get_buckaroo_display_state(dataflow)
                 session.df_display_args = buckaroo_state["df_display_args"]
