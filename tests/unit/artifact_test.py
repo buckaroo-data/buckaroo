@@ -5,7 +5,7 @@ from io import BytesIO
 import pandas as pd
 import pytest
 
-from buckaroo.artifact import (prepare_buckaroo_artifact, artifact_to_json, to_html, _df_to_parquet_b64_tagged)
+from buckaroo.artifact import (prepare_buckaroo_artifact, artifact_to_json, to_html, _df_to_parquet_b64_tagged, _defuse_close_tag)
 
 
 simple_df = pd.DataFrame({'int_col': [1, 2, 3], 'str_col': ['a', 'b', 'c'], 'float_col': [1.1, 2.2, 3.3]})
@@ -164,6 +164,88 @@ class TestToHtml:
     def test_artifact_embedded_as_json(self):
         html = to_html(simple_df)
         assert 'parquet_b64' in html
+
+    def test_self_contained_default_false(self):
+        """Default behaviour: HTML still references sidecar bundle by URL."""
+        html = to_html(simple_df)
+        assert '<link rel="stylesheet" href="static-embed.css">' in html
+        assert '<script type="module" src="static-embed.js"></script>' in html
+
+    def test_self_contained_true_inlines_js_and_css(self):
+        """self_contained=True inlines static-embed.js/css and removes sidecar references."""
+        html = to_html(simple_df, self_contained=True)
+
+        assert 'href="static-embed.css"' not in html, \
+            "self_contained=True should drop the external CSS reference"
+        assert 'src="static-embed.js"' not in html, \
+            "self_contained=True should drop the external JS reference"
+
+        assert '<style>' in html
+        assert '<script type="module">' in html
+
+        # If the asset bundle was actually built (full_build.sh) the CSS
+        # bytes should round-trip into the output. In Python-only CI the
+        # bundle is an empty stub (see scripts/hatch_build.py REQUIRED_STUBS),
+        # so this check is conditional.
+        from pathlib import Path
+        import buckaroo as _bk
+        css_body = (Path(_bk.__file__).parent / "static" / "static-embed.css").read_text()
+        if css_body.strip():
+            assert css_body.splitlines()[0] in html, \
+                "inlined CSS body should be present in output"
+
+    @pytest.mark.parametrize("variant", [
+        "</script>",       # canonical lowercase
+        "</Script>",       # mixed case
+        "</SCRIPT>",       # uppercase
+        "</script >",      # trailing space before >
+        "</script\t>",     # trailing tab
+        "</script/>",      # self-closing-ish
+        "</script\n>",     # trailing LF
+    ])
+    def test_defuse_close_tag_script_variants(self, variant):
+        """Per HTML5, the script-data-end-tag-name state ends on </script
+        followed by tab/LF/FF/space/'/'/'>' (case-insensitive). The defuser
+        must escape every such variant or self_contained=True can produce
+        broken HTML if a bundled JS string ever contains one of them."""
+        defused = _defuse_close_tag("script", f"console.log('{variant}');")
+        assert variant not in defused, \
+            f"variant {variant!r} survived defusing: {defused!r}"
+        # The defused form should contain a backslash between < and /
+        assert "<\\/" in defused
+
+    @pytest.mark.parametrize("variant", ["</style>", "</Style>", "</STYLE>", "</style >", "</style/>"])
+    def test_defuse_close_tag_style_variants(self, variant):
+        defused = _defuse_close_tag("style", f".a {{ content: '{variant}'; }}")
+        assert variant not in defused
+        assert "<\\/" in defused
+
+    def test_defuse_close_tag_leaves_unrelated_text_alone(self):
+        """</scripts> (with trailing 's') is NOT a tag close per HTML5 —
+        the terminator must be whitespace/'/'/'>'. Don't over-eagerly defuse."""
+        body = "var x = '</scripts>'; var y = '</scripto>';"
+        defused = _defuse_close_tag("script", body)
+        assert defused == body, f"defuser modified unrelated text: {defused!r}"
+
+    def test_self_contained_defuses_close_script(self):
+        """Bundled JS containing literal </script> must not break out of the inline tag."""
+        html = to_html(simple_df, self_contained=True)
+        # Inside the module body there must be no raw </script> that could
+        # terminate the inline block prematurely. Exactly one </script>
+        # closes the module tag itself; that one is followed by the </body>
+        # tag in the template.
+        module_start = html.index('<script type="module">')
+        module_chunk = html[module_start + len('<script type="module">'):]
+        first_close = module_chunk.index('</script>')
+        # No further </script> may appear before the genuine terminator's
+        # end — i.e. the substring before first_close must contain no
+        # </script>. (Trivially true by find-first.) Stronger assertion:
+        # whatever sits at first_close should be immediately followed by
+        # whitespace + </body>, meaning the close belongs to the template.
+        tail = module_chunk[first_close:first_close + 60]
+        assert tail.startswith('</script>')
+        assert '</body>' in tail, \
+            f"premature </script> closed the inline module; tail={tail!r}"
 
 
 class TestWeirdTypesParquetRoundtrip:

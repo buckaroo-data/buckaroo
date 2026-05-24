@@ -8,6 +8,7 @@ for compact transport. The JS side decodes them via resolveDFDataAsync().
 """
 import base64
 import json
+import re
 from io import BytesIO
 from pathlib import Path
 
@@ -200,11 +201,17 @@ _HTML_TEMPLATE = """\
 """
 
 
-def to_html(df, title="Buckaroo", embed_type="DFViewer", **kwargs) -> str:
+def to_html(df, title="Buckaroo", embed_type="DFViewer",
+            self_contained=False, **kwargs) -> str:
     """Generate an HTML string that renders a buckaroo table.
 
-    The HTML references ``static-embed.js`` and ``static-embed.css``
-    which must be served alongside it (produced by the JS build).
+    By default the HTML references ``static-embed.js`` and
+    ``static-embed.css`` which must be served alongside it (produced by
+    the JS build). With ``self_contained=True`` those assets are inlined
+    into the page, producing a single ``.html`` file that double-clicks
+    open from disk — browsers refuse to load ES modules over ``file://``,
+    so external-asset HTML can only be served over HTTP, but inline
+    modules sidestep that restriction.
 
     Parameters
     ----------
@@ -215,6 +222,11 @@ def to_html(df, title="Buckaroo", embed_type="DFViewer", **kwargs) -> str:
     embed_type : str, optional
         ``"DFViewer"`` (default) for a plain table, or ``"Buckaroo"`` for
         the full experience with summary_stats/main display switcher.
+    self_contained : bool, optional
+        When True, inline ``static-embed.js`` and ``static-embed.css``
+        into the output so the result is a single self-contained file
+        that works when opened via ``file://``. Default False keeps the
+        smaller sidecar output.
     **kwargs
         Passed through to prepare_buckaroo_artifact().
 
@@ -224,4 +236,52 @@ def to_html(df, title="Buckaroo", embed_type="DFViewer", **kwargs) -> str:
         Complete HTML document string.
     """
     artifact = prepare_buckaroo_artifact(df, embed_type=embed_type, **kwargs)
-    return _HTML_TEMPLATE.format(title=title, artifact_json=artifact_to_json(artifact))
+    html = _HTML_TEMPLATE.format(title=title, artifact_json=artifact_to_json(artifact))
+    if self_contained:
+        html = _inline_static_assets(html)
+    return html
+
+
+# Per HTML5, a script-data / style-data block ends at "</" + tag-name
+# followed by any of TAB / LF / FF / SPACE / "/" / ">", matched
+# case-insensitively. Plain string.replace("</script>", ...) misses
+# variants like "</Script>", "</script >", "</script/", so use a regex
+# with a lookahead that mirrors the spec.
+_CLOSE_TAG_PATTERNS = {
+    name: re.compile(rf"</({name})(?=[\t\n\f />])", re.IGNORECASE)
+    for name in ("script", "style")
+}
+
+
+def _defuse_close_tag(tag_name: str, body: str) -> str:
+    """Defuse any HTML-recognisable closing form of <tag_name> in `body`.
+
+    Inserts a backslash between ``<`` and ``/`` so the HTML parser no
+    longer sees a tag terminator while the contained JS/CSS is unchanged
+    semantically (``<\\/script>`` in a JS string literal still evaluates
+    to ``"</script>"``; ``<\\/style>`` in a CSS rule is just an escaped
+    forward slash).
+    """
+    return _CLOSE_TAG_PATTERNS[tag_name].sub(r"<\\/\1", body)
+
+
+def _inline_static_assets(html: str) -> str:
+    """Replace external ``static-embed.{js,css}`` references with inline blocks.
+
+    The bundled assets may contain a close-tag sequence (case-insensitive
+    ``</script`` or ``</style`` followed by whitespace, ``/``, or ``>``)
+    that would prematurely terminate an inline ``<script>`` / ``<style>``
+    block. ``_defuse_close_tag`` handles all such variants.
+    """
+    from pathlib import Path
+    static_dir = Path(__file__).parent / "static"
+    css_body = (static_dir / "static-embed.css").read_text()
+    js_body = (static_dir / "static-embed.js").read_text()
+
+    css_inline = _defuse_close_tag("style", css_body)
+    js_inline = _defuse_close_tag("script", js_body)
+
+    html = html.replace('<link rel="stylesheet" href="static-embed.css">', f"<style>{css_inline}</style>")
+    html = html.replace('<script type="module" src="static-embed.js"></script>',
+        f'<script type="module">{js_inline}</script>')
+    return html
