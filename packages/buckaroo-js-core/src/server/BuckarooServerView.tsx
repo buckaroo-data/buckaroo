@@ -58,6 +58,13 @@ export interface BuckarooServerViewProps {
 
     /** Optional className on the wrapping div. */
     className?: string;
+
+    /** When true, render with AG Grid's `domLayout: "autoHeight"`: the grid
+     *  grows to fit its row count instead of filling the parent container.
+     *  Use for stacked-cell hosts (notebook-style embeds) where a single
+     *  fixed embed height looks wrong for both small and large dataframes.
+     *  Overrides any `component_config.layoutType` set by the server. */
+    autoHeight?: boolean;
 }
 
 interface ReadyState {
@@ -81,6 +88,7 @@ export function BuckarooServerView({
     onMetadata,
     style,
     className,
+    autoHeight,
 }: BuckarooServerViewProps): React.ReactElement {
     const [ready, setReady] = React.useState<ReadyState | null>(null);
     const [error, setError] = React.useState<Error | null>(null);
@@ -176,6 +184,7 @@ export function BuckarooServerView({
             onMetadata={onMetadata}
             style={style}
             className={className}
+            autoHeight={autoHeight}
         />
     );
 }
