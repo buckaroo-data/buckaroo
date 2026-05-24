@@ -233,13 +233,28 @@ class LoadHandler(tornado.web.RequestHandler):
         if session_id is None:
             return
 
+        # Optional backend="xorq" routes /load through the same push-down
+        # path as /load_expr but sourced from a parquet rather than a
+        # build_dir. Default "pandas" keeps existing callers unaffected.
+        backend_arg = body.get("backend", "pandas")
+        if backend_arg not in ("pandas", "xorq"):
+            self.set_status(400)
+            self.write({"error_code": "invalid_backend",
+                "message": f"backend must be 'pandas' or 'xorq' (got {backend_arg!r})"})
+            return
+        if backend_arg == "xorq" and mode != "buckaroo":
+            self.set_status(400)
+            self.write({"error_code": "invalid_mode_for_backend",
+                "message": "backend='xorq' requires mode='buckaroo' (XorqInfiniteBuckaroo)"})
+            return
+
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
-        # Loading via /load is always pandas — clear any xorq state left
-        # by a prior /load_expr on the same session so WS dispatch routes
-        # to the new pandas dataflow rather than a stale xorq one.
-        session.backend = "pandas"
+        session.backend = backend_arg
+        # Reset any xorq/pandas state left by a prior load on the same
+        # session so WS dispatch routes to the new dataflow rather than a
+        # stale one. The branches below repopulate the relevant fields.
         session.xorq_dataflow = None
         session.expr = None
         # Reset the live-typed row-fetch filter so a search term carried
@@ -251,6 +266,81 @@ class LoadHandler(tornado.web.RequestHandler):
         if component_config:
             session.component_config = component_config
 
+        if backend_arg == "xorq":
+            # XorqInfiniteBuckaroo over a materialised parquet. Mirrors
+            # LoadExprHandler's xorq-branch session setup but sourced from
+            # a file path instead of a build_dir.
+            try:
+                from buckaroo.server import xorq_loading  # noqa: PLC0415
+            except ImportError:
+                self.set_status(501)
+                self.write({"error_code": "xorq_not_installed",
+                    "message": "xorq is not installed on this server. "
+                    "Install with `pip install buckaroo[xorq]`."})
+                return
+
+            if not os.path.exists(path):
+                self.set_status(404)
+                self.write({"error_code": "file_not_found",
+                    "message": f"File not found: {path}"})
+                return
+
+            try:
+                expr = xorq_loading.load_expr_parquet_path(path)
+                xorq_dataflow = xorq_loading.XorqServerDataflow(
+                    expr, skip_main_serial=True)
+                metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, path)
+            except Exception:
+                tb = traceback.format_exc()
+                log.error("load (xorq) error path=%s: %s", path, tb)
+                resp: dict = {"error_code": "load_error",
+                    "message": "Failed to load parquet via xorq backend"}
+                if _BUCKAROO_DEBUG:
+                    resp["details"] = tb
+                self.set_status(500)
+                self.write(resp)
+                return
+
+            session.expr = expr
+            session.xorq_dataflow = xorq_dataflow
+            session.df = None
+            session.dataflow = None
+            session.ldf = None
+            session.metadata = metadata
+            session.df_display_args = xorq_dataflow.df_display_args
+            session.df_data_dict = xorq_dataflow.df_data_dict
+            session.df_meta = xorq_dataflow.df_meta
+            session.buckaroo_state = {
+                "cleaning_method": "", "post_processing": "", "sampled": False,
+                "show_commands": False, "df_display": "main",
+                "search_string": "", "quick_command_args": {}}
+            session.buckaroo_options = xorq_dataflow.buckaroo_options
+            session.command_config = xorq_dataflow.command_config
+            session.operation_results = {
+                "transformed_df": {"schema": {"fields": []}, "data": []},
+                "generated_py_code": "# server mode (xorq backend via /load)"}
+            session.operations = []
+
+            if component_config and session.df_display_args:
+                for key in session.df_display_args:
+                    dvc = session.df_display_args[key].get("df_viewer_config")
+                    if dvc is not None:
+                        dvc["component_config"] = {
+                            **dvc.get("component_config", {}),
+                            **component_config,
+                        }
+
+            self._push_state_to_clients(session, metadata)
+            browser_action = "skipped" if no_browser else self._handle_browser_window(session_id)
+
+            log.info("load session=%s path=%s rows=%d backend=xorq browser=%s",
+                session_id, path, metadata["rows"], browser_action)
+            self.write({"session": session_id, "server_pid": os.getpid(),
+                "browser_action": browser_action, **metadata})
+            return
+
+        # Pandas-default / lazy-polars path. Identical to before — the
+        # session.backend assignment above already set "pandas".
         # Load data in appropriate mode
         file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
         if file_obj is None:
