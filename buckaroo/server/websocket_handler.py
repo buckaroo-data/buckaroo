@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import os
@@ -20,16 +21,21 @@ log = logging.getLogger("buckaroo.server.websocket")
 
 _BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
 
-# Fields in buckaroo_state that drive dataflow changes; others are ignored.
-# search_string lives here too — it doesn't touch the dataflow itself but
-# the row-fetch dispatch reads ``session.search_string`` and applies a
-# literal-contains filter before paginating (#838).
-_DATAFLOW_FIELDS = ("post_processing", "cleaning_method", "quick_command_args", "search_string")
+# Fields in buckaroo_state that drive *dataflow* changes; mutations to
+# any of these rebuild the dataflow and rebroadcast to every client.
+# ``search_string`` is deliberately NOT here — it's per-client typing
+# state owned by the handler instance (#851).
+_DATAFLOW_FIELDS = ("post_processing", "cleaning_method", "quick_command_args")
 
 
 class DataStreamHandler(tornado.websocket.WebSocketHandler):
     def open(self, session_id):
         self.session_id = session_id
+        # Per-client live search term (#838, fix for #851/cross-client
+        # pollution). Used only by the row-fetch filter and the per-client
+        # highlight overlay below — never broadcast, never stored on the
+        # session.
+        self.search_string = ""
         sessions = self.application.settings["sessions"]
         sessions.add_ws_client(session_id, self)
 
@@ -67,8 +73,26 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             if not isinstance(new_state, dict):
                 raise ValueError(f"new_state must be a dict, got {type(new_state).__name__}")
 
+            # Decide up front whether the dataflow path will run, so we
+            # don't both (a) send a per-client overlay AND (b) broadcast
+            # an initial_state in the same turn. The broadcast already
+            # carries any highlight_phrase that ``quick_command_args.search``
+            # produced via cleaning_sd, so the overlay would be redundant
+            # (and tests/clients that read one message back would see two).
+            dataflow_changed = any(old_state.get(f) != new_state.get(f) for f in _DATAFLOW_FIELDS)
+
+            # Per-client live search (#838 / #851). Update self; if no
+            # dataflow change is coming, send a targeted highlight overlay
+            # to this client only. Never touches the session, never broadcasts.
+            new_search = new_state.get("search_string", "")
+            new_search = new_search if isinstance(new_search, str) else ""
+            if self.search_string != new_search:
+                self.search_string = new_search
+                if not dataflow_changed:
+                    self._send_highlight_overlay(session)
+
             # Skip if no effective change to the fields that drive the dataflow.
-            if all(old_state.get(f) == new_state.get(f) for f in _DATAFLOW_FIELDS):
+            if not dataflow_changed:
                 log.debug("buckaroo_state_change no-op session=%s — skipping rebroadcast", self.session_id)
                 return
 
@@ -79,12 +103,6 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 dataflow.cleaning_method = new_state.get("cleaning_method", "")
             if old_state.get("quick_command_args") != new_state.get("quick_command_args"):
                 dataflow.quick_command_args = new_state.get("quick_command_args", {})
-            # search_string is stored on the session — the row-fetch
-            # dispatch reads it instead of pushing it into the dataflow
-            # (#838). Coerce non-string to "" so a malformed payload can't
-            # crash the filter helpers downstream.
-            new_search = new_state.get("search_string", "")
-            session.search_string = new_search if isinstance(new_search, str) else ""
 
             # Re-extract state from the dataflow — same helper works for both
             # ServerDataflow and XorqServerDataflow (verified by probe).
@@ -92,7 +110,10 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             session.df_display_args = buckaroo_state["df_display_args"]
             session.df_data_dict = buckaroo_state["df_data_dict"]
             session.df_meta = buckaroo_state["df_meta"]
-            session.buckaroo_state = new_state
+            # Strip search_string before snapshotting onto the session — it
+            # belongs to this client only (#851), so a future client that
+            # connects shouldn't inherit it via build_state_message.
+            session.buckaroo_state = {k: v for k, v in new_state.items() if k != "search_string"}
             session.buckaroo_options = buckaroo_state["buckaroo_options"]
             session.command_config = buckaroo_state["command_config"]
 
@@ -121,6 +142,44 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 err["details"] = tb
             self.write_message(json.dumps(err))
 
+    def _send_highlight_overlay(self, session):
+        """Send this client an ``initial_state`` with highlight_phrase
+        injected into every string-column ``displayer_args`` so live-typed
+        matches highlight in the grid (#851).
+
+        Per-client because ``search_string`` is per-client — another
+        client's term must not bleed into this one's highlight, and a
+        broadcast initial_state would clobber every other input box. We
+        deep-copy ``session.df_display_args`` so the overlay never
+        mutates the shared session snapshot.
+
+        Empty term clears any prior highlight by sending the pristine
+        df_display_args back. Skipped when no display config is loaded
+        yet — the upcoming ``initial_state`` on first load will be
+        unhighlighted, which is correct (search starts empty).
+        """
+        if not session.df_display_args:
+            return
+        term = self.search_string
+        overlay = copy.deepcopy(session.df_display_args)
+        for dva in overlay.values():
+            dvc = (dva or {}).get("df_viewer_config") or {}
+            for col in dvc.get("column_config", []) or []:
+                disp = col.get("displayer_args")
+                if not isinstance(disp, dict) or disp.get("displayer") != "string":
+                    continue
+                if term:
+                    disp["highlight_phrase"] = [term]
+                else:
+                    disp.pop("highlight_phrase", None)
+
+        msg = build_state_message(session)
+        msg["df_display_args"] = overlay
+        try:
+            self.write_message(json.dumps(msg))
+        except Exception:
+            log.debug("highlight overlay write failed for session=%s", self.session_id)
+
     def _handle_infinite_request(self, payload_args):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
@@ -131,12 +190,14 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             return
 
         def _dispatch(pa):
-            # search_string is the per-session live-typed filter (#838) —
-            # passed alongside payload_args rather than mixed into it so
-            # the WS-level row-fetch contract (start/end/sort) stays
-            # untouched and each backend can apply the filter in its
-            # native expression layer.
-            search = session.search_string or ""
+            # search_string is the per-CLIENT live-typed filter (#838 /
+            # #851) — read off self so two clients sharing the session
+            # don't fight over each other's input. Passed alongside
+            # payload_args rather than mixed into it so the WS-level
+            # row-fetch contract (start/end/sort) stays untouched and
+            # each backend can apply the filter in its native
+            # expression layer.
+            search = self.search_string or ""
             if session.mode == "lazy" and session.ldf is not None:
                 return handle_infinite_request_lazy(session.ldf, session.orig_to_rw,
                     session.rw_to_orig, session.metadata.get("rows", 0), pa)

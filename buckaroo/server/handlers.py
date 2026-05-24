@@ -175,7 +175,12 @@ class LoadHandler(tornado.web.RequestHandler):
         return True
 
     def _push_state_to_clients(self, session, metadata: dict):
-        """Push updated state to all connected WebSocket clients."""
+        """Push updated state to all connected WebSocket clients.
+
+        Also resets each client's live ``search_string`` (#851): the
+        dataset just changed, so a term carried over from the previous
+        load would silently filter the new one.
+        """
         log.info("push_state path=%s ws_clients=%d", metadata.get("filename", "?"), len(session.ws_clients))
         if not session.ws_clients:
             return
@@ -183,6 +188,7 @@ class LoadHandler(tornado.web.RequestHandler):
         push_msg = json.dumps(build_state_message(session, metadata=metadata))
         for client in list(session.ws_clients):
             try:
+                client.search_string = ""
                 client.write_message(push_msg)
             except Exception:
                 session.ws_clients.discard(client)
@@ -242,11 +248,6 @@ class LoadHandler(tornado.web.RequestHandler):
         session.backend = "pandas"
         session.xorq_dataflow = None
         session.expr = None
-        # Reset the live-typed row-fetch filter so a search term carried
-        # over from a prior dataset on this session doesn't silently
-        # filter the new one (Codex P1 on #839). The client's fresh
-        # buckaroo_state has search_string="" — keep the server in sync.
-        session.search_string = ""
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
@@ -388,9 +389,6 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.df = None
         session.dataflow = None
         session.ldf = None
-        # Reset the live-typed row-fetch filter so a prior term doesn't
-        # silently filter the freshly loaded expression (Codex P1 on #839).
-        session.search_string = ""
         session.metadata = metadata
         session.prompt = prompt
         if component_config:
@@ -422,6 +420,9 @@ class LoadExprHandler(tornado.web.RequestHandler):
             push_msg = json.dumps(build_state_message(session, metadata=metadata))
             for client in list(session.ws_clients):
                 try:
+                    # Reset per-client live search (#851): a term from
+                    # the prior expression would silently filter the new one.
+                    client.search_string = ""
                     client.write_message(push_msg)
                 except Exception:
                     session.ws_clients.discard(client)
@@ -567,6 +568,8 @@ class LoadCompareHandler(tornado.web.RequestHandler):
             push_msg = json.dumps(build_state_message(session))
             for client in list(session.ws_clients):
                 try:
+                    # Reset per-client live search (#851).
+                    client.search_string = ""
                     client.write_message(push_msg)
                 except Exception:
                     session.ws_clients.discard(client)
