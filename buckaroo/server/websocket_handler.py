@@ -142,6 +142,9 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                     session.rw_to_orig, session.metadata.get("rows", 0), pa)
             if session.mode == "buckaroo" and session.backend == "xorq" and session.xorq_dataflow:
                 return _handle_infinite_request_xorq(session.xorq_dataflow, pa, search_string=search)
+            if session.mode == "buckaroo" and session.backend == "polars" and session.dataflow:
+                from buckaroo.server.data_loading_polars import handle_infinite_request_buckaroo_polars
+                return handle_infinite_request_buckaroo_polars(session.dataflow, pa, search_string=search)
             if session.mode == "buckaroo" and session.dataflow:
                 return handle_infinite_request_buckaroo(session.dataflow, pa, search_string=search)
             return handle_infinite_request(session.df, pa)
