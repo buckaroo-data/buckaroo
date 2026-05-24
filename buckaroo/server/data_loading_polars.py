@@ -59,7 +59,13 @@ class PolarsServerDataflow(CustomizableDataflow):
 
 
 def load_file_polars(path: str) -> pl.DataFrame:
-    """Eager polars read. Extension dispatch mirrors :func:`load_file`."""
+    """Eager polars read. Extension dispatch mirrors :func:`load_file`.
+
+    ``.json`` uses ``pl.read_json`` (standard JSON array of records) to
+    match ``pd.read_json``'s default ``lines=False`` — same file must
+    load under either backend. Newline-delimited JSON is reachable via
+    the explicit ``.ndjson`` extension.
+    """
     ext = os.path.splitext(path)[1].lower()
     if ext == ".csv":
         return pl.read_csv(path)
@@ -68,6 +74,8 @@ def load_file_polars(path: str) -> pl.DataFrame:
     elif ext in (".parquet", ".parq"):
         return pl.read_parquet(path)
     elif ext == ".json":
+        return pl.read_json(path)
+    elif ext == ".ndjson":
         return pl.read_ndjson(path)
     else:
         raise ValueError(f"Unsupported file format: {ext}")
@@ -108,7 +116,12 @@ def handle_infinite_request_buckaroo_polars(
                     for c in string_cols)
                 filtered_df = processed_df.filter(mask)
             else:
-                filtered_df = processed_df
+                # No string columns to search → no matches. ``search_df_str``
+                # starts from an all-False mask and only ORs over string/object
+                # columns, so a non-empty search on a numeric-only frame
+                # produces an empty result. Matching that here keeps the UI
+                # honest: a search term should never silently appear unfiltered.
+                filtered_df = processed_df.clear()
         else:
             filtered_df = processed_df
 
