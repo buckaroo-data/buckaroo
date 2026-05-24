@@ -17,11 +17,7 @@ import tempfile
 import polars as pl
 import pytest
 
-from buckaroo.server.data_loading_polars import (
-    create_polars_dataflow,
-    handle_infinite_request_buckaroo_polars,
-    load_file_polars,
-)
+from buckaroo.server.data_loading_polars import (create_polars_dataflow, handle_infinite_request_buckaroo_polars, load_file_polars)
 
 
 def _payload(start=0, end=100):
