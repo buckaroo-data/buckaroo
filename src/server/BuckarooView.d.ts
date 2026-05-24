@@ -28,12 +28,6 @@ export interface BuckarooViewProps {
     style?: React.CSSProperties;
     /** Optional className on the wrapping div. */
     className?: string;
-    /** When true, render with AG Grid's `domLayout: "autoHeight"`: the grid
-     *  grows to fit its row count instead of filling the parent container.
-     *  Use for stacked-cell hosts (notebook-style embeds) where a fixed
-     *  embed height looks wrong for both small and large dataframes.
-     *  Overrides any `component_config.layoutType` set by the server. */
-    autoHeight?: boolean;
 }
 export declare function pickMode(rawMode: unknown): BuckarooServerMode;
 /**
@@ -46,4 +40,4 @@ export declare function pickMode(rawMode: unknown): BuckarooServerMode;
  * where you just want a WebSocket connection from the React tree, use
  * {@link BuckarooServerView}, which is a thin wrapper around this component.
  */
-export declare function BuckarooView({ model, initialState, mode, onMetadata, style, className, autoHeight, }: BuckarooViewProps): React.ReactElement;
+export declare function BuckarooView({ model, initialState, mode, onMetadata, style, className, }: BuckarooViewProps): React.ReactElement;

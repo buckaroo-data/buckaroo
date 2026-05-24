@@ -40,14 +40,8 @@ export interface BuckarooServerViewProps {
     style?: React.CSSProperties;
     /** Optional className on the wrapping div. */
     className?: string;
-    /** When true, render with AG Grid's `domLayout: "autoHeight"`: the grid
-     *  grows to fit its row count instead of filling the parent container.
-     *  Use for stacked-cell hosts (notebook-style embeds) where a single
-     *  fixed embed height looks wrong for both small and large dataframes.
-     *  Overrides any `component_config.layoutType` set by the server. */
-    autoHeight?: boolean;
 }
 /** Derive a Buckaroo server WebSocket URL from an HTTP server URL + session
  *  id. Accepts `http://...`, `https://...`, or already-`ws[s]://` URLs. */
 export declare function buckarooWsUrl(serverUrl: string, sessionId: string): string;
-export declare function BuckarooServerView({ wsUrl, renderConnecting, renderError, onMetadata, style, className, autoHeight, }: BuckarooServerViewProps): React.ReactElement;
+export declare function BuckarooServerView({ wsUrl, renderConnecting, renderError, onMetadata, style, className, }: BuckarooServerViewProps): React.ReactElement;
