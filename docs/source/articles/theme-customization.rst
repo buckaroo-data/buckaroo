@@ -392,6 +392,35 @@ with white text and borders.
    </iframe>
 
 
+Bloomberg Terminal
+~~~~~~~~~~~~~~~~~~
+
+Homage to the Bloomberg terminal — pure black with the iconic amber text.
+``headerBackgroundColor`` carves the header row out of the body so it
+reads as a distinct band, and ``headerBorderColor`` puts the amber rule
+underneath it.
+
+.. code-block:: python
+
+    component_config = {'theme': {
+        'colorScheme': 'dark',
+        'accentColor': '#ffaa00',
+        'accentHoverColor': '#ff8c00',
+        'backgroundColor': '#000000',
+        'foregroundColor': '#ffaa00',
+        'oddRowBackgroundColor': '#0a0500',
+        'borderColor': '#3a2a00',
+        'headerBackgroundColor': '#1a0f00',
+        'headerBorderColor': '#ffaa00',
+    }}
+
+.. raw:: html
+
+   <iframe src="../themes/bloomberg.html"
+           style="width:100%; height:280px; border:1px solid #3a2a00; border-radius:4px; margin:1em 0;">
+   </iframe>
+
+
 Auto Light/Dark (Branded)
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
