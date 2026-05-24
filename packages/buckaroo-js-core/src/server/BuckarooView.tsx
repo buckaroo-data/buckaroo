@@ -114,6 +114,7 @@ export function BuckarooView({
     onMetadata,
     style,
     className,
+    autoHeight,
 }: BuckarooViewProps): React.ReactElement {
     // If the caller passed raw initial_state straight off the wire,
     // df_data_dict may still contain parquet_b64 payload objects. Those
@@ -254,9 +255,34 @@ export function BuckarooView({
         model.save_changes();
     }, [model]);
 
-    const wrapperStyle: React.CSSProperties = { width: "100%", height: "100%", ...(style ?? {}) };
+    // When autoHeight is requested, force AG Grid into domLayout:"autoHeight"
+    // by stamping layoutType onto each display-arg entry's component_config,
+    // and drop the wrapper's height:100% so the grid can size to its rows
+    // instead of being capped by the parent. The map is memoized to keep
+    // child reference identity stable across re-renders.
+    const effectiveDisplayArgs = React.useMemo<Record<string, IDisplayArgs>>(() => {
+        if (!autoHeight) return dfDisplayArgs;
+        const out: Record<string, IDisplayArgs> = {};
+        for (const [k, v] of Object.entries(dfDisplayArgs)) {
+            out[k] = {
+                ...v,
+                df_viewer_config: {
+                    ...v.df_viewer_config,
+                    component_config: {
+                        ...(v.df_viewer_config.component_config ?? {}),
+                        layoutType: "autoHeight",
+                    },
+                },
+            };
+        }
+        return out;
+    }, [dfDisplayArgs, autoHeight]);
 
-    if (!dfDisplayArgs?.main || !dataReady) {
+    const wrapperStyle: React.CSSProperties = autoHeight
+        ? { width: "100%", ...(style ?? {}) }
+        : { width: "100%", height: "100%", ...(style ?? {}) };
+
+    if (!effectiveDisplayArgs?.main || !dataReady) {
         return (
             <div className={className} style={wrapperStyle}>
                 <div style={{ padding: 20, fontFamily: "sans-serif" }}>Preparing…</div>
@@ -270,7 +296,7 @@ export function BuckarooView({
                 <BuckarooInfiniteWidget
                     df_meta={dfMeta}
                     df_data_dict={dfDataDict}
-                    df_display_args={dfDisplayArgs}
+                    df_display_args={effectiveDisplayArgs}
                     operations={operations}
                     on_operations={onOperations}
                     operation_results={operationResults}
@@ -284,7 +310,7 @@ export function BuckarooView({
                 <DFViewerInfiniteDS
                     df_meta={dfMeta}
                     df_data_dict={dfDataDict}
-                    df_display_args={dfDisplayArgs}
+                    df_display_args={effectiveDisplayArgs}
                     src={src}
                     df_id={"server"}
                 />
