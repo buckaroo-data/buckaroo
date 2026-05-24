@@ -254,6 +254,9 @@ def to_parquet_b64(df: pd.DataFrame) -> str:
 
 def _make_json_safe(val):
     """Recursively convert non-JSON-serializable types (datetime keys, etc.) to strings."""
+    import numpy as np
+    if isinstance(val, np.ndarray):
+        return [_make_json_safe(v) for v in val.tolist()]
     if isinstance(val, dict):
         return {str(k): _make_json_safe(v) for k, v in val.items()}
     if isinstance(val, (list, tuple)):

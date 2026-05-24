@@ -101,6 +101,92 @@ class TestLoad(tornado.testing.AsyncHTTPTestCase):
             finally:
                 os.unlink(f.name)
 
+    def test_load_buckaroo_with_column_config_overrides(self):
+        """POST /load with column_config_overrides should plumb through to
+        the headless ServerDataflow so server-mode sessions can match a
+        notebook widget's per-column display config (#860 demo case:
+        PolarsBuckarooInfiniteWidget(df, init_sd=column_config_overrides, ...))."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                overrides = {"name": {"displayer_args": {"displayer": "string", "max_length": 5000}}}
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "cco-1", "path": f.name, "mode": "buckaroo",
+                        "column_config_overrides": overrides}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+
+                sessions = self._app.settings["sessions"]
+                session = sessions.get("cco-1")
+                self.assertIsNotNone(session)
+                dvc = session.df_display_args["main"]["df_viewer_config"]
+                # header_name carries the original column name; col_name is
+                # the renamed (a/b/c/...) version.
+                name_col = next(cc for cc in dvc["column_config"]
+                    if cc.get("header_name") == "name")
+                self.assertEqual(name_col["displayer_args"]["displayer"], "string")
+                self.assertEqual(name_col["displayer_args"]["max_length"], 5000)
+            finally:
+                os.unlink(f.name)
+
+    def test_load_buckaroo_with_extra_grid_config(self):
+        """POST /load with extra_grid_config (rowHeight etc.) should
+        reach df_viewer_config so AG-Grid picks it up."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                grid_cfg = {"rowHeight": 70, "pinnedRowHeight": 21}
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "egc-1", "path": f.name, "mode": "buckaroo",
+                        "extra_grid_config": grid_cfg}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+
+                session = self._app.settings["sessions"].get("egc-1")
+                dvc = session.df_display_args["main"]["df_viewer_config"]
+                self.assertEqual(dvc.get("extra_grid_config"), grid_cfg)
+            finally:
+                os.unlink(f.name)
+
+    def test_load_buckaroo_with_init_sd(self):
+        """POST /load with init_sd should apply to the headless dataflow
+        the same way as the widget's init_sd kwarg."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                init_sd = {"name": {"displayer_args": {"displayer": "string", "max_length": 200}}}
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "isd-1", "path": f.name, "mode": "buckaroo", "init_sd": init_sd}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+
+                session = self._app.settings["sessions"].get("isd-1")
+                dvc = session.df_display_args["main"]["df_viewer_config"]
+                name_col = next(cc for cc in dvc["column_config"]
+                    if cc.get("header_name") == "name")
+                self.assertEqual(name_col["displayer_args"]["displayer"], "string")
+                self.assertEqual(name_col["displayer_args"]["max_length"], 200)
+            finally:
+                os.unlink(f.name)
+
+    def test_load_buckaroo_without_optional_configs_keeps_defaults(self):
+        """Default behaviour: omitting the new kwargs leaves
+        extra_grid_config as the empty-dict default the headless dataflow
+        already emits — same as a notebook BuckarooInfiniteWidget(df)."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "plain-1", "path": f.name, "mode": "buckaroo"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+
+                session = self._app.settings["sessions"].get("plain-1")
+                dvc = session.df_display_args["main"]["df_viewer_config"]
+                self.assertEqual(dvc.get("extra_grid_config"), {})
+            finally:
+                os.unlink(f.name)
+
 
 class TestSessionPage(tornado.testing.AsyncHTTPTestCase):
     def get_app(self):
@@ -429,6 +515,97 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                     f"expected 5 rows, got {r['length']}")
                 await ws2.read_message()  # binary
                 ws2.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_search_string_echoed_in_overlay_buckaroo_state(self):
+        """Codex P1 on #854: when a client sends a search-only state change,
+        the server's overlay reply must carry that ``search_string`` inside
+        ``buckaroo_state``. Otherwise the JS ``WebSocketModel`` replaces
+        ``state.buckaroo_state`` wholesale with a copy missing the key,
+        React's local ``buckarooState.search_string`` resets to ``""`` and
+        the search box clears on every keystroke."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-search-echo"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws.read_message()  # initial_state on connect
+
+                ws.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": "Alice"}}))
+                msg = json.loads(await ws.read_message())
+                self.assertEqual(msg["type"], "initial_state")
+                self.assertEqual(msg["buckaroo_state"].get("search_string"), "Alice",
+                    "overlay reply must echo the client's search_string in buckaroo_state — "
+                    "missing key would clobber the React-local value on every keystroke")
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_search_string_per_client_in_dataflow_broadcast(self):
+        """Codex P1 on #854: when client A triggers a dataflow rebuild,
+        the broadcast ``initial_state`` must carry *A's* per-client
+        search_string back to A — and a separate client B sharing the
+        session must see *its own* search_string (here ``""``), not A's.
+        The session-level snapshot is search-agnostic; the per-client
+        value lives only on the handler."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-search-broadcast"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+
+                ws_a = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws_a.read_message()
+                ws_b = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws_b.read_message()
+
+                # A types a search — overlay-only, B unaffected.
+                ws_a.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": "Alice"}}))
+                await ws_a.read_message()  # consume A's overlay
+
+                # Now A triggers a dataflow change. Server rebuilds and
+                # broadcasts initial_state to both. Each client's msg
+                # should carry their own search_string.
+                ws_a.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {"sort": "name"},
+                        "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": "Alice"}}))
+                msg_a = json.loads(await ws_a.read_message())
+                msg_b = json.loads(await ws_b.read_message())
+                self.assertEqual(msg_a["buckaroo_state"].get("search_string"), "Alice",
+                    "A's broadcast copy must preserve A's per-client search_string")
+                self.assertEqual(msg_b["buckaroo_state"].get("search_string"), "",
+                    "B's broadcast copy must carry B's empty search_string, not A's")
+                ws_a.close()
+                ws_b.close()
             finally:
                 os.unlink(f.name)
 

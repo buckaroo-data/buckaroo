@@ -33,11 +33,11 @@ class SessionState:
     xorq_dataflow: Any = None  # XorqServerDataflow when backend="xorq"
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     buckaroo_state: dict = field(default_factory=dict)
-    # Live search term applied at row-fetch time (#838) — bypasses the
-    # dataflow stat pipeline that ``quick_command_args.search`` goes
-    # through, so per-keystroke filtering stays fast on parquet-backed
-    # exprs with ~10⁶ rows.
-    search_string: str = ""
+    # NOTE: ``search_string`` used to live here, but it's per-client typing
+    # state (not a session-wide property). Two clients sharing a session
+    # were clobbering each other's input via the rebroadcast path (#851).
+    # It now lives on ``DataStreamHandler`` instances; this comment is the
+    # tombstone so anyone reading state ordering doesn't expect it back.
     buckaroo_options: dict = field(default_factory=dict)
     command_config: dict = field(default_factory=dict)
     operation_results: dict = field(default_factory=dict)
@@ -58,12 +58,20 @@ mismatch. Lockstep with the buckaroo PyPI version is the documented expectation;
 this field is the runtime escape hatch."""
 
 
-def build_state_message(session: "SessionState", metadata: dict | None = None) -> dict:
+def build_state_message(session: "SessionState", metadata: dict | None = None,
+                         search_string: str = "") -> dict:
     """Build the full ``initial_state`` WebSocket payload from a session.
 
     Args:
         session: The session whose state to serialise.
         metadata: Override metadata to include; defaults to ``session.metadata``.
+        search_string: The *recipient client's* per-client live-typed
+            search term (#851). Injected into ``buckaroo_state`` so the
+            JS ``WebSocketModel`` — which replaces ``buckaroo_state``
+            wholesale on receipt — doesn't silently clear the recipient's
+            search box. The session itself never owns this value; callers
+            must pass the right value per recipient (typically
+            ``handler.search_string``).
 
     Returns:
         A dict ready to be JSON-serialised and sent to WebSocket clients.
@@ -73,7 +81,10 @@ def build_state_message(session: "SessionState", metadata: dict | None = None) -
         "prompt": session.prompt, "df_display_args": session.df_display_args, "df_data_dict": session.df_data_dict,
         "df_meta": session.df_meta, "mode": session.mode}
     if session.mode == "buckaroo":
-        msg["buckaroo_state"] = session.buckaroo_state
+        # Per-client search_string overlay (#851 Codex P1): the snapshot
+        # on the session is search-agnostic; we re-inject the recipient's
+        # value here so a missing key can't wipe it on the client.
+        msg["buckaroo_state"] = {**session.buckaroo_state, "search_string": search_string}
         msg["buckaroo_options"] = session.buckaroo_options
         msg["command_config"] = session.command_config
         msg["operation_results"] = session.operation_results

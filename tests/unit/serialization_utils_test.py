@@ -4,7 +4,7 @@ import pandas as pd
 from buckaroo.ddd_library import get_multiindex_with_names_index_df, get_multiindex_cols_df, get_multiindex_index_df
 from buckaroo.serialization_utils import (
     is_ser_dt_safe, is_dataframe_datetime_safe, check_and_fix_df, pd_to_obj,
-    to_parquet, DuplicateColumnsException)
+    to_parquet, DuplicateColumnsException, _json_encode_cell)
 
 
 
@@ -147,5 +147,19 @@ def test_serialize_naive_json():
 #         {'type': 'finite_number', 'loc': ('a',), 'msg': 'Input should be a finite number',
 #          'input': value
 #          }]
+
+
+def test_json_encode_cell_numpy_array_roundtrips():
+    # histogram_bins arrives as a numpy float array; without explicit
+    # ndarray handling _json_encode_cell falls back to default=str and
+    # emits a Python repr like "[ 2.857 6.571 ...]" that JSON.parse can't
+    # decode on the JS side. The encoded string must round-trip through
+    # json.loads to a list of floats.
+    import json
+    import numpy as np
+    bins = np.array([3.0, 7.5, 12.0, 16.5, 21.0])
+    encoded = _json_encode_cell(bins)
+    decoded = json.loads(encoded)
+    assert decoded == [3.0, 7.5, 12.0, 16.5, 21.0]
 
 
