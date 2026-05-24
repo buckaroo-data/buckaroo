@@ -99,8 +99,12 @@ async function measureCell(page: Page, cellIndex: number): Promise<CellMetrics> 
         rowCount: 0,
       } as any;
     }
+    // BuckarooInfiniteWidget renders TWO AG-Grids per output area: the
+    // StatusBar's 1-row control grid (no `.df-viewer` ancestor) and the
+    // main data grid (inside `.df-viewer`). Scope to .df-viewer so we
+    // measure the data grid, not the controls.
     const dfViewer = outputArea.querySelector(".df-viewer");
-    const agRoot = outputArea.querySelector(".ag-root-wrapper");
+    const agRoot = dfViewer?.querySelector(".ag-root-wrapper") ?? null;
     let classMode = "";
     if (dfViewer) {
       if (dfViewer.classList.contains("short-mode")) classMode = "short-mode";
