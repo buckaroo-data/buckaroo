@@ -7,7 +7,7 @@ Buckaroo started life as a Jupyter widget. It still works that way — the table
 that pops up after ``import buckaroo`` is the same component you'll be
 embedding. But there are now several other ways to render that component
 outside of a notebook: static HTML files, custom web pages, a standalone
-server, and Solara apps. This guide is a map of those options so you can pick
+server, and JS apps. This guide is a map of those options so you can pick
 the one that fits your use case.
 
 The decision comes down to two axes:
@@ -16,7 +16,7 @@ The decision comes down to two axes:
    sampling toggle) vs. a plain DFViewer table. Eager-loaded base vs.
    infinite-scrolling.
 2. **Which deployment?** Notebook kernel, static HTML, custom HTML + JS,
-   Buckaroo server, or Solara.
+   Buckaroo server, or a JS app via npm.
 
 Pick a widget and a deployment — almost any combination works.
 
@@ -73,7 +73,7 @@ Picking between them:
 
 - Default to ``BuckarooWidget`` in notebooks. It's the full pitch.
 - Use ``DFViewer`` when Buckaroo is a component of a larger UI you've
-  already built (a Solara dashboard, a static report page).
+  already built (a static report page, a dashboard).
 - Use the Infinite variants when the dataframe is too big to ship
   eagerly, or when you want server-side sorting on the full set rather
   than only the sampled subset.
@@ -218,6 +218,15 @@ You'll need to copy ``static-embed.js`` and ``static-embed.css`` from
 bundle is built with ``pnpm --filter buckaroo-widget run build:static``;
 released wheels include it.
 
+If shipping those two files alongside the HTML is inconvenient — a
+Gist, an email attachment, a one-off upload — use the CDN pattern
+under mode 3 below as a drop-in replacement. The artifact JSON is
+the same; only the ``<script>`` / ``<link>`` block at the top of the
+page changes (esm.sh URLs + import map instead of local
+``static-embed.js`` / ``static-embed.css``). The result is a single
+self-contained ``.html`` file that works anywhere with a network
+connection.
+
 Limitations:
 
 - Eager only — the full sampled dataframe is in the page. No infinite
@@ -247,36 +256,249 @@ whole page, skip ``to_html()`` and grab the artifact dict directly:
     # serve json_str to your page however you want
 
 The artifact contains the parquet-encoded data, the column display
-config, and (in Buckaroo mode) the status-bar state. On the JS side,
-import ``BuckarooStaticTable`` and ``resolveDFDataAsync`` from
-``buckaroo-js-core`` and feed it the resolved artifact:
+config, and (in Buckaroo mode) the status-bar state. There are two
+ways to feed it to the JS side: drop it into a page that loads the
+prebuilt ``static-embed.js`` bundle (no build step), or import the
+React components from ``buckaroo-js-core`` and render them yourself.
 
-.. code-block:: typescript
+**Raw JS — prebuilt bundle (works today).** The
+``static-embed.js`` bundle that ships with the wheel
+(``buckaroo/static/static-embed.js``) is an ESM module that
+auto-initialises on load. Its contract is two DOM hooks: a
+``<script id="buckaroo-data" type="application/json">`` containing
+the artifact JSON, and a ``<div id="root">`` to mount into. Any HTML
+file matching that contract will render — no JS to write:
+
+.. code-block:: html
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <link rel="stylesheet" href="static-embed.css">
+      <style>#root { width: 100%; height: 100vh; }</style>
+    </head>
+    <body>
+      <div id="root"></div>
+      <script id="buckaroo-data" type="application/json">
+        <!-- artifact JSON written here verbatim; see note below -->
+      </script>
+      <script type="module" src="static-embed.js"></script>
+    </body>
+    </html>
+
+``to_html()`` emits this same template. To embed into an existing
+page, drop the ``#buckaroo-data`` block and the two ``<script>`` /
+``<link>`` tags into your own markup and render the JSON from your
+backend (Flask, Django, Sphinx extension, etc.).
+
+**Don't HTML-escape the JSON.** The bundle reads ``#buckaroo-data``
+via ``textContent`` and hands it straight to ``JSON.parse``. Most
+server-side templating engines autoescape ``{{ ... }}`` by default,
+which turns ``"`` into ``&#34;`` and breaks parsing. Use your
+framework's "already safe" path and also defuse any ``</script>``
+sequence in the JSON so it cannot break out of the block:
+
+.. code-block:: python
+
+    # Flask / Jinja2
+    import json
+    artifact_json = json.dumps(artifact).replace("</", "<\\/")
+    return render_template("page.html", artifact_json=artifact_json)
+
+.. code-block:: jinja
+
+    {# page.html — `| safe` skips Jinja autoescaping #}
+    <script id="buckaroo-data" type="application/json">
+      {{ artifact_json | safe }}
+    </script>
+
+.. code-block:: django
+
+    {# Django: json_script emits the <script type="application/json">
+       wrapper itself and escapes "<", ">", "&" safely. #}
+    {{ artifact|json_script:"buckaroo-data" }}
+
+For *late-bound* data (fetch from an endpoint after page load), set
+``#buckaroo-data`` from JS *before* loading the module, since the
+bundle reads it once at startup:
+
+.. code-block:: html
+
+    <div id="root"></div>
+    <script id="buckaroo-data" type="application/json"></script>
+    <link rel="stylesheet" href="/static/static-embed.css">
+    <script type="module">
+      const r = await fetch("/api/my-table.json");
+      document.getElementById("buckaroo-data").textContent = await r.text();
+      await import("/static/static-embed.js");
+    </script>
+
+Copy ``static-embed.js`` and ``static-embed.css`` from
+``buckaroo/static/`` into whatever your site serves as static
+assets. The bundle is built with
+``pnpm --filter buckaroo-widget run build:static``; released wheels
+include it.
+
+**Raw JS — CDN-hosted npm (no local files, no build step).**
+Since ``buckaroo-js-core`` is on npm, you can load it from esm.sh
+(or jsDelivr / unpkg) and skip both the prebuilt static-embed
+bundle *and* the local file copy. This also doubles as a
+CDN-flavoured replacement for ``to_html()`` (mode 2) — the page
+below is the same shape as ``to_html()``'s output, but the
+``<script>`` / ``<link>`` block references esm.sh instead of a
+sibling ``static-embed.js`` / ``static-embed.css``, so the
+resulting ``.html`` is a single fully self-contained file you can
+email or upload anywhere. Drop it on any static host, fill in
+``#buckaroo-data`` from your backend (or paste the artifact JSON in
+directly for a one-shot report), and it renders:
+
+.. code-block:: html
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <link rel="stylesheet" href="https://esm.sh/buckaroo-js-core@0.14.5/dist/style.css">
+      <style>#root { width: 100%; height: 100vh; }</style>
+      <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.3.1",
+          "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+          "react-dom": "https://esm.sh/react-dom@18.3.1",
+          "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+          "buckaroo-js-core": "https://esm.sh/*buckaroo-js-core@0.14.5"
+        }
+      }
+      </script>
+    </head>
+    <body>
+      <div id="root"></div>
+      <script id="buckaroo-data" type="application/json">
+        <!-- artifact JSON written here verbatim by your backend -->
+      </script>
+      <script type="module">
+        import { createElement } from "react";
+        import { createRoot } from "react-dom/client";
+        import {
+          BuckarooStaticTable,
+          resolveDFDataAsync,
+          preResolveDFDataDict,
+        } from "buckaroo-js-core";
+
+        const artifact = JSON.parse(
+          document.getElementById("buckaroo-data").textContent
+        );
+        const [dfData, summaryStats] = await Promise.all([
+          resolveDFDataAsync(artifact.df_data),
+          resolveDFDataAsync(artifact.summary_stats_data),
+        ]);
+        const resolved = {
+          embed_type: artifact.embed_type ?? "DFViewer",
+          df_data: dfData,
+          df_viewer_config: artifact.df_viewer_config,
+          summary_stats_data: summaryStats,
+        };
+        if (artifact.embed_type === "Buckaroo" && artifact.df_data_dict) {
+          resolved.df_data_dict = await preResolveDFDataDict(artifact.df_data_dict);
+          resolved.df_data_dict.main = dfData;
+          resolved.df_display_args = artifact.df_display_args;
+          resolved.df_meta = artifact.df_meta;
+          resolved.buckaroo_options = artifact.buckaroo_options;
+          resolved.buckaroo_state = artifact.buckaroo_state;
+        }
+        createRoot(document.getElementById("root")).render(
+          createElement(BuckarooStaticTable, { artifact: resolved })
+        );
+      </script>
+    </body>
+    </html>
+
+Two non-obvious bits that make this work:
+
+- **Import map + esm.sh's "starred" build** (``https://esm.sh/*buckaroo-js-core@0.14.5``).
+  Without these, you end up with two React module instances — one
+  that ``createRoot`` renders with, another that the components
+  inside ``buckaroo-js-core`` call ``useState`` on — and the package
+  blows up with ``TypeError: can't access property "useState", i.H
+  is null``. The starred URL tells esm.sh to leave every bare
+  import (``react``, ``react-dom``, ``react/jsx-runtime``)
+  unresolved; the import map then points all of them at the same
+  pinned React, so the package and the page share one instance.
+- **Pin the version.** Use ``@0.14.5``, not ``@latest`` — esm.sh
+  caches aggressively and a future minor can change the package's
+  internal API or React-version range without warning.
+
+Swap ``esm.sh`` for ``cdn.jsdelivr.net/npm/buckaroo-js-core@0.14.5/+esm``
+or ``unpkg.com`` if you prefer; esm.sh is the easiest default
+because it serves the un-resolved (starred) build for you. With
+jsDelivr / unpkg you'd need a bundler-style build or your own
+peer-dep shim — they don't have an equivalent of the ``*`` prefix.
+
+**TypeScript — server embed with the React component.**
+If your page is already a React app (Next.js, Remix, a Vite SPA, an
+internal dashboard), skip the prebuilt bundle and mount the
+component yourself. ``npm install buckaroo-js-core``. The flow has
+two halves — a backend that serializes the artifact, and a React
+component that resolves it and hands it to ``BuckarooStaticTable``.
+
+The Python side is the same ``prepare_buckaroo_artifact`` /
+``artifact_to_json`` call shown above; serve the resulting JSON
+either inline in the page (the ``#buckaroo-data`` block, escaped
+exactly like the raw-JS path) or as a ``GET /api/<table>.json``
+endpoint your React code fetches.
+
+On the JS side, import ``BuckarooStaticTable`` and the resolver
+helpers and feed them the artifact:
+
+.. code-block:: tsx
 
     import {
         BuckarooStaticTable,
         resolveDFDataAsync,
         preResolveDFDataDict,
     } from "buckaroo-js-core";
+    import "buckaroo-js-core/dist/style.css";
 
-    const artifact = JSON.parse(jsonStrFromYourBackend);
-    const dfData = await resolveDFDataAsync(artifact.df_data);
-    const summaryStats = await resolveDFDataAsync(artifact.summary_stats_data);
-    const resolved = { ...artifact, df_data: dfData, summary_stats_data: summaryStats };
-    // <BuckarooStaticTable artifact={resolved} />
+    export async function loadArtifact(url: string) {
+        const artifact = await fetch(url).then((r) => r.json());
+        const [dfData, summaryStats] = await Promise.all([
+            resolveDFDataAsync(artifact.df_data),
+            resolveDFDataAsync(artifact.summary_stats_data),
+        ]);
+        const resolved: any = {
+            embed_type: artifact.embed_type ?? "DFViewer",
+            df_data: dfData,
+            df_viewer_config: artifact.df_viewer_config,
+            summary_stats_data: summaryStats,
+        };
+        if (artifact.embed_type === "Buckaroo" && artifact.df_data_dict) {
+            resolved.df_data_dict = await preResolveDFDataDict(artifact.df_data_dict);
+            resolved.df_data_dict.main = dfData;
+            resolved.df_display_args = artifact.df_display_args;
+            resolved.df_meta = artifact.df_meta;
+            resolved.buckaroo_options = artifact.buckaroo_options;
+            resolved.buckaroo_state = artifact.buckaroo_state;
+        }
+        return resolved;
+    }
 
-This is the same path ``static-embed.tsx`` uses; you're substituting
-your own page shell. Same eager-only limitations as static HTML.
+    export function MyTable({ artifact }: { artifact: any }) {
+        return (
+            <div className="buckaroo_anywidget" style={{ width: "100%", height: "100vh" }}>
+                <BuckarooStaticTable artifact={artifact} />
+            </div>
+        );
+    }
 
-.. note::
+This is the same path ``static-embed.tsx`` uses internally
+(see ``packages/js/static-embed.tsx``); you're substituting your own
+page shell and your own backend transport. The parquet payload in
+``df_data`` (and the per-tab payloads in ``df_data_dict`` for the
+full Buckaroo UI) is what ``resolveDFDataAsync`` /
+``preResolveDFDataDict`` decode — skip that step and the table
+renders empty.
 
-   ``buckaroo-js-core`` is not yet published to npm. Until then, the
-   options are: (1) consume the prebuilt ``static-embed.js`` bundle
-   that ships with the wheel under ``buckaroo/static/`` and call
-   ``window.BuckarooStaticEmbed`` rather than importing modules; or
-   (2) work inside this monorepo and resolve ``buckaroo-js-core`` via
-   the pnpm workspace. The npm publication is tracked under the
-   "future" entry in the quick chooser below.
+Same eager-only limitations as static HTML in either path.
 
 When to use it: embedding into a Sphinx docs page, a marketing site,
 a CMS-rendered article, a multi-table dashboard. You control the
@@ -439,29 +661,6 @@ The most directly relevant stories:
   :doc:`data_flow`, assembled in JS.
 
 
-6. Solara
-~~~~~~~~~
-
-If you're building a `Solara <https://solara.dev/>`_ app, use the
-reacton wrappers in ``buckaroo.solara_buckaroo``:
-
-.. code-block:: python
-
-    from buckaroo.solara_buckaroo import SolaraDFViewer, SolaraBuckarooWidget
-
-    @solara.component
-    def Page():
-        SolaraDFViewer(df)
-
-There are pandas and polars variants of each
-(``SolaraPolarsDFViewer``, ``SolaraPolarsBuckarooWidget``). These
-build the widget from the input frame and hand it to reacton — Solara
-manages the rest of the page lifecycle.
-
-When to use it: you're already in Solara. Otherwise the notebook,
-static, or server modes are simpler.
-
-
 Interactive features and where they work
 ----------------------------------------
 
@@ -514,9 +713,6 @@ post-processing method.
    * - Buckaroo server, ``mode="viewer"`` / ``mode="lazy"``
      - No
      - No dataflow on the session, no status bar
-   * - ``SolaraBuckarooWidget``
-     - Yes
-     - Solara process runs the transform
 
 Sorting and infinite-scroll row fetching are not in this bucket — sort
 is pushed to Python in the Infinite/server path but works without it
@@ -550,8 +746,6 @@ Quick chooser
      - ``XorqBuckarooInfiniteWidget`` (notebook, push-down stats)
    * - Letting Claude Code view data files
      - Buckaroo server via MCP (``buckaroo[mcp]``)
-   * - Solara dashboard
-     - ``SolaraDFViewer`` / ``SolaraBuckarooWidget``
    * - React app embedding a live Buckaroo session
      - ``BuckarooServerView`` from ``buckaroo-js-core`` (mode 5a)
    * - React app, no Python at view time
