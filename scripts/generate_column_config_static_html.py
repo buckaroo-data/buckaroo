@@ -115,33 +115,27 @@ def chart_fixture():
     return df, cfg
 
 
-# 24x24 PNG smiley — same fixture used by the Marimo gallery.
+# 24x24 PNG smiley, PIL-generated (the Marimo-gallery copy turned out to
+# have a corrupted IDAT chunk that Chrome silently rendered but Firefox
+# rejected with "Image corrupt or truncated").
 _PNG_SMILEY = (
-    "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAABHNCSVQICAgIfAhkiAAAAAlwSFlz"
-    "AAAApgAAAKYB3X3/OAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAANCSURB"
-    "VEiJtZZPbBtFFMZ/M7ubXdtdb1xSFyeilBapySVU8h8OoFaooFSqiihIVIpQBKci6KEg9Q6H9kov"
-    "IHoCIVQJJCKE1ENFjnAgcaSGC6rEnxBwA04Tx43t2FnvDAfjkNibxgHxnWb2e/u992bee7tCa00Y"
-    "JsffekFY+nUzFtjW0LrvjRXrCDIAaPLlW0nHL0SsZtVoaF98mLrx3pdhOqLtYPHChahZcYYO7KvP"
-    "FxvRl5XPp1sN3adWiD1ZAqD6XYK1b/dvE5IWryTt2udLFedwc1+9kLp+vbbpoDh+6TklxBeAi9TL"
-    "0taeWpdmZzQDry0AcO+jQ12RyohqqoYoo8RDwJrU+qXkjWtfi8Xxt58BdQuwQs9qC/afLwCw8tnQ"
-    "bqYAPsgxE1S6F3EAIXux2oQFKm0ihMsOF71dHYx+f3NND68ghCu1YIoePPQN1pGRABkJ6Bus96Cu"
-    "tRZMydTl+TvuiRW1m3n0eDl0vRPcEysqdXn+jsQPsrHMquGeXEaY4Yk4wxWcY5V/9scqOMOVUFth"
-    "atyTy8QyqwZ+kDURKoMWxNKr2EeqVKcTNOajqKoBgOE28U4tdQl5p5bwCw7BWquaZSzAPlwjlith"
-    "Jtp3pTImSqQRrb2Z8PHGigD4RZuNX6JYj6wj7O4TFLbCO/Mn/m8R+h6rYSUb3ekokRY6f/YukArN979"
-    "jcW+V/S8g0eT/N3VN3kTqWbQ428m9/8k0P/1aIhF36PccEl6EhOcAUCrXKZXXWS3XKd2vc/TRBG9"
-    "O5ELC17MmWubD2nKhUKZa26Ba2+D3P+4/MNCFwg59oWVeYhkzgN/JDR8deKBoD7Y+ljEjGZ0sosX"
-    "VTvbc6RHirr2reNy1OXd6pJsQ+gqjk8VWFYmHrwBzW/n+uMPFiRwHB2I7ih8ciHFxIkd/3Omk5tCD"
-    "V1t+2nNu5sxxpDFNx+huNhVT3/zMDz8usXC3ddaHBj1GHj/As08fwTS7Kt1HBTmyN29vdwAw+/wb"
-    "wLVOJ3uAD1wi/dUH7Qei66PfyuRj4Ik9is+hglfbkbfR3cnZm7chlUWLdwmprtCohX4HUtlOcQjL"
-    "YCu+fzGJH2QRKvP3UNz8bWk1qMxjGTOMThZ3kvgLI5AzFfo379UAAAAASUVORK5CYII=")
+    "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAnElEQVR42sVVSRKAMAgrjI/y/yd/"
+    "hSed2mEJHVq5QhMwEVpbHATWyex7QoDlMh6fMQ7NAGeINAJBgQ2iDyZXgXcTi0dQHlzVvTUFJwRM"
+    "5UYCtfsHQAPycv0UWzWwOlH/By+XcpEHgJiCPQEREaO6bRqQ1cWMTfuVwcj39WwaaUHRLop0MOpf"
+    "3AN10UgEr/LV6/qXg7PlZJYd/eVxAwbeP1vBDxyQAAAAAElFTkSuQmCC")
 
 
 def image_fixture():
-    df = pd.DataFrame({"raw": [_PNG_SMILEY, None], "image": [_PNG_SMILEY, None]})
+    # Two rows of the same smiley so both cells render (the previous
+    # None-second-row produced a broken-image icon from
+    # ``data:image/png;base64,null``). The PNG is 24x24 — ag-grid row
+    # default is enough to show it without scaling.
+    df = pd.DataFrame({"raw": [_PNG_SMILEY, _PNG_SMILEY],
+        "image": [_PNG_SMILEY, _PNG_SMILEY]})
     cfg = {
         "raw": {"displayer_args": {"displayer": "string", "max_length": 40}},
         "image": {"displayer_args": {"displayer": "Base64PNGImageDisplayer"},
-            "ag_grid_specs": {"width": 150}},
+            "ag_grid_specs": {"width": 80}},
     }
     return df, cfg
 
@@ -180,23 +174,25 @@ def color_map_continuous_fixture():
     return df, cfg
 
 
-def color_map_explicit_fixture():
-    df = pd.DataFrame({"ten_vals_10_colors": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        "ten_vals_5_colors": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        "five_vals_10_colors": [0, 1, 2, 3, 4, None, None, None, None, None, None],
-        "five_vals_5_colors": [0, 1, 2, 3, 4, None, None, None, None, None, None]})
+def color_categorical_fixture():
+    # ``color_categorical`` indexes into the palette directly by the cell
+    # value, no histogram_bins needed — the right tool when the value
+    # itself is the category index (0..N).
+    df = pd.DataFrame({"five_vals_5_colors":  [0, 1, 2, 3, 4, None, None, None, None, None],
+        "five_vals_10_colors": [0, 1, 2, 3, 4, None, None, None, None, None],
+        "ten_vals_5_colors":   [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "ten_vals_10_colors":  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]})
     c10 = ["green", "blue", "red", "orange", "purple", "brown", "pink",
         "beige", "teal", "gray"]
     c5 = ["green", "blue", "red", "orange", "purple"]
     cfg = {
-        "ten_vals_10_colors": {"color_map_config": {"color_rule": "color_map",
-            "map_name": c10}},
-        "ten_vals_5_colors": {"color_map_config": {"color_rule": "color_map",
+        "five_vals_5_colors": {"color_map_config": {"color_rule": "color_categorical",
             "map_name": c5}},
-        "five_vals_10_colors": {"color_map_config": {"color_rule": "color_map",
+        "five_vals_10_colors": {"color_map_config": {"color_rule": "color_categorical",
             "map_name": c10}},
-        "five_vals_5_colors": {"color_map_config": {"color_rule": "color_map",
+        "ten_vals_5_colors": {"color_map_config": {"color_rule": "color_categorical",
             "map_name": c5}},
+        "ten_vals_10_colors": {"color_map_config": {"color_rule": "color_categorical",
+            "map_name": c10}},
     }
     return df, cfg
 
@@ -243,7 +239,7 @@ ENTRIES = [
     ("chart", "Chart Displayer", chart_fixture, []),
     ("image", "Image Displayer", image_fixture, []),
     ("color-map-continuous", "Color Map (Continuous)", color_map_continuous_fixture, []),
-    ("color-map-explicit", "Color Map (Explicit Palette)", color_map_explicit_fixture, []),
+    ("color-categorical", "Color Categorical (Explicit Palette)", color_categorical_fixture, []),
     ("color-from-column", "Color From Column", color_from_column_fixture, []),
     ("error-highlight", "Error Highlighting", error_highlight_fixture, []),
     ("tooltip", "Tooltip", tooltip_fixture, []),

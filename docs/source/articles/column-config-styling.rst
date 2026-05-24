@@ -285,7 +285,7 @@ in another column to show the underlying payload.
         "raw": {"displayer_args": {"displayer": "string",
                                     "max_length": 40}},
         "image": {"displayer_args": {"displayer": "Base64PNGImageDisplayer"},
-                  "ag_grid_specs": {"width": 150}},
+                  "ag_grid_specs": {"width": 80}},
     }
 
 .. raw:: html
@@ -342,16 +342,27 @@ Custom: pass a list of CSS colors.
    </iframe>
 
 
-Color map (explicit palette)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Color categorical (explicit palette)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Pass an explicit list of CSS colors as ``map_name``. The palette is
-distributed across the value range — useful for flagging values from a
-discrete set of categories.
+When the cell *value* is the category index (0, 1, 2, …), use
+``color_rule: "color_categorical"`` to index directly into a palette.
+Unlike ``color_map``, this rule doesn't need a histogram — it reads
+``cmap[cell_value]`` straight from the list.
 
-This example shows the same data with two palette lengths (5 vs 10) and
-two value ranges (5 vs 10 distinct values) to make the distribution
-visible.
+.. code-block:: typescript
+
+    interface ColorCategoricalRules {
+        color_rule: 'color_categorical';
+        map_name: string[];     // explicit CSS-color list
+        val_column?: string;    // optional: drive color from another column
+    }
+
+This example shows the same fixture with two palette lengths (5 vs 10)
+and two value ranges (5 vs 10 distinct integers), so you can see what
+happens when the value space exceeds the palette (``cmap[value]``
+returns ``undefined`` and the cell inherits the row background) and
+when it doesn't.
 
 .. code-block:: python
 
@@ -360,19 +371,19 @@ visible.
     colors_5  = ["green", "blue", "red", "orange", "purple"]
 
     column_config_overrides = {
-        "ten_vals_10_colors":  {"color_map_config": {"color_rule": "color_map",
-                                                      "map_name": colors_10}},
-        "ten_vals_5_colors":   {"color_map_config": {"color_rule": "color_map",
+        "five_vals_5_colors":  {"color_map_config": {"color_rule": "color_categorical",
                                                       "map_name": colors_5}},
-        "five_vals_10_colors": {"color_map_config": {"color_rule": "color_map",
+        "five_vals_10_colors": {"color_map_config": {"color_rule": "color_categorical",
                                                       "map_name": colors_10}},
-        "five_vals_5_colors":  {"color_map_config": {"color_rule": "color_map",
+        "ten_vals_5_colors":   {"color_map_config": {"color_rule": "color_categorical",
                                                       "map_name": colors_5}},
+        "ten_vals_10_colors":  {"color_map_config": {"color_rule": "color_categorical",
+                                                      "map_name": colors_10}},
     }
 
 .. raw:: html
 
-   <iframe src="../styling/color-map-explicit.html"
+   <iframe src="../styling/color-categorical.html"
            style="width:100%; height:320px; border:1px solid #e0e0e0; border-radius:4px; margin:1em 0;">
    </iframe>
 
