@@ -165,6 +165,50 @@ class TestToHtml:
         html = to_html(simple_df)
         assert 'parquet_b64' in html
 
+    def test_self_contained_default_false(self):
+        """Default behaviour: HTML still references sidecar bundle by URL."""
+        html = to_html(simple_df)
+        assert '<link rel="stylesheet" href="static-embed.css">' in html
+        assert '<script type="module" src="static-embed.js"></script>' in html
+
+    def test_self_contained_true_inlines_js_and_css(self):
+        """self_contained=True inlines static-embed.js/css and removes sidecar references."""
+        html = to_html(simple_df, self_contained=True)
+
+        assert 'href="static-embed.css"' not in html, \
+            "self_contained=True should drop the external CSS reference"
+        assert 'src="static-embed.js"' not in html, \
+            "self_contained=True should drop the external JS reference"
+
+        assert '<style>' in html
+        assert '<script type="module">' in html
+
+        from pathlib import Path
+        import buckaroo as _bk
+        static_src = Path(_bk.__file__).parent / "static"
+        css_first_line = (static_src / "static-embed.css").read_text().splitlines()[0]
+        assert css_first_line in html, "inlined CSS body should be present in output"
+
+    def test_self_contained_defuses_close_script(self):
+        """Bundled JS containing literal </script> must not break out of the inline tag."""
+        html = to_html(simple_df, self_contained=True)
+        # Inside the module body there must be no raw </script> that could
+        # terminate the inline block prematurely. Exactly one </script>
+        # closes the module tag itself; that one is followed by the </body>
+        # tag in the template.
+        module_start = html.index('<script type="module">')
+        module_chunk = html[module_start + len('<script type="module">'):]
+        first_close = module_chunk.index('</script>')
+        # No further </script> may appear before the genuine terminator's
+        # end — i.e. the substring before first_close must contain no
+        # </script>. (Trivially true by find-first.) Stronger assertion:
+        # whatever sits at first_close should be immediately followed by
+        # whitespace + </body>, meaning the close belongs to the template.
+        tail = module_chunk[first_close:first_close + 60]
+        assert tail.startswith('</script>')
+        assert '</body>' in tail, \
+            f"premature </script> closed the inline module; tail={tail!r}"
+
 
 class TestWeirdTypesParquetRoundtrip:
     """Parquet b64 encoding must produce standard types that hyparquet can decode.
