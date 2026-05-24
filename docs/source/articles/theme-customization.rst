@@ -395,29 +395,51 @@ with white text and borders.
 Bloomberg Terminal
 ~~~~~~~~~~~~~~~~~~
 
-Homage to the Bloomberg terminal — pure black with the iconic amber text.
-``headerBackgroundColor`` carves the header row out of the body so it
-reads as a distinct band, and ``headerBorderColor`` puts the amber rule
-underneath it.
+Homage to the Bloomberg terminal — pure black with the iconic amber
+``#FF7900`` text. ``headerBorderColor`` puts the bright amber rule
+beneath the column names; the tight ``rowVerticalPaddingScale`` and
+``spacing`` reproduce the dense terminal row layout.
 
 .. code-block:: python
 
     component_config = {'theme': {
         'colorScheme': 'dark',
-        'accentColor': '#ffaa00',
-        'accentHoverColor': '#ff8c00',
+        'accentColor': '#ff7900',
+        'accentHoverColor': '#ffa500',
         'backgroundColor': '#000000',
-        'foregroundColor': '#ffaa00',
+        'foregroundColor': '#ffa500',
         'oddRowBackgroundColor': '#0a0500',
-        'borderColor': '#3a2a00',
-        'headerBackgroundColor': '#1a0f00',
-        'headerBorderColor': '#ffaa00',
+        'borderColor': '#5a3a00',
+        'headerBackgroundColor': '#000000',
+        'headerBorderColor': '#ff7900',
+        'spacing': 2,
+        'rowVerticalPaddingScale': 0.3,
+        'cellHorizontalPaddingScale': 0.7,
     }}
+
+The theme system doesn't expose ``fontFamily``, but the Bloomberg look
+is defined by its monospace CRT-amber typography. To match it on the
+demo page, layer a small CSS block over the embed that forces a
+monospace stack, uppercases the headers, and adds a subtle amber
+text-shadow for the phosphor glow:
+
+.. code-block:: css
+
+    .ag-cell, .ag-header-cell, .ag-header-cell-label {
+        font-family: 'Berkeley Mono', 'JetBrains Mono',
+                     'Menlo', 'Consolas', monospace !important;
+        letter-spacing: 0.02em;
+        text-shadow: 0 0 1px rgba(255,121,0,0.4);
+    }
+    .ag-header-cell-label {
+        font-weight: 700;
+        text-transform: uppercase;
+    }
 
 .. raw:: html
 
    <iframe src="../themes/bloomberg.html"
-           style="width:100%; height:280px; border:1px solid #3a2a00; border-radius:4px; margin:1em 0;">
+           style="width:100%; height:280px; border:1px solid #5a3a00; border-radius:4px; margin:1em 0;">
    </iframe>
 
 

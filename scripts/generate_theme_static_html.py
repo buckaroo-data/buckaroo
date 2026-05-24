@@ -175,11 +175,12 @@ THEME_ENTRIES = [
         "backgroundColor": "#ffffff", "foregroundColor": "#2d3436", "oddRowBackgroundColor": "#f8f9ff",
         "borderColor": "#e8e8f0", "headerBorderColor": "#6c5ce7", "spacing": 16, "rowVerticalPaddingScale": 2.0,
         "cellHorizontalPaddingScale": 1.5}, 'The opposite of trader styling. Maximum whitespace, three columns, last column ends with "Call us for pricing".', "vc"),
-    ("bloomberg", "Bloomberg Terminal", {"colorScheme": "dark", "accentColor": "#ffaa00",
-        "accentHoverColor": "#ff8c00", "backgroundColor": "#000000", "foregroundColor": "#ffaa00",
-        "oddRowBackgroundColor": "#0a0500", "borderColor": "#3a2a00",
-        "headerBackgroundColor": "#1a0f00", "headerBorderColor": "#ffaa00"},
-        "Bloomberg terminal homage — pure black with the iconic amber/orange text."),
+    ("bloomberg", "Bloomberg Terminal", {"colorScheme": "dark", "accentColor": "#ff7900",
+        "accentHoverColor": "#ffa500", "backgroundColor": "#000000", "foregroundColor": "#ffa500",
+        "oddRowBackgroundColor": "#0a0500", "borderColor": "#5a3a00",
+        "headerBackgroundColor": "#000000", "headerBorderColor": "#ff7900",
+        "spacing": 2, "rowVerticalPaddingScale": 0.3, "cellHorizontalPaddingScale": 0.7},
+        "Bloomberg terminal homage — pure black with iconic amber, monospace font, and tight terminal-style row spacing."),
     ("multiindex-headers", "MultiIndex Headers", {"colorScheme": "dark", "accentColor": "purple",
         "accentHoverColor": "orange", "backgroundColor": "blue", "foregroundColor": "teal",
         "oddRowBackgroundColor": "red", "borderColor": "pink", "headerBorderColor": "green",
@@ -187,9 +188,39 @@ THEME_ENTRIES = [
 ]
 
 
+# The theme system exposes colors + spacing but not font-family. Bloomberg
+# is defined by its monospace amber CRT look, so for that one entry we
+# splice in extra CSS at the HTML level (the iframe page is self-contained,
+# so this stays scoped to the demo and doesn't affect other themes).
+_BLOOMBERG_EXTRA_CSS = """
+  body, .ag-theme-quartz, .ag-theme-quartz-dark,
+  .ag-cell, .ag-header-cell, .ag-header-cell-label,
+  .ag-floating-top, .ag-floating-bottom,
+  .buckaroo-summary-stats-row, .buckaroo-footer {
+    font-family: 'Berkeley Mono', 'JetBrains Mono', 'Menlo', 'Consolas', monospace !important;
+    letter-spacing: 0.02em;
+  }
+  .ag-cell, .ag-header-cell-label, .ag-floating-top .ag-cell,
+  .ag-floating-bottom .ag-cell {
+    text-shadow: 0 0 1px rgba(255,121,0,0.4);
+  }
+  .ag-header-cell-label {
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+"""
+
+
+def _splice_extra_css(html: str, extra_css: str) -> str:
+    """Insert extra CSS just before </style> in the document head."""
+    return html.replace("</style>", f"{extra_css}</style>", 1)
+
+
 def generate_embed(filename, title, df, theme_config):
     """Generate a single themed static embed HTML file."""
     html = themed_html(df, title, theme_config)
+    if filename == "bloomberg":
+        html = _splice_extra_css(html, _BLOOMBERG_EXTRA_CSS)
     path = os.path.join(OUT_DIR, f"{filename}.html")
     with open(path, "w") as f:
         f.write(html)
