@@ -218,6 +218,15 @@ You'll need to copy ``static-embed.js`` and ``static-embed.css`` from
 bundle is built with ``pnpm --filter buckaroo-widget run build:static``;
 released wheels include it.
 
+If shipping those two files alongside the HTML is inconvenient — a
+Gist, an email attachment, a one-off upload — use the CDN pattern
+under mode 3 below as a drop-in replacement. The artifact JSON is
+the same; only the ``<script>`` / ``<link>`` block at the top of the
+page changes (esm.sh URLs + import map instead of local
+``static-embed.js`` / ``static-embed.css``). The result is a single
+self-contained ``.html`` file that works anywhere with a network
+connection.
+
 Limitations:
 
 - Eager only — the full sampled dataframe is in the page. No infinite
@@ -333,9 +342,15 @@ include it.
 **Raw JS — CDN-hosted npm (no local files, no build step).**
 Since ``buckaroo-js-core`` is on npm, you can load it from esm.sh
 (or jsDelivr / unpkg) and skip both the prebuilt static-embed
-bundle *and* the local file copy. The page below is fully
-self-contained — drop it on any static host, fill in
-``#buckaroo-data`` from your backend, and it renders:
+bundle *and* the local file copy. This also doubles as a
+CDN-flavoured replacement for ``to_html()`` (mode 2) — the page
+below is the same shape as ``to_html()``'s output, but the
+``<script>`` / ``<link>`` block references esm.sh instead of a
+sibling ``static-embed.js`` / ``static-embed.css``, so the
+resulting ``.html`` is a single fully self-contained file you can
+email or upload anywhere. Drop it on any static host, fill in
+``#buckaroo-data`` from your backend (or paste the artifact JSON in
+directly for a one-shot report), and it renders:
 
 .. code-block:: html
 
