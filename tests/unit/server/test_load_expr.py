@@ -401,6 +401,79 @@ class TestLoadBackendXorq(tornado.testing.AsyncHTTPTestCase):
             "invalid_mode_for_backend")
 
     @tornado.testing.gen_test
+    async def test_xorq_load_failure_preserves_session_backend(self):
+        """Codex P1 on #840: a failed xorq /load must not flip
+        session.backend to 'xorq' before the load is known to succeed.
+        Otherwise a session previously serving pandas ends up with
+        backend='xorq' + xorq_dataflow=None, and the WS state-change
+        handler silently drops further updates (websocket_handler.py:59)."""
+        d = tempfile.mkdtemp()
+        good_path = os.path.join(d, "good.parquet")
+        bogus_path = os.path.join(d, "nonexistent.parquet")
+        try:
+            pd.DataFrame({"idx": list(range(3))}).to_parquet(good_path)
+
+            # 1. Successful pandas load establishes prior session state.
+            resp = await _post(self.get_http_port(), "/load",
+                {"session": "lb-roll", "path": good_path, "mode": "buckaroo"})
+            self.assertEqual(resp.code, 200)
+
+            sessions = self._app.settings["sessions"]
+            session = sessions.get("lb-roll")
+            self.assertEqual(session.backend, "pandas")
+            prior_dataflow = session.dataflow
+            self.assertIsNotNone(prior_dataflow)
+
+            # 2. Failed xorq load (path doesn't exist → 404).
+            resp = await _post(self.get_http_port(), "/load",
+                {"session": "lb-roll", "path": bogus_path,
+                 "mode": "buckaroo", "backend": "xorq"})
+            self.assertEqual(resp.code, 404)
+
+            # 3. Session must not have been half-mutated. backend stays
+            # 'pandas'; the existing pandas dataflow stays reachable so
+            # WS dispatch can still answer buckaroo_state_change.
+            self.assertEqual(session.backend, "pandas",
+                "session.backend must not flip to 'xorq' on failed xorq load")
+            self.assertIs(session.dataflow, prior_dataflow,
+                "session.dataflow must survive a failed xorq load")
+            self.assertIsNone(session.xorq_dataflow)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_xorq_not_installed_returns_501(self):
+        """Codex P2 on #840: when xorq.api is not importable the handler
+        must return 501 xorq_not_installed, not a generic 500 load_error.
+        The probe in handlers.py has to be explicit — importing
+        ``buckaroo.server.xorq_loading`` succeeds even without xorq
+        because the transitive ``import xorq.api`` calls in
+        ``xorq_stats_v2`` and ``xorq_stat_pipeline`` are guarded with
+        try/except.
+
+        Uses a real parquet path so the path-exists check passes; that
+        way a 500 result here proves the bug isn't masked as file-not-
+        found and is genuinely the unreachable 501 branch."""
+        from unittest.mock import patch
+        d = tempfile.mkdtemp()
+        parquet_path = os.path.join(d, "p.parquet")
+        try:
+            pd.DataFrame({"idx": [0]}).to_parquet(parquet_path)
+            # sys.modules[name] = None forces a subsequent `import name`
+            # to raise ImportError. patch.dict restores the mapping so
+            # other tests still see the real xorq.api.
+            with patch.dict(sys.modules, {"xorq.api": None}):
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "lb-noxorq",
+                        "path": parquet_path,
+                        "mode": "buckaroo", "backend": "xorq"}),
+                    headers={"Content-Type": "application/json"})
+            self.assertEqual(resp.code, 501)
+            self.assertEqual(json.loads(resp.body)["error_code"],
+                "xorq_not_installed")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_load_parquet_via_xorq_backend(self):
         """Happy path: POST /load with backend=xorq, then issue an
         infinite_request — the row count must come from the parquet via
