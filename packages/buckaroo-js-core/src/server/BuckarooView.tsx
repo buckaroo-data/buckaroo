@@ -81,6 +81,12 @@ export interface BuckarooViewProps {
 
     /** Optional className on the wrapping div. */
     className?: string;
+
+    /** When true, render with AG Grid's `domLayout: "autoHeight"`: the grid
+     *  grows to fit its row count instead of filling the parent container.
+     *  Use for stacked-cell hosts (notebook-style embeds) where a fixed
+     *  embed height looks wrong for both small and large dataframes. */
+    autoHeight?: boolean;
 }
 
 export function pickMode(rawMode: unknown): BuckarooServerMode {
