@@ -72,21 +72,35 @@ describe("BuckarooView autoHeight (#846)", () => {
         expect(cc?.layoutType).toBe("autoHeight");
     });
 
-    it("leaves display args untouched when autoHeight is not set", async () => {
+    it("preserves a server-provided layoutType when autoHeight is not set", async () => {
+        const state = {
+            df_meta: { total_rows: 4, columns: 2, filtered_rows: 4, rows_shown: 4 },
+            df_data_dict: {},
+            df_display_args: {
+                main: {
+                    df_viewer_config: {
+                        pinned_rows: [],
+                        left_col_configs: [],
+                        column_config: [],
+                        component_config: { layoutType: "normal" },
+                    },
+                    summary_stats_key: "all_stats",
+                },
+            },
+        };
         await act(async () => {
             render(
                 <BuckarooView
                     model={makeFakeModel()}
-                    initialState={baseInitialState()}
+                    initialState={state}
                     mode="viewer"
                 />,
             );
         });
 
         const last = capturedDsProps[capturedDsProps.length - 1];
-        // Either no component_config, or layoutType not forced to autoHeight.
         const cc = last.df_display_args.main.df_viewer_config.component_config;
-        expect(cc?.layoutType).not.toBe("autoHeight");
+        expect(cc?.layoutType).toBe("normal");
     });
 
     it("drops height:100% from the wrapper when autoHeight is set, so the grid can grow with its rows", async () => {

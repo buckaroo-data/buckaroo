@@ -85,7 +85,8 @@ export interface BuckarooViewProps {
     /** When true, render with AG Grid's `domLayout: "autoHeight"`: the grid
      *  grows to fit its row count instead of filling the parent container.
      *  Use for stacked-cell hosts (notebook-style embeds) where a fixed
-     *  embed height looks wrong for both small and large dataframes. */
+     *  embed height looks wrong for both small and large dataframes.
+     *  Overrides any `component_config.layoutType` set by the server. */
     autoHeight?: boolean;
 }
 
@@ -255,11 +256,9 @@ export function BuckarooView({
         model.save_changes();
     }, [model]);
 
-    // When autoHeight is requested, force AG Grid into domLayout:"autoHeight"
-    // by stamping layoutType onto each display-arg entry's component_config,
-    // and drop the wrapper's height:100% so the grid can size to its rows
-    // instead of being capped by the parent. The map is memoized to keep
-    // child reference identity stable across re-renders.
+    // gridUtils already honors component_config.layoutType — stamp it per
+    // display-arg entry and let getHeightStyle2 do the rest. Memoized to
+    // keep child reference identity stable across re-renders.
     const effectiveDisplayArgs = React.useMemo<Record<string, IDisplayArgs>>(() => {
         if (!autoHeight) return dfDisplayArgs;
         const out: Record<string, IDisplayArgs> = {};

@@ -62,7 +62,8 @@ export interface BuckarooServerViewProps {
     /** When true, render with AG Grid's `domLayout: "autoHeight"`: the grid
      *  grows to fit its row count instead of filling the parent container.
      *  Use for stacked-cell hosts (notebook-style embeds) where a single
-     *  fixed embed height looks wrong for both small and large dataframes. */
+     *  fixed embed height looks wrong for both small and large dataframes.
+     *  Overrides any `component_config.layoutType` set by the server. */
     autoHeight?: boolean;
 }
 
