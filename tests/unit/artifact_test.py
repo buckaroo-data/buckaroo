@@ -183,11 +183,16 @@ class TestToHtml:
         assert '<style>' in html
         assert '<script type="module">' in html
 
+        # If the asset bundle was actually built (full_build.sh) the CSS
+        # bytes should round-trip into the output. In Python-only CI the
+        # bundle is an empty stub (see scripts/hatch_build.py REQUIRED_STUBS),
+        # so this check is conditional.
         from pathlib import Path
         import buckaroo as _bk
-        static_src = Path(_bk.__file__).parent / "static"
-        css_first_line = (static_src / "static-embed.css").read_text().splitlines()[0]
-        assert css_first_line in html, "inlined CSS body should be present in output"
+        css_body = (Path(_bk.__file__).parent / "static" / "static-embed.css").read_text()
+        if css_body.strip():
+            assert css_body.splitlines()[0] in html, \
+                "inlined CSS body should be present in output"
 
     def test_self_contained_defuses_close_script(self):
         """Bundled JS containing literal </script> must not break out of the inline tag."""
