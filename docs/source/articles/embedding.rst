@@ -277,11 +277,10 @@ file matching that contract will render — no JS to write:
     </body>
     </html>
 
-That is exactly what ``to_html()`` produces — embedding into an
-existing page is the same template assembled around your own
-``<head>`` and surrounding markup. Server-render the JSON into the
-``#buckaroo-data`` block from your backend (Flask, Django, Sphinx
-extension, etc.) and the bundle does the rest.
+``to_html()`` emits this same template. To embed into an existing
+page, drop the ``#buckaroo-data`` block and the two ``<script>`` /
+``<link>`` tags into your own markup and render the JSON from your
+backend (Flask, Django, Sphinx extension, etc.).
 
 **Don't HTML-escape the JSON.** The bundle reads ``#buckaroo-data``
 via ``textContent`` and hands it straight to ``JSON.parse``. Most
