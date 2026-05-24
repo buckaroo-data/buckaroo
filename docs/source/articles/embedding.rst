@@ -7,7 +7,7 @@ Buckaroo started life as a Jupyter widget. It still works that way — the table
 that pops up after ``import buckaroo`` is the same component you'll be
 embedding. But there are now several other ways to render that component
 outside of a notebook: static HTML files, custom web pages, a standalone
-server, and Solara apps. This guide is a map of those options so you can pick
+server, and JS apps. This guide is a map of those options so you can pick
 the one that fits your use case.
 
 The decision comes down to two axes:
@@ -16,7 +16,7 @@ The decision comes down to two axes:
    sampling toggle) vs. a plain DFViewer table. Eager-loaded base vs.
    infinite-scrolling.
 2. **Which deployment?** Notebook kernel, static HTML, custom HTML + JS,
-   Buckaroo server, or Solara.
+   Buckaroo server, or a JS app via npm.
 
 Pick a widget and a deployment — almost any combination works.
 
@@ -73,7 +73,7 @@ Picking between them:
 
 - Default to ``BuckarooWidget`` in notebooks. It's the full pitch.
 - Use ``DFViewer`` when Buckaroo is a component of a larger UI you've
-  already built (a Solara dashboard, a static report page).
+  already built (a static report page, a dashboard).
 - Use the Infinite variants when the dataframe is too big to ship
   eagerly, or when you want server-side sorting on the full set rather
   than only the sampled subset.
@@ -330,12 +330,78 @@ assets. The bundle is built with
 ``pnpm --filter buckaroo-widget run build:static``; released wheels
 include it.
 
-**TypeScript — server embed with the React component (coming with npm publish).**
+**Raw JS — CDN-hosted npm (no local files, no build step).**
+Since ``buckaroo-js-core`` is on npm, you can load it from any
+ESM-friendly CDN (esm.sh, jsDelivr, unpkg) and skip both the
+prebuilt static-embed bundle *and* the local file copy. The page
+below is fully self-contained — drop it on any static host, fill in
+``#buckaroo-data`` from your backend, and it renders:
+
+.. code-block:: html
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <link rel="stylesheet" href="https://esm.sh/buckaroo-js-core@0.14.5/dist/style.css">
+      <style>#root { width: 100%; height: 100vh; }</style>
+    </head>
+    <body>
+      <div id="root"></div>
+      <script id="buckaroo-data" type="application/json">
+        <!-- artifact JSON written here verbatim by your backend -->
+      </script>
+      <script type="module">
+        import { createElement } from "https://esm.sh/react@18.3.1";
+        import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
+        import {
+          BuckarooStaticTable,
+          resolveDFDataAsync,
+          preResolveDFDataDict,
+        } from "https://esm.sh/buckaroo-js-core@0.14.5";
+
+        const artifact = JSON.parse(
+          document.getElementById("buckaroo-data").textContent
+        );
+        const [dfData, summaryStats] = await Promise.all([
+          resolveDFDataAsync(artifact.df_data),
+          resolveDFDataAsync(artifact.summary_stats_data),
+        ]);
+        const resolved = {
+          embed_type: artifact.embed_type ?? "DFViewer",
+          df_data: dfData,
+          df_viewer_config: artifact.df_viewer_config,
+          summary_stats_data: summaryStats,
+        };
+        if (artifact.embed_type === "Buckaroo" && artifact.df_data_dict) {
+          resolved.df_data_dict = await preResolveDFDataDict(artifact.df_data_dict);
+          resolved.df_data_dict.main = dfData;
+          resolved.df_display_args = artifact.df_display_args;
+          resolved.df_meta = artifact.df_meta;
+          resolved.buckaroo_options = artifact.buckaroo_options;
+          resolved.buckaroo_state = artifact.buckaroo_state;
+        }
+        createRoot(document.getElementById("root")).render(
+          createElement(BuckarooStaticTable, { artifact: resolved })
+        );
+      </script>
+    </body>
+    </html>
+
+Swap ``esm.sh`` for ``cdn.jsdelivr.net/npm`` or ``unpkg.com`` if you
+prefer — the URL shape is the same
+(``https://cdn.jsdelivr.net/npm/buckaroo-js-core@0.14.5/+esm`` for
+jsDelivr's ESM-rewritten variant). esm.sh has the advantage of
+auto-resolving the React peer dependency, so the package's internal
+``import "react"`` Just Works without an import map. Pin the version
+in production — ``@0.14.5`` instead of ``@latest`` — so a future
+release can't break your page silently.
+
+**TypeScript — server embed with the React component.**
 If your page is already a React app (Next.js, Remix, a Vite SPA, an
-internal dashboard), you can skip the prebuilt bundle and mount the
-component yourself. The flow has two halves — a backend that
-serializes the artifact, and a React component that resolves it and
-hands it to ``BuckarooStaticTable``.
+internal dashboard), skip the prebuilt bundle and mount the
+component yourself. ``npm install buckaroo-js-core``. The flow has
+two halves — a backend that serializes the artifact, and a React
+component that resolves it and hands it to ``BuckarooStaticTable``.
 
 The Python side is the same ``prepare_buckaroo_artifact`` /
 ``artifact_to_json`` call shown above; serve the resulting JSON
@@ -394,14 +460,6 @@ full Buckaroo UI) is what ``resolveDFDataAsync`` /
 ``preResolveDFDataDict`` decode — skip that step and the table
 renders empty.
 
-.. note::
-
-   ``buckaroo-js-core`` is not yet published to npm. Until then,
-   the supported routes are (1) the raw-JS / prebuilt-bundle path
-   above, or (2) working inside this monorepo and resolving
-   ``buckaroo-js-core`` via the pnpm workspace. The npm publication
-   is tracked under the "future" entry in the quick chooser below.
-
 Same eager-only limitations as static HTML in either path.
 
 When to use it: embedding into a Sphinx docs page, a marketing site,
@@ -452,25 +510,19 @@ want to revisit; integration with external tools (MCP, scripts,
 ``curl``); team viewing of files on a shared host.
 
 
-5. Full JS embedding via npm *(coming soon)*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+5. Full JS embedding via npm
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A future release will publish ``buckaroo-js-core`` to npm so JS apps
-can ``npm install buckaroo-js-core`` and import the React components
-directly — no Python required at any point. You'd build the
+``npm install buckaroo-js-core`` and import the React components
+directly — no Python required at any point. Build the
 ``df_viewer_config`` and the row data on the JS side (typically from
 a parquet file fetched over HTTP, or from your own backend) and feed
-it to ``DFViewer`` or ``BuckarooStaticTable`` the way the static-embed
-bundle already does internally.
+it to ``DFViewer`` or ``BuckarooStaticTable``. This is the same set
+of components the static-embed bundle and the server-embed path
+above use.
 
-The component shapes are already there — the static-embed and
-artifact paths described above use the same React entry points
-that the npm package will expose. The blocker is publishing the
-package and stabilizing the public API.
-
-To get a feel for what this will look like in practice, the
-Storybook stories already drive the components from raw JS data
-with no Python on the other end. Run them locally with:
+The Storybook stories drive the components from raw JS data with no
+Python on the other end. Run them locally with:
 
 .. code-block:: bash
 
@@ -481,7 +533,7 @@ The most directly relevant stories:
 
 - `DFViewer.stories.tsx <https://github.com/buckaroo-data/buckaroo/blob/main/packages/buckaroo-js-core/src/stories/DFViewer.stories.tsx>`_ —
   plain table fed by a JS ``df_data`` array and a ``df_viewer_config``
-  object. This is the closest match to what an npm consumer will write.
+  object. Closest match to what an npm consumer will write.
 - `DFViewerInfiniteShadow.stories.tsx <https://github.com/buckaroo-data/buckaroo/blob/main/packages/buckaroo-js-core/src/stories/DFViewerInfiniteShadow.stories.tsx>`_ —
   the infinite-scroll variant with a JS-side mock datasource, showing
   the row-fetch contract you'd implement against your backend.
@@ -495,33 +547,6 @@ The most directly relevant stories:
   `ThemeCustomization.stories.tsx <https://github.com/buckaroo-data/buckaroo/blob/main/packages/buckaroo-js-core/src/stories/ThemeCustomization.stories.tsx>`_ —
   same theming and column-config dicts described in
   :doc:`theme-customization` and :doc:`data_flow`, but assembled in JS.
-
-Until the npm package is published, the supported way to embed
-without a Python runtime at view time is the static-embed bundle
-(modes 2 and 3 above), which uses these same components.
-
-
-6. Solara
-~~~~~~~~~
-
-If you're building a `Solara <https://solara.dev/>`_ app, use the
-reacton wrappers in ``buckaroo.solara_buckaroo``:
-
-.. code-block:: python
-
-    from buckaroo.solara_buckaroo import SolaraDFViewer, SolaraBuckarooWidget
-
-    @solara.component
-    def Page():
-        SolaraDFViewer(df)
-
-There are pandas and polars variants of each
-(``SolaraPolarsDFViewer``, ``SolaraPolarsBuckarooWidget``). These
-build the widget from the input frame and hand it to reacton — Solara
-manages the rest of the page lifecycle.
-
-When to use it: you're already in Solara. Otherwise the notebook,
-static, or server modes are simpler.
 
 
 Interactive features and where they work
@@ -576,9 +601,6 @@ post-processing method.
    * - Buckaroo server, ``mode="viewer"`` / ``mode="lazy"``
      - No
      - No dataflow on the session, no status bar
-   * - ``SolaraBuckarooWidget``
-     - Yes
-     - Solara process runs the transform
 
 Sorting and infinite-scroll row fetching are not in this bucket — sort
 is pushed to Python in the Infinite/server path but works without it
@@ -612,10 +634,8 @@ Quick chooser
      - ``XorqBuckarooInfiniteWidget`` (notebook, push-down stats)
    * - Letting Claude Code view data files
      - Buckaroo server via MCP (``buckaroo[mcp]``)
-   * - Solara dashboard
-     - ``SolaraDFViewer`` / ``SolaraBuckarooWidget``
    * - JS app, no Python at view time, npm install
-     - Coming soon — for now use static HTML or HTML+JS artifact
+     - ``buckaroo-js-core`` (npm) — see "Full JS embedding via npm"
    * - Read-only table inside an existing app
      - ``DFViewer`` family (any deployment)
    * - Full clean-and-explore UI
