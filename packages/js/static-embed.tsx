@@ -5,20 +5,14 @@ import "../buckaroo-js-core/dist/style.css";
 
 // Named exports so callers can import parquetRead from static-embed.js directly
 // and feed raw ArrayBuffer parquet (e.g. from fetch()) without base64 encoding.
-export { parquetRead, parquetMetadata } from "hyparquet";
-export { resolveDFDataAsync, preResolveDFDataDict } from "buckaroo-js-core";
+// Re-exported via buckaroo-js-core (which re-exports from hyparquet) to keep a
+// single source of truth for the parquet decoder.
+export { parquetRead, parquetMetadata, resolveDFDataAsync, preResolveDFDataDict } from "buckaroo-js-core";
 
-async function main() {
-    const dataEl = document.getElementById("buckaroo-data");
-    if (!dataEl?.textContent) {
-        throw new Error("No #buckaroo-data script block found");
-    }
-    const artifact = JSON.parse(dataEl.textContent);
-
-    const rootEl = document.getElementById("root");
-    if (!rootEl) throw new Error("No #root element found");
-
-    // Pre-resolve parquet_b64 payloads before React render
+// Resolve any parquet_b64 payloads in the artifact and render it into rootEl.
+// Exported so callers that fetch raw parquet (via the exported parquetRead)
+// can build an artifact at runtime and trigger the same render main() does.
+export async function renderArtifact(rootEl: HTMLElement, artifact: any) {
     const [dfData, summaryStatsData] = await Promise.all([
         resolveDFDataAsync(artifact.df_data),
         resolveDFDataAsync(artifact.summary_stats_data),
@@ -31,11 +25,9 @@ async function main() {
         summary_stats_data: summaryStatsData,
     };
 
-    // For Buckaroo mode, pre-resolve all parquet_b64 values in df_data_dict
     if (artifact.embed_type === "Buckaroo" && artifact.df_data_dict) {
         resolved.df_display_args = artifact.df_display_args;
         resolved.df_data_dict = await preResolveDFDataDict(artifact.df_data_dict);
-        // Ensure "main" key has the already-resolved data
         resolved.df_data_dict["main"] = dfData;
         resolved.df_meta = artifact.df_meta;
         resolved.buckaroo_options = artifact.buckaroo_options;
@@ -48,6 +40,16 @@ async function main() {
             <BuckarooStaticTable artifact={resolved} />
         </div>
     );
+}
+
+async function main() {
+    const dataEl = document.getElementById("buckaroo-data");
+    // When the bundle is imported purely as a library (for parquetRead / renderArtifact),
+    // there is no #buckaroo-data; silently skip auto-init instead of erroring.
+    if (!dataEl?.textContent) return;
+    const rootEl = document.getElementById("root");
+    if (!rootEl) throw new Error("No #root element found");
+    await renderArtifact(rootEl, JSON.parse(dataEl.textContent));
 }
 
 main().catch((e) => {
