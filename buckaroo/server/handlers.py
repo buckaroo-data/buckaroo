@@ -137,7 +137,7 @@ class LoadHandler(tornado.web.RequestHandler):
     def _validate_request(self, body: dict) -> tuple:
         """Validate and extract session_id, path, mode, prompt, no_browser, and component_config from request.
 
-        Returns (session_id, path, mode, prompt, no_browser, component_config) or a tuple of Nones on error.
+        Returns (session_id, path, mode, prompt, no_browser, component_config, backend) or a tuple of Nones on error.
 
         ``session`` is optional — when omitted the server mints a UUID and
         returns it in the response. Lets Tauri/Electron-style hosts call /load
@@ -149,7 +149,7 @@ class LoadHandler(tornado.web.RequestHandler):
         if not path:
             self.set_status(400)
             self.write({"error": "Missing 'path'"})
-            return None, None, None, None, None, None
+            return None, None, None, None, None, None, None
 
         if not session_id:
             session_id = uuid.uuid4().hex
@@ -158,7 +158,12 @@ class LoadHandler(tornado.web.RequestHandler):
         prompt = body.get("prompt", "")
         no_browser = bool(body.get("no_browser", False))
         component_config = body.get("component_config")
-        return session_id, path, mode, prompt, no_browser, component_config
+        # ``backend`` is mode="buckaroo"-only: "pandas" (default) builds a
+        # ServerDataflow against pandas; "polars" builds a PolarsServerDataflow.
+        # Validated/branched in ``post`` — silently passed through here so a
+        # bad value surfaces as a 400 from the loader, not a TypeError.
+        backend = str(body.get("backend", "pandas")).lower()
+        return session_id, path, mode, prompt, no_browser, component_config, backend
 
     def _load_lazy_polars(self, session, path: str, ldf, metadata: dict):
         """Set up lazy polars session state."""
@@ -175,7 +180,12 @@ class LoadHandler(tornado.web.RequestHandler):
         return True
 
     def _push_state_to_clients(self, session, metadata: dict):
-        """Push updated state to all connected WebSocket clients."""
+        """Push updated state to all connected WebSocket clients.
+
+        Also resets each client's live ``search_string`` (#851): the
+        dataset just changed, so a term carried over from the previous
+        load would silently filter the new one.
+        """
         log.info("push_state path=%s ws_clients=%d", metadata.get("filename", "?"), len(session.ws_clients))
         if not session.ws_clients:
             return
@@ -183,6 +193,7 @@ class LoadHandler(tornado.web.RequestHandler):
         push_msg = json.dumps(build_state_message(session, metadata=metadata))
         for client in list(session.ws_clients):
             try:
+                client.search_string = ""
                 client.write_message(push_msg)
             except Exception:
                 session.ws_clients.discard(client)
@@ -194,6 +205,38 @@ class LoadHandler(tornado.web.RequestHandler):
 
         port = self.application.settings["port"]
         return find_or_create_session_window(session_id, port, reload_if_found=True)
+
+    def _load_polars_with_error_handling(self, path: str):
+        """Eager polars load for ``backend='polars'``. Errors share the
+        same shape as the pandas loader so the response surface is
+        identical from the client's POV."""
+        try:
+            from buckaroo.server.data_loading_polars import load_file_polars, get_metadata_polars
+            df = load_file_polars(path)
+            metadata = get_metadata_polars(df, path)
+            return df, metadata
+        except FileNotFoundError:
+            self.set_status(404)
+            self.write({"error_code": "file_not_found", "message": f"File not found: {path}"})
+            return None, None
+        except ImportError:
+            self.set_status(400)
+            self.write({"error_code": "missing_dependency",
+                "message": "backend='polars' requires polars to be installed"})
+            return None, None
+        except ValueError as e:
+            self.set_status(400)
+            self.write({"error_code": "invalid_file", "message": str(e)})
+            return None, None
+        except Exception:
+            tb = traceback.format_exc()
+            log.error("polars load error path=%s: %s", path, tb)
+            resp: dict = {"error_code": "load_error", "message": "Failed to load file"}
+            if _BUCKAROO_DEBUG:
+                resp["details"] = tb
+            self.set_status(500)
+            self.write(resp)
+            return None, None
 
     def _load_file_with_error_handling(self, path: str, is_lazy: bool):
         """Load file and handle errors. Returns (file_obj, metadata) or (None, None)."""
@@ -229,8 +272,21 @@ class LoadHandler(tornado.web.RequestHandler):
         if body is None:
             return
 
-        session_id, path, mode, prompt, no_browser, component_config = self._validate_request(body)
+        session_id, path, mode, prompt, no_browser, component_config, backend = self._validate_request(body)
         if session_id is None:
+            return
+
+        # ``backend`` only affects mode="buckaroo". Reject early so a
+        # mismatched lazy/viewer request doesn't silently look fine.
+        if backend not in ("pandas", "polars"):
+            self.set_status(400)
+            self.write({"error_code": "invalid_backend",
+                "message": f"backend must be 'pandas' or 'polars', got {backend!r}"})
+            return
+        if backend == "polars" and mode != "buckaroo":
+            self.set_status(400)
+            self.write({"error_code": "invalid_backend",
+                "message": "backend='polars' is only valid with mode='buckaroo'"})
             return
 
         # Optional per-column / per-grid configuration that mirrors the
@@ -244,23 +300,21 @@ class LoadHandler(tornado.web.RequestHandler):
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
-        # Loading via /load is always pandas — clear any xorq state left
-        # by a prior /load_expr on the same session so WS dispatch routes
-        # to the new pandas dataflow rather than a stale xorq one.
-        session.backend = "pandas"
+        # Loading via /load is always pandas or polars — clear any xorq state
+        # left by a prior /load_expr on the same session so WS dispatch routes
+        # to the new dataflow rather than a stale xorq one.
+        session.backend = backend
         session.xorq_dataflow = None
         session.expr = None
-        # Reset the live-typed row-fetch filter so a search term carried
-        # over from a prior dataset on this session doesn't silently
-        # filter the new one (Codex P1 on #839). The client's fresh
-        # buckaroo_state has search_string="" — keep the server in sync.
-        session.search_string = ""
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
 
         # Load data in appropriate mode
-        file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
+        if backend == "polars" and mode == "buckaroo":
+            file_obj, metadata = self._load_polars_with_error_handling(path)
+        else:
+            file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
         if file_obj is None:
             return
 
@@ -270,8 +324,13 @@ class LoadHandler(tornado.web.RequestHandler):
             session.df = file_obj
             session.metadata = metadata
             if mode == "buckaroo":
-                dataflow = create_dataflow(file_obj, column_config_overrides=column_config_overrides,
-                    extra_grid_config=extra_grid_config, init_sd=init_sd)
+                if backend == "polars":
+                    from buckaroo.server.data_loading_polars import create_polars_dataflow
+                    dataflow = create_polars_dataflow(file_obj, column_config_overrides=column_config_overrides,
+                        extra_grid_config=extra_grid_config, init_sd=init_sd)
+                else:
+                    dataflow = create_dataflow(file_obj, column_config_overrides=column_config_overrides,
+                        extra_grid_config=extra_grid_config, init_sd=init_sd)
                 session.dataflow = dataflow
                 buckaroo_state = get_buckaroo_display_state(dataflow)
                 session.df_display_args = buckaroo_state["df_display_args"]
@@ -397,9 +456,6 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.df = None
         session.dataflow = None
         session.ldf = None
-        # Reset the live-typed row-fetch filter so a prior term doesn't
-        # silently filter the freshly loaded expression (Codex P1 on #839).
-        session.search_string = ""
         session.metadata = metadata
         session.prompt = prompt
         if component_config:
