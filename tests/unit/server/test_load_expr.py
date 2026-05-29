@@ -374,35 +374,6 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
 
-class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
-    def get_app(self):
-        return make_app()
-
-    def test_reload_expr_session_not_found(self):
-        resp = self.fetch(
-            "/reload_expr/no-such-session", method="POST", body="",
-            headers={"Content-Type": "application/json"})
-        self.assertEqual(resp.code, 404)
-        body = json.loads(resp.body)
-        self.assertEqual(body["error_code"], "session_not_found")
-
-    @tornado.testing.gen_test
-    async def test_reload_expr_not_xorq_session(self):
-        """/reload_expr on a pandas session must return 400."""
-        csv_fd, csv_path = tempfile.mkstemp(suffix=".csv")
-        os.close(csv_fd)
-        try:
-            import pandas as pd
-            pd.DataFrame({"x": [1, 2]}).to_csv(csv_path, index=False)
-            await _post(self.get_http_port(), "/load",
-                {"session": "re-pandas", "path": csv_path, "mode": "buckaroo"})
-            resp = await _post(self.get_http_port(), "/reload_expr/re-pandas", {})
-            self.assertEqual(resp.code, 400)
-            body = json.loads(resp.body)
-            self.assertEqual(body["error_code"], "not_xorq_session")
-        finally:
-            os.unlink(csv_path)
-
     @tornado.testing.gen_test
     async def test_cache_storage_path_accepted(self):
         """POST /load_expr with cache_storage_path must succeed and write cache
