@@ -721,12 +721,26 @@ class ReloadExprHandler(tornado.web.RequestHandler):
             self.write(resp)
             return
 
+        # Replay the session's active buckaroo state onto the new dataflow so
+        # a user who had selected a post-processing method or set
+        # cleaning_method / quick_command_args before the reload doesn't
+        # silently get unfiltered results while the UI still shows their
+        # previous selection.
+        bs = session.buckaroo_state
+        if bs.get("post_processing"):
+            xorq_dataflow.post_processing_method = bs["post_processing"]
+        if bs.get("cleaning_method"):
+            xorq_dataflow.cleaning_method = bs["cleaning_method"]
+        if bs.get("quick_command_args"):
+            xorq_dataflow.quick_command_args = bs["quick_command_args"]
+
+        refreshed = get_buckaroo_display_state(xorq_dataflow)
         session.xorq_dataflow = xorq_dataflow
-        session.df_display_args = xorq_dataflow.df_display_args
-        session.df_data_dict = xorq_dataflow.df_data_dict
-        session.df_meta = xorq_dataflow.df_meta
-        session.buckaroo_options = xorq_dataflow.buckaroo_options
-        session.command_config = xorq_dataflow.command_config
+        session.df_display_args = refreshed["df_display_args"]
+        session.df_data_dict = refreshed["df_data_dict"]
+        session.df_meta = refreshed["df_meta"]
+        session.buckaroo_options = refreshed["buckaroo_options"]
+        session.command_config = refreshed["command_config"]
 
         if session.component_config and session.df_display_args:
             for key in session.df_display_args:
