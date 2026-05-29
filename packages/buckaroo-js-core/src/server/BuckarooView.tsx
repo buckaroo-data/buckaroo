@@ -8,6 +8,7 @@ import { Operation } from "../components/OperationUtils";
 import { OperationResult, baseOperationResults } from "../components/DependentTabs";
 import { DFData, DFDataOrPayload } from "../components/DFViewerParts/DFWhole";
 import { IDisplayArgs } from "../components/DFViewerParts/gridUtils";
+import { stampLayoutType } from "../components/DFViewerParts/displayArgsUtils";
 import { IModel } from "./IModel";
 
 export type BuckarooServerMode = "viewer" | "buckaroo";
@@ -256,26 +257,12 @@ export function BuckarooView({
         model.save_changes();
     }, [model]);
 
-    // gridUtils already honors component_config.layoutType — stamp it per
-    // display-arg entry and let getHeightStyle2 do the rest. Memoized to
-    // keep child reference identity stable across re-renders.
-    const effectiveDisplayArgs = React.useMemo<Record<string, IDisplayArgs>>(() => {
-        if (!autoHeight) return dfDisplayArgs;
-        const out: Record<string, IDisplayArgs> = {};
-        for (const [k, v] of Object.entries(dfDisplayArgs)) {
-            out[k] = {
-                ...v,
-                df_viewer_config: {
-                    ...v.df_viewer_config,
-                    component_config: {
-                        ...(v.df_viewer_config.component_config ?? {}),
-                        layoutType: "autoHeight",
-                    },
-                },
-            };
-        }
-        return out;
-    }, [dfDisplayArgs, autoHeight]);
+    // gridUtils honors component_config.layoutType. Stamp it per entry so the
+    // prop wins when provided. autoHeight=undefined → server value left intact.
+    const effectiveDisplayArgs = React.useMemo(
+        () => stampLayoutType(dfDisplayArgs, autoHeight),
+        [dfDisplayArgs, autoHeight],
+    );
 
     const wrapperStyle: React.CSSProperties = autoHeight
         ? { width: "100%", ...(style ?? {}) }
