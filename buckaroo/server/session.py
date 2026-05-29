@@ -32,6 +32,8 @@ class SessionState:
     dataflow: Any = None  # ServerDataflow when backend="pandas"
     xorq_dataflow: Any = None  # XorqServerDataflow when backend="xorq"
     expr: Any = None  # ibis/xorq expression when backend="xorq"
+    build_dir: Optional[str] = None  # xorq build dir, stored for /reload_expr
+    project_root: Optional[str] = None  # project root for klass discovery
     buckaroo_state: dict = field(default_factory=dict)
     # NOTE: ``search_string`` used to live here, but it's per-client typing
     # state (not a session-wide property). Two clients sharing a session

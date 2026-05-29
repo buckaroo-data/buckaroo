@@ -454,6 +454,8 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.mode = "buckaroo"
         session.backend = "xorq"
         session.expr = expr
+        session.build_dir = build_dir
+        session.project_root = project_root
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
         # session so WS dispatch can no longer reach a stale dataflow.
@@ -659,6 +661,109 @@ class LoadCompareHandler(tornado.web.RequestHandler):
 
         self.write({"session": session_id, "server_pid": os.getpid(), "browser_action": browser_action,
             "rows": len(merged_df), "columns": [str(c) for c in merged_df.columns], "eqs": eqs})
+
+
+class ReloadExprHandler(tornado.web.RequestHandler):
+    """POST /reload_expr/<session_id> — refresh post-processing and stat
+    klasses on a live xorq session without restarting the server.
+
+    Re-scans ``<project_root>/stats/`` and ``<project_root>/post_processing/``
+    for the session's stored project root, rebuilds the ``XorqServerDataflow``
+    with the fresh klass list, and broadcasts the updated ``command_config``
+    and ``buckaroo_options`` to all open WebSocket clients. The expression
+    and its cached stats are reused — no re-execute against the data backend.
+
+    Returns 404 when the session does not exist, 400 when it is not a xorq
+    session or has no project_root recorded, 501 when xorq is not installed."""
+
+    async def post(self, session_id):
+        sessions = self.application.settings["sessions"]
+        session = sessions.get(session_id)
+        if session is None:
+            self.set_status(404)
+            self.write({"error_code": "session_not_found",
+                "message": f"Session not found: {session_id}"})
+            return
+
+        if session.backend != "xorq" or session.xorq_dataflow is None:
+            self.set_status(400)
+            self.write({"error_code": "not_xorq_session",
+                "message": "Session is not a xorq session"})
+            return
+
+        if not session.project_root:
+            self.set_status(400)
+            self.write({"error_code": "no_project_root",
+                "message": "Session has no project_root — pass project_root to /load_expr first"})
+            return
+
+        try:
+            from buckaroo.server import xorq_loading
+        except ImportError:
+            self.set_status(501)
+            self.write({"error_code": "xorq_not_installed",
+                "message": "xorq is not installed on this server. "
+                "Install with `pip install buckaroo[xorq]`."})
+            return
+
+        try:
+            extra_klasses = (
+                xorq_loading.load_project_stat_klasses(session.project_root)
+                + xorq_loading.load_project_post_processing_klasses(session.project_root))
+            xorq_dataflow = xorq_loading.XorqServerDataflow(
+                session.expr, skip_main_serial=True, extra_klasses=extra_klasses)
+        except Exception:
+            tb = traceback.format_exc()
+            log.error("reload_expr error session=%s: %s", session_id, tb)
+            resp: dict = {"error_code": "reload_expr_error",
+                "message": "Failed to reload xorq klasses"}
+            if _BUCKAROO_DEBUG:
+                resp["details"] = tb
+            self.set_status(500)
+            self.write(resp)
+            return
+
+        # Replay the session's active buckaroo state onto the new dataflow so
+        # a user who had selected a post-processing method or set
+        # cleaning_method / quick_command_args before the reload doesn't
+        # silently get unfiltered results while the UI still shows their
+        # previous selection.
+        bs = session.buckaroo_state
+        if bs.get("post_processing"):
+            xorq_dataflow.post_processing_method = bs["post_processing"]
+        if bs.get("cleaning_method"):
+            xorq_dataflow.cleaning_method = bs["cleaning_method"]
+        if bs.get("quick_command_args"):
+            xorq_dataflow.quick_command_args = bs["quick_command_args"]
+
+        refreshed = get_buckaroo_display_state(xorq_dataflow)
+        session.xorq_dataflow = xorq_dataflow
+        session.df_display_args = refreshed["df_display_args"]
+        session.df_data_dict = refreshed["df_data_dict"]
+        session.df_meta = refreshed["df_meta"]
+        session.buckaroo_options = refreshed["buckaroo_options"]
+        session.command_config = refreshed["command_config"]
+
+        if session.component_config and session.df_display_args:
+            for key in session.df_display_args:
+                dvc = session.df_display_args[key].get("df_viewer_config")
+                if dvc is not None:
+                    dvc["component_config"] = {
+                        **dvc.get("component_config", {}),
+                        **session.component_config}
+
+        for client in list(session.ws_clients):
+            try:
+                msg = build_state_message(session,
+                    search_string=getattr(client, "search_string", ""))
+                client.write_message(json.dumps(msg))
+            except Exception:
+                session.ws_clients.discard(client)
+
+        klass_count = len(extra_klasses)
+        log.info("reload_expr session=%s project_root=%s klasses=%d",
+            session_id, session.project_root, klass_count)
+        self.write({"session": session_id, "klasses_loaded": klass_count})
 
 
 def _render_engine_bar(datasets: list) -> tuple:

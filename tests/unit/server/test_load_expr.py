@@ -372,7 +372,7 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             ws.close()
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
-            os.unlink(csv_path)
+
 
     @tornado.testing.gen_test
     async def test_cache_storage_path_accepted(self):
@@ -397,3 +397,116 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
             shutil.rmtree(cache_root, ignore_errors=True)
+
+
+class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
+    def get_app(self):
+        return make_app()
+
+    def test_reload_expr_session_not_found(self):
+        resp = self.fetch(
+            "/reload_expr/no-such-session", method="POST", body="",
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 404)
+        body = json.loads(resp.body)
+        self.assertEqual(body["error_code"], "session_not_found")
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_not_xorq_session(self):
+        """/reload_expr on a pandas session must return 400."""
+        csv_fd, csv_path = tempfile.mkstemp(suffix=".csv")
+        os.close(csv_fd)
+        try:
+            import pandas as pd
+            pd.DataFrame({"x": [1, 2]}).to_csv(csv_path, index=False)
+            await _post(self.get_http_port(), "/load",
+                {"session": "re-pandas", "path": csv_path, "mode": "buckaroo"})
+            resp = await _post(self.get_http_port(), "/reload_expr/re-pandas", {})
+            self.assertEqual(resp.code, 400)
+            body = json.loads(resp.body)
+            self.assertEqual(body["error_code"], "not_xorq_session")
+        finally:
+            os.unlink(csv_path)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_no_project_root(self):
+        """Session loaded via /load_expr without project_root must return 400."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "re-no-pr", "build_dir": build_path})
+            resp = await _post(self.get_http_port(), "/reload_expr/re-no-pr", {})
+            self.assertEqual(resp.code, 400)
+            body = json.loads(resp.body)
+            self.assertEqual(body["error_code"], "no_project_root")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_broadcasts_updated_options(self):
+        """Adding a post_processing file to project_root and calling
+        /reload_expr must surface the new method in buckaroo_options
+        broadcast to WS clients — without re-executing the expression."""
+        builds_root = tempfile.mkdtemp()
+        project_root = tempfile.mkdtemp()
+        pp_dir = os.path.join(project_root, "post_processing")
+        os.makedirs(pp_dir)
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "re-broadcast"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path,
+                 "project_root": project_root})
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+            init_msg = json.loads(await ws.read_message())
+            initial_options = init_msg.get("buckaroo_options", {})
+            initial_pp = initial_options.get("post_processing", [])
+
+            # Write a minimal post-processing file into the project.
+            pp_file = os.path.join(pp_dir, "double_idx.py")
+            with open(pp_file, "w") as f:
+                f.write("def process(expr):\n    return expr\n")
+
+            reload_resp = await _post(
+                self.get_http_port(), f"/reload_expr/{sid}", {})
+            self.assertEqual(reload_resp.code, 200)
+            body = json.loads(reload_resp.body)
+            self.assertEqual(body["session"], sid)
+            self.assertGreaterEqual(body["klasses_loaded"], 1)
+
+            # The WS client must receive an updated initial_state carrying
+            # the new post-processing method in buckaroo_options.
+            updated_msg = json.loads(await ws.read_message())
+            self.assertEqual(updated_msg["type"], "initial_state")
+            updated_options = updated_msg.get("buckaroo_options", {})
+            updated_pp = updated_options.get("post_processing", [])
+            self.assertGreater(len(updated_pp), len(initial_pp),
+                f"expected new pp klass in options; before={initial_pp} after={updated_pp}")
+
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(project_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_returns_200_with_zero_klasses(self):
+        """Empty project_root is valid — reload returns 200 with klasses_loaded=0."""
+        builds_root = tempfile.mkdtemp()
+        project_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "re-empty-pr"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path,
+                 "project_root": project_root})
+
+            resp = await _post(self.get_http_port(), f"/reload_expr/{sid}", {})
+            self.assertEqual(resp.code, 200)
+            body = json.loads(resp.body)
+            self.assertEqual(body["klasses_loaded"], 0)
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(project_root, ignore_errors=True)
