@@ -400,6 +400,82 @@ requests.post("/load", json={
 </div>`,
     },
     {
+        id: "explicit-200-5rows",
+        label: "200px (5 rows)",
+        modeName: "Explicit dfvHeight: 200 with 5 rows — shortMode still fires",
+        data: FIVE_ROWS,
+        pinnedRows: [],
+        summaryStats: [],
+        compConfig: { dfvHeight: 200 },
+        outerHeight: undefined,
+        resolvedDomLayout: "autoHeight",
+        decisionTrace:
+`layoutType not set in component_config → auto-detect runs:
+
+  numRows                = 5
+  pinnedRows             = 0
+  total                  = 5
+
+  dfvHeight              = component_config.dfvHeight = 200  ← explicit
+  rowHeight              = 21 px  (default)
+  scrollSlop             = 3
+  maxRowsWithoutScrolling = floor(200 / 21) - 3
+                         = floor(9.5) - 3
+                         = 9 - 3
+                         = 6
+
+  5 + 0 = 5  <  6  →  shortMode = true
+  →  domLayout: "autoHeight"
+
+Key point: dfvHeight=200 does NOT force normal mode.
+It changes the scroll threshold (fewer rows now trigger normal)
+and caps the container maxHeight, but layout type is still
+auto-detected from the row count.`,
+        agGridSaw:
+`domLayout prop   = "autoHeight"
+                   ↳ AG Grid sizes itself to its content rows.
+
+Container CSS     = { minHeight: 50px, maxHeight: 200px, overflow: hidden }
+  (shortDivStyle — shortMode=true, domLayout=autoHeight)
+  5 rows × 21px ≈ 105px — grid renders at ~105px, well within 200px cap.
+  The outer container (red border) shrinks to match the grid.
+
+Compare with the 200px / 500 rows tab:
+  500 rows → shortMode=false → domLayout="normal" → container height=200px.
+  5 rows   → shortMode=true  → domLayout="autoHeight" → grid shrinks to rows.`,
+        description:
+            "Setting dfvHeight does not force normal mode — it sets the scroll threshold " +
+            "and the container's maxHeight cap, but the layout type is still auto-detected. " +
+            "With only 5 rows and dfvHeight=200, shortMode fires (5 < 6 rows threshold) " +
+            "and the grid shrinks to its content just like the plain '5 rows' example. " +
+            "To force a fixed 200px height on small data, also set layoutType: \"normal\".",
+        whenToUse:
+            "When you want an explicit dfvHeight cap but are fine with the grid shrinking " +
+            "to content on small datasets. The maxHeight prevents unbounded growth if data " +
+            "unexpectedly becomes large, while still allowing compact rendering for small data.",
+        pythonSnippet:
+`# dfvHeight alone does not lock layout to normal mode:
+w = buckaroo.BuckarooWidget(df_5rows, component_config={"dfvHeight": 200})
+# → autoHeight (5 rows fit inside the 200px threshold)
+
+# To force fixed height on small data, also set layoutType:
+w = buckaroo.BuckarooWidget(df_5rows, component_config={
+    "dfvHeight": 200,
+    "layoutType": "normal",   # prevents shortMode from firing
+})`,
+        embedSnippet:
+`// dfvHeight alone on small data → autoHeight still fires:
+<DFViewerInfiniteDS
+  df_display_args={{
+    main: { df_viewer_config: { component_config: { dfvHeight: 200 } } },
+  }}
+  // ...
+/>
+
+// To pin to exactly 200px regardless of row count:
+component_config: { dfvHeight: 200, layoutType: "normal" }`,
+    },
+    {
         id: "fraction-4",
         label: "¼ viewport",
         modeName: "height_fraction: 4  →  dfvHeight = window.innerHeight / 4",
@@ -465,6 +541,190 @@ w = buckaroo.BuckarooWidget(df, component_config={"height_fraction": 4})
     // ...
   />
 </div>`,
+    },
+    {
+        id: "fraction-4-5rows",
+        label: "¼ vp (5 rows)",
+        modeName: "height_fraction: 4 with 5 rows — shortMode still fires",
+        data: FIVE_ROWS,
+        pinnedRows: [],
+        summaryStats: [],
+        compConfig: { height_fraction: 4 },
+        outerHeight: undefined,
+        resolvedDomLayout: "autoHeight",
+        decisionTrace:
+`layoutType not set in component_config → auto-detect runs:
+
+  numRows                = 5
+  pinnedRows             = 0
+  total                  = 5
+
+  dfvHeight              = window.innerHeight / height_fraction
+                         = window.innerHeight / 4  ≈ 225 px  (900px viewport)
+  rowHeight              = 21 px  (default)
+  scrollSlop             = 3
+  maxRowsWithoutScrolling = floor(225 / 21) - 3
+                         = floor(10.7) - 3
+                         = 10 - 3
+                         = 7
+
+  5 + 0 = 5  <  7  →  shortMode = true
+  →  domLayout: "autoHeight"
+
+height_fraction=4 makes the viewport shorter (225px vs 450px default),
+which lowers the scroll threshold from ~18 to ~7 rows.
+With 5 rows that still fits, so autoHeight fires.`,
+        agGridSaw:
+`domLayout prop   = "autoHeight"
+                   ↳ AG Grid sizes itself to its content rows.
+
+Container CSS     = { minHeight: 50px, maxHeight: ≈225px, overflow: hidden }
+  (shortDivStyle — shortMode=true, domLayout=autoHeight)
+  5 rows ≈ 105px — grid renders compactly within the 225px cap.
+  The outer container shrinks to match the grid, not 25vh.`,
+        description:
+            "height_fraction controls dfvHeight but not the layout type. With a ¼-viewport " +
+            "height and only 5 rows, shortMode still fires — the row count is below the " +
+            "(now lower) threshold of ~7 rows, so the grid auto-sizes to content. " +
+            "The maxHeight cap is ≈225px but the grid only uses ~105px.",
+        whenToUse:
+            "Same as ¼ viewport for large data, but demonstrates that small datasets " +
+            "keep their compact rendering even when dfvHeight is set. No intervention needed.",
+        pythonSnippet:
+`w = buckaroo.BuckarooWidget(df_5rows, component_config={"height_fraction": 4})
+# 5 rows → shortMode=true → autoHeight
+# height_fraction only affects dfvHeight, not whether normal/auto fires`,
+        embedSnippet:
+`<DFViewerInfiniteDS
+  df_display_args={{
+    main: { df_viewer_config: { component_config: { height_fraction: 4 } } },
+  }}
+  // ...
+/>
+// 5 rows → autoHeight regardless of height_fraction`,
+    },
+    {
+        id: "fraction-75vh",
+        label: "¾ viewport",
+        modeName: "height_fraction: 4/3  →  dfvHeight = window.innerHeight × ¾",
+        data: FIVE_HUNDRED_ROWS,
+        pinnedRows: [],
+        summaryStats: [],
+        compConfig: { height_fraction: 4/3 },
+        outerHeight: "75vh",
+        resolvedDomLayout: "normal",
+        decisionTrace:
+`layoutType not set in component_config → auto-detect runs:
+
+  numRows                = 500
+  pinnedRows             = 0
+  total                  = 500
+
+  dfvHeight              = window.innerHeight / height_fraction
+                         = window.innerHeight / (4/3)
+                         = window.innerHeight × 0.75
+                         ≈ 675 px  (900px viewport)
+  rowHeight              = 21 px  (default)
+  scrollSlop             = 3
+  maxRowsWithoutScrolling = floor(675 / 21) - 3
+                         = floor(32.1) - 3
+                         = 32 - 3
+                         = 29
+
+  500 + 0 = 500  ≥  29  →  shortMode = false
+  →  domLayout: "normal"
+
+Note: height_fraction = 4/3 gives ¾ of the viewport.
+  window.innerHeight / (4/3) = window.innerHeight × (3/4) = 75vh`,
+        agGridSaw:
+`domLayout prop   = "normal"
+                   ↳ AG Grid fills 100% of its parent container's height.
+
+Container CSS     = { height: ≈675px, overflow: hidden }
+  (regularDivStyle — shortMode=false)
+  At a 900px viewport: window.innerHeight / (4/3) = 675px = 75vh.
+  The outer container (red border) must also be 75vh.`,
+        description:
+            "height_fraction: 4/3 gives three-quarters of the viewport — useful for " +
+            "large data exploration pages where you want the grid to dominate the screen " +
+            "without being full-height. The fraction can be any number; it doesn't have " +
+            "to be an integer. height_fraction = 4/3 ≈ 1.33.",
+        whenToUse:
+            "Full-screen data exploration tools or dashboards where a single table " +
+            "should take most of the vertical space, leaving room for a header or toolbar. " +
+            "Works well paired with a sticky header above the grid.",
+        pythonSnippet:
+`# height_fraction accepts any number, not just integers:
+w = buckaroo.BuckarooWidget(df, component_config={"height_fraction": 4/3})
+# dfvHeight = window.innerHeight / (4/3) = window.innerHeight × 0.75 = 75vh`,
+        embedSnippet:
+`// Outer div must match: height_fraction=4/3 → "75vh"
+<div style={{ height: "75vh" }}>
+  <DFViewerInfiniteDS
+    df_display_args={{
+      main: { df_viewer_config: { component_config: { height_fraction: 4/3 } } },
+    }}
+    // ...
+  />
+</div>`,
+    },
+    {
+        id: "fraction-75vh-5rows",
+        label: "¾ vp (5 rows)",
+        modeName: "height_fraction: 4/3 with 5 rows — shortMode fires despite large dfvHeight",
+        data: FIVE_ROWS,
+        pinnedRows: [],
+        summaryStats: [],
+        compConfig: { height_fraction: 4/3 },
+        outerHeight: undefined,
+        resolvedDomLayout: "autoHeight",
+        decisionTrace:
+`layoutType not set in component_config → auto-detect runs:
+
+  numRows                = 5
+  pinnedRows             = 0
+  total                  = 5
+
+  dfvHeight              ≈ 675 px  (window.innerHeight × 0.75 at 900px)
+  rowHeight              = 21 px  (default)
+  scrollSlop             = 3
+  maxRowsWithoutScrolling = floor(675 / 21) - 3
+                         = 32 - 3
+                         = 29
+
+  5 + 0 = 5  <  29  →  shortMode = true
+  →  domLayout: "autoHeight"
+
+A larger dfvHeight raises the scroll threshold (29 rows vs ~18 default).
+With 5 rows this still fits, so the grid still auto-sizes to content.
+The large maxHeight cap (675px) is never reached by 5 rows.`,
+        agGridSaw:
+`domLayout prop   = "autoHeight"
+                   ↳ AG Grid sizes itself to its content rows.
+
+Container CSS     = { minHeight: 50px, maxHeight: ≈675px, overflow: hidden }
+  (shortDivStyle — shortMode=true, domLayout=autoHeight)
+  5 rows ≈ 105px — grid renders compactly at ~105px.
+  The outer container (red border) shrinks to match.
+  The 675px cap is not reached.`,
+        description:
+            "Even with a ¾-viewport dfvHeight, 5 rows trigger shortMode and the grid " +
+            "auto-sizes to content. The large dfvHeight raises the shortMode threshold " +
+            "to 29 rows, but 5 still fits comfortably below it. " +
+            "The maxHeight cap of ≈675px is set but never reached.",
+        whenToUse:
+            "Shows that fraction-based height settings don't change the fundamental " +
+            "behaviour on small datasets — shortMode keeps small tables compact regardless " +
+            "of what dfvHeight is configured to. No special handling needed for small data.",
+        pythonSnippet:
+`w = buckaroo.BuckarooWidget(df_5rows, component_config={"height_fraction": 4/3})
+# 5 rows → shortMode=true → autoHeight
+# The large dfvHeight (675px) only raises the threshold; 5 rows still fits`,
+        embedSnippet:
+`// Same config as the ¾ viewport example; small data still auto-sizes:
+component_config: { height_fraction: 4/3 }
+// → 5 rows: autoHeight (grid ≈105px)
+// → 500 rows: normal   (grid ≈675px)`,
     },
     {
         id: "force-normal",
