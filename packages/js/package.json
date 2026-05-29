@@ -8,7 +8,8 @@
 		"build:standalone": "esbuild standalone.tsx --format=esm --bundle --minify --outdir=../../buckaroo/static/",
 		"dev": "esbuild widget.tsx --format=esm --bundle --outdir=../../buckaroo/static/ --sourcemap=inline --watch",
 		"dev:standalone": "esbuild standalone.tsx --format=esm --bundle --outdir=../../buckaroo/static/ --sourcemap=inline --watch",
-		"build:static": "esbuild static-embed.tsx --format=esm --bundle --minify --sourcemap --outdir=../../buckaroo/static/"
+		"build:static": "esbuild static-embed.tsx --format=esm --bundle --minify --sourcemap --outdir=../../buckaroo/static/",
+		"build:height-modes": "esbuild ../../docs/spa-src/height-modes.tsx --format=esm --bundle --minify --sourcemap --outdir=../../docs/extra-html/height-modes/"
 	},
 	"dependencies": {
 		"@anywidget/react": "^0.0.8",

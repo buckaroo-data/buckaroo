@@ -336,6 +336,35 @@ describe("testing utility functions in gridUtils ", () => {
       expect(result.classMode).toBe("short-mode");
       expect(result.domLayout).toBe("autoHeight");
     });
+
+    it("throws when layoutType 'normal' is set explicitly without a height source", () => {
+      // layoutType: "normal" without dfvHeight or height_fraction means the grid
+      // will silently fall back to window.innerHeight/2, which almost certainly
+      // won't match the caller's outer container.
+      expect(() =>
+        getHeightStyle2(100, 0, { layoutType: "normal" })
+      ).toThrow(/layoutType.*normal.*dfvHeight/i);
+    });
+
+    it("does not throw when layoutType 'normal' is paired with dfvHeight", () => {
+      expect(() =>
+        getHeightStyle2(100, 0, { layoutType: "normal", dfvHeight: 400 })
+      ).not.toThrow();
+    });
+
+    it("does not throw when layoutType 'normal' is paired with height_fraction", () => {
+      expect(() =>
+        getHeightStyle2(100, 0, { layoutType: "normal", height_fraction: 3 })
+      ).not.toThrow();
+    });
+
+    it("does not throw for auto-detected normal mode without dfvHeight", () => {
+      // auto-detect (no layoutType set) with many rows → normal mode is fine;
+      // the default dfvHeight is intentional in that path.
+      expect(() =>
+        getHeightStyle2(500, 0, {})
+      ).not.toThrow();
+    });
   });
 
   describe("getAutoSize", () => {

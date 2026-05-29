@@ -12,8 +12,9 @@ import { CommandConfigT } from "./CommandUtils";
 import { Operation } from "./OperationUtils";
 import {
     getDs,
-    IDisplayArgs
+    IDisplayArgs,
 } from "./DFViewerParts/gridUtils";
+import { stampLayoutType } from "./DFViewerParts/displayArgsUtils";
 import { DatasourceOrRaw, DFViewerInfinite } from "./DFViewerParts/DFViewerInfinite";
 import { IDatasource, IGetRowsParams } from "ag-grid-community";
 import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "./DFViewerParts/SmartRowCache";
@@ -148,6 +149,7 @@ export function BuckarooInfiniteWidget({
         buckaroo_options,
         src,
         dataframe_id,
+        autoHeight,
     }: {
         df_meta: DFMeta;
         df_data_dict: Record<string, DFData>;
@@ -177,6 +179,11 @@ export function BuckarooInfiniteWidget({
         // operations; UI-only state changes (show_commands, theme, etc.)
         // still get the in-place update path.
         dataframe_id?: string;
+        /** When provided, overrides server-sent component_config.layoutType.
+         *  true → domLayout "autoHeight" (grows with row count).
+         *  false → domLayout "normal" (fills parent container).
+         *  undefined → server value wins. */
+        autoHeight?: boolean;
     }) {
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
         // so having it live between relaods is key
@@ -205,7 +212,12 @@ export function BuckarooInfiniteWidget({
             }
         }, [dataframe_id]);
 
-        const cDisp = df_display_args[buckaroo_state.df_display];
+        const effectiveDisplayArgs = useMemo(
+            () => stampLayoutType(df_display_args, autoHeight),
+            [df_display_args, autoHeight],
+        );
+
+        const cDisp = effectiveDisplayArgs[buckaroo_state.df_display];
 
         const [data_wrapper, summaryStatsData] = useMemo(
             () => [
@@ -362,7 +374,8 @@ export function DFViewerInfiniteDS({
         src,
         df_id,
         message_log,
-        show_message_box
+        show_message_box,
+        autoHeight,
     }: {
         df_meta: DFMeta;
         df_data_dict: Record<string, DFData>;
@@ -371,6 +384,9 @@ export function DFViewerInfiniteDS({
         df_id: string // the memory id
         message_log?: { messages?: Array<any> };
         show_message_box?: { enabled?: boolean };
+        /** When provided, overrides server-sent component_config.layoutType.
+         *  true → domLayout "autoHeight"; false → "normal"; undefined → server wins. */
+        autoHeight?: boolean;
     }) {
         // DFViewerInfiniteDS rendering
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
@@ -381,7 +397,12 @@ export function DFViewerInfiniteDS({
         const mainDs = useMemo(() => getDs(src), [src]);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 
-        const cDisp = df_display_args["main"];
+        const effectiveDisplayArgs = useMemo(
+            () => stampLayoutType(df_display_args, autoHeight),
+            [df_display_args, autoHeight],
+        );
+
+        const cDisp = effectiveDisplayArgs["main"];
 
         const [data_wrapper, summaryStatsData] = useMemo(
             () => [
