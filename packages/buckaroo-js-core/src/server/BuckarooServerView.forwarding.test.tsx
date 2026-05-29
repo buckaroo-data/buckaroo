@@ -86,4 +86,10 @@ describe("BuckarooServerView autoHeight forwarding (#846)", () => {
         await waitFor(() => expect(capturedViewProps.length).toBeGreaterThan(0));
         expect(capturedViewProps[capturedViewProps.length - 1].autoHeight).toBeUndefined();
     });
+
+    it("forwards autoHeight=false to BuckarooView (#862)", async () => {
+        render(<BuckarooServerView wsUrl="ws://x/ws/s" autoHeight={false} />);
+        await waitFor(() => expect(capturedViewProps.length).toBeGreaterThan(0));
+        expect(capturedViewProps[capturedViewProps.length - 1].autoHeight).toBe(false);
+    });
 });
