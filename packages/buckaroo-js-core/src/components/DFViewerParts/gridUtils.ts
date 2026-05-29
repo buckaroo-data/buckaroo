@@ -542,6 +542,14 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
         };
     }
     const domLayout: DomLayoutType = compC?.layoutType || (shortMode ? "autoHeight" : "normal");
+    if (compC?.layoutType === "normal" && !compC?.dfvHeight && !compC?.height_fraction) {
+        throw new Error(
+            'Buckaroo: layoutType: "normal" requires an explicit height. ' +
+            "Set component_config.dfvHeight (pixels) or component_config.height_fraction. " +
+            "Without one the grid silently defaults to window.innerHeight / 2, " +
+            "which likely won't match your outer container.",
+        );
+    }
     // shortDivStyle uses maxHeight (not height), which causes AG Grid in
     // "normal" domLayout to collapse because it can't compute a definitive
     // parent height. When the caller explicitly requests "normal" layout,
