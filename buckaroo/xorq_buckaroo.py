@@ -166,7 +166,12 @@ class XorqDataflow(CustomizableDataflow):
                     'orig_col_name': orig_col,
                     'rewritten_col_name': rewritten_col}
             return empty, {}
-        sdf, errs = super()._get_summary_sd(processed_df)
+        cache_storage = getattr(self, 'cache_storage', None)
+        stats = self.DFStatsClass(
+            processed_df, self.analysis_klasses, self.df_name,
+            debug=self.debug, cache_storage=cache_storage)
+        sdf = stats.sdf
+        errs = stats.errs if stats.errs else {}
         rewritten = {}
         for orig_col, rewritten_col in old_col_new_col(processed_df):
             col_meta = dict(sdf.get(orig_col, {}))
