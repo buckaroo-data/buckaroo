@@ -39,10 +39,11 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         sessions = self.application.settings["sessions"]
         sessions.add_ws_client(session_id, self)
 
-        # Send initial state if session already has data loaded
+        # Send initial state if session already has data loaded.
+        # search_string="" — fresh connection, no per-client typing yet.
         session = sessions.get(session_id)
         if session and (session.df is not None or session.ldf is not None or session.xorq_dataflow is not None):
-            self.write_message(json.dumps(build_state_message(session)))
+            self.write_message(json.dumps(build_state_message(session, search_string=self.search_string)))
 
     def on_message(self, message):
         try:
@@ -127,11 +128,15 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                             **session.component_config,
                         }
 
-            # Broadcast updated state to all connected clients
-            update_payload = json.dumps(build_state_message(session))
+            # Broadcast updated state to all connected clients. Each
+            # client gets its own search_string re-injected so a
+            # dataflow rebuild from one tab doesn't silently clear the
+            # search box on another (or on the typing client itself).
             for client in list(session.ws_clients):
                 try:
-                    client.write_message(update_payload)
+                    msg = build_state_message(session,
+                        search_string=getattr(client, "search_string", ""))
+                    client.write_message(json.dumps(msg))
                 except Exception:
                     session.ws_clients.discard(client)
         except Exception:
@@ -173,7 +178,11 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 else:
                     disp.pop("highlight_phrase", None)
 
-        msg = build_state_message(session)
+        # Pass self.search_string so the overlay's buckaroo_state
+        # round-trips the typed term back to this client (Codex P1 on
+        # #854 — without it the JS clears the search box on every
+        # keystroke).
+        msg = build_state_message(session, search_string=self.search_string)
         msg["df_display_args"] = overlay
         try:
             self.write_message(json.dumps(msg))

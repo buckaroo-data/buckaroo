@@ -135,7 +135,7 @@ class LoadHandler(tornado.web.RequestHandler):
         return body
 
     def _validate_request(self, body: dict) -> tuple:
-        """Validate and extract session_id, path, mode, prompt, no_browser, and component_config from request.
+        """Validate and extract session_id, path, mode, prompt, no_browser, component_config, backend from request.
 
         Returns (session_id, path, mode, prompt, no_browser, component_config, backend) or a tuple of Nones on error.
 
@@ -190,11 +190,15 @@ class LoadHandler(tornado.web.RequestHandler):
         if not session.ws_clients:
             return
 
-        push_msg = json.dumps(build_state_message(session, metadata=metadata))
         for client in list(session.ws_clients):
             try:
+                # Reset per-client live search first (dataset changed),
+                # then build the msg so the injected ``buckaroo_state``
+                # mirrors the post-reset value.
                 client.search_string = ""
-                client.write_message(push_msg)
+                msg = build_state_message(session, metadata=metadata,
+                    search_string=client.search_string)
+                client.write_message(json.dumps(msg))
             except Exception:
                 session.ws_clients.discard(client)
 
@@ -289,10 +293,6 @@ class LoadHandler(tornado.web.RequestHandler):
                 "message": "backend='polars' is only valid with mode='buckaroo'"})
             return
 
-        # Optional per-column / per-grid configuration that mirrors the
-        # matching kwargs on BuckarooInfiniteWidget. Only applied for
-        # mode="buckaroo" where the full dataflow is built (lazy/viewer
-        # paths don't carry merged_sd / extra_grid_config).
         column_config_overrides = body.get("column_config_overrides")
         extra_grid_config = body.get("extra_grid_config")
         init_sd = body.get("init_sd")
@@ -300,8 +300,8 @@ class LoadHandler(tornado.web.RequestHandler):
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
-        # Loading via /load is always pandas or polars — clear any xorq state
-        # left by a prior /load_expr on the same session so WS dispatch routes
+        # Loading via /load is pandas or polars — clear any xorq state left
+        # by a prior /load_expr on the same session so WS dispatch routes
         # to the new dataflow rather than a stale xorq one.
         session.backend = backend
         session.xorq_dataflow = None
@@ -326,10 +326,12 @@ class LoadHandler(tornado.web.RequestHandler):
             if mode == "buckaroo":
                 if backend == "polars":
                     from buckaroo.server.data_loading_polars import create_polars_dataflow
-                    dataflow = create_polars_dataflow(file_obj, column_config_overrides=column_config_overrides,
+                    dataflow = create_polars_dataflow(file_obj,
+                        column_config_overrides=column_config_overrides,
                         extra_grid_config=extra_grid_config, init_sd=init_sd)
                 else:
-                    dataflow = create_dataflow(file_obj, column_config_overrides=column_config_overrides,
+                    dataflow = create_dataflow(file_obj,
+                        column_config_overrides=column_config_overrides,
                         extra_grid_config=extra_grid_config, init_sd=init_sd)
                 session.dataflow = dataflow
                 buckaroo_state = get_buckaroo_display_state(dataflow)
@@ -484,10 +486,14 @@ class LoadExprHandler(tornado.web.RequestHandler):
                         **component_config}
 
         if session.ws_clients:
-            push_msg = json.dumps(build_state_message(session, metadata=metadata))
             for client in list(session.ws_clients):
                 try:
-                    client.write_message(push_msg)
+                    # Reset per-client live search (#851): a term from
+                    # the prior expression would silently filter the new one.
+                    client.search_string = ""
+                    msg = build_state_message(session, metadata=metadata,
+                        search_string=client.search_string)
+                    client.write_message(json.dumps(msg))
                 except Exception:
                     session.ws_clients.discard(client)
 
@@ -629,10 +635,13 @@ class LoadCompareHandler(tornado.web.RequestHandler):
 
         # Push to WebSocket clients
         if session.ws_clients:
-            push_msg = json.dumps(build_state_message(session))
             for client in list(session.ws_clients):
                 try:
-                    client.write_message(push_msg)
+                    # Reset per-client live search (#851).
+                    client.search_string = ""
+                    msg = build_state_message(session,
+                        search_string=client.search_string)
+                    client.write_message(json.dumps(msg))
                 except Exception:
                     session.ws_clients.discard(client)
 
