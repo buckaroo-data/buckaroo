@@ -106,15 +106,22 @@ class XorqStatPipeline:
     EXTERNAL_KEYS = frozenset(
         {"orig_col_name", "rewritten_col_name", "dtype", "length", "min", "max"})
 
-    def __init__(self, stat_funcs: list, backend: Any = None, unit_test: bool = True):
+    def __init__(self, stat_funcs: list, backend: Any = None, unit_test: bool = True,
+                 cache_storage=None):
         if not HAS_XORQ:
             raise ImportError(
                 "xorq is required for XorqStatPipeline. "
                 "Install with: pip install buckaroo[xorq]")
 
+        if backend is not None and cache_storage is not None:
+            raise ValueError(
+                "backend and cache_storage are mutually exclusive: "
+                "pass one or the other, not both")
+
         self.all_stat_funcs = _normalize_inputs(stat_funcs)
         self._original_inputs = list(stat_funcs)
         self.backend = backend
+        self.cache_storage = cache_storage
 
         # Validate the full DAG up front (raises DAGConfigError on misconfig).
         self.ordered_stat_funcs = build_typed_dag(
@@ -139,6 +146,8 @@ class XorqStatPipeline:
     def _execute(self, query):
         if self.backend is not None:
             return self.backend.execute(query)
+        if self.cache_storage is not None:
+            return query.cache(cache=self.cache_storage).execute()
         return query.execute()
 
     def _maybe_materialize(self, table):
@@ -198,7 +207,9 @@ class XorqStatPipeline:
         passed in — the user's backend is for their queries, not ours.
         """
         saved_backend = self.backend
+        saved_cache = self.cache_storage
         self.backend = None
+        self.cache_storage = None
         try:
             table = xo.memtable(PERVERSE_DF)
             _, errors = self.process_table(table)
@@ -209,6 +220,7 @@ class XorqStatPipeline:
             return False, []
         finally:
             self.backend = saved_backend
+            self.cache_storage = saved_cache
 
     def process_table(self, table) -> Tuple[SDType, List[StatError]]:
         materialized, cleanup = self._maybe_materialize(table)
@@ -403,13 +415,15 @@ class XorqDfStatsV2:
         # (issue #709). DAG validation still runs as part of __init__.
         XorqStatPipeline(objs, unit_test=False)
 
-    def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False):
+    def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False,
+                 cache_storage=None):
         self.table = table
         # Skip the unit_test PERVERSE_DF run on each widget construction —
         # it doubles the SQL query count (issue #709). The DAG-validation
         # cost is already paid by verify_analysis_objects on first set up
         # and by the test suite. Mirrors PlDfStatsV2.
-        self.ap = XorqStatPipeline(col_analysis_objs, unit_test=False)
+        self.ap = XorqStatPipeline(col_analysis_objs, unit_test=False,
+            cache_storage=cache_storage)
         self.operating_df_name = operating_df_name
         self.debug = debug
         self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)

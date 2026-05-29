@@ -373,3 +373,27 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
             os.unlink(csv_path)
+
+    @tornado.testing.gen_test
+    async def test_cache_storage_path_accepted(self):
+        """POST /load_expr with cache_storage_path must succeed and write cache
+        files to the specified directory on stat execution."""
+        builds_root = tempfile.mkdtemp()
+        cache_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-cache", "build_dir": build_path,
+                 "cache_storage_path": cache_root})
+            self.assertEqual(resp.code, 200)
+            body = json.loads(resp.body)
+            self.assertEqual(body["rows"], 10)
+            # At least one cache file must have been written.
+            cache_files = []
+            for root, _dirs, files in os.walk(cache_root):
+                cache_files.extend(files)
+            self.assertGreater(len(cache_files), 0,
+                f"expected cache files under {cache_root}, found none")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(cache_root, ignore_errors=True)

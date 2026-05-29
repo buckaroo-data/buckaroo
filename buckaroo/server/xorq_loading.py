@@ -23,6 +23,19 @@ from buckaroo.xorq_buckaroo import (
 log = logging.getLogger(__name__)
 
 
+def _make_cache_storage(cache_storage_path):
+    """Build a ``ParquetSnapshotCache`` from a filesystem path string.
+
+    Returns ``None`` when ``cache_storage_path`` is falsy so callers can
+    check with a simple ``if self.cache_storage``.
+    """
+    if not cache_storage_path:
+        return None
+    from xorq.caching import ParquetSnapshotCache, ParquetStorage, SnapshotStrategy  # noqa: PLC0415
+    storage = ParquetStorage(base_path=Path(cache_storage_path))
+    return ParquetSnapshotCache(strategy=SnapshotStrategy(), storage=storage)
+
+
 class XorqServerDataflow(XorqDataflow):
     """Headless XorqDataflow with infinite sampling.
 
@@ -46,12 +59,13 @@ class XorqServerDataflow(XorqDataflow):
     DFStatsClass = XorqDfStatsV2
     analysis_klasses = _XORQ_ANALYSIS_KLASSES
 
-    def __init__(self, expr, *args, extra_klasses=None, **kwargs):
+    def __init__(self, expr, *args, extra_klasses=None, cache_storage_path=None, **kwargs):
         if extra_klasses:
             # Per-instance override — class-level _XORQ_ANALYSIS_KLASSES is
             # left untouched so other sessions / direct widget usage don't
             # inherit one project's stats.
             self.analysis_klasses = list(_XORQ_ANALYSIS_KLASSES) + list(extra_klasses)
+        self.cache_storage = _make_cache_storage(cache_storage_path)
         super().__init__(expr, *args, **kwargs)
 
 
