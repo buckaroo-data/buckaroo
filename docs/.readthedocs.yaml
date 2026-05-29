@@ -29,6 +29,7 @@ build:
         - uv venv
         - pnpm -C packages/buckaroo-js-core run build
         - pnpm -C packages/js run build:static
+        - pnpm -C packages/js run build:height-modes
         - uv run sphinx-build -T -b html docs/source  $READTHEDOCS_OUTPUT/html
         - ./scripts/marimo_wasm_output.sh buckaroo_ddd_tour.py run
         - ./scripts/marimo_wasm_output.sh buckaroo_compare.py edit
