@@ -45,6 +45,8 @@ const TEN_PINNED: PinnedRowConfig[] = STAT_KEYS.map((k) => ({
 interface HeightConfig {
     id: string;
     label: string;
+    /** When true: no widget is rendered; the panel fills the full space below the button bar. */
+    isIntro?: boolean;
     modeName: string;
     data: DFData;
     pinnedRows: PinnedRowConfig[];
@@ -83,6 +85,15 @@ function makeColConfig(pinnedRows: PinnedRowConfig[], compConfig?: ComponentConf
 }
 
 const CONFIGS: HeightConfig[] = [
+    {
+        id: "intro",
+        label: "Introduction",
+        isIntro: true,
+        // These fields are unused for intro but required by the type:
+        modeName: "", data: [], pinnedRows: [], summaryStats: [],
+        resolvedDomLayout: "autoHeight", decisionTrace: "", agGridSaw: "",
+        description: "", whenToUse: "", pythonSnippet: "", embedSnippet: "",
+    },
     {
         id: "auto-5",
         label: "5 rows",
@@ -930,6 +941,81 @@ const BADGE_NORMAL: React.CSSProperties = {
 
 const AG_GRID_DOMLAYOUT_URL = "https://www.ag-grid.com/javascript-data-grid/grid-size/#dom-layout";
 
+// ─── intro panel ─────────────────────────────────────────────────────────────
+
+function IntroPanel() {
+    const FONT: React.CSSProperties = {
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontSize: 14,
+        lineHeight: 1.75,
+        color: "#333",
+    };
+    const H3: React.CSSProperties = { fontSize: 13, fontWeight: 700, margin: "20px 0 4px", color: "#111" };
+    const UL: React.CSSProperties = { margin: "0 0 12px", paddingLeft: 22 };
+    const LI: React.CSSProperties = { marginBottom: 4 };
+    const C: React.CSSProperties = { background: "#f0f0f0", border: "1px solid #ddd", borderRadius: 3, padding: "1px 5px", fontSize: 12, fontFamily: "monospace" };
+    const CALLOUT: React.CSSProperties = {
+        background: "#fff8e1",
+        border: "1px solid #ffe082",
+        borderLeft: "4px solid #f9a825",
+        borderRadius: "0 4px 4px 0",
+        padding: "10px 14px",
+        margin: "16px 0",
+        fontSize: 13,
+    };
+
+    return (
+        <div style={{ padding: "24px 32px 48px", maxWidth: 780, ...FONT }}>
+            <h2 style={{ margin: "0 0 6px", fontSize: 20, fontWeight: 700 }}>
+                Buckaroo height modes — interactive reference
+            </h2>
+            <p style={{ margin: "0 0 16px", color: "#555" }}>
+                Buckaroo decides the height of an embedded grid from a small set of config
+                keys. The defaults work for most cases, but knowing the logic helps when
+                something looks wrong. Each button above shows a different configuration
+                with a live widget and a full breakdown of the decision process.
+            </p>
+
+            <div style={CALLOUT}>
+                The <strong>red border</strong> on every example marks the outer boundary
+                of the Buckaroo embed — the div your layout owns. The grid lives inside it.
+                Click <strong>500 rows</strong> to start with the most common case.
+            </div>
+
+            <p style={H3}>What you will see in each tab</p>
+            <ul style={UL}>
+                <li style={LI}><strong>The widget</strong> — a live Buckaroo instance with real data, showing the height behaviour in practice.</li>
+                <li style={LI}><strong>How Buckaroo decided</strong> — the exact <code style={C}>shortMode</code> arithmetic: row counts, <code style={C}>dfvHeight</code>, threshold, result.</li>
+                <li style={LI}><strong>What AG Grid saw</strong> — the <code style={C}>domLayout</code> prop and container CSS that Buckaroo passed to AG Grid.</li>
+                <li style={LI}><strong>Code snippets</strong> — Python/Jupyter and React embed examples for that configuration.</li>
+                <li style={LI}><strong>Reference table</strong> — every config key with a clear Buckaroo vs AG Grid label, collapsed at the bottom of each panel.</li>
+            </ul>
+
+            <p style={H3}>Key concepts — Buckaroo side</p>
+            <ul style={UL}>
+                <li style={LI}><code style={C}>shortMode</code> — internal Buckaroo flag, computed on every render. <em>True</em> when rows fit without a scrollbar → grid uses autoHeight. <em>You never set this directly.</em></li>
+                <li style={LI}><code style={C}>layoutType</code> — the config key you <em>do</em> set (in <code style={C}>component_config</code>). Accepts <code style={C}>"autoHeight"</code> or <code style={C}>"normal"</code>. When omitted, shortMode decides.</li>
+                <li style={LI}><code style={C}>dfvHeight</code> — pixel height of the grid container. Setting it also shifts the shortMode threshold.</li>
+                <li style={LI}><code style={C}>height_fraction</code> — sets <code style={C}>dfvHeight = window.innerHeight / height_fraction</code>. Default is 2 (half the viewport).</li>
+            </ul>
+
+            <p style={H3}>Key concepts — AG Grid side</p>
+            <ul style={UL}>
+                <li style={LI}><code style={C}>domLayout</code> — the AG Grid prop Buckaroo writes. <code style={C}>"autoHeight"</code>: grid sizes to content rows. <code style={C}>"normal"</code>: grid fills its container. You set <code style={C}>layoutType</code>; Buckaroo sets <code style={C}>domLayout</code>.</li>
+            </ul>
+
+            <p style={H3}>Suggested reading order</p>
+            <ol style={{ ...UL, paddingLeft: 26 }}>
+                <li style={LI}><strong>500 rows</strong> — the default normal mode. Most production embeds land here automatically.</li>
+                <li style={LI}><strong>5 rows</strong> — autoHeight auto-detected via shortMode. The compact notebook-cell case.</li>
+                <li style={LI}><strong>Explicit 200 px</strong> then <strong>200px (5 rows)</strong> — see how dfvHeight changes the threshold but does not force normal mode.</li>
+                <li style={LI}><strong>¼ viewport</strong> and <strong>¾ viewport</strong> — fraction-based sizing that tracks window resize.</li>
+                <li style={LI}><strong>Force normal (5 rows)</strong> — how to prevent autoHeight on small data using <code style={C}>layoutType: "normal"</code> or the <code style={C}>autoHeight={"{false}"}</code> prop.</li>
+            </ol>
+        </div>
+    );
+}
+
 function ExplanationPanel({ cfg }: { cfg: HeightConfig }) {
     const badgeStyle = cfg.resolvedDomLayout === "autoHeight" ? BADGE_AUTO : BADGE_NORMAL;
     const badge = (
@@ -1035,7 +1121,7 @@ const BTN_ACTIVE: React.CSSProperties = {
 };
 
 function HeightModesApp() {
-    const [activeId, setActiveId] = React.useState(CONFIGS[0].id);
+    const [activeId, setActiveId] = React.useState("normal-500");
     const cfg = CONFIGS.find((c) => c.id === activeId) ?? CONFIGS[0];
 
     return (
@@ -1063,12 +1149,14 @@ function HeightModesApp() {
                 ))}
             </div>
 
-            {/* widget area */}
-            <div style={{ flex: "0 0 auto", paddingTop: 16 }}>
-                <WidgetSection key={cfg.id} cfg={cfg} />
-            </div>
+            {/* widget area — hidden for intro */}
+            {!cfg.isIntro && (
+                <div style={{ flex: "0 0 auto", paddingTop: 16 }}>
+                    <WidgetSection key={cfg.id} cfg={cfg} />
+                </div>
+            )}
 
-            {/* explanation panel */}
+            {/* explanation / intro panel */}
             <div style={{
                 flex: "1 1 0",
                 overflowY: "auto",
@@ -1077,7 +1165,7 @@ function HeightModesApp() {
                 background: "#fff",
                 minHeight: 180,
             }}>
-                <ExplanationPanel cfg={cfg} />
+                {cfg.isIntro ? <IntroPanel /> : <ExplanationPanel cfg={cfg} />}
             </div>
         </div>
     );
