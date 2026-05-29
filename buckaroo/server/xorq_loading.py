@@ -32,8 +32,7 @@ def _make_cache_storage(cache_storage_path):
     if not cache_storage_path:
         return None
     from xorq.caching import ParquetSnapshotCache, ParquetStorage, SnapshotStrategy  # noqa: PLC0415
-    from xorq.api import connect  # noqa: PLC0415
-    storage = ParquetStorage(source=connect(), base_path=Path(cache_storage_path))
+    storage = ParquetStorage(base_path=Path(cache_storage_path))
     return ParquetSnapshotCache(strategy=SnapshotStrategy(), storage=storage)
 
 

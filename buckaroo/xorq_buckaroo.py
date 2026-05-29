@@ -171,7 +171,12 @@ class XorqDataflow(CustomizableDataflow):
             processed_df, self.analysis_klasses, self.df_name,
             debug=self.debug, cache_storage=cache_storage)
         sdf = stats.sdf
-        errs = stats.errs if stats.errs else {}
+        if stats.errs:
+            if self.debug:
+                raise Exception("Error executing analysis")
+            errs = stats.errs
+        else:
+            errs = {}
         rewritten = {}
         for orig_col, rewritten_col in old_col_new_col(processed_df):
             col_meta = dict(sdf.get(orig_col, {}))

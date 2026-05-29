@@ -113,6 +113,11 @@ class XorqStatPipeline:
                 "xorq is required for XorqStatPipeline. "
                 "Install with: pip install buckaroo[xorq]")
 
+        if backend is not None and cache_storage is not None:
+            raise ValueError(
+                "backend and cache_storage are mutually exclusive: "
+                "pass one or the other, not both")
+
         self.all_stat_funcs = _normalize_inputs(stat_funcs)
         self._original_inputs = list(stat_funcs)
         self.backend = backend
