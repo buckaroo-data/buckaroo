@@ -211,7 +211,6 @@ def _column_summaries_xorq(path: Path) -> dict[str, dict]:
     Nothing larger than the single scalar summary row is materialised.
     """
     import xorq.api as xo
-    import xorq.vendor.ibis as ibis
 
     expr = xo.deferred_read_parquet(str(path))
     schema = expr.schema()
