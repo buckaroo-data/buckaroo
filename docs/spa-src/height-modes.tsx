@@ -486,6 +486,9 @@ const LAYOUT_REFERENCE = `component_config.layoutType
                    numRows + pinnedRows  ≥  maxRowsWithoutScrolling
                      →  "normal"      (shortMode = false)
 
+  AG Grid domLayout docs:
+  https://www.ag-grid.com/javascript-data-grid/grid-size/#dom-layout
+
 React-embed prop  (overrides server-sent layoutType)
   autoHeight={true}    stamps "autoHeight"
   autoHeight={false}   stamps "normal"        ← fixed in #862
@@ -552,10 +555,16 @@ const BADGE_NORMAL: React.CSSProperties = {
     color: "#1a73e8",
 };
 
+const AG_GRID_DOMLAYOUT_URL = "https://www.ag-grid.com/javascript-data-grid/grid-size/#dom-layout";
+
 function ExplanationPanel({ cfg }: { cfg: HeightConfig }) {
-    const badge = cfg.resolvedDomLayout === "autoHeight"
-        ? <span style={BADGE_AUTO}>domLayout: "autoHeight"</span>
-        : <span style={BADGE_NORMAL}>domLayout: "normal"</span>;
+    const badgeStyle = cfg.resolvedDomLayout === "autoHeight" ? BADGE_AUTO : BADGE_NORMAL;
+    const badge = (
+        <a href={AG_GRID_DOMLAYOUT_URL} target="_blank" rel="noreferrer"
+           style={{ ...badgeStyle, textDecoration: "none" }}>
+            domLayout: "{cfg.resolvedDomLayout}"
+        </a>
+    );
 
     return (
         <div style={{ padding: "16px 24px 32px", fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', fontSize: 14, lineHeight: 1.7, color: "#333" }}>
