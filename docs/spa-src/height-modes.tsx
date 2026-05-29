@@ -56,6 +56,8 @@ interface HeightConfig {
     resolvedDomLayout: "autoHeight" | "normal";
     /** Multiline breakdown of how Buckaroo arrived at resolvedDomLayout. */
     decisionTrace: string;
+    /** Multiline summary of what Buckaroo passed to AG Grid. */
+    agGridSaw: string;
     description: string;
     whenToUse: string;
     pythonSnippet: string;
@@ -106,6 +108,15 @@ const CONFIGS: HeightConfig[] = [
 
   5 + 0 = 5  <  18  →  shortMode = true
   →  domLayout: "autoHeight"`,
+        agGridSaw:
+`domLayout prop   = "autoHeight"
+                   ↳ AG Grid sizes itself to its content rows.
+                     No scrollbar; grid height = rows × rowHeight.
+
+Container CSS     = { minHeight: 50px, maxHeight: ≈450px, overflow: hidden }
+  (shortDivStyle — used when shortMode=true and domLayout=autoHeight)
+  The maxHeight cap prevents unbounded growth for unexpectedly large
+  data. The grid never reaches it here because 5 rows ≈ 135px.`,
         description:
             "Buckaroo runs a shortMode check on every render. When the total " +
             "of data rows plus pinned rows fits inside the default dfvHeight without " +
@@ -154,6 +165,14 @@ w = buckaroo.BuckarooWidget(df)   # 5 rows → shortMode → autoHeight
   Pinned rows are included in the threshold arithmetic.
   They appear locked at the top of the grid, above the
   scrollable data rows.`,
+        agGridSaw:
+`domLayout prop   = "autoHeight"
+                   ↳ AG Grid sizes itself to its content rows.
+
+Container CSS     = { minHeight: 50px, maxHeight: ≈450px, overflow: hidden }
+  (shortDivStyle — shortMode=true, domLayout=autoHeight)
+  15 rows × 21px ≈ 315px — well within the maxHeight cap.
+  Pinned rows are part of the rendered row count AG Grid sizes to.`,
         description:
             "Pinned rows count the same as data rows in the shortMode threshold. " +
             "With 10 stat rows (dtype, count, mean…) pinned above 5 data rows, the " +
@@ -220,6 +239,15 @@ const displayArgs = {
             ≈ 450 px  (at a 900 px viewport)
 
   Outer container must be set to the same height (50vh here).`,
+        agGridSaw:
+`domLayout prop   = "normal"
+                   ↳ AG Grid fills 100% of its parent container's height.
+                     Rows that overflow get a virtual scrollbar.
+
+Container CSS     = { height: ≈450px, overflow: hidden }
+  (regularDivStyle — shortMode=false, so useShortStyle=false)
+  At a 900px viewport: window.innerHeight / 2 = 450px.
+  The outer container (red border) must also be 450px / 50vh.`,
         description:
             "When the row count exceeds maxRowsWithoutScrolling, shortMode is false " +
             "and the grid uses domLayout: \"normal\" — a fixed-height viewport with a " +
@@ -271,6 +299,14 @@ w = buckaroo.BuckarooWidget(df, component_config={"height_fraction": 3})
 
   Pinned rows appear at the top of the fixed-height viewport.
   The remaining vertical space is used for scrollable data rows.`,
+        agGridSaw:
+`domLayout prop   = "normal"
+                   ↳ AG Grid fills 100% of its parent container's height.
+
+Container CSS     = { height: ≈450px, overflow: hidden }
+  (regularDivStyle — shortMode=false)
+  AG Grid internally splits the height between the pinned row area and
+  the scrollable data viewport. The split is automatic.`,
         description:
             "Normal mode with 10 stat rows pinned at the top of the grid. " +
             "The pinned area is not scrollable; the 500 data rows scroll independently " +
@@ -320,6 +356,13 @@ dfvHeight resolution:
 
   Grid height = 200 px exactly.
   Outer container must also be 200 px.`,
+        agGridSaw:
+`domLayout prop   = "normal"
+                   ↳ AG Grid fills 100% of its parent container's height.
+
+Container CSS     = { height: 200px, overflow: hidden }
+  (regularDivStyle — dfvHeight explicitly 200, shortMode=false for 500 rows)
+  200px is an absolute value; it does not change with the browser window.`,
         description:
             "component_config.dfvHeight sets an exact pixel height for the AG Grid " +
             "viewport, overriding the default of window.innerHeight / height_fraction. " +
@@ -380,6 +423,14 @@ dfvHeight resolution:
   Grid height tracks the browser window. Resize the window
   and the grid adjusts on next render.
   Outer container set to "25vh" to match.`,
+        agGridSaw:
+`domLayout prop   = "normal"
+                   ↳ AG Grid fills 100% of its parent container's height.
+
+Container CSS     = { height: ≈225px, overflow: hidden }
+  (regularDivStyle — dfvHeight = window.innerHeight / 4 ≈ 225px at 900px)
+  This value changes when the browser is resized; the grid re-renders
+  with a new computed height on the next interaction.`,
         description:
             "height_fraction is a viewport-relative height without hardcoding pixels. " +
             "Buckaroo computes dfvHeight = window.innerHeight / height_fraction in the " +
@@ -441,6 +492,16 @@ w = buckaroo.BuckarooWidget(df, component_config={"height_fraction": 4})
 
   Same effect via React prop (fixed in #862):
     autoHeight={false}  →  stamps layoutType: "normal" client-side`,
+        agGridSaw:
+`domLayout prop   = "normal"
+                   ↳ AG Grid fills 100% of its parent container's height.
+
+Container CSS     = { height: 250px, overflow: hidden }
+  (regularDivStyle — layoutType explicitly "normal" suppresses shortDivStyle
+   even though shortMode would have been true for 5 rows)
+  Without the layoutType override, shortMode=true would have produced:
+    { minHeight: 50px, maxHeight: ≈450px }  and  domLayout: "autoHeight"
+  With it, AG Grid gets a concrete 250px height and stays fixed.`,
         description:
             "Setting component_config.layoutType to \"normal\" bypasses the shortMode " +
             "check and forces a fixed-height grid even when the row count is small. " +
@@ -472,31 +533,83 @@ w = buckaroo.BuckarooWidget(df, component_config={
     },
 ];
 
+// ─── threshold explanation ────────────────────────────────────────────────────
+// Shown collapsed under "How Buckaroo decided" on every panel.
+
+const THRESHOLD_EXPLANATION =
+`maxRowsWithoutScrolling = floor(dfvHeight / rowHeight) - scrollSlop
+
+  dfvHeight   The pixel height of the AG Grid viewport (see dfvHeight
+              resolution order in the reference below).
+              Example at 900 px viewport, default settings:
+                dfvHeight = window.innerHeight / 2 = 450 px
+
+  rowHeight   Actual rendered height of one data row in pixels.
+              Passed in from the AG Grid theme; defaults to 21 px when
+              not provided. When a custom rowHeight IS provided,
+              shortMode auto-detection is disabled entirely — set
+              layoutType explicitly instead.
+
+  scrollSlop  Fixed buffer of 3 rows subtracted from the estimate.
+              Accounts for the status bar and other widget chrome that
+              consumes vertical space inside dfvHeight.
+
+Example:
+  floor(450 / 21) - 3  =  floor(21.4) - 3  =  21 - 3  =  18
+
+  numRows + pinnedRows  <  18  →  shortMode = true  →  autoHeight
+  numRows + pinnedRows  ≥  18  →  shortMode = false →  normal
+
+The threshold is recomputed on every render, so resizing the browser
+window can change which mode fires if dfvHeight tracks the viewport
+(height_fraction mode).`;
+
 // ─── layout type reference ────────────────────────────────────────────────────
 // Shown at the bottom of every explanation panel.
 
-const LAYOUT_REFERENCE = `component_config.layoutType
-  "autoHeight"   Grid grows to show all rows — no scrollbar, outer container
-                 follows. Only safe when vertical space is unconstrained.
-  "normal"       Fixed-height grid. Rows that overflow get a scrollbar.
-                 Must pair with dfvHeight (or the grid collapses to zero).
-  (omitted)      Auto-detect: shortMode check fires on every render.
-                   numRows + pinnedRows  <  maxRowsWithoutScrolling
-                     →  "autoHeight"  (shortMode = true)
-                   numRows + pinnedRows  ≥  maxRowsWithoutScrolling
-                     →  "normal"      (shortMode = false)
+const LAYOUT_REFERENCE =
+`─── Buckaroo concepts (component_config keys) ───────────────────────────────
 
-  AG Grid domLayout docs:
-  https://www.ag-grid.com/javascript-data-grid/grid-size/#dom-layout
+  layoutType       Buckaroo config option. Controls which domLayout value is
+                   sent to AG Grid. When omitted, Buckaroo auto-detects via
+                   the shortMode check.
+                     "autoHeight" → AG Grid domLayout="autoHeight"
+                     "normal"     → AG Grid domLayout="normal"
+                                    REQUIRES dfvHeight or height_fraction.
 
-React-embed prop  (overrides server-sent layoutType)
-  autoHeight={true}    stamps "autoHeight"
-  autoHeight={false}   stamps "normal"        ← fixed in #862
-  autoHeight omitted   server's layoutType wins (or auto-detect if unset)
+  shortMode        Buckaroo internal flag — not a config option you set.
+                   Computed on every render from row counts vs the scroll
+                   threshold. Drives the auto-detect path when layoutType
+                   is omitted.
+                     true  →  domLayout="autoHeight"
+                     false →  domLayout="normal"
 
-dfvHeight resolution order
-  1. component_config.dfvHeight           (explicit px)
-  2. window.innerHeight / height_fraction (default fraction = 2 → 50vh)`;
+  dfvHeight        Pixel height of the AG Grid container div. Overrides the
+                   height_fraction default. Must match your outer container.
+
+  height_fraction  Sets dfvHeight = window.innerHeight / height_fraction.
+                   Default = 2 (half viewport). Larger = shorter widget.
+
+─── AG Grid concepts ────────────────────────────────────────────────────────
+
+  domLayout        AG Grid prop written by Buckaroo. Not set directly by
+                   callers — set via component_config.layoutType instead.
+                     "autoHeight"  grid sizes itself to its content rows
+                     "normal"      grid fills its parent container's height
+                   Docs: https://www.ag-grid.com/javascript-data-grid/grid-size/#dom-layout
+
+─── React-embed prop ────────────────────────────────────────────────────────
+
+  autoHeight       Prop on BuckarooServerView / DFViewerInfiniteDS.
+                   Overrides whatever layoutType the server sent.
+                     true    stamps layoutType: "autoHeight"
+                     false   stamps layoutType: "normal"  (fixed in #862)
+                     omitted server's layoutType wins (or auto-detect)
+
+─── dfvHeight resolution order ──────────────────────────────────────────────
+
+  1. component_config.dfvHeight           explicit pixels
+  2. window.innerHeight / height_fraction default fraction = 2 → 50vh`;
 
 // ─── explanation panel ────────────────────────────────────────────────────────
 
@@ -576,6 +689,16 @@ function ExplanationPanel({ cfg }: { cfg: HeightConfig }) {
 
             <p style={SECTION_LABEL}>How Buckaroo decided</p>
             <pre style={DECISION_STYLE}>{cfg.decisionTrace}</pre>
+
+            <details style={{ marginBottom: 4 }}>
+                <summary style={{ fontSize: 12, color: "#666", cursor: "pointer", userSelect: "none" }}>
+                    How maxRowsWithoutScrolling is computed
+                </summary>
+                <pre style={{ ...DECISION_STYLE, marginTop: 6, borderLeftColor: "#aaa", fontSize: 11 }}>{THRESHOLD_EXPLANATION}</pre>
+            </details>
+
+            <p style={SECTION_LABEL}>What AG Grid saw</p>
+            <pre style={{ ...DECISION_STYLE, borderLeftColor: "#fbbc04" }}>{cfg.agGridSaw}</pre>
 
             <p style={SECTION_LABEL}>When to use</p>
             <p style={{ margin: "0 0 12px", color: "#444" }}>{cfg.whenToUse}</p>
