@@ -115,9 +115,10 @@ def test_xorq_diff_accepts_expressions(tmp_path):
 
     n = 1_500
     base = pd.DataFrame({"ride_id": [f"R{i:05d}" for i in range(n)], "minutes": [i % 60 for i in range(n)]})
-    a_path = _write_parquet(tmp_path / "a", base) if False else (tmp_path / "a.parquet")
+    a_path = tmp_path / "a.parquet"
     base.to_parquet(a_path)
-    b = base.copy(); b.loc[0, "minutes"] = 999
+    b = base.copy()
+    b.loc[0, "minutes"] = 999
     b_path = tmp_path / "b.parquet"
     b.to_parquet(b_path)
 
@@ -146,7 +147,6 @@ def test_key_diff_xorq_uses_detected_pk(tmp_path):
     n = 2_000
     base = pd.DataFrame({"ride_id": [f"R{i:06d}" for i in range(n)], "member_casual": (["member", "casual"] * (n // 2)),
         "minutes": [i % 60 for i in range(n)]})
-    a = _write_parquet(tmp_path / "a", base) if False else None
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
     a_path = tmp_path / "a" / "t.parquet"
