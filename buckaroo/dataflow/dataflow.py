@@ -314,11 +314,16 @@ class CustomizableDataflow(DataFlow):
     def __init__(self, orig_df, debug=False,
                  column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
                  pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
-                 component_config:Union[Literal[None], ComponentConfig]=None, init_sd=None, skip_main_serial=False):
+                 component_config:Union[Literal[None], ComponentConfig]=None, init_sd=None, skip_main_serial=False,
+                 skip_stat_columns=None):
         if init_sd is None:
             self.init_sd = {}
         else:
             self.init_sd = init_sd
+        # Columns whose summary stats are supplied (via init_sd) and must NOT
+        # be recomputed. Explicit opt-in: a column merely *mentioned* in
+        # init_sd (e.g. a display hint) is still computed unless named here.
+        self.skip_stat_columns = set(skip_stat_columns or ())
         self.skip_main_serial = skip_main_serial
         if column_config_overrides is None:
             column_config_overrides = {}
@@ -626,7 +631,8 @@ class CustomizableDataflow(DataFlow):
         stats = self.DFStatsClass(
             processed_df,
             self.analysis_klasses,
-            self.df_name, debug=self.debug)
+            self.df_name, debug=self.debug,
+            skip_columns=getattr(self, 'skip_stat_columns', None))
         sdf = stats.sdf
         if stats.errs:
             if self.debug:

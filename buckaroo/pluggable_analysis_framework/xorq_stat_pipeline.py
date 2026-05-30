@@ -222,10 +222,10 @@ class XorqStatPipeline:
             self.backend = saved_backend
             self.cache_storage = saved_cache
 
-    def process_table(self, table) -> Tuple[SDType, List[StatError]]:
+    def process_table(self, table, skip_columns=None) -> Tuple[SDType, List[StatError]]:
         materialized, cleanup = self._maybe_materialize(table)
         try:
-            return self._process_table_impl(materialized)
+            return self._process_table_impl(materialized, skip_columns=skip_columns)
         finally:
             if cleanup is not None:
                 backend, name = cleanup
@@ -234,9 +234,13 @@ class XorqStatPipeline:
                 except Exception:
                     pass
 
-    def _process_table_impl(self, table) -> Tuple[SDType, List[StatError]]:
+    def _process_table_impl(self, table, skip_columns=None) -> Tuple[SDType, List[StatError]]:
         schema = table.schema()
         columns = list(table.columns)
+        # Columns whose stats are supplied externally (via init_sd) keep their
+        # structural metadata (name/dtype/length) but get no stat expressions
+        # built — so the column's data is never scanned.
+        skip = set(skip_columns or ())
 
         # Pre-populate every column accumulator with the externally-provided
         # keys. ``length`` is filled in by the batch query below. ``min`` /
@@ -259,6 +263,8 @@ class XorqStatPipeline:
                 continue
             xorq_col_param = next(r.name for r in sf.requires if r.type is XorqColumn)
             for col in columns:
+                if col in skip:
+                    continue
                 col_dtype = schema[col]
                 if sf.column_filter is not None and not sf.column_filter(col_dtype):
                     continue
@@ -317,7 +323,7 @@ class XorqStatPipeline:
             col_dtype = schema[col]
             col_funcs = build_column_dag(self.all_stat_funcs, col_dtype, external_keys=self.EXTERNAL_KEYS)
 
-            for sf in col_funcs:
+            for sf in col_funcs if col not in skip else []:
                 # Skip stats whose results are already in the accumulator
                 # (typically the batch-phase stats).
                 if sf.provides and all(sk.name in col_accum for sk in sf.provides):
@@ -375,14 +381,14 @@ class XorqStatPipeline:
 
         return True, []
 
-    def process_table_v1_compat(self, table) -> Tuple[SDType, ErrDict]:
+    def process_table_v1_compat(self, table, skip_columns=None) -> Tuple[SDType, ErrDict]:
         """Run process_table and convert errors to v1 ErrDict shape.
 
         Used by XorqDfStatsV2 / DataFlow consumers expecting the same
         ``{(col, stat): (Exception, kls)}`` shape that AnalysisPipeline
         produced.
         """
-        summary, errors = self.process_table(table)
+        summary, errors = self.process_table(table, skip_columns=skip_columns)
         errs: ErrDict = {}
         for se in errors:
             kls = _find_v1_class(se.stat_func, self._original_inputs) if se.stat_func else None
@@ -416,7 +422,7 @@ class XorqDfStatsV2:
         XorqStatPipeline(objs, unit_test=False)
 
     def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False,
-                 cache_storage=None):
+                 cache_storage=None, skip_columns=None):
         self.table = table
         # Skip the unit_test PERVERSE_DF run on each widget construction —
         # it doubles the SQL query count (issue #709). The DAG-validation
@@ -426,7 +432,7 @@ class XorqDfStatsV2:
             cache_storage=cache_storage)
         self.operating_df_name = operating_df_name
         self.debug = debug
-        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
+        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table, skip_columns=skip_columns)
         self.stat_errors = []
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)

@@ -40,7 +40,7 @@ class DfStatsV2:
         cls.ap_class(col_analysis_objs)
 
     def __init__(self, df_stats_df: pd.DataFrame, col_analysis_objs: AObjs, operating_df_name: str = None,
-            debug: bool = False) -> None:
+            debug: bool = False, skip_columns=None) -> None:
         self.df = self.get_operating_df(df_stats_df, force_full_eval=False)
         self.col_order = self.df.columns
         self.ap = self.ap_class(col_analysis_objs)
@@ -48,7 +48,7 @@ class DfStatsV2:
         self.debug = debug
 
         # Process using v1-compatible output format
-        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, self.debug)
+        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, self.debug, skip_columns=skip_columns)
         self.stat_errors = []
 
         if self.errs:
@@ -94,10 +94,10 @@ class PlDfStatsV2:
             return df.sample(n=min(50_000, rows), seed=42)
         return df
 
-    def __init__(self, df, col_analysis_objs, operating_df_name=None, debug=False):
+    def __init__(self, df, col_analysis_objs, operating_df_name=None, debug=False, skip_columns=None):
         self.df = self.get_operating_df(df)
         self.ap = StatPipeline(col_analysis_objs, unit_test=False)
-        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, debug)
+        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, debug, skip_columns=skip_columns)
         self.stat_errors = []
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)

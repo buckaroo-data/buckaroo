@@ -169,7 +169,8 @@ class XorqDataflow(CustomizableDataflow):
         cache_storage = getattr(self, 'cache_storage', None)
         stats = self.DFStatsClass(
             processed_df, self.analysis_klasses, self.df_name,
-            debug=self.debug, cache_storage=cache_storage)
+            debug=self.debug, cache_storage=cache_storage,
+            skip_columns=getattr(self, 'skip_stat_columns', None))
         sdf = stats.sdf
         if stats.errs:
             if self.debug:
