@@ -189,6 +189,7 @@ jobs:
   release-npm:
     name: Publish buckaroo-js-core to npm
     needs: release
+    if: needs.release.result == 'success'
     # GitHub-hosted runner required: npm Trusted Publishing OIDC is only
     # supported on github-hosted runners (Depot's depot-ubuntu-latest is
     # treated as self-hosted and won't receive npm OIDC credentials).
@@ -221,7 +222,7 @@ jobs:
       - name: Upgrade npm to a Trusted-Publishing-capable version
         # Trusted Publishing requires npm >= 11.5.1. The global npm dir
         # on github-hosted runners is root-owned, so sudo is needed.
-        run: sudo npm install -g npm@latest
+        run: sudo npm install -g npm@11.5.1
 
       - name: OIDC diagnostics (compare against npm Trusted Publisher config)
         # NOTE: the npm Trusted Publisher on npmjs.com must be updated to
