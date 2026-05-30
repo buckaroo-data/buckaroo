@@ -11,12 +11,10 @@ What the ratios encode:
   - head_diff*   is lazy on the polars/xorq (parquet) backends: a 100x row
                  increase should barely move the clock, because only the
                  N-row preview (+ a metadata count) is read.
-  - key_diff_xorq detects a real unique key, so it stays ~linear and matches
-                 every row exactly once (matched == n).
-  - key_diff / key_diff_polars infer LOW-cardinality columns as "keys" and
-                 outer-join on them unguarded, so the join is many-to-many and
-                 the matched-row count grows ~O(n^2). Those two are xfail until
-                 the key inference is fixed (see PR #872 review).
+  - key_diff* (all backends) detect a real unique key, so each stays ~linear
+                 and matches every row exactly once (matched == n). The
+                 deterministic matched count guards against the cartesian
+                 blowup the old low-cardinality key heuristic produced.
 
 Run `pytest -s tests/unit/compare_perf_test.py` to see the timing table.
 """
@@ -212,36 +210,32 @@ def test_key_diff_xorq_linear_with_unique_key(data):
 
 
 # ===========================================================================
-# key_diff cartesian blowup (pandas / polars). _infer_keys selects LOW-
-# cardinality columns and the outer join is unguarded, so a single side of
-# size n produces ~n^2/k matched rows. A correct key would give matched == n.
-# These are xfail until the key inference is fixed (PR #872 review finding).
+# key_diff must NOT cartesian-blow-up (pandas / polars). The detector picks the
+# unique 'id', so matched == n (one row per input row). The earlier low-
+# cardinality heuristic picked 'cat' (10 distinct) and produced ~n^2/k matched
+# rows; the deterministic matched count is the regression guard.
 # ===========================================================================
 
-_BLOWUP_N = 2_000  # kept small: the quadratic result must still build fast
+_BLOWUP_N = 2_000  # quadratic blowup would build ~n^2/k rows here — kept small
 
 
-@pytest.mark.xfail(reason="_infer_keys picks low-cardinality 'cat' -> cartesian blowup (PR#872 review)",
-    strict=False)
 def test_key_diff_pandas_no_cartesian_blowup():
     a, b = _gen(_BLOWUP_N, 0), _gen(_BLOWUP_N, 1)
     res = key_diff(a, b)
     matched = res["matched"] if res else None
     print(f"\n[compare-perf] key_diff (pandas) n={_BLOWUP_N} matched={matched} keys={res and res['keys']}")
-    # A sound key gives one matched row per input row. Allow modest slack.
-    assert res is not None and matched <= 2 * _BLOWUP_N, (
+    # A sound key gives one matched row per input row.
+    assert res is not None and res["keys"] == ["id"] and matched == _BLOWUP_N, (
         f"key_diff matched={matched} for n={_BLOWUP_N} on keys={res and res['keys']} — "
-        "cartesian blowup from low-cardinality key inference.")
+        "expected matched==n on the unique 'id' (no cartesian blowup).")
 
 
 @needs_polars
-@pytest.mark.xfail(reason="_infer_keys_polars picks low-cardinality keys -> cartesian blowup (PR#872 review)",
-    strict=False)
 def test_key_diff_polars_no_cartesian_blowup():
     a, b = pl.from_pandas(_gen(_BLOWUP_N, 0)), pl.from_pandas(_gen(_BLOWUP_N, 1))
     res = key_diff_polars(a, b)
     matched = res["matched"] if res else None
     print(f"\n[compare-perf] key_diff (polars) n={_BLOWUP_N} matched={matched} keys={res and res['keys']}")
-    assert res is not None and matched <= 2 * _BLOWUP_N, (
+    assert res is not None and res["keys"] == ["id"] and matched == _BLOWUP_N, (
         f"key_diff_polars matched={matched} for n={_BLOWUP_N} on keys={res and res['keys']} — "
-        "cartesian blowup from low-cardinality key inference.")
+        "expected matched==n on the unique 'id' (no cartesian blowup).")

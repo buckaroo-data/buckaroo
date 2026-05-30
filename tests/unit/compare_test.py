@@ -165,6 +165,154 @@ def test_key_diff_xorq_uses_detected_pk(tmp_path):
     assert keyed["only_after"] == 0
 
 
+# ---------------------------------------------------------------------------
+# pandas / polars key detection — the same algorithm as the xorq backend, so
+# all three pick the same key (or decline) on the same data.
+# ---------------------------------------------------------------------------
+
+
+def _pk_frames():
+    n = 4_000
+    uniq = pd.DataFrame({"ride_id": [f"R{i:06d}" for i in range(n)],
+        "member_casual": (["member", "casual"] * (n // 2)),
+        "rideable_type": (["classic", "electric", "docked"] * (n // 3 + 1))[:n]})
+    lowcard = pd.DataFrame({"member_casual": (["member", "casual"] * (n // 2)),
+        "rideable_type": (["classic", "electric", "docked"] * (n // 3 + 1))[:n],
+        "duration": [i % 600 for i in range(n)]})
+    rows = [(s, d) for s in range(80) for d in range(50)]
+    comp = pd.DataFrame({"station_id": [r[0] for r in rows], "as_of_date": [f"2024-{r[1]:02d}" for r in rows],
+        "reading": [r[0] + r[1] for r in rows]})
+    return uniq, lowcard, comp
+
+
+def _detect(backend, df, **kw):
+    from buckaroo import compare as C
+    if backend == "pandas":
+        return C._detect_pk_pd(df, **kw)
+    pl = pytest.importorskip("polars")
+    return C._detect_pk_polars(pl.from_pandas(df), **kw)
+
+
+@pytest.mark.parametrize("backend", ["pandas", "polars"])
+def test_detect_pk_contract(backend):
+    """Single unique col wins; low-cardinality declines (None); composite found —
+    matching the xorq _detect_pk tests above."""
+    uniq, lowcard, comp = _pk_frames()
+    assert _detect(backend, uniq) == ["ride_id"]
+    assert _detect(backend, lowcard) is None
+    assert _detect(backend, comp) == ["station_id", "as_of_date"]
+
+
+@pytest.mark.parametrize("backend", ["pandas", "polars"])
+def test_detect_pk_approximate_and_max_group(backend):
+    n = 4_000
+    approx = pd.DataFrame({"k": list(range(n - 40)) + list(range(40)), "v": [i % 10 for i in range(n)]})
+    assert _detect(backend, approx, threshold=1.0) is None     # 40 dups -> not exact
+    assert _detect(backend, approx, threshold=0.98) == ["k"]   # but a usable near-key
+
+    skew = pd.DataFrame({"k": [f"K{i:06d}" for i in range(n - 200)] + ["DUP"] * 200})
+    assert _detect(backend, skew, threshold=0.95, max_group=50) is None       # one value covers 200 rows
+    assert _detect(backend, skew, threshold=0.95, max_group=1_000) == ["k"]   # within cap
+
+
+@pytest.mark.parametrize("backend", ["pandas", "polars"])
+def test_key_diff_uses_detected_pk_or_stops(backend):
+    """key_diff joins on the detected unique key (1:1, no blowup); with only
+    low-cardinality columns it stops and returns None."""
+    from buckaroo import compare as C
+    n = 2_000
+    a = pd.DataFrame({"id": range(n), "cat": [i % 10 for i in range(n)], "val": list(range(n))})
+    b = a.copy()
+    b.loc[0, "val"] = 999
+    lowcard = pd.DataFrame({"cat": [i % 5 for i in range(n)], "grp": [i % 7 for i in range(n)]})
+    if backend == "pandas":
+        kd, wrap = C.key_diff, (lambda df: df)
+    else:
+        pl = pytest.importorskip("polars")
+        kd, wrap = C.key_diff_polars, (lambda df: pl.from_pandas(df))
+    keyed = kd(wrap(a), wrap(b))
+    assert keyed is not None and keyed["keys"] == ["id"]
+    assert keyed["matched"] == n and keyed["only_before"] == 0 and keyed["only_after"] == 0
+    assert kd(wrap(lowcard), wrap(lowcard)) is None  # no simple PK -> stop, do not explode
+
+
+@pytest.mark.parametrize("backend", ["pandas", "polars", "xorq"])
+def test_key_diff_membership_null_safe(backend, tmp_path):
+    """A genuine null in a matched row's shared column must not be miscounted as
+    a non-matching row (regression for the first-non-key-column null probe)."""
+    from buckaroo import compare as C
+    n = 100
+    a = pd.DataFrame({"id": [f"k{i}" for i in range(n)], "val": [None] + list(range(n - 1))})
+    b = a.copy()
+    b.loc[0, "val"] = 1000
+    if backend == "pandas":
+        res = C.key_diff(a, b)
+    elif backend == "polars":
+        pl = pytest.importorskip("polars")
+        res = C.key_diff_polars(pl.from_pandas(a), pl.from_pandas(b))
+    else:
+        pytest.importorskip("xorq")
+        ap, bp = tmp_path / "a.parquet", tmp_path / "b.parquet"
+        a.to_parquet(ap)
+        b.to_parquet(bp)
+        res = C.key_diff_xorq(ap, bp)
+    assert res["matched"] == n and res["only_before"] == 0 and res["only_after"] == 0
+
+
+@pytest.mark.parametrize("backend", ["pandas", "polars"])
+def test_probe_diff_gates(backend):
+    """probe_diff says can_diff only when a simple primary key exists."""
+    from buckaroo.compare import probe_diff
+    n = 1_000
+    keyed = pd.DataFrame({"id": range(n), "cat": [i % 10 for i in range(n)]})
+    lowcard = pd.DataFrame({"cat": [i % 5 for i in range(n)], "grp": [i % 7 for i in range(n)]})
+    if backend == "polars":
+        pl = pytest.importorskip("polars")
+        keyed, lowcard = pl.from_pandas(keyed), pl.from_pandas(lowcard)
+    good = probe_diff(keyed, keyed)
+    assert good["can_diff"] is True and good["keys"] == ["id"]
+    bad = probe_diff(lowcard, lowcard)
+    assert bad["can_diff"] is False and bad["keys"] is None
+
+
+@pytest.mark.parametrize("backend", ["pandas", "polars"])
+def test_stats_diff_distinct_excludes_null(backend):
+    """distinct excludes null on pandas and polars alike (matches xorq nunique)."""
+    from buckaroo import compare as C
+    df = pd.DataFrame({"g": ["x", "y", None, None, "x"], "v": [1, 2, 3, 4, 5]})
+    if backend == "pandas":
+        rows = C.stats_diff(df, df)
+    else:
+        pl = pytest.importorskip("polars")
+        rows = C.stats_diff_polars(pl.from_pandas(df), pl.from_pandas(df))
+    g = next(r for r in rows if r["name"] == "g")["before"]
+    assert g["distinct"] == 2 and g["nulls"] == 2
+
+
+def test_probe_diff_rejects_mismatched_backends():
+    """probe_diff raises a clear error (not an opaque crash) on mixed inputs."""
+    pl = pytest.importorskip("polars")
+    from buckaroo.compare import probe_diff
+    a = pd.DataFrame({"id": [1, 2, 3]})
+    with pytest.raises(ValueError, match="same backend"):
+        probe_diff(a, pl.from_pandas(a))
+
+
+@pytest.mark.parametrize("backend", ["pandas", "polars"])
+def test_key_diff_bad_explicit_key_raises(backend):
+    """An explicit key absent from a side is a clear error, not a silent None."""
+    from buckaroo import compare as C
+    a = pd.DataFrame({"id": [1, 2, 3], "v": [1, 2, 3]})
+    b = pd.DataFrame({"id": [1, 2, 3], "v": [1, 2, 9]})
+    if backend == "pandas":
+        kd, wrap = C.key_diff, (lambda d: d)
+    else:
+        pl = pytest.importorskip("polars")
+        kd, wrap = C.key_diff_polars, (lambda d: pl.from_pandas(d))
+    with pytest.raises(ValueError, match="not present in both"):
+        kd(wrap(a), wrap(b), keys=["nope"])
+
+
 def test_single_non_a_join_key():
     """col_join_dfs works with a join key that is not named 'a'."""
     df1 = pd.DataFrame({"id": [1, 2, 3], "val": [10, 20, 30]})
