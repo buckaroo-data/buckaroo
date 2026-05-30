@@ -205,14 +205,47 @@ def key_diff_polars(a: "pl.DataFrame", b: "pl.DataFrame") -> dict | None:
 # ---------------------------------------------------------------------------
 
 
-def _column_summaries_xorq(path: Path) -> dict[str, dict]:
+def _as_expr(src):
+    """Accept either a parquet path/str or an already-built xorq expression.
+
+    Lets every xorq diff helper take ``expr1``/``expr2`` directly — so a diff
+    composes the two entry expressions (each carrying its own ``.cache()``
+    node) rather than reaching for a materialised ``result.parquet``.
+    """
+    import xorq.api as xo
+
+    if isinstance(src, (str, Path)):
+        return xo.deferred_read_parquet(str(src))
+    return src
+
+
+def _align_backends(a, b):
+    """Land two expressions on one backend, but only if they differ.
+
+    Two independently-loaded entry expressions can be bound to different
+    backends, which an outer join rejects; ``into_backend`` unifies them.  When
+    both already share a backend (e.g. both read parquet on the default xorq
+    backend) we skip it — into_backend would force an eager transport.
+    """
+    try:
+        con_a = a._find_backend(use_default=True)
+    except Exception:
+        con_a = None
+    try:
+        con_b = b._find_backend(use_default=True)
+    except Exception:
+        con_b = None
+    if con_a is not None and con_b is not None and con_a is not con_b:
+        b = b.into_backend(con_a)
+    return a, b
+
+
+def _column_summaries_xorq(src) -> dict[str, dict]:
     """One ibis aggregate expression covering every column, executed once.
 
     Nothing larger than the single scalar summary row is materialised.
     """
-    import xorq.api as xo
-
-    expr = xo.deferred_read_parquet(str(path))
+    expr = _as_expr(src)
     schema = expr.schema()
 
     agg: list = [expr.count().name("__total__")]
@@ -239,95 +272,210 @@ def _column_summaries_xorq(path: Path) -> dict[str, dict]:
     return result
 
 
-def _infer_keys_xorq(a_path: Path, b_path: Path) -> list[str]:
-    """Infer key columns by querying both parquets via DuckDB."""
-    import duckdb
-    import xorq.api as xo
-
-    a_schema = xo.deferred_read_parquet(str(a_path)).schema()
-    b_schema = xo.deferred_read_parquet(str(b_path)).schema()
-    shared = [c for c in a_schema if c in b_schema and not a_schema[c].is_numeric()]
-    if not shared:
-        return []
-    con = duckdb.connect()
-    row = con.execute(
-        "SELECT " + ", ".join(f'COUNT(DISTINCT "{c}") AS "{c}"' for c in shared)
-        + f" FROM '{a_path}'").fetchone()
-    total = con.execute(f"SELECT COUNT(*) FROM '{a_path}'").fetchone()[0]
-    threshold = max(20, int(total * 0.5))
-    return [c for c, v in zip(shared, row) if v <= threshold]
+def _max_group_xorq(expr, combo: list[str]) -> int:
+    """Largest number of rows sharing a single value of ``combo`` (one agg)."""
+    grp = expr.group_by(list(combo)).agg(__cnt__=expr.count())
+    return int(grp["__cnt__"].max().execute())
 
 
-def head_diff_xorq(a_path: Path, b_path: Path, n: int = 10) -> dict:
-    """LIMIT-N query on each parquet — no full table scan (xorq backend)."""
-    import duckdb
-    import xorq.api as xo
+def _rank_pk_xorq(src, threshold: float = 1.0, max_width: int = 4, max_group: int | None = None,
+        columns: list[str] | None = None) -> dict | None:
+    """Best join-key candidate for a parquet file or expression (xorq backend).
 
-    a_df = xo.deferred_read_parquet(str(a_path)).limit(n).execute()
-    b_df = xo.deferred_read_parquet(str(b_path)).limit(n).execute()
-    con = duckdb.connect()
-    a_total = con.execute(f"SELECT COUNT(*) FROM '{a_path}'").fetchone()[0]
-    b_total = con.execute(f"SELECT COUNT(*) FROM '{b_path}'").fetchone()[0]
+    Searches single columns (most-unique first), then composites of width
+    2..``max_width`` (shortest first), and returns the first candidate whose
+    *uniqueness* — distinct key tuples / row count — is ``>= threshold``::
+
+        {"keys": [...], "uniqueness": float, "max_group": int | None, "n": int}
+
+    Returns ``None`` if nothing reaches ``threshold``.
+
+    All work is pushed to xorq as aggregate expressions — ``count``,
+    ``nunique``, a distinct-row ``count`` per composite candidate, and (when
+    ``max_group`` is set) one ``group_by``/``max``.  Nothing larger than a
+    one-row summary is materialised, so this is safe on files far larger than
+    memory.  It does not touch DuckDB directly; whatever backend xorq is
+    configured with executes the expressions.
+
+    Parameters
+    ----------
+    threshold
+        Minimum distinct/rows to accept.  ``1.0`` means an exact primary key;
+        a value below 1.0 accepts an *approximate* key and tolerates up to
+        ``(1 - threshold)`` of the rows being duplicate-keyed (real-world data
+        often has no clean PK).
+    max_width
+        Largest composite key to consider.
+    max_group
+        Reject any candidate whose largest duplicate group exceeds this.  A
+        high-uniqueness key can still explode an outer join if one value (a
+        null, a sentinel) covers many rows; the global ratio does not bound
+        that, the biggest group does.  ``None`` skips the check.
+    columns
+        Restrict candidate columns to this subset (e.g. columns shared by both
+        sides of a diff).  ``None`` considers every column.
+    """
+    from itertools import combinations
+
+    expr = _as_expr(src)
+    cols = list(expr.schema())
+    if columns is not None:
+        cols = [c for c in cols if c in columns]
+    if not cols:
+        return None
+
+    aggs = [expr.count().name("__n__")] + [expr[c].nunique().name(c) for c in cols]
+    row = expr.aggregate(aggs).execute().iloc[0]
+    n = int(row["__n__"])
+    if n == 0:
+        return None
+    distinct = {c: int(row[c]) for c in cols}
+    need = threshold * n
+
+    def _accept(combo: tuple[str, ...], d: int) -> dict | None:
+        if d < need:
+            return None
+        mg = _max_group_xorq(expr, list(combo))
+        if max_group is not None and mg > max_group:
+            return None
+        return {"keys": list(combo), "uniqueness": d / n, "max_group": mg, "n": n}
+
+    # Single columns, most-unique first — a passing single beats any composite.
+    for c in sorted(cols, key=lambda c: distinct[c], reverse=True):
+        result = _accept((c,), distinct[c])
+        if result is not None:
+            return result
+
+    # Composite keys, shortest first.  Prune with a cheap cardinality-product
+    # upper bound before paying for the distinct-tuple count.
+    usable = [c for c in cols if distinct[c] > 1]
+    for width in range(2, max_width + 1):
+        for combo in combinations(usable, width):
+            bound = 1
+            for c in combo:
+                bound *= distinct[c]
+                if bound >= need:
+                    break
+            if bound < need:
+                continue
+            d = int(expr.select(*combo).distinct().count().execute())
+            result = _accept(combo, d)
+            if result is not None:
+                return result
+    return None
+
+
+def _detect_pk_xorq(src, threshold: float = 1.0, max_width: int = 4, max_group: int | None = None,
+        columns: list[str] | None = None) -> list[str] | None:
+    """Detected (approximate) primary key for a parquet file or expr, or ``None``.
+
+    Thin wrapper over :func:`_rank_pk_xorq` returning just the key columns.
+    See that function for the meaning of ``threshold`` / ``max_group``.
+    """
+    result = _rank_pk_xorq(
+        src, threshold=threshold, max_width=max_width,
+        max_group=max_group, columns=columns)
+    return list(result["keys"]) if result else None
+
+
+def _shared_columns_xorq(a, b) -> list[str]:
+    """Columns present in both schemas, in ``a``'s order (path or expr)."""
+    a_schema = _as_expr(a).schema()
+    b_schema = _as_expr(b).schema()
+    return [c for c in a_schema if c in b_schema]
+
+
+def head_diff_xorq(a, b, n: int = 10) -> dict:
+    """First N rows of each side + totals, all as xorq expressions."""
+    a_expr = _as_expr(a)
+    b_expr = _as_expr(b)
+    a_df = a_expr.limit(n).execute()
+    b_df = b_expr.limit(n).execute()
+    a_total = int(a_expr.count().execute())
+    b_total = int(b_expr.count().execute())
     return {"before": a_df.to_html(classes="data-table", index=False, border=0),
         "after": b_df.to_html(classes="data-table", index=False, border=0), "n": n, "a_total": a_total,
         "b_total": b_total}
 
 
-def stats_diff_xorq(a_path: Path, b_path: Path) -> list[dict]:
-    """Per-column stats computed directly on parquet files (xorq backend).
+def stats_diff_xorq(a, b) -> list[dict]:
+    """Per-column stats for each side (path or expr).
 
-    Each side is one aggregate query — no DataFrame materialisation.
+    Each side is one aggregate expression — no DataFrame materialisation.
     """
-    import xorq.api as xo
-
-    a_schema = xo.deferred_read_parquet(str(a_path)).schema()
-    b_schema = xo.deferred_read_parquet(str(b_path)).schema()
-    cols = list(dict.fromkeys(list(a_schema) + list(b_schema)))
-    a_s = _column_summaries_xorq(a_path)
-    b_s = _column_summaries_xorq(b_path)
+    a_expr = _as_expr(a)
+    b_expr = _as_expr(b)
+    cols = list(dict.fromkeys(list(a_expr.schema()) + list(b_expr.schema())))
+    a_s = _column_summaries_xorq(a_expr)
+    b_s = _column_summaries_xorq(b_expr)
     return [{"name": col, "before": a_s.get(col), "after": b_s.get(col)} for col in cols]
 
 
-def key_diff_xorq(a_path: Path, b_path: Path) -> dict | None:
-    """Outer-join on inferred keys using DuckDB SQL (xorq backend)."""
-    import duckdb
+def key_diff_xorq(a, b, keys: list[str] | None = None, threshold: float = 0.98, max_width: int = 4,
+        max_group: int | None = 10_000) -> dict | None:
+    """Outer-join two sides on a detected (approximate) key (xorq backend).
 
-    keys = _infer_keys_xorq(a_path, b_path)
+    ``a`` / ``b`` are parquet paths *or* xorq expressions — the diff composes
+    ``expr1`` ⋈ ``expr2`` and lets each side resolve its own cache, never
+    reaching for a materialised parquet.  The join key is inferred with
+    :func:`_detect_pk_xorq` over the shared columns — preferring a true primary
+    key, tolerating an approximate one down to ``threshold`` so real data
+    without a clean key still aligns.  ``max_group`` rejects a key whose
+    largest duplicate group would risk a many-to-many blowup.  Returns
+    ``None`` when no usable key is found.
+
+    Pure ibis: the outer join, the membership counts and the 50-row preview
+    are all expressions; nothing larger than the preview is materialised.
+    """
+    import xorq.vendor.ibis as ibis
+
+    a_expr = _as_expr(a)
+    b_expr = _as_expr(b)
+    # A caller that already knows the key (e.g. resolved + cached from lineage)
+    # passes it in to skip the per-column uniqueness scan entirely.
+    if not keys:
+        shared = _shared_columns_xorq(a_expr, b_expr)
+        keys = _detect_pk_xorq(
+            a_expr, threshold=threshold, max_width=max_width,
+            max_group=max_group, columns=shared)
+        if not keys:
+            keys = _detect_pk_xorq(
+                b_expr, threshold=threshold, max_width=max_width,
+                max_group=max_group, columns=shared)
     if not keys:
         return None
 
-    con = duckdb.connect()
-    con.execute(f"CREATE VIEW a AS SELECT * FROM '{a_path}'")
-    con.execute(f"CREATE VIEW b AS SELECT * FROM '{b_path}'")
-
-    a_cols = [r[0] for r in con.execute("DESCRIBE a").fetchall()]
-    b_cols = [r[0] for r in con.execute("DESCRIBE b").fetchall()]
-    a_non_keys = [c for c in a_cols if c not in keys]
-    b_non_keys = [c for c in b_cols if c not in keys]
-
-    key_sel = ", ".join(f'COALESCE(a."{k}", b."{k}") AS "{k}"' for k in keys)
-    a_sel = ", ".join(f'a."{c}" AS "{c}_before"' for c in a_non_keys)
-    b_sel = ", ".join(f'b."{c}" AS "{c}_after"' for c in b_non_keys)
-    on_clause = " AND ".join(f'a."{k}" = b."{k}"' for k in keys)
-    select_parts = [p for p in [key_sel, a_sel, b_sel] if p]
-    sql_join = f"SELECT {', '.join(select_parts)} FROM a FULL OUTER JOIN b ON {on_clause}"
+    a_non_keys = [c for c in a_expr.schema() if c not in keys]
+    b_non_keys = [c for c in b_expr.schema() if c not in keys]
 
     try:
-        con.execute(f"CREATE VIEW merged AS {sql_join}")
+        # The two sides may be bound to different backends (each entry
+        # expression is loaded independently); land them on one backend so the
+        # outer join is single-engine (no-op when they already share one).
+        a_expr, b_expr = _align_backends(a_expr, b_expr)
+        # Label each side's non-key columns so they don't collide on the join.
+        a_ren = a_expr.rename({f"{c}_before": c for c in a_non_keys})
+        b_ren = b_expr.rename({f"{c}_after": c for c in b_non_keys})
+        joined = a_ren.outer_join(b_ren, [a_ren[k] == b_ren[k] for k in keys])
+
+        sel = [ibis.coalesce(a_ren[k], b_ren[k]).name(k) for k in keys]
+        sel += [joined[f"{c}_before"] for c in a_non_keys]
+        sel += [joined[f"{c}_after"] for c in b_non_keys]
+        merged = joined.select(*sel)
+
         if a_non_keys and b_non_keys:
-            counts = con.execute(f"""
-                SELECT
-                    SUM(CASE WHEN "{a_non_keys[0]}_before" IS NULL THEN 1 ELSE 0 END) AS only_after,
-                    SUM(CASE WHEN "{b_non_keys[0]}_after"  IS NULL THEN 1 ELSE 0 END) AS only_before,
-                    COUNT(*) AS total
-                FROM merged
-            """).fetchone()
-            only_after, only_before, total = int(counts[0]), int(counts[1]), int(counts[2])
-            both = total - only_before - only_after
+            # a-side null → row only in b ("only_after"); b-side null → only in a.
+            a_probe = f"{a_non_keys[0]}_before"
+            b_probe = f"{b_non_keys[0]}_after"
+            counts = merged.aggregate(only_after=merged[a_probe].isnull().sum().cast("int64"),
+                only_before=merged[b_probe].isnull().sum().cast("int64"), total=merged.count()).execute().iloc[0]
+            only_after = int(counts["only_after"])
+            only_before = int(counts["only_before"])
+            both = int(counts["total"]) - only_before - only_after
         else:
             only_before = only_after = 0
-            both = con.execute("SELECT COUNT(*) FROM merged").fetchone()[0]
-        preview = con.execute("SELECT * FROM merged LIMIT 50").df()
+            both = int(merged.count().execute())
+        preview = merged.limit(50).execute()
     except Exception:
         return None
 
