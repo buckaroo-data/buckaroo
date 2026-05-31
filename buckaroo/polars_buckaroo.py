@@ -7,7 +7,6 @@ from traitlets import Unicode
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, RawDFViewerWidget, _bk_flash, _BK_FLASH_ENABLED
 from buckaroo.df_util import old_col_new_col
 from .pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
-from .pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from .customizations.pl_stats_v2 import PL_ANALYSIS_V2
 from .serialization_utils import pd_to_obj, sd_to_parquet_b64
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
@@ -38,28 +37,6 @@ class PolarsMainStyling(DefaultMainStyling):
 local_analysis_klasses = list(PL_ANALYSIS_V2) + [DefaultSummaryStatsStyling, PolarsMainStyling]
 
 
-class PolarsAutocleaning(PandasAutocleaning):
-    # Autocleaning still uses v1 PolarsAnalysis classes (select_clauses),
-    # so it needs the v1 PlDfStats executor.
-    DFStatsKlass = PlDfStats
-    
-    @staticmethod
-    def make_origs(raw_df, cleaned_df, cleaning_sd):
-        clauses = []
-        changed = 0
-        for col, sd in cleaning_sd.items():
-            if "add_orig" in sd:
-                clauses.append(cleaned_df[col])
-                clauses.append(raw_df[col].alias(col+"_orig"))
-                changed += 1
-            else:
-                clauses.append(cleaned_df[col])
-        if changed > 0:
-            return cleaned_df.select(clauses)
-        else:
-            return cleaned_df
-
-    
 class PolarsBuckarooWidget(BuckarooWidget):
     """TODO: Add docstring here
     """

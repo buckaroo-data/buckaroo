@@ -1,13 +1,11 @@
-from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.customizations.pandas_commands import (
     DropCol, MakeCategory, FillNA, Rank,
     DropDuplicates, GroupBy, GroupByTransform, RemoveOutliers, OnlyOutliers, Search, SearchCol,
     ToDatetime, LinearRegression)
 
-from buckaroo.customizations.analysis import (
-    DefaultSummaryStats, PdCleaningStats)
-from buckaroo.customizations.pd_fracs import HeuristicFracs, AggresiveCleaningGenOps, ConvservativeCleaningGenops
+from buckaroo.customizations.pd_stats_v2 import (
+    PD_AUTOCLEAN_DEFAULT_V2, PD_AUTOCLEAN_AGGRESSIVE_V2, PD_AUTOCLEAN_CONSERVATIVE_V2)
 from buckaroo.customizations.pandas_cleaning_commands import (
     IntParse,
     StrBool,
@@ -42,20 +40,8 @@ BASE_COMMANDS = [
     LinearRegression]
 
 
-class CleaningGenOps(ColAnalysis):
-    requires_summary = ['int_parse_fail', 'int_parse']
-    provides_defaults = {'cleaning_ops': []}
-
-    int_parse_threshhold = .3
-    @classmethod
-    def computed_summary(kls, column_metadata):
-        if column_metadata['int_parse'] > kls.int_parse_threshhold:
-            return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}]}
-        else:
-            return {'cleaning_ops': []}
-
 class CleaningConf(AutocleaningConfig):
-    autocleaning_analysis_klasses = [DefaultSummaryStats, CleaningGenOps, PdCleaningStats]
+    autocleaning_analysis_klasses = PD_AUTOCLEAN_DEFAULT_V2
     command_klasses = BASE_COMMANDS
     quick_command_klasses = []
     name="default"
@@ -70,7 +56,7 @@ class NoCleaningConf(AutocleaningConfig):
 
 
 class AggressiveAC(AutocleaningConfig):
-    autocleaning_analysis_klasses = [HeuristicFracs, AggresiveCleaningGenOps]
+    autocleaning_analysis_klasses = PD_AUTOCLEAN_AGGRESSIVE_V2
     command_klasses = [IntParse, StripIntParse, StrBool, USDate, DropCol, FillNA, GroupBy, NoOp, Search]
 
     quick_command_klasses = [Search]
@@ -78,6 +64,6 @@ class AggressiveAC(AutocleaningConfig):
 
 
 class ConservativeAC(AggressiveAC):
-    autocleaning_analysis_klasses = [HeuristicFracs, ConvservativeCleaningGenops]
+    autocleaning_analysis_klasses = PD_AUTOCLEAN_CONSERVATIVE_V2
     name = "conservative"
 
