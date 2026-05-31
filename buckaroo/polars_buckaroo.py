@@ -37,11 +37,33 @@ class PolarsMainStyling(DefaultMainStyling):
 local_analysis_klasses = list(PL_ANALYSIS_V2) + [DefaultSummaryStatsStyling, PolarsMainStyling]
 
 
+class PolarsAutocleaning(PandasAutocleaning):
+    """Polars autocleaning. Runs polars @stat cleaning analyses through
+    PlDfStatsV2 and reconstructs the cleaned frame (with optional _orig
+    columns) using polars select expressions."""
+    DFStatsKlass = PlDfStatsV2
+
+    @staticmethod
+    def make_origs(raw_df, cleaned_df, cleaning_sd):
+        clauses = []
+        changed = 0
+        for col, sd in cleaning_sd.items():
+            if sd.get("add_orig"):
+                clauses.append(cleaned_df[col])
+                clauses.append(raw_df[col].alias(col + "_orig"))
+                changed += 1
+            else:
+                clauses.append(cleaned_df[col])
+        if changed > 0:
+            return cleaned_df.select(clauses)
+        return cleaned_df
+
+
 class PolarsBuckarooWidget(BuckarooWidget):
     """TODO: Add docstring here
     """
     analysis_klasses = local_analysis_klasses
-    autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
+    autocleaning_klass = PolarsAutocleaning #override the base CustomizableDataFlow klass
     autoclean_conf = tuple([NoCleaningConfPl]) #override the base CustomizableDataFlow conf
     DFStatsClass = PlDfStatsV2
     sampling_klass = PLSampling

@@ -21,7 +21,7 @@ from buckaroo.pluggable_analysis_framework.stat_func import stat, RawSeries
 from buckaroo.pluggable_analysis_framework.column_filters import is_numeric_not_bool
 
 # Reused unchanged from pd_stats_v2 — operate on stat dict, not raw series
-from buckaroo.customizations.pd_stats_v2 import (_type, computed_default_summary_stats, histogram, BaseSummaryResult, NumericStatsResult, HistogramSeriesResult)
+from buckaroo.customizations.pd_stats_v2 import (_type, computed_default_summary_stats, histogram, cleaning_gen_ops, BaseSummaryResult, NumericStatsResult, HistogramSeriesResult)
 
 
 # ============================================================
@@ -148,8 +148,29 @@ def pl_histogram_series(ser: RawSeries) -> HistogramSeriesResult:
 
 
 # ============================================================
-# Convenience pipeline list
+# Cleaning stats (int-parse detection for autocleaning)
+# ============================================================
+
+PlCleaningResult = TypedDict('PlCleaningResult', {'int_parse_fail': float, 'int_parse': float})
+
+
+@stat()
+def pl_cleaning_stats(ser: RawSeries) -> PlCleaningResult:
+    """Fraction of a polars column that parses as int (drives safe_int autoclean)."""
+    length = len(ser)
+    if length == 0:
+        return {'int_parse_fail': 0.0, 'int_parse': 0.0}
+    parsed = ser.cast(pl.Int64, strict=False)
+    ok = int(parsed.is_not_null().sum())
+    return {'int_parse': ok / length, 'int_parse_fail': (length - ok) / length}
+
+
+# ============================================================
+# Convenience pipeline lists
 # ============================================================
 
 PL_ANALYSIS_V2 = [pl_typing_stats, _type, pl_base_summary_stats, pl_numeric_stats, computed_default_summary_stats,
     pl_histogram_series, histogram]
+
+# Autocleaning analysis set: int-parse detection -> safe_int op.
+PL_AUTOCLEAN_DEFAULT_V2 = [pl_cleaning_stats, cleaning_gen_ops]
