@@ -126,6 +126,43 @@ def test_string_column_handling():
     assert ten_col['tooltip_config'] == {'tooltip_type': 'simple', 'val_column': 'a'}
 
 
+def _wire_stat_names(all_stats_payload):
+    """Stat names present in a decoded ``all_stats`` parquet-b64 payload."""
+    import base64
+    import io
+    import pyarrow.parquet as pq
+    assert all_stats_payload['format'] == 'parquet_b64'
+    raw = base64.b64decode(all_stats_payload['data'])
+    tbl = pq.read_table(io.BytesIO(raw))
+    return {n.split('__', 1)[1] for n in tbl.schema.names if '__' in n}
+
+
+def test_all_stats_wire_payload_trimmed_to_displayed_keys():
+    """The ``all_stats`` wire payload carries only the stats the frontend
+    reads — the pinned-row values it looks up by ``primary_key_val`` and the
+    histogram bins the color-map rule reads. Dead weight (``value_counts``,
+    ``histogram_args``, ``memory_usage``, the ``is_*`` typing flags) stays on
+    the dataflow's ``merged_sd`` for styling but never ships. See #880."""
+    df = pd.DataFrame({'int_col': [1, 2, 3, 2, 1], 'flt': [1.5, 2.5, 3.5, 1.0, 2.0]})
+    w = BuckarooWidget(df)
+
+    merged_sd = w.dataflow.widget_args_tuple[2]
+    # The full sd on the dataflow keeps everything for styling/regeneration.
+    assert 'value_counts' in merged_sd['a']
+    assert 'histogram_args' in merged_sd['a']
+
+    wire_stats = _wire_stat_names(w.df_data_dict['all_stats'])
+    # Dead weight is gone from the wire ...
+    assert 'value_counts' not in wire_stats
+    assert 'histogram_args' not in wire_stats
+    assert 'memory_usage' not in wire_stats
+    assert 'is_numeric' not in wire_stats
+    # ... but everything the frontend reads survives.
+    for needed in ('dtype', 'mean', 'std', 'min', 'max', 'median',
+                   'histogram', 'histogram_bins',
+                   'non_null_count', 'most_freq'):
+        assert needed in wire_stats, needed
+
 
 def test_non_unique_column_names():
     #you end up with columns named [0,1,2, 0,1,2]
