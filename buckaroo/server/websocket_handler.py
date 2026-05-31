@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 
 import tornado.websocket
 
+from buckaroo.cache.initial_cache import serve_window_request
+from buckaroo.serialization_utils import slice_window_parquet
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
 from buckaroo.server.session import build_state_message
 
@@ -189,6 +191,34 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         except Exception:
             log.debug("highlight overlay write failed for session=%s", self.session_id)
 
+    def _serve_from_cache_if_window(self, session, pa):
+        """Ship ``pa`` from the initial-load cache window if it qualifies.
+
+        The bundle's first window (parked on the session by /load_expr) answers
+        the head slice — unsorted, unfiltered — without executing the expr.
+        Returns True when served; False (sort / live search / deeper slice) so
+        the caller falls through to the live dispatch. ``search_string`` is the
+        per-client live term (#851), read off the handler."""
+        icw = getattr(session, "initial_cache_window", None)
+        if icw is None:
+            return False
+        window_parquet, window_size, total_rows = icw
+        if not serve_window_request(pa, window_size, self.search_string or ""):
+            return False
+        # Ship exactly the requested [start, end] slice. The cached window holds
+        # up to window_size rows, but AG Grid's first block is smaller, and the
+        # client rejects a payload whose row count != the requested segment once
+        # total_rows > window_size (#877) — so the response key stays pa while the
+        # parquet is sliced to match. length stays the full total (scrollbar size).
+        start = pa.get("start", 0) or 0
+        end = pa.get("end", 0) or 0
+        sliced = slice_window_parquet(window_parquet, start, end) if window_parquet else b""
+        self.write_message(json.dumps(
+            {"type": "infinite_resp", "key": pa, "data": [], "length": total_rows}))
+        if sliced:
+            self.write_message(sliced, binary=True)
+        return True
+
     def _handle_infinite_request(self, payload_args):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
@@ -220,15 +250,19 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             return handle_infinite_request(session.df, pa)
 
         try:
-            resp_msg, parquet_bytes = _dispatch(payload_args)
-            # Two-frame sequence: JSON text frame, then binary Parquet frame
-            self.write_message(json.dumps(resp_msg))
-            if parquet_bytes:
-                self.write_message(parquet_bytes, binary=True)
+            # Initial-load cache fast path: the cached head window is shipped
+            # without touching the expr. Falls through to the live (warmed)
+            # dispatch for sorts, searches, and deeper slices.
+            if not self._serve_from_cache_if_window(session, payload_args):
+                resp_msg, parquet_bytes = _dispatch(payload_args)
+                # Two-frame sequence: JSON text frame, then binary Parquet frame
+                self.write_message(json.dumps(resp_msg))
+                if parquet_bytes:
+                    self.write_message(parquet_bytes, binary=True)
 
             # Handle second_request (eager loading)
             second_pa = payload_args.get("second_request")
-            if second_pa:
+            if second_pa and not self._serve_from_cache_if_window(session, second_pa):
                 resp2, parquet2 = _dispatch(second_pa)
                 self.write_message(json.dumps(resp2))
                 if parquet2:

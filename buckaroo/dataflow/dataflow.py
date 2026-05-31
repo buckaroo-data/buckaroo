@@ -17,7 +17,7 @@ from .styling_core import (
     OverrideColumnConfig,
     PinnedRowConfig,
     merge_sd_overrides,
-    merge_sds, merge_column_config, StylingAnalysis)
+    merge_sds, StylingAnalysis, build_df_display_args)
 
 
 from .abc_dataflow import ABCDataflow
@@ -702,25 +702,10 @@ class CustomizableDataflow(DataFlow):
                 'all_stats': self._sd_to_jsondf(merged_sd),
                 'empty': []}
 
-        temp_display_args = {}
-        for display_name, A_Klass in self.df_display_klasses.items():
-            df_viewer_config = A_Klass.get_dfviewer_config(merged_sd, processed_df)
-            base_column_config = df_viewer_config['column_config']
-            df_viewer_config['column_config'] =  merge_column_config(
-                base_column_config, self.processed_df, self.column_config_overrides)
-            disp_arg = {'data_key': A_Klass.data_key,
-                'df_viewer_config': df_viewer_config,
-                'summary_stats_key': A_Klass.summary_stats_key}
-            temp_display_args[display_name] = disp_arg
-
-        if self.pinned_rows is not None:
-            temp_display_args['main']['df_viewer_config']['pinned_rows'] = self.pinned_rows
-        if self.extra_grid_config:
-            temp_display_args['main']['df_viewer_config']['extra_grid_config'] = self.extra_grid_config
-        if self.component_config:
-            temp_display_args['main']['df_viewer_config']['component_config'] = self.component_config
-
-        self.df_display_args = temp_display_args
+        self.df_display_args = build_df_display_args(
+            self.df_display_klasses, merged_sd, processed_df, self.column_config_overrides,
+            pinned_rows=self.pinned_rows, extra_grid_config=self.extra_grid_config,
+            component_config=self.component_config)
    
 """
 

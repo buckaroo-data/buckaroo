@@ -242,6 +242,30 @@ def to_parquet(df):
     return data.read()
 
 
+def slice_window_parquet(parquet_bytes: bytes, start: int, end: int) -> bytes:
+    """Re-slice an already-serialized row window to rows ``[start, end)``.
+
+    The initial-load cache parks a head window (up to ``DEFAULT_WINDOW`` rows) as
+    parquet on the session. AG Grid's first block is ``cacheBlockSize`` rows
+    (visible + 50), smaller than that window, and the client's
+    ``SmartRowCache.addRows`` rejects a payload whose row count differs from the
+    requested ``[start, end]`` segment — so a whole-window response breaks the
+    initial paint once ``total_rows`` exceeds the window. Slicing at the pyarrow
+    level reproduces the exact wire format the live xorq path
+    (``window_to_parquet``) writes and the JS ``hyparquet`` reader consumes; only
+    the row count changes. ``end`` past the window clamps to the rows available.
+    """
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(BytesIO(parquet_bytes))
+    lo = max(0, start)
+    hi = min(end, table.num_rows)
+    sliced = table.slice(lo, max(0, hi - lo))
+    out = BytesIO()
+    pq.write_table(sliced, out, compression='none')
+    return out.getvalue()
+
+
 def to_parquet_b64(df: pd.DataFrame) -> str:
     """Convert a DataFrame to a base64-encoded parquet string.
 
