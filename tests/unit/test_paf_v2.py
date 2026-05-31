@@ -176,6 +176,34 @@ class TestStatDecorator:
         sf = distinct_per._stat_func
         assert sf.default is MISSING
 
+    def test_stat_default_pushdown_is_empty(self):
+        sf = length._stat_func
+        assert sf.pushdown == ()
+
+    def test_stat_pushdown_stored_on_stat_func(self):
+        @stat(pushdown=("xorq", "polars"))
+        def pushdown_mean(ser: RawSeries) -> float:
+            return float(ser.mean())
+
+        assert pushdown_mean._stat_func.pushdown == ("xorq", "polars")
+
+    def test_stat_pushdown_normalises_list_to_tuple(self):
+        @stat(pushdown=["xorq"])
+        def pushdown_sum(ser: RawSeries) -> float:
+            return float(ser.sum())
+
+        assert pushdown_sum._stat_func.pushdown == ("xorq",)
+        assert isinstance(pushdown_sum._stat_func.pushdown, tuple)
+
+    def test_stat_pushdown_accepts_bare_string(self):
+        # A bare string is the natural form for one backend.
+        # ``tuple("xorq")`` would silently store ``('x','o','r','q')``.
+        @stat(pushdown="xorq")
+        def pushdown_count(ser: RawSeries) -> int:
+            return int(ser.count())
+
+        assert pushdown_count._stat_func.pushdown == ("xorq",)
+
 
 class _MultiSizeStats(MultipleProvides):
     row_count: int

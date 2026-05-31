@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, TypedDict, get_type_hints
+from typing import Any, Callable, List, Optional, Tuple, TypedDict, get_type_hints
 
 
 class MultipleProvides(TypedDict):
@@ -145,6 +145,10 @@ class StatFunc:
         column_filter: optional predicate on column dtype
         quiet: suppress error reporting
         default: fallback value on failure (MISSING = no fallback)
+        pushdown: backend identifiers (e.g. ``("xorq", "polars")``) whose
+            engines can compute this stat via aggregation push-down without
+            in-process materialization. Empty default means pandas-only /
+            requires materialization.
     """
     name: str
     func: Callable
@@ -154,6 +158,7 @@ class StatFunc:
     column_filter: Optional[Callable] = None
     quiet: bool = False
     default: Any = field(default_factory=lambda: MISSING)
+    pushdown: Tuple[str, ...] = ()
     spread_dict_result: bool = False  # v1 compat: spread all dict keys into accumulator
     v1_computed: bool = False  # v1 compat: pass full accumulator as single dict arg
 
@@ -250,7 +255,7 @@ def _get_requires_from_params(sig: inspect.Signature, hints: dict) -> tuple:
 # @stat decorator
 # ---------------------------------------------------------------------------
 
-def stat(column_filter=None, quiet=False, default=MISSING):
+def stat(column_filter=None, quiet=False, default=MISSING, pushdown=()):
     """Decorator that converts a function into a StatFunc.
 
     The function signature IS the contract:
@@ -262,6 +267,12 @@ def stat(column_filter=None, quiet=False, default=MISSING):
     Single-provider stats: name the function the same as the accumulator
     key the rest of the DAG expects. Use ``MultipleProvides`` (a TypedDict
     alias) when one function should write several keys.
+
+    ``pushdown=`` declares which backends can compute this stat via
+    engine-side aggregation push-down (no in-process materialization).
+    Empty default means pandas-only / requires materialization. Recognised
+    identifiers: ``"xorq"``, ``"polars"``. Normalised to a tuple so callers
+    may pass a list.
 
     Usage::
 
@@ -276,6 +287,10 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         @stat(default=0)
         def safe_ratio(a: int, b: int) -> float:
             return a / b
+
+        @stat(pushdown=("xorq", "polars"))
+        def mean(col):
+            return col.mean()
 
         class TypingResult(MultipleProvides):
             is_numeric: bool
@@ -297,8 +312,12 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         requires, needs_raw = _get_requires_from_params(sig, hints)
         provides_keys = _get_provides_from_return_type(func.__name__, return_type)
 
+        # A bare string is the natural single-backend form; ``tuple(str)``
+        # would silently expand it to a tuple of characters.
+        pushdown_norm = (pushdown,) if isinstance(pushdown, str) else tuple(pushdown)
         stat_func = StatFunc(name=func.__name__, func=func, requires=requires, provides=provides_keys,
-            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default)
+            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default,
+            pushdown=pushdown_norm)
 
         # Attach metadata to the function so pipeline can find it
         func._stat_func = stat_func
