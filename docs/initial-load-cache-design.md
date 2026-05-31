@@ -1,269 +1,268 @@
 # Initial-load cache — serve the first render without touching the data
 
 ## Status
-Design only. Branch `feat/initial-load-cache`, PR #877. Core decisions locked in a
-design review (recorded under Decisions). Two follow-ups split out: #880 (trim the
-summary-stats wire payload to what the frontend reads) and #881 (DFViewer transport
-abstraction — JSON / b64-parquet / binary per embedding).
+Design only. Branch `feat/initial-load-cache`, PR #877. All decisions below were
+locked in a design review (the grill). Follow-ups split out: #880 (trim the
+summary-stats *wire* payload to what the frontend reads) and #881 (DFViewer
+transport abstraction — JSON / b64-parquet / binary per embedding).
 
 ## Problem
 
-Buckaroo's first render is expensive: sample the frame, run the analysis pipeline,
-style every column, serialize the first window. For a xorq expression the cost is
-*executing the expression*; for a large pandas frame it's the sample+analysis. That
-work happens on every mount / session open, even when neither the data nor the config
-changed since last time.
+Buckaroo's first render is expensive. For a xorq expression the cost is *executing
+it*: a normal load reconstructs the expr once, then computes summary stats as **one
+batched `expr.aggregate(...)` plus one histogram query per column** — ≈ N+1 executions
+(`xorq_stat_pipeline.py:157`, the "N+1 filter evaluations" the code optimizes around)
+— plus a window query and a row count. That work repeats on every session open even
+when neither the data nor the configuration changed.
 
-The driving consumer is xorq desktop / pydata-app, where the expression's deterministic
-build hash is a natural data identity. Such hosts can tell when the data changed, so
-they should be able to hand Buckaroo a precomputed first-render bundle and skip the
-pipeline entirely — *as long as the bundle provably matches the widget's configuration*.
+The driving consumer is xorq desktop / pydata-app, where an expression has a stable,
+content-based identity. Such a host can hand Buckaroo a precomputed first-render
+bundle and skip the pipeline — *provided the bundle provably matches the widget's
+configuration*.
+
+## Measured cost (pydata test-1 catalog, xorq 0.3.26, warm process)
+
+| step | cost | calls |
+|---|---|---|
+| `load_expr` (build-dir reconstruction) | **~15–18 ms, flat** across 0.5–158 MB | once |
+| summary stats (batched aggregate + per-column histograms) | tens of ms → **~85 ms** (158 MB) warm; more cold/wide | **≈ N+1** expr executions |
+| first window (`limit` pushdown) + row `count` | ~4 ms warm | 2 |
+
+So a cold first load ≈ `load(1) + (1+N) stat executions + window(2)`. The bundle
+replaces all of that with a cache read, leaving only a one-time ~17 ms `load_expr` to
+re-warm the expr for later scrolling. `load_expr` is *not* the cost — the per-column
+stat executions are, and they scale with width.
+
+## Three-layer cache
+
+```
+buckaroo initial-load bundle   ← NEW: hit = first paint with zero execution
+   ↓ miss
+xorq ParquetSnapshotCache      ← unchanged (cache_storage_path); per-stat-query snapshots
+   ↓ miss
+live expr execution
+```
+
+The existing `.buckaroo_stat_cache/parquet/letsql_cache-snapshot-*.parquet` files
+(≈ columns+1 per entry) are the xorq snapshot layer. The new bundle sits above it: a
+bundle hit never even reaches the snapshot cache.
 
 ## The handshake — validate, never blindly trust
 
-The spine of the feature. The backend provides an **optional** cache bundle to the
-widget/dataflow *alongside* the df/expr (which is held but not executed):
+The backend provides an **optional** bundle alongside the df/expr (which is held but
+not executed):
 
 ```
 widget computes its OWN config_id from its live analysis_klasses + config,
-and reads its live schema (df.columns/dtypes, or expr.schema() — no execution)
+and reads its live schema (df.columns/dtypes, or get_expr_hash — no execution)
         │
    ┌────┴───────────────────────────────┐
-   │ config_id + schema + version match  │ → hydrate traits from the bundle;
-   └────┬───────────────────────────────┘    df/expr NEVER touched for first render
+   │ config_id + schema + version match  │ → hydrate from bundle; df/expr NEVER touched
+   └────┬───────────────────────────────┘
         │ any mismatch
         ▼
-   warnings.warn(reason) → fall through to the normal pipeline (touch/execute df/expr)
+   warnings.warn(reason) + cache:{status:"mismatch",reason} → normal pipeline (execute)
 ```
 
-Rules:
-- The widget computes `config_id` **itself** from its own klasses and compares — it does
-  not read-and-trust the bundle's claimed id. A cached SD that doesn't match the live
-  `analysis_klasses` (or sampling / `init_sd` / `skip_stat_columns`) is rejected.
-- A stale or foreign bundle costs a `warnings.warn` plus a normal compute — never a wrong
-  render. The cache is an optimization hint, not a source of truth.
-- The df/expr must be **available but unexecuted** so the fallback works. The win is that
-  on a match it stays unexecuted. Out-of-window scroll / sort / filter / ops after a match
-  use the normal push-down path, exactly as today.
+The widget computes `config_id` itself and compares — it never reads-and-trusts the
+bundle's claim. A stale/foreign bundle costs a warning + a normal compute, never a
+wrong render. For xorq the `get_expr_hash` match already implies the schema, so the
+config_id (analysis klasses) check is the load-bearing one.
 
-This subsumes two guards that would otherwise be separate: **schema** validation (the
-widget has the df/expr, so the live schema is free — no execution) and **version** /
-config staleness both surface here as a warn-and-recompute, not a silent mis-serve.
-
-## The two functions
+## Entry points
 
 ```python
 # buckaroo/cache/initial_cache.py
+def get_initial_cache_data(df_or_expr, *, analysis_klasses=None, styling_klasses=None,
+    sampling_klass=None, init_sd=None, skip_stat_columns=None, window=1000,
+    data_id=None, cache_version=None) -> tuple[str, InitialCacheData]:
+    """Producer: run the pipeline ONCE, snapshot first window + stats + config."""
 
-def get_initial_cache_data(
-    df,                          # pd.DataFrame | pl.DataFrame | xorq expr
-    *,
-    analysis_klasses=None, styling_klasses=None, sampling_klass=None,
-    init_sd=None, skip_stat_columns=None,
-    window=1000,                 # rows pre-serialized for the first infinite_request
-    data_id=None, cache_version=None,
-) -> tuple[str, InitialCacheData]:
-    """Run the pipeline ONCE and snapshot it. Returns (config_id, bundle)."""
-```
-
-The **producer**. The **consumer** is the handshake above: construct the widget/dataflow
-with `initial_cache=bundle`; it validates and either hydrates or warns+recomputes.
-Internally that's two helpers:
-
-```python
 def cache_mismatch_reason(bundle, *, analysis_klasses, sampling_klass, init_sd,
-                          skip_stat_columns, schema) -> str | None:
-    """None ⇒ safe to use. Else a human-readable reason for the warning."""
-
-def apply_initial_cache(target, bundle) -> None:
-    """Set df_data_dict / df_display_args / df_meta from the bundle. No dataflow built."""
+    skip_stat_columns, schema) -> str | None:   # None ⇒ safe to use
+def apply_initial_cache(target, bundle) -> None: # set df_data_dict/display_args/meta
 ```
 
-## Decisions (locked)
+The **consumer** is the server's `/load_expr` path running the handshake against its
+in-memory store (below). The widget gets the same handshake (mechanism, not a driver).
 
-- **Driving consumer:** xorq desktop / pydata-app. Expr execution is the cost to avoid;
-  the build hash is the host's `data_id`.
-- **config_id covers the data-touching computation only.** In: `analysis_klasses`
-  (`module.qualname`, ordered), `sampling_klass` params, `init_sd`, `skip_stat_columns`,
-  `INITIAL_CACHE_VERSION` (+ optional `cache_version` arg). Out (replay-time display knobs,
-  regenerated from the bundle, never invalidate the cache): `column_config_overrides`,
-  `component_config`, `extra_grid_config`, `pinned_rows`, `styling_klasses`. The handshake
-  validates `config_id` **and** the live schema.
-- **Stats storage:** the full `merged_sd` **minus `value_counts`** (nothing at replay
-  recomputes from it), persisted losslessly as **binary parquet** via a type-tagged cell
-  codec — **no pickle**. The codec tags the non-JSON-native types so they reconstruct
-  exactly: `pd.Timestamp`/`pd.Timedelta`, stdlib `datetime`/`date`/`time`/`timedelta`,
-  `Decimal`, `bytes`, numpy scalars, `np.datetime64`. Round-trip is **tested across all
-  three backends** (pandas/polars/xorq emit different temporal/exotic types — see below).
-- **Server stats delivery unchanged.** Replay reproduces today's `parquet_b64` in
-  `initial_state`. Shrinking that payload is #880; choosing a binary transport is #881.
-  Neither is in this PR.
-- **No b64 in the persisted artifact** — parquet on disk; b64 only materializes at serve
-  time where the existing wire protocol uses it.
+## Keying & storage
 
-### Backend temporal/exotic type surface (why cross-backend tests matter)
+- **xorq `data_id` = `get_expr_hash(expr)`** (`xorq/.../provenance_utils.py:18-25`):
+  canonicalize → `SnapshotStrategy` tokenize → truncate. Content-based,
+  path-independent; the build-dir basename already *is* this hash. Verified safe:
+  `ExprLoader.load_expr` reads only named files (`compiler.py:663-684`) and never
+  re-verifies a content hash (`:655-657`), so it's *technically* safe to write into a
+  build dir — but we don't (build dirs are packageable + reproducibility-checked;
+  keep them pristine).
+- **Store: server-managed, keyed by `data_id`, OUTSIDE the build/catalog dir.**
+  Persistent (survives restart), with an **in-memory LRU** over it. Lazy-on-miss
+  populates it; `prewarm(dir)` loads it eagerly at startup.
+- **pandas/polars:** the host supplies `data_id` (path+mtime+size, or a content hash).
+  Buckaroo never fingerprints a frame itself.
 
-| type | pandas | polars | xorq |
-|---|---|---|---|
-| `pd.Timestamp` / `pd.Timedelta` | ✓ min/max/mode | — | — |
-| stdlib `datetime`/`date`/`time`/`timedelta` | — | ✓ (`pl_stats_v2.py:86,91,92`) | possible via `_to_python_scalar` |
-| `decimal.Decimal` | — | ✓ | — |
-| `bytes` | — | ✓ | — |
-| `np.datetime64` | mode → Timestamp | — | → `datetime.date` |
+## config_id — the handshake key
 
-No pyarrow scalars anywhere. (`b64decode` itself is sub-ms to a few ms; the cost of b64 is
-the flat +33% size, which is why the on-disk bundle stays binary.)
+Stable cross-process fingerprint (`module.qualname`, not `id()`), over the
+data-touching computation only:
 
-## Key codebase facts
+| In the key | Out (replay-time display; regenerated from the bundle) |
+|---|---|
+| `analysis_klasses` (ordered) | `column_config_overrides` |
+| `sampling_klass` params | `component_config` |
+| `init_sd`, `skip_stat_columns` | `extra_grid_config`, `pinned_rows` |
+| `INITIAL_CACHE_VERSION` (+ optional `cache_version`) | `styling_klasses` |
 
-1. **One terminal assembly point.** The first render is built in `_handle_widget_change`
-   (`dataflow.py:679-723`) from `widget_args_tuple = (id, processed_df, merged_sd)` into
-   `df_data_dict` / `df_display_args` / `df_meta`. The server reads the same three via
-   `get_buckaroo_display_state` (`data_loading.py:67-89`).
-2. **Styling never reads row values.** `get_dfviewer_config(sd, df)` (`styling_core.py:422-429`)
-   → `style_columns` (`:432-473`) + `get_left_col_configs` (`:326-370`). `style_column`
-   (`customizations/styling.py:70-142`) reads only the per-column SD entry; `old_col_new_col`
-   and `get_left_col_configs` read only `df.columns` / `df.index` structure. So
-   `df_display_args` is a pure function of `(merged_sd, column schema)` — a **zero-row
-   DataFrame** regenerates it exactly. This is what keeps styling/component config
-   configurable at replay without the data.
-3. **The window is one call, exactly 1000 rows.** First paint fires a single
-   `infinite_request {start:0, end:1000}` (`gridUtils.ts` `getDs`); the +200 prefetch
-   (`SmartRowCache.maybeMakeLeadingRequest`) only fires after a scroll. So `serve_window`'s
-   predicate is `start==0 ∧ end≤1000 ∧ no sort ∧ no search`. `handle_infinite_request_buckaroo`
-   (`data_loading.py:92-130`) is the slice→`to_parquet` to cache against.
-4. **Serialization primitives exist.** `to_parquet` (`serialization_utils.py:192-242`),
-   `sd_to_parquet_b64` (`:397-440`) and its inverse (`:324`). The existing per-cell codec is
-   **lossy** for temporal/Series (`default=str`, `:361-394`) — the type-tagged codec extends it.
-5. **Hash precedent:** `hash_chain` (`sd_cache.py:38-54`). The live SD cache keys on
-   `id(analysis_klasses)` (`dataflow.py:545-546`) — process-local; `config_id` replaces that
-   with stable `module.qualname`.
-6. **Wide frames already capped** at `max_columns=250` (`dataflow_extras.py`), so the cached
-   window is column-bounded.
+Re-theming or overriding a column never invalidates the cache.
 
 ## The bundle — `InitialCacheData`
 
-On disk: parquet files (binary) + a small JSON manifest. No b64.
+Persisted as parquet (binary) + a JSON manifest. No b64 on disk.
 
 ```python
-InitialCacheData = {
-  'cache_format_version': int,
-  'config_id': str,
-  'data_id': str | None,              # caller-supplied; self-describing
-  'df_meta': dict,                    # columns, rows_shown, total_rows, filtered_rows
-  'column_schema': {                  # rebuild a zero-row df with the same a,b,c mapping
-      'columns': list,                #   ordered ORIGINAL names (str | tuple for MultiIndex)
-      'index': dict,                  #   {kind: range|single|multi, names: [...]}
-      'dtypes': list,                 #   for the live-schema handshake check
-  },
-  'sd_parquet': '<file>',             # merged_sd minus value_counts, lossless type-tagged parquet
-  'first_window_parquet': '<file>',   # to_parquet(processed_df[0:window]), binary
+{
+  'cache_format_version': int, 'config_id': str, 'data_id': str | None,
+  'df_meta': dict,                       # columns, rows_shown, total_rows, filtered_rows
+  'column_schema': {'columns': [...], 'index': {...}, 'dtypes': [...]},
+  'sd_parquet': '<file>',                # merged_sd MINUS value_counts, lossless type-tagged
+  'first_window_parquet': '<file>',      # to_parquet(rows[0:window]) — window IS cached, not stats-only
   'first_window': {'start': 0, 'end': int, 'total_rows': int},
-  'df_display_args': dict,            # prerender for the zero-override common case
-  'buckaroo_options': dict, 'command_config': dict,   # config-derived; complete the initial_state
-  'styling_klasses': list,            # module.qualname, for replay regeneration
+  'df_display_args': dict,               # prerender for the zero-override common case
+  'buckaroo_options': dict, 'command_config': dict,
+  'styling_klasses': [str, ...],
 }
 ```
 
-The `all_stats` wire payload (`{format:'parquet_b64', ...}`) is derived from `sd_parquet`
-at serve time (or stored prerendered) to match the existing protocol exactly.
+The `all_stats` wire payload is derived from `sd_parquet` at serve time (matching
+today's `parquet_b64` in `initial_state` — server delivery unchanged; #880 trims it).
+
+### Stats codec (no pickle, cross-backend)
+
+`value_counts` is **dropped** — nothing at replay recomputes from it (and it's the
+`pd.Series` that made round-tripping hard). The remaining values round-trip via a
+**type-tagged** cell codec extending the lossy `sd_to_parquet_b64` encoder
+(`serialization_utils.py:361-394`), tagging the non-JSON-native types so they
+reconstruct exactly. The type surface differs per backend, so the round-trip is
+**tested across pandas/polars/xorq**:
+
+| type | pandas | polars | xorq |
+|---|---|---|---|
+| `pd.Timestamp`/`pd.Timedelta` | ✓ | — | — |
+| stdlib `datetime`/`date`/`time`/`timedelta` | — | ✓ (`pl_stats_v2.py:86,91,92`) | via `_to_python_scalar` |
+| `Decimal`, `bytes` | — | ✓ | — |
+| `np.datetime64` | mode→Timestamp | — | →`datetime.date` |
 
 ## Styling stays configurable
 
-`initial_cache` + `column_config_overrides` / `component_config` at construction:
-1. Rebuild a **zero-row DataFrame** from `column_schema` (names + index structure; dtypes
-   need only match for the schema check). Same column order ⇒ same `old_col_new_col`
-   mapping ⇒ aligns with the cached parquet and SD.
-2. Regenerate `df_display_args` from the SD + zero-row df + styling klasses + overrides,
-   reusing the **same assembly code** as the live path (refactor below). No display knobs ⇒
-   use the prerendered `df_display_args` directly (zero work). The frame is never built.
+`get_dfviewer_config(sd, df)` reads only the summary dict + column/index *structure*,
+never a row value (`styling_core.py:422-473`, `customizations/styling.py:70-142`). So
+a **zero-row DataFrame** rebuilt from `column_schema` regenerates `df_display_args`
+exactly — feeding `merge_column_config` (`styling_core.py:231-254`) the same
+`old_col_new_col` mapping. With no display knobs passed, the prerendered
+`df_display_args` is used directly; with knobs, regenerate — frame never built either
+way. Refactor: lift the assembly loop (`dataflow.py:705-723`) into a module-level
+`build_df_display_args(...)` shared by the live path and the cache path.
 
-## Serving the opening requests (on a successful handshake)
+## Serving & the warm path
 
-1. **initial_state** — `df_meta`, `df_data_dict` (`main` empty in infinite mode, `all_stats`
-   from the bundle), `df_display_args`, and in buckaroo mode `buckaroo_state` /
-   `buckaroo_options` / `command_config`.
-2. **first `infinite_request {0,1000}`** — `serve_window` returns the cached parquet, echoing
-   `payload_args` as `key` and `total_rows` as `length`.
+- `/load_expr` (default-on): `load_expr` (cheap) → compute `data_id` → store lookup.
+  **Hit** (handshake passes) → serve cached first paint, no stats, no window
+  execution. **Miss** → full compute + store.
+- After a hit: write the cached response, then `IOLoop.current().add_callback(warm)` —
+  `warm` is the **cheap `load_expr` + wire `(expr, cached merged_sd)`** onto the
+  session (~17 ms, synchronous, no `async def`, respects the no-async constraint). The
+  first scroll is then a ~4 ms window pushdown; the N+1 stat queries never re-run.
+- `serve_window` predicate: `start==0 ∧ end≤window ∧ no sort ∧ no search`; anything
+  else falls through to the live `handle_infinite_request_xorq` pushdown.
 
-Out-of-window scroll / sort / search / ops fall through to the normal source path (the
-df/expr is present, unexecuted until now). That keeps each bundle small (first window +
-SD + config), which is what makes unbounded `(data_id, config_id)` variation cheap.
+## Observability & metadata
+
+- **Correlation id:** the POST carries `request_id`; buckaroo echoes it and stamps it
+  on every log line for that load. `/load_expr` returns `cache: {status, reason}`
+  (`hit|miss|mismatch`). Lets the host align its logs with buckaroo's.
+- **`/cache` endpoint:** cache introspection — `[{expr_hash, data_id, bytes,
+  last_used, hits}]`, totals, LRU capacity, hit/miss rate. Broader session/server
+  enumeration is #860.
 
 ## Integration — additive
 
-- **Refactor:** extract the display-args loop (`dataflow.py:705-723`) into module-level
-  `build_df_display_args(...)`; `_handle_widget_change` and the cache path both call it.
-  Mirrors the `_window_to_parquet` lift in the #773 plan.
-- **Widget:** new `initial_cache=` kwarg on `BuckarooWidget.__init__` (`buckaroo_widget.py:125`).
-  Before building `InnerDataFlow`, run the handshake; on match, `apply_initial_cache` + return.
-- **Server:** `/load` and `/load_expr` accept an `initial_cache` field; the dataflow runs the
-  handshake before executing. WS `serve_window` fast path before the dataflow. Session keeps
-  the path/build_dir it already has (`session.py:18-36`) for the unexecuted-fallback.
+- **Server:** `/load_expr` (+ `/load`) accept an `initial_cache` flag — **default ON
+  for `/load_expr`**, a POST field (`initial_cache: false`) turns it off (full compute,
+  skip store). `/load` (pandas/polars) is default-off unless the host passes a
+  `data_id`. Server-managed store (LRU) + `prewarm(dir)` + `/cache` endpoint +
+  correlation-id logging. Session already retains `build_dir` (`session.py:18-36`) for
+  the unexecuted-fallback.
+- **Widget (Jupyter):** `initial_cache=` kwarg + handshake + `apply_initial_cache` in
+  the shared `BuckarooWidgetBase.__init__` (`buckaroo_widget.py:125`) — the *same* code
+  path as the server, so parity is guaranteed. **No Jupyter store / driver / prewarm
+  built now** (per scope).
 
 ## Scope
 
-In: `buckaroo/cache/` (producer, handshake helpers, types, type-tagged SD codec, fingerprint);
-`build_df_display_args` refactor; widget `initial_cache` kwarg + server field; tests.
+In: `buckaroo/cache/` (producer, handshake, `apply_initial_cache`, type-tagged SD
+codec, `config_fingerprint`); `build_df_display_args` refactor; server store + LRU +
+`prewarm` + `/cache` + `/load_expr` default-on integration + correlation-id; widget
+`initial_cache` mechanism; tests.
 
-Out: trimming the stats *wire* payload (#880); a transport abstraction / binary stats on the
-server (#881); caching anything past the first window (sort/filter/scroll/ops stay on the
-source, by design); a built-in on-disk cache store / eviction (the host owns where bundles
-live and when they reset — xorq keys on its build hash).
+Out: trimming the stats *wire* payload (#880); transport abstraction / binary stats on
+the server (#881); a Jupyter store/driver; pandas/polars auto-fingerprinting; caching
+past the first window (sort/filter/scroll/ops stay on the source); writing sidecars
+into build dirs; live-source staleness detection (delegated to xorq — see risks).
 
 ## Files
 
-1. `buckaroo/cache/__init__.py`, `initial_cache.py` *(new)* — producer + handshake +
-   `apply_initial_cache` + types.
-2. `buckaroo/cache/fingerprint.py` *(new)* — `config_fingerprint`, `INITIAL_CACHE_VERSION`.
-3. `buckaroo/serialization_utils.py` — type-tagged lossless SD↔parquet codec (extends the
-   existing lossy encoder; drops `value_counts`).
-4. `buckaroo/dataflow/dataflow.py` — extract `build_df_display_args`; `_handle_widget_change`
-   delegates. Pure refactor.
+1. `buckaroo/cache/{__init__,initial_cache,fingerprint}.py` *(new)* — producer,
+   handshake, `apply_initial_cache`, `config_fingerprint` (uses `get_expr_hash` for
+   xorq `data_id`), `INITIAL_CACHE_VERSION`.
+2. `buckaroo/cache/store.py` *(new)* — server-managed `{data_id: bundle}` LRU store,
+   disk persistence, `prewarm(dir)`.
+3. `buckaroo/serialization_utils.py` — type-tagged lossless SD↔parquet codec (drops
+   `value_counts`).
+4. `buckaroo/dataflow/dataflow.py` — extract `build_df_display_args`; pure refactor.
 5. `buckaroo/buckaroo_widget.py` — `initial_cache` kwarg + handshake.
 6. `buckaroo/server/{handlers,app,session,websocket_handler}.py`, `data_loading.py` —
-   `initial_cache` field, handshake, `serve_window` fast path.
+   `/load_expr` default-on + opt-out, store wiring, `serve_window` fast path, `/cache`
+   endpoint, correlation-id.
 7. `tests/unit/cache/` + `tests/unit/test_sd_codec.py` *(new)*.
 
 ## Implementation order (TDD — failing tests, then fix)
 
-1. **Refactor.** Extract `build_df_display_args`. Existing suite stays green. Own commit.
+1. **Refactor.** Extract `build_df_display_args`; existing suite stays green. Own commit.
 2. **Failing tests** (one commit):
-   - `config_fingerprint` stable across processes; identical for equal configs; differs when
-     an analysis class is added/removed.
-   - **SD codec cross-backend round-trip:** same temporal / `Decimal` / `bytes` / histogram
-     fixtures → each of pandas/polars/xorq stats → encode → decode → equal. (`value_counts`
-     absent.)
-   - `get_initial_cache_data(df)` → bundle whose `initial_state` / `df_display_args` /
-     first-window parquet equal a live `ServerDataflow`'s, **with the frame raising on access**
-     (frame subclass that raises on `__getitem__`/iteration after capture; prove the match path
-     + `serve_window({0,1000})` never trip it).
-   - **handshake mismatch:** a bundle whose `config_id` (wrong `analysis_klasses`) or schema
-     differs from the widget's live config ⇒ `warnings.warn` **and** a normal compute (the
-     raise-on-access frame *is* touched). Assert both.
-   - **replay-override parity:** capture with no overrides, then construct with non-trivial
-     `component_config` + `column_config_overrides`; `df_display_args` byte-equal to a live
-     `ServerDataflow` with the same knobs, frame untouched.
+   - `config_fingerprint` stable cross-process; differs when an analysis class changes.
+   - **SD codec cross-backend round-trip** (temporal/`Decimal`/`bytes`/histogram via
+     pandas/polars/xorq; `value_counts` absent).
+   - `get_initial_cache_data` → bundle whose `initial_state` / `df_display_args` /
+     first-window parquet equal a live `XorqServerDataflow`'s, **with the expr raising
+     on execution** (prove the hit path + `serve_window({0,1000})` never execute it).
+   - **handshake mismatch:** wrong `analysis_klasses` (config_id) or schema ⇒
+     `warnings.warn` + `cache.status=="mismatch"` + a normal compute (expr *is*
+     executed). Assert both.
+   - **replay-override parity:** capture with no overrides, replay with non-trivial
+     `component_config` + `column_config_overrides`; `df_display_args` byte-equal to a
+     live dataflow with the same knobs, frame untouched.
    - `serve_window` returns `None` for sort / search / `start>0` / `end>window`.
-   - server opening sequence (`initial_state` + first `infinite_request`) on a matching bundle
-     equals `/load`, with the expr unexecuted.
+   - server `/load_expr` default-on: first call (miss) executes + stores; second call
+     (hit) serves without executing; `initial_cache:false` always executes.
+   - `prewarm(dir)` loads bundles; `/cache` reports them.
    Push, watch CI fail.
-3. **Fix.** Cache module, codec, refactor wiring, widget kwarg, server field. Push, watch green.
+3. **Fix.** Cache module + store + codec + refactor wiring + widget kwarg + server
+   integration. Push, watch green.
 
 ## Open questions / risks
 
-- **Version granularity.** Recommend a single global `INITIAL_CACHE_VERSION` + class
-  `module.qualname` in `config_id`; no per-class `cache_version` (YAGNI). The handshake catches
-  mismatches loudly, so silent staleness only happens if a class's logic changes *without* a
-  version bump — mitigated by bumping `INITIAL_CACHE_VERSION` on releases that change analysis
-  output, and by hosts folding the buckaroo version into `data_id`. **Confirm.**
-- **Bundle transport to the server.** Recommend by **path** (server reads the parquet+manifest;
-  avoids a multi-MB inline JSON), inline allowed for flexibility. **Confirm.**
-- **Non-deterministic sampling.** `ServerSampling.pre_stats_sample` (`data_loading.py:28-38`)
-  samples unseeded for >1M-row frames, so two producer runs differ. Fine (we snapshot one
-  realization); consider a seed param.
-- **Backend parity.** Confirm polars/xorq bundle field shapes match pandas (the #773 plan flagged
-  the same for `get_buckaroo_display_state` vs `XorqServerDataflow`). Replay is uniform; only the
-  produce-time window serializer differs per backend.
-- **MultiIndex.** Zero-row df reconstruction must reproduce the exact `old_col_new_col` mapping;
+- **Live-source staleness.** `get_expr_hash` is *structural* — an expr over a mutable
+  source can keep its hash while the data changes. v1 scopes the cache to pinned/built
+  exprs (the catalog model). For live sources, detection is delegated to xorq's cache
+  invalidation when the real expr is next touched (error if invalid). Dependency: I'll
+  confirm `ParquetSnapshotCache`/`SnapshotStrategy` exposes that signal when building
+  the scroll/miss path — not a v1 first-paint blocker (the hit path never executes).
+- **Eager vs deferred stat execution.** Instrumenting `XorqStatPipeline._execute`
+  showed 0 calls for some no-`cache_storage` constructs, i.e. the stat queries
+  defer/short-circuit on that path. The N+1 cost model (from the code + snapshot-file
+  count) is authoritative; the precise eager/deferred timing can be pinned by
+  instrumenting `process_table` if a number is needed.
+- **Non-deterministic sampling** (`data_loading.py:28-38`, unseeded `df.sample` for
+  >1M-row frames) — we snapshot one realization; consider a seed.
+- **MultiIndex** — the zero-row df must reproduce the exact `old_col_new_col` mapping;
   test with a MultiIndex fixture.
