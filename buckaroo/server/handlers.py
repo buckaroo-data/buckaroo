@@ -520,7 +520,18 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # serve_window fast path. Done before the component_config merge so the
         # merge lands on the bundle's (replayed) df_display_args too.
         if hit:
-            apply_initial_cache(session, bundle)
+            # Pass the current request's display knobs (built into xorq_dataflow)
+            # so the replay regenerates df_display_args with them — they're
+            # excluded from the cache fingerprint by design, so a hit on the same
+            # expr must still honor this load's overrides rather than the bundle's
+            # baseline (#877). Mirrors the widget path. component_config is applied
+            # by the merge loop below, as on the miss path.
+            apply_initial_cache(
+                session, bundle,
+                df_display_klasses=xorq_dataflow.df_display_klasses,
+                column_config_overrides=xorq_dataflow.column_config_overrides,
+                extra_grid_config=xorq_dataflow.extra_grid_config,
+                pinned_rows=xorq_dataflow.pinned_rows)
             session.initial_cache_window = (
                 bundle.first_window_parquet, DEFAULT_WINDOW, bundle.first_window["total_rows"])
         elif cache_status in ("miss", "mismatch"):

@@ -4,7 +4,7 @@ import pandas as pd
 from buckaroo.ddd_library import get_multiindex_with_names_index_df, get_multiindex_cols_df, get_multiindex_index_df
 from buckaroo.serialization_utils import (
     is_ser_dt_safe, is_dataframe_datetime_safe, check_and_fix_df, pd_to_obj,
-    to_parquet, DuplicateColumnsException, _json_encode_cell)
+    to_parquet, slice_window_parquet, DuplicateColumnsException, _json_encode_cell)
 
 
 
@@ -163,3 +163,34 @@ def test_json_encode_cell_numpy_array_roundtrips():
     assert decoded == [3.0, 7.5, 12.0, 16.5, 21.0]
 
 
+
+
+def _read_window(parquet_bytes):
+    import pyarrow.parquet as pq
+    from io import BytesIO
+    return pq.read_table(BytesIO(parquet_bytes))
+
+
+def test_slice_window_parquet_honors_requested_range():
+    # A 10-row head window re-sliced to a smaller block ships exactly the
+    # requested rows — the wire contract the SmartRowCache enforces (#877).
+    df = pd.DataFrame({'x': range(10), 's': [chr(97 + i) for i in range(10)]})
+    window = to_parquet(df)
+    assert _read_window(window).num_rows == 10
+
+    sliced = slice_window_parquet(window, 0, 4)
+    t = _read_window(sliced)
+    assert t.num_rows == 4
+    # Columns + the appended index column survive the re-slice unchanged.
+    assert t.column_names == _read_window(window).column_names
+    assert t.column('a').to_pylist() == [0, 1, 2, 3]
+    assert t.column('index').to_pylist() == [0, 1, 2, 3]
+
+
+def test_slice_window_parquet_clamps_past_end():
+    # end past the window's row count clamps to what's available; the whole
+    # window comes back rather than erroring.
+    df = pd.DataFrame({'x': range(6)})
+    window = to_parquet(df)
+    assert _read_window(slice_window_parquet(window, 0, 1000)).num_rows == 6
+    assert _read_window(slice_window_parquet(window, 0, 6)).num_rows == 6

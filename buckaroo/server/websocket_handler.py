@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import tornado.websocket
 
 from buckaroo.cache.initial_cache import serve_window_request
+from buckaroo.serialization_utils import slice_window_parquet
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
 from buckaroo.server.session import build_state_message
 
@@ -204,10 +205,18 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         window_parquet, window_size, total_rows = icw
         if not serve_window_request(pa, window_size, self.search_string or ""):
             return False
+        # Ship exactly the requested [start, end] slice. The cached window holds
+        # up to window_size rows, but AG Grid's first block is smaller, and the
+        # client rejects a payload whose row count != the requested segment once
+        # total_rows > window_size (#877) — so the response key stays pa while the
+        # parquet is sliced to match. length stays the full total (scrollbar size).
+        start = pa.get("start", 0) or 0
+        end = pa.get("end", 0) or 0
+        sliced = slice_window_parquet(window_parquet, start, end) if window_parquet else b""
         self.write_message(json.dumps(
             {"type": "infinite_resp", "key": pa, "data": [], "length": total_rows}))
-        if window_parquet:
-            self.write_message(window_parquet, binary=True)
+        if sliced:
+            self.write_message(sliced, binary=True)
         return True
 
     def _handle_infinite_request(self, payload_args):
