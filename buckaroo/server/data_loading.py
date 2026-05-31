@@ -12,9 +12,7 @@ from buckaroo.dataflow.dataflow import CustomizableDataflow
 from buckaroo.dataflow.dataflow_extras import Sampling
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
 from buckaroo.dataflow.styling_core import StylingAnalysis
-from buckaroo.customizations.analysis import (
-    TypingStats, DefaultSummaryStats, ComputedDefaultSummaryStats)
-from buckaroo.customizations.histogram import Histogram
+from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
 from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from buckaroo.customizations.pd_autoclean_conf import CleaningConf, NoCleaningConf
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
@@ -44,8 +42,8 @@ class ServerDataflow(CustomizableDataflow):
     autocleaning_klass = PandasAutocleaning
     DFStatsClass = DfStatsV2
     autoclean_conf = tuple([CleaningConf, NoCleaningConf])
-    analysis_klasses = [TypingStats, DefaultSummaryStats, Histogram, ComputedDefaultSummaryStats, StylingAnalysis,
-        DefaultSummaryStats, DefaultSummaryStatsStyling, DefaultMainStyling]
+    analysis_klasses = list(PD_ANALYSIS_V2) + [StylingAnalysis,
+        DefaultSummaryStatsStyling, DefaultMainStyling]
 
     def _df_to_obj(self, df):
         # No sampling — matches BuckarooInfiniteWidget._df_to_obj

@@ -192,7 +192,7 @@ class PandasAutocleaning:
                 continue
             if col == 'index':
                 continue
-            if "add_orig" in sd:
+            if sd.get("add_orig"):
                 cols[col] = cleaned_df[col]
                 cols[col + "_orig"] = raw_df[col]
                 changed += 1

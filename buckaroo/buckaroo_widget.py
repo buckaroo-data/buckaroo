@@ -21,8 +21,7 @@ import string
 from traitlets import List, Dict, observe, Unicode, Any, Bool
 import anywidget
 
-from .customizations.analysis import (TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
-from .customizations.histogram import (Histogram)
+from .customizations.pd_stats_v2 import PD_ANALYSIS_V2
 from .customizations.pd_autoclean_conf import (CleaningConf, NoCleaningConf, AggressiveAC, ConservativeAC)
 from .customizations.styling import (DefaultSummaryStatsStyling, DefaultMainStyling, CleaningDetailStyling)
 from .pluggable_analysis_framework.df_stats_v2 import DfStatsV2
@@ -234,11 +233,8 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         
     #widget config.  Change these via inheritance to alter core behaviors of buckaroo
     #command_klasses = DefaultCommandKlsList
-    analysis_klasses = [TypingStats, DefaultSummaryStats,
-        Histogram,
-        ComputedDefaultSummaryStats,
+    analysis_klasses = list(PD_ANALYSIS_V2) + [
         StylingAnalysis,
-        DefaultSummaryStats,
         DefaultSummaryStatsStyling, DefaultMainStyling]
 
 
