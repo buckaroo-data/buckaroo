@@ -5,6 +5,7 @@ from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlD
 from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.dataflow.autocleaning import (merge_ops, format_ops, AutocleaningConfig, _rekey_op_sd_to_internal)
 from buckaroo.polars_buckaroo import PolarsAutocleaning
+from buckaroo.customizations.pl_autocleaning_conf import NoCleaningConfPl
 from buckaroo.customizations.polars_commands import (
     Command, PlSafeInt, DropCol, FillNA, GroupBy, NoOp, Search, SDResult
 )
@@ -315,6 +316,54 @@ def test_init_sd_displayer_args_and_search_highlight_coexist_on_same_column():
     assert cc['displayer_args']['max_length'] == 2000
     assert cc['displayer_args']['highlight_regex'] == 'pizza'
     assert cc['ag_grid_specs']['wrapText'] is True
+
+
+class _RecordTypeCommand(Command):
+    """Probe command for the lazy-threading tests below: records the
+    runtime type name of `df` it sees mid-pipeline, returns df unchanged.
+
+    Module-level recording — reset at the start of each test that uses it.
+    """
+    seen_types: list = []
+
+    command_default = [s('record_type'), s('df'), 'col']
+    command_pattern = [None]
+
+    @staticmethod
+    def transform(df, col):
+        _RecordTypeCommand.seen_types.append(type(df).__name__)
+        return df
+
+    @staticmethod
+    def transform_to_py(df, col):
+        return "    # record_type"
+
+
+class LazyProbeConf(NoCleaningConfPl):
+    autocleaning_analysis_klasses = []
+    command_klasses = [FillNA, _RecordTypeCommand]
+    quick_command_klasses = []
+    name = ""
+
+
+def test_polars_pipeline_threads_lazyframe_between_ops():
+    """The polars conf flips df to LazyFrame at interpreter entry and
+    collects once at exit. Each command's transform therefore sees a
+    LazyFrame mid-pipeline; the final cleaned df is a DataFrame so
+    make_origs / PlDfStatsV2 keep working unchanged."""
+    _RecordTypeCommand.seen_types = []
+    ac = PolarsAutocleaning([LazyProbeConf])
+    df = pl.DataFrame({'a': [1, None, 3]})
+    ops = [
+        [{'symbol': 'fillna'}, s('df'), 'a', 0],
+        [{'symbol': 'record_type'}, s('df'), 'a'],
+        [{'symbol': 'fillna'}, s('df'), 'a', 0],
+        [{'symbol': 'record_type'}, s('df'), 'a']]
+    cleaned, _sd, _gen, _ops = ac.handle_ops_and_clean(
+        df, cleaning_method='', quick_command_args={}, existing_operations=ops)
+
+    assert _RecordTypeCommand.seen_types == ['LazyFrame', 'LazyFrame']
+    assert isinstance(cleaned, pl.DataFrame)
 
 
 def test_style_column_delete_keys_drops_tooltip():

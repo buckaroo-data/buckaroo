@@ -70,11 +70,21 @@ class SentinelAutocleaning:
             cleaned_df = df
         return [cleaned_df, {}, generated_code, merged_operations]
 
+def _identity(x):
+    return x
+
+
 class AutocleaningConfig:
     command_klasses = [DefaultCommandKlsList]
     autocleaning_analysis_klasses = []
     quick_command_klasses = []
     name = 'default'
+    # Hooks bookending the lisp-interpreter call in _run_df_interpreter.
+    # Default identity = current behaviour. Polars overrides with df.lazy()
+    # / collect-if-LazyFrame so a multi-op pipeline materialises once
+    # instead of after every command. See NoCleaningConfPl.
+    lazy_enter = staticmethod(_identity)
+    lazy_exit = staticmethod(_identity)
     
     
 class WrongFrontendQuickArgs(Exception):
@@ -136,6 +146,8 @@ class PandasAutocleaning:
         self.df_interpreter, self.gencode_interpreter = df_interpreter, gencode_interpreter
         self.command_config = dict(argspecs=c_patterns, defaultArgs=c_defaults)
         self.quick_command_klasses = conf.quick_command_klasses
+        self.lazy_enter = conf.lazy_enter
+        self.lazy_exit = conf.lazy_exit
 
 
     def _run_df_interpreter(self, df, operations, initial_sd):
@@ -168,7 +180,13 @@ class PandasAutocleaning:
             # contract is precisely "no ops → caller's objects come back as-is".
             return df, initial_sd
 
-        return self.df_interpreter(full_ops, df, initial_sd)
+        # lazy_enter/lazy_exit are conf-provided hooks. Polars flips to
+        # LazyFrame on entry and collects on exit (one materialisation per
+        # pipeline instead of N). Pandas/xorq leave the defaults — identity.
+        # Both hooks run *after* the no-op short-circuit above, so the
+        # by-reference identity contract there is preserved.
+        ret_df, ret_sd = self.df_interpreter(full_ops, self.lazy_enter(df), initial_sd)
+        return self.lazy_exit(ret_df), ret_sd
 
     def _run_code_generator(self, operations):
         if len(operations) == 0:
