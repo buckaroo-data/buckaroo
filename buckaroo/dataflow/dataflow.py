@@ -6,7 +6,7 @@ import pandas as pd
 from traitlets import Unicode, Any, observe, Dict
 
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, SDType
-from ..serialization_utils import pd_to_obj, sd_to_parquet_b64
+from ..serialization_utils import pd_to_obj, sd_to_parquet_b64, project_sd
 from buckaroo.pluggable_analysis_framework.utils import (filter_analysis)
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from .autocleaning import SentinelAutocleaning
@@ -17,7 +17,7 @@ from .styling_core import (
     OverrideColumnConfig,
     PinnedRowConfig,
     merge_sd_overrides,
-    merge_sds, merge_column_config, StylingAnalysis)
+    merge_sds, merge_column_config, StylingAnalysis, wire_stat_keys)
 
 
 from .abc_dataflow import ABCDataflow
@@ -648,11 +648,16 @@ class CustomizableDataflow(DataFlow):
     # ### end summary stats block        
 
     def _sd_to_jsondf(self, sd:SDType):
-        """Serialize summary stats dict. Returns parquet-b64 tagged dict by default.
+        """Serialize summary stats to the wire payload (parquet-b64 tagged dict).
 
-        Exists so this can be overridden for polars.
+        Projects ``sd`` down to just the stats the frontend reads — the
+        pinned-row values + histogram bins (see ``wire_stat_keys`` / #880) —
+        before serializing. The full ``sd`` stays on the dataflow's
+        ``merged_sd`` for styling regeneration and server-side use; only the
+        wire copy shrinks.
         """
-        return sd_to_parquet_b64(sd)
+        keep = wire_stat_keys(self.df_display_klasses.values(), self.pinned_rows)
+        return sd_to_parquet_b64(project_sd(sd, keep))
 
     def _df_to_obj(self, df:pd.DataFrame) -> TDict[str, TAny]:
         return pd_to_obj(self.sampling_klass.serialize_sample(df))

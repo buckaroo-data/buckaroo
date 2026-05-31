@@ -13,7 +13,8 @@ from io import BytesIO
 import numpy as np
 import pyarrow.parquet as pq
 
-from buckaroo.serialization_utils import sd_to_parquet_b64
+from buckaroo.serialization_utils import sd_to_parquet_b64, project_sd
+from buckaroo.dataflow.styling_core import wire_stat_keys
 
 
 def _decode(result):
@@ -204,6 +205,31 @@ def test_uint64_max_round_trips_in_wide_layout():
     schema = {f.name: str(f.type) for f in table.schema}
     assert schema['a__max'] == 'uint64'
     assert table.to_pydict()['a__max'] == [2**63 + 7]
+
+
+def test_project_sd_keeps_only_requested_keys():
+    """``project_sd`` filters each column's inner dict to ``keep_keys`` and
+    leaves the input untouched (see #880)."""
+    sd = {'a': {'mean': 1.0, 'value_counts': [1, 2, 3], 'dtype': 'int64'},
+        'b': {'mean': 2.0, 'memory_usage': 999, 'dtype': 'float64'}}
+    projected = project_sd(sd, {'mean', 'dtype'})
+    assert projected == {'a': {'mean': 1.0, 'dtype': 'int64'}, 'b': {'mean': 2.0, 'dtype': 'float64'}}
+    # input is not mutated
+    assert 'value_counts' in sd['a']
+
+
+def test_wire_stat_keys_unions_pinned_rows_and_histogram_bins():
+    """``wire_stat_keys`` is the histogram-bin keys plus every pinned-row
+    ``primary_key_val`` (``?`` scope prefix stripped) across the active
+    styling classes and any runtime pinned-rows override."""
+    class _Styling:
+        pinned_rows = [{'primary_key_val': 'dtype'},
+                       {'primary_key_val': 'mean'},
+                       {'primary_key_val': '?filtered_histogram'}]
+
+    keys = wire_stat_keys([_Styling], extra_pinned_rows=[{'primary_key_val': 'std'}])
+    assert keys == {'histogram_bins', 'histogram_log_bins',
+        'dtype', 'mean', 'filtered_histogram', 'std'}
 
 
 def test_negative_int_beyond_int64_falls_back_to_json_string():

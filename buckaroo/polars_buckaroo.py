@@ -9,7 +9,7 @@ from buckaroo.df_util import old_col_new_col
 from .pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
 from .pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from .customizations.pl_stats_v2 import PL_ANALYSIS_V2
-from .serialization_utils import pd_to_obj, sd_to_parquet_b64
+from .serialization_utils import pd_to_obj
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .customizations.pl_autocleaning_conf import NoCleaningConfPl
 from .dataflow.dataflow import Sampling
@@ -69,9 +69,8 @@ class PolarsBuckarooWidget(BuckarooWidget):
     DFStatsClass = PlDfStatsV2
     sampling_klass = PLSampling
 
-    def _sd_to_jsondf(self, sd):
-        """Serialize summary stats dict as parquet-b64."""
-        return sd_to_parquet_b64(sd)
+    # _sd_to_jsondf is inherited from BuckarooWidgetBase, which delegates to
+    # the dataflow so the wire-stat projection (#880) lives in one place.
 
     def _build_error_dataframe(self, e):
         return pl.DataFrame({'err': [str(e)]})

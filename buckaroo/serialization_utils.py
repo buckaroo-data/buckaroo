@@ -394,6 +394,28 @@ def _stat_value_to_pa_array(val):
     return pa.array([_json_encode_cell(val)], type=pa.string())
 
 
+def project_sd(sd: Dict[str, Any], keep_keys: Any) -> Dict[str, Any]:
+    """Project a summary-stats dict down to ``keep_keys`` per column.
+
+    ``sd`` is ``{short_col: {stat_name: value}}``. Each column's inner stat
+    dict is filtered to the stats in ``keep_keys``; non-dict column values
+    (defensive — shouldn't occur) pass through untouched. The input is not
+    mutated.
+
+    Used to trim the ``all_stats`` wire payload to just the stats the frontend
+    reads before ``sd_to_parquet_b64`` (see ``wire_stat_keys`` / #880). The
+    full ``sd`` stays on the dataflow's ``merged_sd`` for styling regeneration
+    and server-side use; only the wire copy shrinks.
+    """
+    projected: Dict[str, Any] = {}
+    for col, stats in sd.items():
+        if isinstance(stats, dict):
+            projected[col] = {k: v for k, v in stats.items() if k in keep_keys}
+        else:
+            projected[col] = stats
+    return projected
+
+
 def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
     """Convert a summary stats dict to a tagged parquet-b64 payload.
 

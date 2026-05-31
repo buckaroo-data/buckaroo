@@ -29,7 +29,7 @@ from .pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.extension_utils import copy_extend
 
-from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, sd_to_parquet_b64
+from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import (Sampling, exception_protect)
 from .dataflow.styling_core import (ComponentConfig, DFViewerConfig, DisplayArgs, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
@@ -261,11 +261,10 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         self.buckaroo_state = temp_buckaroo_state
 
     def _sd_to_jsondf(self, sd):
-        """Serialize summary stats dict. Returns parquet-b64 tagged dict by default.
-
-        Exists so this can be overridden for polars.
-        """
-        return sd_to_parquet_b64(sd)
+        """Serialize summary stats. Delegates to the dataflow so the wire
+        projection (see #880) lives in exactly one place — used by the
+        infinite-widget path, which assembles ``all_stats`` on the widget."""
+        return self.dataflow._sd_to_jsondf(sd)
 
 
 
