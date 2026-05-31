@@ -100,8 +100,22 @@ def test_make_origs_different_dtype():
     raw = pl.DataFrame({'a': [30, "40"]}, strict=False)
     cleaned = pl.DataFrame({'a': [30, 40]})
     expected = pl.DataFrame({'a': [30, 40], 'a_orig': [30, "40"]}, strict=False)
-    combined = PolarsAutocleaning.make_origs(raw, cleaned, {'a': {'add_orig': True}})
+    # cleaning_sd is keyed by the internal name; make_origs indexes by orig_col_name.
+    combined = PolarsAutocleaning.make_origs(
+        raw, cleaned, {'a': {'add_orig': True, 'orig_col_name': 'a'}})
     assert combined.to_dicts() == expected.to_dicts()
+
+
+def test_autoclean_preserves_original_column_names():
+    """Regression: cleaning_sd is keyed by buckaroo's internal a/b/c names while
+    cleaned_df/raw_df keep the user's original names. A column not literally named
+    'a' previously raised ColumnNotFoundError in make_origs. (codex P2 on #876)"""
+    ac = PolarsAutocleaning([ACConf, NoCleaning])
+    df = pl.DataFrame({'realname': ["30", "40"]})
+    cleaned_df, _sd, _gen, _ops = ac.handle_ops_and_clean(
+        df, cleaning_method='default', quick_command_args={}, existing_operations=[])
+    expected = pl.DataFrame({'realname': [30, 40], 'realname_orig': ["30", "40"]})
+    assert cleaned_df.to_dicts() == expected.to_dicts()
 
 
 def test_format_ops():
