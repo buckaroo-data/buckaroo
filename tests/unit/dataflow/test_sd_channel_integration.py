@@ -8,13 +8,12 @@ Covers all three transform shapes composing in one pipeline:
 
 Interpreter-level proofs (apply-result! closure, proxy enforcement, ordering)
 live in tests/unit/jlisp/test_sd_channel.py — this test exercises the full
-PolarsAutocleaning.handle_ops_and_clean pipeline.
+PandasAutocleaning.handle_ops_and_clean pipeline.
 """
 
 import polars as pl
 
-from buckaroo.dataflow.autocleaning import AutocleaningConfig
-from buckaroo.polars_buckaroo import PolarsAutocleaning
+from buckaroo.dataflow.autocleaning import AutocleaningConfig, PandasAutocleaning
 from buckaroo.customizations.polars_commands import Command, SDResult
 from buckaroo.jlisp.lisp_utils import s
 
@@ -73,7 +72,7 @@ def test_three_shapes_compose_through_handle_ops_and_clean():
     """SDResult, sd-as-arg, and df-only commands compose in one pipeline.
     SDResult seeds sd; sd-as-arg reads the seed and writes again via
     SDResult; df-only mutates df without touching sd."""
-    ac = PolarsAutocleaning([ThreeShapesConf])
+    ac = PandasAutocleaning([ThreeShapesConf])
     df = pl.DataFrame({'a': [10, 20, 30]})
     ops = [[{'symbol': 'sd_seed'}, s('df'), 'a', 'hello'], [{'symbol': 'sd_rw'}, s('df'), s('sd'), 'a', 'world'],
         [{'symbol': 'add_one'}, s('df'), 'a']]

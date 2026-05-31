@@ -9,35 +9,17 @@ import pandas as pd
 import pytest
 
 from buckaroo import BuckarooWidget
-from buckaroo.customizations.analysis import DefaultSummaryStats, PdCleaningStats
 from buckaroo.customizations.pandas_commands import (
     DropCol, FillNA, GroupBy, NoOp, SafeInt, Search)
 from buckaroo.customizations.pd_autoclean_conf import NoCleaningConf
+from buckaroo.customizations.pd_stats_v2 import PD_AUTOCLEAN_DEFAULT_V2
 from buckaroo.dataflow.autocleaning import AutocleaningConfig, PandasAutocleaning
 from buckaroo.dataflow.sd_cache import hash_chain, split_chain_by_scope
 from buckaroo.jlisp.lisp_utils import s, sA, sQ
-from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
-
-
-class CleaningGenOps(ColAnalysis):
-    requires_summary = ['int_parse_fail', 'int_parse']
-    provides_defaults = {'cleaning_ops': []}
-
-    @classmethod
-    def computed_summary(kls, column_metadata):
-        if column_metadata['int_parse'] > 0.3:
-            return {
-                'cleaning_ops': [
-                    {'symbol': 'safe_int', 'meta': {'auto_clean': True}},
-                    {'symbol': 'df'},
-                ],
-                'add_orig': True,
-            }
-        return {'cleaning_ops': []}
 
 
 class _Conf(AutocleaningConfig):
-    autocleaning_analysis_klasses = [DefaultSummaryStats, CleaningGenOps, PdCleaningStats]
+    autocleaning_analysis_klasses = PD_AUTOCLEAN_DEFAULT_V2
     command_klasses = [DropCol, FillNA, GroupBy, NoOp, SafeInt, Search]
     quick_command_klasses = [Search]
     name = 'default'

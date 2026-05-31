@@ -17,35 +17,33 @@ observable in ``merged_sd``.
 
 import pandas as pd
 
-from buckaroo.customizations.analysis import DefaultSummaryStats, PdCleaningStats
+from typing import Any, TypedDict
 from buckaroo.customizations.pandas_commands import (DropCol, FillNA, GroupBy, NoOp, SafeInt, Search)
 from buckaroo.customizations.pd_autoclean_conf import NoCleaningConf
+from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2, PD_AUTOCLEAN_DEFAULT_V2, cleaning_gen_ops
 from buckaroo.dataflow.autocleaning import (AutocleaningConfig, PandasAutocleaning)
 from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
-from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
+from buckaroo.pluggable_analysis_framework.stat_func import stat
 
 
-class CleaningGenOps(ColAnalysis):
-    """Auto-clean: cast numeric-looking strings via safe_int."""
-    requires_summary = ['int_parse_fail', 'int_parse']
-    provides_defaults = {'cleaning_ops': []}
-    int_parse_threshhold = .3
+_AddOrigResult = TypedDict('_AddOrigResult', {'cleaning_ops': Any, 'add_orig': Any})
 
-    @classmethod
-    def computed_summary(kls, column_metadata):
-        if column_metadata['int_parse'] > kls.int_parse_threshhold:
-            return {
-                'cleaning_ops': [{'symbol': 'safe_int',
-                                  'meta': {'auto_clean': True}},
-                                 {'symbol': 'df'}],
-                'add_orig': True,
-            }
-        return {'cleaning_ops': []}
+
+@stat()
+def _add_orig_cleaning(int_parse: float, int_parse_fail: float) -> _AddOrigResult:
+    """Auto-clean: cast numeric-looking strings via safe_int, flagging add_orig."""
+    if int_parse > 0.3:
+        return {'cleaning_ops': [{'symbol': 'safe_int', 'meta': {'auto_clean': True}}, {'symbol': 'df'}],
+            'add_orig': True}
+    return {'cleaning_ops': [], 'add_orig': False}
+
+
+_AC_CLEANING = [k for k in PD_AUTOCLEAN_DEFAULT_V2 if k is not cleaning_gen_ops] + [_add_orig_cleaning]
 
 
 class ScopedConf(AutocleaningConfig):
     """Cleaning + search both available."""
-    autocleaning_analysis_klasses = [DefaultSummaryStats, CleaningGenOps, PdCleaningStats]
+    autocleaning_analysis_klasses = _AC_CLEANING
     command_klasses = [DropCol, FillNA, GroupBy, NoOp, SafeInt, Search]
     quick_command_klasses = [Search]
     name = "default"
@@ -54,7 +52,7 @@ class ScopedConf(AutocleaningConfig):
 class ScopedDataflow(CustomizableDataflow):
     autocleaning_klass = PandasAutocleaning
     autoclean_conf = tuple([NoCleaningConf, ScopedConf])
-    analysis_klasses = [StylingAnalysis, DefaultSummaryStats]
+    analysis_klasses = [StylingAnalysis] + list(PD_ANALYSIS_V2)
 
 
 def _build_dataflow():
@@ -243,7 +241,7 @@ def test_analysis_klasses_change_invalidates_scoped_sd():
     key1 = dfc1._scope_cache_key([])
 
     dfc2 = ScopedDataflow(df)
-    dfc2.analysis_klasses = [StylingAnalysis, DefaultSummaryStats, CleaningGenOps]
+    dfc2.analysis_klasses = list(PD_ANALYSIS_V2)
     key2 = dfc2._scope_cache_key([])
 
     assert key1 != key2, (
