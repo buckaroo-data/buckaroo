@@ -34,6 +34,12 @@ class SessionState:
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     build_dir: Optional[str] = None  # xorq build dir, stored for /reload_expr
     project_root: Optional[str] = None  # project root for klass discovery
+    # Initial-load cache first window: ``(parquet_bytes, window_size, total_rows)``
+    # set on a /load_expr miss-or-hit so the WS serve_window fast path can answer
+    # the head slice without touching the expr. Cleared by /load (pandas/polars)
+    # and by /load_expr with initial_cache disabled — a stale window from a prior
+    # dataset must never bleed into a new one.
+    initial_cache_window: Optional[tuple] = None
     buckaroo_state: dict = field(default_factory=dict)
     # NOTE: ``search_string`` used to live here, but it's per-client typing
     # state (not a session-wide property). Two clients sharing a session

@@ -139,6 +139,45 @@ class TestInitialCacheServer(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_hit_session_scrolls(self):
+        """A cache-hit session serves both the cached head window (the fast
+        path) and a sorted slice (which falls through to the warmed expr) —
+        both return the full 10-row count."""
+        import io
+
+        import pyarrow.parquet as pq
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "hs-a", "build_dir": build_path})
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "hs-b", "build_dir": build_path})  # hit
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/hs-b")
+            await ws.read_message()  # initial_state
+
+            # Head window — served from the cache fast path.
+            ws.write_message(json.dumps({"type": "infinite_request",
+                "payload_args": {"start": 0, "end": 10, "sourceName": "default", "origEnd": 10}}))
+            r = json.loads(await ws.read_message())
+            self.assertEqual(r["length"], 10)
+            self.assertEqual(pq.read_table(io.BytesIO(await ws.read_message())).num_rows, 10)
+
+            # Sorted slice — falls through to the warmed expr (cheap dataflow).
+            ws.write_message(json.dumps({"type": "infinite_request",
+                "payload_args": {"start": 0, "end": 10, "sort": "a",
+                    "sort_direction": "asc", "sourceName": "default", "origEnd": 10}}))
+            r2 = json.loads(await ws.read_message())
+            self.assertEqual(r2["length"], 10)
+            self.assertNotIn("error_info", r2)
+            await ws.read_message()  # binary
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_mismatch_recomputes(self):
         """Same expr (same data_id) but a different data-touching config
         (init_sd) ⇒ the cached bundle's config_id no longer matches ⇒ the load

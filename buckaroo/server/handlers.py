@@ -6,10 +6,12 @@ import sys
 import time
 import traceback
 import uuid
+import warnings
 
 import tornado.escape
 import tornado.web
 
+from buckaroo.cache.initial_cache import DEFAULT_WINDOW, apply_initial_cache, cache_mismatch_reason
 from buckaroo.server.data_loading import (load_file, get_metadata, get_display_state, create_dataflow, get_buckaroo_display_state, load_file_lazy, get_metadata_lazy, get_display_state_lazy)
 from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
@@ -306,6 +308,10 @@ class LoadHandler(tornado.web.RequestHandler):
         session.backend = backend
         session.xorq_dataflow = None
         session.expr = None
+        # A pandas/polars load supersedes any xorq initial-load cache window —
+        # otherwise the WS serve_window fast path would ship the prior expr's
+        # cached head slice for the new dataset.
+        session.initial_cache_window = None
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
@@ -435,18 +441,29 @@ class LoadExprHandler(tornado.web.RequestHandler):
         initial_cache_enabled = bool(body.get("initial_cache", True))
         request_id = body.get("request_id")
 
+        store = self.application.settings["initial_cache_store"]
         try:
             expr = xorq_loading.load_expr_build_dir(build_dir)
             extra_klasses = (
                 xorq_loading.load_project_stat_klasses(project_root)
                 + xorq_loading.load_project_post_processing_klasses(project_root)
                 if project_root else [])
+            # Initial-load cache handshake (default-on). load_expr is already
+            # cheap; a HIT additionally skips the N+1 stat pipeline by building
+            # the dataflow with every column's stats skipped — the first paint +
+            # stats are then served from the cached bundle (apply_initial_cache
+            # below), while the dataflow stays fully functional for scroll / sort
+            # / live-search (which need only the expr + orig_col_name).
+            bundle, cache_status, data_id = self._cache_handshake(
+                expr, store, initial_cache_enabled, extra_klasses, init_sd, skip_stat_columns)
+            hit = cache_status == "hit"
+            skip_cols = list(expr.columns) if hit else skip_stat_columns
             xorq_dataflow = xorq_loading.XorqServerDataflow(
                 expr, skip_main_serial=True, extra_klasses=extra_klasses,
                 cache_storage_path=cache_storage_path,
                 column_config_overrides=column_config_overrides,
                 extra_grid_config=extra_grid_config, init_sd=init_sd,
-                skip_stat_columns=skip_stat_columns)
+                skip_stat_columns=skip_cols)
             metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, build_dir)
         except FileNotFoundError:
             self.set_status(404)
@@ -496,6 +513,24 @@ class LoadExprHandler(tornado.web.RequestHandler):
             "generated_py_code": "# server mode"}
         session.operations = []
 
+        # Initial-load cache: replay (hit) or store (miss/mismatch). On a hit the
+        # first paint + stats come from the bundle (the cheap dataflow's skipped
+        # stats are never shown); on a miss/mismatch the freshly-built bundle is
+        # stored. Either way the first window is parked on the session for the WS
+        # serve_window fast path. Done before the component_config merge so the
+        # merge lands on the bundle's (replayed) df_display_args too.
+        if hit:
+            apply_initial_cache(session, bundle)
+            session.initial_cache_window = (
+                bundle.first_window_parquet, DEFAULT_WINDOW, bundle.first_window["total_rows"])
+        elif cache_status in ("miss", "mismatch"):
+            stored = self._store_bundle(xorq_dataflow, data_id)
+            session.initial_cache_window = (
+                stored.first_window_parquet, DEFAULT_WINDOW, stored.first_window["total_rows"]) if stored else None
+        else:
+            session.initial_cache_window = None
+        cache_block = {"status": cache_status, "data_id": data_id, "request_id": request_id}
+
         if component_config and session.df_display_args:
             for key in session.df_display_args:
                 dvc = session.df_display_args[key].get("df_viewer_config")
@@ -522,33 +557,57 @@ class LoadExprHandler(tornado.web.RequestHandler):
             port = self.application.settings["port"]
             browser_action = find_or_create_session_window(session_id, port, reload_if_found=True)
 
-        cache_block = self._store_initial_cache(
-            expr, xorq_dataflow, initial_cache_enabled, request_id)
-
         log.info("load_expr session=%s build_dir=%s rows=%d backend=xorq cache=%s request_id=%s",
             session_id, build_dir, metadata["rows"], cache_block["status"], request_id)
         self.write({"session": session_id, "server_pid": os.getpid(),
             "browser_action": browser_action, "cache": cache_block, **metadata})
 
-    def _store_initial_cache(self, expr, xorq_dataflow, enabled: bool, request_id):
-        """Build + store the initial-load bundle for ``expr``; return the
-        ``cache`` block echoed in the response.
+    def _cache_handshake(self, expr, store, enabled: bool, extra_klasses, init_sd, skip_stat_columns):
+        """Decide the initial-load cache outcome for ``expr`` *before* building.
 
-        Best-effort: a cache failure must never fail the load, so any error
-        degrades to ``status='error'`` and the load proceeds normally. The first
-        load of a given expr is a ``miss`` (computed + stored); the hit fast path
-        lands with the serve-from-cache integration."""
+        Returns ``(bundle_or_None, status, data_id)`` with ``status`` in
+        ``{off, miss, hit, mismatch, error}``. A ``hit`` returns the cached bundle
+        to replay; ``miss`` / ``mismatch`` return ``None`` (the caller builds +
+        stores). The live config_id is recomputed from the klasses that *would* be
+        used (built-in xorq stats + project extras) and the request's
+        init_sd / skip columns — never read from the bundle. Best-effort: any
+        cache error degrades to a normal compute (``status='error'``)."""
         if not enabled:
-            return {"status": "off", "data_id": None, "request_id": request_id}
+            return None, "off", None
         try:
             from buckaroo.server import xorq_loading
+            from buckaroo.xorq_buckaroo import _XORQ_ANALYSIS_KLASSES
             data_id = xorq_loading.expr_data_id(expr)
+            bundle = store.get(data_id)
+            if bundle is None:
+                return None, "miss", data_id
+            live_klasses = list(_XORQ_ANALYSIS_KLASSES) + list(extra_klasses or [])
+            reason = cache_mismatch_reason(
+                bundle, analysis_klasses=live_klasses,
+                sampling_klass=xorq_loading.XorqServerDataflow.sampling_klass,
+                init_sd=init_sd or None, skip_stat_columns=skip_stat_columns)
+            if reason is None:
+                return bundle, "hit", data_id
+            warnings.warn("initial-load cache mismatch (recomputing): %s" % reason)
+            return None, "mismatch", data_id
+        except Exception:
+            log.error("initial-cache handshake failed: %s", traceback.format_exc())
+            return None, "error", None
+
+    def _store_bundle(self, xorq_dataflow, data_id):
+        """Build + store the bundle for a miss/mismatch. Best-effort — returns the
+        stored bundle, or ``None`` if building/storing failed (the load still
+        succeeds; only the cache fast path is skipped)."""
+        if data_id is None:
+            return None
+        try:
+            from buckaroo.server import xorq_loading
             bundle = xorq_loading.build_xorq_bundle(xorq_dataflow, data_id)
             self.application.settings["initial_cache_store"].put(bundle)
-            return {"status": "miss", "data_id": data_id, "request_id": request_id}
+            return bundle
         except Exception:
             log.error("initial-cache store failed: %s", traceback.format_exc())
-            return {"status": "error", "data_id": None, "request_id": request_id}
+            return None
 
 
 class LoadCompareHandler(tornado.web.RequestHandler):
