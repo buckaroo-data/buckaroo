@@ -18,10 +18,10 @@ abstraction — JSON / b64-parquet / binary per embedding).
    `skip_stat_columns=all` rebuild + bundle replay), `cache_mismatch_reason`
    handshake, WS `serve_window` fast path, `/cache` endpoint, `request_id`
    correlation-id (`server/{handlers,app,websocket_handler,session,xorq_loading}.py`).
+5. Widget `initial_cache=` kwarg + handshake in `BuckarooWidgetBase`
+   (mechanism-only parity, no Jupyter store/driver — `buckaroo_widget.py`).
 
-**Remaining:** widget `initial_cache=` kwarg + handshake in `BuckarooWidgetBase`
-(mechanism-only parity, no Jupyter store/driver); pandas/polars `/load` opt-in
-(host-supplied `data_id`).
+**Remaining:** pandas/polars `/load` opt-in (host-supplied `data_id`).
 
 ## Problem
 
