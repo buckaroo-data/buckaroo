@@ -84,31 +84,12 @@ def enable(buckaroo_kls=BuckarooInfiniteWidget, debug=False):
                 return
             raise NotImplementedError
 
-    def _display_geopandas_as_buckaroo(gdf):
-        from IPython.display import display
-        from buckaroo.geopandas_buckaroo import GeopandasBuckarooWidget
-
-        try:
-            return display(GeopandasBuckarooWidget(gdf))
-        except:
-            if debug:
-                traceback.print_exc()
-                return
-            raise NotImplementedError
-
-
     ip_formatter = ip.display_formatter.ipython_display_formatter
     ip_formatter.for_type(pd.DataFrame, _display_as_buckaroo)
     
     try:
         import polars as pl
         ip_formatter.for_type(pl.DataFrame, _display_polars_as_buckaroo)
-    except ImportError:
-        pass
-
-    try:
-        import geopandas
-        ip_formatter.for_type(geopandas.geodataframe.GeoDataFrame, _display_geopandas_as_buckaroo)
     except ImportError:
         pass
 
