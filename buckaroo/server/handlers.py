@@ -428,6 +428,12 @@ class LoadExprHandler(tornado.web.RequestHandler):
 
         project_root = body.get("project_root")
         cache_storage_path = body.get("cache_storage_path")
+        # Initial-load cache: default ON for /load_expr; ``initial_cache: false``
+        # turns it off (full compute, skip the store). ``request_id`` is the
+        # host's correlation id — echoed in the response + stamped on the log
+        # line so the caller can align its logs with the server's.
+        initial_cache_enabled = bool(body.get("initial_cache", True))
+        request_id = body.get("request_id")
 
         try:
             expr = xorq_loading.load_expr_build_dir(build_dir)
@@ -516,10 +522,33 @@ class LoadExprHandler(tornado.web.RequestHandler):
             port = self.application.settings["port"]
             browser_action = find_or_create_session_window(session_id, port, reload_if_found=True)
 
-        log.info("load_expr session=%s build_dir=%s rows=%d backend=xorq",
-            session_id, build_dir, metadata["rows"])
+        cache_block = self._store_initial_cache(
+            expr, xorq_dataflow, initial_cache_enabled, request_id)
+
+        log.info("load_expr session=%s build_dir=%s rows=%d backend=xorq cache=%s request_id=%s",
+            session_id, build_dir, metadata["rows"], cache_block["status"], request_id)
         self.write({"session": session_id, "server_pid": os.getpid(),
-            "browser_action": browser_action, **metadata})
+            "browser_action": browser_action, "cache": cache_block, **metadata})
+
+    def _store_initial_cache(self, expr, xorq_dataflow, enabled: bool, request_id):
+        """Build + store the initial-load bundle for ``expr``; return the
+        ``cache`` block echoed in the response.
+
+        Best-effort: a cache failure must never fail the load, so any error
+        degrades to ``status='error'`` and the load proceeds normally. The first
+        load of a given expr is a ``miss`` (computed + stored); the hit fast path
+        lands with the serve-from-cache integration."""
+        if not enabled:
+            return {"status": "off", "data_id": None, "request_id": request_id}
+        try:
+            from buckaroo.server import xorq_loading
+            data_id = xorq_loading.expr_data_id(expr)
+            bundle = xorq_loading.build_xorq_bundle(xorq_dataflow, data_id)
+            self.application.settings["initial_cache_store"].put(bundle)
+            return {"status": "miss", "data_id": data_id, "request_id": request_id}
+        except Exception:
+            log.error("initial-cache store failed: %s", traceback.format_exc())
+            return {"status": "error", "data_id": None, "request_id": request_id}
 
 
 class LoadCompareHandler(tornado.web.RequestHandler):
@@ -816,6 +845,22 @@ def _render_engine_bar(datasets: list) -> tuple:
         "<span id=\"engine-status\" style=\"margin-left: 12px; color: #888;\"></span>"
         "</div>")
     return bar, datasets_json
+
+
+class CacheHandler(tornado.web.RequestHandler):
+    """GET /cache — initial-load cache introspection.
+
+    Reports the in-memory LRU's entries (data_id, config_id, bytes, hits,
+    total_rows), totals, capacity, and disk-load / miss counters — so a host can
+    see what's cached and how the cache is performing. Broader session/server
+    enumeration is #860."""
+
+    def get(self):
+        store = self.application.settings.get("initial_cache_store")
+        if store is None:
+            self.write({"count": 0, "entries": [], "capacity": 0, "total_bytes": 0})
+            return
+        self.write(store.report())
 
 
 class SessionPageHandler(tornado.web.RequestHandler):

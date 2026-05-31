@@ -9,11 +9,15 @@ installed still imports cleanly.
 from __future__ import annotations
 
 import builtins
+import copy
 import inspect
 import logging
 import traceback
 from pathlib import Path
 
+from buckaroo.cache.fingerprint import config_fingerprint
+from buckaroo.cache.initial_cache import DEFAULT_WINDOW, InitialCacheData
+from buckaroo.cache.sd_codec import serialize_sd
 from buckaroo.server.window import clamp_window
 from buckaroo.xorq_buckaroo import (
     NoCleaningConfXorq, XorqAutocleaning, XorqDataflow, XorqDfStatsV2,
@@ -21,6 +25,54 @@ from buckaroo.xorq_buckaroo import (
     window_to_parquet)
 
 log = logging.getLogger(__name__)
+
+
+def expr_data_id(expr) -> str:
+    """Content-based, path-independent identity for an expr — the store key.
+
+    ``get_expr_hash`` canonicalizes + tokenizes the expr, so two build dirs of
+    the same expression share a ``data_id`` and a rebuild over the same data
+    validates against the cached bundle.
+    """
+    from xorq.common.utils.provenance_utils import get_expr_hash  # noqa: PLC0415
+    return get_expr_hash(expr)
+
+
+def build_xorq_bundle(xorq_dataflow: XorqServerDataflow, data_id: str,
+        window: int = DEFAULT_WINDOW) -> InitialCacheData:
+    """Snapshot a built ``XorqServerDataflow``'s first render into a bundle.
+
+    The xorq counterpart of ``build_bundle_from_dataflow`` — its ``processed_df``
+    is an ibis expression, so the first window comes from ``window_to_parquet``
+    and the schema from ``expr.schema()`` rather than the pandas ``to_parquet`` /
+    DataFrame introspection the core builder uses.
+    """
+    _id, expr, merged_sd = xorq_dataflow.widget_args_tuple
+    total = _expr_count(expr)
+    end = min(window, total)
+    schema = expr.schema()
+    columns = [str(c) for c in expr.columns]
+    column_schema = {
+        'columns': columns, 'columns_multiindex': False, 'columns_names': None,
+        'dtypes': [str(schema[c]) for c in expr.columns],
+        'index_multiindex': False, 'index_names': [None], 'index_nlevels': 1}
+    config_id = config_fingerprint(
+        analysis_klasses=xorq_dataflow.analysis_klasses,
+        sampling_klass=getattr(xorq_dataflow, 'sampling_klass', None),
+        init_sd=getattr(xorq_dataflow, 'init_sd', None) or None,
+        skip_stat_columns=getattr(xorq_dataflow, 'skip_stat_columns', None))
+    styling_klasses = [
+        "%s.%s" % (k.__module__, getattr(k, '__qualname__', k.__name__))
+        for k in xorq_dataflow.df_display_klasses.values()]
+    return InitialCacheData(
+        config_id=config_id, data_id=data_id, df_meta=dict(xorq_dataflow.df_meta),
+        column_schema=column_schema, sd_parquet=serialize_sd(merged_sd),
+        first_window_parquet=window_to_parquet(expr, 0, end, None, True),
+        first_window={'start': 0, 'end': end, 'total_rows': total},
+        df_display_args=copy.deepcopy(xorq_dataflow.df_display_args),
+        buckaroo_options=dict(xorq_dataflow.buckaroo_options),
+        command_config=dict(xorq_dataflow.command_config),
+        styling_klasses=styling_klasses)
 
 
 def _make_cache_storage(cache_storage_path):
