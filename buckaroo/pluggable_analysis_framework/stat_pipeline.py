@@ -1,7 +1,10 @@
 """StatPipeline — top-level orchestrator for the pluggable analysis framework.
 
-Typed DAG execution with Ok/Err error propagation. Accepts a mix of @stat
-functions and ColAnalysis classes (the latter via v1_adapter).
+Typed DAG execution with Ok/Err error propagation. Accepts @stat functions and
+@stat-decorated stat-group classes. Structural ColAnalysis classes (styling,
+post-processing) are accepted as no-ops; a ColAnalysis still overriding the v1
+series_summary/computed_summary is rejected with a clear error (the v1 adapter
+is gone — port it to @stat).
 """
 from __future__ import annotations
 

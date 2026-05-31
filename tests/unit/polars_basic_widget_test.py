@@ -62,7 +62,7 @@ def test_polars_all_stats():
         'a':  {'mean': 2.5, 'null_count':  0, 'quin99':  4.0, 'rewritten_col_name':'a',
             'orig_col_name':'normal_int_series'}}
     class SimplePolarsBuckaroo(PolarsBuckarooWidget):
-        analysis_klasses= [select_only, StylingAnalysis]
+        analysis_klasses= [select_only, SelectOnlyStyling]
 
     spbw = SimplePolarsBuckaroo(test_df)
     assert spbw.dataflow.merged_sd == expected
