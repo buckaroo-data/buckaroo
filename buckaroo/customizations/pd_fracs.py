@@ -1,9 +1,6 @@
 import re
 import pandas as pd
 import numpy as np
-from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
-from buckaroo.jlisp.lisp_utils import s
-from buckaroo.customizations.heuristics import BaseHeuristicCleaningGenOps
 
 from buckaroo.pluggable_analysis_framework.utils import cache_series_func
 
@@ -61,38 +58,3 @@ def us_dates_frac(ser):
 def euro_dates_frac(ser):
     parsed_dates = pd.to_datetime(ser, errors="coerce", format="%d/%m/%Y")
     return (~parsed_dates.isna()).sum() / len(ser)
-
-class HeuristicFracs(ColAnalysis):
-    provides_defaults = dict(str_bool_frac=0, regular_int_parse_frac=0, strip_int_parse_frac=0, us_dates_frac=0)
-
-    @staticmethod
-    def series_summary(sampled_ser, ser):
-        if not (
-            pd.api.types.is_string_dtype(ser)
-            or pd.api.types.is_object_dtype(ser)
-        ):
-            return {}
-
-        return dict(str_bool_frac=str_bool_frac(ser), regular_int_parse_frac=regular_int_parse_frac(ser),
-            strip_int_parse_frac=strip_int_parse_frac(ser), us_dates_frac=us_dates_frac(ser))
-
-frac_name_to_command = {"str_bool_frac": "str_bool", "regular_int_parse_frac": "regular_int_parse",
-    "strip_int_parse_frac": "strip_int_parse", "us_dates_frac": "us_date"}
-
-
-class ConvservativeCleaningGenops(BaseHeuristicCleaningGenOps):
-    requires_summary = ["str_bool_frac", "regular_int_parse_frac", "strip_int_parse_frac", "us_dates_frac"]
-
-    rules = {"str_bool_frac": [s("f>"), 0.9], "regular_int_parse_frac": [s("f>"), 0.9],
-        "strip_int_parse_frac": [s("f>"), 0.9], "none": [s("none-rule")],
-        "us_dates_frac": [s("primary"), [s("f>"), 0.8]]}
-    rules_op_names = frac_name_to_command
-
-
-class AggresiveCleaningGenOps(BaseHeuristicCleaningGenOps):
-    requires_summary = ["str_bool_frac", "regular_int_parse_frac", "strip_int_parse_frac", "us_dates_frac"]
-    rules = {"str_bool_frac": [s("f>"), 0.6], "regular_int_parse_frac": [s("f>"), 0.7],
-        "strip_int_parse_frac": [s("f>"), 0.6], "none": [s("none-rule")],
-        "us_dates_frac": [s("primary"), [s("f>"), 0.7]]}
-
-    rules_op_names = frac_name_to_command    

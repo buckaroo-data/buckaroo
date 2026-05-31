@@ -1,6 +1,4 @@
-import pandas as pd
 import numpy as np
-from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 
 
 def force_float(n):
@@ -105,62 +103,3 @@ def numeric_histogram(histogram_args, min_, max_, nan_per):
     return ret_histo
 
 
-class Histogram(ColAnalysis):
-    provides_defaults = dict(
-        histogram= [[],[]], histogram_args=[], histogram_bins=[])
-                    
-    @staticmethod
-    def series_summary(sampled_ser, ser):
-        """
-        https://stackoverflow.com/questions/11882393/matplotlib-disregard-outliers-when-plotting
-        """
-        if not pd.api.types.is_numeric_dtype(ser):
-            return dict(histogram_args={})
-        if pd.api.types.is_bool_dtype(ser):
-            return dict(histogram_args={})
-        if not ser.index.is_unique:
-            ser.index = pd.RangeIndex(len(ser))
-        vals = ser.dropna()
-        if len(vals) == 0:
-            return dict(histogram_args={})
-        low_tail = np.quantile(vals, 0.01)
-        high_tail =  np.quantile(vals, 0.99)
-        low_pass  = ser > low_tail 
-        high_pass = ser < high_tail
-        meat = vals[low_pass & high_pass]
-        if len(meat) == 0:
-            return dict(histogram_args={})
-
-        try:
-            meat_histogram=np.histogram(meat, 10)
-        except ValueError:
-            # Can happen when float64 precision is insufficient to create
-            # 10 distinct bin edges (e.g. large integers near 2^53 where
-            # np.spacing > bin width).
-            return dict(histogram_args={})
-        populations, _ = meat_histogram
-        return dict(
-            histogram_bins = meat_histogram[1],
-            histogram_args=dict(
-                meat_histogram=meat_histogram,
-                normalized_populations=(populations/populations.sum()).tolist(),
-                low_tail=low_tail,
-                high_tail=high_tail))
-
-    requires_summary = ['value_counts', 'nan_per', 'is_numeric', 'length', 'min', 'max']
-
-
-    @staticmethod
-    def computed_summary(summary_dict):
-        is_numeric = summary_dict['is_numeric']
-        value_counts = summary_dict['value_counts']
-        nan_per = summary_dict['nan_per']
-        if is_numeric and len(value_counts) > 5 and summary_dict['histogram_args']:
-            histogram_args = summary_dict['histogram_args']
-            min_, max_ = summary_dict['min'], summary_dict['max']
-            temp_histo =  numeric_histogram(histogram_args, min_, max_, nan_per)
-            if len(temp_histo) > 5:
-                #if we had basically a categorical variable encoded into an integer.. don't return it
-                return {'histogram': temp_histo}
-        length = summary_dict['length']
-        return {'histogram':categorical_histogram(length, value_counts, nan_per)}
