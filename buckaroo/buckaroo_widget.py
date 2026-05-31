@@ -10,6 +10,7 @@ TODO: Add module docstring
 import os
 import sys
 import traceback
+import warnings
 from datetime import datetime
 from typing import Literal, Union
 import pandas as pd
@@ -30,6 +31,7 @@ from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.extension_utils import copy_extend
 
 from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, sd_to_parquet_b64
+from .cache.initial_cache import apply_initial_cache, cache_mismatch_reason, extract_column_schema
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import (Sampling, exception_protect)
 from .dataflow.styling_core import (ComponentConfig, DFViewerConfig, DisplayArgs, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, build_df_display_args, EMPTY_DFVIEWER_CONFIG)
@@ -126,7 +128,8 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None, skip_stat_columns=None, skip_main_serial=False, record_transcript=False):
+        init_sd=None, skip_stat_columns=None, skip_main_serial=False, record_transcript=False,
+        initial_cache=None):
         """
         BuckarooWidget was originally designed to extend CustomizableDataFlow
 
@@ -168,7 +171,38 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         bidirectional_wire(self, self.dataflow, "operation_results")
         bidirectional_wire(self, self.dataflow, "buckaroo_options")
         bidirectional_wire(self, self.dataflow, "command_config")
-        
+
+        self._maybe_apply_initial_cache(initial_cache)
+
+    def _maybe_apply_initial_cache(self, bundle):
+        """Validate + replay a host-provided initial-load bundle (mechanism only —
+        no Jupyter store / prewarm). A bundle whose config_id + schema match the
+        widget's live configuration hydrates the display traits from the cache; a
+        mismatch warns and keeps the freshly-computed values.
+
+        The dataflow is already built here, so this is for parity with the server
+        path (and future Jupyter cache exploitation), not a build skip. Replays
+        via the same ``apply_initial_cache`` the server uses, regenerating
+        ``df_display_args`` from a zero-row frame when display overrides are set."""
+        if bundle is None:
+            return
+        df = self.dataflow.processed_df
+        reason = cache_mismatch_reason(
+            bundle, analysis_klasses=self.dataflow.analysis_klasses,
+            sampling_klass=getattr(self.dataflow, 'sampling_klass', None),
+            init_sd=getattr(self.dataflow, 'init_sd', None) or None,
+            skip_stat_columns=getattr(self.dataflow, 'skip_stat_columns', None),
+            schema=extract_column_schema(df) if df is not None else None)
+        if reason is not None:
+            warnings.warn("initial_cache ignored (config mismatch): %s" % reason)
+            return
+        apply_initial_cache(
+            self, bundle, df_display_klasses=self.dataflow.df_display_klasses,
+            column_config_overrides=self.dataflow.column_config_overrides,
+            component_config=self.dataflow.component_config,
+            extra_grid_config=self.dataflow.extra_grid_config,
+            pinned_rows=self.dataflow.pinned_rows, sd_to_jsondf=self._sd_to_jsondf)
+
     def _df_to_obj(self, df:pd.DataFrame):
         return pd_to_obj(self.sampling_klass.serialize_sample(df))
 
@@ -377,11 +411,12 @@ class BuckarooInfiniteWidget(BuckarooWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None, skip_stat_columns=None, record_transcript=False):
+        init_sd=None, skip_stat_columns=None, record_transcript=False, initial_cache=None):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
             extra_grid_config, component_config, init_sd,
             skip_stat_columns=skip_stat_columns,
-            skip_main_serial=True, record_transcript=record_transcript)
+            skip_main_serial=True, record_transcript=record_transcript,
+            initial_cache=initial_cache)
 
         def widget_tuple_args_bridge(change_unused):
             self._handle_widget_change(change_unused)
@@ -454,10 +489,10 @@ class DFViewerInfinite(BuckarooInfiniteWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None, skip_stat_columns=None):
+        init_sd=None, skip_stat_columns=None, initial_cache=None):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
             extra_grid_config, component_config, init_sd,
-            skip_stat_columns=skip_stat_columns)
+            skip_stat_columns=skip_stat_columns, initial_cache=initial_cache)
         self.df_id = str(id(orig_df))
 
 

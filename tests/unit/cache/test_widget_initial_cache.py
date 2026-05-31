@@ -46,3 +46,11 @@ def test_widget_warns_and_ignores_mismatch():
     # Mismatch ⇒ the bundle is ignored; the widget shows its own computed meta.
     assert 'sentinel' not in w.df_meta
     assert w.df_meta['total_rows'] == 3
+
+
+def test_widget_without_initial_cache_constructs_normally():
+    # The new kwarg must default cleanly — no bundle, normal construction.
+    df = pd.DataFrame({'a': [1, 2, 3], 'b': ['x', 'y', 'z']})
+    w = BuckarooInfiniteWidget(df)
+    assert w.df_meta['total_rows'] == 3
+    assert 'main' in w.df_display_args
