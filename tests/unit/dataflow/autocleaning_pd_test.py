@@ -2,15 +2,33 @@ import traceback
 import pandas as pd
 import numpy as np
 from buckaroo import BuckarooWidget
-from buckaroo.customizations.analysis import (
-    DefaultSummaryStats, PdCleaningStats)
+from typing import Any, TypedDict
 from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
+from buckaroo.pluggable_analysis_framework.stat_func import stat
+from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2, PD_AUTOCLEAN_DEFAULT_V2, cleaning_gen_ops
 from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.dataflow.autocleaning import PandasAutocleaning, generate_quick_ops
 from buckaroo.jlisp.lisp_utils import (s, sA, sQ)
 from buckaroo.customizations.pandas_commands import (Command, SafeInt, DropCol, FillNA, GroupBy, NoOp, Search, OnlyOutliers)
 from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)
 from buckaroo.dataflow.dataflow import CustomizableDataflow
+
+_CleaningOpsResult = TypedDict('_CleaningOpsResult', {'cleaning_ops': Any})
+_AddOrigResult = TypedDict('_AddOrigResult', {'cleaning_ops': Any, 'add_orig': Any})
+
+
+@stat()
+def add_orig_cleaning_gen_ops(int_parse: float, int_parse_fail: float) -> _AddOrigResult:
+    """Like the default cleaning_gen_ops, but also flags add_orig so make_origs
+    keeps the pre-clean column as <col>_orig."""
+    if int_parse > 0.3:
+        return {'cleaning_ops': [{'symbol': 'safe_int', 'meta': {'auto_clean': True}}, {'symbol': 'df'}],
+            'add_orig': True}
+    return {'cleaning_ops': [], 'add_orig': False}
+
+
+# Default autoclean set, but with the add_orig-flagging cleaning op generator.
+_AC_CLEANING = [k for k in PD_AUTOCLEAN_DEFAULT_V2 if k is not cleaning_gen_ops] + [add_orig_cleaning_gen_ops]
 
 dirty_df = pd.DataFrame(
     {'a':[10,  20,  30,   40,  10, 20.3,   5, None, None, None],
@@ -24,24 +42,8 @@ def make_default_analysis(**kwargs):
         provides_defaults = kwargs
     return DefaultAnalysis
 
-class CleaningGenOps(ColAnalysis):
-    requires_summary = ['int_parse_fail', 'int_parse']
-    provides_defaults = {'cleaning_ops': []}
-
-    int_parse_threshhold = .3
-    @classmethod
-    def computed_summary(kls, column_metadata):
-        if column_metadata['int_parse'] > kls.int_parse_threshhold:
-            return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}],
-                'add_orig': True}
-        else:
-            return {'cleaning_ops': []}
-
-
-
-
 class ACConf(AutocleaningConfig):
-    autocleaning_analysis_klasses = [DefaultSummaryStats, CleaningGenOps, PdCleaningStats]
+    autocleaning_analysis_klasses = _AC_CLEANING
     command_klasses = [DropCol, FillNA, GroupBy, NoOp, SafeInt, Search]
     quick_command_klasses = [Search]
     name="default"
@@ -186,7 +188,7 @@ class ThrowNestedError(Command):
         return "    df['%s'] = df['%s'].apply(pd.to_numeric, errors='coerce')" % (col, col)
 
 class ACErrorConf(AutocleaningConfig):
-    autocleaning_analysis_klasses = [DefaultSummaryStats]
+    autocleaning_analysis_klasses = list(PD_ANALYSIS_V2)
     command_klasses = [DropCol, FillNA, GroupBy, NoOp, SafeInt, Search, ThrowError, ThrowNestedError]
     quick_command_klasses = [Search]
     name=""
@@ -382,24 +384,16 @@ class NoOp2(Command):
     def transform_to_py(df, col):
         return "    #noop2"
 
-class SentinelCleaningGenOps(ColAnalysis):
-    """
-    This class just calls no-op on each column
-    """
-    requires_summary = []
-    provides_defaults = {'cleaning_ops': []}
-
-
-    @classmethod
-    def computed_summary(kls, column_metadata):
-        ops = [sA('noop', clean_col=column_metadata['orig_col_name']), s('df')]
-        return {'cleaning_ops': ops}
+@stat()
+def sentinel_cleaning_gen_ops(orig_col_name: Any) -> _CleaningOpsResult:
+    """noop on each column"""
+    return {'cleaning_ops': [sA('noop', clean_col=orig_col_name), s('df')]}
 
 class SentinelConfig(AutocleaningConfig):
     """
     add a check between rules_op_names to all of the included command classes
     """
-    autocleaning_analysis_klasses = [SentinelCleaningGenOps]
+    autocleaning_analysis_klasses = [sentinel_cleaning_gen_ops]
     command_klasses = [
         DropCol, FillNA, GroupBy, NoOp, Search, NoOp2]
     
@@ -408,29 +402,18 @@ class SentinelConfig(AutocleaningConfig):
 
 
 
-class SentinelCleaningGenOps2(ColAnalysis):
-    """
-    This class just generated noop2 for 'b_col'
-    """
-    requires_summary = []
-    provides_defaults = {'cleaning_ops': []}
-
-
-    @classmethod
-    def computed_summary(kls, column_metadata):
-        if column_metadata['orig_col_name'] == 'c':
-            ops = [
-                sA('noop2', clean_col='c'),
-                {'symbol': 'df'}]
-            print("ops", ops)
-            return {'cleaning_ops': ops}
-        return {}
+@stat()
+def sentinel_cleaning_gen_ops2(orig_col_name: Any) -> _CleaningOpsResult:
+    """noop2 for column 'c'"""
+    if orig_col_name == 'c':
+        return {'cleaning_ops': [sA('noop2', clean_col='c'), {'symbol': 'df'}]}
+    return {'cleaning_ops': []}
 
 class SentinelConfig2(AutocleaningConfig):
     """
     add a check between rules_op_names to all of the included command classes
     """
-    autocleaning_analysis_klasses = [SentinelCleaningGenOps2]
+    autocleaning_analysis_klasses = [sentinel_cleaning_gen_ops2]
     command_klasses = [
         DropCol, FillNA, GroupBy, NoOp, Search, NoOp2]
     

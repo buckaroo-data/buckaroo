@@ -15,7 +15,7 @@ from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
 def test_pandas_skip_columns_not_computed():
     df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
     pipe = StatPipeline(PD_ANALYSIS_V2, unit_test=False)
-    sd, errs = pipe.process_df_v1_compat(df, skip_columns={"b"})
+    sd, errs = pipe.process_df(df, skip_columns={"b"})
     assert "a" in sd and "b" in sd            # both columns still present
     assert "mean" in sd["a"]                  # a was computed
     assert "mean" not in sd["b"]              # b was skipped
@@ -25,7 +25,7 @@ def test_pandas_skip_columns_not_computed():
 def test_pandas_no_skip_is_unchanged():
     df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
     pipe = StatPipeline(PD_ANALYSIS_V2, unit_test=False)
-    sd, _ = pipe.process_df_v1_compat(df)
+    sd, _ = pipe.process_df(df)
     assert "mean" in sd["a"] and "mean" in sd["b"]
 
 
