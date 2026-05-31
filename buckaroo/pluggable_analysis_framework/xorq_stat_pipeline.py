@@ -26,10 +26,10 @@ from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 
-from .col_analysis import ErrDict, SDType
+from .col_analysis import SDType
 from .safe_summary_df import output_full_reproduce
 from .stat_func import XorqColumn, XorqExpr, XorqExecute, RAW_MARKER_TYPES, StatFunc
-from .stat_pipeline import _execute_stat_func, _find_v1_class, _normalize_inputs
+from .stat_pipeline import _execute_stat_func, _normalize_inputs, errors_to_errdict
 from .stat_result import Err, Ok, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_column_dag, build_typed_dag
 from .utils import PERVERSE_DF
@@ -429,8 +429,8 @@ class XorqStatPipeline:
     def add_stat(self, stat_func_or_class) -> Tuple[bool, List[StatError]]:
         """Add a stat function or ColAnalysis class interactively.
 
-        Mirrors ``StatPipeline.add_stat`` for parity with the v1-compat
-        DfStats surface, but skips the PERVERSE_DF unit-test (no ibis
+        Mirrors ``StatPipeline.add_stat`` for parity with the stats-wrapper
+        surface, but skips the PERVERSE_DF unit-test (no ibis
         equivalent yet — there's no perverse ibis.Table to validate
         against). Validates the DAG; returns ``(True, [])`` on success
         or ``(False, [config_error])`` if the DAG can't be built.
@@ -465,28 +465,12 @@ class XorqStatPipeline:
 
         return True, []
 
-    def process_table_v1_compat(self, table, skip_columns=None) -> Tuple[SDType, ErrDict]:
-        """Run process_table and convert errors to v1 ErrDict shape.
-
-        Used by XorqDfStatsV2 / DataFlow consumers expecting the same
-        ``{(col, stat): (Exception, kls)}`` shape that AnalysisPipeline
-        produced.
-        """
-        summary, errors = self.process_table(table, skip_columns=skip_columns)
-        errs: ErrDict = {}
-        for se in errors:
-            kls = _find_v1_class(se.stat_func, self._original_inputs) if se.stat_func else None
-            err_key = (se.column, se.stat_func.name if se.stat_func else "unknown")
-            errs[err_key] = (se.error, kls)
-        return summary, errs
-
-
 class XorqDfStatsV2:
-    """Drop-in DfStats wrapper for xorq table inputs.
+    """Stats wrapper for xorq table inputs.
 
     Mirrors the ``DfStatsV2`` / ``PlDfStatsV2`` surface (``.sdf``, ``.errs``,
     ``.ap.ordered_a_objs``, ``verify_analysis_objects``) so DataFlow,
-    ``CustomizableDataflow`` and any other DfStats consumer can run
+    ``CustomizableDataflow`` and any other stats consumer can run
     against a xorq table without changes.
 
     Lives in this module (not ``df_stats_v2``) so importing
@@ -516,7 +500,8 @@ class XorqDfStatsV2:
             cache_storage=cache_storage)
         self.operating_df_name = operating_df_name
         self.debug = debug
-        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table, skip_columns=skip_columns)
+        self.sdf, errors = self.ap.process_table(self.table, skip_columns=skip_columns)
+        self.errs = errors_to_errdict(errors)
         self.stat_errors = []
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)
@@ -528,8 +513,8 @@ class XorqDfStatsV2:
         so DataFlow.add_analysis works against a xorq-backed stats wrapper.
         """
         passed, errors = self.ap.add_stat(a_obj)
-        self.sdf, self.errs = self.ap.process_table_v1_compat(self.table)
-        _, self.stat_errors = self.ap.process_table(self.table)
+        self.sdf, self.stat_errors = self.ap.process_table(self.table)
+        self.errs = errors_to_errdict(self.stat_errors)
         if not passed:
             print("DAG validation failed")
         if self.errs:
