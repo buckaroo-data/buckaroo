@@ -178,6 +178,70 @@ class TestInitialCacheServer(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_hit_serves_requested_subwindow_not_whole_window(self):
+        """The cache fast path must ship exactly the requested ``[start, end]``
+        slice, not the whole cached window.
+
+        AG Grid's first block is ``cacheBlockSize`` rows (visible + 50), smaller
+        than the cached window. Shipping the full window against a smaller key
+        makes the client's ``SmartRowCache.addRows`` reject the payload (row count
+        != requested segment) whenever ``total_rows > window``, so the initial
+        paint fails. Here the 10-row head window is asked for ``[0, 4]`` — the
+        binary frame must carry 4 rows."""
+        import io
+
+        import pyarrow.parquet as pq
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "sw-a", "build_dir": build_path})
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "sw-b", "build_dir": build_path})  # hit
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/sw-b")
+            await ws.read_message()  # initial_state
+
+            ws.write_message(json.dumps({"type": "infinite_request",
+                "payload_args": {"start": 0, "end": 4, "sourceName": "default", "origEnd": 4}}))
+            r = json.loads(await ws.read_message())
+            self.assertEqual(r["length"], 10)  # total stays the full row count
+            self.assertEqual(r["key"]["end"], 4)
+            # The binary frame must hold exactly the requested 4 rows.
+            self.assertEqual(pq.read_table(io.BytesIO(await ws.read_message())).num_rows, 4)
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_hit_replays_display_overrides(self):
+        """A cache hit must honor the *current* request's display knobs, which are
+        deliberately excluded from the cache fingerprint.
+
+        First load stores a baseline bundle (no overrides). A later hit of the
+        same expr supplies ``extra_grid_config``; the replayed df_display_args
+        must carry it, not the bundle's bare baseline."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "ov-a", "build_dir": build_path})  # miss, baseline bundle
+            r2 = json.loads((await _post(self.get_http_port(), "/load_expr",
+                {"session": "ov-b", "build_dir": build_path,
+                 "extra_grid_config": {"rowHeight": 99}})).body)  # hit + override
+            self.assertEqual(r2["cache"]["status"], "hit")
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/ov-b")
+            init = json.loads(await ws.read_message())
+            dvc = init["df_display_args"]["main"]["df_viewer_config"]
+            self.assertEqual(dvc.get("extra_grid_config"), {"rowHeight": 99})
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_mismatch_recomputes(self):
         """Same expr (same data_id) but a different data-touching config
         (init_sd) ⇒ the cached bundle's config_id no longer matches ⇒ the load
