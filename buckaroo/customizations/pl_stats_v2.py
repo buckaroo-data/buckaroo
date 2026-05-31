@@ -113,7 +113,7 @@ def pl_numeric_stats(ser: RawSeries) -> NumericStatsResult:
 # Histogram Series (polars series API)
 # ============================================================
 
-@stat()
+@stat(cost="aggregate")
 def pl_histogram_series(ser: RawSeries) -> HistogramSeriesResult:
     """Compute histogram args from raw polars series (numeric path)."""
     if not ser.dtype.is_numeric():

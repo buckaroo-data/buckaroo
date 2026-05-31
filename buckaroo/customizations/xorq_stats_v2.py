@@ -255,7 +255,7 @@ def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, co
     return out
 
 
-@stat(default=[])
+@stat(default=[], cost="aggregate")
 def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numeric: bool, is_bool: bool, length: int,
         distinct_count: int, min: float, max: float) -> list:
     """10-bucket numeric histogram or top-10 categorical histogram.

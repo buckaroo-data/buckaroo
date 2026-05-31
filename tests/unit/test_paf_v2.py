@@ -176,6 +176,49 @@ class TestStatDecorator:
         sf = distinct_per._stat_func
         assert sf.default is MISSING
 
+    def test_stat_default_cost_is_scalar(self):
+        # Default cost class is "scalar" — the bulk of stats are cheap.
+        # Only known-expensive ones opt in to "aggregate".
+        sf = length._stat_func
+        assert sf.cost == "scalar"
+
+    def test_stat_explicit_cost_aggregate(self):
+        @stat(cost="aggregate")
+        def big_compute(ser: RawSeries) -> float:
+            return float(ser.mean())
+
+        assert big_compute._stat_func.cost == "aggregate"
+
+    def test_stat_invalid_cost_rejected(self):
+        # Only "scalar" and "aggregate" are recognised. A typo should
+        # fail loud at decoration time — silently dropping an invalid
+        # cost would leak into the cost-class router as an unscheduled
+        # stat group.
+        import pytest as _pt
+        with _pt.raises(ValueError, match="cost"):
+            @stat(cost="bigly")
+            def bad(ser: RawSeries) -> float:
+                return float(ser.mean())
+
+    def test_known_expensive_stats_marked_aggregate(self):
+        """The expensive built-in stat funcs (histogram producers across
+        all three engines) are tagged ``cost="aggregate"`` so a
+        downstream router can schedule them on the slow path."""
+        from buckaroo.customizations.pd_stats_v2 import histogram as pd_histogram
+        from buckaroo.customizations.pd_stats_v2 import histogram_series as pd_hs
+        from buckaroo.customizations.pl_stats_v2 import pl_histogram_series
+
+        assert pd_histogram._stat_func.cost == "aggregate"
+        assert pd_hs._stat_func.cost == "aggregate"
+        assert pl_histogram_series._stat_func.cost == "aggregate"
+
+        # xorq histogram (optional dep — skip if not installed)
+        try:
+            from buckaroo.customizations.xorq_stats_v2 import histogram as xq_histogram
+        except ImportError:
+            return
+        assert xq_histogram._stat_func.cost == "aggregate"
+
 
 class _MultiSizeStats(MultipleProvides):
     row_count: int
