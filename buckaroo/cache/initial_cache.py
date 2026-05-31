@@ -215,6 +215,25 @@ def cache_mismatch_reason(bundle: InitialCacheData, *, analysis_klasses: Any,
     return None
 
 
+def serve_window_request(payload_args: Dict[str, Any], window: int = DEFAULT_WINDOW,
+        search_string: str = "") -> bool:
+    """True iff an infinite_request can be answered from the cached first window.
+
+    The bundle caches only the head slice ``[0:window]``, unsorted and unfiltered.
+    A sort, a live per-client search, a non-zero start, or an end past the cached
+    window must fall through to the live source (the scroll path that warms the
+    expr). ``end`` may exceed the actual row count — the cached parquet simply has
+    fewer rows — so the bound is the configured ``window``, not the row total.
+    """
+    if search_string:
+        return False
+    if payload_args.get('sort'):
+        return False
+    start = payload_args.get('start', 0) or 0
+    end = payload_args.get('end', 0) or 0
+    return start == 0 and 0 <= end <= window
+
+
 def apply_initial_cache(target: Any, bundle: InitialCacheData, *, df_display_klasses: Any = None,
         column_config_overrides: Any = None, component_config: Any = None, extra_grid_config: Any = None,
         pinned_rows: Any = None, sd_to_jsondf: Any = None) -> None:
