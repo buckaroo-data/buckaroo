@@ -317,8 +317,14 @@ Out (v1):
      capture, prove `populate_from_cache_data` + `initial_state` +
      `serve_window({0,1000})` never trip it).
    - `serve_window` returns `None` for sort / search / `start>0` / `end>window`.
-   - replay with `component_config` / `column_config_overrides` re-styles
-     correctly and still never touches the frame.
+   - **replay-override parity:** capture a bundle with *no* overrides, then
+     `populate_from_cache_data` with a non-trivial `component_config` +
+     `column_config_overrides`; assert the resulting `df_display_args` is
+     byte-equal to a live `ServerDataflow` built with those same knobs, while
+     the raise-on-access frame proves replay never touches data. Confirms
+     both knobs are honored at replay via the regeneration path —
+     `merge_column_config` + the `main` `component_config` overlay
+     (`dataflow.py:709-721`) — not just the prerendered fast path.
    - server `/load_cache` opening sequence (WS `initial_state` + first
      `infinite_request`) matches `/load`, behind the existing server-test
      pattern.
