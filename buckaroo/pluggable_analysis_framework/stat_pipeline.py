@@ -270,8 +270,14 @@ class StatPipeline:
 
         return resolve_accumulator(accumulator, column_name, col_key_to_func)
 
-    def process_df(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, List[StatError]]:
+    def process_df(self, df: pd.DataFrame, debug: bool = False,
+                   skip_columns=None) -> Tuple[SDType, List[StatError]]:
         """Process all columns of a DataFrame.
+
+        ``skip_columns`` names columns whose summary stats are supplied
+        externally (e.g. via ``init_sd`` — reused from a source dataframe in a
+        diff). They still appear in the output with structural metadata, but no
+        stat functions run for them, so the column is never scanned.
 
         Returns:
             (summary_dict, all_errors) where summary_dict is SDType-compatible
@@ -283,10 +289,16 @@ class StatPipeline:
         if self.record_timings:
             self.timings = []
 
+        skip = set(skip_columns or ())
         summary: SDType = {}
         all_errors: List[StatError] = []
 
         for orig_col_name, rewritten_col_name in old_col_new_col(df):
+            if orig_col_name in skip or rewritten_col_name in skip:
+                # Provided externally — keep the column, skip computation.
+                summary[rewritten_col_name] = {
+                    'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name}
+                continue
             ser = df[orig_col_name]
             col_dtype = ser.dtype
 
@@ -299,7 +311,8 @@ class StatPipeline:
 
         return summary, all_errors
 
-    def process_df_v1_compat(self, df: pd.DataFrame, debug: bool = False) -> Tuple[SDType, ErrDict]:
+    def process_df_v1_compat(self, df: pd.DataFrame, debug: bool = False,
+                             skip_columns=None) -> Tuple[SDType, ErrDict]:
         """Process DataFrame with v1-compatible error format.
 
         Returns (SDType, ErrDict) matching the v1 AnalysisPipeline interface.
@@ -307,7 +320,7 @@ class StatPipeline:
         that mixes ColAnalysis subclasses into the input list — DataFlow,
         autocleaning, server.data_loading, polars_buckaroo).
         """
-        summary, errors = self.process_df(df, debug=debug)
+        summary, errors = self.process_df(df, debug=debug, skip_columns=skip_columns)
 
         # Convert StatError list to v1 ErrDict format
         errs: ErrDict = {}

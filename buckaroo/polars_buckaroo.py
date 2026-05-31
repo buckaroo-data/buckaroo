@@ -189,9 +189,10 @@ class PolarsDFViewerInfinite(PolarsBuckarooInfiniteWidget):
         column_config_overrides=None,
         pinned_rows=None, extra_grid_config=None,
         component_config=None,
-        init_sd=None, record_transcript=False):
+        init_sd=None, skip_stat_columns=None, record_transcript=False):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
-            extra_grid_config, component_config, init_sd, record_transcript=record_transcript)
+            extra_grid_config, component_config, init_sd,
+            skip_stat_columns=skip_stat_columns, record_transcript=record_transcript)
         self.df_id = str(id(orig_df))
 
 

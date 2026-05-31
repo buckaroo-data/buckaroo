@@ -286,7 +286,13 @@ class DfStats(object):
         kls.ap_class(col_analysis_objs)
 
     def __init__(self, df_stats_df:pd.DataFrame, col_analysis_objs:AObjs,
-        operating_df_name:str=None, debug:bool=False) -> None:
+        operating_df_name:str=None, debug:bool=False, skip_columns=None) -> None:
+        # ``skip_columns`` is accepted for signature parity with the v2 / xorq
+        # stats classes — CustomizableDataflow._get_summary_sd passes it to
+        # every DFStatsClass. The legacy v1 AnalysisPipeline has no
+        # column-skipping hook, so it is ignored here: every column is still
+        # computed and any externally-supplied stats (from ``init_sd``) override
+        # them downstream.
         self.df = self.get_operating_df(df_stats_df, force_full_eval=False)
         self.col_order = self.df.columns
         self.ap = self.ap_class(col_analysis_objs)

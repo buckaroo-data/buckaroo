@@ -126,7 +126,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None, skip_main_serial=False, record_transcript=False):
+        init_sd=None, skip_stat_columns=None, skip_main_serial=False, record_transcript=False):
         """
         BuckarooWidget was originally designed to extend CustomizableDataFlow
 
@@ -157,6 +157,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
             debug=debug,column_config_overrides=column_config_overrides,
             pinned_rows=pinned_rows, extra_grid_config=extra_grid_config,
             component_config=component_config, init_sd=init_sd,
+            skip_stat_columns=skip_stat_columns,
             skip_main_serial=skip_main_serial)
 
         bidirectional_wire(self, self.dataflow, "df_data_dict")
@@ -390,9 +391,10 @@ class BuckarooInfiniteWidget(BuckarooWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None, record_transcript=False):
+        init_sd=None, skip_stat_columns=None, record_transcript=False):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
             extra_grid_config, component_config, init_sd,
+            skip_stat_columns=skip_stat_columns,
             skip_main_serial=True, record_transcript=record_transcript)
 
         def widget_tuple_args_bridge(change_unused):
@@ -466,9 +468,10 @@ class DFViewerInfinite(BuckarooInfiniteWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None):
+        init_sd=None, skip_stat_columns=None):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
-            extra_grid_config, component_config, init_sd)
+            extra_grid_config, component_config, init_sd,
+            skip_stat_columns=skip_stat_columns)
         self.df_id = str(id(orig_df))
 
 

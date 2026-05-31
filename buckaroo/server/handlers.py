@@ -422,6 +422,9 @@ class LoadExprHandler(tornado.web.RequestHandler):
         column_config_overrides = body.get("column_config_overrides")
         extra_grid_config = body.get("extra_grid_config")
         init_sd = body.get("init_sd")
+        # Columns whose summary stats are supplied via init_sd and must not be
+        # recomputed (e.g. a diff reusing each source column's stats).
+        skip_stat_columns = body.get("skip_stat_columns")
 
         project_root = body.get("project_root")
         cache_storage_path = body.get("cache_storage_path")
@@ -436,7 +439,8 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 expr, skip_main_serial=True, extra_klasses=extra_klasses,
                 cache_storage_path=cache_storage_path,
                 column_config_overrides=column_config_overrides,
-                extra_grid_config=extra_grid_config, init_sd=init_sd)
+                extra_grid_config=extra_grid_config, init_sd=init_sd,
+                skip_stat_columns=skip_stat_columns)
             metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, build_dir)
         except FileNotFoundError:
             self.set_status(404)
