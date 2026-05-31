@@ -27,6 +27,8 @@ import pandas as pd
 
 from buckaroo.pluggable_analysis_framework.stat_func import (StatFunc, StatKey, stat, RawSeries)
 from buckaroo.pluggable_analysis_framework.column_filters import is_numeric_not_bool
+from buckaroo.jlisp.lisp_utils import s, sA
+from buckaroo.auto_clean.heuristic_lang import get_top_score
 
 # Helper functions from v1 modules (not rewritten - pure utilities)
 from buckaroo.customizations.analysis import get_mode, _has_unhashable_values
@@ -286,50 +288,42 @@ def heuristic_fracs(ser: RawSeries) -> HeuristicFracsResult:
 # Cleaning Ops (replaces BaseHeuristicCleaningGenOps subclasses)
 # ============================================================
 
-try:
-    from buckaroo.jlisp.lisp_utils import s, sA
-    from buckaroo.auto_clean.heuristic_lang import get_top_score
+def _make_cleaning_stat(rules, rules_op_names, class_name):
+    """Factory for heuristic cleaning ops StatFunc objects."""
+    def cleaning_func(str_bool_frac=0.0, regular_int_parse_frac=0.0, strip_int_parse_frac=0.0, us_dates_frac=0.0,
+            orig_col_name=''):
+        column_metadata = {'str_bool_frac': str_bool_frac, 'regular_int_parse_frac': regular_int_parse_frac,
+            'strip_int_parse_frac': strip_int_parse_frac, 'us_dates_frac': us_dates_frac,
+            'orig_col_name': orig_col_name}
+        cleaning_op_name = get_top_score(rules, column_metadata)
+        if cleaning_op_name == "none":
+            return {"cleaning_ops": [], "cleaning_name": "None", "add_orig": False}
+        else:
+            cleaning_name = rules_op_names.get(cleaning_op_name, cleaning_op_name)
+            ops = [sA(cleaning_name, clean_strategy=class_name, clean_col=orig_col_name), {"symbol": "df"}]
+            return {"cleaning_ops": ops, "cleaning_name": cleaning_name, "add_orig": True}
 
-    def _make_cleaning_stat(rules, rules_op_names, class_name):
-        """Factory for heuristic cleaning ops StatFunc objects."""
-        def cleaning_func(str_bool_frac=0.0, regular_int_parse_frac=0.0, strip_int_parse_frac=0.0, us_dates_frac=0.0,
-                orig_col_name=''):
-            column_metadata = {'str_bool_frac': str_bool_frac, 'regular_int_parse_frac': regular_int_parse_frac,
-                'strip_int_parse_frac': strip_int_parse_frac, 'us_dates_frac': us_dates_frac,
-                'orig_col_name': orig_col_name}
-            cleaning_op_name = get_top_score(rules, column_metadata)
-            if cleaning_op_name == "none":
-                return {"cleaning_ops": [], "cleaning_name": "None", "add_orig": False}
-            else:
-                cleaning_name = rules_op_names.get(cleaning_op_name, cleaning_op_name)
-                ops = [sA(cleaning_name, clean_strategy=class_name, clean_col=orig_col_name), {"symbol": "df"}]
-                return {"cleaning_ops": ops, "cleaning_name": cleaning_name, "add_orig": True}
+    cleaning_func.__name__ = class_name
+    cleaning_func.__qualname__ = class_name
 
-        cleaning_func.__name__ = class_name
-        cleaning_func.__qualname__ = class_name
+    return StatFunc(name=class_name, func=cleaning_func,
+        requires=[StatKey('str_bool_frac', float), StatKey('regular_int_parse_frac', float),
+            StatKey('strip_int_parse_frac', float), StatKey('us_dates_frac', float), StatKey('orig_col_name', Any)],
+        provides=[StatKey('cleaning_ops', Any), StatKey('cleaning_name', Any), StatKey('add_orig', Any)],
+        needs_raw=False)
 
-        return StatFunc(name=class_name, func=cleaning_func,
-            requires=[StatKey('str_bool_frac', float), StatKey('regular_int_parse_frac', float),
-                StatKey('strip_int_parse_frac', float), StatKey('us_dates_frac', float), StatKey('orig_col_name', Any)],
-            provides=[StatKey('cleaning_ops', Any), StatKey('cleaning_name', Any), StatKey('add_orig', Any)],
-            needs_raw=False)
+_frac_name_to_command = {"str_bool_frac": "str_bool", "regular_int_parse_frac": "regular_int_parse",
+    "strip_int_parse_frac": "strip_int_parse", "us_dates_frac": "us_date"}
 
-    _frac_name_to_command = {"str_bool_frac": "str_bool", "regular_int_parse_frac": "regular_int_parse",
-        "strip_int_parse_frac": "strip_int_parse", "us_dates_frac": "us_date"}
+conservative_cleaning = _make_cleaning_stat(rules={"str_bool_frac": [s("f>"), 0.9],
+    "regular_int_parse_frac": [s("f>"), 0.9], "strip_int_parse_frac": [s("f>"), 0.9], "none": [s("none-rule")],
+    "us_dates_frac": [s("primary"), [s("f>"), 0.8]]},
+    rules_op_names=_frac_name_to_command, class_name='ConservativeCleaningGenops')
 
-    conservative_cleaning = _make_cleaning_stat(rules={"str_bool_frac": [s("f>"), 0.9],
-        "regular_int_parse_frac": [s("f>"), 0.9], "strip_int_parse_frac": [s("f>"), 0.9], "none": [s("none-rule")],
-        "us_dates_frac": [s("primary"), [s("f>"), 0.8]]},
-        rules_op_names=_frac_name_to_command, class_name='ConservativeCleaningGenops')
-
-    aggressive_cleaning = _make_cleaning_stat(rules={"str_bool_frac": [s("f>"), 0.6],
-        "regular_int_parse_frac": [s("f>"), 0.7], "strip_int_parse_frac": [s("f>"), 0.6], "none": [s("none-rule")],
-        "us_dates_frac": [s("primary"), [s("f>"), 0.7]]},
-        rules_op_names=_frac_name_to_command, class_name='AggresiveCleaningGenOps')
-
-except ImportError:
-    conservative_cleaning = None
-    aggressive_cleaning = None
+aggressive_cleaning = _make_cleaning_stat(rules={"str_bool_frac": [s("f>"), 0.6],
+    "regular_int_parse_frac": [s("f>"), 0.7], "strip_int_parse_frac": [s("f>"), 0.6], "none": [s("none-rule")],
+    "us_dates_frac": [s("primary"), [s("f>"), 0.7]]},
+    rules_op_names=_frac_name_to_command, class_name='AggresiveCleaningGenOps')
 
 
 # ============================================================
@@ -352,7 +346,5 @@ PD_AUTOCLEAN_DEFAULT_V2 = [typing_stats, _type, base_summary_stats, numeric_stat
     pd_cleaning_stats, cleaning_gen_ops, orig_col_name]
 
 # Heuristic configs: parsing fracs -> rule-driven cleaning op.
-PD_AUTOCLEAN_AGGRESSIVE_V2 = [heuristic_fracs, orig_col_name] + (
-    [aggressive_cleaning] if aggressive_cleaning is not None else [])
-PD_AUTOCLEAN_CONSERVATIVE_V2 = [heuristic_fracs, orig_col_name] + (
-    [conservative_cleaning] if conservative_cleaning is not None else [])
+PD_AUTOCLEAN_AGGRESSIVE_V2 = [heuristic_fracs, orig_col_name, aggressive_cleaning]
+PD_AUTOCLEAN_CONSERVATIVE_V2 = [heuristic_fracs, orig_col_name, conservative_cleaning]
