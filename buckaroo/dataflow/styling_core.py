@@ -272,6 +272,35 @@ def rewrite_override_col_references(rewrites: Dict[ColIdentifier, ColIdentifier]
     return obj
 
 
+def build_df_display_args(df_display_klasses: Dict[str, Any], merged_sd: SDType, processed_df: pd.DataFrame,
+        column_config_overrides: OverrideColumnConfig, pinned_rows: Any = None, extra_grid_config: Any = None,
+        component_config: Any = None) -> Dict[str, DisplayArgs]:
+    """Assemble ``df_display_args`` from styling klasses + summary dict + frame.
+
+    Shared by the live dataflow path (``_handle_widget_change``) and the
+    initial-load cache replay path. Reads only ``merged_sd`` plus the frame's
+    column / index *structure* (never row values), so a zero-row frame with the
+    right schema regenerates identical display args.
+    """
+    temp_display_args: Dict[str, DisplayArgs] = {}
+    for display_name, A_Klass in df_display_klasses.items():
+        df_viewer_config = A_Klass.get_dfviewer_config(merged_sd, processed_df)
+        base_column_config = df_viewer_config['column_config']
+        df_viewer_config['column_config'] = merge_column_config(
+            base_column_config, processed_df, column_config_overrides)
+        temp_display_args[display_name] = {
+            'data_key': A_Klass.data_key,
+            'df_viewer_config': df_viewer_config,
+            'summary_stats_key': A_Klass.summary_stats_key}
+    if pinned_rows is not None:
+        temp_display_args['main']['df_viewer_config']['pinned_rows'] = pinned_rows
+    if extra_grid_config:
+        temp_display_args['main']['df_viewer_config']['extra_grid_config'] = extra_grid_config
+    if component_config:
+        temp_display_args['main']['df_viewer_config']['component_config'] = component_config
+    return temp_display_args
+
+
 def merge_sd_overrides(final_sd:SDType, df:pd.DataFrame, overrides:SDType) -> SDType:
     """
       this is psecifically built for places where keys from the original dataframe will be used in 'overrides'

@@ -2,6 +2,7 @@ import sys
 import pandas as pd
 from buckaroo.dataflow.dataflow import DataFlow
 from buckaroo.dataflow import dataflow as dft
+from buckaroo.dataflow.styling_core import merge_column_config
 from buckaroo.dataflow.autocleaning import SENTINEL_DF_1, SENTINEL_DF_2
 
 simple_df = pd.DataFrame({'int_col':[1, 2, 3], 'str_col':['a', 'b', 'c']})
@@ -121,7 +122,7 @@ def test_merge_column_config():
             {'header_name':'foo', 'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
             {'header_name':'bar', 'col_name':'b', 'displayer_args': {'displayer': 'obj'}}]
     temp_df=pd.DataFrame({'foo':[], 'bar':[], 'volume_colors':[]})
-    merged = dft.merge_column_config(computed_column_config, temp_df, overrides)
+    merged = merge_column_config(computed_column_config, temp_df, overrides)
 
     expected = [
             {'header_name':'foo', 'col_name': 'a', 'displayer_args': {'displayer': 'obj'},
@@ -138,7 +139,7 @@ def test_merge_column_config_hide():
             {'header_name':'foo', 'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
             {'header_name':'bar', 'col_name':'b', 'displayer_args': {'displayer': 'obj'}}]
     temp_df=pd.DataFrame({'foo':[], 'bar':[], 'volume_colors':[]})
-    merged = dft.merge_column_config(
+    merged = merge_column_config(
         computed_column_config, temp_df, overrides)
 
     expected = [
