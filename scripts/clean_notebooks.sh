@@ -7,7 +7,6 @@ nbstripout docs/example-notebooks/DFViewer.ipynb \
  docs/example-notebooks/Extending.ipynb \
  docs/example-notebooks/Filter.ipynb \
  docs/example-notebooks/Full-tour.ipynb \
- docs/example-notebooks/GeoPandas.ipynb \
  docs/example-notebooks/Histograms-demo.ipynb \
  docs/example-notebooks/Itables-testcases.ipynb \
  docs/example-notebooks/Pluggable-Analysis-Framework.ipynb \

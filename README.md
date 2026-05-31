@@ -115,7 +115,6 @@ The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery)
 - [Extending Buckaroo](https://www.youtube.com/watch?v=GPl6_9n31NE) 12m56s
 - [Styling Buckaroo](https://www.youtube.com/watch?v=cbwJyo_PzKY) 8m18s
 - [Understanding JLisp in Buckaroo](https://youtu.be/3Tf3lnuZcj8) 12m42s
-- [GeoPandas Support](https://youtu.be/8WBhoNjDJsA)
 
 ## Articles
 - [Using Buckaroo and pandas to investigate large CSVs](https://medium.com/@paddy_mullen/using-buckaroo-and-pandas-to-investigate-large-csvs-2a200aebae31)
@@ -134,7 +133,6 @@ The interactive [styling gallery](https://py.cafe/app/paddymul/buckaroo-gallery)
 - [Styling Howto](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=styling-howto.ipynb) - In depth custom styling guide
 - [Pluggable Analysis Framework](https://paddymul.github.io/buckaroo-examples/lab/index.html?path=Pluggable-Analysis-Framework.ipynb) - Adding new summary stats
 - [Solara Buckaroo](https://github.com/buckaroo-data/buckaroo/blob/main/docs/example-notebooks/Solara-Buckaroo.ipynb) - Using Buckaroo with Solara
-- [GeoPandas with Buckaroo](https://github.com/buckaroo-data/buckaroo/blob/main/docs/example-notebooks/GeoPandas.ipynb)
 
 ## Example apps built on Buckaroo
 - [Buckaroo Compare](https://marimo.io/p/@paddy-mullen/buckaroo-compare-preview) - Join two dataframes and highlight visual differences

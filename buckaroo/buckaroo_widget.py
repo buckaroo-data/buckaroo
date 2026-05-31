@@ -263,7 +263,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     def _sd_to_jsondf(self, sd):
         """Serialize summary stats dict. Returns parquet-b64 tagged dict by default.
 
-        Exists so this can be overridden for polars/geopandas.
+        Exists so this can be overridden for polars.
         """
         return sd_to_parquet_b64(sd)
 
