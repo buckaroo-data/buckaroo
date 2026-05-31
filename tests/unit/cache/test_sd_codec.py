@@ -81,12 +81,8 @@ def test_roundtrip_real_pandas_pipeline_sd():
     from buckaroo.customizations.histogram import Histogram
     from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 
-    df = pd.DataFrame({
-        'ints': [1, 2, 3, None],
-        'floats': [1.5, 2.5, 3.5, 4.5],
-        'strs': ['a', 'b', 'c', 'd'],
-        'dates': pd.to_datetime(['2020-01-01', '2020-06-01', '2021-01-01', '2021-06-01']),
-    })
+    df = pd.DataFrame({'ints': [1, 2, 3, None], 'floats': [1.5, 2.5, 3.5, 4.5], 'strs': ['a', 'b', 'c', 'd'],
+        'dates': pd.to_datetime(['2020-01-01', '2020-06-01', '2021-01-01', '2021-06-01'])})
     sd = DfStatsV2(
         df, [TypingStats, DefaultSummaryStats, Histogram, ComputedDefaultSummaryStats],
         'test_df').sdf
