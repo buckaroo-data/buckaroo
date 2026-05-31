@@ -1,10 +1,27 @@
 # Initial-load cache — serve the first render without touching the data
 
 ## Status
-Design only. Branch `feat/initial-load-cache`, PR #877. All decisions below were
-locked in a design review (the grill). Follow-ups split out: #880 (trim the
-summary-stats *wire* payload to what the frontend reads) and #881 (DFViewer
-transport abstraction — JSON / b64-parquet / binary per embedding).
+Branch `feat/initial-load-cache`, PR #877. All decisions below were locked in a
+design review (the grill). Follow-ups split out: #880 (trim the summary-stats
+*wire* payload to what the frontend reads) and #881 (DFViewer transport
+abstraction — JSON / b64-parquet / binary per embedding).
+
+**Implemented (CI-green), in TDD increments:**
+1. `build_df_display_args` refactor (shared assembler).
+2. `config_fingerprint` (`buckaroo/cache/fingerprint.py`).
+3. Lossless type-tagged SD codec (`buckaroo/cache/sd_codec.py`).
+4. Producer + handshake + consumer (`buckaroo/cache/initial_cache.py`):
+   `get_initial_cache_data` / `build_bundle_from_dataflow`, `cache_mismatch_reason`,
+   `apply_initial_cache`, `serve_window_request`.
+4a. `InitialCacheStore` — LRU + disk persistence + `prewarm` (`buckaroo/cache/store.py`).
+4b. Server integration: `/load_expr` default-on store + hit fast path (cheap
+   `skip_stat_columns=all` rebuild + bundle replay), `cache_mismatch_reason`
+   handshake, WS `serve_window` fast path, `/cache` endpoint, `request_id`
+   correlation-id (`server/{handlers,app,websocket_handler,session,xorq_loading}.py`).
+
+**Remaining:** widget `initial_cache=` kwarg + handshake in `BuckarooWidgetBase`
+(mechanism-only parity, no Jupyter store/driver); pandas/polars `/load` opt-in
+(host-supplied `data_id`).
 
 ## Problem
 
