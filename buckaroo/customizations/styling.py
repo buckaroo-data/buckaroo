@@ -100,19 +100,24 @@ class DefaultMainStyling(StylingAnalysis):
         else:
             disp = {'displayer': 'obj'}
             base_config['tooltip_config'] = {'tooltip_type':'simple', 'val_column': str(col)}
-        # Lowcode ops (e.g. Search) contribute highlight metadata via SDResult;
-        # the JS string displayer reads these from displayer_args.
-        if disp.get('displayer') == 'string':
-            for k in ('highlight_phrase', 'highlight_regex', 'highlight_color'):
-                if k in column_metadata:
-                    disp[k] = column_metadata[k]
         # init_sd users may pass the same nested shape they'd use in
         # column_config_overrides — e.g. {'comments': {'displayer_args':
         # {'max_length': 2000}}}. Shallow-merge that into disp so init_sd
-        # augments (rather than replaces) styling's computed displayer_args
-        # AND coexists with op-supplied highlights. Caller wins per-key.
+        # augments (rather than replaces) styling's computed displayer_args.
+        # Done BEFORE the highlight branch so a column whose pandas ``_type``
+        # is 'obj' but which init_sd promotes to ``displayer: 'string'``
+        # (long-text columns like comments are the canonical case) still
+        # picks up lowcode-op highlight_phrase. Caller wins per-key.
         if isinstance(column_metadata.get('displayer_args'), dict):
             disp.update(column_metadata['displayer_args'])
+        # Lowcode ops (e.g. Search) contribute highlight metadata via SDResult;
+        # the JS string displayer reads these from displayer_args. Skip
+        # injecting any key the caller already set above, so an explicit
+        # init_sd ``displayer_args.highlight_phrase`` still wins.
+        if disp.get('displayer') == 'string':
+            for k in ('highlight_phrase', 'highlight_regex', 'highlight_color'):
+                if k in column_metadata and k not in disp:
+                    disp[k] = column_metadata[k]
         base_config['displayer_args'] = disp
 
         # Compute content-aware minWidth
