@@ -59,3 +59,50 @@ def test_xorq_skip_columns_not_computed(tmp_path):
     assert "a" in sd and "b" in sd
     assert "mean" in sd["a"]
     assert "mean" not in sd["b"]
+
+
+# ---------------------------------------------------------------------------
+# Notebook widget constructors must forward skip_stat_columns to the dataflow
+# (it was only wired into CustomizableDataflow + the server /load handler, not
+# the widget classes a notebook user instantiates).
+# ---------------------------------------------------------------------------
+
+
+def _by_orig(sd, orig_name):
+    return next(v for v in sd.values() if v.get("orig_col_name") == orig_name)
+
+
+def test_buckaroo_widget_threads_skip_stat_columns():
+    from buckaroo import BuckarooWidget
+    df = pd.DataFrame({"alpha": [1, 2, 3, 4], "beta": [10, 20, 30, 40]})
+    sd = BuckarooWidget(df, skip_stat_columns=["beta"]).dataflow.merged_sd
+    assert "mean" in _by_orig(sd, "alpha")      # computed
+    assert "mean" not in _by_orig(sd, "beta")   # skipped
+
+
+def test_buckaroo_infinite_widget_threads_skip_stat_columns():
+    from buckaroo import BuckarooInfiniteWidget
+    df = pd.DataFrame({"alpha": [1, 2, 3, 4], "beta": [10, 20, 30, 40]})
+    sd = BuckarooInfiniteWidget(df, skip_stat_columns=["beta"]).dataflow.merged_sd
+    assert "mean" in _by_orig(sd, "alpha")
+    assert "mean" not in _by_orig(sd, "beta")
+
+
+def test_widget_skip_preserves_supplied_init_sd():
+    """The point of skipping: stats supplied via init_sd survive because the
+    column is not recomputed. Without skip the computed value overrides them."""
+    from buckaroo import BuckarooWidget
+    df = pd.DataFrame({"alpha": [1, 2, 3, 4], "beta": [10, 20, 30, 40]})  # real beta mean = 25
+    supplied = {"beta": {"mean": 999.0}}
+    assert _by_orig(BuckarooWidget(df, init_sd=supplied).dataflow.merged_sd, "beta")["mean"] == 25.0
+    assert _by_orig(BuckarooWidget(df, init_sd=supplied, skip_stat_columns=["beta"]).dataflow.merged_sd,
+                    "beta")["mean"] == 999.0
+
+
+def test_polars_widget_threads_skip_stat_columns():
+    pl = pytest.importorskip("polars")
+    from buckaroo.polars_buckaroo import PolarsBuckarooWidget
+    pdf = pl.DataFrame({"alpha": [1, 2, 3, 4], "beta": [10, 20, 30, 40]})
+    sd = PolarsBuckarooWidget(pdf, skip_stat_columns=["beta"]).dataflow.merged_sd
+    assert "mean" in _by_orig(sd, "alpha")
+    assert "mean" not in _by_orig(sd, "beta")
