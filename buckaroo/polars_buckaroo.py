@@ -45,15 +45,21 @@ class PolarsAutocleaning(PandasAutocleaning):
 
     @staticmethod
     def make_origs(raw_df, cleaned_df, cleaning_sd):
+        # cleaning_sd is keyed by buckaroo's internal a/b/c names, but cleaned_df
+        # and raw_df carry the user's original column names — so index by
+        # ``orig_col_name`` (mirrors PandasAutocleaning.make_origs), not the key.
         clauses = []
+        seen = set()
         changed = 0
-        for col, sd in cleaning_sd.items():
+        for _rewritten_col, sd in cleaning_sd.items():
+            col = sd.get("orig_col_name")
+            if col not in cleaned_df.columns or col == 'index' or col in seen:
+                continue
+            seen.add(col)
+            clauses.append(cleaned_df[col])
             if sd.get("add_orig"):
-                clauses.append(cleaned_df[col])
                 clauses.append(raw_df[col].alias(col + "_orig"))
                 changed += 1
-            else:
-                clauses.append(cleaned_df[col])
         if changed > 0:
             return cleaned_df.select(clauses)
         return cleaned_df
