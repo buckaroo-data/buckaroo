@@ -195,9 +195,9 @@ class TestHistogram:
         assert len(h) > 0
         assert "name" in h[0]
         assert "population" in h[0]
-        # populations should sum to ~1.0
+        # populations should sum to ~100.0
         total_pop = sum(b["population"] for b in h)
-        assert abs(total_pop - 1.0) < 1e-6
+        assert abs(total_pop - 100.0) < 0.1
 
     def test_categorical_histogram_present(self):
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
@@ -236,7 +236,7 @@ class TestHistogram:
         assert isinstance(h, list)
         assert len(h) > 0, "histogram should not be empty for a numeric column with nulls"
         total_pop = sum(b["population"] for b in h)
-        assert abs(total_pop - 1.0) < 1e-6
+        assert abs(total_pop - 100.0) < 0.1
 
 
 # ============================================================

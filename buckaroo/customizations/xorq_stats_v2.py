@@ -233,7 +233,8 @@ def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: s
         low = min_val + idx * bucket_width
         high = low + bucket_width
         out.append(
-            {"name": fmt_bucket(low, high, bucket_width, ref), "population": float(row["__count"]) / total})
+            {"name": fmt_bucket(low, high, bucket_width, ref),
+             "population": round(float(row["__count"]) / total * 100, 1)})
     return out
 
 

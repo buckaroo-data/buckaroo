@@ -24,7 +24,7 @@ export function FloatingTooltip({ items, x, y }: any) {
     const offset = 30;
     const renderedItems = items.map((name: [string, number], _value: number | string) => {
         const [realName, realValue] = name;
-        const formattedVal = realValue === 0 ? "<1" : `${(realValue * 100).toFixed(1)}`;
+        const formattedVal = realValue === 0 ? "<1" : `${realValue.toFixed(1)}`;
         return (
             <React.Fragment>
                 <dt>{realName}</dt>
@@ -58,7 +58,7 @@ const CustomTooltip = ({ active, payload, screenCoords }: any) => {
                     left: screenCoords.x + 10,
                 }}
             >
-                <p className="label">{`${name} : ${(payload[0].value * 100).toFixed(1)}%`}</p>
+                <p className="label">{`${name} : ${payload[0].value.toFixed(1)}%`}</p>
             </div>,
             document.body,
         );
