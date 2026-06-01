@@ -32,6 +32,7 @@ import pandas as pd
 
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (XorqColumn, XorqExpr, XorqExecute)
 from buckaroo.pluggable_analysis_framework.stat_func import MultipleProvides, stat
+from buckaroo.customizations.histogram import fmt_bucket
 
 try:
     import xorq.api as xo
@@ -225,13 +226,14 @@ def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: s
         return []
 
     bucket_width = (max_val - min_val) / 10
+    ref = abs(max_val) if abs(max_val) >= abs(min_val) else abs(min_val)
     out = []
     for _, row in df.iterrows():
         idx = int(row["__bucket"])
         low = min_val + idx * bucket_width
         high = low + bucket_width
         out.append(
-            {"name": f"{low:.3g}-{high:.3g}", "cat_pop": float(row["__count"]) / total})
+            {"name": fmt_bucket(low, high, bucket_width, ref), "population": float(row["__count"]) / total})
     return out
 
 

@@ -1,3 +1,4 @@
+import math
 import pandas as pd
 import numpy as np
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
@@ -8,13 +9,47 @@ def force_float(n):
         return n.item()
     else:
         return n
-    
+
+
+def _trim(s: str) -> str:
+    """Strip trailing zeros after the decimal point only."""
+    if '.' in s:
+        s = s.rstrip('0').rstrip('.')
+    return s
+
+
+def fmt_num(value: float, step: float, ref: float) -> str:
+    """Format one histogram boundary — SI prefix (K/M/B/T) + step-based precision."""
+    if step > 0 and abs(value) < step * 1e-9:
+        value = 0.0
+    for threshold, suffix in [(1e12, 'T'), (1e9, 'B'), (1e6, 'M'), (1e3, 'K')]:
+        if ref >= threshold:
+            scaled = value / threshold
+            step_s = step / threshold
+            dec = max(0, -math.floor(math.log10(step_s)) + 1) if step_s > 0 else 1
+            dec = min(dec, 2)
+            return _trim(f"{scaled:.{dec}f}") + suffix
+    dec = max(0, -math.floor(math.log10(step)) + 1) if step > 0 else 0
+    dec = min(dec, 6)
+    return _trim(f"{value:.{dec}f}")
+
+
+def fmt_bucket(lo: float, hi: float, step: float, ref: float) -> str:
+    lo_s = fmt_num(lo, step, ref)
+    hi_s = fmt_num(hi, step, ref)
+    sep = '<>' if hi_s.startswith('-') else '–'
+    return f"{lo_s}{sep}{hi_s}"
+
+
 def numeric_histogram_labels(endpoints):
     left = endpoints[0]
     labels = []
+    min_val = float(endpoints[0])
+    max_val = float(endpoints[-1])
+    step = (max_val - min_val) / max(len(endpoints) - 1, 1)
+    ref = max(abs(min_val), abs(max_val))
     for edge in endpoints[1:]:
-        
-        labels.append("{:.0f}-{:.0f}".format(force_float(left), force_float(edge)))
+        labels.append(fmt_bucket(float(left), float(edge), step, ref))
         left = edge
     return labels
 
@@ -87,18 +122,19 @@ def numeric_histogram(histogram_args, min_, max_, nan_per):
     nan_observation = {'name':'NA', 'NA':np.round(nan_per*100, 0)}
     if nan_per == 1.0:
         return [nan_observation]
-    
-    populations, endpoints = histogram_args['meat_histogram']
-    
-    labels = numeric_histogram_labels(endpoints)
-    #normalized_pop = populations / populations.sum()
-    normalized_pop = histogram_args['normalized_populations']
-    low_label = "%r - %r" % (force_float(min_), force_float(low_tail))
 
+    populations, endpoints = histogram_args['meat_histogram']
+    labels = numeric_histogram_labels(endpoints)
+    normalized_pop = histogram_args['normalized_populations']
+
+    min_f, max_f = force_float(min_), force_float(max_)
+    step = (max_f - min_f) / 10
+    ref = max(abs(min_f), abs(max_f))
+    low_label = fmt_bucket(min_f, force_float(low_tail), step, ref)
     ret_histo.append({'name': low_label, 'tail':1})
     for label, pop in zip(labels, normalized_pop):
         ret_histo.append({'name': label, 'population':np.round(pop * 100, 0)})
-    high_label = "%r - %r" % (force_float(high_tail), force_float(max_))
+    high_label = fmt_bucket(force_float(high_tail), max_f, step, ref)
     ret_histo.append({'name': high_label, 'tail':1})
     if nan_per > 0.0:
         ret_histo.append(nan_observation)

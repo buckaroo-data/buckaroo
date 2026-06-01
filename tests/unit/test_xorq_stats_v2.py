@@ -194,9 +194,9 @@ class TestHistogram:
         assert isinstance(h, list)
         assert len(h) > 0
         assert "name" in h[0]
-        assert "cat_pop" in h[0]
-        # cat_pops should sum to ~1.0
-        total_pop = sum(b["cat_pop"] for b in h)
+        assert "population" in h[0]
+        # populations should sum to ~1.0
+        total_pop = sum(b["population"] for b in h)
         assert abs(total_pop - 1.0) < 1e-6
 
     def test_categorical_histogram_present(self):
@@ -235,7 +235,7 @@ class TestHistogram:
         h = stats["vals"]["histogram"]
         assert isinstance(h, list)
         assert len(h) > 0, "histogram should not be empty for a numeric column with nulls"
-        total_pop = sum(b["cat_pop"] for b in h)
+        total_pop = sum(b["population"] for b in h)
         assert abs(total_pop - 1.0) < 1e-6
 
 
