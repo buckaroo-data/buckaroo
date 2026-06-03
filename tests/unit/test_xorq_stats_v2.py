@@ -500,3 +500,55 @@ class TestMaterialization:
         leaked = [n for n in (set(con.list_tables()) - before)
                   if n.startswith("__buckaroo_histo_mat")]
         assert leaked == [], f"materialized table not cleaned up: {leaked}"
+
+    @staticmethod
+    def _cached_join_expr(tmp_path):
+        """A cache()+join expression — the shape every catalog-diff
+        comparison carries. The cache() wrapper inserts a CachedNode, which
+        has no SQL translation, so the plain create_table(expr) materialize
+        path raises on it."""
+        cache = xo.ParquetSnapshotCache.from_kwargs(
+            source=xo.connect(), base_path=str(tmp_path))
+        df = pd.DataFrame({"k": range(20), "v": [float(i % 7) for i in range(20)]})
+        con = xo.connect()
+        a = con.create_table("cn_a", df).cache(cache=cache)
+        b = (con.create_table("cn_b", df.assign(v=df.v + 1))
+             .cache(cache=cache).rename({"v_v2": "v"}))
+        expr = a.join(b, "k").select("k", "v", "v_v2")
+        expr.execute()  # populate the on-disk cache files
+        return expr
+
+    def test_materializes_past_cached_node(self, tmp_path):
+        """A CachedNode-bearing expr (the diff shape) still materializes:
+        create_table(expr) can't compile CachedNode, so the fallback rewrites
+        each node to a read of its cache file and retries in-engine. Without
+        the fallback, materialization silently no-ops and every per-column
+        histogram re-runs the join."""
+        from xorq.expr.relations import CachedNode
+        from xorq.vendor.ibis.expr import operations as ops
+
+        expr = self._cached_join_expr(tmp_path)
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        materialized, cleanup = pipeline._maybe_materialize(expr)
+        try:
+            assert cleanup is not None, "materialization did not fire for CachedNode expr"
+            assert isinstance(materialized.op(), (ops.DatabaseTable, ops.InMemoryTable))
+            # In-engine path: the CachedNode is rewritten to a parquet read,
+            # not pulled through pandas.
+            assert not list(materialized.op().find(CachedNode))
+        finally:
+            if cleanup is not None:
+                cleanup[0].drop_table(cleanup[1])
+
+    def test_cached_node_stats_match_unmaterialized(self, tmp_path):
+        """Stats over the materialized base table equal stats over the raw
+        CachedNode expr — materialization is a perf optimization, not a
+        semantic change."""
+        expr = self._cached_join_expr(tmp_path)
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        raw, _ = pipeline._process_table_impl(expr)
+        mat, _ = pipeline.process_table(expr)
+        for col in raw:
+            for key in ("min", "max", "mean", "null_count", "distinct_count"):
+                assert raw[col].get(key) == mat[col].get(key), (col, key)
+            assert len(raw[col].get("histogram", [])) == len(mat[col].get("histogram", []))
