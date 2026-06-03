@@ -22,7 +22,7 @@ installing a wrapper that:
    does not clone the parent's address space or threads, so the
    fork-from-multithreaded hazard cannot fire by construction; and
 2. **degrades to placeholders on any failure** (signal death, missing git,
-   timeout) instead of raising.
+   non-zero exit) instead of raising.
 
 Each call captures fresh — no permanent cache — so successive loads record the
 repo state at the time rather than freezing the first capture.
@@ -32,22 +32,22 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import subprocess
 import tempfile
 
 # Matches xorq's get_git_state command set (sub-commands; "git" prepended at spawn).
 _GIT_COMMANDS = (["rev-parse", "HEAD"], ["diff"], ["diff", "--cached"])
 
+# ``os.posix_spawn`` is POSIX-only. The fork-from-multithreaded SIGSEGV this
+# module guards against is likewise POSIX/macOS-specific; on Windows
+# ``subprocess`` uses ``CreateProcess`` (no fork), so there is no hazard and we
+# simply shell out the ordinary way — which also keeps real git provenance
+# instead of degrading every Windows capture to placeholders.
+_HAS_POSIX_SPAWN = hasattr(os, "posix_spawn")
 
-def _run_git(args: list, timeout: float = 10.0) -> str:
-    """Run ``git <args>`` without forking, via ``os.posix_spawn``.
 
-    Resolves git on PATH at call time (posix_spawn does not search PATH).
-    Returns stripped stdout; raises on a missing git, signal death, or non-zero
-    exit — all of which ``_capture`` turns into placeholders.
-    """
-    git = shutil.which("git")
-    if git is None:
-        raise FileNotFoundError("git not found on PATH")
+def _run_git_posix_spawn(git: str, args: list) -> str:
+    """Run ``git <args>`` without forking, via ``os.posix_spawn`` (vfork-style)."""
     devnull = os.open(os.devnull, os.O_WRONLY)
     try:
         with tempfile.TemporaryFile() as out:
@@ -67,6 +67,27 @@ def _run_git(args: list, timeout: float = 10.0) -> str:
         os.close(devnull)
 
 
+def _run_git(args: list) -> str:
+    """Run ``git <args>`` and return stripped stdout.
+
+    Resolves git on PATH at call time (posix_spawn does not search PATH). Uses
+    ``os.posix_spawn`` where available (the fork-free path that avoids the
+    macOS hazard) and falls back to ``subprocess`` on platforms without it
+    (Windows), where there is no fork hazard. Raises on a missing git, signal
+    death, or non-zero exit — all of which ``_capture`` turns into placeholders.
+    """
+    git = shutil.which("git")
+    if git is None:
+        raise FileNotFoundError("git not found on PATH")
+    if _HAS_POSIX_SPAWN:
+        return _run_git_posix_spawn(git, args)
+    completed = subprocess.run(
+        [git, *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if completed.returncode != 0:
+        raise RuntimeError(f"git {args} exited non-zero (returncode={completed.returncode})")
+    return completed.stdout.decode().strip()
+
+
 def _format(triple: tuple, hash_diffs: bool) -> dict:
     """Shape a (commit, diff, diff_cached) triple like xorq's get_git_state does."""
     commit, diff, diff_cached = triple
@@ -82,9 +103,11 @@ def _capture() -> tuple:
     try:
         out = [_run_git(cmd) for cmd in _GIT_COMMANDS]
         return (out[0], out[1], out[2])
-    except BaseException:
-        # RuntimeError (signal death like SIGSEGV / non-zero exit),
-        # FileNotFoundError, OSError — none of it may reach the caller.
+    except Exception:
+        # RuntimeError (child signal death like SIGSEGV / non-zero exit),
+        # FileNotFoundError, OSError — none of it may reach the caller. Child
+        # signal death surfaces here as RuntimeError via WIFSIGNALED, not as a
+        # BaseException, so Exception is the right (and tightest) breadth.
         return ("unknown", "", "")
 
 

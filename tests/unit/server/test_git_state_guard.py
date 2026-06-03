@@ -118,6 +118,9 @@ def segfault_git_repo(tmp_path: Path, monkeypatch) -> Path:
     return repo
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "posix_spawn"),
+    reason="posix_spawn (the fork-free path) is POSIX-only; Windows has no fork hazard")
 def test_installed_guard_dispatches_git_fork_free(guard_env, spawn_spy, temp_git_repo):
     """The real xorq get_git_state, through the guard, must use posix_spawn."""
     lu, _ = guard_env
@@ -147,6 +150,22 @@ def test_guard_reflects_repo_state_changes(guard_env, temp_git_repo):
         "guard returned stale, permanently-cached provenance; each call must "
         "reflect current repo state")
     assert "new.txt" in second["diff_cached"]
+
+
+def test_guard_subprocess_fallback_captures_real_provenance(
+        guard_env, temp_git_repo, monkeypatch):
+    """On platforms without os.posix_spawn (Windows), the guard must fall back
+    to subprocess and still capture real provenance — not degrade every capture
+    to placeholders. Exercised on POSIX by forcing the no-posix_spawn branch."""
+    lu, _ = guard_env
+    monkeypatch.setattr(g, "_HAS_POSIX_SPAWN", False)
+    g.install_git_state_guard()
+
+    state = lu.get_git_state(hash_diffs=False)
+
+    assert state["commit"] != "unknown", (
+        "subprocess fallback degraded to placeholders instead of capturing "
+        "real git provenance")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell shim / signals")
