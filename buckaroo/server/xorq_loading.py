@@ -14,6 +14,7 @@ import logging
 import traceback
 from pathlib import Path
 
+from buckaroo.server.git_state_guard import install_git_state_guard
 from buckaroo.server.window import clamp_window
 from buckaroo.xorq_buckaroo import (
     NoCleaningConfXorq, XorqAutocleaning, XorqDataflow, XorqDfStatsV2,
@@ -21,6 +22,13 @@ from buckaroo.xorq_buckaroo import (
     window_to_parquet)
 
 log = logging.getLogger(__name__)
+
+# xorq captures git provenance by forking `git` from the compiler; from the
+# long-lived multithreaded Tornado server that fork can SIGSEGV on macOS and
+# fail /load_expr with a 500 (#885). Installing the guard here — the single
+# module the server imports to touch xorq — makes every xorq build/load path
+# the server drives dispatch git fork-free and degrade instead of crashing.
+install_git_state_guard()
 
 
 def _make_cache_storage(cache_storage_path):
