@@ -1,7 +1,7 @@
 import pandas as pd
 from buckaroo.pluggable_analysis_framework.analysis_management import (
     DfStats, produce_series_df, AnalysisPipeline)
-from buckaroo.customizations.histogram import Histogram
+from buckaroo.customizations.histogram import Histogram, numeric_histogram
 from buckaroo.customizations.analysis import (
     TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
 
@@ -84,3 +84,14 @@ def test_dfstats_histogram():
     print(sdf['a'])
     ha = sdf['a']['histogram_args']
     _assert_ha(ha)
+
+
+def test_tail_label_precision():
+    """Tail labels must take precision from the meat bucket width, not the
+    outlier-inflated full range — a huge outlier must not collapse the low
+    tail to '0K–0K'."""
+    histogram_args = {'meat_histogram': ([5, 5], [1.4, 1.6, 1.8]), 'normalized_populations': [0.5, 0.5],
+        'low_tail': 1.4, 'high_tail': 1.8}
+    result = numeric_histogram(histogram_args, 1.2, 50_000, 0.0)
+    assert result[0]['name'] == '1.2–1.4'
+    assert result[-1]['name'] == '1.8–50K'

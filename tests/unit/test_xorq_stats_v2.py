@@ -209,6 +209,10 @@ class TestHistogram:
         # 'a' appears 3 times — should be present
         names = [b["name"] for b in h]
         assert "a" in names
+        # cat_pop must be on the 0-100 scale like pandas/polars; all 8
+        # categories fit in the top-10 cap, so they sum to ~100
+        total_pop = sum(b["cat_pop"] for b in h)
+        assert abs(total_pop - 100.0) < 0.1
 
     def test_histogram_constant_column_empty(self):
         """Constant numeric column (min == max) → empty histogram, not crash."""
