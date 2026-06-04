@@ -20,6 +20,7 @@ Optional dependency: install with ``buckaroo[xorq]``.
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -185,14 +186,73 @@ class XorqStatPipeline:
         if not any(not _is_batch_func(sf) for sf in self.ordered_stat_funcs):
             return table, None
         name = f"__buckaroo_histo_mat_{uuid.uuid4().hex[:12]}"
-        try:
-            # Pass the ibis expression directly to create_table — xorq
-            # materializes it in DataFusion without round-tripping through
-            # pandas (~3-4× cheaper than execute() + create_table(df)).
-            new_table = underlying.create_table(name, table, overwrite=True)
-        except Exception:
+        new_table = self._create_base_table(underlying, name, table)
+        if new_table is None:
             return table, None
         return new_table, (underlying, name)
+
+    def _create_base_table(self, underlying, name, table):
+        """Land ``table`` as a base table on ``underlying``, or None on failure.
+
+        Prefers the in-engine ``create_table(expr)`` path, which materialises
+        in DataFusion without a pandas round-trip (~3-4× cheaper than
+        ``execute()`` + ``create_table(df)``). That path compiles the
+        expression to SQL, so an op with no translation rule — notably
+        ``CachedNode`` from ``expr.cache()`` (the shape every catalog-diff
+        comparison carries) — makes it raise. Two fallbacks recover that:
+
+          1. Rewrite each ``CachedNode`` to a read of its on-disk cache file
+             and retry in-engine — no transport, the join still runs once.
+          2. Last resort, ``execute()`` to pandas and register the result.
+             Correct for any expression but pays a full transport.
+        """
+        try:
+            return underlying.create_table(name, table, overwrite=True)
+        except Exception:
+            pass
+        rewritten = self._resolve_cached_nodes(table, underlying)
+        if rewritten is not None:
+            try:
+                return underlying.create_table(name, rewritten, overwrite=True)
+            except Exception:
+                pass
+        try:
+            return underlying.create_table(name, table.execute(), overwrite=True)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _resolve_cached_nodes(table, underlying):
+        """Rewrite ``CachedNode``s in ``table`` to reads of their cache files.
+
+        ``CachedNode`` has no SQL translation, but its cached result is a
+        parquet on disk once materialised. Swapping each node for a
+        ``read_parquet`` of that file yields an equivalent expression the SQL
+        compiler can handle, keeping materialisation in-engine. Returns the
+        rewritten expression, or None if there are no cached nodes or any
+        cache file is missing (so the caller falls back to ``execute()``,
+        which populates the cache).
+        """
+        try:
+            from xorq.expr.relations import CachedNode
+        except Exception:
+            return None
+        nodes = list(table.op().find(CachedNode))
+        if not nodes:
+            return None
+        subs = {}
+        for cn in nodes:
+            try:
+                path = cn.cache.storage.get_path(cn.cache.calc_key(cn.parent))
+                if not Path(path).exists():
+                    return None
+                subs[cn] = underlying.read_parquet(str(path)).op()
+            except Exception:
+                return None
+        try:
+            return table.op().replace(subs).to_expr()
+        except Exception:
+            return None
 
     def unit_test(self) -> Tuple[bool, List[StatError]]:
         """Run pipeline against PERVERSE_DF wrapped as a xorq memtable.
