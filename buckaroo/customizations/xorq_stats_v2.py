@@ -254,7 +254,8 @@ def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, co
     out = []
     for _, row in df.iterrows():
         out.append(
-            {"name": str(row[col]), "cat_pop": float(row["__count"]) / total})
+            {"name": str(row[col]),
+             "cat_pop": round(float(row["__count"]) / total * 100, 1)})
     return out
 
 

@@ -34,11 +34,19 @@ def fmt_num(value: float, step: float, ref: float) -> str:
     return _trim(f"{value:.{dec}f}")
 
 
-def fmt_bucket(lo: float, hi: float, step: float, ref: float) -> str:
-    lo_s = fmt_num(lo, step, ref)
-    hi_s = fmt_num(hi, step, ref)
+def _join_bounds(lo_s: str, hi_s: str) -> str:
     sep = '<>' if hi_s.startswith('-') else '–'
     return f"{lo_s}{sep}{hi_s}"
+
+
+def fmt_bucket(lo: float, hi: float, step: float, ref: float) -> str:
+    return _join_bounds(fmt_num(lo, step, ref), fmt_num(hi, step, ref))
+
+
+def fmt_tail_bucket(lo: float, hi: float, step: float) -> str:
+    """Format a tail bucket — per-bound SI prefix so an outlier bound
+    doesn't drag a small bound to '0K'."""
+    return _join_bounds(fmt_num(lo, step, abs(lo)), fmt_num(hi, step, abs(hi)))
 
 
 def numeric_histogram_labels(endpoints):
@@ -128,13 +136,15 @@ def numeric_histogram(histogram_args, min_, max_, nan_per):
     normalized_pop = histogram_args['normalized_populations']
 
     min_f, max_f = force_float(min_), force_float(max_)
-    step = (max_f - min_f) / 10
-    ref = max(abs(min_f), abs(max_f))
-    low_label = fmt_bucket(min_f, force_float(low_tail), step, ref)
+    # precision from the meat bucket width — the full min/max range is
+    # outlier-inflated and would collapse small tail bounds to '0K'
+    e_lo, e_hi = float(endpoints[0]), float(endpoints[-1])
+    step = (e_hi - e_lo) / max(len(endpoints) - 1, 1)
+    low_label = fmt_tail_bucket(min_f, force_float(low_tail), step)
     ret_histo.append({'name': low_label, 'tail':1})
     for label, pop in zip(labels, normalized_pop):
         ret_histo.append({'name': label, 'population':np.round(pop * 100, 0)})
-    high_label = fmt_bucket(force_float(high_tail), max_f, step, ref)
+    high_label = fmt_tail_bucket(force_float(high_tail), max_f, step)
     ret_histo.append({'name': high_label, 'tail':1})
     if nan_per > 0.0:
         ret_histo.append(nan_observation)

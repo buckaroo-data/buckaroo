@@ -1,7 +1,7 @@
 import pandas as pd
 from buckaroo.pluggable_analysis_framework.analysis_management import (
     DfStats, produce_series_df, AnalysisPipeline)
-from buckaroo.customizations.histogram import Histogram, numeric_histogram
+from buckaroo.customizations.histogram import Histogram, fmt_bucket, numeric_histogram
 from buckaroo.customizations.analysis import (
     TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
 
@@ -84,6 +84,15 @@ def test_dfstats_histogram():
     print(sdf['a'])
     ha = sdf['a']['histogram_args']
     _assert_ha(ha)
+
+
+def test_fmt_bucket_labels():
+    # SI prefix with step-scaled precision (diamonds price style)
+    assert fmt_bucket(300, 2200, 190, 2200) == '0.3K–2.2K'
+    # negative high bound switches separator to avoid the double-dash
+    assert fmt_bucket(-100, -80, 2, 100) == '-100<>-80'
+    # step=0 (constant column) must not crash
+    assert fmt_bucket(7, 7, 0, 7) == '7–7'
 
 
 def test_tail_label_precision():

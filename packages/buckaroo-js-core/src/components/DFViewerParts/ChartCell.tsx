@@ -19,29 +19,6 @@ export const formatter = (value: any, name: any, props: any) => {
     }
 };
 
-export function FloatingTooltip({ items, x, y }: any) {
-    const offset = 30;
-    const renderedItems = items.map((name: [string, number], _value: number | string) => {
-        const [realName, realValue] = name;
-        const formattedVal = realValue === 0 ? "<1" : realValue;
-        return (
-            <React.Fragment>
-                <dt>{realName}</dt>
-                <dd>{formattedVal}%</dd>
-            </React.Fragment>
-        );
-    });
-    return createPortal(
-        <div
-            className="floating-tooltip"
-            style={{ position: "absolute", top: y + offset, left: x + offset }}
-        >
-            <dl>{renderedItems}</dl>
-        </div>,
-        document.body,
-    );
-}
-
 const CustomTooltip = ({ active, payload, screenCoords }: any) => {
     if (active && payload && payload.length && screenCoords) {
         // console.log("payload", payload, "label", label);
