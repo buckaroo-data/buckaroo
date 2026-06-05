@@ -238,6 +238,42 @@ class TestHistogram:
         total_pop = sum(b["cat_pop"] for b in h)
         assert abs(total_pop - 1.0) < 1e-6
 
+    def test_histogram_bins_numeric(self):
+        """histogram_bins must be 11 evenly-spaced edges for numeric columns."""
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(_make_table())
+        assert errors == []
+        bins = stats["ints"]["histogram_bins"]
+        assert isinstance(bins, list)
+        assert len(bins) == 11
+        assert bins[0] == stats["ints"]["min"]
+        assert abs(bins[-1] - stats["ints"]["max"]) < 1e-9
+        # evenly spaced
+        widths = [bins[i + 1] - bins[i] for i in range(10)]
+        assert all(abs(w - widths[0]) < 1e-9 for w in widths)
+
+    def test_histogram_bins_non_numeric_empty(self):
+        """histogram_bins must be empty for string columns."""
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(_make_table())
+        assert errors == []
+        assert stats["strs"]["histogram_bins"] == []
+
+    def test_histogram_bins_bool_empty(self):
+        """histogram_bins must be empty for boolean columns."""
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(_make_table())
+        assert errors == []
+        assert stats["bools"]["histogram_bins"] == []
+
+    def test_histogram_bins_constant_empty(self):
+        """Constant numeric column (min == max) must return empty histogram_bins."""
+        table = xo.memtable(pd.DataFrame({"const": [7, 7, 7, 7, 7, 7, 7]}))
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(table)
+        assert errors == []
+        assert stats["const"]["histogram_bins"] == []
+
 
 # ============================================================
 # Structured error capture — silent excepts must be gone
