@@ -91,6 +91,9 @@ def test_fmt_bucket_labels():
     assert fmt_bucket(300, 2200, 190, 2200) == '0.3K–2.2K'
     # negative high bound switches separator to avoid the double-dash
     assert fmt_bucket(-100, -80, 2, 100) == '-100<>-80'
+    # negative low bound too — '-0.5–0.5' reads as a double-dash since the
+    # minus sign and en-dash are near-identical glyphs
+    assert fmt_bucket(-0.5, 0.5, 0.1, 0.5) == '-0.5<>0.5'
     # step=0 (constant column) must not crash
     assert fmt_bucket(7, 7, 0, 7) == '7–7'
 

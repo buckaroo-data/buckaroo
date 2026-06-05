@@ -19,6 +19,10 @@ export const formatter = (value: any, name: any, props: any) => {
     }
 };
 
+// Tooltip value display, shared with HistogramCell. Extraction of the
+// inline `value.toFixed(1)` — still crashes on non-numbers.
+export const formatTooltipValue = (value: any): string => value.toFixed(1);
+
 const CustomTooltip = ({ active, payload, screenCoords }: any) => {
     if (active && payload && payload.length && screenCoords) {
         // console.log("payload", payload, "label", label);
