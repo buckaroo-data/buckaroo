@@ -194,10 +194,10 @@ class TestHistogram:
         assert isinstance(h, list)
         assert len(h) > 0
         assert "name" in h[0]
-        assert "cat_pop" in h[0]
-        # cat_pops should sum to ~1.0
-        total_pop = sum(b["cat_pop"] for b in h)
-        assert abs(total_pop - 1.0) < 1e-6
+        assert "population" in h[0]
+        # populations should sum to ~100.0
+        total_pop = sum(b["population"] for b in h)
+        assert abs(total_pop - 100.0) < 0.6  # per-bucket 1dp rounding drift
 
     def test_categorical_histogram_present(self):
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
@@ -209,6 +209,10 @@ class TestHistogram:
         # 'a' appears 3 times — should be present
         names = [b["name"] for b in h]
         assert "a" in names
+        # cat_pop must be on the 0-100 scale like pandas/polars; all 8
+        # categories fit in the top-10 cap, so they sum to ~100
+        total_pop = sum(b["cat_pop"] for b in h)
+        assert abs(total_pop - 100.0) < 0.6  # per-bucket 1dp rounding drift
 
     def test_histogram_constant_column_empty(self):
         """Constant numeric column (min == max) → empty histogram, not crash."""
@@ -235,8 +239,8 @@ class TestHistogram:
         h = stats["vals"]["histogram"]
         assert isinstance(h, list)
         assert len(h) > 0, "histogram should not be empty for a numeric column with nulls"
-        total_pop = sum(b["cat_pop"] for b in h)
-        assert abs(total_pop - 1.0) < 1e-6
+        total_pop = sum(b["population"] for b in h)
+        assert abs(total_pop - 100.0) < 0.6  # per-bucket 1dp rounding drift
 
     def test_histogram_bins_numeric(self):
         """histogram_bins must be 11 evenly-spaced edges for numeric columns."""

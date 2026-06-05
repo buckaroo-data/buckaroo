@@ -3,7 +3,7 @@ import React from "react";
 import { createPortal } from "react-dom";
 
 import { Bar, BarChart, Tooltip } from "recharts";
-import { getChartColors } from "./ChartCell";
+import { formatTooltipValue, getChartColors } from "./ChartCell";
 import { ColDef, Column, Context, GridApi } from "ag-grid-community";
 import { useColorScheme } from "../useColorScheme";
 
@@ -20,29 +20,6 @@ export const formatter = (value: any, name: any, props: any) => {
     }
 };
 
-export function FloatingTooltip({ items, x, y }: any) {
-    const offset = 30;
-    const renderedItems = items.map((name: [string, number], _value: number | string) => {
-        const [realName, realValue] = name;
-        const formattedVal = realValue === 0 ? "<1" : realValue;
-        return (
-            <React.Fragment>
-                <dt>{realName}</dt>
-                <dd>{formattedVal}%</dd>
-            </React.Fragment>
-        );
-    });
-    return createPortal(
-        <div
-            className="floating-tooltip"
-            style={{ position: "absolute", top: y + offset, left: x + offset }}
-        >
-            <dl>{renderedItems}</dl>
-        </div>,
-        document.body,
-    );
-}
-
 const CustomTooltip = ({ active, payload, screenCoords }: any) => {
     // Read this github issue for context https://github.com/recharts/recharts/issues/5181
     if (active && payload && payload.length && screenCoords) {
@@ -58,7 +35,7 @@ const CustomTooltip = ({ active, payload, screenCoords }: any) => {
                     left: screenCoords.x + 10,
                 }}
             >
-                <p className="label">{`${name} : ${payload[0].value}%`}</p>
+                <p className="label">{`${name} : ${formatTooltipValue(payload[0].value)}%`}</p>
             </div>,
             document.body,
         );

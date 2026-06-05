@@ -1,7 +1,7 @@
 import pandas as pd
 from buckaroo.pluggable_analysis_framework.analysis_management import (
     DfStats, produce_series_df, AnalysisPipeline)
-from buckaroo.customizations.histogram import Histogram
+from buckaroo.customizations.histogram import Histogram, fmt_bucket, numeric_histogram
 from buckaroo.customizations.analysis import (
     TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
 
@@ -84,3 +84,26 @@ def test_dfstats_histogram():
     print(sdf['a'])
     ha = sdf['a']['histogram_args']
     _assert_ha(ha)
+
+
+def test_fmt_bucket_labels():
+    # SI prefix with step-scaled precision (diamonds price style)
+    assert fmt_bucket(300, 2200, 190, 2200) == '0.3K–2.2K'
+    # negative high bound switches separator to avoid the double-dash
+    assert fmt_bucket(-100, -80, 2, 100) == '-100<>-80'
+    # negative low bound too — '-0.5–0.5' reads as a double-dash since the
+    # minus sign and en-dash are near-identical glyphs
+    assert fmt_bucket(-0.5, 0.5, 0.1, 0.5) == '-0.5<>0.5'
+    # step=0 (constant column) must not crash
+    assert fmt_bucket(7, 7, 0, 7) == '7–7'
+
+
+def test_tail_label_precision():
+    """Tail labels must take precision from the meat bucket width, not the
+    outlier-inflated full range — a huge outlier must not collapse the low
+    tail to '0K–0K'."""
+    histogram_args = {'meat_histogram': ([5, 5], [1.4, 1.6, 1.8]), 'normalized_populations': [0.5, 0.5],
+        'low_tail': 1.4, 'high_tail': 1.8}
+    result = numeric_histogram(histogram_args, 1.2, 50_000, 0.0)
+    assert result[0]['name'] == '1.2–1.4'
+    assert result[-1]['name'] == '1.8–50K'

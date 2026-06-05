@@ -19,28 +19,15 @@ export const formatter = (value: any, name: any, props: any) => {
     }
 };
 
-export function FloatingTooltip({ items, x, y }: any) {
-    const offset = 30;
-    const renderedItems = items.map((name: [string, number], _value: number | string) => {
-        const [realName, realValue] = name;
-        const formattedVal = realValue === 0 ? "<1" : realValue;
-        return (
-            <React.Fragment>
-                <dt>{realName}</dt>
-                <dd>{formattedVal}%</dd>
-            </React.Fragment>
-        );
-    });
-    return createPortal(
-        <div
-            className="floating-tooltip"
-            style={{ position: "absolute", top: y + offset, left: x + offset }}
-        >
-            <dl>{renderedItems}</dl>
-        </div>,
-        document.body,
-    );
-}
+// Tooltip value display, shared with HistogramCell. Rounds numbers to 1dp;
+// non-numbers (longtail/unique labels, missing values) pass through instead
+// of crashing on .toFixed.
+export const formatTooltipValue = (value: any): string => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value.toFixed(1);
+    }
+    return value == null ? "" : String(value);
+};
 
 const CustomTooltip = ({ active, payload, screenCoords }: any) => {
     if (active && payload && payload.length && screenCoords) {
@@ -58,7 +45,7 @@ const CustomTooltip = ({ active, payload, screenCoords }: any) => {
                     left: screenCoords.x + 10,
                 }}
             >
-                <p className="label">{`${name} : ${payload[0].value}`}</p>
+                <p className="label">{`${name} : ${formatTooltipValue(payload[0].value)}`}</p>
             </div>,
             document.body,
         );
