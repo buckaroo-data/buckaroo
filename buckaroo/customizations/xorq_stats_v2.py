@@ -283,6 +283,30 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
     return _categorical_histogram(execute, expr, orig_col_name)
 
 
+@stat(default=[])
+def histogram_bins(is_numeric: bool, is_bool: bool, distinct_count: int, min: float, max: float) -> list:
+    """Evenly-spaced numeric bin edges consumed by the JS ``color_map`` styler.
+
+    Returns 11 edges (10 equal-width bins) spanning [min, max] — the same
+    10-bucket layout used by ``_numeric_histogram``.  Pure computation: only
+    depends on ``min`` / ``max`` from the batch aggregate so no extra query
+    is needed.
+
+    The JS ``color_map`` rule reads ``histogram_stats[col].histogram_bins``
+    to map cell values onto a colour gradient (e.g. DIVERGING_RED_WHITE_BLUE).
+    An empty list causes that rule to fall back to ``inherit``, so non-numeric,
+    boolean, low-cardinality, and degenerate columns are safely skipped.
+    """
+    if not is_numeric or is_bool or distinct_count <= 5:
+        return []
+    if min is None or max is None:
+        return []
+    if min == max:
+        return []
+    width = (max - min) / 10
+    return [min + i * width for i in range(11)]
+
+
 # ============================================================
 # Convenience list — drop into XorqStatPipeline(XORQ_STATS_V2)
 # ============================================================
@@ -295,4 +319,4 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
 # ``PL_ANALYSIS_V2``) for those pipelines.
 
 XORQ_STATS_V2 = [typing_stats, _type, null_count, min, max, distinct_count, mean, std, median,
-    non_null_count, nan_per, distinct_per, histogram]
+    non_null_count, nan_per, distinct_per, histogram, histogram_bins]
