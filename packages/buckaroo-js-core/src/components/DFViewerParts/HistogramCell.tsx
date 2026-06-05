@@ -3,7 +3,7 @@ import React from "react";
 import { createPortal } from "react-dom";
 
 import { Bar, BarChart, Tooltip } from "recharts";
-import { getChartColors } from "./ChartCell";
+import { formatTooltipValue, getChartColors } from "./ChartCell";
 import { ColDef, Column, Context, GridApi } from "ag-grid-community";
 import { useColorScheme } from "../useColorScheme";
 
@@ -35,7 +35,7 @@ const CustomTooltip = ({ active, payload, screenCoords }: any) => {
                     left: screenCoords.x + 10,
                 }}
             >
-                <p className="label">{`${name} : ${payload[0].value.toFixed(1)}%`}</p>
+                <p className="label">{`${name} : ${formatTooltipValue(payload[0].value)}%`}</p>
             </div>,
             document.body,
         );

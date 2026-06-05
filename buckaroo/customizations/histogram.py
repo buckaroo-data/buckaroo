@@ -35,7 +35,9 @@ def fmt_num(value: float, step: float, ref: float) -> str:
 
 
 def _join_bounds(lo_s: str, hi_s: str) -> str:
-    sep = '<>' if hi_s.startswith('-') else '–'
+    # any negative bound makes '–' ambiguous: the minus sign and en-dash
+    # are near-identical glyphs
+    sep = '<>' if (lo_s.startswith('-') or hi_s.startswith('-')) else '–'
     return f"{lo_s}{sep}{hi_s}"
 
 
