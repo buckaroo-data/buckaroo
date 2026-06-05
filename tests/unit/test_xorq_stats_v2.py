@@ -274,6 +274,14 @@ class TestHistogram:
         assert errors == []
         assert stats["const"]["histogram_bins"] == []
 
+    def test_histogram_bins_low_cardinality_empty(self):
+        """Numeric column with ≤ 5 distinct values must return empty histogram_bins."""
+        table = xo.memtable(pd.DataFrame({"few": [1, 2, 3, 4, 5, 1, 2, 3]}))
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(table)
+        assert errors == []
+        assert stats["few"]["histogram_bins"] == []
+
 
 # ============================================================
 # Structured error capture — silent excepts must be gone
