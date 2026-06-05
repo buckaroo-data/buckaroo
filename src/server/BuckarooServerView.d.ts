@@ -44,10 +44,18 @@ export interface BuckarooServerViewProps {
      *  grows to fit its row count instead of filling the parent container.
      *  Use for stacked-cell hosts (notebook-style embeds) where a single
      *  fixed embed height looks wrong for both small and large dataframes.
+     *  @see onHeightChange for a fixed-height alternative that collapses the
+     *  host wrapper to the content instead of growing with row count.
      *  Overrides any `component_config.layoutType` set by the server. */
     autoHeight?: boolean;
+    /** Called with the widget's natural rendered height (px) whenever it
+     *  changes. A fixed-height host (e.g. a `60vh` wrapper) can use it to
+     *  collapse the wrapper to the table's actual height, removing the gap
+     *  Buckaroo otherwise leaves below short tables. Only fires in
+     *  `"buckaroo"` mode. */
+    onHeightChange?: (height: number) => void;
 }
 /** Derive a Buckaroo server WebSocket URL from an HTTP server URL + session
  *  id. Accepts `http://...`, `https://...`, or already-`ws[s]://` URLs. */
 export declare function buckarooWsUrl(serverUrl: string, sessionId: string): string;
-export declare function BuckarooServerView({ wsUrl, renderConnecting, renderError, onMetadata, style, className, autoHeight, }: BuckarooServerViewProps): React.ReactElement;
+export declare function BuckarooServerView({ wsUrl, renderConnecting, renderError, onMetadata, style, className, autoHeight, onHeightChange, }: BuckarooServerViewProps): React.ReactElement;
