@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+import weakref
 from io import BytesIO
 from typing import Any
 
@@ -45,14 +46,13 @@ def _is_pandas(obj: Any) -> bool:
 # with one entry per unique expression object observed; entries become
 # unreachable when the expression is GC'd, so for a long-running
 # session it tracks the live set of expressions naturally.
-_expr_count_cache: dict[int, int] = {}
+_expr_count_cache: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 def _expr_count(expr_or_df: Any) -> int:
     if _is_pandas(expr_or_df):
         return len(expr_or_df)
-    key = id(expr_or_df)
-    cached = _expr_count_cache.get(key)
+    cached = _expr_count_cache.get(expr_or_df)
     if cached is not None:
         return cached
     try:
@@ -65,7 +65,7 @@ def _expr_count(expr_or_df: Any) -> int:
         # next call retries the backend.
         logger.exception("_expr_count: backend count failed; not caching")
         return 0
-    _expr_count_cache[key] = result
+    _expr_count_cache[expr_or_df] = result
     return result
 
 

@@ -95,7 +95,7 @@ class TestExprCountMemoization:
         assert len(xorq_buckaroo._expr_count_cache) == 1, (
             f"expected exactly 1 cached entry for 3 calls on the same "
             f"expression; got {len(xorq_buckaroo._expr_count_cache)}. "
-            f"The cache key must be id(expr)."
+            f"The cache key must be the expression object itself."
         )
 
     def test_expr_count_separate_expressions_cache_separately(self):
@@ -159,9 +159,9 @@ class TestExprCountMemoization:
         stub = _StubExpr()
 
         first = xorq_buckaroo._expr_count(stub)
-        assert id(stub) not in xorq_buckaroo._expr_count_cache, (
+        assert stub not in xorq_buckaroo._expr_count_cache, (
             "failed _expr_count call must not write to the cache; "
-            f"found cached value {xorq_buckaroo._expr_count_cache.get(id(stub))!r}"
+            f"found cached value {xorq_buckaroo._expr_count_cache.get(stub)!r}"
         )
 
         second = xorq_buckaroo._expr_count(stub)
@@ -169,7 +169,7 @@ class TestExprCountMemoization:
             f"after backend recovery, _expr_count must return the real "
             f"count, not a cached failure sentinel; got {second!r}"
         )
-        assert xorq_buckaroo._expr_count_cache.get(id(stub)) == 42, (
+        assert xorq_buckaroo._expr_count_cache.get(stub) == 42, (
             "successful call following a failure must populate the cache "
             "with the real count"
         )
