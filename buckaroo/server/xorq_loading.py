@@ -350,6 +350,11 @@ def load_project_display_klasses(project_root) -> list:
     for path in sorted(display_dir.glob("*.py")):
         if path.name.startswith("_"):
             continue
+        if not path.stem.isidentifier():
+            log.warning(
+                "project display %s: filename stem is not a valid python identifier; skipping",
+                path)
+            continue
         try:
             found = _compile_project_display(path, ColAnalysis,
                 DefaultMainStyling, DefaultSummaryStatsStyling, StylingAnalysis)
@@ -366,11 +371,22 @@ def _compile_project_display(path: Path, ColAnalysis, *extra_bases):
     file defines no qualifying classes (not an error)."""
     source = path.read_text()
     safe = _safe_builtins()
-    # class syntax requires __build_class__; classmethod/staticmethod are
-    # standard descriptors needed for display klass method definitions.
+    # __build_class__ is the CPython hook that executes class bodies; without
+    # it, any ``class Foo:`` statement raises NameError. Adding it opens more
+    # exec surface than the function-only stat/post-processing loaders — class
+    # bodies run arbitrary code at definition time (descriptors,
+    # __init_subclass__, metaclasses). Display files are project-developer-
+    # authored, not end-user input, so this is acceptable; keep that scope in
+    # mind if the sandbox model is ever revisited.
     safe["__build_class__"] = __build_class__
     safe["classmethod"] = classmethod
     safe["staticmethod"] = staticmethod
+    # super() is a builtin but not in _SAFE_BUILTIN_NAMES; without it,
+    # calling super() inside any method succeeds at class-definition time
+    # but raises NameError at render time — the common override pattern
+    # (subclass DefaultMainStyling, call super().style_column(...)) would
+    # silently break.
+    safe["super"] = super
     globs: dict = {"__builtins__": safe, "__name__": str(path.stem), "ColAnalysis": ColAnalysis}
     for base in extra_bases:
         globs[base.__name__] = base
