@@ -2,7 +2,7 @@ import {
     CellClassParams,
 } from "ag-grid-community";
 
-import { BLUE_TO_YELLOW, DIVERGING_RED_WHITE_BLUE } from "../../baked_data/colorMap";
+import { BLUE_TO_YELLOW, DIVERGING_RED_WHITE_BLUE, DIVERGING_BLUE_WHITE_RED } from "../../baked_data/colorMap";
 import {
     ColorMappingConfig,
     ColorMapRules,
@@ -18,6 +18,8 @@ const getColorMap =  (cm:ColorMap): string[] => {
 	return BLUE_TO_YELLOW
     } else if (cm === "DIVERGING_RED_WHITE_BLUE") {
 	return DIVERGING_RED_WHITE_BLUE
+    } else if (cm === "DIVERGING_BLUE_WHITE_RED") {
+	return DIVERGING_BLUE_WHITE_RED
     } else {
 	return cm
     }

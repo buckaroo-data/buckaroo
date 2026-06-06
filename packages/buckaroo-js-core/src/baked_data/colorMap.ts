@@ -521,3 +521,7 @@ export const BLUE_TO_YELLOW = [
     "#fedd5a",
     "#fedd59",
 ];
+
+// DIVERGING_RED_WHITE_BLUE reversed: blue (low/negative) → white (zero) → red (high/positive).
+// Use when large positive change should be alarming (red) and no change should be calm (blue/white).
+export const DIVERGING_BLUE_WHITE_RED = [...DIVERGING_RED_WHITE_BLUE].reverse();
