@@ -115,7 +115,7 @@ export const cellRendererDisplayers = [
     "SVGDisplayer",
 ];
 
-export type ColorMap = "BLUE_TO_YELLOW" | "DIVERGING_RED_WHITE_BLUE" | string[];
+export type ColorMap = "BLUE_TO_YELLOW" | "DIVERGING_RED_WHITE_BLUE" | "DIVERGING_BLUE_WHITE_RED" | string[];
 
 //ColorMapRules
 export interface ColorMapRules {
