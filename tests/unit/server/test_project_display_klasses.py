@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from buckaroo.server.xorq_loading import load_project_display_klasses
 
