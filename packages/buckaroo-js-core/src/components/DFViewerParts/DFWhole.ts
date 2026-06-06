@@ -222,7 +222,11 @@ export type ComponentConfig = {
     height_fraction?: number;
     // temporary debugging props
     dfvHeight?: number;
-    layoutType?: "autoHeight" | "normal";
+    // "autoHeight": grow to fit all rows (no scroll). "normal": fixed dfvHeight
+    // viewport with scroll. "fitContent": auto-detect between those AND size the
+    // widget's own outer box to its content, so the host container doesn't need
+    // to match the viewport height (removes the gap below short tables).
+    layoutType?: "autoHeight" | "normal" | "fitContent";
     shortMode?: boolean;
     selectionBackground?: string;
     className?: string;

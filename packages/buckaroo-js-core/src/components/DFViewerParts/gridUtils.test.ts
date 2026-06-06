@@ -365,6 +365,36 @@ describe("testing utility functions in gridUtils ", () => {
         getHeightStyle2(500, 0, {})
       ).not.toThrow();
     });
+
+    describe("fitContent layout", () => {
+      // fitContent drives the grid exactly like auto-detect (autoHeight when the
+      // rows fit, normal + scroll when they don't); the outer box is sized to
+      // content by the widget wrappers. It must never reach AG Grid as a literal
+      // "fitContent" domLayout.
+      it("uses autoHeight + short-mode when the rows fit", () => {
+        const result = getHeightStyle2(5, 0, { layoutType: "fitContent" });
+        expect(result.domLayout).toBe("autoHeight");
+        expect(result.classMode).toBe("short-mode");
+      });
+
+      it("falls back to normal + scroll when the rows don't fit", () => {
+        const result = getHeightStyle2(5000, 0, { layoutType: "fitContent" });
+        expect(result.domLayout).toBe("normal");
+        expect(result.classMode).toBe("regular-mode");
+      });
+
+      it("never emits 'fitContent' as a domLayout", () => {
+        for (const rows of [1, 5, 50, 5000]) {
+          expect(getHeightStyle2(rows, 0, { layoutType: "fitContent" }).domLayout).not.toBe(
+            "fitContent"
+          );
+        }
+      });
+
+      it("does not throw without an explicit dfvHeight", () => {
+        expect(() => getHeightStyle2(5000, 0, { layoutType: "fitContent" })).not.toThrow();
+      });
+    });
   });
 
   describe("getAutoSize", () => {

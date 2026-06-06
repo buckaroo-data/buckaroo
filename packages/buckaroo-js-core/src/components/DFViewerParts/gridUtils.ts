@@ -541,7 +541,8 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
             maxRowsWithoutScrolling
         };
     }
-    const domLayout: DomLayoutType = compC?.layoutType || (shortMode ? "autoHeight" : "normal");
+    // NOTE: "fitContent" is not handled yet — see the following commit.
+    const domLayout: DomLayoutType = (compC?.layoutType as DomLayoutType) || (shortMode ? "autoHeight" : "normal");
     if (compC?.layoutType === "normal" && !compC?.dfvHeight && !compC?.height_fraction) {
         throw new Error(
             'Buckaroo: layoutType: "normal" requires an explicit height. ' +
