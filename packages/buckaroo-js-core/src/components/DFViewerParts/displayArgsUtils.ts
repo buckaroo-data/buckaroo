@@ -1,5 +1,12 @@
 import type { IDisplayArgs } from "./gridUtils";
 
+// True when the (effective) "main" display args request the "fitContent" layout.
+// In that mode the widget's outer wrappers size to their content instead of
+// filling the host container, so the host doesn't have to match the viewport.
+export function isFitContentLayout(args: Record<string, IDisplayArgs>): boolean {
+    return args?.main?.df_viewer_config?.component_config?.layoutType === "fitContent";
+}
+
 // When autoHeight is undefined the server value is left intact.
 // true → "autoHeight", false → "normal" (overrides server).
 export function stampLayoutType(

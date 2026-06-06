@@ -8,7 +8,7 @@ import { Operation } from "../components/OperationUtils";
 import { OperationResult, baseOperationResults } from "../components/DependentTabs";
 import { DFData, DFDataOrPayload } from "../components/DFViewerParts/DFWhole";
 import { IDisplayArgs } from "../components/DFViewerParts/gridUtils";
-import { stampLayoutType } from "../components/DFViewerParts/displayArgsUtils";
+import { stampLayoutType, isFitContentLayout } from "../components/DFViewerParts/displayArgsUtils";
 import { IModel } from "./IModel";
 
 export type BuckarooServerMode = "viewer" | "buckaroo";
@@ -264,7 +264,11 @@ export function BuckarooView({
         [dfDisplayArgs, autoHeight],
     );
 
-    const wrapperStyle: React.CSSProperties = autoHeight
+    // autoHeight and fitContent both size the widget to its content, so the
+    // wrapper must not impose height:100% (which would re-introduce the gap a
+    // taller host container leaves below the table).
+    const contentSized = autoHeight || isFitContentLayout(effectiveDisplayArgs);
+    const wrapperStyle: React.CSSProperties = contentSized
         ? { width: "100%", ...(style ?? {}) }
         : { width: "100%", height: "100%", ...(style ?? {}) };
 

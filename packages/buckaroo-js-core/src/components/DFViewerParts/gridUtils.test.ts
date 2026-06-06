@@ -365,6 +365,56 @@ describe("testing utility functions in gridUtils ", () => {
         getHeightStyle2(500, 0, {})
       ).not.toThrow();
     });
+
+    describe("fitContent layout", () => {
+      // fitContent drives the grid exactly like auto-detect (autoHeight when the
+      // rows fit, normal + scroll when they don't); the outer box is sized to
+      // content by the widget wrappers. It must never reach AG Grid as a literal
+      // "fitContent" domLayout.
+      it("uses autoHeight + short-mode when the rows fit", () => {
+        const result = getHeightStyle2(5, 0, { layoutType: "fitContent" });
+        expect(result.domLayout).toBe("autoHeight");
+        expect(result.classMode).toBe("short-mode");
+      });
+
+      it("falls back to normal + scroll when the rows don't fit", () => {
+        const result = getHeightStyle2(5000, 0, { layoutType: "fitContent" });
+        expect(result.domLayout).toBe("normal");
+        expect(result.classMode).toBe("regular-mode");
+      });
+
+      it("never emits 'fitContent' as a domLayout", () => {
+        for (const rows of [1, 5, 50, 5000]) {
+          expect(getHeightStyle2(rows, 0, { layoutType: "fitContent" }).domLayout).not.toBe(
+            "fitContent"
+          );
+        }
+      });
+
+      it("does not throw without an explicit dfvHeight", () => {
+        expect(() => getHeightStyle2(5000, 0, { layoutType: "fitContent" })).not.toThrow();
+      });
+
+      // dfvHeight is the cap: the box grows to fit content up to dfvHeight, then
+      // switches to a fixed-height, virtualized, scrolling viewport. With a 400px
+      // cap (~16 rows at the default 21px row height) a small table fits and a
+      // large one scrolls.
+      it("grows to content (capped, no scroll) when it fits under dfvHeight", () => {
+        const result = getHeightStyle2(5, 0, { layoutType: "fitContent", dfvHeight: 400 });
+        expect(result.domLayout).toBe("autoHeight");
+        expect(result.classMode).toBe("short-mode");
+        // shortDivStyle caps the auto-grown box at dfvHeight.
+        expect(result.applicableStyle.maxHeight).toBe(400);
+      });
+
+      it("caps at dfvHeight and scrolls when content exceeds it", () => {
+        const result = getHeightStyle2(100, 0, { layoutType: "fitContent", dfvHeight: 400 });
+        expect(result.domLayout).toBe("normal");
+        expect(result.classMode).toBe("regular-mode");
+        // regularDivStyle pins the viewport at dfvHeight; rows beyond it scroll.
+        expect(result.applicableStyle.height).toBe(400);
+      });
+    });
   });
 
   describe("getAutoSize", () => {
