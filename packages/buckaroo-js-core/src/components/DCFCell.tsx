@@ -62,7 +62,7 @@ export function WidgetDCFCell({
                     setBuckarooState={on_buckaroo_state}
                     buckarooOptions={buckaroo_options}
                     themeConfig={cDisp.df_viewer_config?.component_config?.theme}
-                    componentConfig={cDisp.df_viewer_config?.component_config as Record<string, unknown> | undefined}
+                    componentConfig={df_display_args['main']?.df_viewer_config?.component_config as Record<string, unknown> | undefined}
                 />
                 <DFViewer
                     df_data={dfData}
