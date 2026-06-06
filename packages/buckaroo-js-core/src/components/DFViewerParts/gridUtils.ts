@@ -541,8 +541,14 @@ export const heightStyle = (hArgs: HeightStyleArgs): HeightStyleI => {
             maxRowsWithoutScrolling
         };
     }
-    // NOTE: "fitContent" is not handled yet — see the following commit.
-    const domLayout: DomLayoutType = (compC?.layoutType as DomLayoutType) || (shortMode ? "autoHeight" : "normal");
+    // "fitContent" sizes the widget's own outer box to its content (the widget
+    // wrappers drop their height:100% when the layout is fitContent), so a host
+    // no longer has to match the inner viewport height. For the grid it behaves
+    // like auto-detect: autoHeight when the rows fit, normal + scroll (capped
+    // at dfvHeight) when they don't. It must never reach AG Grid as a literal
+    // domLayout value.
+    const explicitLayout = compC?.layoutType === "fitContent" ? undefined : compC?.layoutType;
+    const domLayout: DomLayoutType = explicitLayout || (shortMode ? "autoHeight" : "normal");
     if (compC?.layoutType === "normal" && !compC?.dfvHeight && !compC?.height_fraction) {
         throw new Error(
             'Buckaroo: layoutType: "normal" requires an explicit height. ' +

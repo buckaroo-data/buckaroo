@@ -14,7 +14,7 @@ import {
     getDs,
     IDisplayArgs,
 } from "./DFViewerParts/gridUtils";
-import { stampLayoutType } from "./DFViewerParts/displayArgsUtils";
+import { stampLayoutType, isFitContentLayout } from "./DFViewerParts/displayArgsUtils";
 import { DatasourceOrRaw, DFViewerInfinite } from "./DFViewerParts/DFViewerInfinite";
 import { IDatasource, IGetRowsParams } from "ag-grid-community";
 import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "./DFViewerParts/SmartRowCache";
@@ -218,6 +218,7 @@ export function BuckarooInfiniteWidget({
         );
 
         const cDisp = effectiveDisplayArgs[buckaroo_state.df_display];
+        const fitContent = isFitContentLayout(effectiveDisplayArgs);
 
         const [data_wrapper, summaryStatsData] = useMemo(
             () => [
@@ -323,7 +324,7 @@ export function BuckarooInfiniteWidget({
 
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
-             style={{ width: "100%", height: "100%" }}>
+             style={{ width: "100%", height: fitContent ? "auto" : "100%" }}>
                 <div
                     className="orig-df flex flex-row"
                     style={{
@@ -403,6 +404,7 @@ export function DFViewerInfiniteDS({
         );
 
         const cDisp = effectiveDisplayArgs["main"];
+        const fitContent = isFitContentLayout(effectiveDisplayArgs);
 
         const [data_wrapper, summaryStatsData] = useMemo(
             () => [
@@ -433,7 +435,7 @@ export function DFViewerInfiniteDS({
         
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
-             style={{ width: "100%", height: "100%" }}>
+             style={{ width: "100%", height: fitContent ? "auto" : "100%" }}>
                 <div
                     className="orig-df flex flex-row"
                     style={{
