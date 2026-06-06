@@ -69,7 +69,7 @@ export interface SVGDisplayerA {
 export type CellRendererArgs = HistogramDisplayerA | ChartDisplayerA | LinkifyDisplayerA | BooleanCheckboxDisplayerA | Base64PNGImageDisplayerA | SVGDisplayerA;
 export type DisplayerArgs = FormatterArgs | CellRendererArgs | InheritDisplayerA;
 export declare const cellRendererDisplayers: string[];
-export type ColorMap = "BLUE_TO_YELLOW" | "DIVERGING_RED_WHITE_BLUE" | string[];
+export type ColorMap = "BLUE_TO_YELLOW" | "DIVERGING_RED_WHITE_BLUE" | "DIVERGING_BLUE_WHITE_RED" | string[];
 export interface ColorMapRules {
     color_rule: "color_map";
     map_name: ColorMap;
