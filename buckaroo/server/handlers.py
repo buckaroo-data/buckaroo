@@ -434,6 +434,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
             extra_klasses = (
                 xorq_loading.load_project_stat_klasses(project_root)
                 + xorq_loading.load_project_post_processing_klasses(project_root)
+                + xorq_loading.load_project_display_klasses(project_root)
                 if project_root else [])
             xorq_dataflow = xorq_loading.XorqServerDataflow(
                 expr, skip_main_serial=True, extra_klasses=extra_klasses,
@@ -718,7 +719,8 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         try:
             extra_klasses = (
                 xorq_loading.load_project_stat_klasses(session.project_root)
-                + xorq_loading.load_project_post_processing_klasses(session.project_root))
+                + xorq_loading.load_project_post_processing_klasses(session.project_root)
+                + xorq_loading.load_project_display_klasses(session.project_root))
             xorq_dataflow = xorq_loading.XorqServerDataflow(
                 session.expr, skip_main_serial=True, extra_klasses=extra_klasses)
         except Exception:

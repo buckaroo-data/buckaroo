@@ -315,6 +315,82 @@ def _compile_project_post_processing(name: str, path: Path):
     })
 
 
+# ---------------------------------------------------------------------------
+# project-authored display klasses (loaded from <project_root>/display/*.py)
+# ---------------------------------------------------------------------------
+
+
+def load_project_display_klasses(project_root) -> list:
+    """Scan ``<project_root>/display/*.py`` for ``ColAnalysis`` subclasses
+    with a ``df_display_name`` attribute and return them as ``extra_klasses``.
+
+    Unlike the stat and post-processing loaders, display files define full
+    class bodies rather than a single function. Each file is exec'd with
+    ``ColAnalysis`` and the standard styling base classes in scope; any
+    class found in the resulting namespace that (a) subclasses ``ColAnalysis``
+    and (b) carries a ``df_display_name`` string is collected.
+
+    Because ``filter_analysis(klasses, "df_display_name")`` maps display-name
+    → last-klass-wins, a display klass loaded here overrides the built-in
+    ``DefaultMainStyling`` (``df_display_name = "main"``) for this session
+    only — ``_XORQ_ANALYSIS_KLASSES`` is not mutated.
+
+    Files whose name starts with ``_`` are skipped (parking convention).
+    Errors in any one file are logged and the file is skipped.
+    """
+    display_dir = Path(project_root) / "display"
+    if not display_dir.is_dir():
+        return []
+
+    from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: PLC0415
+    from buckaroo.customizations.styling import (  # noqa: PLC0415
+        DefaultMainStyling, DefaultSummaryStatsStyling, StylingAnalysis)
+
+    klasses: list = []
+    for path in sorted(display_dir.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        try:
+            found = _compile_project_display(path, ColAnalysis,
+                DefaultMainStyling, DefaultSummaryStatsStyling, StylingAnalysis)
+            klasses.extend(found)
+        except Exception as e:
+            log.warning("project display %s skipped: %s", path, e)
+    return klasses
+
+
+def _compile_project_display(path: Path, ColAnalysis, *extra_bases):
+    """Exec one display file and return all ColAnalysis subclasses with
+    ``df_display_name`` found in its namespace. Raises on syntax errors
+    so the loader can log-and-skip. Returns an empty list when a valid
+    file defines no qualifying classes (not an error)."""
+    source = path.read_text()
+    safe = _safe_builtins()
+    # class syntax requires __build_class__; classmethod/staticmethod are
+    # standard descriptors needed for display klass method definitions.
+    safe["__build_class__"] = __build_class__
+    safe["classmethod"] = classmethod
+    safe["staticmethod"] = staticmethod
+    globs: dict = {"__builtins__": safe, "__name__": str(path.stem), "ColAnalysis": ColAnalysis}
+    for base in extra_bases:
+        globs[base.__name__] = base
+
+    # Track identities of pre-injected classes so we don't return them as
+    # user-defined klasses — they're context for the file, not the output.
+    injected_ids = {id(ColAnalysis)} | {id(b) for b in extra_bases}
+
+    exec(compile(source, str(path), "exec"), globs)
+
+    found = []
+    for obj in globs.values():
+        if (isinstance(obj, type)
+                and id(obj) not in injected_ids
+                and issubclass(obj, ColAnalysis)
+                and isinstance(getattr(obj, "df_display_name", None), str)):
+            found.append(obj)
+    return found
+
+
 def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
         payload_args: dict, search_string: str = "") -> tuple[dict, bytes]:
     """Drive one infinite_request window against a xorq expression.
