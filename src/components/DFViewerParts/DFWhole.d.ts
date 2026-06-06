@@ -143,7 +143,7 @@ export type ThemeConfig = ThemeColorConfig & {
 export type ComponentConfig = {
     height_fraction?: number;
     dfvHeight?: number;
-    layoutType?: "autoHeight" | "normal";
+    layoutType?: "autoHeight" | "normal" | "fitContent";
     shortMode?: boolean;
     selectionBackground?: string;
     className?: string;
