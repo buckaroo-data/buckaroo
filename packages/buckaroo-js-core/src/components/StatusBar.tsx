@@ -215,13 +215,16 @@ export const fakeSearchCell = function (_params: any) {
         _params.setValue(v)
     }
 
-    // Live search: after SEARCH_DEBOUNCE_MS of no keystrokes, push the term
-    // upstream. Buttons / Enter bypass the debounce and fire immediately.
+    // Live search: after debounceMs of no keystrokes, push the term upstream.
+    // Reads searchDebounceMs from the AG-Grid context's componentConfig blob
+    // (set by the Python-side ComponentConfig). Buttons / Enter bypass the
+    // debounce and fire immediately.
+    const debounceMs: number = (_params.context?.componentConfig?.searchDebounceMs as number | undefined) ?? SEARCH_DEBOUNCE_MS;
     useEffect(() => {
         if (searchVal === (value || '')) return;  // initial mount, no-op
-        const t = setTimeout(() => submit(searchVal), SEARCH_DEBOUNCE_MS);
+        const t = setTimeout(() => submit(searchVal), debounceMs);
         return () => clearTimeout(t);
-    }, [searchVal, value]);
+    }, [searchVal, value, debounceMs]);
 
     const keyPressHandler = (event:React.KeyboardEvent<HTMLInputElement> ) => {
         if (event.key === "Enter") {
@@ -312,6 +315,7 @@ export function StatusBar({
     heightOverride,
     themeConfig,
     inFlight,
+    componentConfig,
 }: {
     dfMeta: DFMeta;
     buckarooState: BuckarooState;
@@ -324,6 +328,12 @@ export function StatusBar({
     // grid is otherwise ambiguous between "zero rows" and "still computing".
     // When set, renders a small "computing…" dot in the status-bar chrome.
     inFlight?: boolean;
+    /** Opaque component_config blob from Python. Passed into the AG-Grid
+     *  context so any cell renderer can read config keys without additional
+     *  prop threading. New config keys (e.g. searchDebounceMs) are added to
+     *  Python's ComponentConfig TypedDict; cell renderers read them via
+     *  params.context.componentConfig. */
+    componentConfig?: Record<string, unknown>;
 }) {
     if (false) {
 	console.log("heightOverride", heightOverride);
@@ -531,7 +541,8 @@ export function StatusBar({
                     context={{
                         buckarooState,
                         setBuckarooState,
-                        buckarooOptions
+                        buckarooOptions,
+                        componentConfig,
                     }}
                 ></AgGridReact>
             </div>

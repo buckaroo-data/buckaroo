@@ -339,6 +339,7 @@ export function BuckarooInfiniteWidget({
                         buckarooOptions={buckaroo_options}
                         themeConfig={cDisp.df_viewer_config?.component_config?.theme}
                         inFlight={inFlight}
+                        componentConfig={effectiveDisplayArgs['main']?.df_viewer_config?.component_config as Record<string, unknown> | undefined}
                     />
                     <DFViewerInfinite
                         key={effectiveDataframeId}

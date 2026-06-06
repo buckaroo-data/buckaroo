@@ -167,7 +167,8 @@ ComponentConfig = TypedDict('ComponentConfig', {
     'shortMode': NotRequired[bool],
     'selectionBackground': NotRequired[str],
     'className': NotRequired[str],
-    'theme': NotRequired[ThemeConfig]})
+    'theme': NotRequired[ThemeConfig],
+    'searchDebounceMs': NotRequired[int]})
 
 DFViewerConfig = TypedDict('DFViewerConfig', {
     'pinned_rows': List[PinnedRowConfig],
