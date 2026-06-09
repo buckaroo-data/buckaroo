@@ -19,6 +19,7 @@ Optional dependency: install with ``buckaroo[xorq]``.
 
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -148,6 +149,21 @@ class XorqStatPipeline:
         if self.backend is not None:
             return self.backend.execute(query)
         if self.cache_storage is not None:
+            # On a cache HIT, read the snapshot parquet directly instead of
+            # routing the query back through ``cache().execute()``. The latter
+            # re-plans and re-executes the whole expression through DataFusion
+            # just to reach the cached node — ~30ms for a single-table expr and
+            # ~125ms for a join, versus ~1-3ms to read the result parquet. The
+            # win compounds across the per-column histogram queries. calc_key /
+            # storage.get_path are the same ParquetSnapshotCache API used by
+            # ``_resolve_cached_nodes`` below.
+            key = self.cache_storage.calc_key(query)
+            path = self.cache_storage.storage.get_path(key)
+            if os.path.exists(path):
+                try:
+                    return pd.read_parquet(path)
+                except Exception:
+                    pass  # corrupt/partial cache file — fall back to recompute
             return query.cache(cache=self.cache_storage).execute()
         return query.execute()
 
@@ -164,7 +180,15 @@ class XorqStatPipeline:
         backends would pay the cost of pulling all data over the wire.
         Returns (table_to_use, cleanup) where cleanup is (backend, name)
         for later drop, or None if no materialization happened.
+
+        Skipped when a ``cache_storage`` is set: stat queries are then served
+        from the per-expression snapshot cache, so the per-column filter
+        re-evaluation this avoids never happens — and materializing would inject
+        a ``__buckaroo_histo_mat_<uuid>`` table name into the expression token,
+        breaking the content-addressed cache key on every load.
         """
+        if self.cache_storage is not None:
+            return table, None
         try:
             underlying = table._find_backend()
         except Exception:
