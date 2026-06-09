@@ -86,13 +86,24 @@ def load_expr_build_dir(build_dir: str):
     during rehydration. xorq's own datafusion backend is the natural
     default — it's what ``xo.connect()`` returns and what ships with
     every ``buckaroo[xorq]`` install. If the caller has already set
-    a default (e.g. DuckDB), respect that."""
-    from xorq.api import connect, load_expr  # noqa: PLC0415  (lazy, see module docstring)
+    a default (e.g. DuckDB), respect that.
+
+    ``xorq.config.default_backend()`` is the xorq-internal singleton
+    (cached in ``xorq.config.options.default_backend``). Calling it here
+    pre-warms that singleton so xorq's own internal paths (e.g.
+    ``deferred_reads_to_memtables``) reuse the same SessionContext on
+    every call rather than minting a new one."""
+    from xorq.api import load_expr  # noqa: PLC0415  (lazy, see module docstring)
     from xorq.vendor import ibis  # noqa: PLC0415
-    # Direct option assignment — `ibis.set_backend(...)` was removed in
-    # xorq 0.3.25; the option is the stable cross-version contract.
+    from xorq import config as xorq_config  # noqa: PLC0415
+    # Pre-warm xorq's process-wide singleton. xorq.config.default_backend()
+    # caches in xorq.config.options.default_backend (a separate object from
+    # ibis.options.default_backend); calling it once here ensures subsequent
+    # calls inside load_expr return the same SessionContext.
+    con = xorq_config.default_backend()
+    # Also set the ibis-vendor option for any ibis-internal paths that use it.
     if ibis.options.default_backend is None:
-        ibis.options.default_backend = connect()
+        ibis.options.default_backend = con
     return load_expr(build_dir)
 
 

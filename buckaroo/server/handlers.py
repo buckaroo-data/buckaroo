@@ -406,6 +406,26 @@ class LoadExprHandler(tornado.web.RequestHandler):
             self.write({"error": "Missing 'build_dir'"})
             return
 
+        session_id = body.get("session") or uuid.uuid4().hex
+        no_browser = bool(body.get("no_browser", False))
+
+        # Short-circuit: if this session is already loaded with the same
+        # build_dir, skip the expensive pipeline and return cached metadata.
+        # Only fires when the caller explicitly passes back a session_id from
+        # a prior response (UUID-generated ids are always new).
+        sessions = self.application.settings["sessions"]
+        existing = sessions.get(session_id)
+        if existing and getattr(existing, "build_dir", None) == build_dir and existing.metadata:
+            if no_browser or not self.application.settings.get("open_browser", True):
+                browser_action = "skipped"
+            else:
+                port = self.application.settings["port"]
+                browser_action = find_or_create_session_window(
+                    session_id, port, reload_if_found=True)
+            self.write({"session": session_id, "server_pid": os.getpid(),
+                "browser_action": browser_action, **existing.metadata})
+            return
+
         try:
             from buckaroo.server import xorq_loading
         except ImportError:
@@ -415,9 +435,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 "Install with `pip install buckaroo[xorq]`."})
             return
 
-        session_id = body.get("session") or uuid.uuid4().hex
         prompt = body.get("prompt", "")
-        no_browser = bool(body.get("no_browser", False))
         component_config = body.get("component_config")
         column_config_overrides = body.get("column_config_overrides")
         extra_grid_config = body.get("extra_grid_config")
