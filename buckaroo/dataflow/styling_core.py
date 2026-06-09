@@ -472,6 +472,47 @@ class StylingAnalysis(ColAnalysis):
                 continue
             ret_col_config.append(base_style)
         return ret_col_config
-    
 
-    
+
+# Stat keys the JS color-map rule reads per column straight off the wire
+# payload (``histogram_bins`` / ``histogram_log_bins`` in gridUtils.ts),
+# independent of any pinned row.
+HISTOGRAM_BIN_WIRE_KEYS = frozenset({'histogram_bins', 'histogram_log_bins'})
+
+
+def _pinned_row_stat_keys(pinned_rows: Any) -> set:
+    """Stat keys referenced by a list of ``PinnedRowConfig`` entries.
+
+    A leading ``?`` marks an optional/scoped row whose data is keyed by the
+    unprefixed name (mirrors ``stripOptionalPinnedKey`` in gridUtils.ts).
+    """
+    keys = set()
+    for pr in pinned_rows or []:
+        pkey = pr.get('primary_key_val')
+        if not pkey:
+            continue
+        keys.add(pkey[1:] if pkey.startswith('?') else pkey)
+    return keys
+
+
+def wire_stat_keys(styling_classes: Iterable[Any], extra_pinned_rows: Any = ()) -> set:
+    """Stat keys the frontend reads from the ``all_stats`` wire payload.
+
+    The frontend reads exactly two things out of the summary-stats payload:
+    the histogram-bin arrays the color-map rule bins against
+    (``HISTOGRAM_BIN_WIRE_KEYS``), and the per-column pinned-row values it
+    looks up by ``primary_key_val``. Everything else in ``merged_sd``
+    (``value_counts``, ``histogram_args``, ``memory_usage``, the ``is_*``
+    typing flags, the heuristic ``*_frac`` cleaning stats, ...) is shipped
+    today but never read. This is the allowlist used to trim the wire copy
+    (see ``project_sd`` / #880).
+
+    ``styling_classes`` are the active ``StylingAnalysis`` subclasses (the
+    dataflow's ``df_display_klasses`` values); ``extra_pinned_rows`` carries
+    any runtime ``pinned_rows`` override set on the dataflow.
+    """
+    keys = set(HISTOGRAM_BIN_WIRE_KEYS)
+    for kls in styling_classes:
+        keys |= _pinned_row_stat_keys(getattr(kls, 'pinned_rows', None))
+    keys |= _pinned_row_stat_keys(extra_pinned_rows)
+    return keys

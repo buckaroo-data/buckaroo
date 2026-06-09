@@ -11,6 +11,7 @@ from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget, to_parquet
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from buckaroo.dataflow.dataflow import StylingAnalysis
+from buckaroo.styling_helpers import inherit_
 from buckaroo.serialization_utils import resolve_summary_stats_payload as _resolve_all_stats
 from buckaroo.jlisp.lisp_utils import (s, sQ)
 
@@ -36,6 +37,15 @@ class SelectOnlyAnalysis(PolarsAnalysis):
         F.all().mean().name.map(json_postfix('mean')),
         F.all().quantile(.99).name.map(json_postfix('quin99'))]
 
+
+# Pin the stats SelectOnlyAnalysis produces so they survive the #880 wire
+# projection (which trims all_stats to the displayed/pinned keys).
+SELECT_ONLY_PINNED = [inherit_('null_count'), inherit_('mean'), inherit_('quin99')]
+
+
+class SelectOnlyStyling(StylingAnalysis):
+    pinned_rows = SELECT_ONLY_PINNED
+
 test_df = pl.DataFrame({'normal_int_series' : pl.Series([1,2,3,4])})
 
 
@@ -56,19 +66,19 @@ def test_polars_all_stats():
     #dsdf = replace_in_dict(sdf, [(np.nan, None)])
     class SimplePolarsBuckaroo(PolarsBuckarooWidget):
         DFStatsClass = PlDfStats  # v1 PolarsAnalysis classes need PlDfStats
-        analysis_klasses= [SelectOnlyAnalysis, StylingAnalysis]
+        analysis_klasses= [SelectOnlyAnalysis, SelectOnlyStyling]
 
     spbw = SimplePolarsBuckaroo(test_df)
     assert spbw.dataflow.merged_sd == expected
 
     resolved_stats = _resolve_all_stats(spbw.df_data_dict['all_stats'])
-    assert resolved_stats == [
-        {'index': 'orig_col_name', 'a': 'normal_int_series', 'level_0':'orig_col_name'},
-        {'index': 'rewritten_col_name', 'a': 'a', 'level_0':'rewritten_col_name'},
-        {'index': 'null_count', 'a': 0.0, 'level_0':'null_count'},
-        {'index': 'mean', 'a': 2.5, 'level_0':'mean'},
-        {'index': 'quin99', 'a': 4.0, 'level_0':'quin99'}]
-    assert spbw.df_display_args['main']['df_viewer_config'] == EXPECTED_DF_VIEWER_CONFIG
+    # #880: the wire payload is projected to the displayed (pinned) stats.
+    # orig_col_name / rewritten_col_name stay on merged_sd (asserted above)
+    # but aren't pinned, so they no longer ship to the frontend.
+    by_index = {row['index']: row['a'] for row in resolved_stats}
+    assert by_index == {'null_count': 0.0, 'mean': 2.5, 'quin99': 4.0}
+    assert spbw.df_display_args['main']['df_viewer_config'] == dict(
+        EXPECTED_DF_VIEWER_CONFIG, pinned_rows=SELECT_ONLY_PINNED)
 
 def test_polars_boolean():
     bool_df = pl.DataFrame({'bools':[True, True, False, False, True, None]})
