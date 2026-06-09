@@ -441,7 +441,7 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
     async def test_new_session_always_runs_pipeline(self):
         """#899: two distinct session_ids must each run the full pipeline even
         when they share the same build_dir."""
-        from unittest.mock import patch, call
+        from unittest.mock import patch
         builds_root = tempfile.mkdtemp()
         try:
             build_path = _build_expr_dir(builds_root)
@@ -466,8 +466,10 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
         """#896: load_expr_build_dir must call xorq.config.default_backend()
         rather than connect() so xorq's process-wide singleton is reused across
         calls instead of a new SessionContext being minted each time."""
-        from unittest.mock import patch, MagicMock
-        import tempfile, shutil
+        import shutil
+        import tempfile
+        from unittest.mock import patch
+
         from buckaroo.server import xorq_loading
 
         builds_root = tempfile.mkdtemp()
