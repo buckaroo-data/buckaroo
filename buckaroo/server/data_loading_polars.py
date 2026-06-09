@@ -68,7 +68,7 @@ def load_file_polars(path: str) -> pl.DataFrame:
     elif ext in (".parquet", ".parq"):
         return pl.read_parquet(path)
     elif ext == ".json":
-        return pl.read_ndjson(path)
+        return pl.read_json(path)
     else:
         raise ValueError(f"Unsupported file format: {ext}")
 
