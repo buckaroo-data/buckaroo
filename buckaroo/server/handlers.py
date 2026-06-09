@@ -408,14 +408,16 @@ class LoadExprHandler(tornado.web.RequestHandler):
 
         session_id = body.get("session") or uuid.uuid4().hex
         no_browser = bool(body.get("no_browser", False))
+        force_reload = bool(body.get("force_reload", False))
 
         # Short-circuit: if this session is already loaded with the same
         # build_dir, skip the expensive pipeline and return cached metadata.
         # Only fires when the caller explicitly passes back a session_id from
         # a prior response (UUID-generated ids are always new).
+        # Pass force_reload=true to bypass this and re-run the full pipeline.
         sessions = self.application.settings["sessions"]
         existing = sessions.get(session_id)
-        if existing and getattr(existing, "build_dir", None) == build_dir and existing.metadata:
+        if not force_reload and existing and existing.build_dir == build_dir and existing.metadata:
             if no_browser or not self.application.settings.get("open_browser", True):
                 browser_action = "skipped"
             else:
