@@ -127,6 +127,25 @@ class TestBatchAggregate:
         assert stats["ints"]["distinct_count"] == 7
         assert stats["strs"]["distinct_count"] == 7
 
+    def test_distinct_count_uses_approx(self):
+        """distinct_count must build ApproxCountDistinct, not exact CountDistinct.
+
+        Exact COUNT(DISTINCT) folded into the shared batch aggregate defeats
+        DataFusion's single-distinct rewrite: 3.8GB peak on a 131M-row string
+        column with 6.2M distinct values, vs 238MB for approx_nunique in the
+        same batch shape (#906).
+        """
+        from xorq.vendor.ibis.expr import operations as ops
+
+        from buckaroo.customizations.xorq_stats_v2 import distinct_count
+
+        expr = distinct_count._stat_func.func(col=_make_table().strs)
+        op = expr.op()
+        assert list(op.find(ops.ApproxCountDistinct)), (
+            "distinct_count should aggregate via approx_nunique")
+        assert not list(op.find(ops.CountDistinct)), (
+            "exact COUNT(DISTINCT) must not enter the batch aggregate")
+
 
 # ============================================================
 # Numeric-only stats: mean, std, median
