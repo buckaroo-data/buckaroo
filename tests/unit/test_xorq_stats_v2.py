@@ -5,6 +5,7 @@ ibis-framework or remote backend required. Skipped if xorq is not
 installed.
 """
 
+import logging
 import math
 import os
 
@@ -774,3 +775,87 @@ class TestCacheStorageExecute:
 
         pd.testing.assert_frame_equal(
             result1.reset_index(drop=True), result2.reset_index(drop=True))
+
+
+class TestSnapshotCacheRun:
+    """Per-run snapshot-cache behaviour (#910).
+
+    A cold run materializes the source filter chain once and writes one
+    snapshot per stat query; a fully-warm run reads those snapshots without
+    re-scanning the source; every run with a cache configured logs a single
+    summary line carrying the hit/miss/snapshot/byte/error counts."""
+
+    _LOGGER = "buckaroo.pluggable_analysis_framework.xorq_stat_pipeline"
+
+    @staticmethod
+    def _cache(tmp_path):
+        return xo.ParquetSnapshotCache.from_kwargs(
+            source=xo.connect(), base_path=str(tmp_path))
+
+    @staticmethod
+    def _filter_chain_table():
+        # Lazy filter chain (re-scanned per query unless materialized) with a
+        # numeric column (numeric histogram) and a string column (categorical
+        # histogram), so both per-column query shapes run through the cache.
+        con = xo.connect()
+        df = pd.DataFrame(
+            {"n": list(range(40)), "cat": [c for c in "abcdefgh" for _ in range(5)]})
+        t = con.create_table("snap_src", df)
+        return t.filter(t.n > 1)
+
+    def test_cold_run_materializes_and_writes_snapshots(self, tmp_path):
+        pipeline = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False, cache_storage=self._cache(tmp_path))
+        pipeline.process_table(self._filter_chain_table())
+        s = pipeline._cache_stats
+        assert s["misses"] > 0 and s["hits"] == 0, f"cold run should miss the cache: {s}"
+        assert s["snapshots"] == s["misses"], "each miss should write exactly one snapshot"
+        assert s["bytes"] > 0 and s["write_errors"] == 0
+        assert s["materialized"] is True, (
+            "a cold run over a filter chain must materialize the source once (#910)")
+        files = [f for _, _, fs in os.walk(tmp_path) for f in fs if f.endswith(".parquet")]
+        assert files, "expected snapshot parquet files under the cache dir"
+
+    def test_warm_run_hits_without_materializing(self, tmp_path):
+        cache = self._cache(tmp_path)
+        XorqStatPipeline(XORQ_STATS_V2, unit_test=False,
+            cache_storage=cache).process_table(self._filter_chain_table())
+        warm = XorqStatPipeline(XORQ_STATS_V2, unit_test=False, cache_storage=cache)
+        warm.process_table(self._filter_chain_table())
+        s = warm._cache_stats
+        assert s["hits"] > 0 and s["misses"] == 0, f"warm run should hit the cache: {s}"
+        assert s["snapshots"] == 0, "a fully-warm run should write nothing"
+        assert s["materialized"] is False, (
+            "a fully-warm run serves every query from a snapshot — no source scan (#910)")
+
+    def test_run_logs_one_cache_summary_line(self, tmp_path, caplog):
+        pipeline = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False, cache_storage=self._cache(tmp_path))
+        with caplog.at_level(logging.INFO, logger=self._LOGGER):
+            pipeline.process_table(self._filter_chain_table())
+        lines = [r.getMessage() for r in caplog.records
+                 if r.name == self._LOGGER and r.getMessage().startswith("xorq stat cache")]
+        assert len(lines) == 1, f"expected exactly one cache summary line, got {lines}"
+        assert "miss(es)" in lines[0] and "snapshot(s) written" in lines[0]
+
+    def test_cached_stats_match_uncached(self, tmp_path):
+        """The materialized cold path and the snapshot-read warm path produce
+        the same stats as a plain uncached run — materialization is a perf
+        optimization, not a semantic change."""
+        cache = self._cache(tmp_path)
+        plain, _ = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False).process_table(self._filter_chain_table())
+        cold, _ = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False,
+            cache_storage=cache).process_table(self._filter_chain_table())
+        warm, _ = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False,
+            cache_storage=cache).process_table(self._filter_chain_table())
+        # The warm run reads the exact parquet the cold run wrote, so its whole
+        # SD (histogram row order included) must reproduce the cold run's.
+        assert cold == warm, "warm run must reproduce the cold run's snapshot exactly"
+        # Histogram tie-order can differ between materialized and unmaterialized
+        # execution, so compare the tie-independent stats against the plain run.
+        for col in plain:
+            for key in ("length", "min", "max", "mean", "null_count", "distinct_count"):
+                assert cold[col].get(key) == plain[col].get(key), (col, key)
