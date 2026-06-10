@@ -56,8 +56,18 @@ def _is_numeric_not_bool(dtype) -> bool:
     return dtype.is_numeric() and not dtype.is_boolean()
 
 
-def _not_float(dtype) -> bool:
-    return not dtype.is_floating()
+def _distinct_count_supported(dtype) -> bool:
+    """Columns distinct_count runs on. Skips floats and nested types.
+
+    approx_distinct raises on both Float64 and nested (struct/array/map) types,
+    so they fall to exact COUNT(DISTINCT). On a high-cardinality column that is
+    the multi-GB hash set #906 fixed for strings — ~25GB measured streaming the
+    stats over a 24M-row ``struct<url, description>`` column, all of it the
+    exact distinct on that one column. #908 only routed scalar string / integer
+    / timestamp / date to approx; nested types kept the exact aggregate and so
+    inherited the same blowup. A distinct count over a struct is rarely
+    meaningful anyway. Booleans/decimals stay (low-cardinality in practice)."""
+    return not (dtype.is_floating() or dtype.is_nested())
 
 
 # ============================================================
@@ -144,7 +154,7 @@ def max(col: XorqColumn) -> float:
     return col.max().cast("float64")
 
 
-@stat(column_filter=_not_float)
+@stat(column_filter=_distinct_count_supported)
 def distinct_count(col: XorqColumn) -> int:
     """Approximate distinct count (HyperLogLog, ~1% error) where supported.
 
@@ -155,19 +165,19 @@ def distinct_count(col: XorqColumn) -> int:
     is displayed as a ratio, and the histogram branch thresholds
     (distinct_count > 5 / <= 5) sit where HLL is exact in practice.
 
-    Float columns skip the stat entirely (column_filter): DataFusion's
-    approx_distinct raises on Float64, exact COUNT(DISTINCT) costs memory
-    proportional to cardinality (~2.2GB measured on a 30M-distinct float
-    column), and a distinct count over floats is rarely meaningful. The
-    pipeline pre-populates ``distinct_count`` as None so dependents
-    (histogram, histogram_bins, distinct_per) still run.
+    Float and nested (struct/array/map) columns skip the stat entirely
+    (column_filter — see ``_distinct_count_supported``): approx_distinct raises
+    on both, so they fall to exact COUNT(DISTINCT), whose memory is proportional
+    to cardinality (~2.2GB on a 30M-distinct float; ~25GB on a 24M-row
+    high-cardinality struct), and a distinct count over either is rarely
+    meaningful. The pipeline pre-populates ``distinct_count`` as None so
+    dependents (histogram, histogram_bins, distinct_per) still run.
 
-    Allowlist, not denylist, for the remaining dtypes: approx_distinct
-    raises for other unimplemented dtypes too (Boolean at least), and one
-    failing expression aborts the entire batch aggregate — every batched
-    stat for every column. Unverified dtypes keep the exact aggregate;
-    the memory blowup is dominated by high-cardinality string columns,
-    which are covered.
+    For the dtypes that remain, approx_distinct still raises on some (Boolean at
+    least), and one failing expression aborts the entire batch aggregate — every
+    batched stat for every column. So only the verified scalar dtypes below take
+    the approx path; the rest (Boolean, decimal, …) keep the exact aggregate,
+    which is bounded for the low-cardinality types that reach it.
     """
     dt = col.type()
     if dt.is_string() or dt.is_integer() or dt.is_timestamp() or dt.is_date():
