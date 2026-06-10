@@ -48,14 +48,18 @@ def _normalize_inputs(inputs: list) -> List[StatFunc]:
                 all_funcs.extend(collected)
                 continue
             # No @stat methods. Styling / post-processing ColAnalysis classes are
-            # structural and contribute no stats. A class still overriding the v1
-            # series_summary/computed_summary is a leftover that must be ported.
+            # structural and contribute no stats. A class still providing stats the
+            # v1 way — series_summary/computed_summary overrides, or polars
+            # select_clauses/column_ops — is a leftover that must be ported;
+            # treating it as structural would silently drop its stats.
             if issubclass(obj, ColAnalysis):
                 if (obj.series_summary is not ColAnalysis.series_summary
-                        or obj.computed_summary is not ColAnalysis.computed_summary):
+                        or obj.computed_summary is not ColAnalysis.computed_summary
+                        or obj.select_clauses or obj.column_ops):
                     raise TypeError(
                         f"{obj.__name__} relies on the removed v1 ColAnalysis adapter "
-                        f"(series_summary/computed_summary); port it to @stat functions.")
+                        f"(series_summary/computed_summary/select_clauses/column_ops); "
+                        f"port it to @stat functions.")
                 continue
 
         raise TypeError(
@@ -166,20 +170,20 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
 
 
 class StatPipeline:
-    """Top-level orchestrator for the pluggable analysis framework v2.
+    """Top-level orchestrator for the pluggable analysis framework.
 
     Accepts a mix of:
-    - StatFunc objects (v2)
-    - @stat-decorated functions (v2)
-    - Stat group classes with @stat methods (v2)
-    - ColAnalysis subclasses (v1 via adapter)
+    - StatFunc objects
+    - @stat-decorated functions
+    - Stat group classes with @stat methods
+    - Structural ColAnalysis subclasses (styling / post-processing), as no-ops
 
     Builds a typed DAG, executes per-column with Ok/Err error propagation,
     and supports column-type filtering.
 
     Usage::
 
-        pipeline = StatPipeline([TypingStats, DefaultSummaryStats, distinct_per])
+        pipeline = StatPipeline([typing_stats, base_summary_stats, distinct_per])
         result, errors = pipeline.process_df(my_df)
     """
 
