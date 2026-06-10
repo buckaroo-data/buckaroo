@@ -49,17 +49,19 @@ def _normalize_inputs(inputs: list) -> List[StatFunc]:
                 continue
             # No @stat methods. Styling / post-processing ColAnalysis classes are
             # structural and contribute no stats. A class still providing stats the
-            # v1 way — series_summary/computed_summary overrides, or polars
-            # select_clauses/column_ops — is a leftover that must be ported;
-            # treating it as structural would silently drop its stats.
+            # v1 way — series_summary/computed_summary overrides, polars
+            # select_clauses/column_ops, or bare provides_defaults — is a leftover
+            # that must be ported; treating it as structural would silently drop
+            # its stats (a pinned_row displaying one would just go blank).
             if issubclass(obj, ColAnalysis):
                 if (obj.series_summary is not ColAnalysis.series_summary
                         or obj.computed_summary is not ColAnalysis.computed_summary
-                        or obj.select_clauses or obj.column_ops):
+                        or obj.select_clauses or obj.column_ops
+                        or obj.provides_defaults):
                     raise TypeError(
                         f"{obj.__name__} relies on the removed v1 ColAnalysis adapter "
-                        f"(series_summary/computed_summary/select_clauses/column_ops); "
-                        f"port it to @stat functions.")
+                        f"(series_summary/computed_summary/select_clauses/column_ops/"
+                        f"provides_defaults); port it to @stat functions.")
                 continue
 
         raise TypeError(
