@@ -186,6 +186,30 @@ class TestBatchAggregate:
         assert stats["ints"]["distinct_count"] == 7
         assert stats["strs"]["distinct_per"] == 1.0
 
+    def test_distinct_count_skipped_for_nested_types(self):
+        """Struct / array / map columns skip distinct_count.
+
+        approx_distinct raises on nested types, so they fall to exact
+        COUNT(DISTINCT) — and a high-cardinality nested column is the same
+        multi-GB hash set #906 fixed for strings: ~25GB measured streaming the
+        stats over a 24M-row ``struct<url, description>`` column, all of it the
+        exact distinct on that one column (#908 only routed scalar string /
+        integer / timestamp / date to approx). They must be filtered out like
+        floats so distinct_count resolves to None and dependents still run.
+        """
+        from xorq.vendor.ibis.expr import datatypes as dt
+
+        from buckaroo.customizations.xorq_stats_v2 import distinct_count
+
+        cf = distinct_count._stat_func.column_filter
+        assert cf(dt.Struct({"url": "string", "description": "string"})) is False
+        assert cf(dt.Array(dt.string)) is False
+        assert cf(dt.Map(dt.string, dt.string)) is False
+        # scalar columns still computed; the existing float skip is preserved
+        assert cf(dt.string) is True
+        assert cf(dt.int64) is True
+        assert cf(dt.float64) is False
+
 
 # ============================================================
 # Numeric-only stats: mean, std, median
