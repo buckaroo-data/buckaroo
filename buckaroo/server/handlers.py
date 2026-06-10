@@ -406,6 +406,38 @@ class LoadExprHandler(tornado.web.RequestHandler):
             self.write({"error": "Missing 'build_dir'"})
             return
 
+        session_id = body.get("session") or uuid.uuid4().hex
+        no_browser = bool(body.get("no_browser", False))
+        force_reload = bool(body.get("force_reload", False))
+
+        # Config-bearing fields that change how the result is computed or
+        # rendered. If the caller passes any of these on a warm POST we must
+        # re-run the pipeline — returning cached metadata would silently
+        # ignore the new config.
+        has_config = any(body.get(k) for k in (
+            "component_config", "column_config_overrides", "extra_grid_config",
+            "init_sd", "skip_stat_columns"))
+
+        # Short-circuit: if this session is already loaded with the same
+        # build_dir (and no new config was supplied), skip the expensive
+        # pipeline and return cached metadata. Only fires when the caller
+        # explicitly passes back a session_id from a prior response
+        # (UUID-generated ids are always new). Pass force_reload=true — or any
+        # config-bearing field — to bypass this and re-run the full pipeline.
+        sessions = self.application.settings["sessions"]
+        existing = sessions.get(session_id)
+        if (not force_reload and not has_config and existing
+                and existing.build_dir == build_dir and existing.metadata):
+            if no_browser or not self.application.settings.get("open_browser", True):
+                browser_action = "skipped"
+            else:
+                port = self.application.settings["port"]
+                browser_action = find_or_create_session_window(
+                    session_id, port, reload_if_found=True)
+            self.write({"session": session_id, "server_pid": os.getpid(),
+                "browser_action": browser_action, **existing.metadata})
+            return
+
         try:
             from buckaroo.server import xorq_loading
         except ImportError:
@@ -415,9 +447,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 "Install with `pip install buckaroo[xorq]`."})
             return
 
-        session_id = body.get("session") or uuid.uuid4().hex
         prompt = body.get("prompt", "")
-        no_browser = bool(body.get("no_browser", False))
         component_config = body.get("component_config")
         column_config_overrides = body.get("column_config_overrides")
         extra_grid_config = body.get("extra_grid_config")
