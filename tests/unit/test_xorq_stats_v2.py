@@ -6,6 +6,7 @@ installed.
 """
 
 import math
+import os
 
 import pandas as pd
 import pytest
@@ -600,3 +601,68 @@ class TestMaterialization:
             for key in ("min", "max", "mean", "null_count", "distinct_count"):
                 assert raw[col].get(key) == mat[col].get(key), (col, key)
             assert len(raw[col].get("histogram", [])) == len(mat[col].get("histogram", []))
+
+    def test_skipped_when_cache_storage_set(self, tmp_path):
+        """With cache_storage set, _maybe_materialize must NOT inject a
+        __buckaroo_histo_mat_<uuid> base table — that name lands in the
+        expression token and would break the content-addressed cache key on
+        every load. A lazy filter chain that materializes without cache_storage
+        is returned untouched once cache_storage is set."""
+        con = xo.connect()
+        df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
+        t = con.create_table("t_mat_cache", df)
+        filt = t.filter(t.v > 1)  # lazy chain → would materialize
+
+        # Without cache_storage the chain materializes: new table + cleanup.
+        plain = XorqStatPipeline(XORQ_STATS_V2)
+        mat, cleanup = plain._maybe_materialize(filt)
+        try:
+            assert cleanup is not None, "filter chain should materialize without cache_storage"
+            assert mat is not filt
+        finally:
+            if cleanup is not None:
+                cleanup[0].drop_table(cleanup[1])
+
+        # With cache_storage the same chain is returned untouched, no cleanup.
+        cache = xo.ParquetSnapshotCache.from_kwargs(
+            source=xo.connect(), base_path=str(tmp_path))
+        cached = XorqStatPipeline(XORQ_STATS_V2, cache_storage=cache)
+        same, no_cleanup = cached._maybe_materialize(filt)
+        assert same is filt
+        assert no_cleanup is None
+
+
+class TestCacheStorageExecute:
+    """_execute serves a cache HIT by reading the snapshot parquet directly
+    rather than re-planning the expression through cache().execute()."""
+
+    def test_cache_hit_reads_parquet_directly(self, tmp_path):
+        import buckaroo.pluggable_analysis_framework.xorq_stat_pipeline as xsp
+        from unittest.mock import patch
+
+        cache = xo.ParquetSnapshotCache.from_kwargs(
+            source=xo.connect(), base_path=str(tmp_path))
+        con = xo.connect()
+        df = pd.DataFrame({"k": range(20), "v": [float(i % 7) for i in range(20)]})
+        t = con.create_table("ce_t", df)
+        query = t.filter(t.v > 1)
+
+        pipeline = XorqStatPipeline(XORQ_STATS_V2, cache_storage=cache)
+
+        # First execute is a MISS: the snapshot doesn't exist yet, so the
+        # parquet-read shortcut must NOT fire — it falls through to cache().
+        with patch.object(xsp.pd, "read_parquet", wraps=pd.read_parquet) as miss_spy:
+            result1 = pipeline._execute(query)
+        assert miss_spy.call_count == 0, "read_parquet fired before the cache was populated"
+
+        key = cache.calc_key(query)
+        assert os.path.exists(cache.storage.get_path(key)), "miss did not populate the cache"
+
+        # Second execute is a HIT: served by reading the snapshot parquet,
+        # never re-planning through cache().execute().
+        with patch.object(xsp.pd, "read_parquet", wraps=pd.read_parquet) as hit_spy:
+            result2 = pipeline._execute(query)
+        assert hit_spy.call_count == 1, "cache hit did not read the snapshot parquet"
+
+        pd.testing.assert_frame_equal(
+            result1.reset_index(drop=True), result2.reset_index(drop=True))

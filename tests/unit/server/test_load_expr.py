@@ -462,12 +462,76 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
 
+    @tornado.testing.gen_test
+    async def test_force_reload_bypasses_warm_session(self):
+        """#899: force_reload=true must bypass the warm-session early-exit and
+        re-run the pipeline even for an already-loaded session_id."""
+        from unittest.mock import patch
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "lx-force-reload"
+            from buckaroo.server import xorq_loading
+            original = xorq_loading.load_expr_build_dir
+            calls = []
+            def counting_loader(bd):
+                calls.append(bd)
+                return original(bd)
+
+            with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path})
+                self.assertEqual(len(calls), 1)
+                # Plain warm repeat takes the early-exit — no re-run.
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path})
+                self.assertEqual(len(calls), 1, "plain warm repeat must not re-run")
+                # force_reload bypasses the early-exit — pipeline runs again.
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path, "force_reload": True})
+                self.assertEqual(resp.code, 200)
+                self.assertEqual(len(calls), 2, "force_reload must re-run the pipeline")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_warm_session_with_new_config_reruns(self):
+        """#899: a warm POST that carries a config-bearing field (here
+        component_config) must re-run the pipeline rather than silently
+        returning stale cached metadata that ignores the new config."""
+        from unittest.mock import patch
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "lx-warm-config"
+            from buckaroo.server import xorq_loading
+            original = xorq_loading.load_expr_build_dir
+            calls = []
+            def counting_loader(bd):
+                calls.append(bd)
+                return original(bd)
+
+            with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path})
+                self.assertEqual(len(calls), 1)
+                # Plain warm repeat takes the early-exit — no re-run.
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path})
+                self.assertEqual(len(calls), 1, "plain warm repeat must not re-run")
+                # Same session + build_dir but with new config — must re-run.
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path,
+                     "component_config": {"search_debounce": 100}})
+                self.assertEqual(resp.code, 200)
+                self.assertEqual(len(calls), 2, "new config must bypass the early-exit")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
     def test_shared_backend_singleton(self):
         """#896: load_expr_build_dir must call xorq.config.default_backend()
         rather than connect() so xorq's process-wide singleton is reused across
         calls instead of a new SessionContext being minted each time."""
-        import shutil
-        import tempfile
         from unittest.mock import patch
 
         from buckaroo.server import xorq_loading
