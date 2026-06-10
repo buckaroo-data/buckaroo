@@ -729,3 +729,25 @@ class TestSnapshotCacheRun:
                  if r.name == self._LOGGER and r.getMessage().startswith("xorq stat cache")]
         assert len(lines) == 1, f"expected exactly one cache summary line, got {lines}"
         assert "miss(es)" in lines[0] and "snapshot(s) written" in lines[0]
+
+    def test_cached_stats_match_uncached(self, tmp_path):
+        """The materialized cold path and the snapshot-read warm path produce
+        the same stats as a plain uncached run — materialization is a perf
+        optimization, not a semantic change."""
+        cache = self._cache(tmp_path)
+        plain, _ = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False).process_table(self._filter_chain_table())
+        cold, _ = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False,
+            cache_storage=cache).process_table(self._filter_chain_table())
+        warm, _ = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False,
+            cache_storage=cache).process_table(self._filter_chain_table())
+        # The warm run reads the exact parquet the cold run wrote, so its whole
+        # SD (histogram row order included) must reproduce the cold run's.
+        assert cold == warm, "warm run must reproduce the cold run's snapshot exactly"
+        # Histogram tie-order can differ between materialized and unmaterialized
+        # execution, so compare the tie-independent stats against the plain run.
+        for col in plain:
+            for key in ("length", "min", "max", "mean", "null_count", "distinct_count"):
+                assert cold[col].get(key) == plain[col].get(key), (col, key)

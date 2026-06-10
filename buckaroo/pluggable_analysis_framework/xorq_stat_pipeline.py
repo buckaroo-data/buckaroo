@@ -19,6 +19,7 @@ Optional dependency: install with ``buckaroo[xorq]``.
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -44,6 +45,19 @@ try:
 except ImportError:
     xo = None
     HAS_XORQ = False
+
+log = logging.getLogger(__name__)
+
+
+def _new_cache_run_stats() -> Dict[str, Any]:
+    """Per-``process_table``-run counters for the snapshot cache.
+
+    Reset at the start of every run and summarised in one log line at the
+    end (see ``_log_cache_stats``). ``materialized`` records whether the
+    source filter chain was landed as an in-memory base table to amortise
+    the per-column histogram scans (#910)."""
+    return {"hits": 0, "misses": 0, "snapshots": 0, "bytes": 0,
+        "write_errors": 0, "materialized": False}
 
 
 def _to_python_scalar(val):
@@ -125,6 +139,12 @@ class XorqStatPipeline:
         self.backend = backend
         self.cache_storage = cache_storage
 
+        # Per-run snapshot-cache state, (re)initialised in process_table.
+        # Defaults set here so the attributes always exist (e.g. for the
+        # unit_test() run kicked off below, which disables the cache).
+        self._cache_stats = _new_cache_run_stats()
+        self._reset_cache_materialization()
+
         # Validate the full DAG up front (raises DAGConfigError on misconfig).
         self.ordered_stat_funcs = build_typed_dag(
             self.all_stat_funcs, external_keys=self.EXTERNAL_KEYS)
@@ -149,23 +169,150 @@ class XorqStatPipeline:
         if self.backend is not None:
             return self.backend.execute(query)
         if self.cache_storage is not None:
-            # On a cache HIT, read the snapshot parquet directly instead of
-            # routing the query back through ``cache().execute()``. The latter
-            # re-plans and re-executes the whole expression through DataFusion
-            # just to reach the cached node — ~30ms for a single-table expr and
-            # ~125ms for a join, versus ~1-3ms to read the result parquet. The
-            # win compounds across the per-column histogram queries. calc_key /
-            # storage.get_path are the same ParquetSnapshotCache API used by
-            # ``_resolve_cached_nodes`` below.
-            key = self.cache_storage.calc_key(query)
-            path = self.cache_storage.storage.get_path(key)
-            if os.path.exists(path):
-                try:
-                    return pd.read_parquet(path)
-                except Exception:
-                    pass  # corrupt/partial cache file — fall back to recompute
-            return query.cache(cache=self.cache_storage).execute()
+            return self._execute_cached(query)
         return query.execute()
+
+    def _execute_cached(self, query):
+        """Serve ``query`` from the per-expression snapshot cache.
+
+        HIT: read the snapshot parquet directly rather than routing the query
+        back through ``cache().execute()``. The latter re-plans and re-executes
+        the whole expression through DataFusion just to reach the cached node —
+        ~30ms for a single-table expr and ~125ms for a join, versus ~1-3ms to
+        read the result parquet. The win compounds across the per-column
+        histogram queries.
+
+        MISS: execute and write the snapshot ourselves. The cache key is
+        content-addressed on ``query`` as built against the *original* source
+        expression (the same key the next process gets), so warm loads stay
+        portable. For execution only, ``_rewrite_to_materialized`` swaps the
+        source leaf for an in-memory base table so the filter chain is scanned
+        once instead of once per per-column query (#910) — that rewrite never
+        touches the cache key. The result is written with pandas (the same
+        reader the HIT path uses); these stat-result snapshots are read back
+        only via ``pd.read_parquet`` here, never through xorq's cache layer.
+        """
+        key = self.cache_storage.calc_key(query)
+        path = self.cache_storage.storage.get_path(key)
+        if os.path.exists(path):
+            try:
+                result = pd.read_parquet(path)
+                self._cache_stats["hits"] += 1
+                return result
+            except Exception:
+                pass  # corrupt/partial cache file — fall back to recompute
+        self._cache_stats["misses"] += 1
+        result = self._rewrite_to_materialized(query).execute()
+        self._write_snapshot(path, result)
+        return result
+
+    def _write_snapshot(self, path, result_df):
+        """Write a stat result to its snapshot path, atomically.
+
+        Writes a temp file and renames so a crash mid-write can't leave a
+        truncated parquet the HIT path would later read as a corrupt cache.
+        Write failures are counted and logged — never silent (#910)."""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".tmp")
+            result_df.to_parquet(tmp, index=False)
+            tmp.rename(path)
+            self._cache_stats["snapshots"] += 1
+            self._cache_stats["bytes"] += path.stat().st_size
+        except Exception as e:
+            self._cache_stats["write_errors"] += 1
+            log.warning("xorq stat snapshot write failed for %s: %s", path, e)
+
+    def _rewrite_to_materialized(self, query):
+        """Rewrite ``query``'s source leaf to the materialized base table.
+
+        Lazily materialises the post-filter source once (on the first miss),
+        then substitutes that base table for the source op in each query so the
+        filter/clean chain is scanned a single time rather than re-evaluated by
+        every per-column histogram. Best-effort: any failure to materialise or
+        rewrite falls back to executing ``query`` against the original source."""
+        subs = self._ensure_cache_materialization()
+        if not subs:
+            return query
+        try:
+            return query.op().replace(subs).to_expr()
+        except Exception:
+            return query
+
+    def _ensure_cache_materialization(self):
+        """Materialise the cache source once; return the substitution map.
+
+        Returns ``{source_op: materialized_op}`` for ``_rewrite_to_materialized``
+        to splice in, or ``None`` when materialisation doesn't apply (no source,
+        non-datafusion backend, source already a base table, no per-column work
+        to amortise, or a failed create_table). Mirrors the guards in
+        ``_maybe_materialize`` — that path handles the no-cache case eagerly;
+        this one handles the cache case lazily so a fully-warm load (all hits)
+        never scans the source at all."""
+        if self._cache_mat_attempted:
+            return self._cache_mat_subs
+        self._cache_mat_attempted = True
+
+        source = self._cache_source
+        if source is None:
+            return None
+        # Only in-process datafusion — a remote backend would pull all data
+        # over the wire just to land the base table.
+        try:
+            underlying = source._find_backend()
+        except Exception:
+            return None
+        if "xorq_datafusion" not in type(underlying).__module__:
+            return None
+        # Already a base table → no filter chain to amortise; the per-column
+        # queries already scan it directly.
+        try:
+            from xorq.vendor.ibis.expr import operations as _ibis_ops
+            if isinstance(source.op(), (_ibis_ops.DatabaseTable, _ibis_ops.InMemoryTable)):
+                return None
+        except Exception:
+            pass
+        # Nothing re-executes the filter chain (only batched stats) → a single
+        # materialisation scan would be pure overhead.
+        if not any(not _is_batch_func(sf) for sf in self.ordered_stat_funcs):
+            return None
+
+        name = f"__buckaroo_histo_mat_{uuid.uuid4().hex[:12]}"
+        mat = self._create_base_table(underlying, name, source)
+        if mat is None:
+            return None
+        self._cache_mat_cleanup = (underlying, name)
+        self._cache_mat_subs = {source.op(): mat.op()}
+        self._cache_stats["materialized"] = True
+        return self._cache_mat_subs
+
+    def _reset_cache_materialization(self):
+        self._cache_source = None
+        self._cache_mat_subs = None
+        self._cache_mat_cleanup = None
+        self._cache_mat_attempted = False
+
+    def _cleanup_cache_materialization(self):
+        cleanup = self._cache_mat_cleanup
+        self._reset_cache_materialization()
+        if cleanup is not None:
+            backend, name = cleanup
+            try:
+                backend.drop_table(name)
+            except Exception:
+                pass
+
+    def _log_cache_stats(self):
+        """One summary line per run when a snapshot cache is in play (#910)."""
+        if self.cache_storage is None:
+            return
+        s = self._cache_stats
+        base_path = getattr(getattr(self.cache_storage, "storage", None), "base_path", "?")
+        log.info(
+            "xorq stat cache [%s]: %d hit(s), %d miss(es), %d snapshot(s) "
+            "written (%d bytes), %d write error(s), source materialized=%s",
+            base_path, s["hits"], s["misses"], s["snapshots"], s["bytes"],
+            s["write_errors"], s["materialized"])
 
     def _maybe_materialize(self, table):
         """Materialize a lazy expression to a fresh base table.
@@ -181,11 +328,13 @@ class XorqStatPipeline:
         Returns (table_to_use, cleanup) where cleanup is (backend, name)
         for later drop, or None if no materialization happened.
 
-        Skipped when a ``cache_storage`` is set: stat queries are then served
-        from the per-expression snapshot cache, so the per-column filter
-        re-evaluation this avoids never happens — and materializing would inject
-        a ``__buckaroo_histo_mat_<uuid>`` table name into the expression token,
-        breaking the content-addressed cache key on every load.
+        Skipped (no-op) when a ``cache_storage`` is set: the cache path keys
+        each stat query against the *original* ``table`` so the content-
+        addressed snapshot key is stable across loads, and materialises lazily
+        inside ``_execute_cached`` (only on a miss, as an execution-only
+        rewrite) so a fully-warm load never scans the source. Materialising
+        here instead would inject a per-load ``__buckaroo_histo_mat_<uuid>``
+        table name into the query token and break the cache key on every load.
         """
         if self.cache_storage is not None:
             return table, None
@@ -307,6 +456,14 @@ class XorqStatPipeline:
             self.cache_storage = saved_cache
 
     def process_table(self, table, skip_columns=None) -> Tuple[SDType, List[StatError]]:
+        # Reset per-run cache state. When a snapshot cache is set, queries are
+        # keyed against this original ``table`` (stable across processes) while
+        # ``_execute_cached`` materialises it lazily for execution — so
+        # _maybe_materialize stays a no-op for the cache path.
+        self._cache_stats = _new_cache_run_stats()
+        self._reset_cache_materialization()
+        if self.cache_storage is not None:
+            self._cache_source = table
         materialized, cleanup = self._maybe_materialize(table)
         try:
             return self._process_table_impl(materialized, skip_columns=skip_columns)
@@ -317,6 +474,8 @@ class XorqStatPipeline:
                     backend.drop_table(name)
                 except Exception:
                     pass
+            self._cleanup_cache_materialization()
+            self._log_cache_stats()
 
     def _process_table_impl(self, table, skip_columns=None) -> Tuple[SDType, List[StatError]]:
         schema = table.schema()
