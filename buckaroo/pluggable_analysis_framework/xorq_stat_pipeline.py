@@ -101,6 +101,45 @@ def _is_batch_func(sf: StatFunc) -> bool:
     return True
 
 
+# Relational ops whose result a per-column re-scan recomputes expensively, so
+# materialising the source once amortises across the per-column histogram
+# queries. Everything else — scans, projections, unions, limits — streams
+# cheaply via predicate + projection pushdown, so materialising it is pure
+# overhead, and multi-GB of resident overhead on a wide or tall source (#915).
+# Resolved by name so an op renamed/absent across ibis versions is skipped
+# rather than raising.
+_MATERIALIZE_WORTHY_OP_NAMES = (
+    "Filter", "Aggregate", "JoinChain", "JoinLink", "Distinct", "Sort", "DropNull")
+
+
+def _materialize_worthy_ops():
+    if not HAS_XORQ:
+        return ()
+    from xorq.vendor.ibis.expr import operations as ops  # noqa: PLC0415
+    return tuple(getattr(ops, n) for n in _MATERIALIZE_WORTHY_OP_NAMES if hasattr(ops, n))
+
+
+def _source_worth_materializing(source) -> bool:
+    """True if the source op tree carries a chain — filter / aggregate / join /
+    distinct / sort / drop_null — whose re-execution per per-column query
+    materialising the source once would avoid.
+
+    A source built only from scans, projections, unions and limits streams
+    cheaply, so materialising it is pure overhead (#915). The check is op-tree
+    based, hence independent of how the expression was spelled (``.filter`` vs
+    ``[bool]``, ``group_by().agg`` vs ``.agg`` vs ``.count``, any ``*_join``).
+
+    Conservative: a classification failure returns False (stream). Streaming is
+    memory-safe; the unbounded in-memory copy is the failure mode we avoid."""
+    worthy = _materialize_worthy_ops()
+    if not worthy:
+        return False
+    try:
+        return bool(list(source.op().find(worthy)))
+    except Exception:
+        return False
+
+
 class XorqStatPipeline:
     """v2 stat pipeline for ``ibis.Table`` inputs.
 
@@ -277,6 +316,12 @@ class XorqStatPipeline:
         # materialisation scan would be pure overhead.
         if not any(not _is_batch_func(sf) for sf in self.ordered_stat_funcs):
             return None
+        # Only worth materialising when re-scanning would recompute an expensive
+        # chain (filter / aggregate / join / …). A scan / projection / union
+        # streams cheaply; materialising a wide or tall one is multi-GB of pure
+        # overhead (#915).
+        if not _source_worth_materializing(source):
+            return None
 
         name = f"__buckaroo_histo_mat_{uuid.uuid4().hex[:12]}"
         mat = self._create_base_table(underlying, name, source)
@@ -358,6 +403,11 @@ class XorqStatPipeline:
         # would re-execute the filter chain), materialization is just
         # wasted work — skip it.
         if not any(not _is_batch_func(sf) for sf in self.ordered_stat_funcs):
+            return table, None
+        # Only worth materialising when the source carries an expensive chain
+        # (filter / aggregate / join / …) a per-column re-scan would recompute;
+        # a scan / projection / union streams cheaply (#915).
+        if not _source_worth_materializing(table):
             return table, None
         name = f"__buckaroo_histo_mat_{uuid.uuid4().hex[:12]}"
         new_table = self._create_base_table(underlying, name, table)
