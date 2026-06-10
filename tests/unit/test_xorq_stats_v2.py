@@ -127,6 +127,64 @@ class TestBatchAggregate:
         assert stats["ints"]["distinct_count"] == 7
         assert stats["strs"]["distinct_count"] == 7
 
+    def test_distinct_count_uses_approx(self):
+        """distinct_count must build ApproxCountDistinct, not exact CountDistinct.
+
+        Exact COUNT(DISTINCT) folded into the shared batch aggregate defeats
+        DataFusion's single-distinct rewrite: 3.8GB peak on a 131M-row string
+        column with 6.2M distinct values, vs 238MB for approx_nunique in the
+        same batch shape (#906).
+        """
+        from xorq.vendor.ibis.expr import operations as ops
+
+        from buckaroo.customizations.xorq_stats_v2 import distinct_count
+
+        expr = distinct_count._stat_func.func(col=_make_table().strs)
+        op = expr.op()
+        assert list(op.find(ops.ApproxCountDistinct)), (
+            "distinct_count should aggregate via approx_nunique")
+        # ApproxCountDistinct subclasses CountDistinct, so filter it out to
+        # check no *exact* distinct aggregate remains.
+        exact = [n for n in op.find(ops.CountDistinct)
+                 if not isinstance(n, ops.ApproxCountDistinct)]
+        assert not exact, "exact COUNT(DISTINCT) must not enter the batch aggregate"
+
+    def test_distinct_count_exact_fallback_for_bool(self):
+        """Booleans keep exact nunique — approx_distinct raises on Boolean.
+
+        One failing expression aborts the whole batch aggregate, and exact
+        COUNT(DISTINCT bool) is trivially cheap (<= 3 entries of hash state),
+        so booleans must fall back to the exact aggregate rather than error.
+        """
+        from xorq.vendor.ibis.expr import operations as ops
+
+        from buckaroo.customizations.xorq_stats_v2 import distinct_count
+
+        expr = distinct_count._stat_func.func(col=_make_table().bools)
+        op = expr.op()
+        assert not list(op.find(ops.ApproxCountDistinct))
+        assert list(op.find(ops.CountDistinct))
+
+    def test_distinct_count_skipped_for_floats(self):
+        """Float columns skip distinct_count entirely.
+
+        approx_distinct raises on Float64, and exact COUNT(DISTINCT) costs
+        memory proportional to cardinality (~2.2GB measured on a 30M-distinct
+        column) for a number that is rarely meaningful on floats. The stat is
+        skipped: distinct_count and distinct_per resolve to None, while the
+        numeric histogram and histogram_bins must still be produced.
+        """
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(_make_table())
+        assert errors == []
+        assert stats["floats"]["distinct_count"] is None
+        assert stats["floats"]["distinct_per"] is None
+        assert len(stats["floats"]["histogram"]) > 0
+        assert len(stats["floats"]["histogram_bins"]) == 11
+        # non-float columns are unaffected
+        assert stats["ints"]["distinct_count"] == 7
+        assert stats["strs"]["distinct_per"] == 1.0
+
 
 # ============================================================
 # Numeric-only stats: mean, std, median

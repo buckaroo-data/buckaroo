@@ -106,7 +106,8 @@ class XorqStatPipeline:
     # actual provider stat (e.g. ``min`` for numeric cols) is filtered
     # out by column_filter.
     EXTERNAL_KEYS = frozenset(
-        {"orig_col_name", "rewritten_col_name", "dtype", "length", "min", "max"})
+        {"orig_col_name", "rewritten_col_name", "dtype", "length", "min", "max",
+         "distinct_count"})
 
     def __init__(self, stat_funcs: list, backend: Any = None, unit_test: bool = True,
                  cache_storage=None):
@@ -330,11 +331,13 @@ class XorqStatPipeline:
         # keys. ``length`` is filled in by the batch query below. ``min`` /
         # ``max`` start as None so dependents (histogram) don't cascade-
         # exclude on non-numeric columns; ``min`` / ``max`` overwrite for
-        # numeric cols.
+        # numeric cols. ``distinct_count`` likewise starts as None so float
+        # columns (where the stat is column_filtered out) keep their
+        # dependents (histogram, histogram_bins, distinct_per) runnable.
         accumulators: Dict[str, Dict[str, StatResult]] = {}
         for col in columns:
             accumulators[col] = {"orig_col_name": Ok(col), "rewritten_col_name": Ok(col), "dtype": Ok(str(schema[col])),
-                "length": Ok(0), "min": Ok(None), "max": Ok(None)}
+                "length": Ok(0), "min": Ok(None), "max": Ok(None), "distinct_count": Ok(None)}
 
         # ---- Phase 1: batch aggregate ----------------------------------
         # ``length`` is a table-level scalar (same value for every column),
