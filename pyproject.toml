@@ -79,16 +79,24 @@ dev = [
     "pl-series-hash==0.2.1",
     "marimo>=0.19.7",
 ]
-polars = [
-    "polars>=1.24.0",
-    "polars[timezone]",
-    "pl-series-hash==0.2.1",
-    # Server runtime (buckaroo.server) needs tornado + pandas; the dataflow
-    # pipeline is pandas-keyed even when input is polars. Bundling them here
-    # means `pip install 'buckaroo[polars]'` is enough to boot the sidecar.
+# Headless data server (the `buckaroo-server` entrypoint / Tauri sidecar).
+# pandas is the base engine: the dataflow/stats pipeline is pandas-keyed even
+# when the input is polars or xorq, so it lives here rather than in an optional
+# backend extra. `pip install 'buckaroo[server]'` boots the server against
+# pandas files with no polars/xorq pulled in — the backend extras below add
+# those only when needed.
+server = [
     "tornado>=6.0",
     "pandas; python_version >= '3.13'",
     "pandas>=1.3.5; python_version < '3.13'",
+]
+# polars backend for the server + the polars notebook widget. Additive on top
+# of [server]; only the polars wheels are extra.
+polars = [
+    "buckaroo[server]",
+    "polars>=1.24.0",
+    "polars[timezone]",
+    "pl-series-hash==0.2.1",
 ]
 
 test = [
@@ -118,15 +126,14 @@ test = [
 # value_counts) on polars-written parquets that contain Categorical
 # columns. Fixed in xorq-datafusion 0.2.7, shipped with xorq 0.3.25.
 xorq = [
+    "buckaroo[server]",
+    # xorq drives the lazy path via its own parquet readers, so a polars-free
+    # xorq install is supported — [server] supplies pandas + tornado.
     "xorq>=0.3.25 ; python_version < '3.14'",
-    # Server runtime (buckaroo.server) — polars is no longer required to
-    # boot; pandas + tornado are. xorq drives the lazy path via its own
-    # parquet readers, so a polars-free xorq install is supported.
-    "tornado>=6.0",
-    "pandas; python_version >= '3.13'",
-    "pandas>=1.3.5; python_version < '3.13'",
 ]
-mcp = ["mcp", "tornado>=6.0", "polars"]
+# MCP server. Builds on [server] (pandas + tornado); polars is no longer
+# forced — add buckaroo[polars] alongside if a polars backend is wanted.
+mcp = ["buckaroo[server]", "mcp"]
 marimo = [
     "marimo>=0.19.7",
     "pandas; python_version >= '3.13'",

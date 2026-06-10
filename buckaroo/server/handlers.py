@@ -226,7 +226,8 @@ class LoadHandler(tornado.web.RequestHandler):
         except ImportError:
             self.set_status(400)
             self.write({"error_code": "missing_dependency",
-                "message": "backend='polars' requires polars to be installed"})
+                "message": "backend='polars' requires polars. "
+                "Install with `pip install buckaroo[polars]`."})
             return None, None
         except ValueError as e:
             self.set_status(400)
@@ -256,6 +257,15 @@ class LoadHandler(tornado.web.RequestHandler):
         except FileNotFoundError:
             self.set_status(404)
             self.write({"error_code": "file_not_found", "message": f"File not found: {path}"})
+            return None, None
+        except ImportError:
+            # The lazy path imports polars on demand; an absent polars means
+            # the [polars] extra wasn't installed. Surface a clean 400 with the
+            # install hint instead of a generic 500 (mirrors the xorq path).
+            self.set_status(400)
+            self.write({"error_code": "missing_dependency",
+                "message": "mode='lazy' requires polars. "
+                "Install with `pip install buckaroo[polars]`."})
             return None, None
         except ValueError as e:
             self.set_status(400)
