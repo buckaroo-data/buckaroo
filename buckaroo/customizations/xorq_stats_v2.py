@@ -56,18 +56,31 @@ def _is_numeric_not_bool(dtype) -> bool:
     return dtype.is_numeric() and not dtype.is_boolean()
 
 
-def _distinct_count_supported(dtype) -> bool:
-    """Columns distinct_count runs on. Skips floats and nested types.
+def _distinct_count_approx(dtype) -> bool:
+    """Dtypes xorq-datafusion's approx_distinct (HyperLogLog, bounded memory)
+    supports, verified empirically across the arrow dtypes (#918): integer,
+    string (dictionary columns decode to string), binary, and temporal
+    (date / time / timestamp). approx_distinct raises on float, decimal,
+    boolean and nested types."""
+    return (dtype.is_integer() or dtype.is_string() or dtype.is_binary()
+            or dtype.is_temporal())
 
-    approx_distinct raises on both Float64 and nested (struct/array/map) types,
-    so they fall to exact COUNT(DISTINCT). On a high-cardinality column that is
-    the multi-GB hash set #906 fixed for strings — ~25GB measured streaming the
-    stats over a 24M-row ``struct<url, description>`` column, all of it the
-    exact distinct on that one column. #908 only routed scalar string / integer
-    / timestamp / date to approx; nested types kept the exact aggregate and so
-    inherited the same blowup. A distinct count over a struct is rarely
-    meaningful anyway. Booleans/decimals stay (low-cardinality in practice)."""
-    return not (dtype.is_floating() or dtype.is_nested())
+
+def _distinct_count_supported(dtype) -> bool:
+    """Columns distinct_count runs on. The approx path (bounded HLL) covers the
+    dtypes in ``_distinct_count_approx``; booleans keep exact COUNT(DISTINCT)
+    (<= 2 distinct, trivially cheap).
+
+    Everything else — float, decimal, and nested struct/array/map — has no
+    approx_distinct AND unbounded cardinality, where exact COUNT(DISTINCT) is
+    the multi-GB hash set #906 fixed for strings: ~2.2GB on a 30M-distinct
+    float, 10GB on a 24M-row unique-per-row ``struct<url, description>``. #908
+    routed only scalar string/integer/timestamp/date to approx and left the
+    rest on exact, so binary/time (approx-capable) paid nothing while
+    decimal/struct (approx-incapable, high-card) inherited the blowup. Skip the
+    unbounded ones: distinct_count resolves to None and dependents
+    (distinct_per, histogram, histogram_bins) still run."""
+    return _distinct_count_approx(dtype) or dtype.is_boolean()
 
 
 # ============================================================
@@ -165,24 +178,18 @@ def distinct_count(col: XorqColumn) -> int:
     is displayed as a ratio, and the histogram branch thresholds
     (distinct_count > 5 / <= 5) sit where HLL is exact in practice.
 
-    Float and nested (struct/array/map) columns skip the stat entirely
-    (column_filter — see ``_distinct_count_supported``): approx_distinct raises
-    on both, so they fall to exact COUNT(DISTINCT), whose memory is proportional
-    to cardinality (~2.2GB on a 30M-distinct float; ~25GB on a 24M-row
-    high-cardinality struct), and a distinct count over either is rarely
-    meaningful. The pipeline pre-populates ``distinct_count`` as None so
-    dependents (histogram, histogram_bins, distinct_per) still run.
-
-    For the dtypes that remain, approx_distinct still raises on some (Boolean at
-    least), and one failing expression aborts the entire batch aggregate — every
-    batched stat for every column. So only the verified scalar dtypes below take
-    the approx path; the rest (Boolean, decimal, …) keep the exact aggregate,
-    which is bounded for the low-cardinality types that reach it.
+    Type handling is split out so it can't drift from the column_filter:
+    ``_distinct_count_approx`` lists the approx-capable dtypes (the only ones
+    that reach the approx branch), ``_distinct_count_supported`` adds boolean
+    (exact, <= 2 distinct) and skips the unbounded exact-only dtypes (float,
+    decimal, nested) entirely — the pipeline pre-populates their distinct_count
+    as None so dependents (histogram, histogram_bins, distinct_per) still run.
+    Picking the approx vs exact branch on the same predicate keeps approx off
+    any dtype it would raise on (one raising expression aborts the whole batch).
     """
-    dt = col.type()
-    if dt.is_string() or dt.is_integer() or dt.is_timestamp() or dt.is_date():
+    if _distinct_count_approx(col.type()):
         return col.approx_nunique().cast("int64")
-    return col.nunique().cast("int64")
+    return col.nunique().cast("int64")  # only booleans reach here (exact, <= 2)
 
 
 @stat(column_filter=_is_numeric_not_bool)
