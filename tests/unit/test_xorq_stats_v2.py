@@ -215,6 +215,39 @@ class TestHistogram:
         total_pop = sum(b["cat_pop"] for b in h)
         assert abs(total_pop - 100.0) < 0.6  # per-bucket 1dp rounding drift
 
+    def test_categorical_histogram_bounded_above_100k_rows(self):
+        """Above 100k rows the categorical histogram must sample, not group the full table.
+
+        The exact top-10 query (group_by(col).count().order_by(desc).limit(10))
+        materializes a hash entry per distinct value: ~1GB transient per
+        high-cardinality string column on a 26M-row table (#907). Above the
+        100k-row threshold the group-by input must be bounded by a Sample
+        node; at or below the threshold the exact query is preserved.
+        """
+        from xorq.vendor.ibis.expr import operations as ops
+
+        from buckaroo.customizations.xorq_stats_v2 import histogram
+
+        fn = histogram._stat_func.func
+        table = _make_table_categorical()
+        captured = []
+
+        def execute(query):
+            captured.append(query)
+            return query.execute()
+
+        fn(expr=table, execute=execute, orig_col_name="cat", is_numeric=False,
+           is_bool=False, length=200_000, distinct_count=8, min=None, max=None)
+        assert len(captured) == 1
+        assert list(captured[0].op().find(ops.Sample)), (
+            "categorical histogram over >100k rows must bound its input with a sample")
+
+        small = fn(expr=table, execute=execute, orig_col_name="cat", is_numeric=False,
+            is_bool=False, length=11, distinct_count=8, min=None, max=None)
+        assert not list(captured[1].op().find(ops.Sample)), (
+            "at or below 100k rows the exact top-10 query must be preserved")
+        assert [b["name"] for b in small][0] == "a"
+
     def test_histogram_constant_column_empty(self):
         """Constant numeric column (min == max) → empty histogram, not crash."""
         table = xo.memtable(pd.DataFrame({"const": [7, 7, 7, 7]}))
