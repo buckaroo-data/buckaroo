@@ -113,6 +113,12 @@ class LegacyColumnOpsAnalysis(ColAnalysis):
     column_ops = {'dtype': ("all", lambda col_series: col_series.dtype)}
 
 
+class LegacyDefaultsOnlyAnalysis(ColAnalysis):
+    """A v1 defaults-only class: no overrides, but non-empty provides_defaults.
+    The v1 adapter turned these defaults into stats — no longer supported."""
+    provides_defaults = {'foo': 0}
+
+
 # ============================================================================
 # Tests: stat_func
 # ============================================================================
@@ -492,6 +498,14 @@ class TestNormalizeInputs:
             _normalize_inputs([LegacySelectClausesAnalysis])
         with pytest.raises(TypeError, match='column_ops|@stat'):
             _normalize_inputs([LegacyColumnOpsAnalysis])
+
+    def test_defaults_only_colanalysis_rejected(self):
+        """A ColAnalysis with non-empty provides_defaults and no @stat methods
+        used to contribute its defaults as stats via the v1 adapter. Treating it
+        as structural would silently drop those stats — a pinned_row displaying
+        one of them would just go blank. It must error loudly instead."""
+        with pytest.raises(TypeError, match='provides_defaults|@stat'):
+            _normalize_inputs([LegacyDefaultsOnlyAnalysis])
 
     def test_invalid_input(self):
         with pytest.raises(TypeError):
