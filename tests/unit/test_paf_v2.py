@@ -101,6 +101,18 @@ class LegacyStatAnalysis(ColAnalysis):
         return {'length': len(ser)}
 
 
+class LegacySelectClausesAnalysis(ColAnalysis):
+    """A v1 polars-style class providing stats via select_clauses — no longer supported."""
+    provides_defaults = {'quin99': 0}
+    select_clauses = ['placeholder polars expression']
+
+
+class LegacyColumnOpsAnalysis(ColAnalysis):
+    """A v1 polars-style class providing stats via column_ops — no longer supported."""
+    provides_defaults = {'dtype': 'unknown'}
+    column_ops = {'dtype': ("all", lambda col_series: col_series.dtype)}
+
+
 # ============================================================================
 # Tests: stat_func
 # ============================================================================
@@ -471,6 +483,15 @@ class TestNormalizeInputs:
         """A v1 ColAnalysis overriding series_summary is no longer adaptable."""
         with pytest.raises(TypeError, match='series_summary|@stat'):
             _normalize_inputs([LegacyStatAnalysis])
+
+    def test_legacy_select_clauses_colanalysis_rejected(self):
+        """A v1 polars ColAnalysis providing stats via select_clauses or
+        column_ops must be rejected with a clear error, not silently treated
+        as a structural no-op (which would drop its stats)."""
+        with pytest.raises(TypeError, match='select_clauses|@stat'):
+            _normalize_inputs([LegacySelectClausesAnalysis])
+        with pytest.raises(TypeError, match='column_ops|@stat'):
+            _normalize_inputs([LegacyColumnOpsAnalysis])
 
     def test_invalid_input(self):
         with pytest.raises(TypeError):
