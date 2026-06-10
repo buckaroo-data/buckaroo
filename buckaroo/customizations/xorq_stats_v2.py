@@ -142,6 +142,25 @@ def max(col: XorqColumn) -> float:
 
 @stat()
 def distinct_count(col: XorqColumn) -> int:
+    """Approximate distinct count (HyperLogLog, ~1% error) where supported.
+
+    Exact COUNT(DISTINCT) folded into the shared batch aggregate defeats
+    DataFusion's single-distinct rewrite: 3.8GB peak on a 131M-row string
+    column with 6.2M distinct values vs 238MB for approx_nunique in the
+    same batch shape (#906). No consumer needs exactness — distinct_per
+    is displayed as a ratio, and the histogram branch thresholds
+    (distinct_count > 5 / <= 5) sit where HLL is exact in practice.
+
+    Allowlist, not denylist: DataFusion's approx_distinct raises for
+    unimplemented dtypes (Float64, Boolean at least), and one failing
+    expression aborts the entire batch aggregate — every batched stat for
+    every column. Unverified dtypes keep the exact aggregate; the memory
+    blowup is dominated by high-cardinality string columns, which are
+    covered.
+    """
+    dt = col.type()
+    if dt.is_string() or dt.is_integer() or dt.is_timestamp() or dt.is_date():
+        return col.approx_nunique().cast("int64")
     return col.nunique().cast("int64")
 
 

@@ -143,8 +143,29 @@ class TestBatchAggregate:
         op = expr.op()
         assert list(op.find(ops.ApproxCountDistinct)), (
             "distinct_count should aggregate via approx_nunique")
-        assert not list(op.find(ops.CountDistinct)), (
-            "exact COUNT(DISTINCT) must not enter the batch aggregate")
+        # ApproxCountDistinct subclasses CountDistinct, so filter it out to
+        # check no *exact* distinct aggregate remains.
+        exact = [n for n in op.find(ops.CountDistinct)
+                 if not isinstance(n, ops.ApproxCountDistinct)]
+        assert not exact, "exact COUNT(DISTINCT) must not enter the batch aggregate"
+
+    def test_distinct_count_exact_fallback_for_unsupported_dtypes(self):
+        """Dtypes without DataFusion approx_distinct support keep exact nunique.
+
+        approx_distinct raises for Float64 and Boolean, and one failing
+        expression aborts the whole batch aggregate — so unsupported dtypes
+        must fall back to the exact aggregate rather than error.
+        """
+        from xorq.vendor.ibis.expr import operations as ops
+
+        from buckaroo.customizations.xorq_stats_v2 import distinct_count
+
+        table = _make_table()
+        for colname in ("floats", "bools"):
+            expr = distinct_count._stat_func.func(col=table[colname])
+            op = expr.op()
+            assert not list(op.find(ops.ApproxCountDistinct)), colname
+            assert list(op.find(ops.CountDistinct)), colname
 
 
 # ============================================================
