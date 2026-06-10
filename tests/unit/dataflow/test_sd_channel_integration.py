@@ -9,6 +9,12 @@ Covers all three transform shapes composing in one pipeline:
 Interpreter-level proofs (apply-result! closure, proxy enforcement, ordering)
 live in tests/unit/jlisp/test_sd_channel.py — this test exercises the full
 PandasAutocleaning.handle_ops_and_clean pipeline.
+
+These run through PandasAutocleaning (the generic implementation) even though
+they feed polars frames — the sd-channel mechanics are df-agnostic. Equivalent
+coverage through PolarsAutocleaning is deferred pending a broader autocleaning
+rethink; its polars-specific surface (make_origs) is covered directly in
+tests/unit/dataflow/autocleaning_pl_test.py.
 """
 
 import polars as pl

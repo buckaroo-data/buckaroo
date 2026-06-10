@@ -166,6 +166,9 @@ class TagConf(AutocleaningConfig):
 
 
 def test_sdresult_lands_in_cleaning_sd_through_handle_ops_and_clean():
+    # Runs through PandasAutocleaning even with a polars frame — the SDResult
+    # mechanics are df-agnostic. PolarsAutocleaning-specific SDResult coverage
+    # is deferred pending a broader autocleaning rethink.
     ac = PandasAutocleaning([TagConf])
     df = pl.DataFrame({'a': [1, 2, 3]})
     op = [{'symbol': 'tag'}, s('df'), 'a', 'hello']

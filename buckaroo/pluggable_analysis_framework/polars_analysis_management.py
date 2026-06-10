@@ -55,9 +55,8 @@ def polars_series_stats_from_select_result(select_result_df: pl.DataFrame, origi
             summary_dict[rw_col].update(measures)
 
     # column_ops may require original series; execute them if data is available.
-    # If original_df_for_schema has data (height > 0), execute column_ops similar
-    # to polars_produce_series_df. If it's empty (schema-only), skip column_ops
-    # for backward compatibility.
+    # If original_df_for_schema has data (height > 0), execute column_ops.
+    # If it's empty (schema-only), skip column_ops for backward compatibility.
     if original_df_for_schema.height > 0:
         for pa in unordered_objs:
             for measure_name, action_tuple in pa.column_ops.items():
@@ -77,7 +76,7 @@ def polars_series_stats_from_select_result(select_result_df: pl.DataFrame, origi
                             continue
                         sub_df = original_df_for_schema.select(matching_cols)
                     else:
-                        # col_selector is a column name (legacy behavior from polars_produce_series_df)
+                        # col_selector is a column name
                         sub_df = original_df_for_schema.select(pl.col(col_selector))
 
                     for col in sub_df.columns:
@@ -90,10 +89,9 @@ def polars_series_stats_from_select_result(select_result_df: pl.DataFrame, origi
                     continue
 
     # After base measures + column_ops, optionally run computed_summary for each analysis.
-    # When run_computed_summary=False (used by polars_produce_series_df), this step is skipped
-    # and computed_summary is run later in polars_produce_summary_df.
     # When run_computed_summary=True (used by PAFColumnExecutor), computed_summary runs here
     # to populate derived fields such as histogram, histogram_bins, categorical_histogram, etc.
+    # Callers that run computed_summary separately pass run_computed_summary=False.
     if run_computed_summary:
         # Note: we intentionally iterate over original_df_for_schema so that
         # old_col_new_col provides a stable mapping from original -> rewritten names.
@@ -115,9 +113,8 @@ def polars_series_stats_from_select_result(select_result_df: pl.DataFrame, origi
                         summary_res = a_kls.computed_summary(base_summary_dict)
                     base_summary_dict.update(summary_res)
                 except Exception as e:
-                    # Mirror behaviour of polars_produce_summary_df: record/log errors
-                    # via debug prints only; callers that need structured errs should
-                    # extend this function to surface them.
+                    # Errors are logged via debug prints only; callers that need
+                    # structured errs should extend this function to surface them.
                     if debug:
                         print(f"Error in {a_kls.__name__}.computed_summary: {e}")
                     continue
