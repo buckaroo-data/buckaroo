@@ -238,9 +238,25 @@ def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: s
     return out
 
 
-def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str) -> list:
+# Above this many rows the exact top-10 query is replaced by one over a
+# ~CATEGORICAL_HISTOGRAM_SAMPLE_ROWS row sample. The exact query holds a
+# hash entry per distinct value just to return 10 rows — ~1GB transient
+# per high-cardinality string column (#907). Sampling bounds the group-by
+# input (and therefore the hash state) to the sample size.
+CATEGORICAL_HISTOGRAM_EXACT_MAX_ROWS = 100_000
+CATEGORICAL_HISTOGRAM_SAMPLE_ROWS = 100_000
+
+
+def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str,
+        length: int = 0) -> list:
+    source = expr
+    if length > CATEGORICAL_HISTOGRAM_EXACT_MAX_ROWS:
+        # ``seed`` is unsupported on the DataFusion backend, so the sample
+        # (and the resulting cat_pop estimates) varies run to run. With
+        # cache_storage set the first run's snapshot is what gets reused.
+        source = expr.sample(CATEGORICAL_HISTOGRAM_SAMPLE_ROWS / length)
     query = (
-        expr.group_by(col)
+        source.group_by(col)
         .aggregate(__count=lambda t: t.count())
         .order_by(xo.desc("__count"))
         .limit(10)
@@ -284,7 +300,7 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
         return []
     if is_numeric and not is_bool and distinct_count > 5:
         return _numeric_histogram(execute, expr, orig_col_name, min, max)
-    return _categorical_histogram(execute, expr, orig_col_name)
+    return _categorical_histogram(execute, expr, orig_col_name, length)
 
 
 @stat(default=[])

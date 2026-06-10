@@ -248,6 +248,23 @@ class TestHistogram:
             "at or below 100k rows the exact top-10 query must be preserved")
         assert [b["name"] for b in small][0] == "a"
 
+    def test_categorical_histogram_sampled_finds_dominant_value(self):
+        """Sampled top-10 still surfaces the dominant category above the threshold.
+
+        Half the rows share one value, the rest are unique — any ~100k-row
+        sample puts the shared value on top with cat_pop near 100 (the other
+        top-10 entries are singletons).
+        """
+        n = 150_000
+        vals = ["common"] * (n // 2) + [f"u{i}" for i in range(n - n // 2)]
+        table = xo.memtable(pd.DataFrame({"cat": vals}))
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(table)
+        assert errors == []
+        h = stats["cat"]["histogram"]
+        assert h[0]["name"] == "common"
+        assert h[0]["cat_pop"] > 90
+
     def test_histogram_constant_column_empty(self):
         """Constant numeric column (min == max) → empty histogram, not crash."""
         table = xo.memtable(pd.DataFrame({"const": [7, 7, 7, 7]}))
