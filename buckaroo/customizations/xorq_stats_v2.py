@@ -56,6 +56,10 @@ def _is_numeric_not_bool(dtype) -> bool:
     return dtype.is_numeric() and not dtype.is_boolean()
 
 
+def _not_float(dtype) -> bool:
+    return not dtype.is_floating()
+
+
 # ============================================================
 # Typing — derive type flags from the schema dtype string
 # ============================================================
@@ -140,7 +144,7 @@ def max(col: XorqColumn) -> float:
     return col.max().cast("float64")
 
 
-@stat()
+@stat(column_filter=_not_float)
 def distinct_count(col: XorqColumn) -> int:
     """Approximate distinct count (HyperLogLog, ~1% error) where supported.
 
@@ -151,12 +155,19 @@ def distinct_count(col: XorqColumn) -> int:
     is displayed as a ratio, and the histogram branch thresholds
     (distinct_count > 5 / <= 5) sit where HLL is exact in practice.
 
-    Allowlist, not denylist: DataFusion's approx_distinct raises for
-    unimplemented dtypes (Float64, Boolean at least), and one failing
-    expression aborts the entire batch aggregate — every batched stat for
-    every column. Unverified dtypes keep the exact aggregate; the memory
-    blowup is dominated by high-cardinality string columns, which are
-    covered.
+    Float columns skip the stat entirely (column_filter): DataFusion's
+    approx_distinct raises on Float64, exact COUNT(DISTINCT) costs memory
+    proportional to cardinality (~2.2GB measured on a 30M-distinct float
+    column), and a distinct count over floats is rarely meaningful. The
+    pipeline pre-populates ``distinct_count`` as None so dependents
+    (histogram, histogram_bins, distinct_per) still run.
+
+    Allowlist, not denylist, for the remaining dtypes: approx_distinct
+    raises for other unimplemented dtypes too (Boolean at least), and one
+    failing expression aborts the entire batch aggregate — every batched
+    stat for every column. Unverified dtypes keep the exact aggregate;
+    the memory blowup is dominated by high-cardinality string columns,
+    which are covered.
     """
     dt = col.type()
     if dt.is_string() or dt.is_integer() or dt.is_timestamp() or dt.is_date():
@@ -198,6 +209,9 @@ def nan_per(length: int, null_count: int) -> float:
 
 @stat()
 def distinct_per(length: int, distinct_count: int) -> float:
+    if distinct_count is None:
+        # Float columns skip distinct_count; the ratio is undefined.
+        return None
     if not length:
         return 0.0
     return distinct_count / length
@@ -292,6 +306,10 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
     (where ``min``/``max`` are filtered out by ``column_filter``) don't cascade-
     exclude this stat — the categorical branch ignores them.
 
+    ``distinct_count`` is ``None`` for float columns (the stat is skipped
+    there — see ``distinct_count``); floats always take the numeric
+    branch, where the <= 5 fallthrough rarely applied anyway.
+
     All queries go through the injected ``execute`` callable so a
     pipeline-supplied backend isn't bypassed.
 
@@ -301,7 +319,7 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
     """
     if length == 0:
         return []
-    if is_numeric and not is_bool and distinct_count > 5:
+    if is_numeric and not is_bool and (distinct_count is None or distinct_count > 5):
         return _numeric_histogram(execute, expr, orig_col_name, min, max)
     return _categorical_histogram(execute, expr, orig_col_name)
 
@@ -320,7 +338,11 @@ def histogram_bins(is_numeric: bool, is_bool: bool, distinct_count: int, min: fl
     An empty list causes that rule to fall back to ``inherit``, so non-numeric,
     boolean, low-cardinality, and degenerate columns are safely skipped.
     """
-    if not is_numeric or is_bool or distinct_count <= 5:
+    if not is_numeric or is_bool:
+        return []
+    # distinct_count is None for float columns (stat skipped there) —
+    # treat unknown cardinality as high enough to want bins.
+    if distinct_count is not None and distinct_count <= 5:
         return []
     if min is None or max is None:
         return []
