@@ -308,6 +308,25 @@ jobs:
         run: scripts/run_pytest_tolerant.sh uv run --with pytest-cov pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
       - uses: codecov/codecov-action@v6
 
+  StatsPerfSmoke:
+    name: Stats / Perf Smoke Report
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          prune-cache: false
+      - name: Install the project
+        run: uv sync --all-extras --dev
+      - name: Run perf smoke over shipped stats
+        # Per-stat worst-case time/memory table lands in the job summary;
+        # the job only fails on the loose smoke limits. See #920.
+        run: uv run python scripts/perf_smoke_report.py
+
   TestPythonMaxVersions:
     name: Python / Test (Max Versions)
     runs-on: depot-ubuntu-latest
