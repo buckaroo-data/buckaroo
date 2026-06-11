@@ -68,6 +68,17 @@ def test_default_summary_stats():
     for ser in all_sers:
         print(base_summary_stats(ser))
 
+def test_bigint_histogram_series():
+    # np.histogram raises ValueError when float64 precision can't create 10
+    # distinct bin edges (large integers near 2^53 where np.spacing > bin
+    # width). histogram_series must return empty histogram_args (so the
+    # categorical fallback renders) instead of erroring — the v1
+    # Histogram.series_summary guarded this, see f2147ce9 / bigint-test.html.
+    ser = pd.Series([9007199254740993 + i for i in range(20)])
+    result = histogram_series(ser)
+    assert result['histogram_args'] == {}
+    assert result['histogram_bins'] == []
+
 def test_datetime_histogram():
     series_result = histogram_series(datetime_ser)
     assert series_result['histogram_args'] == {}

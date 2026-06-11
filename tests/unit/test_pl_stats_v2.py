@@ -307,6 +307,16 @@ class TestPlHistogram:
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert 'histogram' in result
 
+    def test_bigint_histogram_series(self):
+        """np.histogram raises ValueError when float64 precision can't create
+        10 distinct bin edges (large integers near 2^53 where np.spacing >
+        bin width). pl_histogram_series must return empty histogram_args (so
+        the categorical fallback renders) instead of erroring."""
+        ser = pl.Series('big_id', [9007199254740993 + i for i in range(20)])
+        result = pl_histogram_series(ser)
+        assert result['histogram_args'] == {}
+        assert result['histogram_bins'] == []
+
 
 # ============================================================================
 # Full pipeline integration tests

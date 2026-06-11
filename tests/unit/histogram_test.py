@@ -60,6 +60,19 @@ def test_non_nunique_index():
     assert errs == []
 
 
+def test_bigint_precision():
+    """Integers near 2^53 make np.histogram raise ValueError (float64 can't
+    produce 10 distinct bin edges). The pipeline must not record errors and
+    the column must still get the categorical fallback histogram — matches
+    the v1 Histogram behavior and the bigint-test.html static-embed data.
+    """
+    df = pd.DataFrame({'big_id': [9007199254740993 + i for i in range(20)]})
+    sdf, errs = _process(df)
+    assert errs == []
+    assert isinstance(sdf['a']['histogram'], list)
+    assert len(sdf['a']['histogram']) > 0
+
+
 def test_dfstats_histogram():
     stats = DfStatsV2(test_df, HISTO_KLASSES, 'test_df', debug=True)
     _assert_ha(stats.sdf['a']['histogram_args'])
