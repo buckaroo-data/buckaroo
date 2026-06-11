@@ -116,6 +116,7 @@ jobs:
     permissions:
       id-token: write
       pull-requests: write
+      actions: read
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v8
@@ -139,6 +140,22 @@ jobs:
             const pr = context.issue.number;
             const rtdSlug = 'buckaroo-data';
             const docsUrl = `https://${rtdSlug}--${pr}.org.readthedocs.build/en/${pr}/`;
+            // Deep-link to the Stats / Perf Smoke Report job summary in this
+            // run (the per-stat time/memory table). Falls back to the run page.
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            let perfSmokeUrl = runUrl;
+            try {
+              const { data: { jobs } } = await github.rest.actions.listJobsForWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+                per_page: 100,
+              });
+              const smoke = jobs.find(j => j.name === 'Stats / Perf Smoke Report');
+              if (smoke) perfSmokeUrl = `${runUrl}#summary-${smoke.id}`;
+            } catch (e) {
+              core.warning(`perf smoke job lookup failed: ${e.message}`);
+            }
             const body = [
               '## :package: TestPyPI package published',
               '',
@@ -161,6 +178,8 @@ jobs:
               `### :book: [Docs preview](${docsUrl})`,
               '',
               `### :art: [Storybook preview](${docsUrl}storybook/)`,
+              '',
+              `### :stopwatch: [Perf smoke report](${perfSmokeUrl})`,
             ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
