@@ -42,7 +42,12 @@ def test_slow_stat_flagged():
                     total += 1
         return total
 
-    passed, findings = perf_smoke_test([slow_pairwise], rows=2_000)
+    # 4_000 rows keeps the O(n^2) loop well over the 0.25s time floor across
+    # interpreter speeds. At 2_000 rows the per-column call lands right at the
+    # floor on Python 3.14's faster interpreter, so no column got flagged
+    # (passed=True) and the assertions below failed. The recorder short-circuits
+    # after the first column trips, so the test still finishes in a few seconds.
+    passed, findings = perf_smoke_test([slow_pairwise], rows=4_000)
     assert passed is False
     time_findings = [f for f in findings if f.kind == 'time' and f.stat_name == 'slow_pairwise']
     assert time_findings
