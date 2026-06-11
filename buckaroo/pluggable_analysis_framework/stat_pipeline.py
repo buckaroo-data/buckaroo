@@ -1,7 +1,10 @@
-"""StatPipeline — top-level orchestrator for the pluggable analysis framework v2.
+"""StatPipeline — top-level orchestrator for the pluggable analysis framework.
 
-Replaces AnalysisPipeline with typed DAG execution and Ok/Err error propagation.
-Accepts a mix of v2 @stat functions and v1 ColAnalysis classes (via adapter).
+Typed DAG execution with Ok/Err error propagation. Accepts @stat functions and
+@stat-decorated stat-group classes. Structural ColAnalysis classes (styling,
+post-processing) are accepted as no-ops; a ColAnalysis still overriding the v1
+series_summary/computed_summary is rejected with a clear error (the v1 adapter
+is gone — port it to @stat).
 """
 from __future__ import annotations
 
@@ -16,12 +19,16 @@ from .col_analysis import ColAnalysis, ErrDict, SDType
 from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqExpr, XorqExecute, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
 from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_typed_dag, build_column_dag, DAGConfigError
-from .v1_adapter import col_analysis_to_stat_funcs
 from .utils import PERVERSE_DF
 
 
 def _normalize_inputs(inputs: list) -> List[StatFunc]:
-    """Convert a mixed list of StatFunc, @stat functions, and ColAnalysis classes to StatFuncs."""
+    """Convert a mixed list of StatFunc, @stat functions, and stat-group classes to StatFuncs.
+
+    Structural ColAnalysis classes (styling, post-processing) define no @stat
+    methods and contribute no stats — they are accepted as no-ops so they can
+    ride along in ``analysis_klasses`` lists.
+    """
     all_funcs: List[StatFunc] = []
 
     for obj in inputs:
@@ -35,22 +42,31 @@ def _normalize_inputs(inputs: list) -> List[StatFunc]:
             all_funcs.append(obj._stat_func)
             continue
 
-        # A class with @stat-decorated methods (stat group)
-        if isinstance(obj, type) and not issubclass(obj, ColAnalysis):
+        if isinstance(obj, type):
             collected = collect_stat_funcs(obj)
             if collected:
                 all_funcs.extend(collected)
                 continue
-
-        # A v1 ColAnalysis subclass
-        if isinstance(obj, type) and issubclass(obj, ColAnalysis):
-            adapted = col_analysis_to_stat_funcs(obj)
-            all_funcs.extend(adapted)
-            continue
+            # No @stat methods. Styling / post-processing ColAnalysis classes are
+            # structural and contribute no stats. A class still providing stats the
+            # v1 way — series_summary/computed_summary overrides, polars
+            # select_clauses/column_ops, or bare provides_defaults — is a leftover
+            # that must be ported; treating it as structural would silently drop
+            # its stats (a pinned_row displaying one would just go blank).
+            if issubclass(obj, ColAnalysis):
+                if (obj.series_summary is not ColAnalysis.series_summary
+                        or obj.computed_summary is not ColAnalysis.computed_summary
+                        or obj.select_clauses or obj.column_ops
+                        or obj.provides_defaults):
+                    raise TypeError(
+                        f"{obj.__name__} relies on the removed v1 ColAnalysis adapter "
+                        f"(series_summary/computed_summary/select_clauses/column_ops/"
+                        f"provides_defaults); port it to @stat functions.")
+                continue
 
         raise TypeError(
             f"Cannot convert {obj!r} to StatFunc. Expected StatFunc, "
-            f"@stat-decorated function, stat group class, or ColAnalysis subclass.")
+            f"@stat-decorated function, or stat-group / structural styling class.")
 
     return all_funcs
 
@@ -62,35 +78,9 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
     Handles:
     - Raw data injection (RawSeries, SampledSeries, RawDataFrame)
     - Upstream error propagation
-    - Multi-value return unpacking (for TypedDict and v1 adapter dict returns)
+    - Multi-value return unpacking (TypedDict returns)
     - Default fallback on error
-    - v1_computed mode: pass full accumulator as single dict arg
-    - spread_dict_result mode: spread all dict keys into accumulator
     """
-    # v1_computed mode: pass full resolved accumulator as single dict arg
-    if sf.v1_computed:
-        summary_dict = {}
-        for k, v in accumulator.items():
-            if isinstance(v, Ok):
-                summary_dict[k] = v.value
-        try:
-            result = sf.func(summary_dict)
-        except Exception as e:
-            if sf.default is not MISSING:
-                for sk in sf.provides:
-                    accumulator[sk.name] = Ok(sf.default)
-            else:
-                for sk in sf.provides:
-                    accumulator[sk.name] = Err(error=e, stat_func_name=sf.name, column_name=column_name,
-                        inputs=summary_dict.copy())
-            return
-        if sf.spread_dict_result and isinstance(result, dict):
-            for k, v in result.items():
-                accumulator[k] = Ok(v)
-        elif len(sf.provides) == 1:
-            accumulator[sf.provides[0].name] = Ok(result)
-        return
-
     # Build kwargs from requires
     kwargs = {}
     has_upstream_err = False
@@ -156,12 +146,8 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
         result = sf.func(**kwargs)
 
         # Unpack result
-        if sf.spread_dict_result and isinstance(result, dict):
-            # v1 compat: spread all dict keys into accumulator
-            for k, v in result.items():
-                accumulator[k] = Ok(v)
-        elif isinstance(result, dict) and any(sk.name in result for sk in sf.provides):
-            # TypedDict returns (v2) and v1 adapter dict returns
+        if isinstance(result, dict) and any(sk.name in result for sk in sf.provides):
+            # TypedDict returns
             for sk in sf.provides:
                 if sk.name in result:
                     accumulator[sk.name] = Ok(result[sk.name])
@@ -186,20 +172,20 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
 
 
 class StatPipeline:
-    """Top-level orchestrator for the pluggable analysis framework v2.
+    """Top-level orchestrator for the pluggable analysis framework.
 
     Accepts a mix of:
-    - StatFunc objects (v2)
-    - @stat-decorated functions (v2)
-    - Stat group classes with @stat methods (v2)
-    - ColAnalysis subclasses (v1 via adapter)
+    - StatFunc objects
+    - @stat-decorated functions
+    - Stat group classes with @stat methods
+    - Structural ColAnalysis subclasses (styling / post-processing), as no-ops
 
     Builds a typed DAG, executes per-column with Ok/Err error propagation,
     and supports column-type filtering.
 
     Usage::
 
-        pipeline = StatPipeline([TypingStats, DefaultSummaryStats, distinct_per])
+        pipeline = StatPipeline([typing_stats, base_summary_stats, distinct_per])
         result, errors = pipeline.process_df(my_df)
     """
 
@@ -311,27 +297,6 @@ class StatPipeline:
 
         return summary, all_errors
 
-    def process_df_v1_compat(self, df: pd.DataFrame, debug: bool = False,
-                             skip_columns=None) -> Tuple[SDType, ErrDict]:
-        """Process DataFrame with v1-compatible error format.
-
-        Returns (SDType, ErrDict) matching the v1 AnalysisPipeline interface.
-        Used by DfStatsV2/PlDfStatsV2 (and via _find_v1_class, by any caller
-        that mixes ColAnalysis subclasses into the input list — DataFlow,
-        autocleaning, server.data_loading, polars_buckaroo).
-        """
-        summary, errors = self.process_df(df, debug=debug, skip_columns=skip_columns)
-
-        # Convert StatError list to v1 ErrDict format
-        errs: ErrDict = {}
-        for se in errors:
-            # Find the original ColAnalysis class if this came from v1 adapter
-            kls = _find_v1_class(se.stat_func, self._original_inputs) if se.stat_func else None
-            err_key = (se.column, se.stat_func.name if se.stat_func else "unknown")
-            errs[err_key] = (se.error, kls)
-
-        return summary, errs
-
     def unit_test(self) -> Tuple[bool, List[StatError]]:
         """Test the pipeline against PERVERSE_DF."""
         try:
@@ -427,17 +392,13 @@ class StatPipeline:
                 print()
 
 
-def _find_v1_class(stat_func: Optional[StatFunc], original_inputs: list) -> Any:
-    """Find the original v1 ColAnalysis class for a stat func name."""
-    if stat_func is None:
-        return None
-
-    # The v1 adapter names funcs as "ClassName__series" or "ClassName__computed"
-    name = stat_func.name
-    for suffix in ('__series', '__computed'):
-        if name.endswith(suffix):
-            class_name = name[:-len(suffix)]
-            for inp in original_inputs:
-                if isinstance(inp, type) and inp.__name__ == class_name:
-                    return inp
-    return None
+def errors_to_errdict(errors: List[StatError]) -> ErrDict:
+    """Convert a StatError list into the ``{(col, stat): (error, kls)}`` ErrDict
+    shape that DataFlow and ``output_full_reproduce`` consume. ``kls`` is always
+    ``None`` — the stat name carries the provenance.
+    """
+    errs: ErrDict = {}
+    for se in errors:
+        err_key = (se.column, se.stat_func.name if se.stat_func else "unknown")
+        errs[err_key] = (se.error, None)
+    return errs

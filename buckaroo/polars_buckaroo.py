@@ -7,7 +7,6 @@ from traitlets import Unicode
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, RawDFViewerWidget, _bk_flash, _BK_FLASH_ENABLED
 from buckaroo.df_util import old_col_new_col
 from .pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
-from .pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from .customizations.pl_stats_v2 import PL_ANALYSIS_V2
 from .serialization_utils import pd_to_obj
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
@@ -39,32 +38,38 @@ local_analysis_klasses = list(PL_ANALYSIS_V2) + [DefaultSummaryStatsStyling, Pol
 
 
 class PolarsAutocleaning(PandasAutocleaning):
-    # Autocleaning still uses v1 PolarsAnalysis classes (select_clauses),
-    # so it needs the v1 PlDfStats executor.
-    DFStatsKlass = PlDfStats
-    
+    """Polars autocleaning. Runs polars @stat cleaning analyses through
+    PlDfStatsV2 and reconstructs the cleaned frame (with optional _orig
+    columns) using polars select expressions."""
+    DFStatsKlass = PlDfStatsV2
+
     @staticmethod
     def make_origs(raw_df, cleaned_df, cleaning_sd):
+        # cleaning_sd is keyed by buckaroo's internal a/b/c names, but cleaned_df
+        # and raw_df carry the user's original column names — so index by
+        # ``orig_col_name`` (mirrors PandasAutocleaning.make_origs), not the key.
         clauses = []
+        seen = set()
         changed = 0
-        for col, sd in cleaning_sd.items():
-            if "add_orig" in sd:
-                clauses.append(cleaned_df[col])
-                clauses.append(raw_df[col].alias(col+"_orig"))
+        for _rewritten_col, sd in cleaning_sd.items():
+            col = sd.get("orig_col_name")
+            if col not in cleaned_df.columns or col == 'index' or col in seen:
+                continue
+            seen.add(col)
+            clauses.append(cleaned_df[col])
+            if sd.get("add_orig"):
+                clauses.append(raw_df[col].alias(col + "_orig"))
                 changed += 1
-            else:
-                clauses.append(cleaned_df[col])
         if changed > 0:
             return cleaned_df.select(clauses)
-        else:
-            return cleaned_df
+        return cleaned_df
 
-    
+
 class PolarsBuckarooWidget(BuckarooWidget):
     """TODO: Add docstring here
     """
     analysis_klasses = local_analysis_klasses
-    autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
+    autocleaning_klass = PolarsAutocleaning #override the base CustomizableDataFlow klass
     autoclean_conf = tuple([NoCleaningConfPl]) #override the base CustomizableDataFlow conf
     DFStatsClass = PlDfStatsV2
     sampling_klass = PLSampling

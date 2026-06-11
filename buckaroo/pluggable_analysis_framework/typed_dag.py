@@ -1,7 +1,7 @@
-"""Typed DAG construction for the pluggable analysis framework v2.
+"""Typed DAG construction for the pluggable analysis framework.
 
-Replaces v1's order_analysis() and check_solvable() with type-aware
-dependency resolution that supports column-type filtering.
+Type-aware dependency resolution and cycle/solvability checking for stat
+functions, with support for column-type filtering.
 """
 from __future__ import annotations
 

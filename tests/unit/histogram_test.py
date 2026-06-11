@@ -1,9 +1,12 @@
 import pandas as pd
-from buckaroo.pluggable_analysis_framework.analysis_management import (
-    DfStats, produce_series_df, AnalysisPipeline)
-from buckaroo.customizations.histogram import Histogram, fmt_bucket, numeric_histogram
-from buckaroo.customizations.analysis import (
-    TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
+from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
+from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
+from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
+from buckaroo.customizations.histogram import fmt_bucket, numeric_histogram
+
+# histogram (@stat) depends on typing_stats (is_numeric) and the summary-stat
+# functions, so the DAG needs the full PD_ANALYSIS_V2 set wired together.
+HISTO_KLASSES = list(PD_ANALYSIS_V2)
 
 # table-format
 INT_ARR = [33, 41, 11, 46, 42, 44, 31, 25, 16, 24, 26,  7, 19, 23, 20, 46, 10,  4, 31, 45, 40, 37, 48, 21, 19, 20, 19,
@@ -26,64 +29,53 @@ def _assert_ha(ha):
         0.09743589743589744, 0.1076923076923077, 0.1282051282051282, 0.07692307692307693,
         0.1076923076923077, 0.09230769230769231]
     #numpy arrays need special comparison that I will look at later
-    
-    # assert ha['meat_histogram'] == (
-    #             np.array([14, 21, 16, 25, 19, 21, 25, 15, 21, 18]),
-    #             np.array([ 2. ,  6.6, 11.2, 15.8, 20.4, 25. , 29.6, 34.2, 38.8, 43.4, 48. ]))
 
-    
-def test_produce_series_df():
-    """just make sure this doesn't fail"""
-    sdf, errs = produce_series_df(
-        test_df, [Histogram], 'test_df', debug=True)
-    ha = sdf['a']['histogram_args']
-    _assert_ha(ha)
+
+def _process(df, klasses=HISTO_KLASSES):
+    return StatPipeline(klasses, unit_test=False).process_df(df, debug=True)
+
+
+def test_histogram_args():
+    """The Histogram analysis produces the expected histogram_args."""
+    sdf, errs = _process(test_df)
+    _assert_ha(sdf['a']['histogram_args'])
+
 
 def test_no_meat():
-    """just make sure this doesn't fail based on
+    """Nearly-constant column with outliers must not error.
     Nearly-constant column with outliers fails to display #264
     https://github.com/paddymul/buckaroo/issues/264
     """
     df = pd.DataFrame({'no_meat': [1] * 400 + [10, 20, 30, 40, 50]})
-    sdf, errs = AnalysisPipeline.full_produce_summary_df(df,
-        [TypingStats, ComputedDefaultSummaryStats, Histogram, DefaultSummaryStats],
-        debug=True)
-    assert errs == {}
+    sdf, errs = _process(df)
+    assert errs == []
+
 
 def test_non_nunique_index():
-    """ histograms can fail with non-unique indexes.  non-unique indexes frequently occur as the result of concatting dataframes.  This should not fail
+    """histograms can fail with non-unique indexes.  non-unique indexes frequently occur as the result of concatting dataframes.  This should not fail
     """
     df = pd.DataFrame({'bad': pd.Series([1,2, pd.NA,  1],
         index= [11000, 11001, 11002,  11000]).astype('Int64')})
-    
-    sdf, errs = AnalysisPipeline.full_produce_summary_df(df,
-        [TypingStats, ComputedDefaultSummaryStats, Histogram, DefaultSummaryStats],
-        debug=True)
-    assert errs == {}
+    sdf, errs = _process(df)
+    assert errs == []
 
-def test_full_produce_summary_df():
-    sdf, errs = AnalysisPipeline.full_produce_summary_df(test_df, [Histogram], debug=True)
-    ha = sdf['a']['histogram_args']
-    _assert_ha(ha)
-    
-def test_full_produce_summary_df2():
-    sdf, errs = AnalysisPipeline.full_produce_summary_df(
-        test_df,
-        [TypingStats, ComputedDefaultSummaryStats, Histogram, DefaultSummaryStats],
-        debug=True)
-    ha = sdf['a']['histogram_args']
-    _assert_ha(ha)
-    
+
+def test_bigint_precision():
+    """Integers near 2^53 make np.histogram raise ValueError (float64 can't
+    produce 10 distinct bin edges). The pipeline must not record errors and
+    the column must still get the categorical fallback histogram — matches
+    the v1 Histogram behavior and the bigint-test.html static-embed data.
+    """
+    df = pd.DataFrame({'big_id': [9007199254740993 + i for i in range(20)]})
+    sdf, errs = _process(df)
+    assert errs == []
+    assert isinstance(sdf['a']['histogram'], list)
+    assert len(sdf['a']['histogram']) > 0
+
+
 def test_dfstats_histogram():
-    stats = DfStats(
-        test_df,
-        [TypingStats, ComputedDefaultSummaryStats, Histogram, DefaultSummaryStats],
-        'test_df', debug=True)
-    sdf = stats.sdf
-    
-    print(sdf['a'])
-    ha = sdf['a']['histogram_args']
-    _assert_ha(ha)
+    stats = DfStatsV2(test_df, HISTO_KLASSES, 'test_df', debug=True)
+    _assert_ha(stats.sdf['a']['histogram_args'])
 
 
 def test_fmt_bucket_labels():

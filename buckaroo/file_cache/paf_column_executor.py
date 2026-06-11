@@ -147,12 +147,11 @@ class PAFColumnExecutor(ColumnExecutor[ExecutorArgs]):
         cols = execution_args.columns
         only_cols = ldf.select(cols)
         
-        # Try to execute all expressions together first (like polars_produce_series_df)
+        # Try to execute all expressions together first
         try:
             res = only_cols.select(*execution_args.expressions).collect()
         except Exception:
             # Fallback: Execute expressions individually and combine horizontally
-            # This matches the behavior of polars_produce_series_df (lines 46-82)
             # to handle cases where some expressions fail (e.g., mean() on string columns)
             individual_results = []
             for expr in execution_args.expressions:
@@ -215,8 +214,8 @@ class PAFColumnExecutor(ColumnExecutor[ExecutorArgs]):
         # Collect the original column data for column_ops execution
         original_data = only_cols.collect()
         # Build series stats from the selection result, passing actual data so column_ops can execute
-        # Use run_computed_summary=True so computed_summary runs here (PAFColumnExecutor doesn't
-        # call polars_produce_summary_df separately)
+        # Use run_computed_summary=True so computed_summary runs here (PAFColumnExecutor has
+        # no separate computed_summary pass)
         series_stats, errs = polars_series_stats_from_select_result(
             res, original_data, self.analyses, 'paf_exec', debug=False, run_computed_summary=True)
         # Extract hash values from result if present

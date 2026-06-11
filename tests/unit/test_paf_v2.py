@@ -1,7 +1,7 @@
 """Comprehensive tests for the Pluggable Analysis Framework v2.
 
 Tests for: stat_func, stat_result, typed_dag, column_filters,
-stat_pipeline, v1_adapter, df_stats_v2.
+stat_pipeline, df_stats_v2.
 """
 import warnings
 from typing import Any, TypedDict
@@ -13,8 +13,7 @@ from buckaroo.pluggable_analysis_framework.stat_func import (StatKey, StatFunc, 
 from buckaroo.pluggable_analysis_framework.stat_result import (Ok, Err, UpstreamError, StatError, resolve_accumulator)
 from buckaroo.pluggable_analysis_framework.typed_dag import (build_typed_dag, build_column_dag, DAGConfigError)
 from buckaroo.pluggable_analysis_framework.column_filters import (is_numeric, is_string, is_temporal, is_boolean, any_of, not_)
-from buckaroo.pluggable_analysis_framework.stat_pipeline import (StatPipeline, _normalize_inputs)
-from buckaroo.pluggable_analysis_framework.v1_adapter import (col_analysis_to_stat_funcs)
+from buckaroo.pluggable_analysis_framework.stat_pipeline import (StatPipeline, _normalize_inputs, errors_to_errdict)
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 
@@ -85,49 +84,39 @@ class BasicStats:
         return int(ser.isna().sum())
 
 
-# V1 ColAnalysis fixtures
-class V1Len(ColAnalysis):
+# ColAnalysis fixtures — structural (styling-like, no stats) and a leftover v1
+# stat class (used only to assert _normalize_inputs rejects it now the adapter
+# is gone).
+class StructuralAnalysis(ColAnalysis):
+    """Styling/post-processing style class: no @stat methods, no series/computed."""
+    provides_defaults = {}
+
+
+class LegacyStatAnalysis(ColAnalysis):
+    """A v1-style class overriding series_summary — no longer supported."""
     provides_defaults = {'length': 0}
-    provides_series_stats = ['length']
 
     @staticmethod
     def series_summary(sampled_ser, ser):
         return {'length': len(ser)}
 
 
-class V1DistinctCount(ColAnalysis):
-    provides_defaults = {'distinct_count': 0}
-    provides_series_stats = ['distinct_count']
-
-    @staticmethod
-    def series_summary(sampled_ser, ser):
-        return {'distinct_count': len(ser.value_counts())}
+class LegacySelectClausesAnalysis(ColAnalysis):
+    """A v1 polars-style class providing stats via select_clauses — no longer supported."""
+    provides_defaults = {'quin99': 0}
+    select_clauses = ['placeholder polars expression']
 
 
-class V1DistinctPer(ColAnalysis):
-    provides_defaults = {'distinct_per': 0.0}
-    requires_summary = ['length', 'distinct_count']
-
-    @staticmethod
-    def computed_summary(summary_dict):
-        length = summary_dict['length']
-        dc = summary_dict['distinct_count']
-        return {'distinct_per': dc / length if length > 0 else 0.0}
+class LegacyColumnOpsAnalysis(ColAnalysis):
+    """A v1 polars-style class providing stats via column_ops — no longer supported."""
+    provides_defaults = {'dtype': 'unknown'}
+    column_ops = {'dtype': ("all", lambda col_series: col_series.dtype)}
 
 
-class V1Combined(ColAnalysis):
-    """V1 class with both series_summary and computed_summary."""
-    provides_defaults = {'raw_len': 0, 'doubled_len': 0}
-    provides_series_stats = ['raw_len']
-    requires_summary = ['raw_len']
-
-    @staticmethod
-    def series_summary(sampled_ser, ser):
-        return {'raw_len': len(ser)}
-
-    @staticmethod
-    def computed_summary(summary_dict):
-        return {'doubled_len': summary_dict.get('raw_len', 0) * 2}
+class LegacyDefaultsOnlyAnalysis(ColAnalysis):
+    """A v1 defaults-only class: no overrides, but non-empty provides_defaults.
+    The v1 adapter turned these defaults into stats — no longer supported."""
+    provides_defaults = {'foo': 0}
 
 
 # ============================================================================
@@ -473,52 +462,6 @@ class TestColumnFilters:
 
 
 # ============================================================================
-# Tests: v1_adapter
-# ============================================================================
-
-class TestV1Adapter:
-    def test_series_only_class(self):
-        funcs = col_analysis_to_stat_funcs(V1Len)
-        assert len(funcs) == 1
-        sf = funcs[0]
-        assert sf.name == 'V1Len__series'
-        assert sf.needs_raw is True
-        prov_names = {sk.name for sk in sf.provides}
-        assert 'length' in prov_names
-
-    def test_computed_only_class(self):
-        funcs = col_analysis_to_stat_funcs(V1DistinctPer)
-        assert len(funcs) == 1
-        sf = funcs[0]
-        assert sf.name == 'V1DistinctPer__computed'
-        assert sf.needs_raw is False
-        req_names = {sk.name for sk in sf.requires}
-        assert req_names == {'length', 'distinct_count'}
-
-    def test_combined_class(self):
-        """Class with both series_summary and computed_summary."""
-        funcs = col_analysis_to_stat_funcs(V1Combined)
-        assert len(funcs) == 2
-        names = {f.name for f in funcs}
-        assert 'V1Combined__series' in names
-        assert 'V1Combined__computed' in names
-
-    def test_series_func_executes(self):
-        funcs = col_analysis_to_stat_funcs(V1Len)
-        sf = funcs[0]
-        result = sf.func(ser=pd.Series([1, 2, 3]))
-        assert isinstance(result, dict)
-        assert result['length'] == 3
-
-    def test_computed_func_executes(self):
-        funcs = col_analysis_to_stat_funcs(V1DistinctPer)
-        sf = funcs[0]
-        result = sf.func({'length': 10, 'distinct_count': 5})
-        assert isinstance(result, dict)
-        assert result['distinct_per'] == 0.5
-
-
-# ============================================================================
 # Tests: stat_pipeline
 # ============================================================================
 
@@ -537,17 +480,39 @@ class TestNormalizeInputs:
         result = _normalize_inputs([BasicStats])
         assert len(result) == 2
 
-    def test_v1_col_analysis(self):
-        result = _normalize_inputs([V1Len])
-        assert len(result) == 1
-        assert result[0].name == 'V1Len__series'
+    def test_structural_colanalysis_is_noop(self):
+        """Styling/post-processing classes (no @stat methods) contribute no stats."""
+        result = _normalize_inputs([StructuralAnalysis])
+        assert result == []
+
+    def test_legacy_stat_colanalysis_rejected(self):
+        """A v1 ColAnalysis overriding series_summary is no longer adaptable."""
+        with pytest.raises(TypeError, match='series_summary|@stat'):
+            _normalize_inputs([LegacyStatAnalysis])
+
+    def test_legacy_select_clauses_colanalysis_rejected(self):
+        """A v1 polars ColAnalysis providing stats via select_clauses or
+        column_ops must be rejected with a clear error, not silently treated
+        as a structural no-op (which would drop its stats)."""
+        with pytest.raises(TypeError, match='select_clauses|@stat'):
+            _normalize_inputs([LegacySelectClausesAnalysis])
+        with pytest.raises(TypeError, match='column_ops|@stat'):
+            _normalize_inputs([LegacyColumnOpsAnalysis])
+
+    def test_defaults_only_colanalysis_rejected(self):
+        """A ColAnalysis with non-empty provides_defaults and no @stat methods
+        used to contribute its defaults as stats via the v1 adapter. Treating it
+        as structural would silently drop those stats — a pinned_row displaying
+        one of them would just go blank. It must error loudly instead."""
+        with pytest.raises(TypeError, match='provides_defaults|@stat'):
+            _normalize_inputs([LegacyDefaultsOnlyAnalysis])
 
     def test_invalid_input(self):
         with pytest.raises(TypeError):
             _normalize_inputs([42])
 
     def test_mixed_inputs(self):
-        result = _normalize_inputs([V1Len, distinct_count, BasicStats])
+        result = _normalize_inputs([length, distinct_count, BasicStats])
         assert len(result) >= 3
 
 
@@ -649,14 +614,14 @@ class TestStatPipeline:
         assert result['most_freq'] == 1
         assert result['freq_count'] == 2
 
-    def test_v1_compat_mixed(self):
-        """Mix v1 and v2 in the same pipeline."""
-        pipeline = StatPipeline([V1Len, V1DistinctCount, distinct_per], unit_test=False)
-        ser = pd.Series([1, 2, 3, 1])
-        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
-        assert result['length'] == 4
-        assert result['distinct_count'] == 3
-        assert result['distinct_per'] == 3 / 4
+    def test_errors_to_errdict_shape(self):
+        """errors_to_errdict converts the process_df error list to ErrDict format."""
+        pipeline = StatPipeline([length], unit_test=False)
+        df = pd.DataFrame({'a': [1, 2, 3]})
+        result, errors = pipeline.process_df(df)
+        errs = errors_to_errdict(errors)
+        assert isinstance(errs, dict)
+        assert len(errs) == 0
 
     def test_explain(self):
         pipeline = StatPipeline([length, distinct_per, distinct_count], unit_test=False)
@@ -705,29 +670,6 @@ class TestStatPipeline:
         assert passed is True
 
 
-class TestStatPipelineV1Compat:
-    """Test backward compatibility with v1 ColAnalysis classes."""
-
-    def test_v1_only_pipeline(self):
-        pipeline = StatPipeline([V1Len, V1DistinctCount, V1DistinctPer], unit_test=False)
-        df = pd.DataFrame({'a': [1, 2, 3], 'b': [1, 1, 1]})
-        result, errors = pipeline.process_df(df)
-        assert len(result) == 2
-
-        for col_key, col_stats in result.items():
-            assert 'length' in col_stats
-            assert 'distinct_count' in col_stats
-            assert 'distinct_per' in col_stats
-
-    def test_v1_process_df_v1_compat(self):
-        """process_df_v1_compat should return ErrDict format."""
-        pipeline = StatPipeline([V1Len], unit_test=False)
-        df = pd.DataFrame({'a': [1, 2, 3]})
-        result, errs = pipeline.process_df_v1_compat(df)
-        assert isinstance(errs, dict)
-        assert len(errs) == 0
-
-
 # ============================================================================
 # Tests: df_stats_v2
 # ============================================================================
@@ -736,14 +678,14 @@ class TestDfStatsV2:
     def test_basic_usage(self):
         from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
         df = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
-        stats = DfStatsV2(df, [V1Len, V1DistinctCount, V1DistinctPer])
+        stats = DfStatsV2(df, [length, distinct_count, distinct_per])
         assert isinstance(stats.sdf, dict)
         assert len(stats.sdf) == 2
 
     def test_interface_matches_dfstats(self):
         from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
         df = pd.DataFrame({'x': [1, 2, 3]})
-        stats = DfStatsV2(df, [V1Len])
+        stats = DfStatsV2(df, [length])
         assert hasattr(stats, 'sdf')
         assert hasattr(stats, 'errs')
         assert hasattr(stats, 'df')
@@ -756,21 +698,6 @@ class TestDfStatsV2:
 # ============================================================================
 
 class TestIntegration:
-    def test_mix_v1_v2_pipeline(self):
-        """The primary integration test from the plan: mix v1 and v2."""
-        pipeline = StatPipeline([
-            V1Len,             # v1 ColAnalysis (series only)
-            V1DistinctCount,   # v1 ColAnalysis (series only)
-            distinct_per,      # v2 @stat function
-        ], unit_test=False)
-
-        ser = pd.Series([1, 2, 3, 1, 2])
-        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
-        assert result['length'] == 5
-        assert result['distinct_count'] == 3
-        assert result['distinct_per'] == 3 / 5
-        assert errors == []
-
     def test_full_pipeline_on_perverse_df(self):
         """Run a realistic pipeline on PERVERSE_DF."""
         pipeline = StatPipeline([length, null_count, distinct_count, nan_per, distinct_per], unit_test=False)
@@ -799,16 +726,13 @@ class TestIntegration:
         assert 'RuntimeError' in code
         assert 'bad_stat' in code
 
-    def test_backward_compat_output(self):
-        """V1 and V2 pipelines should produce matching stat values."""
-        v1_klasses = [V1Len, V1DistinctCount, V1DistinctPer]
-        v2_pipeline = StatPipeline(v1_klasses, unit_test=False)
-
+    def test_stat_output_values(self):
+        """A v2 @stat pipeline produces the expected per-column stat values."""
+        pipeline = StatPipeline([length, distinct_count, distinct_per], unit_test=False)
         df = pd.DataFrame({'a': [1, 2, 3, 1], 'b': ['x', 'y', 'x', 'x']})
-        v2_result, v2_errors = v2_pipeline.process_df(df)
+        result, errors = pipeline.process_df(df)
 
-        # Verify expected stat values
-        for col_key, col_stats in v2_result.items():
+        for col_key, col_stats in result.items():
             assert col_stats['length'] == 4
             assert isinstance(col_stats['distinct_per'], float)
             assert col_stats['distinct_per'] > 0

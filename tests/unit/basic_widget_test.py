@@ -3,13 +3,12 @@ import pandas as pd
 from IPython.display import display
 from buckaroo.buckaroo_widget import BuckarooWidget
 from buckaroo.ddd_library import get_multiindex_cols_df
-from buckaroo.pluggable_analysis_framework.analysis_management import PERVERSE_DF
+from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 from .fixtures import (word_only_df)
 from buckaroo.serialization_utils import (DuplicateColumnsException)
 from buckaroo.dataflow.styling_core import StylingAnalysis
 
-from buckaroo.customizations.analysis import (TypingStats, ComputedDefaultSummaryStats, DefaultSummaryStats)
-from buckaroo.customizations.histogram import (Histogram)
+from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
 from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from buckaroo.jlisp.lisp_utils import (s, sQ)
 from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)
@@ -40,12 +39,10 @@ class EverythingStyling(StylingAnalysis):
             
 class KitchenSinkWidget(BuckarooWidget):
     #let's be explicit here and show all of the built in analysis klasses
-    analysis_klasses = [
-    TypingStats, DefaultSummaryStats,
-    Histogram, ComputedDefaultSummaryStats,
+    analysis_klasses = list(PD_ANALYSIS_V2) + [
     # default buckaroo styling
     DefaultSummaryStatsStyling, DefaultMainStyling,
-    EverythingStyling]
+        EverythingStyling]
 
 def test_styling_instantiation():
     

@@ -2,14 +2,12 @@ import os
 import polars as pl
 from polars import functions as F
 import numpy as np
-from buckaroo.pluggable_analysis_framework.polars_analysis_management import (
-    PolarsAnalysis, polars_produce_series_df)
-from buckaroo.pluggable_analysis_framework.col_analysis import (
-    ColAnalysis)
+from typing import Any, TypedDict
+from buckaroo.pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
+from buckaroo.pluggable_analysis_framework.stat_func import stat, RawSeries
 
-from buckaroo.pluggable_analysis_framework.utils import (json_postfix)
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget, to_parquet
-from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlDfStats
 from buckaroo.dataflow.dataflow import StylingAnalysis
 from buckaroo.styling_helpers import inherit_
 from buckaroo.serialization_utils import resolve_summary_stats_payload as _resolve_all_stats
@@ -30,12 +28,14 @@ EXPECTED_DF_VIEWER_CONFIG = {
     'extra_grid_config': {},
 }
                              
-class SelectOnlyAnalysis(PolarsAnalysis):
+SelectOnlyResult = TypedDict('SelectOnlyResult', {'null_count': int, 'mean': Any, 'quin99': Any})
 
-    select_clauses = [
-        F.all().null_count().name.map(json_postfix('null_count')),
-        F.all().mean().name.map(json_postfix('mean')),
-        F.all().quantile(.99).name.map(json_postfix('quin99'))]
+
+@stat()
+def select_only(ser: RawSeries) -> SelectOnlyResult:
+    """A small custom @stat analysis (replaces the v1 select_clauses SelectOnlyAnalysis)."""
+    return {'null_count': int(ser.null_count()), 'mean': ser.mean(), 'quin99': ser.quantile(0.99)}
+
 
 
 # Pin the stats SelectOnlyAnalysis produces so they survive the #880 wire
@@ -57,16 +57,12 @@ def test_polars_all_stats():
     Since polars doesn't have an index concept, some things are a little different, but the summary_stats display essentiall depends on the index being present and displayed
 
     """
-    
-    sdf, errs = polars_produce_series_df(
-        test_df, [SelectOnlyAnalysis], 'test_df', debug=True)
+
     expected = {
         'a':  {'mean': 2.5, 'null_count':  0, 'quin99':  4.0, 'rewritten_col_name':'a',
             'orig_col_name':'normal_int_series'}}
-    #dsdf = replace_in_dict(sdf, [(np.nan, None)])
     class SimplePolarsBuckaroo(PolarsBuckarooWidget):
-        DFStatsClass = PlDfStats  # v1 PolarsAnalysis classes need PlDfStats
-        analysis_klasses= [SelectOnlyAnalysis, SelectOnlyStyling]
+        analysis_klasses= [select_only, SelectOnlyStyling]
 
     spbw = SimplePolarsBuckaroo(test_df)
     assert spbw.dataflow.merged_sd == expected
@@ -112,20 +108,14 @@ def test_pandas_all_stats():
     })
 
     
-    class SimpleAnalysis(ColAnalysis):
-        provides_defaults = {}
-        requires_raw = True
-        provides_series_stats = ["distinct_count"]
+    SimpleResult = TypedDict('SimpleResult', {'null_count': int, 'mean': Any, 'quin99': Any})
 
-        @staticmethod
-        def series_summary(sampled_ser, raw_ser):
-            return dict(
-                null_count=0,
-                mean=2.5,
-                quin99=4.0)
+    @stat()
+    def simple_analysis(ser: RawSeries) -> SimpleResult:
+        return {'null_count': 0, 'mean': 2.5, 'quin99': 4.0}
 
     class SimpleBuckaroo(BuckarooWidget):
-        analysis_klasses= [SimpleAnalysis, StylingAnalysis]
+        analysis_klasses= [simple_analysis, StylingAnalysis]
 
     sbw = SimpleBuckaroo(pd_test_df)
     assert sbw.dataflow.merged_sd == {

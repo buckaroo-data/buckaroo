@@ -27,9 +27,11 @@ import pandas as pd
 
 from buckaroo.pluggable_analysis_framework.stat_func import (StatFunc, StatKey, stat, RawSeries)
 from buckaroo.pluggable_analysis_framework.column_filters import is_numeric_not_bool
+from buckaroo.jlisp.lisp_utils import s, sA
+from buckaroo.auto_clean.heuristic_lang import get_top_score
 
 # Helper functions from v1 modules (not rewritten - pure utilities)
-from buckaroo.customizations.analysis import get_mode
+from buckaroo.customizations.analysis import get_mode, _has_unhashable_values
 from buckaroo.customizations.histogram import (categorical_histogram, numeric_histogram)
 from buckaroo.customizations.pd_fracs import (regular_int_parse_frac as _regular_int_parse_frac, strip_int_parse_frac as _strip_int_parse_frac, str_bool_frac as _str_bool_frac, us_dates_frac as _us_dates_frac)
 
@@ -114,7 +116,14 @@ def base_summary_stats(ser: RawSeries) -> BaseSummaryResult:
     is_numeric = pd.api.types.is_numeric_dtype(ser)
     is_bool = pd.api.types.is_bool_dtype(ser)
 
-    base = {'length': length, 'null_count': int(ser.isna().sum()), 'value_counts': ser.value_counts(),
+    # value_counts on list/dict/set-typed Series is meaningless and falls back to
+    # an O(n^2) pairwise compare; short-circuit to an empty Series (#843).
+    if _has_unhashable_values(ser):
+        value_counts = pd.Series([], dtype='int64', name='count')
+    else:
+        value_counts = ser.value_counts()
+
+    base = {'length': length, 'null_count': int(ser.isna().sum()), 'value_counts': value_counts,
         'mode': get_mode(ser), 'min': np.nan, 'max': np.nan}
 
     if is_numeric and not is_bool and base['null_count'] < length:
@@ -197,7 +206,13 @@ def histogram_series(ser: RawSeries) -> HistogramSeriesResult:
     if len(meat) == 0:
         return {'histogram_args': {}, 'histogram_bins': []}
 
-    meat_histogram = np.histogram(meat, 10)
+    try:
+        meat_histogram = np.histogram(meat, 10)
+    except ValueError:
+        # Can happen when float64 precision is insufficient to create
+        # 10 distinct bin edges (e.g. large integers near 2^53 where
+        # np.spacing > bin width).
+        return {'histogram_args': {}, 'histogram_bins': []}
     populations, _ = meat_histogram
     return {
         'histogram_bins': meat_histogram[1].tolist(),
@@ -239,6 +254,23 @@ def pd_cleaning_stats(value_counts: pd.Series, length: int) -> PdCleaningResult:
 
 
 # ============================================================
+# Default cleaning ops (replaces CleaningGenOps)
+# ============================================================
+
+CleaningGenOpsResult = TypedDict('CleaningGenOpsResult', {'cleaning_ops': Any})
+
+_INT_PARSE_THRESHOLD = .3
+
+
+@stat()
+def cleaning_gen_ops(int_parse: float, int_parse_fail: float) -> CleaningGenOpsResult:
+    """Generate the default autoclean op (safe_int) when a column mostly parses as int."""
+    if int_parse > _INT_PARSE_THRESHOLD:
+        return {'cleaning_ops': [{'symbol': 'safe_int', 'meta': {'auto_clean': True}}, {'symbol': 'df'}]}
+    return {'cleaning_ops': []}
+
+
+# ============================================================
 # Heuristic Fracs (replaces HeuristicFracs ColAnalysis)
 # ============================================================
 
@@ -253,7 +285,7 @@ def heuristic_fracs(ser: RawSeries) -> HeuristicFracsResult:
         pd.api.types.is_string_dtype(ser)
         or pd.api.types.is_object_dtype(ser)
     ):
-        return {'str_bool_frac': 0, 'regular_int_parse_frac': 0, 'strip_int_parse_frac': 0, 'us_dates_frac': 0}
+        return {'str_bool_frac': 0.0, 'regular_int_parse_frac': 0.0, 'strip_int_parse_frac': 0.0, 'us_dates_frac': 0.0}
     return {'str_bool_frac': _str_bool_frac(ser), 'regular_int_parse_frac': _regular_int_parse_frac(ser),
         'strip_int_parse_frac': _strip_int_parse_frac(ser), 'us_dates_frac': _us_dates_frac(ser)}
 
@@ -262,50 +294,42 @@ def heuristic_fracs(ser: RawSeries) -> HeuristicFracsResult:
 # Cleaning Ops (replaces BaseHeuristicCleaningGenOps subclasses)
 # ============================================================
 
-try:
-    from buckaroo.jlisp.lisp_utils import s, sA
-    from buckaroo.auto_clean.heuristic_lang import get_top_score
+def _make_cleaning_stat(rules, rules_op_names, class_name):
+    """Factory for heuristic cleaning ops StatFunc objects."""
+    def cleaning_func(str_bool_frac=0.0, regular_int_parse_frac=0.0, strip_int_parse_frac=0.0, us_dates_frac=0.0,
+            orig_col_name=''):
+        column_metadata = {'str_bool_frac': str_bool_frac, 'regular_int_parse_frac': regular_int_parse_frac,
+            'strip_int_parse_frac': strip_int_parse_frac, 'us_dates_frac': us_dates_frac,
+            'orig_col_name': orig_col_name}
+        cleaning_op_name = get_top_score(rules, column_metadata)
+        if cleaning_op_name == "none":
+            return {"cleaning_ops": [], "cleaning_name": "None", "add_orig": False}
+        else:
+            cleaning_name = rules_op_names.get(cleaning_op_name, cleaning_op_name)
+            ops = [sA(cleaning_name, clean_strategy=class_name, clean_col=orig_col_name), {"symbol": "df"}]
+            return {"cleaning_ops": ops, "cleaning_name": cleaning_name, "add_orig": True}
 
-    def _make_cleaning_stat(rules, rules_op_names, class_name):
-        """Factory for heuristic cleaning ops StatFunc objects."""
-        def cleaning_func(str_bool_frac=0.0, regular_int_parse_frac=0.0, strip_int_parse_frac=0.0, us_dates_frac=0.0,
-                orig_col_name=''):
-            column_metadata = {'str_bool_frac': str_bool_frac, 'regular_int_parse_frac': regular_int_parse_frac,
-                'strip_int_parse_frac': strip_int_parse_frac, 'us_dates_frac': us_dates_frac,
-                'orig_col_name': orig_col_name}
-            cleaning_op_name = get_top_score(rules, column_metadata)
-            if cleaning_op_name == "none":
-                return {"cleaning_ops": [], "cleaning_name": "None", "add_orig": False}
-            else:
-                cleaning_name = rules_op_names.get(cleaning_op_name, cleaning_op_name)
-                ops = [sA(cleaning_name, clean_strategy=class_name, clean_col=orig_col_name), {"symbol": "df"}]
-                return {"cleaning_ops": ops, "cleaning_name": cleaning_name, "add_orig": True}
+    cleaning_func.__name__ = class_name
+    cleaning_func.__qualname__ = class_name
 
-        cleaning_func.__name__ = class_name
-        cleaning_func.__qualname__ = class_name
+    return StatFunc(name=class_name, func=cleaning_func,
+        requires=[StatKey('str_bool_frac', float), StatKey('regular_int_parse_frac', float),
+            StatKey('strip_int_parse_frac', float), StatKey('us_dates_frac', float), StatKey('orig_col_name', Any)],
+        provides=[StatKey('cleaning_ops', Any), StatKey('cleaning_name', Any), StatKey('add_orig', Any)],
+        needs_raw=False)
 
-        return StatFunc(name=class_name, func=cleaning_func,
-            requires=[StatKey('str_bool_frac', float), StatKey('regular_int_parse_frac', float),
-                StatKey('strip_int_parse_frac', float), StatKey('us_dates_frac', float), StatKey('orig_col_name', Any)],
-            provides=[StatKey('cleaning_ops', Any), StatKey('cleaning_name', Any), StatKey('add_orig', Any)],
-            needs_raw=False)
+_frac_name_to_command = {"str_bool_frac": "str_bool", "regular_int_parse_frac": "regular_int_parse",
+    "strip_int_parse_frac": "strip_int_parse", "us_dates_frac": "us_date"}
 
-    _frac_name_to_command = {"str_bool_frac": "str_bool", "regular_int_parse_frac": "regular_int_parse",
-        "strip_int_parse_frac": "strip_int_parse", "us_dates_frac": "us_date"}
+conservative_cleaning = _make_cleaning_stat(rules={"str_bool_frac": [s("f>"), 0.9],
+    "regular_int_parse_frac": [s("f>"), 0.9], "strip_int_parse_frac": [s("f>"), 0.9], "none": [s("none-rule")],
+    "us_dates_frac": [s("primary"), [s("f>"), 0.8]]},
+    rules_op_names=_frac_name_to_command, class_name='ConservativeCleaningGenops')
 
-    conservative_cleaning = _make_cleaning_stat(rules={"str_bool_frac": [s("f>"), 0.9],
-        "regular_int_parse_frac": [s("f>"), 0.9], "strip_int_parse_frac": [s("f>"), 0.9], "none": [s("none-rule")],
-        "us_dates_frac": [s("primary"), [s("f>"), 0.8]]},
-        rules_op_names=_frac_name_to_command, class_name='ConservativeCleaningGenops')
-
-    aggressive_cleaning = _make_cleaning_stat(rules={"str_bool_frac": [s("f>"), 0.6],
-        "regular_int_parse_frac": [s("f>"), 0.7], "strip_int_parse_frac": [s("f>"), 0.6], "none": [s("none-rule")],
-        "us_dates_frac": [s("primary"), [s("f>"), 0.7]]},
-        rules_op_names=_frac_name_to_command, class_name='AggresiveCleaningGenOps')
-
-except ImportError:
-    conservative_cleaning = None
-    aggressive_cleaning = None
+aggressive_cleaning = _make_cleaning_stat(rules={"str_bool_frac": [s("f>"), 0.6],
+    "regular_int_parse_frac": [s("f>"), 0.7], "strip_int_parse_frac": [s("f>"), 0.6], "none": [s("none-rule")],
+    "us_dates_frac": [s("primary"), [s("f>"), 0.7]]},
+    rules_op_names=_frac_name_to_command, class_name='AggresiveCleaningGenOps')
 
 
 # ============================================================
@@ -321,3 +345,12 @@ PD_ANALYSIS_V2_WITH_CLEANING = PD_ANALYSIS_V2 + [pd_cleaning_stats]
 
 # With heuristic fracs (for autocleaning)
 PD_ANALYSIS_V2_WITH_HEURISTICS = PD_ANALYSIS_V2 + [heuristic_fracs, orig_col_name]
+
+# Autocleaning analysis sets (replace the v1 ColAnalysis autocleaning_analysis_klasses).
+# Default config: int-parse detection -> safe_int op.
+PD_AUTOCLEAN_DEFAULT_V2 = [typing_stats, _type, base_summary_stats, numeric_stats,
+    pd_cleaning_stats, cleaning_gen_ops, orig_col_name]
+
+# Heuristic configs: parsing fracs -> rule-driven cleaning op.
+PD_AUTOCLEAN_AGGRESSIVE_V2 = [heuristic_fracs, orig_col_name, aggressive_cleaning]
+PD_AUTOCLEAN_CONSERVATIVE_V2 = [heuristic_fracs, orig_col_name, conservative_cleaning]

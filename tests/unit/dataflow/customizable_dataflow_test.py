@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
-from ..fixtures import (DistinctCount)
 from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
+from buckaroo.pluggable_analysis_framework.stat_func import stat, RawSeries
 from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget
 from buckaroo.jlisp.lisp_utils import (s, sQ)
@@ -9,6 +9,17 @@ from buckaroo.dataflow.autocleaning import PandasAutocleaning
 from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)
 from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.ddd_library import get_basic_df2
+
+
+@stat()
+def distinct_count(ser: RawSeries) -> int:
+    return len(ser.value_counts())
+
+
+@stat()
+def always_fail(ser: RawSeries) -> int:
+    raise ZeroDivisionError("always fails")
+
 
 BASIC_DF = get_basic_df2()
 EMPTY_DF_JSON = {
@@ -124,7 +135,7 @@ def test_hide_column_config_overrides():
 
 def test_custom_summary_stats():
     class DCDFC(ACDFC):
-        analysis_klasses = [DistinctCount, StylingAnalysis]
+        analysis_klasses = [distinct_count, StylingAnalysis]
 
     dc_dfc = DCDFC(BASIC_DF)
 
@@ -139,7 +150,7 @@ def test_init_sd():
       verify that values put into init_sd end up in merged_sd
       """
     class DCDFC(ACDFC):
-        analysis_klasses = [DistinctCount, StylingAnalysis]
+        analysis_klasses = [distinct_count, StylingAnalysis]
 
     dc_dfc = DCDFC(BASIC_DF, init_sd={'foo_col':{'foo':8}})
 
@@ -290,15 +301,9 @@ def test_hide_column_config_post_processing2():
     assert p_dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_WITHOUT_B
 
 
-class AlwaysFailAnalysis(ColAnalysis):
-    provides_defaults = {}
-
-    @staticmethod
-    def computed_summary(foo):
-        1/0
 def test_error_analysis():
     class ErrorCustomDataflow(ACDFC):
-        analysis_klasses = [AlwaysFailAnalysis]
+        analysis_klasses = [always_fail]
 
     ErrorCustomDataflow(BASIC_DF)
     #basically asserting that it doesn't throw an error

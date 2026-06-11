@@ -1,16 +1,17 @@
+from typing import Any, TypedDict
 import polars as pl
-from buckaroo.customizations.polars_analysis import (
-    VCAnalysis, PLCleaningStats, BasicAnalysis)
-from buckaroo.pluggable_analysis_framework.polars_analysis_management import PlDfStats
-from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
-from buckaroo.dataflow.autocleaning import (merge_ops, format_ops, AutocleaningConfig, _rekey_op_sd_to_internal)
-from buckaroo.polars_buckaroo import PolarsAutocleaning
-from buckaroo.customizations.polars_commands import (
-    Command, PlSafeInt, DropCol, FillNA, GroupBy, NoOp, Search, SDResult
-)
+from buckaroo.dataflow.autocleaning import (
+    merge_ops, format_ops, AutocleaningConfig, PandasAutocleaning, _rekey_op_sd_to_internal)
+from buckaroo.customizations.polars_commands import (Command, Search, SDResult, PlSafeInt, DropCol, FillNA, GroupBy, NoOp)
 from buckaroo.customizations.styling import DefaultMainStyling
+from buckaroo.customizations.pl_stats_v2 import PL_AUTOCLEAN_DEFAULT_V2, pl_cleaning_stats
+from buckaroo.polars_buckaroo import PolarsAutocleaning
+from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+from buckaroo.pluggable_analysis_framework.stat_func import stat
 from buckaroo.jlisp.lisp_utils import s
 
+
+SAFE_INT_TOKEN = [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}]
 
 dirty_df = pl.DataFrame(
     {'a':[10,  20,  30,   40,  10, 20.3,   5, None, None, None],
@@ -18,44 +19,103 @@ dirty_df = pl.DataFrame(
     strict=False)
 
 
-def make_default_analysis(**kwargs):
-    class DefaultAnalysis(ColAnalysis):
-        requires_summary = []
-        provides_defaults = kwargs
-    return DefaultAnalysis
+_AddOrigResult = TypedDict('_AddOrigResult', {'cleaning_ops': Any, 'add_orig': Any})
 
-class CleaningGenOps(ColAnalysis):
-    requires_summary = ['int_parse_fail', 'int_parse']
-    provides_defaults = {'cleaning_ops': []}
 
-    int_parse_threshhold = .3
-    @classmethod
-    def computed_summary(kls, column_metadata):
-        if column_metadata['int_parse'] > kls.int_parse_threshhold:
-            return {'cleaning_ops': [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}],
-                'add_orig': True}
-        else:
-            return {'cleaning_ops': []}
+@stat()
+def _pl_add_orig_cleaning(int_parse: float, int_parse_fail: float) -> _AddOrigResult:
+    """Polars cleaning op generator that flags add_orig (keeps <col>_orig)."""
+    if int_parse > 0.3:
+        return {'cleaning_ops': SAFE_INT_TOKEN, 'add_orig': True}
+    return {'cleaning_ops': [], 'add_orig': False}
+
+
+_PL_AC_CLEANING = [pl_cleaning_stats, _pl_add_orig_cleaning]
+
+
+class ACConf(AutocleaningConfig):
+    autocleaning_analysis_klasses = _PL_AC_CLEANING
+    command_klasses = [PlSafeInt, DropCol, FillNA, GroupBy, NoOp]
+    name = "default"
+
+
+class NoCleaning(AutocleaningConfig):
+    autocleaning_analysis_klasses = []
+    command_klasses = [PlSafeInt, DropCol, FillNA, GroupBy, NoOp]
+    name = ""
 
 
 def test_cleaning_stats():
-    dfs = PlDfStats(dirty_df, [VCAnalysis, PLCleaningStats, BasicAnalysis])
+    # "3", "4", "5", "5"  -> 4 of 10 parse as int
+    s = PlDfStatsV2(dirty_df, PL_AUTOCLEAN_DEFAULT_V2)
+    assert s.sdf['b']['int_parse'] == 0.4
+    assert s.sdf['b']['int_parse_fail'] == 0.6
 
-    # "3", "4", "5", "5"   4 out of 10
-    assert dfs.sdf['b']['int_parse'] == 0.4
-    assert dfs.sdf['b']['int_parse_fail'] == 0.6
 
-
-SAFE_INT_TOKEN = [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}]
 def test_ops_gen():
+    s = PlDfStatsV2(dirty_df, PL_AUTOCLEAN_DEFAULT_V2)
+    assert s.sdf['b']['cleaning_ops'] == SAFE_INT_TOKEN
+    no_ints = PlDfStatsV2(pl.DataFrame({'x': ['aa', 'bb', 'cc']}), PL_AUTOCLEAN_DEFAULT_V2)
+    assert no_ints.sdf['a']['cleaning_ops'] == []
 
-    dfs = PlDfStats(dirty_df, [make_default_analysis(int_parse=.4, int_parse_fail=.6),
-                               CleaningGenOps], debug=True)
-    assert dfs.sdf['b']['cleaning_ops'] == SAFE_INT_TOKEN
-    dfs = PlDfStats(dirty_df, [make_default_analysis(int_parse=.2, int_parse_fail=.8),
-                               CleaningGenOps])
-    assert dfs.sdf['b']['cleaning_ops'] == []
 
+def test_handle_user_ops():
+    ac = PolarsAutocleaning([ACConf, NoCleaning])
+    df = pl.DataFrame({'a': [10, 20, 30]})
+    _cleaned, _sd, _gen, merged_operations = ac.handle_ops_and_clean(
+        df, cleaning_method='default', quick_command_args={}, existing_operations=[])
+    assert merged_operations == [[{'symbol': 'safe_int', 'meta': {'auto_clean': True}}, {'symbol': 'df'}, 'a']]
+
+    user_ops = [[{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
+    _cleaned, _sd, _gen, merged_operations3 = ac.handle_ops_and_clean(
+        df, cleaning_method='default', quick_command_args={}, existing_operations=user_ops)
+    assert merged_operations3 == [
+        [{'symbol': 'safe_int', 'meta': {'auto_clean': True}}, {'symbol': 'df'}, 'a'],
+        [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
+
+
+def test_handle_clean_df():
+    ac = PolarsAutocleaning([ACConf, NoCleaning])
+    df = pl.DataFrame({'a': ["30", "40"]})
+    cleaned_df, _sd, _gen, _ops = ac.handle_ops_and_clean(
+        df, cleaning_method='default', quick_command_args={}, existing_operations=[])
+    expected = pl.DataFrame({'a': [30, 40], 'a_orig': ["30", "40"]})
+    assert cleaned_df.to_dicts() == expected.to_dicts()
+
+
+EXPECTED_GEN_CODE = """def clean(df):
+    df = df.with_columns(pl.col('a').cast(pl.Int64, strict=False))
+    return df"""
+
+
+def test_autoclean_codegen():
+    ac = PolarsAutocleaning([ACConf, NoCleaning])
+    df = pl.DataFrame({'a': ["30", "40"]})
+    _cleaned, _sd, generated_code, _ops = ac.handle_ops_and_clean(
+        df, cleaning_method='default', quick_command_args={}, existing_operations=[])
+    assert generated_code == EXPECTED_GEN_CODE
+
+
+def test_make_origs_different_dtype():
+    raw = pl.DataFrame({'a': [30, "40"]}, strict=False)
+    cleaned = pl.DataFrame({'a': [30, 40]})
+    expected = pl.DataFrame({'a': [30, 40], 'a_orig': [30, "40"]}, strict=False)
+    # cleaning_sd is keyed by the internal name; make_origs indexes by orig_col_name.
+    combined = PolarsAutocleaning.make_origs(
+        raw, cleaned, {'a': {'add_orig': True, 'orig_col_name': 'a'}})
+    assert combined.to_dicts() == expected.to_dicts()
+
+
+def test_autoclean_preserves_original_column_names():
+    """Regression: cleaning_sd is keyed by buckaroo's internal a/b/c names while
+    cleaned_df/raw_df keep the user's original names. A column not literally named
+    'a' previously raised ColumnNotFoundError in make_origs. (codex P2 on #876)"""
+    ac = PolarsAutocleaning([ACConf, NoCleaning])
+    df = pl.DataFrame({'realname': ["30", "40"]})
+    cleaned_df, _sd, _gen, _ops = ac.handle_ops_and_clean(
+        df, cleaning_method='default', quick_command_args={}, existing_operations=[])
+    expected = pl.DataFrame({'realname': [30, 40], 'realname_orig': ["30", "40"]})
+    assert cleaned_df.to_dicts() == expected.to_dicts()
 
 
 def test_format_ops():
@@ -82,102 +142,7 @@ def test_merge_ops():
     expected_merged = [
         [{'symbol': 'new_cleaning', 'meta':{'auto_clean': True}}, 'a'],
         [{'symbol': 'usergen'}, 'foo_column']]
-    print( merge_ops(existing_ops, cleaning_ops))
-    print("@"*80)
     assert merge_ops(existing_ops, cleaning_ops) == expected_merged
-
-class ACConf(AutocleaningConfig):
-    autocleaning_analysis_klasses = [VCAnalysis, PLCleaningStats, BasicAnalysis, CleaningGenOps]
-    command_klasses = [PlSafeInt, DropCol, FillNA, GroupBy, NoOp]
-    name = "default"
-
-class NoCleaning(AutocleaningConfig):
-    autocleaning_analysis_klasses = []
-    command_klasses = [PlSafeInt, DropCol, FillNA, GroupBy, NoOp]
-    name = ""
-
-
-    
-def test_handle_user_ops():
-
-    ac = PolarsAutocleaning([ACConf, NoCleaning])
-    df = pl.DataFrame({'a': [10, 20, 30]})
-    cleaning_result = ac.handle_ops_and_clean(
-        df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
-    assert merged_operations == [
-        [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
-
-    existing_ops = [
-        [{'symbol': 'old_safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
-    cleaning_result2 = ac.handle_ops_and_clean(
-        df, cleaning_method='default', quick_command_args={}, existing_operations=existing_ops)
-    cleaned_df, cleaning_sd, generated_code, merged_operations2 = cleaning_result2
-    assert merged_operations2 == [
-        [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a']]
-
-    user_ops = [
-        [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
-    cleaning_result3 = ac.handle_ops_and_clean(
-        df, cleaning_method='default', quick_command_args={}, existing_operations=user_ops)
-    cleaned_df, cleaning_sd, generated_code, merged_operations3 = cleaning_result3
-    assert merged_operations3 == [
-        [{'symbol': 'safe_int', 'meta':{'auto_clean': True}}, {'symbol': 'df'}, 'a'],
-        [{'symbol': 'noop'}, {'symbol': 'df'}, 'b']]
-
-
-def desired_test_make_origs():
-    # I can't make this work in a sensible way because it is not
-    # possible to quickly run comparisons against different dtype
-    # columns, and object dtypes are serverely limited
-    df_a = pl.DataFrame({'a': [10, 20, 30, 40], 'b': [1, 2, 3, 4]})
-    df_b = pl.DataFrame({'a': [10, 20,  0, 40], 'b': [1, 2, 3, 4]})    
-
-    expected = pl.DataFrame([pl.Series("a",      [  10,   20,    0,   40], dtype=pl.Int64),
-        pl.Series("a_orig", [None, None,   30, None], dtype=pl.Int64),
-        pl.Series("b",      [   1,    2,    3,    4], dtype=pl.Int64),
-        pl.Series("b_orig", [None, None, None, None], dtype=pl.Int64)])
-
-    combined = PolarsAutocleaning.make_origs(
-        df_a, df_b, {'a':{'add_orig': True}, 'b': {'add_orig': True}})
-    assert combined.to_dicts() == expected.to_dicts()
-
-def test_make_origs_different_dtype():
-    raw = pl.DataFrame({'a': [30, "40"]}, strict=False)
-    cleaned = pl.DataFrame({'a': [30,  40]})
-    expected = pl.DataFrame(
-        {
-            'a': [30, 40],
-         'a_orig': [30,  "40"]},
-        strict=False)
-    combined = PolarsAutocleaning.make_origs(
-        raw, cleaned, {'a':{'add_orig': True}})
-    assert combined.to_dicts() == expected.to_dicts()
-
-def test_handle_clean_df():
-    ac = PolarsAutocleaning([ACConf, NoCleaning])
-    df = pl.DataFrame({'a': ["30", "40"]})
-    cleaning_result = ac.handle_ops_and_clean(
-        df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
-    expected = pl.DataFrame({
-        'a': [30, 40],
-        'a_orig': ["30",  "40"]})
-    print(f"{cleaning_sd=}")
-    assert cleaned_df.to_dicts() == expected.to_dicts()
-
-EXPECTED_GEN_CODE = """def clean(df):
-    df = df.with_columns(pl.col('a').cast(pl.Int64, strict=False))
-    return df"""
-
-def test_autoclean_codegen():
-    ac = PolarsAutocleaning([ACConf, NoCleaning])
-    df = pl.DataFrame({'a': ["30", "40"]})
-    cleaning_result = ac.handle_ops_and_clean(
-        df, cleaning_method='default', quick_command_args={}, existing_operations=[])
-    cleaned_df, cleaning_sd, generated_code, merged_operations = cleaning_result
-
-    assert generated_code == EXPECTED_GEN_CODE
 
 
 class TaggingCommand(Command):
@@ -201,7 +166,10 @@ class TagConf(AutocleaningConfig):
 
 
 def test_sdresult_lands_in_cleaning_sd_through_handle_ops_and_clean():
-    ac = PolarsAutocleaning([TagConf])
+    # Runs through PandasAutocleaning even with a polars frame — the SDResult
+    # mechanics are df-agnostic. PolarsAutocleaning-specific SDResult coverage
+    # is deferred pending a broader autocleaning rethink.
+    ac = PandasAutocleaning([TagConf])
     df = pl.DataFrame({'a': [1, 2, 3]})
     op = [{'symbol': 'tag'}, s('df'), 'a', 'hello']
 
@@ -223,7 +191,7 @@ def test_search_threads_highlight_regex_into_cleaning_sd_under_rename():
     internal a/b/c names, so autocleaning rewrites the op-supplied keys to
     match — otherwise the entries would sit alongside as orphans without
     a `_type` and trip the styling fallback."""
-    ac = PolarsAutocleaning([SearchConf])
+    ac = PandasAutocleaning([SearchConf])
     # 'businessname' becomes 'a', 'rating' becomes 'b' under buckaroo renaming.
     df = pl.DataFrame({'businessname': ['pizza', 'sushi'], 'rating': [5, 4]})
     search_op = [{'symbol': 'search'}, s('df'), 'col', 'pizza']

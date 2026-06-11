@@ -1,16 +1,15 @@
-"""DfStatsV2 — drop-in replacement for DfStats using StatPipeline.
+"""DfStatsV2 — ties the StatPipeline to a DataFrame for DataFlow consumers.
 
-Wraps StatPipeline to match the DfStats interface used by DataFlow,
-PandasAutocleaning, and other consumers.
+Wraps StatPipeline to provide the ``.sdf`` / ``.errs`` surface used by
+DataFlow, PandasAutocleaning, and other consumers.
 
 Usage::
 
     from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 
-    # Same interface as DfStats
-    stats = DfStatsV2(my_df, [TypingStats, DefaultSummaryStats, Histogram])
+    stats = DfStatsV2(my_df, [typing_stats, base_summary_stats, histogram])
     stats.sdf  # -> SDType
-    stats.errs  # -> ErrDict (v1 compatible)
+    stats.errs  # -> ErrDict
 """
 from __future__ import annotations
 
@@ -20,16 +19,16 @@ import numpy as np
 import pandas as pd
 
 from .col_analysis import AObjs, ColAnalysis
-from .stat_pipeline import StatPipeline
+from .stat_pipeline import StatPipeline, errors_to_errdict
 from .utils import FAST_SUMMARY_WHEN_GREATER
 from .safe_summary_df import output_full_reproduce
 
 
 class DfStatsV2:
-    """Drop-in replacement for DfStats. Uses StatPipeline internally.
+    """Tie a StatPipeline to a DataFrame, exposing ``.sdf`` and ``.errs``.
 
-    Maintains the same interface as DfStats so that DataFlow,
-    autocleaning, and all other consumers work without changes.
+    Used by DataFlow, autocleaning, and other consumers as the pandas
+    summary-stats executor.
     """
 
     ap_class = StatPipeline
@@ -47,8 +46,8 @@ class DfStatsV2:
         self.operating_df_name = operating_df_name
         self.debug = debug
 
-        # Process using v1-compatible output format
-        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, self.debug, skip_columns=skip_columns)
+        self.sdf, errors = self.ap.process_df(self.df, self.debug, skip_columns=skip_columns)
+        self.errs = errors_to_errdict(errors)
         self.stat_errors = []
 
         if self.errs:
@@ -69,8 +68,8 @@ class DfStatsV2:
         passed, errors = self.ap.add_stat(a_obj)
 
         # Re-process with updated pipeline
-        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, debug=True)
-        _, self.stat_errors = self.ap.process_df(self.df, debug=True)
+        self.sdf, self.stat_errors = self.ap.process_df(self.df, debug=True)
+        self.errs = errors_to_errdict(self.stat_errors)
 
         if not passed:
             print("Unit tests failed")
@@ -82,7 +81,7 @@ class DfStatsV2:
 
 
 class PlDfStatsV2:
-    """Drop-in for PlDfStats. Uses StatPipeline with @stat polars functions."""
+    """Polars summary-stats executor. Uses StatPipeline with @stat polars functions."""
 
     @classmethod
     def verify_analysis_objects(cls, objs):
@@ -97,7 +96,8 @@ class PlDfStatsV2:
     def __init__(self, df, col_analysis_objs, operating_df_name=None, debug=False, skip_columns=None):
         self.df = self.get_operating_df(df)
         self.ap = StatPipeline(col_analysis_objs, unit_test=False)
-        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, debug, skip_columns=skip_columns)
+        self.sdf, errors = self.ap.process_df(self.df, debug, skip_columns=skip_columns)
+        self.errs = errors_to_errdict(errors)
         self.stat_errors = []
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)
@@ -105,8 +105,8 @@ class PlDfStatsV2:
     def add_analysis(self, a_obj):
         """Add a new analysis class interactively."""
         passed, errors = self.ap.add_stat(a_obj)
-        self.sdf, self.errs = self.ap.process_df_v1_compat(self.df, debug=True)
-        _, self.stat_errors = self.ap.process_df(self.df, debug=True)
+        self.sdf, self.stat_errors = self.ap.process_df(self.df, debug=True)
+        self.errs = errors_to_errdict(self.stat_errors)
         if not passed:
             print("Unit tests failed")
         if self.errs:

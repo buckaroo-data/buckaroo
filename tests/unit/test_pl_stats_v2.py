@@ -307,6 +307,17 @@ class TestPlHistogram:
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert 'histogram' in result
 
+    def test_bigint_histogram_series(self):
+        """Integers near 2^53: np.histogram either raises ValueError (newer
+        numpy, where float64 linspace produces colliding bin edges) or returns
+        near-degenerate bins (e.g. numpy 2.0.2). pl_histogram_series must not
+        raise either way — on the raising versions the guard returns empty
+        histogram_args so the categorical fallback renders."""
+        ser = pl.Series('big_id', [9007199254740993 + i for i in range(20)])
+        result = pl_histogram_series(ser)
+        assert isinstance(result['histogram_args'], dict)
+        assert isinstance(result['histogram_bins'], list)
+
 
 # ============================================================================
 # Full pipeline integration tests
