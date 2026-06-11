@@ -106,10 +106,13 @@ def _is_batch_func(sf: StatFunc) -> bool:
 # queries. Everything else — scans, projections, unions, limits — streams
 # cheaply via predicate + projection pushdown, so materialising it is pure
 # overhead, and multi-GB of resident overhead on a wide or tall source (#915).
+# ``Sample`` is here for correctness, not just cost: an unseeded sample
+# re-drawn per query would compute length/min/max/histogram over different row
+# sets, so the run must share a single materialised sample.
 # Resolved by name so an op renamed/absent across ibis versions is skipped
 # rather than raising.
 _MATERIALIZE_WORTHY_OP_NAMES = (
-    "Filter", "Aggregate", "JoinChain", "JoinLink", "Distinct", "Sort", "DropNull")
+    "Filter", "Aggregate", "JoinChain", "JoinLink", "Distinct", "Sort", "DropNull", "Sample")
 
 
 def _materialize_worthy_ops():
@@ -121,8 +124,9 @@ def _materialize_worthy_ops():
 
 def _source_worth_materializing(source) -> bool:
     """True if the source op tree carries a chain — filter / aggregate / join /
-    distinct / sort / drop_null — whose re-execution per per-column query
-    materialising the source once would avoid.
+    distinct / sort / drop_null / sample — whose re-execution per per-column
+    query materialising the source once would avoid (and, for an unseeded
+    sample, must avoid so every stat sees the same rows).
 
     A source built only from scans, projections, unions and limits streams
     cheaply, so materialising it is pure overhead (#915). The check is op-tree
