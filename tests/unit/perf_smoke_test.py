@@ -8,8 +8,10 @@ wrong.
 """
 
 import numpy as np
+import pandas as pd
 
-from buckaroo.pluggable_analysis_framework.perf_smoke import perf_smoke_test
+from buckaroo.pluggable_analysis_framework.perf_smoke import (
+    SMOKE_FRAME_MAKERS, measurements_markdown, perf_smoke_test, run_perf_smoke)
 from buckaroo.pluggable_analysis_framework.stat_func import stat, RawSeries
 
 
@@ -64,3 +66,41 @@ def test_memory_hog_flagged():
     mem_findings = [f for f in findings if f.kind == 'memory' and f.stat_name == 'memory_hog']
     assert mem_findings
     assert 'memory_hog' in mem_findings[0].message
+
+
+def test_smoke_frames_cover_known_killers():
+    # Shapes with bug history: unhashable cells (#843), int64 past 2^53
+    # (#800/#632), Decimal (#801), tz-aware datetimes (#277), all-null,
+    # categorical.
+    expected = {'base', 'unhashable', 'big_int64', 'decimal', 'tz_datetime',
+        'all_null', 'categorical'}
+    assert expected <= set(SMOKE_FRAME_MAKERS)
+    frames = {name: maker(100) for name, maker in SMOKE_FRAME_MAKERS.items()}
+    for name, df in frames.items():
+        assert len(df) == 100, name
+    assert isinstance(frames['unhashable'].iloc[0, 0], list)
+    assert (frames['big_int64'] > 2**53).any().any()
+    assert frames['all_null'].isna().all().all()
+    assert isinstance(frames['categorical'].dtypes.iloc[0], pd.CategoricalDtype)
+
+
+def test_findings_name_the_frame():
+    @stat()
+    def memory_hog_frames(ser: RawSeries) -> float:
+        scratch = np.ones((len(ser), 4_000))
+        return float(scratch.sum())
+
+    passed, findings = perf_smoke_test([memory_hog_frames], rows=2_000)
+    assert passed is False
+    finding = findings[0]
+    assert finding.frame in SMOKE_FRAME_MAKERS
+    assert finding.frame in finding.message
+
+
+def test_run_perf_smoke_measurements_and_markdown():
+    result = run_perf_smoke([smoke_length], rows=2_000)
+    assert result.passed is True
+    assert {m.frame for m in result.measurements} == set(SMOKE_FRAME_MAKERS)
+    md = measurements_markdown(result.measurements)
+    assert 'smoke_length' in md
+    assert md.startswith('|')
