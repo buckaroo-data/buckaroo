@@ -341,14 +341,21 @@ class XorqStatPipeline:
         self._cache_mat_subs = None
         self._cache_mat_cleanup = None
         self._cache_mat_attempted = False
+        self._cache_mat_tmp_parquet = None
 
     def _cleanup_cache_materialization(self):
         cleanup = self._cache_mat_cleanup
+        tmp_parquet = self._cache_mat_tmp_parquet
         self._reset_cache_materialization()
         if cleanup is not None:
             backend, name = cleanup
             try:
                 backend.drop_table(name)
+            except Exception:
+                pass
+        if tmp_parquet is not None:
+            try:
+                tmp_parquet.unlink(missing_ok=True)
             except Exception:
                 pass
 
@@ -422,18 +429,44 @@ class XorqStatPipeline:
     def _create_base_table(self, underlying, name, table):
         """Land ``table`` as a base table on ``underlying``, or None on failure.
 
-        Prefers the in-engine ``create_table(expr)`` path, which materialises
-        in DataFusion without a pandas round-trip (~3-4× cheaper than
-        ``execute()`` + ``create_table(df)``). That path compiles the
+        Primary: stream-write the expression to a temp parquet file and
+        register it as a lazy DataFusion parquet scan (table_name=``name``).
+        This is fully out-of-core — DataFusion never holds all rows in its
+        Rust heap at once (~1 GB peak for a 167M-row scan vs 12+ GB for
+        ``CREATE TABLE AS SELECT``). The temp file is tracked in
+        ``self._cache_mat_tmp_parquet`` and deleted by
+        ``_cleanup_cache_materialization``.
+
+        Falls back to the original in-engine ``create_table(expr)`` path when
+        xorq is unavailable or the parquet write fails. That path compiles the
         expression to SQL, so an op with no translation rule — notably
         ``CachedNode`` from ``expr.cache()`` (the shape every catalog-diff
-        comparison carries) — makes it raise. Two fallbacks recover that:
+        comparison carries) — makes it raise. Two further fallbacks recover that:
 
           1. Rewrite each ``CachedNode`` to a read of its on-disk cache file
              and retry in-engine — no transport, the join still runs once.
           2. Last resort, ``execute()`` to pandas and register the result.
              Correct for any expression but pays a full transport.
         """
+        import tempfile  # noqa: PLC0415
+
+        tmp_path = None
+        try:
+            from xorq.expr.api import to_parquet as _xorq_to_parquet  # noqa: PLC0415
+            fd, tmp_str = tempfile.mkstemp(suffix=".parquet", prefix="buckaroo_mat_")
+            os.close(fd)
+            tmp_path = Path(tmp_str)
+            _xorq_to_parquet(table, tmp_path)
+            result = underlying.read_parquet(str(tmp_path), table_name=name)
+            self._cache_mat_tmp_parquet = tmp_path
+            return result
+        except Exception:
+            if tmp_path is not None and tmp_path.exists():
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
         try:
             return underlying.create_table(name, table, overwrite=True)
         except Exception:
