@@ -56,8 +56,31 @@ def _is_numeric_not_bool(dtype) -> bool:
     return dtype.is_numeric() and not dtype.is_boolean()
 
 
-def _not_float(dtype) -> bool:
-    return not dtype.is_floating()
+def _distinct_count_approx(dtype) -> bool:
+    """Dtypes xorq-datafusion's approx_distinct (HyperLogLog, bounded memory)
+    supports, verified empirically across the arrow dtypes (#918): integer,
+    string (dictionary columns decode to string), binary, and temporal
+    (date / time / timestamp). approx_distinct raises on float, decimal,
+    boolean and nested types."""
+    return (dtype.is_integer() or dtype.is_string() or dtype.is_binary()
+            or dtype.is_temporal())
+
+
+def _distinct_count_supported(dtype) -> bool:
+    """Columns distinct_count runs on. The approx path (bounded HLL) covers the
+    dtypes in ``_distinct_count_approx``; booleans keep exact COUNT(DISTINCT)
+    (<= 2 distinct, trivially cheap).
+
+    Everything else — float, decimal, and nested struct/array/map — has no
+    approx_distinct AND unbounded cardinality, where exact COUNT(DISTINCT) is
+    the multi-GB hash set #906 fixed for strings: ~2.2GB on a 30M-distinct
+    float, 10GB on a 24M-row unique-per-row ``struct<url, description>``. #908
+    routed only scalar string/integer/timestamp/date to approx and left the
+    rest on exact, so binary/time (approx-capable) paid nothing while
+    decimal/struct (approx-incapable, high-card) inherited the blowup. Skip the
+    unbounded ones: distinct_count resolves to None and dependents
+    (distinct_per, histogram, histogram_bins) still run."""
+    return _distinct_count_approx(dtype) or dtype.is_boolean()
 
 
 # ============================================================
@@ -144,7 +167,7 @@ def max(col: XorqColumn) -> float:
     return col.max().cast("float64")
 
 
-@stat(column_filter=_not_float)
+@stat(column_filter=_distinct_count_supported)
 def distinct_count(col: XorqColumn) -> int:
     """Approximate distinct count (HyperLogLog, ~1% error) where supported.
 
@@ -155,24 +178,18 @@ def distinct_count(col: XorqColumn) -> int:
     is displayed as a ratio, and the histogram branch thresholds
     (distinct_count > 5 / <= 5) sit where HLL is exact in practice.
 
-    Float columns skip the stat entirely (column_filter): DataFusion's
-    approx_distinct raises on Float64, exact COUNT(DISTINCT) costs memory
-    proportional to cardinality (~2.2GB measured on a 30M-distinct float
-    column), and a distinct count over floats is rarely meaningful. The
-    pipeline pre-populates ``distinct_count`` as None so dependents
-    (histogram, histogram_bins, distinct_per) still run.
-
-    Allowlist, not denylist, for the remaining dtypes: approx_distinct
-    raises for other unimplemented dtypes too (Boolean at least), and one
-    failing expression aborts the entire batch aggregate — every batched
-    stat for every column. Unverified dtypes keep the exact aggregate;
-    the memory blowup is dominated by high-cardinality string columns,
-    which are covered.
+    Type handling is split out so it can't drift from the column_filter:
+    ``_distinct_count_approx`` lists the approx-capable dtypes (the only ones
+    that reach the approx branch), ``_distinct_count_supported`` adds boolean
+    (exact, <= 2 distinct) and skips the unbounded exact-only dtypes (float,
+    decimal, nested) entirely — the pipeline pre-populates their distinct_count
+    as None so dependents (histogram, histogram_bins, distinct_per) still run.
+    Picking the approx vs exact branch on the same predicate keeps approx off
+    any dtype it would raise on (one raising expression aborts the whole batch).
     """
-    dt = col.type()
-    if dt.is_string() or dt.is_integer() or dt.is_timestamp() or dt.is_date():
+    if _distinct_count_approx(col.type()):
         return col.approx_nunique().cast("int64")
-    return col.nunique().cast("int64")
+    return col.nunique().cast("int64")  # only booleans reach here (exact, <= 2)
 
 
 @stat(column_filter=_is_numeric_not_bool)

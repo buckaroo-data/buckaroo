@@ -186,6 +186,68 @@ class TestBatchAggregate:
         assert stats["ints"]["distinct_count"] == 7
         assert stats["strs"]["distinct_per"] == 1.0
 
+    def test_distinct_count_skipped_for_nested_types(self):
+        """Struct / array / map columns skip distinct_count.
+
+        approx_distinct raises on nested types, so they fall to exact
+        COUNT(DISTINCT) — and a high-cardinality nested column is the same
+        multi-GB hash set #906 fixed for strings: ~25GB measured streaming the
+        stats over a 24M-row ``struct<url, description>`` column, all of it the
+        exact distinct on that one column (#908 only routed scalar string /
+        integer / timestamp / date to approx). They must be filtered out like
+        floats so distinct_count resolves to None and dependents still run.
+        """
+        from xorq.vendor.ibis.expr import datatypes as dt
+
+        from buckaroo.customizations.xorq_stats_v2 import distinct_count
+
+        cf = distinct_count._stat_func.column_filter
+        assert cf(dt.Struct({"url": "string", "description": "string"})) is False
+        assert cf(dt.Array(dt.string)) is False
+        assert cf(dt.Map(dt.string, dt.string)) is False
+        # scalar columns still computed; the existing float skip is preserved
+        assert cf(dt.string) is True
+        assert cf(dt.int64) is True
+        assert cf(dt.float64) is False
+
+    @pytest.mark.parametrize("dtype, supported, approx", [
+        # approx_nunique works (HLL, bounded) — empirically verified across the
+        # arrow dtypes on xorq-datafusion 0.2.7 (#918):
+        ("int64", True, True),
+        ("int32", True, True),
+        ("string", True, True),
+        ("binary", True, True),         # approx works; was wrongly on exact
+        ("date", True, True),
+        ("time", True, True),           # approx works; was wrongly on exact
+        ("timestamp", True, True),
+        # approx raises but cardinality is bounded -> keep exact:
+        ("boolean", True, False),       # <= 2 distinct
+        # approx raises AND cardinality unbounded -> skip (exact is a multi-GB
+        # hash set on high cardinality):
+        ("float64", False, False),
+        ("decimal", False, False),      # was wrongly on exact
+        ("struct", False, False),
+        ("array", False, False),
+        ("map", False, False),
+    ])
+    def test_distinct_count_type_classification(self, dtype, supported, approx):
+        """Every arrow dtype is classified approx / exact / skip — never an
+        unbounded exact COUNT(DISTINCT) on a type approx can't cover."""
+        from xorq.vendor.ibis.expr import datatypes as dt
+
+        from buckaroo.customizations.xorq_stats_v2 import (
+            _distinct_count_approx, distinct_count)
+
+        d = {"int64": dt.int64, "int32": dt.int32, "string": dt.string,
+            "binary": dt.binary, "date": dt.date, "time": dt.time,
+            "timestamp": dt.Timestamp(), "boolean": dt.boolean,
+            "float64": dt.float64, "decimal": dt.Decimal(5, 2),
+            "struct": dt.Struct({"a": "string"}), "array": dt.Array(dt.string),
+            "map": dt.Map(dt.string, dt.string)}[dtype]
+        cf = distinct_count._stat_func.column_filter
+        assert cf(d) is supported, f"{dtype}: column_filter (supported)"
+        assert _distinct_count_approx(d) is approx, f"{dtype}: approx path"
+
 
 # ============================================================
 # Numeric-only stats: mean, std, median
