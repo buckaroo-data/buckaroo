@@ -903,11 +903,15 @@ class TestMaterializeHeuristic:
         assert stats["misses"] > 0 and stats["snapshots"] == stats["misses"]
         assert {"n", "cat"} <= set(summary)
 
-    @pytest.mark.parametrize("shape", ["filter", "aggregate", "agg-shorthand", "distinct"])
+    @pytest.mark.parametrize("shape", ["filter", "aggregate", "agg-shorthand", "distinct", "sample"])
     def test_chain_source_is_materialized(self, shape, tmp_path):
         t = self._base()
         src = {"filter": t.filter(t.n > 1), "aggregate": t.group_by("cat").aggregate(c=t.count()),
-            "agg-shorthand": t.group_by("cat").count(), "distinct": t.select("cat").distinct()}[shape]
+            "agg-shorthand": t.group_by("cat").count(), "distinct": t.select("cat").distinct(),
+            # A sample source MUST materialize: an unseeded sample re-drawn per
+            # per-column query would compute length/min/max/histogram over
+            # different rows (Codex review on #916).
+            "sample": t.sample(0.5)}[shape]
         stats, _ = self._run(src, tmp_path)
         assert stats["materialized"] is True, (
             f"a {shape} source carries an expensive chain — materialize once (#915)")
