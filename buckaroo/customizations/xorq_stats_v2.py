@@ -56,6 +56,33 @@ def _is_numeric_not_bool(dtype) -> bool:
     return dtype.is_numeric() and not dtype.is_boolean()
 
 
+def _distinct_count_approx(dtype) -> bool:
+    """Dtypes xorq-datafusion's approx_distinct (HyperLogLog, bounded memory)
+    supports, verified empirically across the arrow dtypes (#918): integer,
+    string (dictionary columns decode to string), binary, and temporal
+    (date / time / timestamp). approx_distinct raises on float, decimal,
+    boolean and nested types."""
+    return (dtype.is_integer() or dtype.is_string() or dtype.is_binary()
+            or dtype.is_temporal())
+
+
+def _distinct_count_supported(dtype) -> bool:
+    """Columns distinct_count runs on. The approx path (bounded HLL) covers the
+    dtypes in ``_distinct_count_approx``; booleans keep exact COUNT(DISTINCT)
+    (<= 2 distinct, trivially cheap).
+
+    Everything else — float, decimal, and nested struct/array/map — has no
+    approx_distinct AND unbounded cardinality, where exact COUNT(DISTINCT) is
+    the multi-GB hash set #906 fixed for strings: ~2.2GB on a 30M-distinct
+    float, 10GB on a 24M-row unique-per-row ``struct<url, description>``. #908
+    routed only scalar string/integer/timestamp/date to approx and left the
+    rest on exact, so binary/time (approx-capable) paid nothing while
+    decimal/struct (approx-incapable, high-card) inherited the blowup. Skip the
+    unbounded ones: distinct_count resolves to None and dependents
+    (distinct_per, histogram, histogram_bins) still run."""
+    return _distinct_count_approx(dtype) or dtype.is_boolean()
+
+
 # ============================================================
 # Typing — derive type flags from the schema dtype string
 # ============================================================
@@ -140,9 +167,29 @@ def max(col: XorqColumn) -> float:
     return col.max().cast("float64")
 
 
-@stat()
+@stat(column_filter=_distinct_count_supported)
 def distinct_count(col: XorqColumn) -> int:
-    return col.nunique().cast("int64")
+    """Approximate distinct count (HyperLogLog, ~1% error) where supported.
+
+    Exact COUNT(DISTINCT) folded into the shared batch aggregate defeats
+    DataFusion's single-distinct rewrite: 3.8GB peak on a 131M-row string
+    column with 6.2M distinct values vs 238MB for approx_nunique in the
+    same batch shape (#906). No consumer needs exactness — distinct_per
+    is displayed as a ratio, and the histogram branch thresholds
+    (distinct_count > 5 / <= 5) sit where HLL is exact in practice.
+
+    Type handling is split out so it can't drift from the column_filter:
+    ``_distinct_count_approx`` lists the approx-capable dtypes (the only ones
+    that reach the approx branch), ``_distinct_count_supported`` adds boolean
+    (exact, <= 2 distinct) and skips the unbounded exact-only dtypes (float,
+    decimal, nested) entirely — the pipeline pre-populates their distinct_count
+    as None so dependents (histogram, histogram_bins, distinct_per) still run.
+    Picking the approx vs exact branch on the same predicate keeps approx off
+    any dtype it would raise on (one raising expression aborts the whole batch).
+    """
+    if _distinct_count_approx(col.type()):
+        return col.approx_nunique().cast("int64")
+    return col.nunique().cast("int64")  # only booleans reach here (exact, <= 2)
 
 
 @stat(column_filter=_is_numeric_not_bool)
@@ -179,6 +226,9 @@ def nan_per(length: int, null_count: int) -> float:
 
 @stat()
 def distinct_per(length: int, distinct_count: int) -> float:
+    if distinct_count is None:
+        # Float columns skip distinct_count; the ratio is undefined.
+        return None
     if not length:
         return 0.0
     return distinct_count / length
@@ -238,9 +288,25 @@ def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: s
     return out
 
 
-def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str) -> list:
+# Above this many rows the exact top-10 query is replaced by one over a
+# ~CATEGORICAL_HISTOGRAM_SAMPLE_ROWS row sample. The exact query holds a
+# hash entry per distinct value just to return 10 rows — ~1GB transient
+# per high-cardinality string column (#907). Sampling bounds the group-by
+# input (and therefore the hash state) to the sample size.
+CATEGORICAL_HISTOGRAM_EXACT_MAX_ROWS = 100_000
+CATEGORICAL_HISTOGRAM_SAMPLE_ROWS = 100_000
+
+
+def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str,
+        length: int = 0) -> list:
+    source = expr
+    if length > CATEGORICAL_HISTOGRAM_EXACT_MAX_ROWS:
+        # ``seed`` is unsupported on the DataFusion backend, so the sample
+        # (and the resulting cat_pop estimates) varies run to run. With
+        # cache_storage set the first run's snapshot is what gets reused.
+        source = expr.sample(CATEGORICAL_HISTOGRAM_SAMPLE_ROWS / length)
     query = (
-        expr.group_by(col)
+        source.group_by(col)
         .aggregate(__count=lambda t: t.count())
         .order_by(xo.desc("__count"))
         .limit(10)
@@ -273,6 +339,10 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
     (where ``min``/``max`` are filtered out by ``column_filter``) don't cascade-
     exclude this stat — the categorical branch ignores them.
 
+    ``distinct_count`` is ``None`` for float columns (the stat is skipped
+    there — see ``distinct_count``); floats always take the numeric
+    branch, where the <= 5 fallthrough rarely applied anyway.
+
     All queries go through the injected ``execute`` callable so a
     pipeline-supplied backend isn't bypassed.
 
@@ -282,9 +352,9 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
     """
     if length == 0:
         return []
-    if is_numeric and not is_bool and distinct_count > 5:
+    if is_numeric and not is_bool and (distinct_count is None or distinct_count > 5):
         return _numeric_histogram(execute, expr, orig_col_name, min, max)
-    return _categorical_histogram(execute, expr, orig_col_name)
+    return _categorical_histogram(execute, expr, orig_col_name, length)
 
 
 @stat(default=[])
@@ -301,7 +371,11 @@ def histogram_bins(is_numeric: bool, is_bool: bool, distinct_count: int, min: fl
     An empty list causes that rule to fall back to ``inherit``, so non-numeric,
     boolean, low-cardinality, and degenerate columns are safely skipped.
     """
-    if not is_numeric or is_bool or distinct_count <= 5:
+    if not is_numeric or is_bool:
+        return []
+    # distinct_count is None for float columns (stat skipped there) —
+    # treat unknown cardinality as high enough to want bins.
+    if distinct_count is not None and distinct_count <= 5:
         return []
     if min is None or max is None:
         return []

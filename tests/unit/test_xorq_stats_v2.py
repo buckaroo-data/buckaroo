@@ -5,6 +5,7 @@ ibis-framework or remote backend required. Skipped if xorq is not
 installed.
 """
 
+import logging
 import math
 import os
 
@@ -127,6 +128,126 @@ class TestBatchAggregate:
         assert stats["ints"]["distinct_count"] == 7
         assert stats["strs"]["distinct_count"] == 7
 
+    def test_distinct_count_uses_approx(self):
+        """distinct_count must build ApproxCountDistinct, not exact CountDistinct.
+
+        Exact COUNT(DISTINCT) folded into the shared batch aggregate defeats
+        DataFusion's single-distinct rewrite: 3.8GB peak on a 131M-row string
+        column with 6.2M distinct values, vs 238MB for approx_nunique in the
+        same batch shape (#906).
+        """
+        from xorq.vendor.ibis.expr import operations as ops
+
+        from buckaroo.customizations.xorq_stats_v2 import distinct_count
+
+        expr = distinct_count._stat_func.func(col=_make_table().strs)
+        op = expr.op()
+        assert list(op.find(ops.ApproxCountDistinct)), (
+            "distinct_count should aggregate via approx_nunique")
+        # ApproxCountDistinct subclasses CountDistinct, so filter it out to
+        # check no *exact* distinct aggregate remains.
+        exact = [n for n in op.find(ops.CountDistinct)
+                 if not isinstance(n, ops.ApproxCountDistinct)]
+        assert not exact, "exact COUNT(DISTINCT) must not enter the batch aggregate"
+
+    def test_distinct_count_exact_fallback_for_bool(self):
+        """Booleans keep exact nunique — approx_distinct raises on Boolean.
+
+        One failing expression aborts the whole batch aggregate, and exact
+        COUNT(DISTINCT bool) is trivially cheap (<= 3 entries of hash state),
+        so booleans must fall back to the exact aggregate rather than error.
+        """
+        from xorq.vendor.ibis.expr import operations as ops
+
+        from buckaroo.customizations.xorq_stats_v2 import distinct_count
+
+        expr = distinct_count._stat_func.func(col=_make_table().bools)
+        op = expr.op()
+        assert not list(op.find(ops.ApproxCountDistinct))
+        assert list(op.find(ops.CountDistinct))
+
+    def test_distinct_count_skipped_for_floats(self):
+        """Float columns skip distinct_count entirely.
+
+        approx_distinct raises on Float64, and exact COUNT(DISTINCT) costs
+        memory proportional to cardinality (~2.2GB measured on a 30M-distinct
+        column) for a number that is rarely meaningful on floats. The stat is
+        skipped: distinct_count and distinct_per resolve to None, while the
+        numeric histogram and histogram_bins must still be produced.
+        """
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(_make_table())
+        assert errors == []
+        assert stats["floats"]["distinct_count"] is None
+        assert stats["floats"]["distinct_per"] is None
+        assert len(stats["floats"]["histogram"]) > 0
+        assert len(stats["floats"]["histogram_bins"]) == 11
+        # non-float columns are unaffected
+        assert stats["ints"]["distinct_count"] == 7
+        assert stats["strs"]["distinct_per"] == 1.0
+
+    def test_distinct_count_skipped_for_nested_types(self):
+        """Struct / array / map columns skip distinct_count.
+
+        approx_distinct raises on nested types, so they fall to exact
+        COUNT(DISTINCT) — and a high-cardinality nested column is the same
+        multi-GB hash set #906 fixed for strings: ~25GB measured streaming the
+        stats over a 24M-row ``struct<url, description>`` column, all of it the
+        exact distinct on that one column (#908 only routed scalar string /
+        integer / timestamp / date to approx). They must be filtered out like
+        floats so distinct_count resolves to None and dependents still run.
+        """
+        from xorq.vendor.ibis.expr import datatypes as dt
+
+        from buckaroo.customizations.xorq_stats_v2 import distinct_count
+
+        cf = distinct_count._stat_func.column_filter
+        assert cf(dt.Struct({"url": "string", "description": "string"})) is False
+        assert cf(dt.Array(dt.string)) is False
+        assert cf(dt.Map(dt.string, dt.string)) is False
+        # scalar columns still computed; the existing float skip is preserved
+        assert cf(dt.string) is True
+        assert cf(dt.int64) is True
+        assert cf(dt.float64) is False
+
+    @pytest.mark.parametrize("dtype, supported, approx", [
+        # approx_nunique works (HLL, bounded) — empirically verified across the
+        # arrow dtypes on xorq-datafusion 0.2.7 (#918):
+        ("int64", True, True),
+        ("int32", True, True),
+        ("string", True, True),
+        ("binary", True, True),         # approx works; was wrongly on exact
+        ("date", True, True),
+        ("time", True, True),           # approx works; was wrongly on exact
+        ("timestamp", True, True),
+        # approx raises but cardinality is bounded -> keep exact:
+        ("boolean", True, False),       # <= 2 distinct
+        # approx raises AND cardinality unbounded -> skip (exact is a multi-GB
+        # hash set on high cardinality):
+        ("float64", False, False),
+        ("decimal", False, False),      # was wrongly on exact
+        ("struct", False, False),
+        ("array", False, False),
+        ("map", False, False),
+    ])
+    def test_distinct_count_type_classification(self, dtype, supported, approx):
+        """Every arrow dtype is classified approx / exact / skip — never an
+        unbounded exact COUNT(DISTINCT) on a type approx can't cover."""
+        from xorq.vendor.ibis.expr import datatypes as dt
+
+        from buckaroo.customizations.xorq_stats_v2 import (
+            _distinct_count_approx, distinct_count)
+
+        d = {"int64": dt.int64, "int32": dt.int32, "string": dt.string,
+            "binary": dt.binary, "date": dt.date, "time": dt.time,
+            "timestamp": dt.Timestamp(), "boolean": dt.boolean,
+            "float64": dt.float64, "decimal": dt.Decimal(5, 2),
+            "struct": dt.Struct({"a": "string"}), "array": dt.Array(dt.string),
+            "map": dt.Map(dt.string, dt.string)}[dtype]
+        cf = distinct_count._stat_func.column_filter
+        assert cf(d) is supported, f"{dtype}: column_filter (supported)"
+        assert _distinct_count_approx(d) is approx, f"{dtype}: approx path"
+
 
 # ============================================================
 # Numeric-only stats: mean, std, median
@@ -214,6 +335,56 @@ class TestHistogram:
         # categories fit in the top-10 cap, so they sum to ~100
         total_pop = sum(b["cat_pop"] for b in h)
         assert abs(total_pop - 100.0) < 0.6  # per-bucket 1dp rounding drift
+
+    def test_categorical_histogram_bounded_above_100k_rows(self):
+        """Above 100k rows the categorical histogram must sample, not group the full table.
+
+        The exact top-10 query (group_by(col).count().order_by(desc).limit(10))
+        materializes a hash entry per distinct value: ~1GB transient per
+        high-cardinality string column on a 26M-row table (#907). Above the
+        100k-row threshold the group-by input must be bounded by a Sample
+        node; at or below the threshold the exact query is preserved.
+        """
+        from xorq.vendor.ibis.expr import operations as ops
+
+        from buckaroo.customizations.xorq_stats_v2 import histogram
+
+        fn = histogram._stat_func.func
+        table = _make_table_categorical()
+        captured = []
+
+        def execute(query):
+            captured.append(query)
+            return query.execute()
+
+        fn(expr=table, execute=execute, orig_col_name="cat", is_numeric=False,
+           is_bool=False, length=200_000, distinct_count=8, min=None, max=None)
+        assert len(captured) == 1
+        assert list(captured[0].op().find(ops.Sample)), (
+            "categorical histogram over >100k rows must bound its input with a sample")
+
+        small = fn(expr=table, execute=execute, orig_col_name="cat", is_numeric=False,
+            is_bool=False, length=11, distinct_count=8, min=None, max=None)
+        assert not list(captured[1].op().find(ops.Sample)), (
+            "at or below 100k rows the exact top-10 query must be preserved")
+        assert [b["name"] for b in small][0] == "a"
+
+    def test_categorical_histogram_sampled_finds_dominant_value(self):
+        """Sampled top-10 still surfaces the dominant category above the threshold.
+
+        Half the rows share one value, the rest are unique — any ~100k-row
+        sample puts the shared value on top with cat_pop near 100 (the other
+        top-10 entries are singletons).
+        """
+        n = 150_000
+        vals = ["common"] * (n // 2) + [f"u{i}" for i in range(n - n // 2)]
+        table = xo.memtable(pd.DataFrame({"cat": vals}))
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(table)
+        assert errors == []
+        h = stats["cat"]["histogram"]
+        assert h[0]["name"] == "common"
+        assert h[0]["cat_pop"] > 90
 
     def test_histogram_constant_column_empty(self):
         """Constant numeric column (min == max) → empty histogram, not crash."""
@@ -666,3 +837,143 @@ class TestCacheStorageExecute:
 
         pd.testing.assert_frame_equal(
             result1.reset_index(drop=True), result2.reset_index(drop=True))
+
+
+class TestSnapshotCacheRun:
+    """Per-run snapshot-cache behaviour (#910).
+
+    A cold run materializes the source filter chain once and writes one
+    snapshot per stat query; a fully-warm run reads those snapshots without
+    re-scanning the source; every run with a cache configured logs a single
+    summary line carrying the hit/miss/snapshot/byte/error counts."""
+
+    _LOGGER = "buckaroo.pluggable_analysis_framework.xorq_stat_pipeline"
+
+    @staticmethod
+    def _cache(tmp_path):
+        return xo.ParquetSnapshotCache.from_kwargs(
+            source=xo.connect(), base_path=str(tmp_path))
+
+    @staticmethod
+    def _filter_chain_table():
+        # Lazy filter chain (re-scanned per query unless materialized) with a
+        # numeric column (numeric histogram) and a string column (categorical
+        # histogram), so both per-column query shapes run through the cache.
+        con = xo.connect()
+        df = pd.DataFrame(
+            {"n": list(range(40)), "cat": [c for c in "abcdefgh" for _ in range(5)]})
+        t = con.create_table("snap_src", df)
+        return t.filter(t.n > 1)
+
+    def test_cold_run_materializes_and_writes_snapshots(self, tmp_path):
+        pipeline = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False, cache_storage=self._cache(tmp_path))
+        pipeline.process_table(self._filter_chain_table())
+        s = pipeline._cache_stats
+        assert s["misses"] > 0 and s["hits"] == 0, f"cold run should miss the cache: {s}"
+        assert s["snapshots"] == s["misses"], "each miss should write exactly one snapshot"
+        assert s["bytes"] > 0 and s["write_errors"] == 0
+        assert s["materialized"] is True, (
+            "a cold run over a filter chain must materialize the source once (#910)")
+        files = [f for _, _, fs in os.walk(tmp_path) for f in fs if f.endswith(".parquet")]
+        assert files, "expected snapshot parquet files under the cache dir"
+
+    def test_warm_run_hits_without_materializing(self, tmp_path):
+        cache = self._cache(tmp_path)
+        XorqStatPipeline(XORQ_STATS_V2, unit_test=False,
+            cache_storage=cache).process_table(self._filter_chain_table())
+        warm = XorqStatPipeline(XORQ_STATS_V2, unit_test=False, cache_storage=cache)
+        warm.process_table(self._filter_chain_table())
+        s = warm._cache_stats
+        assert s["hits"] > 0 and s["misses"] == 0, f"warm run should hit the cache: {s}"
+        assert s["snapshots"] == 0, "a fully-warm run should write nothing"
+        assert s["materialized"] is False, (
+            "a fully-warm run serves every query from a snapshot — no source scan (#910)")
+
+    def test_run_logs_one_cache_summary_line(self, tmp_path, caplog):
+        pipeline = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False, cache_storage=self._cache(tmp_path))
+        with caplog.at_level(logging.INFO, logger=self._LOGGER):
+            pipeline.process_table(self._filter_chain_table())
+        lines = [r.getMessage() for r in caplog.records
+                 if r.name == self._LOGGER and r.getMessage().startswith("xorq stat cache")]
+        assert len(lines) == 1, f"expected exactly one cache summary line, got {lines}"
+        assert "miss(es)" in lines[0] and "snapshot(s) written" in lines[0]
+
+    def test_cached_stats_match_uncached(self, tmp_path):
+        """The materialized cold path and the snapshot-read warm path produce
+        the same stats as a plain uncached run — materialization is a perf
+        optimization, not a semantic change."""
+        cache = self._cache(tmp_path)
+        plain, _ = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False).process_table(self._filter_chain_table())
+        cold, _ = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False,
+            cache_storage=cache).process_table(self._filter_chain_table())
+        warm, _ = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False,
+            cache_storage=cache).process_table(self._filter_chain_table())
+        # The warm run reads the exact parquet the cold run wrote, so its whole
+        # SD (histogram row order included) must reproduce the cold run's.
+        assert cold == warm, "warm run must reproduce the cold run's snapshot exactly"
+        # Histogram tie-order can differ between materialized and unmaterialized
+        # execution, so compare the tie-independent stats against the plain run.
+        for col in plain:
+            for key in ("length", "min", "max", "mean", "null_count", "distinct_count"):
+                assert cold[col].get(key) == plain[col].get(key), (col, key)
+
+
+class TestMaterializeHeuristic:
+    """#915: materialize the source only when its op tree carries an expensive
+    chain (filter / aggregate / join / distinct / sort / drop_null) worth
+    amortising across the per-column queries. A scan / projection / union /
+    limit streams cheaply via predicate + projection pushdown, so materialising
+    it is pure overhead — and multi-GB of resident overhead on a wide or tall
+    source (#915, e.g. a 131M-row union or a 24M×20 read landing 25GB in RAM).
+
+    The decision is op-tree based, so it is independent of how the expression
+    was spelled — hence the parametrised formation styles below."""
+
+    @staticmethod
+    def _cache(tmp_path):
+        return xo.ParquetSnapshotCache.from_kwargs(
+            source=xo.connect(), base_path=str(tmp_path))
+
+    @staticmethod
+    def _base():
+        con = xo.connect()
+        df = pd.DataFrame(
+            {"n": list(range(40)), "cat": [c for c in "abcdefgh" for _ in range(5)]})
+        return con.create_table("heur_src", df)
+
+    def _run(self, src, tmp_path):
+        p = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False, cache_storage=self._cache(tmp_path))
+        summary, _ = p.process_table(src)
+        return p._cache_stats, summary
+
+    @pytest.mark.parametrize("shape", ["union", "projection", "column-list", "limit"])
+    def test_cheap_source_streams_not_materialized(self, shape, tmp_path):
+        t = self._base()
+        src = {"union": t.select("n", "cat").union(t.select("n", "cat")), "projection": t.select("n", "cat"),
+            "column-list": t[["n", "cat"]], "limit": t.limit(30)}[shape]
+        stats, summary = self._run(src, tmp_path)
+        assert stats["materialized"] is False, (
+            f"a {shape} source has no chain to amortise — must stream, not "
+            f"materialize into RAM (#915)")
+        # still a real cold run: stats computed and snapshots written
+        assert stats["misses"] > 0 and stats["snapshots"] == stats["misses"]
+        assert {"n", "cat"} <= set(summary)
+
+    @pytest.mark.parametrize("shape", ["filter", "aggregate", "agg-shorthand", "distinct", "sample"])
+    def test_chain_source_is_materialized(self, shape, tmp_path):
+        t = self._base()
+        src = {"filter": t.filter(t.n > 1), "aggregate": t.group_by("cat").aggregate(c=t.count()),
+            "agg-shorthand": t.group_by("cat").count(), "distinct": t.select("cat").distinct(),
+            # A sample source MUST materialize: an unseeded sample re-drawn per
+            # per-column query would compute length/min/max/histogram over
+            # different rows (Codex review on #916).
+            "sample": t.sample(0.5)}[shape]
+        stats, _ = self._run(src, tmp_path)
+        assert stats["materialized"] is True, (
+            f"a {shape} source carries an expensive chain — materialize once (#915)")

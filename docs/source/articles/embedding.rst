@@ -512,6 +512,11 @@ The Buckaroo server is a Tornado application that loads files
 server-side and serves the table over WebSocket. It's the Infinite
 widget without a notebook.
 
+Install it with ``pip install 'buckaroo[server]'`` — that pulls in
+Tornado and pandas (the pandas backend) without polars or xorq. Add
+``buckaroo[polars]`` for the lazy/polars backend or ``buckaroo[xorq]``
+for the xorq backend; each is additive on top of ``[server]``.
+
 Start it:
 
 .. code-block:: bash

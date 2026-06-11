@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+from unittest import mock
 
 import pandas as pd
 import pytest
@@ -98,6 +99,30 @@ class TestLoad(tornado.testing.AsyncHTTPTestCase):
                     body=json.dumps({"session": "test-3", "path": f.name}),
                     headers={"Content-Type": "application/json"})
                 self.assertEqual(resp.code, 400)
+            finally:
+                os.unlink(f.name)
+
+    def test_load_lazy_without_polars_returns_missing_dependency(self):
+        # mode="lazy" needs polars. When polars is absent the loader raises
+        # ImportError; the handler must surface a clean 400 pointing at the
+        # install extra, not a generic 500. Simulate polars-absent by making
+        # load_file_lazy raise ImportError (mirrors `pip install buckaroo`
+        # without the polars extra).
+        def _no_polars(path):
+            raise ImportError("No module named 'polars'")
+
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                with mock.patch("buckaroo.server.handlers.load_file_lazy", _no_polars):
+                    resp = self.fetch("/load", method="POST",
+                        body=json.dumps({"session": "test-lazy-nopolars",
+                            "path": f.name, "mode": "lazy"}),
+                        headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 400)
+                body = json.loads(resp.body)
+                self.assertEqual(body["error_code"], "missing_dependency")
+                self.assertIn("buckaroo[polars]", body["message"])
             finally:
                 os.unlink(f.name)
 
