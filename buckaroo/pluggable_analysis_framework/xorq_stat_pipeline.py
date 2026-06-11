@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -382,8 +383,11 @@ class XorqStatPipeline:
 
         Only runs for in-process xorq-datafusion backends. Remote
         backends would pay the cost of pulling all data over the wire.
-        Returns (table_to_use, cleanup) where cleanup is (backend, name)
-        for later drop, or None if no materialization happened.
+        Returns the table to use. When materialization fires, the
+        registered table name (and any streamed temp parquet) is recorded
+        on the instance and released by ``_cleanup_cache_materialization``
+        — one lifecycle for both resources, so a direct caller can't drop
+        the table yet leak the file.
 
         Skipped (no-op) when a ``cache_storage`` is set: the cache path keys
         each stat query against the *original* ``table`` so the content-
@@ -394,37 +398,38 @@ class XorqStatPipeline:
         table name into the query token and break the cache key on every load.
         """
         if self.cache_storage is not None:
-            return table, None
+            return table
         try:
             underlying = table._find_backend()
         except Exception:
-            return table, None
+            return table
         if "xorq_datafusion" not in type(underlying).__module__:
-            return table, None
+            return table
         # Skip when the table is already a base table on the backend —
         # materializing it again is pure overhead (full table read +
         # re-register) with no filter chain to amortize.
         try:
             from xorq.vendor.ibis.expr import operations as _ibis_ops
             if isinstance(table.op(), (_ibis_ops.DatabaseTable, _ibis_ops.InMemoryTable)):
-                return table, None
+                return table
         except Exception:
             pass
         # If no per-column work follows the batch aggregate (i.e. nothing
         # would re-execute the filter chain), materialization is just
         # wasted work — skip it.
         if not any(not _is_batch_func(sf) for sf in self.ordered_stat_funcs):
-            return table, None
+            return table
         # Only worth materialising when the source carries an expensive chain
         # (filter / aggregate / join / …) a per-column re-scan would recompute;
         # a scan / projection / union streams cheaply (#915).
         if not _source_worth_materializing(table):
-            return table, None
+            return table
         name = f"__buckaroo_histo_mat_{uuid.uuid4().hex[:12]}"
         new_table = self._create_base_table(underlying, name, table)
         if new_table is None:
-            return table, None
-        return new_table, (underlying, name)
+            return table
+        self._cache_mat_cleanup = (underlying, name)
+        return new_table
 
     def _create_base_table(self, underlying, name, table):
         """Land ``table`` as a base table on ``underlying``, or None on failure.
@@ -435,10 +440,15 @@ class XorqStatPipeline:
         Rust heap at once (~1 GB peak for a 167M-row scan vs 12+ GB for
         ``CREATE TABLE AS SELECT``). The temp file is tracked in
         ``self._cache_mat_tmp_parquet`` and deleted by
-        ``_cleanup_cache_materialization``.
+        ``_cleanup_cache_materialization``. It lands in the system temp dir
+        (honours ``TMPDIR``) and duplicates the result on disk for the run's
+        duration — on hosts where /tmp is RAM-backed tmpfs, point ``TMPDIR``
+        at real disk to keep the out-of-core win.
 
-        Falls back to the original in-engine ``create_table(expr)`` path when
-        xorq is unavailable or the parquet write fails. That path compiles the
+        Falls back (with a logged warning) to the in-engine
+        ``create_table(expr)`` path when this xorq has no
+        ``xorq.expr.api.to_parquet`` or the parquet write fails — xorq
+        itself is guaranteed by ``__init__``. That path compiles the
         expression to SQL, so an op with no translation rule — notably
         ``CachedNode`` from ``expr.cache()`` (the shape every catalog-diff
         comparison carries) — makes it raise. Two further fallbacks recover that:
@@ -448,8 +458,6 @@ class XorqStatPipeline:
           2. Last resort, ``execute()`` to pandas and register the result.
              Correct for any expression but pays a full transport.
         """
-        import tempfile  # noqa: PLC0415
-
         tmp_path = None
         try:
             from xorq.expr.api import to_parquet as _xorq_to_parquet  # noqa: PLC0415
@@ -460,11 +468,14 @@ class XorqStatPipeline:
             result = underlying.read_parquet(str(tmp_path), table_name=name)
             self._cache_mat_tmp_parquet = tmp_path
             return result
-        except Exception:
-            if tmp_path is not None and tmp_path.exists():
+        except Exception as e:
+            log.warning(
+                "xorq stat materialization: streaming parquet write failed, "
+                "falling back to in-engine create_table: %s", e)
+            if tmp_path is not None:
                 try:
                     tmp_path.unlink(missing_ok=True)
-                except Exception:
+                except OSError:
                     pass
 
         try:
@@ -552,16 +563,10 @@ class XorqStatPipeline:
         self._reset_cache_materialization()
         if self.cache_storage is not None:
             self._cache_source = table
-        materialized, cleanup = self._maybe_materialize(table)
+        materialized = self._maybe_materialize(table)
         try:
             return self._process_table_impl(materialized, skip_columns=skip_columns)
         finally:
-            if cleanup is not None:
-                backend, name = cleanup
-                try:
-                    backend.drop_table(name)
-                except Exception:
-                    pass
             self._cleanup_cache_materialization()
             self._log_cache_stats()
 
