@@ -206,7 +206,13 @@ def histogram_series(ser: RawSeries) -> HistogramSeriesResult:
     if len(meat) == 0:
         return {'histogram_args': {}, 'histogram_bins': []}
 
-    meat_histogram = np.histogram(meat, 10)
+    try:
+        meat_histogram = np.histogram(meat, 10)
+    except ValueError:
+        # Can happen when float64 precision is insufficient to create
+        # 10 distinct bin edges (e.g. large integers near 2^53 where
+        # np.spacing > bin width).
+        return {'histogram_args': {}, 'histogram_bins': []}
     populations, _ = meat_histogram
     return {
         'histogram_bins': meat_histogram[1].tolist(),
