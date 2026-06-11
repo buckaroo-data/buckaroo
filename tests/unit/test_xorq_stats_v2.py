@@ -859,3 +859,59 @@ class TestSnapshotCacheRun:
         for col in plain:
             for key in ("length", "min", "max", "mean", "null_count", "distinct_count"):
                 assert cold[col].get(key) == plain[col].get(key), (col, key)
+
+
+class TestMaterializeHeuristic:
+    """#915: materialize the source only when its op tree carries an expensive
+    chain (filter / aggregate / join / distinct / sort / drop_null) worth
+    amortising across the per-column queries. A scan / projection / union /
+    limit streams cheaply via predicate + projection pushdown, so materialising
+    it is pure overhead — and multi-GB of resident overhead on a wide or tall
+    source (#915, e.g. a 131M-row union or a 24M×20 read landing 25GB in RAM).
+
+    The decision is op-tree based, so it is independent of how the expression
+    was spelled — hence the parametrised formation styles below."""
+
+    @staticmethod
+    def _cache(tmp_path):
+        return xo.ParquetSnapshotCache.from_kwargs(
+            source=xo.connect(), base_path=str(tmp_path))
+
+    @staticmethod
+    def _base():
+        con = xo.connect()
+        df = pd.DataFrame(
+            {"n": list(range(40)), "cat": [c for c in "abcdefgh" for _ in range(5)]})
+        return con.create_table("heur_src", df)
+
+    def _run(self, src, tmp_path):
+        p = XorqStatPipeline(
+            XORQ_STATS_V2, unit_test=False, cache_storage=self._cache(tmp_path))
+        summary, _ = p.process_table(src)
+        return p._cache_stats, summary
+
+    @pytest.mark.parametrize("shape", ["union", "projection", "column-list", "limit"])
+    def test_cheap_source_streams_not_materialized(self, shape, tmp_path):
+        t = self._base()
+        src = {"union": t.select("n", "cat").union(t.select("n", "cat")), "projection": t.select("n", "cat"),
+            "column-list": t[["n", "cat"]], "limit": t.limit(30)}[shape]
+        stats, summary = self._run(src, tmp_path)
+        assert stats["materialized"] is False, (
+            f"a {shape} source has no chain to amortise — must stream, not "
+            f"materialize into RAM (#915)")
+        # still a real cold run: stats computed and snapshots written
+        assert stats["misses"] > 0 and stats["snapshots"] == stats["misses"]
+        assert {"n", "cat"} <= set(summary)
+
+    @pytest.mark.parametrize("shape", ["filter", "aggregate", "agg-shorthand", "distinct", "sample"])
+    def test_chain_source_is_materialized(self, shape, tmp_path):
+        t = self._base()
+        src = {"filter": t.filter(t.n > 1), "aggregate": t.group_by("cat").aggregate(c=t.count()),
+            "agg-shorthand": t.group_by("cat").count(), "distinct": t.select("cat").distinct(),
+            # A sample source MUST materialize: an unseeded sample re-drawn per
+            # per-column query would compute length/min/max/histogram over
+            # different rows (Codex review on #916).
+            "sample": t.sample(0.5)}[shape]
+        stats, _ = self._run(src, tmp_path)
+        assert stats["materialized"] is True, (
+            f"a {shape} source carries an expensive chain — materialize once (#915)")
