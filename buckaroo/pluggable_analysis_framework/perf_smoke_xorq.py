@@ -79,11 +79,12 @@ def run_xorq_perf_smoke(stat_funcs: list, rows: int = DEFAULT_ROWS,
         scales = [small, rows] if small < rows else [rows]
         for n in scales:
             for frame_name, maker in frame_makers.items():
-                pdf = maker(n)
                 try:
+                    pdf = maker(n)
                     table = xo.memtable(pdf)
+                    table.count().execute()
                 except Exception:
-                    continue  # frame shape not representable in arrow
+                    continue  # frame shape not representable in arrow (e.g. Period, #799)
                 recorder.frame = frame_name
                 baseline = _xorq_baseline_seconds(table)
                 recorder.configure(

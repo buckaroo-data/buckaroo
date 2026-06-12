@@ -7,6 +7,8 @@ allocations — which is what user- and LLM/MCP-authored stats tend to get
 wrong.
 """
 
+import datetime
+
 import numpy as np
 import pandas as pd
 
@@ -71,19 +73,31 @@ def test_memory_hog_flagged():
 
 
 def test_smoke_frames_cover_known_killers():
-    # Shapes with bug history: unhashable cells (#843), int64 past 2^53
-    # (#800/#632), Decimal (#801), tz-aware datetimes (#277), all-null,
-    # categorical.
+    # Shapes with bug history in buckaroo — unhashable cells (#843),
+    # list<string> (#842), int64 past 2^53 (#800/#632), Decimal (#801),
+    # tz-aware datetimes (#277), Period (#799), uint8 (#791), time/binary
+    # (#918), all-null, categorical — plus shapes tallyman learned to stop
+    # emitting (timedelta/duration, timestamp-for-date) and ddd_library
+    # ancestry (inf, python ints past int64).
     expected = {'base', 'unhashable', 'big_int64', 'decimal', 'tz_datetime',
-        'all_null', 'categorical'}
+        'all_null', 'categorical', 'timedelta', 'period_interval',
+        'date_time_binary', 'uint', 'extreme_floats', 'python_big_int'}
     assert expected <= set(SMOKE_FRAME_MAKERS)
     frames = {name: maker(100) for name, maker in SMOKE_FRAME_MAKERS.items()}
     for name, df in frames.items():
         assert len(df) == 100, name
     assert isinstance(frames['unhashable'].iloc[0, 0], list)
+    assert isinstance(frames['unhashable']['list_str_cells'].iloc[0][0], str)
     assert (frames['big_int64'] > 2**53).any().any()
     assert frames['all_null'].isna().all().all()
     assert isinstance(frames['categorical'].dtypes.iloc[0], pd.CategoricalDtype)
+    assert frames['timedelta']['timedelta_col'].dtype.kind == 'm'
+    assert isinstance(frames['period_interval']['period_col'].dtype, pd.PeriodDtype)
+    assert isinstance(frames['date_time_binary']['date_col'].iloc[0], datetime.date)
+    assert isinstance(frames['date_time_binary']['binary_col'].iloc[0], bytes)
+    assert int(frames['uint']['uint64_beyond_int64'].iloc[0]) > 2**63 - 1
+    assert np.isinf(frames['extreme_floats']['inf_floats']).any()
+    assert frames['python_big_int']['huge_int_obj'].iloc[0] > np.iinfo(np.int64).max
 
 
 def test_findings_name_the_frame():
@@ -128,4 +142,9 @@ def test_polars_native_memory_hog_flagged():
 def test_polars_stats_over_polars_frames():
     result = run_perf_smoke(PL_ANALYSIS_V2, rows=2_000, frames=PL_SMOKE_FRAME_MAKERS)
     assert result.passed is True, [f.message for f in result.findings]
-    assert {m.frame for m in result.measurements} == set(PL_SMOKE_FRAME_MAKERS)
+    measured_frames = {m.frame for m in result.measurements}
+    # Frames whose pandas->polars conversion raises (Period/Interval) skip by
+    # design; everything else must be measured.
+    assert measured_frames <= set(PL_SMOKE_FRAME_MAKERS)
+    assert {'base', 'unhashable', 'big_int64', 'decimal', 'tz_datetime',
+        'all_null', 'categorical', 'timedelta', 'uint'} <= measured_frames

@@ -19,10 +19,17 @@ frames and flags per-stat wall-time and peak-memory blowups::
 Pass the same stat list you would hand to a widget or pipeline — stats that
 ``require`` keys from other stats need their providers in the list.
 
-The frame suite (``SMOKE_FRAME_MAKERS``) covers shapes with bug history:
-unhashable object cells (#843), int64 beyond 2^53 (#800, #632), Decimal
-columns (#801), tz-aware datetimes (#277), all-null columns, and categorical
-dtype. Findings name the frame that triggered them.
+The frame suite (``SMOKE_FRAME_MAKERS``) covers shapes with bug history in
+buckaroo and shapes tallyman learned to stop emitting because the viewer
+choked: unhashable object cells (#843), list<string> (#842), int64 beyond
+2^53 (#800, #632), Decimal (#801), tz-aware datetimes (#277), all-null,
+categorical, timedelta/duration (#622 and tallyman's cast-to-int64
+guidance), Period/Interval (#799), date-only/time/binary (#918, tallyman's
+date-not-timestamp guidance), uint8/uint64 (#791), inf/-inf extremes and
+python ints past int64 (ddd_library ancestry). Findings name the frame that
+triggered them. A frame whose maker or engine conversion raises is skipped —
+shapes an engine rejects outright are unit-test territory, not perf
+territory.
 
 ``run_perf_smoke()`` additionally returns every per-call measurement, and
 ``measurements_markdown()`` renders them as a per-stat worst-case table —
@@ -52,6 +59,7 @@ Design notes:
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import sys
 import threading
 import time
@@ -93,9 +101,11 @@ def make_smoke_df(rows: int = DEFAULT_ROWS, seed: int = 42) -> pd.DataFrame:
 
 def _make_unhashable_df(rows: int = DEFAULT_ROWS, seed: int = 42) -> pd.DataFrame:
     # 843: cells holding lists/dicts break hash-based ops (nunique raises) and
-    # make others crawl (value_counts succeeds but takes seconds at 10k rows)
+    # make others crawl (value_counts succeeds but takes seconds at 10k rows).
+    # 842: list<string> columns were 80-100x slower through ServerDataflow.
     return pd.DataFrame({'list_cells': [[i, i + 1] for i in range(rows)],
-        'dict_cells': [{'k': i} for i in range(rows)]})
+        'dict_cells': [{'k': i} for i in range(rows)],
+        'list_str_cells': [[f's{i}', f's{i + 1}'] for i in range(rows)]})
 
 
 def _make_big_int64_df(rows: int = DEFAULT_ROWS, seed: int = 42) -> pd.DataFrame:
@@ -134,9 +144,73 @@ def _make_categorical_df(rows: int = DEFAULT_ROWS, seed: int = 42) -> pd.DataFra
                                                  ordered=True)})
 
 
+def _make_timedelta_df(rows: int = DEFAULT_ROWS, seed: int = 42) -> pd.DataFrame:
+    # Durations were so problematic downstream (mean() raises, parquet write
+    # fails, polars Duration #622) that tallyman's MCP guidance tells LLMs to
+    # cast them to int64 before buckaroo ever sees them. The viewer still
+    # meets them from every other source.
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame({
+        'timedelta_col': pd.to_timedelta(rng.integers(0, 10**9, rows), unit='us'),
+        'mixed_magnitude_td': pd.to_timedelta(
+            rng.choice([1, 10**3, 10**6, 86_400 * 10**6], rows), unit='us')})
+
+
+def _make_period_interval_df(rows: int = DEFAULT_ROWS, seed: int = 42) -> pd.DataFrame:
+    # 799: xo.memtable rejects Period; ddd_library weird_types ancestry.
+    # polars/xorq conversion rejects this frame — it skips there by design
+    # and exercises the pandas pipeline only.
+    return pd.DataFrame({
+        'period_col': pd.period_range('2020-01', periods=rows, freq='M'),
+        'interval_col': pd.arrays.IntervalArray.from_breaks(np.arange(rows + 1))})
+
+
+def _make_date_time_binary_df(rows: int = DEFAULT_ROWS, seed: int = 42) -> pd.DataFrame:
+    # date-only columns: tallyman steers schemas to 'date' (timestamp shows
+    # off-by-one across timezones). time + binary: 918 missed the approx
+    # distinct path for both.
+    base_date = datetime.date(2020, 1, 1)
+    return pd.DataFrame({
+        'date_col': [base_date + datetime.timedelta(days=int(i % 3650)) for i in range(rows)],
+        'time_col': [datetime.time((i // 3600) % 24, (i // 60) % 60, i % 60)
+                     for i in range(rows)],
+        'binary_col': [b'\x00\x01' + str(i).encode() for i in range(rows)]})
+
+
+def _make_uint_df(rows: int = DEFAULT_ROWS, seed: int = 42) -> pd.DataFrame:
+    # 791: uint8 dictionary indices broke /load; uint64 beyond int64 range
+    # breaks anything that round-trips through int64.
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame({
+        'uint8_col': rng.integers(0, 255, rows, dtype=np.uint8),
+        'uint64_beyond_int64': np.uint64(2**63) + rng.integers(0, 1_000, rows).astype(np.uint64)})
+
+
+def _make_extreme_floats_df(rows: int = DEFAULT_ROWS, seed: int = 42) -> pd.DataFrame:
+    # df_with_infinity ancestry: inf/-inf/nan mixed, plus magnitudes at both
+    # float64 extremes (overflow bait for sums/squares).
+    rng = np.random.default_rng(seed)
+    vals = rng.random(rows)
+    vals[::7] = np.inf
+    vals[1::11] = -np.inf
+    vals[2::13] = np.nan
+    return pd.DataFrame({'inf_floats': vals,
+        'tiny_huge': np.where(rng.random(rows) < 0.5, 1e-308, 1e308)})
+
+
+def _make_python_big_int_df(rows: int = DEFAULT_ROWS, seed: int = 42) -> pd.DataFrame:
+    # df_with_really_big_number ancestry: python ints past int64 stay object
+    # dtype and overflow any int64/float cast.
+    return pd.DataFrame({
+        'huge_int_obj': [9_999_999_999_999_999_999 + i for i in range(rows)]})
+
+
 SMOKE_FRAME_MAKERS: Dict[str, Callable[..., pd.DataFrame]] = {'base': make_smoke_df, 'unhashable': _make_unhashable_df,
     'big_int64': _make_big_int64_df, 'decimal': _make_decimal_df, 'tz_datetime': _make_tz_datetime_df,
-    'all_null': _make_all_null_df, 'categorical': _make_categorical_df}
+    'all_null': _make_all_null_df, 'categorical': _make_categorical_df,
+    'timedelta': _make_timedelta_df, 'period_interval': _make_period_interval_df,
+    'date_time_binary': _make_date_time_binary_df, 'uint': _make_uint_df,
+    'extreme_floats': _make_extreme_floats_df, 'python_big_int': _make_python_big_int_df}
 
 
 @dataclass
@@ -417,7 +491,10 @@ def run_perf_smoke(stat_funcs: list, rows: int = DEFAULT_ROWS,
         scales = [small, rows] if small < rows else [rows]
         for n in scales:
             for frame_name, maker in frame_makers.items():
-                df = maker(n)
+                try:
+                    df = maker(n)
+                except Exception:
+                    continue  # engine can't represent this shape (e.g. Period in polars)
                 recorder.frame = frame_name
                 baseline = _baseline_seconds(df)
                 recorder.configure(
