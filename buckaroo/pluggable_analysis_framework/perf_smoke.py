@@ -39,13 +39,21 @@ Design notes:
   never run again — a quadratic stat can't make the smoke test itself run
   away.
 - Errors raised by stats are ignored here; that's ``unit_test()``'s job.
-- Peak memory is measured with ``tracemalloc``, which sees numpy/pandas
-  allocations. Polars/Arrow-native allocations are invisible to it; this
-  harness targets the pandas pipeline.
+- Peak memory is measured two ways per call: ``tracemalloc`` (exact, but only
+  sees python-heap allocations like numpy/pandas) and a native peak-RSS
+  tracker (``_NativePeak``) that catches what tracemalloc can't — polars,
+  Arrow and DataFusion allocate in native memory. A memory finding fires when
+  either signal exceeds the limit.
+- The harness is engine-agnostic where it can be: ``run_perf_smoke`` accepts
+  polars frames (``perf_smoke_pl.PL_SMOKE_FRAME_MAKERS``) with a polars stat
+  list, since polars stats run through the same ``StatPipeline``. The xorq
+  pipeline executes differently — see ``perf_smoke_xorq``.
 """
 from __future__ import annotations
 
 import dataclasses
+import sys
+import threading
 import time
 import tracemalloc
 from dataclasses import dataclass
@@ -54,6 +62,16 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+try:
+    import psutil
+except ImportError:  # pragma: no cover - optional, used only as a fallback tracker
+    psutil = None
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - windows
+    resource = None
 
 from .stat_pipeline import StatPipeline, _normalize_inputs
 from .stat_func import StatFunc
@@ -136,13 +154,16 @@ class SmokeFinding:
 @dataclass
 class SmokeMeasurement:
     """One instrumented stat call: which stat, on which frame/column/scale,
-    and what it cost. Collected for every call, not just limit exceedances."""
+    and what it cost. Collected for every call, not just limit exceedances.
+    ``peak_bytes`` is tracemalloc's python-heap peak; ``native_peak_bytes``
+    is the process peak-RSS delta (catches polars/Arrow allocations)."""
     stat_name: str
     frame: str
     column: str
     rows: int
     seconds: float
     peak_bytes: float
+    native_peak_bytes: float = 0.0
 
 
 @dataclass
@@ -157,15 +178,124 @@ class _SmokeSkip(Exception):
     records an Err instead of running the pathological code again."""
 
 
-def _baseline_seconds(df: pd.DataFrame) -> float:
-    """Time canonical per-column pandas work on a smoke frame. A reasonable
-    stat does far less than this; the time limit is a multiple of it. Ops that
-    raise on a shape (value_counts on unhashable cells) are skipped — the
-    absolute floor keeps the limit sane when most ops skip."""
+def _read_status_bytes(field: str) -> float:
+    """Read a kB-valued field (VmRSS, VmHWM) from /proc/self/status."""
+    with open('/proc/self/status') as fh:
+        for line in fh:
+            if line.startswith(field + ':'):
+                return float(line.split()[1]) * 1024
+    return 0.0
+
+
+def _maxrss_bytes() -> float:
+    # ru_maxrss is kB on linux, bytes on macOS
+    val = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return float(val) * (1024 if sys.platform.startswith('linux') else 1)
+
+
+def _choose_native_strategy() -> str:
+    """Pick the best available native peak-memory tracker once at import.
+
+    linux: the kernel's peak-RSS counter (VmHWM), reset per call by writing
+    '5' to /proc/self/clear_refs — exact and dependency-free.
+    psutil: a ~1ms sampling thread reading current RSS — approximate, but
+    blowups big enough to matter (>20MB) live long enough to be sampled.
+    maxrss: ru_maxrss high-water only — registers a peak only when it exceeds
+    the process's previous maximum.
+    """
+    if sys.platform.startswith('linux'):
+        try:
+            with open('/proc/self/clear_refs', 'w') as fh:
+                fh.write('5')
+            if _read_status_bytes('VmHWM') > 0:
+                return 'linux'
+        except Exception:
+            pass
+    if psutil is not None:
+        return 'psutil'
+    if resource is not None:
+        return 'maxrss'
+    return 'none'
+
+
+_NATIVE_STRATEGY = _choose_native_strategy()
+_PSUTIL_PROC = psutil.Process() if psutil is not None else None
+
+
+class _NativePeak:
+    """Peak process-RSS delta across one call — the native-memory complement
+    to tracemalloc. Catches polars/Arrow/DataFusion allocations, which never
+    touch the python heap. RSS is confounded by allocator pooling (memory
+    reused from a freed pool shows no delta), so this under-reports repeats;
+    with flag-and-skip the first blowup is the one that matters."""
+
+    def start(self) -> None:
+        self.before = 0.0
+        if _NATIVE_STRATEGY == 'linux':
+            with open('/proc/self/clear_refs', 'w') as fh:
+                fh.write('5')
+            self.before = _read_status_bytes('VmRSS')
+        elif _NATIVE_STRATEGY == 'psutil':
+            self.before = float(_PSUTIL_PROC.memory_info().rss)
+            self.peak = self.before
+            self._stop_evt = threading.Event()
+            self._thread = threading.Thread(target=self._sample, daemon=True)
+            self._thread.start()
+        elif _NATIVE_STRATEGY == 'maxrss':
+            self.before = _maxrss_bytes()
+
+    def _sample(self) -> None:
+        while not self._stop_evt.wait(0.001):
+            rss = float(_PSUTIL_PROC.memory_info().rss)
+            if rss > self.peak:
+                self.peak = rss
+
+    def stop(self) -> float:
+        if _NATIVE_STRATEGY == 'linux':
+            return max(0.0, _read_status_bytes('VmHWM') - self.before)
+        if _NATIVE_STRATEGY == 'psutil':
+            self._stop_evt.set()
+            self._thread.join()
+            rss = float(_PSUTIL_PROC.memory_info().rss)
+            if rss > self.peak:
+                self.peak = rss
+            return max(0.0, self.peak - self.before)
+        if _NATIVE_STRATEGY == 'maxrss':
+            return max(0.0, _maxrss_bytes() - self.before)
+        return 0.0
+
+
+def _frame_bytes(df) -> float:
+    """Deep size of a pandas or polars frame."""
+    if isinstance(df, pd.DataFrame):
+        return float(df.memory_usage(deep=True).sum())
+    return float(df.estimated_size())
+
+
+# (pandas name, polars name) pairs for the canonical baseline ops
+_CANONICAL_OP_NAMES = (('value_counts', 'value_counts'), ('sort_values', 'sort'),
+    ('nunique', 'n_unique'))
+
+
+def _canonical_ops(ser) -> list:
+    ops = []
+    for pd_name, pl_name in _CANONICAL_OP_NAMES:
+        op = getattr(ser, pd_name, None)
+        if op is None:
+            op = getattr(ser, pl_name, None)
+        if op is not None:
+            ops.append(op)
+    return ops
+
+
+def _baseline_seconds(df) -> float:
+    """Time canonical per-column work on a smoke frame (pandas or polars). A
+    reasonable stat does far less than this; the time limit is a multiple of
+    it. Ops that raise on a shape (value_counts on unhashable cells) are
+    skipped — the absolute floor keeps the limit sane when most ops skip."""
     def work():
         for col in df.columns:
-            ser = df[col]
-            for op in (ser.value_counts, ser.sort_values, ser.nunique):
+            for op in _canonical_ops(df[col]):
                 try:
                     op()
                 except Exception:
@@ -197,10 +327,12 @@ class _Recorder:
         self.time_limit = time_limit
         self.memory_limit = memory_limit
 
-    def record(self, stat_name: str, seconds: float, peak_bytes: float) -> None:
+    def record(self, stat_name: str, seconds: float, peak_bytes: float,
+               native_peak_bytes: float = 0.0) -> None:
         self.measurements.append(SmokeMeasurement(
             stat_name=stat_name, frame=self.frame, column=self.column,
-            rows=self.rows, seconds=seconds, peak_bytes=peak_bytes))
+            rows=self.rows, seconds=seconds, peak_bytes=peak_bytes,
+            native_peak_bytes=native_peak_bytes))
         if seconds > self.time_limit:
             self.flagged.add(stat_name)
             self.findings.append(SmokeFinding(
@@ -211,17 +343,37 @@ class _Recorder:
                     f"of the {self.rows}-row '{self.frame}' frame (limit {self.time_limit:.2f}s). "
                     f"Likely a per-row python loop or an O(n^2) algorithm — "
                     f"vectorize with pandas/numpy operations.")))
-        if peak_bytes > self.memory_limit:
+        worst_mem = max(peak_bytes, native_peak_bytes)
+        if worst_mem > self.memory_limit:
+            signal = 'python-heap' if peak_bytes >= native_peak_bytes else 'native'
             self.flagged.add(stat_name)
             self.findings.append(SmokeFinding(
                 stat_name=stat_name, frame=self.frame, column=self.column,
-                kind='memory', measured=peak_bytes, limit=self.memory_limit, rows=self.rows,
+                kind='memory', measured=worst_mem, limit=self.memory_limit, rows=self.rows,
                 message=(
-                    f"stat '{stat_name}' allocated a peak of {peak_bytes / 1e6:.0f}MB on column "
-                    f"'{self.column}' of the {self.rows}-row '{self.frame}' frame "
-                    f"(limit {self.memory_limit / 1e6:.0f}MB). "
+                    f"stat '{stat_name}' allocated a peak of {worst_mem / 1e6:.0f}MB "
+                    f"({signal}) on column '{self.column}' of the {self.rows}-row "
+                    f"'{self.frame}' frame (limit {self.memory_limit / 1e6:.0f}MB). "
                     f"Avoid materializing large intermediates (pairwise matrices, "
                     f"cross joins, full copies per row).")))
+
+
+def _measure(recorder: _Recorder, stat_name: str, fn, *args, **kwargs):
+    """Run ``fn`` under wall-time + tracemalloc + native-RSS instrumentation
+    and record the measurement. Exceptions propagate after recording; the
+    flagged check is the caller's job."""
+    before_bytes = tracemalloc.get_traced_memory()[0]
+    tracemalloc.reset_peak()
+    native = _NativePeak()
+    native.start()
+    t0 = time.perf_counter()
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        elapsed = time.perf_counter() - t0
+        native_peak = native.stop()
+        peak = tracemalloc.get_traced_memory()[1] - before_bytes
+        recorder.record(stat_name, elapsed, peak, native_peak)
 
 
 def _wrap(sf: StatFunc, recorder: _Recorder) -> StatFunc:
@@ -230,15 +382,7 @@ def _wrap(sf: StatFunc, recorder: _Recorder) -> StatFunc:
     def measured(*args, **kwargs):
         if sf.name in recorder.flagged:
             raise _SmokeSkip(f"'{sf.name}' skipped after an earlier perf finding")
-        before_bytes = tracemalloc.get_traced_memory()[0]
-        tracemalloc.reset_peak()
-        t0 = time.perf_counter()
-        try:
-            return inner(*args, **kwargs)
-        finally:
-            elapsed = time.perf_counter() - t0
-            peak = tracemalloc.get_traced_memory()[1] - before_bytes
-            recorder.record(sf.name, elapsed, peak)
+        return _measure(recorder, sf.name, inner, *args, **kwargs)
 
     return dataclasses.replace(sf, func=measured)
 
@@ -280,7 +424,7 @@ def run_perf_smoke(stat_funcs: list, rows: int = DEFAULT_ROWS,
                     rows=n,
                     time_limit=max(time_floor_seconds, max_time_ratio * baseline),
                     memory_limit=max(memory_floor_bytes,
-                                     max_memory_ratio * float(df.memory_usage(deep=True).sum())))
+                                     max_memory_ratio * _frame_bytes(df)))
                 for col in df.columns:
                     recorder.column = col
                     pipeline.process_df(df[[col]])
@@ -306,19 +450,26 @@ def perf_smoke_test(stat_funcs: list, rows: int = DEFAULT_ROWS,
 
 
 def measurements_markdown(measurements: List[SmokeMeasurement]) -> str:
-    """Per-stat markdown table: worst wall-time and worst peak memory across
-    all frames/columns/scales, naming where each worst case happened."""
+    """Per-stat markdown table: worst wall-time, worst python-heap peak and
+    worst native (RSS) peak across all frames/columns/scales, naming where
+    each worst case happened."""
     worst_time: Dict[str, SmokeMeasurement] = {}
     worst_mem: Dict[str, SmokeMeasurement] = {}
+    worst_native: Dict[str, SmokeMeasurement] = {}
     for m in measurements:
         if m.stat_name not in worst_time or m.seconds > worst_time[m.stat_name].seconds:
             worst_time[m.stat_name] = m
         if m.stat_name not in worst_mem or m.peak_bytes > worst_mem[m.stat_name].peak_bytes:
             worst_mem[m.stat_name] = m
-    lines = ['| stat | worst time | worst peak memory |', '| --- | --- | --- |']
+        if (m.stat_name not in worst_native
+                or m.native_peak_bytes > worst_native[m.stat_name].native_peak_bytes):
+            worst_native[m.stat_name] = m
+    lines = ['| stat | worst time | worst python-heap peak | worst native peak |',
+        '| --- | --- | --- | --- |']
     for name in sorted(worst_time):
-        wt, wm = worst_time[name], worst_mem[name]
+        wt, wm, wn = worst_time[name], worst_mem[name], worst_native[name]
         lines.append(
             f'| {name} | {wt.seconds * 1000:.1f}ms ({wt.frame}.{wt.column}, {wt.rows} rows) '
-            f'| {wm.peak_bytes / 1e6:.1f}MB ({wm.frame}.{wm.column}, {wm.rows} rows) |')
+            f'| {wm.peak_bytes / 1e6:.1f}MB ({wm.frame}.{wm.column}, {wm.rows} rows) '
+            f'| {wn.native_peak_bytes / 1e6:.1f}MB ({wn.frame}.{wn.column}, {wn.rows} rows) |')
     return '\n'.join(lines)
