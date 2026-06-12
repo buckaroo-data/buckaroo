@@ -5,9 +5,11 @@ ibis-framework or remote backend required. Skipped if xorq is not
 installed.
 """
 
+import glob
 import logging
 import math
 import os
+import tempfile
 
 import pandas as pd
 import pytest
@@ -42,6 +44,11 @@ def _make_table_categorical():
     return xo.memtable(
         pd.DataFrame(
             {"cat": ["a", "a", "a", "b", "b", "c", "d", "e", "f", "g", "h"]}))
+
+
+def _tmp_mat_files():
+    """Temp parquets written by _create_base_table's streaming path (#922)."""
+    return set(glob.glob(os.path.join(tempfile.gettempdir(), "buckaroo_mat_*.parquet")))
 
 
 # ============================================================
@@ -709,17 +716,89 @@ class TestMaterialization:
 
     def test_materialized_table_dropped_after_call(self):
         """Materialized tables created for filter chains are cleaned up
-        so the backend connection doesn't accumulate temp tables."""
+        so the backend connection doesn't accumulate temp tables — and the
+        streamed temp parquet backing them goes with them (#922)."""
         con = xo.connect()
         df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
         t = con.create_table("t_mat_filt", df)
         filt = t.filter(t.v > 1)  # lazy chain → triggers materialization
         before = set(con.list_tables())
+        before_files = _tmp_mat_files()
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
         pipeline.process_table(filt)
         leaked = [n for n in (set(con.list_tables()) - before)
                   if n.startswith("__buckaroo_histo_mat")]
         assert leaked == [], f"materialized table not cleaned up: {leaked}"
+        leaked_files = _tmp_mat_files() - before_files
+        assert leaked_files == set(), f"temp parquet not cleaned up: {leaked_files}"
+
+    def test_streaming_path_bypasses_create_table(self):
+        """#922: a worthy source must land via a streamed temp parquet +
+        read_parquet, never CREATE TABLE AS SELECT — DataFusion materialises
+        CTAS results into an in-memory table in its Rust heap (12+ GB RSS on
+        a 167M-row filtered scan)."""
+        from unittest.mock import patch
+
+        con = xo.connect()
+        df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
+        t = con.create_table("t_stream_src", df)
+        filt = t.filter(t.v > 1)
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        with patch.object(type(con), "create_table",
+            side_effect=RuntimeError("CTAS path used")) as ctas:
+            stats, errors = pipeline.process_table(filt)
+        assert ctas.call_count == 0, (
+            "materialization went through create_table (in-memory CTAS) "
+            "instead of the streamed-parquet path")
+        assert errors == []
+        assert stats["v"]["length"] == 6
+
+    def test_to_parquet_failure_falls_back_with_warning(self, caplog):
+        """A failed streaming write must fall back to in-engine create_table
+        and warn — silently reverting changes the run's memory profile ~6x
+        (never-silent precedent, #910). The partial temp file must not leak."""
+        from unittest.mock import patch
+
+        import xorq.expr.api as xorq_expr_api
+
+        con = xo.connect()
+        df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
+        t = con.create_table("t_fallback_src", df)
+        filt = t.filter(t.v > 1)
+        before_files = _tmp_mat_files()
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        with caplog.at_level(logging.WARNING):
+            with patch.object(xorq_expr_api, "to_parquet",
+                side_effect=RuntimeError("disk full")):
+                stats, errors = pipeline.process_table(filt)
+        assert errors == []
+        assert stats["v"]["length"] == 6
+        assert _tmp_mat_files() - before_files == set(), "partial temp parquet leaked"
+        warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("create_table" in m for m in warnings), (
+            f"no fallback warning logged; warnings seen: {warnings}")
+
+    def test_cleanup_releases_table_and_temp_file(self):
+        """One _cleanup_cache_materialization() call must release everything
+        a direct _maybe_materialize() registered — the backend table AND the
+        streamed temp parquet — so direct callers can't leak either."""
+        con = xo.connect()
+        df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
+        t = con.create_table("t_cleanup_src", df)
+        filt = t.filter(t.v > 1)
+        before_tables = set(con.list_tables())
+        before_files = _tmp_mat_files()
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        pipeline._maybe_materialize(filt)
+        fired = [n for n in set(con.list_tables()) - before_tables
+                 if n.startswith("__buckaroo_histo_mat")]
+        assert fired, "materialization did not fire for a filter chain"
+        pipeline._cleanup_cache_materialization()
+        leaked_tables = [n for n in set(con.list_tables()) - before_tables
+                         if n.startswith("__buckaroo_histo_mat")]
+        leaked_files = _tmp_mat_files() - before_files
+        assert leaked_tables == [], f"cleanup left registered table(s): {leaked_tables}"
+        assert leaked_files == set(), f"cleanup left temp parquet(s): {leaked_files}"
 
     @staticmethod
     def _cached_join_expr(tmp_path):
@@ -749,16 +828,16 @@ class TestMaterialization:
 
         expr = self._cached_join_expr(tmp_path)
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
-        materialized, cleanup = pipeline._maybe_materialize(expr)
+        materialized = pipeline._maybe_materialize(expr)
         try:
-            assert cleanup is not None, "materialization did not fire for CachedNode expr"
+            assert pipeline._cache_mat_cleanup is not None, (
+                "materialization did not fire for CachedNode expr")
             assert isinstance(materialized.op(), (ops.DatabaseTable, ops.InMemoryTable))
             # In-engine path: the CachedNode is rewritten to a parquet read,
             # not pulled through pandas.
             assert not list(materialized.op().find(CachedNode))
         finally:
-            if cleanup is not None:
-                cleanup[0].drop_table(cleanup[1])
+            pipeline._cleanup_cache_materialization()
 
     def test_cached_node_stats_match_unmaterialized(self, tmp_path):
         """Stats over the materialized base table equal stats over the raw
@@ -784,23 +863,24 @@ class TestMaterialization:
         t = con.create_table("t_mat_cache", df)
         filt = t.filter(t.v > 1)  # lazy chain → would materialize
 
-        # Without cache_storage the chain materializes: new table + cleanup.
+        # Without cache_storage the chain materializes: new table + cleanup
+        # state recorded on the instance.
         plain = XorqStatPipeline(XORQ_STATS_V2)
-        mat, cleanup = plain._maybe_materialize(filt)
+        mat = plain._maybe_materialize(filt)
         try:
-            assert cleanup is not None, "filter chain should materialize without cache_storage"
+            assert plain._cache_mat_cleanup is not None, (
+                "filter chain should materialize without cache_storage")
             assert mat is not filt
         finally:
-            if cleanup is not None:
-                cleanup[0].drop_table(cleanup[1])
+            plain._cleanup_cache_materialization()
 
         # With cache_storage the same chain is returned untouched, no cleanup.
         cache = xo.ParquetSnapshotCache.from_kwargs(
             source=xo.connect(), base_path=str(tmp_path))
         cached = XorqStatPipeline(XORQ_STATS_V2, cache_storage=cache)
-        same, no_cleanup = cached._maybe_materialize(filt)
+        same = cached._maybe_materialize(filt)
         assert same is filt
-        assert no_cleanup is None
+        assert cached._cache_mat_cleanup is None
 
 
 class TestCacheStorageExecute:
