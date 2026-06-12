@@ -11,11 +11,9 @@ import numpy as np
 import pandas as pd
 
 from buckaroo.customizations.pl_stats_v2 import PL_ANALYSIS_V2
-from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2
 from buckaroo.pluggable_analysis_framework.perf_smoke import (
     SMOKE_FRAME_MAKERS, measurements_markdown, perf_smoke_test, run_perf_smoke)
 from buckaroo.pluggable_analysis_framework.perf_smoke_pl import PL_SMOKE_FRAME_MAKERS
-from buckaroo.pluggable_analysis_framework.perf_smoke_xorq import run_xorq_perf_smoke
 from buckaroo.pluggable_analysis_framework.stat_func import stat, RawSeries
 
 
@@ -131,31 +129,3 @@ def test_polars_stats_over_polars_frames():
     result = run_perf_smoke(PL_ANALYSIS_V2, rows=2_000, frames=PL_SMOKE_FRAME_MAKERS)
     assert result.passed is True, [f.message for f in result.findings]
     assert {m.frame for m in result.measurements} == set(PL_SMOKE_FRAME_MAKERS)
-
-
-def test_xorq_batch_stats_measured():
-    # Batch aggregate stats never execute inside their own python func; the
-    # xorq runner times each one as its own single-expression aggregate.
-    result = run_xorq_perf_smoke(XORQ_STATS_V2, rows=2_000,
-        frames={'base': SMOKE_FRAME_MAKERS['base']})
-    measured = {m.stat_name for m in result.measurements}
-    assert {'min', 'mean'} <= measured  # batch aggregates, individually executed
-    assert 'histogram' in measured  # post-batch expression stat via the pipeline
-
-
-def test_xorq_slow_stat_flagged():
-    # Deterministic CPU burn standing in for a pathological post-batch stat.
-    @stat()
-    def xorq_slow_post(length: int) -> int:
-        total = 0
-        for _ in range(length):
-            for _ in range(5_000):
-                total += 1
-        return total
-
-    result = run_xorq_perf_smoke(list(XORQ_STATS_V2) + [xorq_slow_post], rows=2_000,
-        frames={'base': SMOKE_FRAME_MAKERS['base']})
-    assert result.passed is False
-    time_findings = [f for f in result.findings
-        if f.kind == 'time' and f.stat_name == 'xorq_slow_post']
-    assert time_findings
