@@ -73,9 +73,15 @@ It covers all three stat backends and the first pull uniformly:
   `stat.xorq.batch_aggregate` phases are reported as their own `perf span=`
   lines, not folded into that total.
 - **First data pull** — `firstpull.summary_stats`,
-  `firstpull.window_to_parquet`, and (server) `firstpull.load_expr` /
-  `firstpull.dataflow_construct` spans. In the server these land in
-  `~/.buckaroo/logs/server.log`.
+  `firstpull.window_to_parquet`, and the server-side spans that decompose a
+  `/load_expr` into the three numbers a perf harness wants: `firstpull.expr_load`
+  (expression build, just `load_expr_build_dir`), `firstpull.dataflow_construct`
+  (stats run — the `stat.xorq.*` spans break it down further), and
+  `firstpull.metadata`, all nested under the outer `firstpull.load_expr` total;
+  plus `firstpull.ws_first_payload` (time-to-first-rows — the parquet encode and
+  frame send of the first `infinite_request`, emitted once per session). The
+  server spans carry `session=` so they correlate across concurrent loads. In
+  the server these land in `~/.buckaroo/logs/server.log`.
 
 Lines are `key=value` and greppable (`grep 'perf span=' server.log`),
 so external harnesses can parse `secs=` for a named span. The

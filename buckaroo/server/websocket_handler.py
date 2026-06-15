@@ -3,10 +3,12 @@ import json
 import logging
 import os
 import traceback
+from contextlib import nullcontext
 from urllib.parse import urlparse
 
 import tornado.websocket
 
+from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
 from buckaroo.server.session import build_state_message
 
@@ -220,11 +222,20 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             return handle_infinite_request(session.df, pa)
 
         try:
-            resp_msg, parquet_bytes = _dispatch(payload_args)
-            # Two-frame sequence: JSON text frame, then binary Parquet frame
-            self.write_message(json.dumps(resp_msg))
-            if parquet_bytes:
-                self.write_message(parquet_bytes, binary=True)
+            # First infinite_request for this session = time-to-first-rows.
+            # Span just that one (window_to_parquet encode + frame send), keyed
+            # by session= so it lines up with the firstpull.load_expr spans.
+            first_payload = perf_log.enabled() and not session._perf_first_payload_seen
+            span = (perf_log.perf_span("firstpull.ws_first_payload", session=self.session_id)
+                    if first_payload else nullcontext())
+            with span:
+                resp_msg, parquet_bytes = _dispatch(payload_args)
+                # Two-frame sequence: JSON text frame, then binary Parquet frame
+                self.write_message(json.dumps(resp_msg))
+                if parquet_bytes:
+                    self.write_message(parquet_bytes, binary=True)
+            if first_payload:
+                session._perf_first_payload_seen = True
 
             # Handle second_request (eager loading)
             second_pa = payload_args.get("second_request")

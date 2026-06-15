@@ -47,6 +47,10 @@ class SessionState:
     prompt: str = ""
     component_config: Optional[dict] = None
     last_accessed: float = field(default_factory=time.time)
+    # Gates the firstpull.ws_first_payload perf span so it fires only on the
+    # first infinite_request for this session (time-to-first-rows), not every
+    # scroll. Flipped True after the first payload is dispatched.
+    _perf_first_payload_seen: bool = False
 
     def touch(self) -> None:
         """Update the last-accessed timestamp."""
