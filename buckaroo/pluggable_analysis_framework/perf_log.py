@@ -68,15 +68,25 @@ def perf_span(label: str, **fields):
 
     No-op (a single bool check, no timing) when instrumentation is off.
     ``fields`` are appended as ``key=value`` pairs for grepping/parsing.
+
+    If the block raises, the line still emits (the timing of the partial
+    work) but is tagged ``errored=true`` so a parser keying on ``secs=``
+    doesn't mistake a failed run's partial timing for a clean one.
     """
     if not _ENABLED:
         yield
         return
     t0 = time.perf_counter()
+    errored = False
     try:
         yield
+    except BaseException:
+        errored = True
+        raise
     finally:
         secs = time.perf_counter() - t0
+        if errored:
+            fields = {**fields, "errored": "true"}
         suffix = _fmt_fields(fields)
         log.info("perf span=%s secs=%.4f%s", label, secs,
                  f" {suffix}" if suffix else "")

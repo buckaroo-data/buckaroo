@@ -471,14 +471,17 @@ class LoadExprHandler(tornado.web.RequestHandler):
         cache_storage_path = body.get("cache_storage_path")
 
         try:
-            with perf_log.perf_span("firstpull.load_expr", build_dir=build_dir):
+            # session= correlates these spans across concurrent loads — the
+            # handler is async, so two /load_expr requests can interleave in
+            # the log even though no await sits inside a single span.
+            with perf_log.perf_span("firstpull.load_expr", session=session_id, build_dir=build_dir):
                 expr = xorq_loading.load_expr_build_dir(build_dir)
                 extra_klasses = (
                     xorq_loading.load_project_stat_klasses(project_root)
                     + xorq_loading.load_project_post_processing_klasses(project_root)
                     + xorq_loading.load_project_display_klasses(project_root)
                     if project_root else [])
-                with perf_log.perf_span("firstpull.dataflow_construct"):
+                with perf_log.perf_span("firstpull.dataflow_construct", session=session_id):
                     xorq_dataflow = xorq_loading.XorqServerDataflow(
                         expr, skip_main_serial=True, extra_klasses=extra_klasses,
                         cache_storage_path=cache_storage_path,

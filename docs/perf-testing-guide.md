@@ -68,7 +68,10 @@ It covers all three stat backends and the first pull uniformly:
   phase; xorq splits into `stat.xorq.batch_aggregate` (the single folded
   aggregate query), `stat.xorq.materialize` (cold-cache source landing),
   and `xorq/per-column` (histogram re-scans — usually the dominant cost),
-  with cache hit/miss folded into the summary label.
+  with cache hit/miss folded into the summary label. Note the summary's
+  `total=` sums the per-column rows only; the `stat.xorq.materialize` and
+  `stat.xorq.batch_aggregate` phases are reported as their own `perf span=`
+  lines, not folded into that total.
 - **First data pull** — `firstpull.summary_stats`,
   `firstpull.window_to_parquet`, and (server) `firstpull.load_expr` /
   `firstpull.dataflow_construct` spans. In the server these land in
