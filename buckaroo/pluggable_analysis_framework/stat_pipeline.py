@@ -196,12 +196,26 @@ class StatPipeline:
     def ordered_a_objs(self):
         return list(self._original_inputs)
 
+    @property
+    def record_timings(self) -> bool:
+        """Whether to capture per-stat timings on the next process_df call.
+
+        Resolved live so a None default follows perf_log.enable()/disable()
+        even after the pipeline was constructed; an explicit bool passed to
+        __init__ is honoured verbatim.
+        """
+        if self._record_timings is None:
+            return perf_log.enabled()
+        return self._record_timings
+
     def __init__(self, stat_funcs: list, unit_test: bool = True, record_timings: Optional[bool] = None):
         self.all_stat_funcs = _normalize_inputs(stat_funcs)
         self._original_inputs = list(stat_funcs)
-        # Default to the global perf toggle; an explicit True/False (e.g. from
-        # scripts/perf/perf_bench.py) always wins.
-        self.record_timings = perf_log.enabled() if record_timings is None else record_timings
+        # Tri-state, resolved live by the record_timings property: None follows
+        # the runtime perf toggle at process time, so enable()/disable() after
+        # construction takes effect; an explicit True/False (e.g. from
+        # scripts/perf/perf_bench.py) is latched and always wins.
+        self._record_timings = record_timings
         # When record_timings is True: list of (column, stat_name, seconds) tuples
         # captured during the most recent process_df call.
         self.timings: List[Tuple[str, str, float]] = []

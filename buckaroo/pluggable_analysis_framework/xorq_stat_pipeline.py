@@ -466,41 +466,47 @@ class XorqStatPipeline:
              and retry in-engine — no transport, the join still runs once.
           2. Last resort, ``execute()`` to pandas and register the result.
              Correct for any expression but pays a full transport.
-        """
-        tmp_path = None
-        try:
-            from xorq.expr.api import to_parquet as _xorq_to_parquet  # noqa: PLC0415
-            fd, tmp_str = tempfile.mkstemp(suffix=".parquet", prefix="buckaroo_mat_")
-            os.close(fd)
-            tmp_path = Path(tmp_str)
-            _xorq_to_parquet(table, tmp_path)
-            result = underlying.read_parquet(str(tmp_path), table_name=name)
-            self._cache_mat_tmp_parquet = tmp_path
-            return result
-        except Exception as e:
-            log.warning(
-                "xorq stat materialization: streaming parquet write failed, "
-                "falling back to in-engine create_table: %s", e)
-            if tmp_path is not None:
-                try:
-                    tmp_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
-        try:
-            return underlying.create_table(name, table, overwrite=True)
-        except Exception:
-            pass
-        rewritten = self._resolve_cached_nodes(table, underlying)
-        if rewritten is not None:
+        Wrapped in the ``stat.xorq.materialize`` span: this is the one place the
+        actual source scan happens, for both the eager (no-cache) and lazy
+        (first cache miss) paths, so the span reports the real cost wherever
+        materialisation runs.
+        """
+        with self._span("stat.xorq.materialize"):
+            tmp_path = None
             try:
-                return underlying.create_table(name, rewritten, overwrite=True)
+                from xorq.expr.api import to_parquet as _xorq_to_parquet  # noqa: PLC0415
+                fd, tmp_str = tempfile.mkstemp(suffix=".parquet", prefix="buckaroo_mat_")
+                os.close(fd)
+                tmp_path = Path(tmp_str)
+                _xorq_to_parquet(table, tmp_path)
+                result = underlying.read_parquet(str(tmp_path), table_name=name)
+                self._cache_mat_tmp_parquet = tmp_path
+                return result
+            except Exception as e:
+                log.warning(
+                    "xorq stat materialization: streaming parquet write failed, "
+                    "falling back to in-engine create_table: %s", e)
+                if tmp_path is not None:
+                    try:
+                        tmp_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+
+            try:
+                return underlying.create_table(name, table, overwrite=True)
             except Exception:
                 pass
-        try:
-            return underlying.create_table(name, table.execute(), overwrite=True)
-        except Exception:
-            return None
+            rewritten = self._resolve_cached_nodes(table, underlying)
+            if rewritten is not None:
+                try:
+                    return underlying.create_table(name, rewritten, overwrite=True)
+                except Exception:
+                    pass
+            try:
+                return underlying.create_table(name, table.execute(), overwrite=True)
+            except Exception:
+                return None
 
     @staticmethod
     def _resolve_cached_nodes(table, underlying):
@@ -585,8 +591,13 @@ class XorqStatPipeline:
         self._perf = (perf_log.PerfRecorder()
                       if perf_log.enabled() and not self._suppress_perf_summary else None)
         with self._span("stat.xorq.total"):
-            with self._span("stat.xorq.materialize"):
-                materialized = self._maybe_materialize(table)
+            # No materialize span here: with a cache_storage set, _maybe_materialize
+            # is a documented no-op and the real source landing happens lazily on
+            # the first cache miss. The span lives inside _create_base_table, the
+            # single point both the eager and lazy paths funnel through, so it
+            # reports the actual scan cost wherever it runs (or not at all when a
+            # warm cache never materialises).
+            materialized = self._maybe_materialize(table)
             try:
                 return self._process_table_impl(materialized, skip_columns=skip_columns)
             finally:

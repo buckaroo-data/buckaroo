@@ -18,9 +18,14 @@ When enabled, two things happen:
   ``(phase, column, stat, seconds)`` and print a top-N-slowest summary at the
   end of a run.
 
-The logger has no handler of its own — it inherits the root config (stderr in
-a notebook, the server log file under the server). It stays quiet unless
-``BUCKAROO_PERF`` is set, regardless of how noisy other loggers are.
+Enabling (env var or :func:`enable`) raises the ``buckaroo.perf`` logger to
+INFO so spans and summaries are emitted. When the root logger is already
+configured (the server, or a notebook that called ``logging.basicConfig``)
+the lines propagate to that existing handler — the server log file, stderr,
+etc. When nothing upstream has a handler (the common ``BUCKAROO_PERF=1
+python script.py`` / bare-notebook case, where root sits at WARNING and would
+drop INFO), a plain stderr handler is attached so the spans still show. It
+stays quiet unless enabled, regardless of how noisy other loggers are.
 """
 from __future__ import annotations
 
@@ -41,6 +46,23 @@ def _env_enabled() -> bool:
 _ENABLED: bool = _env_enabled()
 
 
+def _ensure_logging() -> None:
+    """Make INFO spans visible whenever perf is enabled.
+
+    A bare notebook/script leaves the root logger at WARNING with only the
+    lastResort handler, so our INFO lines would be dropped. Bump this logger to
+    INFO and, when nothing upstream has a handler, attach a plain stderr handler
+    of our own. When root is already configured (the server) we add nothing and
+    let propagation deliver the lines to the existing log. Idempotent — safe to
+    call on every enable().
+    """
+    log.setLevel(logging.INFO)
+    if not logging.getLogger().hasHandlers() and not log.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        log.addHandler(handler)
+
+
 def enabled() -> bool:
     """True when perf instrumentation should run. Cheap; safe in hot paths."""
     return _ENABLED
@@ -50,12 +72,19 @@ def enable() -> None:
     """Turn perf instrumentation on for this process (overrides the env var)."""
     global _ENABLED
     _ENABLED = True
+    _ensure_logging()
 
 
 def disable() -> None:
     """Turn perf instrumentation off for this process."""
     global _ENABLED
     _ENABLED = False
+
+
+# When enabled from the environment, configure logging at import so spans are
+# visible without a separate enable() call.
+if _ENABLED:
+    _ensure_logging()
 
 
 def _fmt_fields(fields: dict) -> str:
