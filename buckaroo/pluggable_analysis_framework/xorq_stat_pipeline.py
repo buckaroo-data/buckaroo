@@ -22,12 +22,15 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import time
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 
+from . import perf_log
 from .col_analysis import SDType
 from .safe_summary_df import output_full_reproduce
 from .stat_func import XorqColumn, XorqExpr, XorqExecute, RAW_MARKER_TYPES, StatFunc
@@ -189,6 +192,12 @@ class XorqStatPipeline:
         # unit_test() run kicked off below, which disables the cache).
         self._cache_stats = _new_cache_run_stats()
         self._reset_cache_materialization()
+        # Per-run perf recorder, (re)initialised in process_table when the
+        # BUCKAROO_PERF toggle is on; None otherwise.
+        self._perf = None
+        # Set during the unit_test() DAG self-check so its PERVERSE_DF run
+        # stays out of the perf log.
+        self._suppress_perf_summary = False
 
         # Validate the full DAG up front (raises DAGConfigError on misconfig).
         self.ordered_stat_funcs = build_typed_dag(
@@ -457,41 +466,47 @@ class XorqStatPipeline:
              and retry in-engine — no transport, the join still runs once.
           2. Last resort, ``execute()`` to pandas and register the result.
              Correct for any expression but pays a full transport.
-        """
-        tmp_path = None
-        try:
-            from xorq.expr.api import to_parquet as _xorq_to_parquet  # noqa: PLC0415
-            fd, tmp_str = tempfile.mkstemp(suffix=".parquet", prefix="buckaroo_mat_")
-            os.close(fd)
-            tmp_path = Path(tmp_str)
-            _xorq_to_parquet(table, tmp_path)
-            result = underlying.read_parquet(str(tmp_path), table_name=name)
-            self._cache_mat_tmp_parquet = tmp_path
-            return result
-        except Exception as e:
-            log.warning(
-                "xorq stat materialization: streaming parquet write failed, "
-                "falling back to in-engine create_table: %s", e)
-            if tmp_path is not None:
-                try:
-                    tmp_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
-        try:
-            return underlying.create_table(name, table, overwrite=True)
-        except Exception:
-            pass
-        rewritten = self._resolve_cached_nodes(table, underlying)
-        if rewritten is not None:
+        Wrapped in the ``stat.xorq.materialize`` span: this is the one place the
+        actual source scan happens, for both the eager (no-cache) and lazy
+        (first cache miss) paths, so the span reports the real cost wherever
+        materialisation runs.
+        """
+        with self._span("stat.xorq.materialize"):
+            tmp_path = None
             try:
-                return underlying.create_table(name, rewritten, overwrite=True)
+                from xorq.expr.api import to_parquet as _xorq_to_parquet  # noqa: PLC0415
+                fd, tmp_str = tempfile.mkstemp(suffix=".parquet", prefix="buckaroo_mat_")
+                os.close(fd)
+                tmp_path = Path(tmp_str)
+                _xorq_to_parquet(table, tmp_path)
+                result = underlying.read_parquet(str(tmp_path), table_name=name)
+                self._cache_mat_tmp_parquet = tmp_path
+                return result
+            except Exception as e:
+                log.warning(
+                    "xorq stat materialization: streaming parquet write failed, "
+                    "falling back to in-engine create_table: %s", e)
+                if tmp_path is not None:
+                    try:
+                        tmp_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+
+            try:
+                return underlying.create_table(name, table, overwrite=True)
             except Exception:
                 pass
-        try:
-            return underlying.create_table(name, table.execute(), overwrite=True)
-        except Exception:
-            return None
+            rewritten = self._resolve_cached_nodes(table, underlying)
+            if rewritten is not None:
+                try:
+                    return underlying.create_table(name, rewritten, overwrite=True)
+                except Exception:
+                    pass
+            try:
+                return underlying.create_table(name, table.execute(), overwrite=True)
+            except Exception:
+                return None
 
     @staticmethod
     def _resolve_cached_nodes(table, underlying):
@@ -542,6 +557,9 @@ class XorqStatPipeline:
         saved_cache = self.cache_storage
         self.backend = None
         self.cache_storage = None
+        # The PERVERSE_DF self-check is not a real data pull — keep it out of
+        # the perf log (spans and summary).
+        self._suppress_perf_summary = True
         try:
             table = xo.memtable(PERVERSE_DF)
             _, errors = self.process_table(table)
@@ -553,6 +571,13 @@ class XorqStatPipeline:
         finally:
             self.backend = saved_backend
             self.cache_storage = saved_cache
+            self._suppress_perf_summary = False
+
+    def _span(self, label, **fields):
+        """perf_span when perf is on for this (non-unit-test) run, else no-op."""
+        if perf_log.enabled() and not self._suppress_perf_summary:
+            return perf_log.perf_span(label, **fields)
+        return nullcontext()
 
     def process_table(self, table, skip_columns=None) -> Tuple[SDType, List[StatError]]:
         # Reset per-run cache state. When a snapshot cache is set, queries are
@@ -563,12 +588,28 @@ class XorqStatPipeline:
         self._reset_cache_materialization()
         if self.cache_storage is not None:
             self._cache_source = table
-        materialized = self._maybe_materialize(table)
-        try:
-            return self._process_table_impl(materialized, skip_columns=skip_columns)
-        finally:
-            self._cleanup_cache_materialization()
-            self._log_cache_stats()
+        self._perf = (perf_log.PerfRecorder()
+                      if perf_log.enabled() and not self._suppress_perf_summary else None)
+        with self._span("stat.xorq.total"):
+            # No materialize span here: with a cache_storage set, _maybe_materialize
+            # is a documented no-op and the real source landing happens lazily on
+            # the first cache miss. The span lives inside _create_base_table, the
+            # single point both the eager and lazy paths funnel through, so it
+            # reports the actual scan cost wherever it runs (or not at all when a
+            # warm cache never materialises).
+            materialized = self._maybe_materialize(table)
+            try:
+                return self._process_table_impl(materialized, skip_columns=skip_columns)
+            finally:
+                self._cleanup_cache_materialization()
+                self._log_cache_stats()
+                if self._perf is not None:
+                    self._perf.label = (
+                        f"xorq cols={len(table.columns)} "
+                        f"cache_hits={self._cache_stats['hits']} "
+                        f"misses={self._cache_stats['misses']} "
+                        f"materialized={self._cache_stats['materialized']}")
+                    self._perf.summary()
 
     def _process_table_impl(self, table, skip_columns=None) -> Tuple[SDType, List[StatError]]:
         schema = table.schema()
@@ -629,7 +670,8 @@ class XorqStatPipeline:
         agg_exprs.extend(e for _, _, e in batch_items)
 
         try:
-            result_df = self._execute(table.aggregate(agg_exprs))
+            with self._span("stat.xorq.batch_aggregate", n_stats=len(batch_items)):
+                result_df = self._execute(table.aggregate(agg_exprs))
         except Exception as e:
             # Whole batch query failed — every batched stat reports the same root cause.
             # length stays at the prepopulated 0 so consumers still see something.
@@ -666,8 +708,12 @@ class XorqStatPipeline:
                 # (typically the batch-phase stats).
                 if sf.provides and all(sk.name in col_accum for sk in sf.provides):
                     continue
+                if self._perf is not None:
+                    t0 = time.perf_counter()
                 _execute_stat_func(sf, col_accum, col, raw_series=None, sampled_series=None, raw_dataframe=None,
                     xorq_expr=table, xorq_execute=self._execute)
+                if self._perf is not None:
+                    self._perf.record("xorq/per-column", col, sf.name, time.perf_counter() - t0)
 
             col_key_to_func: Dict[str, StatFunc] = {}
             for sf in col_funcs:

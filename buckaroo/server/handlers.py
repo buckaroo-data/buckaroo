@@ -15,6 +15,7 @@ from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.server.session import build_state_message
+from buckaroo.pluggable_analysis_framework import perf_log
 
 log = logging.getLogger("buckaroo.server.handlers")
 
@@ -470,19 +471,30 @@ class LoadExprHandler(tornado.web.RequestHandler):
         cache_storage_path = body.get("cache_storage_path")
 
         try:
-            expr = xorq_loading.load_expr_build_dir(build_dir)
-            extra_klasses = (
-                xorq_loading.load_project_stat_klasses(project_root)
-                + xorq_loading.load_project_post_processing_klasses(project_root)
-                + xorq_loading.load_project_display_klasses(project_root)
-                if project_root else [])
-            xorq_dataflow = xorq_loading.XorqServerDataflow(
-                expr, skip_main_serial=True, extra_klasses=extra_klasses,
-                cache_storage_path=cache_storage_path,
-                column_config_overrides=column_config_overrides,
-                extra_grid_config=extra_grid_config, init_sd=init_sd,
-                skip_stat_columns=skip_stat_columns)
-            metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, build_dir)
+            # session= correlates these spans across concurrent loads — the
+            # handler is async, so two /load_expr requests can interleave in
+            # the log even though no await sits inside a single span.
+            with perf_log.perf_span("firstpull.load_expr", session=session_id, build_dir=build_dir):
+                # The harness reads "expression build" as just this call, so it
+                # gets its own span rather than being outer-minus-inner residual.
+                with perf_log.perf_span("firstpull.expr_load", session=session_id):
+                    expr = xorq_loading.load_expr_build_dir(build_dir)
+                extra_klasses = (
+                    xorq_loading.load_project_stat_klasses(project_root)
+                    + xorq_loading.load_project_post_processing_klasses(project_root)
+                    + xorq_loading.load_project_display_klasses(project_root)
+                    if project_root else [])
+                with perf_log.perf_span("firstpull.dataflow_construct", session=session_id):
+                    xorq_dataflow = xorq_loading.XorqServerDataflow(
+                        expr, skip_main_serial=True, extra_klasses=extra_klasses,
+                        cache_storage_path=cache_storage_path,
+                        column_config_overrides=column_config_overrides,
+                        extra_grid_config=extra_grid_config, init_sd=init_sd,
+                        skip_stat_columns=skip_stat_columns)
+                # Spanning metadata too leaves only the small klass-load step
+                # unmeasured inside the outer firstpull.load_expr total.
+                with perf_log.perf_span("firstpull.metadata", session=session_id):
+                    metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, build_dir)
         except FileNotFoundError:
             self.set_status(404)
             self.write({"error_code": "build_dir_not_found",

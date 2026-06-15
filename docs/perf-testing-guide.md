@@ -42,12 +42,61 @@ Run from the repo root with the project venv:
 
 ## Instrumentation already in the code
 
-`StatPipeline` has an opt-in `record_timings` flag
-(`buckaroo/pluggable_analysis_framework/stat_pipeline.py`). Default is
-off — turning it on captures `(column, stat_name, seconds)` per
-`process_df` call. Use this *only* when comparing stat-pipeline shapes;
-do not use it as a substitute for cProfile when looking outside the
-pipeline.
+### Runtime toggle — `BUCKAROO_PERF`
+
+The fastest way to see where time goes in a live run (no bench script,
+no profiler) is the `BUCKAROO_PERF` toggle
+(`buckaroo/pluggable_analysis_framework/perf_log.py`). Default off, zero
+overhead. Turn it on and every stat-pipeline run and first-data-pull
+emits structured lines to the `buckaroo.perf` logger:
+
+```bash
+BUCKAROO_PERF=1 .venv/bin/python your_script.py     # spans + summary on stderr
+```
+
+```python
+from buckaroo.pluggable_analysis_framework import perf_log
+perf_log.enable()                # or BUCKAROO_PERF=1 in the env
+BuckarooWidget(df)               # pandas / polars / xorq — same output shape
+perf_log.disable()
+```
+
+It covers all three stat backends and the first pull uniformly:
+
+- **Stats pipeline** — per-`(phase, column, stat, seconds)` rows plus a
+  top-N-slowest summary. pandas/polars run as one `pandas/polars`
+  phase; xorq splits into `stat.xorq.batch_aggregate` (the single folded
+  aggregate query), `stat.xorq.materialize` (cold-cache source landing),
+  and `xorq/per-column` (histogram re-scans — usually the dominant cost),
+  with cache hit/miss folded into the summary label. Note the summary's
+  `total=` sums the per-column rows only; the `stat.xorq.materialize` and
+  `stat.xorq.batch_aggregate` phases are reported as their own `perf span=`
+  lines, not folded into that total.
+- **First data pull** — `firstpull.summary_stats`,
+  `firstpull.window_to_parquet`, and the server-side spans that decompose a
+  `/load_expr` into the three numbers a perf harness wants: `firstpull.expr_load`
+  (expression build, just `load_expr_build_dir`), `firstpull.dataflow_construct`
+  (stats run — the `stat.xorq.*` spans break it down further), and
+  `firstpull.metadata`, all nested under the outer `firstpull.load_expr` total;
+  plus `firstpull.ws_first_payload` (time-to-first-rows — the parquet encode and
+  frame send of the first `infinite_request`, emitted once per session). The
+  server spans carry `session=` so they correlate across concurrent loads. In
+  the server these land in `~/.buckaroo/logs/server.log`.
+
+Lines are `key=value` and greppable (`grep 'perf span=' server.log`),
+so external harnesses can parse `secs=` for a named span. The
+`PERVERSE_DF` DAG self-check that runs on every pipeline construction is
+suppressed, so the only output is real data pulls.
+
+Take *headline* numbers with the toggle **off** — the per-`(col,stat)`
+`perf_counter` pairs are cheap but nonzero on very wide frames.
+
+### Offline `record_timings` (bench scripts)
+
+`StatPipeline` also has the lower-level `record_timings` flag it's built
+on. When `BUCKAROO_PERF` is set it defaults on; pass it explicitly to
+capture `pipe.timings` without logging (this is what
+`scripts/perf/perf_bench.py` does):
 
 ```python
 pipe = StatPipeline(stat_funcs, record_timings=True)
