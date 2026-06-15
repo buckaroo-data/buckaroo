@@ -328,7 +328,7 @@ jobs:
         run: |
           rm -f uv.lock
           sed -i 's/\[tool\.uv\]/[tool.uv]\noverride-dependencies = ["pandas"]/' pyproject.toml
-          uv sync --resolution=highest --all-extras --dev --no-group datacompy
+          uv sync --resolution=highest --all-extras --dev --no-group datacompy --no-group linkcheck
           uv pip list | grep -i pandas
       - name: Run tests
         # Tolerant of the post-summary polars-stream / pyo3 SIGABRT — see scripts/run_pytest_tolerant.sh.
@@ -664,7 +664,7 @@ jobs:
         with:
           packages: pandoc graphviz
       - name: Install the project
-        run: uv sync --locked --all-extras --dev
+        run: uv sync --locked --all-extras --dev --group linkcheck
       - name: Check docs build and links
         run: |
           mkdir -p docs/build/html

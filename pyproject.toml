@@ -68,12 +68,10 @@ dev = [
     "solara[pytest]; python_version < '3.14'",
     "sphinx>=1.5",
     "graphviz>=0.20.1",
-    "pytest-check-links",
     "pytest",
     "toml",
     "watchfiles",
     "graphviz>=0.20.1",
-    "pytest-check-links",
     "toml",
     "mistune<3.1",
     "pl-series-hash==0.2.1",
@@ -311,6 +309,21 @@ datacompy = [
     "datacompy>=0.15.0",
 ]
 
+# Docs link-checking only. pytest-check-links declares its pytest_collect_file
+# hook with the legacy `path` argument that pytest 9 removed from the hookspec,
+# so under pytest >= 9 it raises PluginValidationError at startup and aborts
+# collection for the *whole* suite. Version 0.10.1 caps pytest < 9 in its own
+# metadata; 0.9.1 does not, so an unconstrained resolve against pytest 9 (the
+# Max Versions matrix) backtracks to 0.9.1 and reintroduces the break. pytest-
+# check-links is not a buckaroo runtime dependency — only the CheckDocs job runs
+# `pytest --check-links` — so it lives in its own group (kept out of the shared
+# dev deps and the Max Versions matrix). Pin >= 0.10.1 plus an explicit
+# pytest < 9 belt to guard against a future release dropping the cap.
+linkcheck = [
+    "pytest-check-links>=0.10.1",
+    "pytest<9",
+]
+
 release = [
     "anthropic>=0.40.0",
 ]
@@ -333,11 +346,9 @@ dev = [
     "solara[pytest]; python_version < '3.14'",
     "sphinx>=1.5",
     "graphviz>=0.20.1",
-    "pytest-check-links",
     "toml",
     "watchfiles",
     "graphviz>=0.20.1",
-    "pytest-check-links",
     "toml",
     "marimo>=0.19.7"
 ]
