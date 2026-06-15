@@ -89,7 +89,7 @@ def perf_span(label: str, **fields):
             fields = {**fields, "errored": "true"}
         suffix = _fmt_fields(fields)
         log.info("perf span=%s secs=%.4f%s", label, secs,
-                 f" {suffix}" if suffix else "")
+            f" {suffix}" if suffix else "")
 
 
 class PerfRecorder:
@@ -126,4 +126,4 @@ class PerfRecorder:
         slowest = sorted(self.rows, key=lambda r: -r[3])[:top_n]
         for phase, column, stat, secs in slowest:
             log.info("perf   slow phase=%s col=%s stat=%s secs=%.4f",
-                     phase, column, stat, secs)
+                phase, column, stat, secs)
