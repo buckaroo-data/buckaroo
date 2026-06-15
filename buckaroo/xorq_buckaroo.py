@@ -29,6 +29,7 @@ from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import Sampling
 from .df_util import old_col_new_col
+from .pluggable_analysis_framework import perf_log
 from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from .pluggable_analysis_framework.xorq_stat_pipeline import XorqDfStatsV2
 from .serialization_utils import pd_to_obj, to_parquet
@@ -167,10 +168,11 @@ class XorqDataflow(CustomizableDataflow):
                     'rewritten_col_name': rewritten_col}
             return empty, {}
         cache_storage = getattr(self, 'cache_storage', None)
-        stats = self.DFStatsClass(
-            processed_df, self.analysis_klasses, self.df_name,
-            debug=self.debug, cache_storage=cache_storage,
-            skip_columns=getattr(self, 'skip_stat_columns', None))
+        with perf_log.perf_span("firstpull.summary_stats"):
+            stats = self.DFStatsClass(
+                processed_df, self.analysis_klasses, self.df_name,
+                debug=self.debug, cache_storage=cache_storage,
+                skip_columns=getattr(self, 'skip_stat_columns', None))
         sdf = stats.sdf
         if stats.errs:
             if self.debug:
@@ -276,6 +278,11 @@ def window_to_parquet(processed_df, start, end, sort_col=None, ascending=True) -
     ``handle_infinite_request_xorq`` (WebSocket binary frame). Lifted
     to module level so both transports drive one push-down path.
     """
+    with perf_log.perf_span("firstpull.window_to_parquet", start=start, end=end):
+        return _window_to_parquet(processed_df, start, end, sort_col, ascending)
+
+
+def _window_to_parquet(processed_df, start, end, sort_col, ascending) -> bytes:
     if _is_pandas(processed_df):
         if sort_col is not None:
             processed_df = processed_df.sort_values(by=[sort_col], ascending=ascending)

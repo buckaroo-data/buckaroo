@@ -15,6 +15,7 @@ import pandas as pd
 
 from buckaroo.df_util import old_col_new_col
 
+from . import perf_log
 from .col_analysis import ColAnalysis, ErrDict, SDType
 from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqExpr, XorqExecute, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
 from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator
@@ -195,13 +196,18 @@ class StatPipeline:
     def ordered_a_objs(self):
         return list(self._original_inputs)
 
-    def __init__(self, stat_funcs: list, unit_test: bool = True, record_timings: bool = False):
+    def __init__(self, stat_funcs: list, unit_test: bool = True, record_timings: Optional[bool] = None):
         self.all_stat_funcs = _normalize_inputs(stat_funcs)
         self._original_inputs = list(stat_funcs)
-        self.record_timings = record_timings
+        # Default to the global perf toggle; an explicit True/False (e.g. from
+        # scripts/perf/perf_bench.py) always wins.
+        self.record_timings = perf_log.enabled() if record_timings is None else record_timings
         # When record_timings is True: list of (column, stat_name, seconds) tuples
         # captured during the most recent process_df call.
         self.timings: List[Tuple[str, str, float]] = []
+        # Set during the unit_test() DAG self-check so its PERVERSE_DF run
+        # doesn't emit a perf summary.
+        self._suppress_perf_summary = False
 
         # Validate the full DAG (raises DAGConfigError if invalid)
         self.ordered_stat_funcs = build_typed_dag(
@@ -295,10 +301,18 @@ class StatPipeline:
             summary[rewritten_col_name] = col_result
             all_errors.extend(col_errors)
 
+        if self.record_timings and perf_log.enabled() and not self._suppress_perf_summary:
+            rec = perf_log.PerfRecorder(label=f"stats rows={len(df)} cols={len(summary)}")
+            rec.extend_timings("pandas/polars", self.timings)
+            rec.summary()
+
         return summary, all_errors
 
     def unit_test(self) -> Tuple[bool, List[StatError]]:
         """Test the pipeline against PERVERSE_DF."""
+        # The DAG self-check runs the pipeline against the 10-row PERVERSE_DF.
+        # Don't let that emit a perf summary — it's not a real data pull.
+        self._suppress_perf_summary = True
         try:
             _, errors = self.process_df(PERVERSE_DF)
             if not errors:
@@ -306,6 +320,8 @@ class StatPipeline:
             return False, errors
         except Exception:
             return False, []
+        finally:
+            self._suppress_perf_summary = False
 
     def add_stat(self, stat_func_or_class) -> Tuple[bool, List[StatError]]:
         """Add a stat function or ColAnalysis class interactively.
