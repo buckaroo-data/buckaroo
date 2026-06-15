@@ -262,7 +262,6 @@ dev = [
     { name = "pyarrow", version = "22.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "pydantic" },
     { name = "pytest" },
-    { name = "pytest-check-links" },
     { name = "pytest-playwright" },
     { name = "ruff" },
     { name = "solara", extra = ["pytest"], marker = "python_full_version < '3.14'" },
@@ -344,7 +343,6 @@ dev = [
     { name = "pyarrow", version = "21.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "pyarrow", version = "22.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "pydantic" },
-    { name = "pytest-check-links" },
     { name = "pytest-playwright" },
     { name = "ruff" },
     { name = "solara", extra = ["pytest"], marker = "python_full_version < '3.14'" },
@@ -352,6 +350,10 @@ dev = [
     { name = "toml" },
     { name = "watchfiles", version = "1.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "watchfiles", version = "1.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
+]
+linkcheck = [
+    { name = "pytest" },
+    { name = "pytest-check-links" },
 ]
 release = [
     { name = "anthropic" },
@@ -411,7 +413,6 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'test'", specifier = ">=2.5.2" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=6" },
-    { name = "pytest-check-links", marker = "extra == 'dev'" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=3" },
     { name = "pytest-playwright", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.2" },
@@ -446,7 +447,6 @@ dev = [
     { name = "polars", extras = ["timezone"] },
     { name = "pyarrow" },
     { name = "pydantic", specifier = ">=2.5.2" },
-    { name = "pytest-check-links" },
     { name = "pytest-playwright" },
     { name = "ruff", specifier = ">=0.6.2" },
     { name = "solara", marker = "python_full_version < '3.14'" },
@@ -454,6 +454,10 @@ dev = [
     { name = "sphinx", specifier = ">=1.5" },
     { name = "toml" },
     { name = "watchfiles" },
+]
+linkcheck = [
+    { name = "pytest", specifier = "<9" },
+    { name = "pytest-check-links", specifier = ">=0.10.1" },
 ]
 release = [{ name = "anthropic", specifier = ">=0.40.0" }]
 
