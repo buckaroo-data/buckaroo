@@ -43,10 +43,21 @@ class ABCDataflow(HasTraits, Generic[FrameT], metaclass=_ABCMetaHasTraits):
     processed_sd: Dict[str, Any]
     merged_sd: Dict[str, Any]
     widget_args_tuple: Any
-    # The fully-processed frame the widget renders, in the backend's own
-    # type (``None`` before the pipeline has run, or for lazy backends
-    # that never materialize).
-    processed_df: Optional[FrameT]
+
+    @property
+    @abstractmethod
+    def processed_df(self) -> Optional[FrameT]:
+        """The fully-processed frame the widget renders, in the backend's
+        own type (``None`` before the pipeline has run, or for lazy
+        backends that never materialize).
+
+        A read-only computed property in every implementation — eager
+        backends derive it from ``processed_result``; the lazy
+        ``ColumnExecutorDataflow`` never materializes and returns ``None``.
+        Declared as a property (not a plain attribute) so those
+        ``@property`` overrides are a compatible, like-for-like override.
+        """
+        ...
 
     @abstractmethod
     def populate_df_meta(self) -> None:

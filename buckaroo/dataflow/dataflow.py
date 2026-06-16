@@ -269,6 +269,11 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
         # Skip when neither the dataframe nor analysis_klasses has actually
         # changed since the last run. See issue #709.
         df = self.processed_df
+        if df is None:
+            # Nothing to summarize before the pipeline has produced a frame.
+            # Matches the guards in _merged_sd and _populate_sd_cache, and
+            # narrows Optional[DataFrameT] -> DataFrameT for _get_summary_sd.
+            return
         klasses = self.analysis_klasses
         if (id(df), id(klasses)) == self._summary_sd_cache_key:
             return
