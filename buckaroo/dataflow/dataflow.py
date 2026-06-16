@@ -44,13 +44,17 @@ class DfTrait(Any):
 
     def set(self, obj, value):
         new_value = self._validate(obj, value)
+        # self.name is Optional[str] in the traitlets stubs (None until the
+        # metaclass binds the trait to a class), but it is always set by the
+        # time set() runs on an instance.
+        name = cast(str, self.name)
         try:
-            old_value = obj._trait_values[self.name]
+            old_value = obj._trait_values[name]
         except KeyError:
             old_value = self.default_value
-        obj._trait_values[self.name] = new_value
+        obj._trait_values[name] = new_value
         if old_value is not new_value:
-            obj._notify_trait(self.name, old_value, new_value)
+            obj._notify_trait(name, old_value, new_value)
     
 class Autocleaning(Protocol):
     """Structural interface the dataflow pipeline calls on ``self.ac_obj``.
