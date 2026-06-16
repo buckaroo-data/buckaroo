@@ -1,0 +1,17 @@
+{
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.11",
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": false,
+  "include": [
+    "buckaroo/dataflow/df_types.py",
+    "buckaroo/dataflow/abc_dataflow.py",
+    "buckaroo/dataflow/dataflow.py",
+    "buckaroo/dataflow/column_executor_dataflow.py",
+    "buckaroo/buckaroo_widget.py",
+    "buckaroo/polars_buckaroo.py",
+    "buckaroo/xorq_buckaroo.py",
+    "buckaroo/server/data_loading.py",
+    "buckaroo/server/data_loading_polars.py"
+  ]
+}
