@@ -48,13 +48,7 @@ not on the traits.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar
-
-import pandas as pd
-
-if TYPE_CHECKING:
-    import polars as pl
-    from xorq.vendor.ibis.expr.types.relations import Table as XorqExpr
+from typing import Any, Protocol, TypeVar
 
 
 class DataFrameLike(Protocol):
@@ -95,11 +89,4 @@ FrameT = TypeVar("FrameT")
 #: three (see module docstring), so the bound is structural.
 DataFrameT = TypeVar("DataFrameT", bound=DataFrameLike)
 
-#: The concrete frame types a dataflow may carry, for the rare call site
-#: that must accept *any* backend (e.g. a backend-detection helper) rather
-#: than a single bound ``DataFrameT``. Prefer ``DataFrameT`` inside the
-#: dataflow classes themselves; reach for this only at backend-dispatch
-#: boundaries.
-AnyDataFrame: TypeAlias = "pd.DataFrame | pl.DataFrame | XorqExpr"
-
-__all__ = ["FrameT", "DataFrameT", "DataFrameLike", "AnyDataFrame"]
+__all__ = ["FrameT", "DataFrameT", "DataFrameLike"]
