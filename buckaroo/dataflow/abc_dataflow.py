@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
-from typing import Any, Dict, Generic, List, Optional, Type
+from typing import Any, Generic, List, Optional, Type
 
 from traitlets import HasTraits, MetaHasTraits
 
@@ -30,18 +30,29 @@ class ABCDataflow(HasTraits, Generic[FrameT], metaclass=_ABCMetaHasTraits):
     """
 
     # Baseline interface expected by Buckaroo widgets and extensions.
+    #
+    # The synced/computed wire attributes below are declared ``Any`` on
+    # purpose. Every concrete dataflow backs them with a traitlets trait
+    # (``Dict(...)`` / ``Any(...)``) or a ``@property``, and a traitlets
+    # descriptor returns ``Any`` on instance access. Declaring a concrete
+    # ``Dict[str, Any]`` here only fights the descriptor protocol: the
+    # subclass trait/property reads as an incompatible override, and a write
+    # (``self.summary_sd = ...``) reads as an illegal assignment. What these
+    # document is "this name exists on every dataflow"; each trait's actual
+    # shape lives with its definition. Same rationale as the frame-carrying
+    # methods in ``df_types`` — type where it's sound, not on the traits.
     analysis_klasses: List[Type[ColAnalysis]]
-    df_data_dict: Dict[str, Any]
-    df_display_args: Dict[str, Any]
-    df_meta: Dict[str, Any]
-    buckaroo_options: Dict[str, Any]
-    command_config: Dict[str, Any]
+    df_data_dict: Any
+    df_display_args: Any
+    df_meta: Any
+    buckaroo_options: Any
+    command_config: Any
     operations: Any
-    operation_results: Dict[str, Any]
-    summary_sd: Dict[str, Any]
-    cleaned_sd: Dict[str, Any]
-    processed_sd: Dict[str, Any]
-    merged_sd: Dict[str, Any]
+    operation_results: Any
+    summary_sd: Any
+    cleaned_sd: Any
+    processed_sd: Any
+    merged_sd: Any
     widget_args_tuple: Any
 
     @property

@@ -391,9 +391,11 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
             'rows_shown': min(len(self.processed_df), self.sampling_klass.serialize_limit),  
             'total_rows': len(self.orig_df)}
 
-    #typing compalins about this, but so far as this class is concerned, buckaroo_options follows theBuckarooOptions type
-    # typing doesn't get along well with traitlets
-    buckaroo_options:BuckarooOptions = Dict({'sampled': ['random'], 'auto_clean': ['aggressive', 'conservative'],
+    # buckaroo_options is BuckarooOptions-shaped at runtime, but it's a
+    # traitlets ``Dict`` trait, so we let it inherit the base ``Any`` rather
+    # than annotate ``: BuckarooOptions`` — the descriptor value can't
+    # satisfy that declared type. See ABCDataflow's wire-attribute note.
+    buckaroo_options = Dict({'sampled': ['random'], 'auto_clean': ['aggressive', 'conservative'],
         'post_processing': [], 'df_display': ['main', 'summary'], 'show_commands': ['on'], 'summary_stats': ['all']}).tag(sync=True)
 
     def setup_options_from_analysis(self):
