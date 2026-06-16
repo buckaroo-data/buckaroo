@@ -39,7 +39,7 @@ class PolarsServerSampling(PLSampling):
     serialize_limit = -1  # infinite mode — no per-page sample cap
 
 
-class PolarsServerDataflow(CustomizableDataflow):
+class PolarsServerDataflow(CustomizableDataflow[pl.DataFrame]):
     """Headless polars dataflow matching ``PolarsBuckarooInfiniteWidget``."""
     analysis_klasses = local_analysis_klasses
     autocleaning_klass = PandasAutocleaning
