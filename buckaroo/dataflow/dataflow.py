@@ -1,4 +1,6 @@
-from typing import List, Literal, Tuple, Type, TypedDict, Dict as TDict, Any as TAny, Union
+from typing import (
+    Generic, List, Literal, Optional, Tuple, Type, TypedDict, cast,
+    Dict as TDict, Any as TAny, Union)
 from typing_extensions import override
 import six
 import warnings
@@ -21,6 +23,7 @@ from .styling_core import (
 
 
 from .abc_dataflow import ABCDataflow
+from .df_types import DataFrameT
 from .sd_cache import hash_chain, split_chain_by_scope
 
 
@@ -49,7 +52,7 @@ class DfTrait(Any):
         if old_value is not new_value:
             obj._notify_trait(self.name, old_value, new_value)
     
-class DataFlow(ABCDataflow):
+class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
     """This class is meant to only represent the dataflow through
     buckaroo with no accomodation for widget particulars
 
@@ -133,7 +136,7 @@ class DataFlow(ABCDataflow):
 
 
     
-    def _compute_sampled_df(self, raw_df:pd.DataFrame, sample_method:str):
+    def _compute_sampled_df(self, raw_df: DataFrameT, sample_method: str) -> DataFrameT:
         if sample_method == "first":
             return raw_df[:1]
         return raw_df
@@ -192,9 +195,13 @@ class DataFlow(ABCDataflow):
             self._in_operation_result = False
 
     @property
-    def cleaned_df(self):
+    def cleaned_df(self) -> Optional[DataFrameT]:
+        # traitlets descriptors return Any on access, so the element type
+        # of the ``cleaned`` tuple is opaque to the checker — cast to the
+        # frame type this dataflow is bound to.
         if self.cleaned is not None:
-            return self.cleaned[0]
+            return cast(DataFrameT, self.cleaned[0])
+        return None
 
     @property
     def cleaned_sd(self):
@@ -212,8 +219,10 @@ class DataFlow(ABCDataflow):
         if self.cleaned is not None:
             return self.cleaned[3]
 
-    def _compute_processed_result(self, cleaned_df, post_processing_method):
-        return [cleaned_df, {}]
+    def _compute_processed_result(
+            self, cleaned_df: DataFrameT,
+            post_processing_method: str) -> Tuple[DataFrameT, SDType]:
+        return (cleaned_df, {})
 
     def populate_df_meta(self):
         pass
@@ -226,9 +235,9 @@ class DataFlow(ABCDataflow):
         self.populate_df_meta()
 
     @property
-    def processed_df(self):
+    def processed_df(self) -> Optional[DataFrameT]:
         if self.processed_result is not None:
-            return self.processed_result[0]
+            return cast(DataFrameT, self.processed_result[0])
         return None
 
     @property
@@ -237,14 +246,14 @@ class DataFlow(ABCDataflow):
             return self.processed_result[1]
         return {}
 
-    def _get_summary_sd(self, df:pd.DataFrame) -> Tuple[SDType, TAny]:
+    def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, TAny]:
         analysis_klasses = self.analysis_klasses
         if analysis_klasses == "foo":
             return {'some-col': {'foo':8}}, {}
         if analysis_klasses == "bar":
             return {'other-col': {'bar':10}}, {}
         ret_summary = {}
-        for col in df.columns:
+        for col in processed_df.columns:
             ret_summary[col] = {}
         return ret_summary, {}
 
@@ -298,9 +307,14 @@ BuckarooOptions = TypedDict('BuckarooOptions', {
     'summary_stats': List[str]})
 
     
-class CustomizableDataflow(DataFlow):
+class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     """
     This allows targetd extension and customization of DataFlow
+
+    Still generic on ``DataFrameT``: both the pandas and polars backends
+    use this class directly (bound to ``pd.DataFrame`` / ``pl.DataFrame``
+    respectively), and ``XorqDataflow`` subclasses it as
+    ``CustomizableDataflow[XorqExpr]``.
     """
     #analysis_klasses = [StylingAnalysis]
     analysis_klasses: List[Type[ColAnalysis]] = [StylingAnalysis]
@@ -609,7 +623,9 @@ class CustomizableDataflow(DataFlow):
     ### end code interpeter block
 
     @override
-    def _compute_processed_result(self, cleaned_df:pd.DataFrame, post_processing_method:str) -> Tuple[pd.DataFrame, SDType]:
+    def _compute_processed_result(
+            self, cleaned_df: DataFrameT,
+            post_processing_method: str) -> Tuple[DataFrameT, SDType]:
         if post_processing_method == '':
             return (cleaned_df, {})
         else:
@@ -618,16 +634,19 @@ class CustomizableDataflow(DataFlow):
                 ret_df, sd = post_analysis.post_process_df(cleaned_df)
                 return (ret_df, sd)
             except Exception as e:
-                return (self._build_error_dataframe(e), {})
+                # Error frames are always pandas regardless of backend — the
+                # styling layer renders them through the pandas path. The cast
+                # documents that intentional impurity in the DataFrameT contract.
+                return (cast(DataFrameT, self._build_error_dataframe(e)), {})
 
-    def _build_error_dataframe(self, e):
+    def _build_error_dataframe(self, e) -> pd.DataFrame:
         return pd.DataFrame({'err': [str(e)]})
 
 
     ### start summary stats block
     #TAny closer to some error type
     @override
-    def _get_summary_sd(self, processed_df:pd.DataFrame) -> Tuple[SDType, TDict[str, TAny]]:
+    def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, TDict[str, TAny]]:
         stats = self.DFStatsClass(
             processed_df,
             self.analysis_klasses,
@@ -659,7 +678,7 @@ class CustomizableDataflow(DataFlow):
         keep = wire_stat_keys(self.df_display_klasses.values(), self.pinned_rows)
         return sd_to_parquet_b64(project_sd(sd, keep))
 
-    def _df_to_obj(self, df:pd.DataFrame) -> TDict[str, TAny]:
+    def _df_to_obj(self, df: DataFrameT) -> TDict[str, TAny]:
         return pd_to_obj(self.sampling_klass.serialize_sample(df))
     
     def add_analysis(self, analysis_klass:Type[ColAnalysis]) -> None:

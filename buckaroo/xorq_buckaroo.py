@@ -14,9 +14,12 @@ import logging
 import traceback
 import weakref
 from io import BytesIO
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from xorq.vendor.ibis.expr.types.relations import Table as XorqExpr
 import pyarrow as pa
 import pyarrow.parquet as pq
 from traitlets import Unicode
@@ -129,7 +132,7 @@ class XorqAutocleaning(PandasAutocleaning):
     """
 
 
-class XorqDataflow(CustomizableDataflow):
+class XorqDataflow(CustomizableDataflow["XorqExpr"]):
     """Dataflow specialised for ibis/xorq expression inputs.
 
     Two pieces of behaviour differ from the pandas dataflow:
@@ -156,7 +159,7 @@ class XorqDataflow(CustomizableDataflow):
             'rows_shown': rows_shown,
             'total_rows': _expr_count(self.orig_df)}
 
-    def _get_summary_sd(self, processed_df):
+    def _get_summary_sd(self, processed_df: "XorqExpr | pd.DataFrame"):
         if _is_pandas(processed_df):
             # The error path (and any postprocessor that returns a pandas
             # DataFrame) doesn't go through XorqStatPipeline. Return a

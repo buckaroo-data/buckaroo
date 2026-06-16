@@ -11,7 +11,7 @@ import os
 import sys
 import traceback
 from datetime import datetime
-from typing import Literal, Union
+from typing import Any as TAny, ClassVar, Literal, Type, Union
 import pandas as pd
 import json
 import logging
@@ -34,6 +34,10 @@ from .dataflow.dataflow_extras import (Sampling, exception_protect)
 from .dataflow.styling_core import (ComponentConfig, DFViewerConfig, DisplayArgs, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
 from .dataflow.autocleaning import PandasAutocleaning
 from pathlib import Path
+
+# pandas backend binding of the generic dataflow. Mirrors PolarsDataflow
+# (polars_buckaroo) and XorqDataflow (xorq_buckaroo).
+PandasDataflow = CustomizableDataflow[pd.DataFrame]
 
 logger = logging.getLogger()
 
@@ -184,7 +188,10 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
     DFStatsClass = DfStatsV2 # Pandas Specific
     autoclean_conf = tuple([CleaningConf, NoCleaningConf]) #override the base CustomizableDataFlow conf
-    dataflow_klass = CustomizableDataflow
+    # The composed dataflow's backend binding. Typed broadly here (one slot,
+    # specialised per backend subclass) — the precise binding lives in the
+    # named alias/subclass assigned: PandasDataflow / PolarsDataflow / XorqDataflow.
+    dataflow_klass: ClassVar[Type[CustomizableDataflow[TAny]]] = PandasDataflow
 
 
     df_data_dict = Dict({}).tag(sync=True)

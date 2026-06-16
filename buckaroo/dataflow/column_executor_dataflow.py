@@ -27,8 +27,14 @@ if TYPE_CHECKING:
     from buckaroo.file_cache.batch_planning import PlanningFunction
 
 
-class ColumnExecutorDataflow(ABCDataflow):
+class ColumnExecutorDataflow(ABCDataflow[pl.LazyFrame]):
     """A minimal DataFlow focused on column-executor-driven summary stats for Polars LazyFrames.
+
+    Binds the abstract base's unbounded ``FrameT`` to ``pl.LazyFrame``. A
+    LazyFrame is never materialised, so it cannot meet the eager
+    ``DataFrameLike`` contract (no ``len`` / row-slice) — which is why this
+    class inherits ``ABCDataflow`` directly rather than the eager
+    ``CustomizableDataflow`` body, and supplies its own executor pipeline.
 
     - Works with a LazyFrame and avoids materializing the dataframe on load.
 
@@ -364,7 +370,9 @@ class ColumnExecutorDataflow(ABCDataflow):
                     # Don't re-raise, let it fail silently and use defaults
 
     @property
-    def processed_df(self) -> Any:
+    def processed_df(self) -> Optional[pl.LazyFrame]:
+        # Lazy: the frame is never materialised, so there is no processed
+        # frame to render. Always None (matches ABCDataflow's Optional[FrameT]).
         return None
 
     @observe('merged_sd')

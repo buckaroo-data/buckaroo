@@ -3,22 +3,30 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, Generic, List, Optional, Type
 
 from traitlets import HasTraits, MetaHasTraits
 
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
+
+from .df_types import FrameT
 
 
 class _ABCMetaHasTraits(ABCMeta, MetaHasTraits):
     pass
 
 
-class ABCDataflow(HasTraits, metaclass=_ABCMetaHasTraits):
+class ABCDataflow(HasTraits, Generic[FrameT], metaclass=_ABCMetaHasTraits):
     """
     Abstract base for dataflow implementations.
     Reference implementations: DataFlow and CustomizableDataflow.
     Other implementations (e.g., ColumnExecutorDataflow) should conform.
+
+    Generic on ``FrameT`` — the (unbounded) carrier type, so this umbrella
+    covers both the eager subtree (``DataFlow`` / ``CustomizableDataflow``,
+    which narrow to the ``DataFrameLike``-bound ``DataFrameT``) and the lazy
+    ``ColumnExecutorDataflow`` (``ABCDataflow[pl.LazyFrame]``). See
+    ``df_types`` for the ``FrameT`` / ``DataFrameT`` split.
     """
 
     # Baseline interface expected by Buckaroo widgets and extensions.
@@ -35,9 +43,10 @@ class ABCDataflow(HasTraits, metaclass=_ABCMetaHasTraits):
     processed_sd: Dict[str, Any]
     merged_sd: Dict[str, Any]
     widget_args_tuple: Any
-    processed_df: Any
-    
-    analysis_klasses: List[Type[ColAnalysis]]
+    # The fully-processed frame the widget renders, in the backend's own
+    # type (``None`` before the pipeline has run, or for lazy backends
+    # that never materialize).
+    processed_df: Optional[FrameT]
 
     @abstractmethod
     def populate_df_meta(self) -> None:
