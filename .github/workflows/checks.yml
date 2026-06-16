@@ -34,6 +34,41 @@ jobs:
       - name: Run paddy-format check
         run: find buckaroo tests scripts -type f -name "*.py" -not -path "buckaroo/jlisp/lispy.py" -print0 | xargs -0 uv run python scripts/paddy_format.py --check
 
+  # Non-blocking static type check (continue-on-error) over the files touched
+  # by the dataflow generic-typing work. Scoped + standard mode are both
+  # deliberate: pyrightconfig.typecheck.json lists exactly those files and runs
+  # basedpyright's "standard" mode rather than its stricter "recommended"
+  # default, so the signal stays on real type errors instead of third-party
+  # stub noise. Editors keep using the [tool.basedpyright] block in
+  # pyproject.toml — that file's name is not auto-discovered.
+  TypeCheck:
+    name: Python / Typecheck (non-blocking)
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install the project
+        # --all-extras so basedpyright can resolve polars/xorq/pyarrow imports.
+        run: uv sync --locked --all-extras --dev
+      - name: Run basedpyright (scoped, informational)
+        # Informational only: these files carry a large pre-existing backlog of
+        # standard-mode diagnostics, so the step is forced green and the totals
+        # go to the job summary. The full report is in the step log. `|| true`
+        # keeps the check green; job-level continue-on-error covers setup steps.
+        run: |
+          uv run --with basedpyright==1.39.8 basedpyright --project pyrightconfig.typecheck.json 2>&1 | tee bpr.log || true
+          {
+            echo "## basedpyright (standard mode, dataflow typing files — non-blocking)"
+            echo '```'
+            tail -n 1 bpr.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   TestJS:
     name: JS / Build + Test
     runs-on: depot-ubuntu-latest
