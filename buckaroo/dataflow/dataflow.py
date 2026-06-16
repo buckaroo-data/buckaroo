@@ -1,5 +1,5 @@
 from typing import (
-    Generic, List, Literal, Optional, Tuple, Type, TypedDict, cast,
+    Generic, List, Literal, Optional, Protocol, Tuple, Type, TypedDict, cast,
     Dict as TDict, Any as TAny, Union)
 from typing_extensions import override
 import six
@@ -52,6 +52,25 @@ class DfTrait(Any):
         if old_value is not new_value:
             obj._notify_trait(self.name, old_value, new_value)
     
+class Autocleaning(Protocol):
+    """Structural interface the dataflow pipeline calls on ``self.ac_obj``.
+
+    The eager backends (``PandasAutocleaning`` and the polars/xorq variants)
+    supply all of it. The bare-pipeline ``SentinelAutocleaning`` implements
+    only the subset the stub path touches (``command_config`` /
+    ``handle_ops_and_clean``), so ``ac_obj`` is cast to this Protocol at
+    construction — the code-interpreter members below are reached only via
+    ``CustomizableDataflow``, which always runs on a real backend.
+    """
+    command_config: TAny
+    config_dict: TAny
+    def handle_ops_and_clean(self, df: TAny, cleaning_method: TAny,
+                             quick_command_args: TAny, existing_operations: TAny) -> TAny: ...
+    def add_command(self, incomingCommandKls: TAny) -> TAny: ...
+    def _run_df_interpreter(self, df: TAny, operations: TAny, initial_sd: TAny) -> TAny: ...
+    def run_code_generator(self, operations: TAny) -> TAny: ...
+
+
 class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
     """This class is meant to only represent the dataflow through
     buckaroo with no accomodation for widget particulars
@@ -74,7 +93,10 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
         super().__init__()
         self.summary_sd = {}
         self.existing_operations = []
-        self.ac_obj = self.autocleaning_klass(self.autoclean_conf)
+        # SentinelAutocleaning (the bare default) implements only part of the
+        # Autocleaning interface; the real backends supply all of it. Cast so
+        # the code-interpreter methods type-check on the customizable path.
+        self.ac_obj = cast(Autocleaning, self.autocleaning_klass(self.autoclean_conf))
         self.command_config = self.ac_obj.command_config
         try:
             self.raw_df = raw_df
