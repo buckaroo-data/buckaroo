@@ -89,7 +89,9 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
     
     """
     def __init__(self, raw_df):
-        self.exception = None
+        # Set by exception_protect handlers (see dataflow_extras) to
+        # sys.exc_info() when a trait-observer cascade fails; None until then.
+        self.exception: Optional[Tuple[TAny, TAny, TAny]] = None
         super().__init__()
         self.summary_sd = {}
         self.existing_operations = []
@@ -101,6 +103,10 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
         try:
             self.raw_df = raw_df
         except Exception:
+            if self.exception is None:
+                # No handler stored the original exc_info — propagate the
+                # current exception rather than subscripting None.
+                raise
             six.reraise(self.exception[0], self.exception[1], self.exception[2])
 
     autocleaning_klass = SentinelAutocleaning
