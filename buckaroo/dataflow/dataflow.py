@@ -105,7 +105,12 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
     post_processing_method = Unicode('').tag(default='')
     processed_result = DfTrait().tag(default=None)
 
-    analysis_klasses = None
+    # Bare-pipeline stub: no analyses by default. ``[]`` (not ``None``) so the
+    # type stays ``List[Type[ColAnalysis]]`` end-to-end — CustomizableDataflow
+    # narrows it to a real list, and nothing relies on a None sentinel (reads
+    # are id()-based cache keys and the dead "foo"/"bar" test branches below,
+    # all of which treat None and [] alike).
+    analysis_klasses: List[Type[ColAnalysis]] = []
     summary_sd = Any()
     df_meta = Any()
 
