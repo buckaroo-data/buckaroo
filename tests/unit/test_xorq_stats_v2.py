@@ -22,6 +22,10 @@ from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (  # noqa: 
 from buckaroo.pluggable_analysis_framework.stat_func import stat  # noqa: E402
 from buckaroo.customizations.xorq_stats_v2 import (  # noqa: E402
     XORQ_STATS_V2)
+from buckaroo.pluggable_analysis_framework.perf_smoke import (  # noqa: E402
+    SMOKE_FRAME_MAKERS)
+from buckaroo.pluggable_analysis_framework.perf_smoke_xorq import (  # noqa: E402
+    run_xorq_perf_smoke)
 
 
 def _make_table():
@@ -1057,3 +1061,36 @@ class TestMaterializeHeuristic:
         stats, _ = self._run(src, tmp_path)
         assert stats["materialized"] is True, (
             f"a {shape} source carries an expensive chain — materialize once (#915)")
+
+
+# ============================================================
+# Perf smoke (see perf_smoke_test.py for the pandas/polars half —
+# these live here for the module-level xorq importorskip guard)
+# ============================================================
+
+def test_xorq_batch_stats_measured():
+    # Batch aggregate stats never execute inside their own python func; the
+    # xorq runner times each one as its own single-expression aggregate.
+    result = run_xorq_perf_smoke(XORQ_STATS_V2, rows=2_000,
+        frames={"base": SMOKE_FRAME_MAKERS["base"]})
+    measured = {m.stat_name for m in result.measurements}
+    assert {"min", "mean"} <= measured  # batch aggregates, individually executed
+    assert "histogram" in measured  # post-batch expression stat via the pipeline
+
+
+def test_xorq_slow_stat_flagged():
+    # Deterministic CPU burn standing in for a pathological post-batch stat.
+    @stat()
+    def xorq_slow_post(length: int) -> int:
+        total = 0
+        for _ in range(length):
+            for _ in range(5_000):
+                total += 1
+        return total
+
+    result = run_xorq_perf_smoke(list(XORQ_STATS_V2) + [xorq_slow_post], rows=2_000,
+        frames={"base": SMOKE_FRAME_MAKERS["base"]})
+    assert result.passed is False
+    time_findings = [f for f in result.findings
+        if f.kind == "time" and f.stat_name == "xorq_slow_post"]
+    assert time_findings
