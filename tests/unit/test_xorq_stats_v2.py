@@ -5,11 +5,9 @@ ibis-framework or remote backend required. Skipped if xorq is not
 installed.
 """
 
-import glob
 import logging
 import math
 import os
-import tempfile
 
 import pandas as pd
 import pytest
@@ -44,11 +42,6 @@ def _make_table_categorical():
     return xo.memtable(
         pd.DataFrame(
             {"cat": ["a", "a", "a", "b", "b", "c", "d", "e", "f", "g", "h"]}))
-
-
-def _tmp_mat_files():
-    """Temp parquets written by _create_base_table's streaming path (#922)."""
-    return set(glob.glob(os.path.join(tempfile.gettempdir(), "buckaroo_mat_*.parquet")))
 
 
 # ============================================================
@@ -697,192 +690,6 @@ class TestBackendThreading:
         ), f"histogram is recomputing min/max; saw {backend.calls} queries"
 
 
-class TestMaterialization:
-    """Lazy filter/clean chains get materialized to a fresh DataFusion table
-    so per-column histogram queries don't re-execute the chain N times."""
-
-    def test_skipped_for_base_tables(self):
-        """A registered base table shouldn't be re-materialized — that's
-        pure overhead with no filter chain to amortize."""
-        con = xo.connect()
-        df = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6, 7], "y": list("abcdefg")})
-        t = con.create_table("t_mat_skip", df)
-        before = set(con.list_tables())
-        pipeline = XorqStatPipeline(XORQ_STATS_V2)
-        pipeline.process_table(t)
-        new = set(con.list_tables()) - before
-        leaked = [n for n in new if n.startswith("__buckaroo_histo_mat")]
-        assert leaked == [], f"materialization fired for a base table: {leaked}"
-
-    def test_materialized_table_dropped_after_call(self):
-        """Materialized tables created for filter chains are cleaned up
-        so the backend connection doesn't accumulate temp tables — and the
-        streamed temp parquet backing them goes with them (#922)."""
-        con = xo.connect()
-        df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
-        t = con.create_table("t_mat_filt", df)
-        filt = t.filter(t.v > 1)  # lazy chain → triggers materialization
-        before = set(con.list_tables())
-        before_files = _tmp_mat_files()
-        pipeline = XorqStatPipeline(XORQ_STATS_V2)
-        pipeline.process_table(filt)
-        leaked = [n for n in (set(con.list_tables()) - before)
-                  if n.startswith("__buckaroo_histo_mat")]
-        assert leaked == [], f"materialized table not cleaned up: {leaked}"
-        leaked_files = _tmp_mat_files() - before_files
-        assert leaked_files == set(), f"temp parquet not cleaned up: {leaked_files}"
-
-    def test_streaming_path_bypasses_create_table(self):
-        """#922: a worthy source must land via a streamed temp parquet +
-        read_parquet, never CREATE TABLE AS SELECT — DataFusion materialises
-        CTAS results into an in-memory table in its Rust heap (12+ GB RSS on
-        a 167M-row filtered scan)."""
-        from unittest.mock import patch
-
-        con = xo.connect()
-        df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
-        t = con.create_table("t_stream_src", df)
-        filt = t.filter(t.v > 1)
-        pipeline = XorqStatPipeline(XORQ_STATS_V2)
-        with patch.object(type(con), "create_table",
-            side_effect=RuntimeError("CTAS path used")) as ctas:
-            stats, errors = pipeline.process_table(filt)
-        assert ctas.call_count == 0, (
-            "materialization went through create_table (in-memory CTAS) "
-            "instead of the streamed-parquet path")
-        assert errors == []
-        assert stats["v"]["length"] == 6
-
-    def test_to_parquet_failure_falls_back_with_warning(self, caplog):
-        """A failed streaming write must fall back to in-engine create_table
-        and warn — silently reverting changes the run's memory profile ~6x
-        (never-silent precedent, #910). The partial temp file must not leak."""
-        from unittest.mock import patch
-
-        import xorq.expr.api as xorq_expr_api
-
-        con = xo.connect()
-        df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
-        t = con.create_table("t_fallback_src", df)
-        filt = t.filter(t.v > 1)
-        before_files = _tmp_mat_files()
-        pipeline = XorqStatPipeline(XORQ_STATS_V2)
-        with caplog.at_level(logging.WARNING):
-            with patch.object(xorq_expr_api, "to_parquet",
-                side_effect=RuntimeError("disk full")):
-                stats, errors = pipeline.process_table(filt)
-        assert errors == []
-        assert stats["v"]["length"] == 6
-        assert _tmp_mat_files() - before_files == set(), "partial temp parquet leaked"
-        warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
-        assert any("create_table" in m for m in warnings), (
-            f"no fallback warning logged; warnings seen: {warnings}")
-
-    def test_cleanup_releases_table_and_temp_file(self):
-        """One _cleanup_cache_materialization() call must release everything
-        a direct _maybe_materialize() registered — the backend table AND the
-        streamed temp parquet — so direct callers can't leak either."""
-        con = xo.connect()
-        df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
-        t = con.create_table("t_cleanup_src", df)
-        filt = t.filter(t.v > 1)
-        before_tables = set(con.list_tables())
-        before_files = _tmp_mat_files()
-        pipeline = XorqStatPipeline(XORQ_STATS_V2)
-        pipeline._maybe_materialize(filt)
-        fired = [n for n in set(con.list_tables()) - before_tables
-                 if n.startswith("__buckaroo_histo_mat")]
-        assert fired, "materialization did not fire for a filter chain"
-        pipeline._cleanup_cache_materialization()
-        leaked_tables = [n for n in set(con.list_tables()) - before_tables
-                         if n.startswith("__buckaroo_histo_mat")]
-        leaked_files = _tmp_mat_files() - before_files
-        assert leaked_tables == [], f"cleanup left registered table(s): {leaked_tables}"
-        assert leaked_files == set(), f"cleanup left temp parquet(s): {leaked_files}"
-
-    @staticmethod
-    def _cached_join_expr(tmp_path):
-        """A cache()+join expression — the shape every catalog-diff
-        comparison carries. The cache() wrapper inserts a CachedNode, which
-        has no SQL translation, so the plain create_table(expr) materialize
-        path raises on it."""
-        cache = xo.ParquetSnapshotCache.from_kwargs(
-            source=xo.connect(), base_path=str(tmp_path))
-        df = pd.DataFrame({"k": range(20), "v": [float(i % 7) for i in range(20)]})
-        con = xo.connect()
-        a = con.create_table("cn_a", df).cache(cache=cache)
-        b = (con.create_table("cn_b", df.assign(v=df.v + 1))
-             .cache(cache=cache).rename({"v_v2": "v"}))
-        expr = a.join(b, "k").select("k", "v", "v_v2")
-        expr.execute()  # populate the on-disk cache files
-        return expr
-
-    def test_materializes_past_cached_node(self, tmp_path):
-        """A CachedNode-bearing expr (the diff shape) still materializes:
-        create_table(expr) can't compile CachedNode, so the fallback rewrites
-        each node to a read of its cache file and retries in-engine. Without
-        the fallback, materialization silently no-ops and every per-column
-        histogram re-runs the join."""
-        from xorq.expr.relations import CachedNode
-        from xorq.vendor.ibis.expr import operations as ops
-
-        expr = self._cached_join_expr(tmp_path)
-        pipeline = XorqStatPipeline(XORQ_STATS_V2)
-        materialized = pipeline._maybe_materialize(expr)
-        try:
-            assert pipeline._cache_mat_cleanup is not None, (
-                "materialization did not fire for CachedNode expr")
-            assert isinstance(materialized.op(), (ops.DatabaseTable, ops.InMemoryTable))
-            # In-engine path: the CachedNode is rewritten to a parquet read,
-            # not pulled through pandas.
-            assert not list(materialized.op().find(CachedNode))
-        finally:
-            pipeline._cleanup_cache_materialization()
-
-    def test_cached_node_stats_match_unmaterialized(self, tmp_path):
-        """Stats over the materialized base table equal stats over the raw
-        CachedNode expr — materialization is a perf optimization, not a
-        semantic change."""
-        expr = self._cached_join_expr(tmp_path)
-        pipeline = XorqStatPipeline(XORQ_STATS_V2)
-        raw, _ = pipeline._process_table_impl(expr)
-        mat, _ = pipeline.process_table(expr)
-        for col in raw:
-            for key in ("min", "max", "mean", "null_count", "distinct_count"):
-                assert raw[col].get(key) == mat[col].get(key), (col, key)
-            assert len(raw[col].get("histogram", [])) == len(mat[col].get("histogram", []))
-
-    def test_skipped_when_cache_storage_set(self, tmp_path):
-        """With cache_storage set, _maybe_materialize must NOT inject a
-        __buckaroo_histo_mat_<uuid> base table — that name lands in the
-        expression token and would break the content-addressed cache key on
-        every load. A lazy filter chain that materializes without cache_storage
-        is returned untouched once cache_storage is set."""
-        con = xo.connect()
-        df = pd.DataFrame({"v": [1.0, 2, 3, 4, 5, 6, 7], "c": list("abcdefg")})
-        t = con.create_table("t_mat_cache", df)
-        filt = t.filter(t.v > 1)  # lazy chain → would materialize
-
-        # Without cache_storage the chain materializes: new table + cleanup
-        # state recorded on the instance.
-        plain = XorqStatPipeline(XORQ_STATS_V2)
-        mat = plain._maybe_materialize(filt)
-        try:
-            assert plain._cache_mat_cleanup is not None, (
-                "filter chain should materialize without cache_storage")
-            assert mat is not filt
-        finally:
-            plain._cleanup_cache_materialization()
-
-        # With cache_storage the same chain is returned untouched, no cleanup.
-        cache = xo.ParquetSnapshotCache.from_kwargs(
-            source=xo.connect(), base_path=str(tmp_path))
-        cached = XorqStatPipeline(XORQ_STATS_V2, cache_storage=cache)
-        same = cached._maybe_materialize(filt)
-        assert same is filt
-        assert cached._cache_mat_cleanup is None
-
-
 class TestCacheStorageExecute:
     """_execute serves a cache HIT by reading the snapshot parquet directly
     rather than re-planning the expression through cache().execute()."""
@@ -922,8 +729,8 @@ class TestCacheStorageExecute:
 class TestSnapshotCacheRun:
     """Per-run snapshot-cache behaviour (#910).
 
-    A cold run materializes the source filter chain once and writes one
-    snapshot per stat query; a fully-warm run reads those snapshots without
+    A cold run computes each stat query against the source and writes one
+    snapshot per query; a fully-warm run reads those snapshots without
     re-scanning the source; every run with a cache configured logs a single
     summary line carrying the hit/miss/snapshot/byte/error counts."""
 
@@ -936,16 +743,16 @@ class TestSnapshotCacheRun:
 
     @staticmethod
     def _filter_chain_table():
-        # Lazy filter chain (re-scanned per query unless materialized) with a
-        # numeric column (numeric histogram) and a string column (categorical
-        # histogram), so both per-column query shapes run through the cache.
+        # Lazy filter chain with a numeric column (numeric histogram) and a
+        # string column (categorical histogram), so both per-column query
+        # shapes run through the cache.
         con = xo.connect()
         df = pd.DataFrame(
             {"n": list(range(40)), "cat": [c for c in "abcdefgh" for _ in range(5)]})
         t = con.create_table("snap_src", df)
         return t.filter(t.n > 1)
 
-    def test_cold_run_materializes_and_writes_snapshots(self, tmp_path):
+    def test_cold_run_writes_snapshots(self, tmp_path):
         pipeline = XorqStatPipeline(
             XORQ_STATS_V2, unit_test=False, cache_storage=self._cache(tmp_path))
         pipeline.process_table(self._filter_chain_table())
@@ -953,12 +760,10 @@ class TestSnapshotCacheRun:
         assert s["misses"] > 0 and s["hits"] == 0, f"cold run should miss the cache: {s}"
         assert s["snapshots"] == s["misses"], "each miss should write exactly one snapshot"
         assert s["bytes"] > 0 and s["write_errors"] == 0
-        assert s["materialized"] is True, (
-            "a cold run over a filter chain must materialize the source once (#910)")
         files = [f for _, _, fs in os.walk(tmp_path) for f in fs if f.endswith(".parquet")]
         assert files, "expected snapshot parquet files under the cache dir"
 
-    def test_warm_run_hits_without_materializing(self, tmp_path):
+    def test_warm_run_hits_cache(self, tmp_path):
         cache = self._cache(tmp_path)
         XorqStatPipeline(XORQ_STATS_V2, unit_test=False,
             cache_storage=cache).process_table(self._filter_chain_table())
@@ -967,8 +772,6 @@ class TestSnapshotCacheRun:
         s = warm._cache_stats
         assert s["hits"] > 0 and s["misses"] == 0, f"warm run should hit the cache: {s}"
         assert s["snapshots"] == 0, "a fully-warm run should write nothing"
-        assert s["materialized"] is False, (
-            "a fully-warm run serves every query from a snapshot — no source scan (#910)")
 
     def test_run_logs_one_cache_summary_line(self, tmp_path, caplog):
         pipeline = XorqStatPipeline(
@@ -981,8 +784,8 @@ class TestSnapshotCacheRun:
         assert "miss(es)" in lines[0] and "snapshot(s) written" in lines[0]
 
     def test_cached_stats_match_uncached(self, tmp_path):
-        """The materialized cold path and the snapshot-read warm path produce
-        the same stats as a plain uncached run — materialization is a perf
+        """The cold (compute + write) and warm (snapshot-read) cache paths
+        produce the same stats as a plain uncached run — the cache is a perf
         optimization, not a semantic change."""
         cache = self._cache(tmp_path)
         plain, _ = XorqStatPipeline(
@@ -996,64 +799,7 @@ class TestSnapshotCacheRun:
         # The warm run reads the exact parquet the cold run wrote, so its whole
         # SD (histogram row order included) must reproduce the cold run's.
         assert cold == warm, "warm run must reproduce the cold run's snapshot exactly"
-        # Histogram tie-order can differ between materialized and unmaterialized
-        # execution, so compare the tie-independent stats against the plain run.
+        # Compare the tie-independent stats against the plain run.
         for col in plain:
             for key in ("length", "min", "max", "mean", "null_count", "distinct_count"):
                 assert cold[col].get(key) == plain[col].get(key), (col, key)
-
-
-class TestMaterializeHeuristic:
-    """#915: materialize the source only when its op tree carries an expensive
-    chain (filter / aggregate / join / distinct / sort / drop_null) worth
-    amortising across the per-column queries. A scan / projection / union /
-    limit streams cheaply via predicate + projection pushdown, so materialising
-    it is pure overhead — and multi-GB of resident overhead on a wide or tall
-    source (#915, e.g. a 131M-row union or a 24M×20 read landing 25GB in RAM).
-
-    The decision is op-tree based, so it is independent of how the expression
-    was spelled — hence the parametrised formation styles below."""
-
-    @staticmethod
-    def _cache(tmp_path):
-        return xo.ParquetSnapshotCache.from_kwargs(
-            source=xo.connect(), base_path=str(tmp_path))
-
-    @staticmethod
-    def _base():
-        con = xo.connect()
-        df = pd.DataFrame(
-            {"n": list(range(40)), "cat": [c for c in "abcdefgh" for _ in range(5)]})
-        return con.create_table("heur_src", df)
-
-    def _run(self, src, tmp_path):
-        p = XorqStatPipeline(
-            XORQ_STATS_V2, unit_test=False, cache_storage=self._cache(tmp_path))
-        summary, _ = p.process_table(src)
-        return p._cache_stats, summary
-
-    @pytest.mark.parametrize("shape", ["union", "projection", "column-list", "limit"])
-    def test_cheap_source_streams_not_materialized(self, shape, tmp_path):
-        t = self._base()
-        src = {"union": t.select("n", "cat").union(t.select("n", "cat")), "projection": t.select("n", "cat"),
-            "column-list": t[["n", "cat"]], "limit": t.limit(30)}[shape]
-        stats, summary = self._run(src, tmp_path)
-        assert stats["materialized"] is False, (
-            f"a {shape} source has no chain to amortise — must stream, not "
-            f"materialize into RAM (#915)")
-        # still a real cold run: stats computed and snapshots written
-        assert stats["misses"] > 0 and stats["snapshots"] == stats["misses"]
-        assert {"n", "cat"} <= set(summary)
-
-    @pytest.mark.parametrize("shape", ["filter", "aggregate", "agg-shorthand", "distinct", "sample"])
-    def test_chain_source_is_materialized(self, shape, tmp_path):
-        t = self._base()
-        src = {"filter": t.filter(t.n > 1), "aggregate": t.group_by("cat").aggregate(c=t.count()),
-            "agg-shorthand": t.group_by("cat").count(), "distinct": t.select("cat").distinct(),
-            # A sample source MUST materialize: an unseeded sample re-drawn per
-            # per-column query would compute length/min/max/histogram over
-            # different rows (Codex review on #916).
-            "sample": t.sample(0.5)}[shape]
-        stats, _ = self._run(src, tmp_path)
-        assert stats["materialized"] is True, (
-            f"a {shape} source carries an expensive chain — materialize once (#915)")
