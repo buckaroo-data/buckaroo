@@ -1,4 +1,6 @@
-from typing import List, Literal, Tuple, Type, TypedDict, Dict as TDict, Any as TAny, Union
+from typing import (
+    Generic, List, Literal, Optional, Protocol, Tuple, Type, TypedDict, cast,
+    Dict as TDict, Any as TAny, Union)
 from typing_extensions import override
 import six
 import warnings
@@ -21,6 +23,7 @@ from .styling_core import (
 
 
 from .abc_dataflow import ABCDataflow
+from .df_types import DataFrameT
 from .sd_cache import hash_chain, split_chain_by_scope
 
 
@@ -41,15 +44,38 @@ class DfTrait(Any):
 
     def set(self, obj, value):
         new_value = self._validate(obj, value)
+        # self.name is Optional[str] in the traitlets stubs (None until the
+        # metaclass binds the trait to a class), but it is always set by the
+        # time set() runs on an instance.
+        name = cast(str, self.name)
         try:
-            old_value = obj._trait_values[self.name]
+            old_value = obj._trait_values[name]
         except KeyError:
             old_value = self.default_value
-        obj._trait_values[self.name] = new_value
+        obj._trait_values[name] = new_value
         if old_value is not new_value:
-            obj._notify_trait(self.name, old_value, new_value)
+            obj._notify_trait(name, old_value, new_value)
     
-class DataFlow(ABCDataflow):
+class Autocleaning(Protocol):
+    """Structural interface the dataflow pipeline calls on ``self.ac_obj``.
+
+    The eager backends (``PandasAutocleaning`` and the polars/xorq variants)
+    supply all of it. The bare-pipeline ``SentinelAutocleaning`` implements
+    only the subset the stub path touches (``command_config`` /
+    ``handle_ops_and_clean``), so ``ac_obj`` is cast to this Protocol at
+    construction — the code-interpreter members below are reached only via
+    ``CustomizableDataflow``, which always runs on a real backend.
+    """
+    command_config: TAny
+    config_dict: TAny
+    def handle_ops_and_clean(self, df: TAny, cleaning_method: TAny,
+                             quick_command_args: TAny, existing_operations: TAny) -> TAny: ...
+    def add_command(self, incomingCommandKls: TAny) -> TAny: ...
+    def _run_df_interpreter(self, df: TAny, operations: TAny, initial_sd: TAny) -> TAny: ...
+    def run_code_generator(self, operations: TAny) -> TAny: ...
+
+
+class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
     """This class is meant to only represent the dataflow through
     buckaroo with no accomodation for widget particulars
 
@@ -67,15 +93,24 @@ class DataFlow(ABCDataflow):
     
     """
     def __init__(self, raw_df):
-        self.exception = None
+        # Set by exception_protect handlers (see dataflow_extras) to
+        # sys.exc_info() when a trait-observer cascade fails; None until then.
+        self.exception: Optional[Tuple[TAny, TAny, TAny]] = None
         super().__init__()
         self.summary_sd = {}
         self.existing_operations = []
-        self.ac_obj = self.autocleaning_klass(self.autoclean_conf)
+        # SentinelAutocleaning (the bare default) implements only part of the
+        # Autocleaning interface; the real backends supply all of it. Cast so
+        # the code-interpreter methods type-check on the customizable path.
+        self.ac_obj = cast(Autocleaning, self.autocleaning_klass(self.autoclean_conf))
         self.command_config = self.ac_obj.command_config
         try:
             self.raw_df = raw_df
         except Exception:
+            if self.exception is None:
+                # No handler stored the original exc_info — propagate the
+                # current exception rather than subscripting None.
+                raise
             six.reraise(self.exception[0], self.exception[1], self.exception[2])
 
     autocleaning_klass = SentinelAutocleaning
@@ -102,7 +137,12 @@ class DataFlow(ABCDataflow):
     post_processing_method = Unicode('').tag(default='')
     processed_result = DfTrait().tag(default=None)
 
-    analysis_klasses = None
+    # Bare-pipeline stub: no analyses by default. ``[]`` (not ``None``) so the
+    # type stays ``List[Type[ColAnalysis]]`` end-to-end — CustomizableDataflow
+    # narrows it to a real list, and nothing relies on a None sentinel (reads
+    # are id()-based cache keys and the dead "foo"/"bar" test branches below,
+    # all of which treat None and [] alike).
+    analysis_klasses: List[Type[ColAnalysis]] = []
     summary_sd = Any()
     df_meta = Any()
 
@@ -133,7 +173,7 @@ class DataFlow(ABCDataflow):
 
 
     
-    def _compute_sampled_df(self, raw_df:pd.DataFrame, sample_method:str):
+    def _compute_sampled_df(self, raw_df: DataFrameT, sample_method: str) -> DataFrameT:
         if sample_method == "first":
             return raw_df[:1]
         return raw_df
@@ -192,9 +232,13 @@ class DataFlow(ABCDataflow):
             self._in_operation_result = False
 
     @property
-    def cleaned_df(self):
+    def cleaned_df(self) -> Optional[DataFrameT]:
+        # traitlets descriptors return Any on access, so the element type
+        # of the ``cleaned`` tuple is opaque to the checker — cast to the
+        # frame type this dataflow is bound to.
         if self.cleaned is not None:
-            return self.cleaned[0]
+            return cast(DataFrameT, self.cleaned[0])
+        return None
 
     @property
     def cleaned_sd(self):
@@ -212,8 +256,10 @@ class DataFlow(ABCDataflow):
         if self.cleaned is not None:
             return self.cleaned[3]
 
-    def _compute_processed_result(self, cleaned_df, post_processing_method):
-        return [cleaned_df, {}]
+    def _compute_processed_result(
+            self, cleaned_df: DataFrameT,
+            post_processing_method: str) -> Tuple[DataFrameT, SDType]:
+        return (cleaned_df, {})
 
     def populate_df_meta(self):
         pass
@@ -226,9 +272,9 @@ class DataFlow(ABCDataflow):
         self.populate_df_meta()
 
     @property
-    def processed_df(self):
+    def processed_df(self) -> Optional[DataFrameT]:
         if self.processed_result is not None:
-            return self.processed_result[0]
+            return cast(DataFrameT, self.processed_result[0])
         return None
 
     @property
@@ -237,14 +283,14 @@ class DataFlow(ABCDataflow):
             return self.processed_result[1]
         return {}
 
-    def _get_summary_sd(self, df:pd.DataFrame) -> Tuple[SDType, TAny]:
+    def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, TAny]:
         analysis_klasses = self.analysis_klasses
         if analysis_klasses == "foo":
             return {'some-col': {'foo':8}}, {}
         if analysis_klasses == "bar":
             return {'other-col': {'bar':10}}, {}
         ret_summary = {}
-        for col in df.columns:
+        for col in processed_df.columns:
             ret_summary[col] = {}
         return ret_summary, {}
 
@@ -260,6 +306,11 @@ class DataFlow(ABCDataflow):
         # Skip when neither the dataframe nor analysis_klasses has actually
         # changed since the last run. See issue #709.
         df = self.processed_df
+        if df is None:
+            # Nothing to summarize before the pipeline has produced a frame.
+            # Matches the guards in _merged_sd and _populate_sd_cache, and
+            # narrows Optional[DataFrameT] -> DataFrameT for _get_summary_sd.
+            return
         klasses = self.analysis_klasses
         if (id(df), id(klasses)) == self._summary_sd_cache_key:
             return
@@ -298,9 +349,14 @@ BuckarooOptions = TypedDict('BuckarooOptions', {
     'summary_stats': List[str]})
 
     
-class CustomizableDataflow(DataFlow):
+class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     """
     This allows targetd extension and customization of DataFlow
+
+    Still generic on ``DataFrameT``: both the pandas and polars backends
+    use this class directly (bound to ``pd.DataFrame`` / ``pl.DataFrame``
+    respectively), and ``XorqDataflow`` subclasses it as
+    ``CustomizableDataflow[XorqExpr]``.
     """
     #analysis_klasses = [StylingAnalysis]
     analysis_klasses: List[Type[ColAnalysis]] = [StylingAnalysis]
@@ -372,9 +428,11 @@ class CustomizableDataflow(DataFlow):
             'rows_shown': min(len(self.processed_df), self.sampling_klass.serialize_limit),  
             'total_rows': len(self.orig_df)}
 
-    #typing compalins about this, but so far as this class is concerned, buckaroo_options follows theBuckarooOptions type
-    # typing doesn't get along well with traitlets
-    buckaroo_options:BuckarooOptions = Dict({'sampled': ['random'], 'auto_clean': ['aggressive', 'conservative'],
+    # buckaroo_options is BuckarooOptions-shaped at runtime, but it's a
+    # traitlets ``Dict`` trait, so we let it inherit the base ``Any`` rather
+    # than annotate ``: BuckarooOptions`` — the descriptor value can't
+    # satisfy that declared type. See ABCDataflow's wire-attribute note.
+    buckaroo_options = Dict({'sampled': ['random'], 'auto_clean': ['aggressive', 'conservative'],
         'post_processing': [], 'df_display': ['main', 'summary'], 'show_commands': ['on'], 'summary_stats': ['all']}).tag(sync=True)
 
     def setup_options_from_analysis(self):
@@ -609,7 +667,9 @@ class CustomizableDataflow(DataFlow):
     ### end code interpeter block
 
     @override
-    def _compute_processed_result(self, cleaned_df:pd.DataFrame, post_processing_method:str) -> Tuple[pd.DataFrame, SDType]:
+    def _compute_processed_result(
+            self, cleaned_df: DataFrameT,
+            post_processing_method: str) -> Tuple[DataFrameT, SDType]:
         if post_processing_method == '':
             return (cleaned_df, {})
         else:
@@ -618,16 +678,19 @@ class CustomizableDataflow(DataFlow):
                 ret_df, sd = post_analysis.post_process_df(cleaned_df)
                 return (ret_df, sd)
             except Exception as e:
-                return (self._build_error_dataframe(e), {})
+                # Error frames are always pandas regardless of backend — the
+                # styling layer renders them through the pandas path. The cast
+                # documents that intentional impurity in the DataFrameT contract.
+                return (cast(DataFrameT, self._build_error_dataframe(e)), {})
 
-    def _build_error_dataframe(self, e):
+    def _build_error_dataframe(self, e) -> pd.DataFrame:
         return pd.DataFrame({'err': [str(e)]})
 
 
     ### start summary stats block
     #TAny closer to some error type
     @override
-    def _get_summary_sd(self, processed_df:pd.DataFrame) -> Tuple[SDType, TDict[str, TAny]]:
+    def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, TDict[str, TAny]]:
         stats = self.DFStatsClass(
             processed_df,
             self.analysis_klasses,
@@ -659,7 +722,7 @@ class CustomizableDataflow(DataFlow):
         keep = wire_stat_keys(self.df_display_klasses.values(), self.pinned_rows)
         return sd_to_parquet_b64(project_sd(sd, keep))
 
-    def _df_to_obj(self, df:pd.DataFrame) -> TDict[str, TAny]:
+    def _df_to_obj(self, df: DataFrameT) -> TDict[str, TAny]:
         return pd_to_obj(self.sampling_klass.serialize_sample(df))
     
     def add_analysis(self, analysis_klass:Type[ColAnalysis]) -> None:

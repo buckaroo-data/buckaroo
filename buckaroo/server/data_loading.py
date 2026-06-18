@@ -36,7 +36,7 @@ class ServerSampling(Sampling):
         return df
 
 
-class ServerDataflow(CustomizableDataflow):
+class ServerDataflow(CustomizableDataflow[pd.DataFrame]):
     """Headless dataflow matching BuckarooInfiniteWidget's pipeline."""
     sampling_klass = ServerSampling
     autocleaning_klass = PandasAutocleaning

@@ -11,10 +11,14 @@ from .customizations.pl_stats_v2 import PL_ANALYSIS_V2
 from .serialization_utils import pd_to_obj
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .customizations.pl_autocleaning_conf import NoCleaningConfPl
-from .dataflow.dataflow import Sampling
+from .dataflow.dataflow import CustomizableDataflow, Sampling
 from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.widget_extension_utils import configure_buckaroo
 from .styling_helpers import obj_, pinned_histogram, pinned_filtered_histogram
+
+# polars backend binding of the generic dataflow. Mirrors PandasDataflow
+# (buckaroo_widget) and XorqDataflow (xorq_buckaroo).
+PolarsDataflow = CustomizableDataflow[pl.DataFrame]
 
 class PLSampling(Sampling):
     pre_limit = False
@@ -73,6 +77,7 @@ class PolarsBuckarooWidget(BuckarooWidget):
     autoclean_conf = tuple([NoCleaningConfPl]) #override the base CustomizableDataFlow conf
     DFStatsClass = PlDfStatsV2
     sampling_klass = PLSampling
+    dataflow_klass = PolarsDataflow  # composed dataflow carries polars DataFrames
 
     # _sd_to_jsondf is inherited from BuckarooWidgetBase, which delegates to
     # the dataflow so the wire-stat projection (#880) lives in one place.
