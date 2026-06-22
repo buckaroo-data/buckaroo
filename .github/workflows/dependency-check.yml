@@ -45,7 +45,11 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Run tests
-        run: .venv/bin/python -m pytest ./tests/unit --color=yes
+        # Exclude slow MCP/uvx network tests: they install Buckaroo from
+        # test.pypi (no JS built in) and assert on bundled assets, which is
+        # unrelated to dependency compatibility. Matches the -m "not slow"
+        # filter used by every unit-test job in checks.yml.
+        run: .venv/bin/python -m pytest ./tests/unit -m "not slow" --color=yes
 
   notify-on-failure:
     name: Create Issue on Failure
