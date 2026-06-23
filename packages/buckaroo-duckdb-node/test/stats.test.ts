@@ -36,6 +36,22 @@ const summarizeRows: SummarizeRow[] = [
     count: 1000,
     null_percentage: 0,
   },
+  // a VARCHAR column whose min/max look numeric (ZIP codes / zero-padded IDs):
+  // they must stay strings, not be coerced to a number (which strips zeros).
+  {
+    column_name: 'c',
+    column_type: 'VARCHAR',
+    min: '00123',
+    max: '00999',
+    approx_unique: 50,
+    avg: null,
+    std: null,
+    q25: null,
+    q50: null,
+    q75: null,
+    count: 1000,
+    null_percentage: 0,
+  },
   // the synthesized index column must be ignored
   {
     column_name: 'index',
@@ -57,7 +73,7 @@ describe('summarizeToSDType', () => {
   const sd = summarizeToSDType(summarizeRows);
 
   it('skips the synthesized index column', () => {
-    expect(Object.keys(sd)).toEqual(['a', 'b']);
+    expect(Object.keys(sd)).toEqual(['a', 'b', 'c']);
   });
 
   it('maps SUMMARIZE fields per the v1 plan table', () => {
@@ -84,6 +100,11 @@ describe('summarizeToSDType', () => {
     expect(sd.b.max).toBe('zzz');
     expect(sd.b.mean).toBeNull();
     expect(sd.b.std).toBeNull();
+  });
+
+  it('keeps numeric-looking VARCHAR min/max as strings (no zero-stripping)', () => {
+    expect(sd.c.min).toBe('00123');
+    expect(sd.c.max).toBe('00999');
   });
 });
 
