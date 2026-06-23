@@ -42,6 +42,22 @@ def test_committed_fixture_matches_in_memory_regeneration():
         assert od["data"] == fr["data"], (
             f"{backend} parquet bytes drifted; regenerate with "
             "scripts/generate_native_string_fixture.py")
+        assert od["envelope"] == fr["envelope"], (
+            f"{backend} transport envelope drifted; regenerate with "
+            "scripts/generate_native_string_fixture.py")
+
+
+def test_native_senders_stamp_empty_json_columns():
+    """The native paths must declare json_columns: [] on the wire so the JS
+    decoder skips the fastparquet-style JSON.parse. This is the producer half
+    of the contract nativeStringCells.test.ts checks on the decoder half."""
+    payload = generate()
+    for backend in ("polars", "xorq"):
+        env = payload["backends"][backend]["envelope"]
+        assert env["format"] == "parquet_buffer"
+        assert env.get("json_columns") == [], (
+            f"{backend} sender must stamp json_columns: [], got "
+            f"{env.get('json_columns')!r}")
 
 
 def test_ground_truth_keeps_json_looking_strings_as_strings():

@@ -53,23 +53,27 @@ function bigintToCell(val: bigint): number | string {
 /**
  * JSON-parse each cell value in a row from row-layout parquet data.
  *
- * For non-wide payloads (the main DataFrame artifact), object/category
- * columns are JSON-encoded on the Python side and must be parsed back.
- * The 'index' and 'level_0' columns are kept as-is.
+ * `jsonCols` names the columns whose string cells are JSON-encoded (the
+ * fastparquet `object_encoding='json'` convention). When provided, only those
+ * columns are JSON-parsed and every other string passes through untouched —
+ * deterministic, no per-cell guessing. When `undefined` (no `json_columns` on
+ * the envelope), every string cell is parsed (legacy pandas behavior, where
+ * all object columns are JSON-wrapped). Native-parquet frames pass an empty set
+ * so no string is parsed. The 'index' and 'level_0' columns are kept as-is.
  */
-function parseParquetRow(row: Record<string, any>): DFDataRow {
+function parseParquetRow(row: Record<string, any>, jsonCols?: Set<string>): DFDataRow {
     const parsed: DFDataRow = {};
     for (const [key, val] of Object.entries(row)) {
         if (key === 'index' || key === 'level_0') {
             parsed[key] = typeof val === 'bigint' ? Number(val) : val;
-        } else if (typeof val === 'string') {
+        } else if (typeof val === 'bigint') {
+            parsed[key] = bigintToCell(val);
+        } else if (typeof val === 'string' && (jsonCols === undefined || jsonCols.has(key))) {
             try {
                 parsed[key] = JSON.parse(val);
             } catch {
                 parsed[key] = val;
             }
-        } else if (typeof val === 'bigint') {
-            parsed[key] = bigintToCell(val);
         } else {
             parsed[key] = val;
         }
@@ -135,15 +139,20 @@ export function pivotWideSummaryStats(wideRow: Record<string, any>): DFData {
 
 /**
  * Turn raw hyparquet rows into DFData, honoring the envelope's layout.
- * 'wide' → pivot the single summary-stats row; otherwise JSON-parse each
- * object/list/dict cell back to its native value.
+ * 'wide' → pivot the single summary-stats row; otherwise JSON-parse the cells
+ * named by `jsonColumns` (or every string cell, when `jsonColumns` is absent).
  */
-function parquetRowsToDFData(rows: Record<string, any>[], layout?: string): DFData {
+function parquetRowsToDFData(
+    rows: Record<string, any>[],
+    layout?: string,
+    jsonColumns?: string[],
+): DFData {
     if (layout === 'wide') {
         // Wide layout always serializes a single row.
         return rows.length === 0 ? [] : pivotWideSummaryStats(rows[0]);
     }
-    return (rows as DFDataRow[]).map(parseParquetRow);
+    const jsonCols = jsonColumns ? new Set(jsonColumns) : undefined;
+    return (rows as DFDataRow[]).map((r) => parseParquetRow(r, jsonCols));
 }
 
 /**
@@ -198,7 +207,7 @@ export async function decodeDFData(
             const cached = _cache.get(envelope.data);
             if (cached && cached.length > 0) return cached;
             const rows = await readParquetRows(b64ToArrayBuffer(envelope.data));
-            const result = parquetRowsToDFData(rows, envelope.layout);
+            const result = parquetRowsToDFData(rows, envelope.layout, envelope.json_columns);
             cacheSet(envelope.data, result);
             return result;
         }
@@ -212,7 +221,7 @@ export async function decodeDFData(
                 return [];
             }
             const rows = await readParquetRows(dataViewToArrayBuffer(dv));
-            return parquetRowsToDFData(rows, envelope.layout);
+            return parquetRowsToDFData(rows, envelope.layout, envelope.json_columns);
         }
     } catch (e) {
         console.error('decodeDFData: failed to decode envelope', envelope, e);

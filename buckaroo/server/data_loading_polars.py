@@ -140,7 +140,8 @@ def handle_infinite_request_buckaroo_polars(
 
         out = BytesIO()
         prepare_df_for_serialization(slice_df).write_parquet(out, compression="uncompressed")
-        return make_infinite_resp(payload_args, len(filtered_df), out.getvalue())
+        # Native polars parquet — strings are not JSON-wrapped.
+        return make_infinite_resp(payload_args, len(filtered_df), out.getvalue(), json_columns=[])
     except Exception:
         return ({"type": "infinite_resp", "key": payload_args, "length": 0,
             "error_info": traceback.format_exc()}, b"")

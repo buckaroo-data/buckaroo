@@ -198,14 +198,9 @@ def pl_df_with_weird_types_as_pandas():
 # pandas/fastparquet path (object cells arrive JSON-encoded) but corrupts the
 # native-parquet backends (polars/xorq/lazy), where "null" -> null, "123" ->
 # 123, '{"a": 1}' -> object. These frames pin that hazard down for both paths.
-_JSON_LIKE_STRINGS = {
-    'norm': ['alpha', 'beta', 'gamma'],
-    'jnull': ['null', 'value', 'still text'],
-    'jbool': ['true', 'false', 'maybe'],
-    'jint': ['123', '45', '0'],
-    'jobj': ['{"a": 1}', '{"b": 2}', '{}'],
-    'jarr': ['[1, 2]', '[3]', '[]'],
-}
+_JSON_LIKE_STRINGS = {'norm': ['alpha', 'beta', 'gamma'], 'jnull': ['null', 'value', 'still text'],
+    'jbool': ['true', 'false', 'maybe'], 'jint': ['123', '45', '0'], 'jobj': ['{"a": 1}', '{"b": 2}', '{}'],
+    'jarr': ['[1, 2]', '[3]', '[]']}
 
 
 def df_with_json_like_strings() -> pd.DataFrame:

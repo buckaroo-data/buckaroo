@@ -35,7 +35,7 @@ import polars as pl
 import pyarrow.parquet as pq
 import xorq.api as xo
 
-from buckaroo.polars_buckaroo import to_parquet as polars_to_parquet
+from buckaroo.polars_buckaroo import PolarsBuckarooInfiniteWidget
 from buckaroo.xorq_buckaroo import XorqBuckarooInfiniteWidget
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -48,14 +48,8 @@ FIXTURE_PATH = (
 #   norm -> plain word (parse throws, stays string — the control)
 #   jnull/jbool/jint -> parse to null / boolean / number
 #   jobj/jarr -> parse to object / array
-_DATA = {
-    "norm": ["alpha", "beta"],
-    "jnull": ["null", "value"],
-    "jbool": ["true", "false"],
-    "jint": ["123", "45"],
-    "jobj": ['{"a": 1}', '{"b": 2}'],
-    "jarr": ["[1, 2]", "[3]"],
-}
+_DATA = {"norm": ["alpha", "beta"], "jnull": ["null", "value"], "jbool": ["true", "false"], "jint": ["123", "45"],
+    "jobj": ['{"a": 1}', '{"b": 2}'], "jarr": ["[1, 2]", "[3]"]}
 
 
 def _rows_from_parquet(parquet_bytes: bytes) -> List[Dict[str, Any]]:
@@ -72,41 +66,52 @@ def _rows_from_parquet(parquet_bytes: bytes) -> List[Dict[str, Any]]:
     return rows
 
 
-def _polars_bytes() -> bytes:
-    # polars_buckaroo.to_parquet requires an explicit 'index' column and
-    # rewrites the other columns to the a, b, c... space.
-    df = pl.DataFrame({"index": [0, 1], **_DATA})
-    return polars_to_parquet(df)
-
-
-def _xorq_bytes() -> bytes:
-    # Drive the real XorqBuckarooInfiniteWidget infinite path, capturing the
-    # parquet buffer it emits — same harness as generate_xorq_window_fixture.
-    expr = xo.memtable(_DATA)
-    widget = XorqBuckarooInfiniteWidget(expr)
+def _capture_infinite_resp(widget: Any) -> tuple:
+    """Drive a widget's infinite path and capture the (envelope, bytes) it
+    emits. The envelope is ``msg['payload']`` — the exact transport dict the JS
+    side decodes — so the fixture records whether the native sender really
+    stamped ``json_columns: []``, not a hand-built assumption."""
     sent: list = []
     widget.send = lambda msg, buffers=None: sent.append((msg, buffers))
     widget._handle_payload_args({"start": 0, "end": len(_DATA["norm"])})
     if not sent or not sent[0][1]:
-        raise RuntimeError("xorq widget emitted no parquet buffer")
-    return sent[0][1][0]
+        raise RuntimeError(f"{type(widget).__name__} emitted no parquet buffer")
+    msg, buffers = sent[0]
+    return msg["payload"], buffers[0]
+
+
+def _polars_envelope_bytes() -> tuple:
+    # Drive the real PolarsBuckarooInfiniteWidget infinite path (df.write_parquet,
+    # native UTF8 strings). The widget rewrites data columns to a, b, c... space.
+    widget = PolarsBuckarooInfiniteWidget(pl.DataFrame(_DATA))
+    return _capture_infinite_resp(widget)
+
+
+def _xorq_envelope_bytes() -> tuple:
+    # Drive the real XorqBuckarooInfiniteWidget infinite path (pq.write_table).
+    widget = XorqBuckarooInfiniteWidget(xo.memtable(_DATA))
+    return _capture_infinite_resp(widget)
 
 
 def generate() -> Dict[str, Any]:
-    """Build the fixture payload — captured bytes plus the pyarrow ground
-    truth for each backend. No file I/O."""
-    polars_bytes = _polars_bytes()
-    xorq_bytes = _xorq_bytes()
+    """Build the fixture payload — the captured envelope + parquet bytes each
+    native sender emits, plus the pyarrow ground-truth decode. No file I/O."""
+    polars_env, polars_bytes = _polars_envelope_bytes()
+    xorq_env, xorq_bytes = _xorq_envelope_bytes()
     return {
         "description": (
             "Native parquet string cells whose text is valid JSON. "
-            "decodeDFData must return them unchanged, not JSON.parse them."),
+            "decodeDFData must return them unchanged, not JSON.parse them. The "
+            "captured envelope carries json_columns: [] so the decoder skips "
+            "the fastparquet-style JSON.parse for these native frames."),
         "backends": {
             "polars": {
+                "envelope": polars_env,
                 "data": base64.b64encode(polars_bytes).decode("ascii"),
                 "expected": _rows_from_parquet(polars_bytes),
             },
             "xorq": {
+                "envelope": xorq_env,
                 "data": base64.b64encode(xorq_bytes).decode("ascii"),
                 "expected": _rows_from_parquet(xorq_bytes),
             },

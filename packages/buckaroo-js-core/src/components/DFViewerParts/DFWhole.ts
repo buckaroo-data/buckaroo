@@ -255,10 +255,17 @@ export type DFData = DFDataRow[];
 //
 // `layout` is orthogonal to transport: 'wide' marks the single-row
 // {col}__{stat} summary-stats shape that must be pivoted after decode.
+//
+// `json_columns` names exactly the columns whose string cells are JSON-encoded
+// (the fastparquet `object_encoding='json'` convention). The decoder JSON-parses
+// only those columns and passes every other cell through. Mirrors fastparquet's
+// per-column model. When absent, the decoder falls back to legacy parse-all
+// (correct for the pandas path, where every object column is JSON-wrapped).
+// Native-parquet senders (polars/xorq/pyarrow) emit `json_columns: []`.
 export type DFEnvelope =
-    | { format: 'parquet_buffer'; buffer_index: number; layout?: 'wide' | 'row' } // bytes in buffers[]
-    | { format: 'parquet_b64'; data: string; layout?: 'wide' | 'row' }            // base64 parquet, inline
-    | { format: 'json'; data: DFData; layout?: 'wide' | 'row' };                  // record array, inline
+    | { format: 'parquet_buffer'; buffer_index: number; layout?: 'wide' | 'row'; json_columns?: string[] } // bytes in buffers[]
+    | { format: 'parquet_b64'; data: string; layout?: 'wide' | 'row'; json_columns?: string[] }            // base64 parquet, inline
+    | { format: 'json'; data: DFData; layout?: 'wide' | 'row' };                                            // record array, inline
 
 // A value in df_data_dict / a wire payload can be plain JSON (DFData) or a
 // transport envelope. DFData passthrough is retained.

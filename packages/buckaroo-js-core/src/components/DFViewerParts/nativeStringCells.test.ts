@@ -33,13 +33,13 @@ describe('native-parquet string cells survive decodeDFData unchanged', () => {
         const blob = fixture.backends[backend];
 
         it(`${backend}: every string cell stays a string (no JSON.parse coercion)`, async () => {
-            const env: DFEnvelope = { format: 'parquet_buffer', buffer_index: 0 };
+            const env = blob.envelope as DFEnvelope;
             const rows = await decodeDFData(env, [b64ToDataView(blob.data)]);
             expect(rows).toEqual(blob.expected as DFData);
         });
 
         it(`${backend}: JSON-looking strings are not coerced to null/number/object`, async () => {
-            const env: DFEnvelope = { format: 'parquet_buffer', buffer_index: 0 };
+            const env = blob.envelope as DFEnvelope;
             const rows = await decodeDFData(env, [b64ToDataView(blob.data)]);
             const row0 = rows[0];
             expect(row0.b).toBe('null');
