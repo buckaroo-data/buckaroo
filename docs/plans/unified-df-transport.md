@@ -116,9 +116,10 @@ envelope wrapping is unified.
 
 `buckaroo_widget.py:423`, `polars_buckaroo.py:129`, `xorq_buckaroo.py:355` each
 hand-build `{"type":"infinite_resp", 'key':…, 'data':[], 'length':…}` +
-`[to_parquet(slice)]`. Replace each with a shared helper that calls
+`[to_parquet(slice)]` (xorq via its `window_to_parquet` helper, not `to_parquet`
+directly). Replace each with a shared helper that calls
 `encode_df(slice, 'comm')` and sends
-`{"type":"infinite_resp", 'key':…, 'length':…, **envelope}` plus the buffers.
+`{"type":"infinite_resp", 'key':…, 'length':…, "payload": envelope}` plus the buffers.
 `_df_to_parquet_b64_tagged` (artifact.py) becomes `encode_df(df, 'static')`.
 
 ## Latent bug this fixes (needs a test)
