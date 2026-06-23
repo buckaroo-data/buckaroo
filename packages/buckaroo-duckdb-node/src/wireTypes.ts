@@ -58,6 +58,28 @@ export interface HistogramDisplayerA {
   displayer: 'histogram';
 }
 
+/**
+ * One bar of a `histogram` summary stat — the cell value the `displayer:
+ * 'histogram'` pinned row renders. Mirrors buckaroo-js-core's `HistogramBar`
+ * (HistogramCell.tsx). Exactly one of the value keys is set per bar; `name` is
+ * always the bucket label. Percentages are on the 0–100 scale.
+ */
+export interface HistogramBar {
+  name: string;
+  /** numeric meat-bucket population % */
+  population?: number;
+  /** categorical top-N population % */
+  cat_pop?: number;
+  /** numeric low/high tail marker (always 1) */
+  tail?: number;
+  /** longtail bucket % */
+  longtail?: number;
+  /** unique-values bucket % */
+  unique?: number;
+  /** missing-values bucket % */
+  NA?: number;
+}
+
 export interface InheritDisplayerA {
   displayer: 'inherit';
 }

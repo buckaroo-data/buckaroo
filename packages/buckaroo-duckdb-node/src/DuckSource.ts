@@ -26,6 +26,13 @@ export interface DuckSource {
    * natively and the caller never touches a `DuckDBValue`.
    */
   copyToParquet(query: string): Promise<Uint8Array>;
+
+  /**
+   * Run a read query → JSON row objects. Used for the small histogram
+   * aggregates (quantiles, bin counts, value counts), whose results are scalar
+   * counts/labels — not user row data — so the no-coercion rule does not apply.
+   */
+  queryRows(sql: string): Promise<Array<Record<string, unknown>>>;
 }
 
 /** One row of `DESCRIBE (<stmt>)`. DuckDB returns more columns; we use these. */

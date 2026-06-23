@@ -18,6 +18,7 @@ import { buildRenamePlan, INDEX_COL, type RenamePlan } from './rename.js';
 import { effectiveQuery, windowedQuery, type QueryTransform } from './query.js';
 import { buildDfViewerConfig } from './columnConfig.js';
 import { summarizeToSDType, sdTypeToStatRows } from './stats.js';
+import { computeHistograms } from './histogramSql.js';
 import type {
   BuckarooOptions,
   BuckarooState,
@@ -105,6 +106,19 @@ export class DuckBackend {
 
     const sd = summarizeToSDType(summarizeRows);
     const statRows = sdTypeToStatRows(sd);
+
+    // The histogram bars are a per-column list of objects, not a scalar stat,
+    // so they ride as their own pinned row (injected right after dtype, the
+    // position the `histogram` pin in columnConfig expects) rather than through
+    // the SDType pivot.
+    const histos = await computeHistograms(
+      this.source,
+      plan.renamedRelation(this.effectiveSql),
+      plan,
+      sd,
+      this.totalRows,
+    );
+    statRows.splice(1, 0, { [INDEX_COL]: 'histogram', level_0: 'histogram', ...histos });
 
     const dfViewerConfig = buildDfViewerConfig(plan);
 
