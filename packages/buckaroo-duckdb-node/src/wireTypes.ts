@@ -124,16 +124,22 @@ export type DFDataRow = Record<
 export type DFData = DFDataRow[];
 
 /**
- * Transport envelope. This is the post-#933 unified `DFEnvelope` shape
- * (docs/plans/unified-df-transport.md). The DuckDB backend only ever emits
- * `parquet_b64` (inline base64 parquet) — the no-coercion path. The other
- * variants are declared for completeness so this type matches the js-core
- * `decodeDFData` input once #933 lands.
+ * Transport envelope — the unified `DFEnvelope` from #933 (DFWhole.ts:258-261,
+ * docs/plans/unified-df-transport.md). js-core's
+ * `decodeDFData(envelope, buffers)` is the matching consumer. The DuckDB
+ * backend only ever emits `parquet_b64` (inline base64 parquet, the
+ * no-coercion path) for rows and `json` for the pre-pivoted stats; the
+ * `parquet_buffer` variant is declared so this type stays structurally
+ * identical to the js-core source of truth.
+ *
+ * `layout` is orthogonal to transport: `'wide'` marks the single-row
+ * `{col}__{stat}` summary-stats shape the decoder pivots; `'row'` (or absent)
+ * is ordinary row-layout parquet, JSON-parsed per cell.
  */
 export type DFEnvelope =
-  | { format: 'parquet_buffer'; buffer_index: number; layout?: 'wide' }
-  | { format: 'parquet_b64'; data: string; layout?: 'wide' }
-  | { format: 'json'; data: DFData; layout?: 'wide' };
+  | { format: 'parquet_buffer'; buffer_index: number; layout?: 'wide' | 'row' }
+  | { format: 'parquet_b64'; data: string; layout?: 'wide' | 'row' }
+  | { format: 'json'; data: DFData; layout?: 'wide' | 'row' };
 
 // ---------------------------------------------------------------------------
 // Widget state  (WidgetTypes.tsx)
@@ -179,8 +185,9 @@ export interface PayloadArgs {
 }
 
 /**
- * The `infinite_resp` message. Post-#933 the parquet bytes ride in `payload`
- * as a bare `DFEnvelope` rather than via the untagged `buffers[0]` convention.
+ * The `infinite_resp` message. Per #933 the parquet bytes ride in `payload` as
+ * a bare `DFEnvelope` (decoded by `decodeDFData(msg.payload, buffers)`) rather
+ * than via the untagged `buffers[0]` convention.
  */
 export interface PayloadResponse {
   type: 'infinite_resp';

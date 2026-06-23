@@ -1,16 +1,13 @@
 /**
  * `IModel`-over-IPC transport adapter (renderer side).
  *
- * ┌──────────── PARTIALLY BLOCKED ON #933 ────────────────────────────────────┐
- * │ The PRODUCER side (this file + the backend) is complete and decoupled. The │
- * │ CONSUMER side — buckaroo-js-core decoding the `parquet_b64` payload on the  │
- * │ infinite path — requires #933's `decodeDFData(msg.payload, buffers)`.       │
- * │ Today the infinite handler does `parquetRead(buffers[0])` and crashes on a  │
- * │ single JSON message with inline parquet (BuckarooWidgetInfinite.tsx:122).   │
- * │ So this adapter is wired and unit-tested against the message contract, but  │
- * │ end-to-end rendering must wait for #933 to land in js-core. Do not ship the │
- * │ renderer integration before then.                                          │
- * └────────────────────────────────────────────────────────────────────────────┘
+ * Both sides of the wire are now in place. The PRODUCER (this file + the
+ * backend) emits a single JSON `infinite_resp` whose `payload` is a bare
+ * `parquet_b64` `DFEnvelope`. The CONSUMER — buckaroo-js-core's infinite
+ * handler — decodes it via #933's `decodeDFData(msg.payload, buffers)`
+ * (BuckarooWidgetInfinite.tsx:125), so an inline-parquet single-message reply
+ * (no binary side-channel frame) renders end-to-end. The pre-#933 handler did
+ * `parquetRead(buffers[0])` and could not consume this shape.
  *
  * aistudio has no Node webserver — it is Electron main + renderer over IPC
  * (`ipcMain.handle` / `ipcRenderer.invoke`). buckaroo-js-core runs in the
@@ -21,9 +18,9 @@
  *   adapter emits "msg:custom" with the reply.
  *
  * The "two frames" of `WebSocketModel` is a WebSocketModel implementation
- * detail; the React handler only needs the `"msg:custom"` event. Post-#933 the
- * reply is a single JSON object with an inline `parquet_b64` payload, so there
- * is no binary frame and no `buffers` array.
+ * detail; the React handler only needs the `"msg:custom"` event. The reply is
+ * a single JSON object with an inline `parquet_b64` payload, so there is no
+ * binary frame and no `buffers` array.
  */
 
 import type { DuckBackend } from './backend.js';

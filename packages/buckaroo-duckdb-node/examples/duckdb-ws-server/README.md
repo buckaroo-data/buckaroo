@@ -38,19 +38,20 @@ cd packages/js && pnpm build:standalone
 # (or ./scripts/full_build.sh)
 ```
 
-## How it renders today (without #933)
+## How it renders (legacy binary-frame path)
 
-The viewer's transport (`WebSocketModel`) delivers each row window as a **binary
-parquet frame** paired with an `infinite_resp` JSON frame, then decodes it via
+This demo deliberately uses `WebSocketModel`'s binary-frame path rather than
+#933's `decodeDFData`. `WebSocketModel` delivers each row window as a **binary
+parquet frame** paired with an `infinite_resp` JSON frame and decodes it via
 `parquetRead(buffers[0])`. So this server sends the raw bytes from
-`DuckSource.copyToParquet` as that binary frame — the exact wire today's
-buckaroo-js-core already speaks. No `decodeDFData` (#933) needed.
+`DuckSource.copyToParquet` as that binary frame — a wire buckaroo-js-core has
+always spoken — which keeps the demo self-contained over a plain WebSocket.
 
 The backend logic is identical to the production IPC transport
-(`src/transport.ts`); only the framing differs. Post-#933, the same
+(`src/transport.ts`); only the framing differs. Over Electron IPC the same
 `DuckBackend.handleInfiniteRequest` answer (a single JSON message with an inline
-`parquet_b64` payload) flows straight through over Electron IPC with no
-re-framing.
+`parquet_b64` payload) flows straight through, decoded by
+`decodeDFData(msg.payload, buffers)` (#933) with no re-framing.
 
 ## What it exercises
 

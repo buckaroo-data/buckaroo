@@ -16,8 +16,8 @@ pnpm demo         # builds, then serves a live DuckDB-backed viewer
 ```
 
 Open http://localhost:8780/ — a 250k-row DuckDB table with infinite scroll,
-sort, and summary stats, no Python. It renders against today's browser bundle
-via the legacy binary-frame protocol (no #933 needed); details in
+sort, and summary stats, no Python. It renders against the browser bundle over
+`WebSocketModel`'s binary-frame path; details in
 `examples/duckdb-ws-server/README.md`.
 
 ## Status (v1)
@@ -34,15 +34,12 @@ Implemented and tested:
 - **Serialization** — the `COPY → tempfile parquet` no-coercion path, plus a
   batteries-included `@duckdb/node-api` adapter.
 - **Transport** — an `IModel`-over-IPC adapter for Electron (renderer ⇄ main).
+  The renderer decodes the inline `parquet_b64` `infinite_resp` payload through
+  `buckaroo-js-core`'s `decodeDFData(msg.payload, buffers)` (#933), so the
+  single-JSON-message reply renders end-to-end with no binary frame.
 
-### Blocked / fast-follow
+### Fast-follow
 
-- **End-to-end rendering is partially blocked on #933.** The producer side here
-  is complete, but the renderer decodes the inline `parquet_b64` row payload via
-  `decodeDFData` from #933 (unified DF transport). Until that lands in
-  `buckaroo-js-core`, the infinite path still does `parquetRead(buffers[0])` and
-  cannot consume a single-JSON-message inline-parquet reply. Don't ship the
-  renderer integration before #933.
 - **Histograms / quantiles, search, quick commands, exact DECIMAL** — designed
   for (the effective-query seam is in place) but not built. See the plan.
 
@@ -96,7 +93,8 @@ ipcMain.handle('buckaroo:msg', makeIpcMainHandler(backend));
 // renderer process
 import { IpcDuckModel } from 'buckaroo-duckdb-node';
 const model = new IpcDuckModel((channel, msg) => ipcRenderer.invoke(channel, msg));
-// hand `model` to the buckaroo-js-core viewer (post-#933)
+// hand `model` to the buckaroo-js-core viewer; it decodes the parquet_b64
+// payload via decodeDFData(msg.payload, buffers) (#933)
 ```
 
 ## Serialization fidelity (spike findings)

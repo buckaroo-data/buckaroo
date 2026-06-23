@@ -2,18 +2,18 @@
  * DuckDB WebSocket demo server.
  *
  * Stands the new `buckaroo-duckdb-node` backend behind the EXISTING buckaroo
- * server protocol so today's browser bundle (`buckaroo/static/standalone.js`)
+ * server protocol so the browser bundle (`buckaroo/static/standalone.js`)
  * renders a live, DuckDB-backed viewer — infinite scroll, sort, summary stats —
- * with no Python kernel and WITHOUT waiting on #933.
+ * with no Python kernel, over a plain WebSocket.
  *
- * Why this works pre-#933: the legacy protocol delivers each row window as a
- * binary parquet frame paired with an `infinite_resp` JSON frame, which
- * `WebSocketModel` already pairs into a `msg:custom` event and decodes via
- * `parquetRead(buffers[0])`. So the demo sends the raw parquet bytes from
- * `DuckSource.copyToParquet` as that binary frame. (Post-#933 the same backend
- * answers a single JSON message with an inline `parquet_b64` payload over IPC —
- * see ../../src/transport.ts. The backend logic is identical; only the framing
- * differs.)
+ * Why the legacy framing: `WebSocketModel` delivers each row window as a binary
+ * parquet frame paired with an `infinite_resp` JSON frame, pairs them into a
+ * `msg:custom` event, and decodes via `parquetRead(buffers[0])`. So the demo
+ * sends the raw parquet bytes from `DuckSource.copyToParquet` as that binary
+ * frame, which keeps it self-contained. (The production IPC transport instead
+ * answers a single JSON message with an inline `parquet_b64` payload, decoded by
+ * `decodeDFData(msg.payload, buffers)` from #933 — see ../../src/transport.ts.
+ * The backend logic is identical; only the framing differs.)
  *
  * Run:  pnpm demo        (from packages/buckaroo-duckdb-node)
  * Then open the printed http://localhost:8780/ URL.
