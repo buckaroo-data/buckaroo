@@ -158,12 +158,25 @@ export interface DFViewerConfig {
 }
 export type DFDataRow = Record<string, string | number | boolean | any[] | Record<string, any> | null>;
 export type DFData = DFDataRow[];
+export type DFEnvelope = {
+    format: 'parquet_buffer';
+    buffer_index: number;
+    layout?: 'wide' | 'row';
+} | {
+    format: 'parquet_b64';
+    data: string;
+    layout?: 'wide' | 'row';
+} | {
+    format: 'json';
+    data: DFData;
+    layout?: 'wide' | 'row';
+};
 export interface ParquetB64Payload {
     format: 'parquet_b64';
     data: string;
     layout?: 'wide' | 'row';
 }
-export type DFDataOrPayload = DFData | ParquetB64Payload;
+export type DFDataOrPayload = DFData | DFEnvelope;
 export interface DFWhole {
     dfviewer_config: DFViewerConfig;
     data: DFData;

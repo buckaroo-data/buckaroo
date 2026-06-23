@@ -15,30 +15,25 @@ import { DFData, DFDataOrPayload } from './DFWhole';
  */
 export declare function pivotWideSummaryStats(wideRow: Record<string, any>): DFData;
 /**
- * Synchronously resolve a DFDataOrPayload to DFData.
+ * The one place that owns "how a dataframe payload is decoded".
  *
- * - If the input is already a plain DFData array, return it as-is.
- * - If it is a parquet-b64 payload, decode and parse the parquet into DFData.
- * - Falls back to an empty array on errors.
+ * Consumes a transport envelope (or a plain pre-decoded DFData array, which
+ * passes through) and returns DFData. Awaited only at the ingestion edges —
+ * the comm/ws message handler, the df_data_dict trait hook, and the static
+ * mount — so the component tree stays synchronous on plain DFData.
  *
- * NOTE: hyparquet's parquetRead onComplete may fire asynchronously in some
- * bundler environments (e.g. esbuild standalone). In such cases this function
- * returns [] and the result is cached when onComplete fires. Prefer
- * resolveDFDataAsync() for reliable decoding.
+ * Branches:
+ *   - null/undefined  → []
+ *   - DFData array    → passthrough
+ *   - parquet_buffer  → bytes from buffers[buffer_index] → rows
+ *   - parquet_b64     → atob → bytes → rows (cached by the b64 string)
+ *   - json            → inline record array
+ * then for parquet-derived rows: layout 'wide' pivots, else parseParquetRow.
  */
-export declare function resolveDFData(val: DFDataOrPayload | undefined | null): DFData;
+export declare function decodeDFData(env: DFDataOrPayload | null | undefined, buffers?: DataView[]): Promise<DFData>;
 /**
- * Asynchronously resolve a DFDataOrPayload to DFData.
- *
- * Unlike resolveDFData(), this properly awaits hyparquet's parquetRead
- * so it works reliably in all bundler environments.
+ * Decode every envelope value in a df_data_dict to DFData. Plain-array values
+ * pass through. Used by the df_data_dict ingestion edge so the component tree
+ * receives decoded data end-to-end.
  */
-export declare function resolveDFDataAsync(val: DFDataOrPayload | undefined | null): Promise<DFData>;
-/**
- * Pre-resolve all parquet_b64 values in a df_data_dict.
- *
- * Returns a new dict where parquet_b64 payloads have been decoded to DFData arrays.
- * This should be called before passing df_data_dict to React components so that
- * the synchronous resolveDFData() sees plain arrays and passes them through.
- */
-export declare function preResolveDFDataDict(dict: Record<string, DFDataOrPayload> | undefined | null): Promise<Record<string, DFDataOrPayload>>;
+export declare function decodeDFDataDict(dict: Record<string, DFDataOrPayload> | undefined | null, buffers?: DataView[]): Promise<Record<string, DFData>>;
