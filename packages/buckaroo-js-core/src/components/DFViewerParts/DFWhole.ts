@@ -262,6 +262,11 @@ export type DFData = DFDataRow[];
 // per-column model. When absent, the decoder falls back to legacy parse-all
 // (correct for the pandas path, where every object column is JSON-wrapped).
 // Native-parquet senders (polars/xorq/pyarrow) emit `json_columns: []`.
+//
+// Names here are in *rewritten* column space (the internal a, b, c... names the
+// pipeline assigns), not the original column names — the decoder matches them
+// against the parquet row keys, which are already rewritten. A non-empty list
+// using original names would match nothing and leave JSON-encoded cells raw.
 export type DFEnvelope =
     | { format: 'parquet_buffer'; buffer_index: number; layout?: 'wide' | 'row'; json_columns?: string[] } // bytes in buffers[]
     | { format: 'parquet_b64'; data: string; layout?: 'wide' | 'row'; json_columns?: string[] }            // base64 parquet, inline
