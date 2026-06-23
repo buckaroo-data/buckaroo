@@ -23,6 +23,7 @@
 
 import type { SummarizeRow, SDType, SDVal } from './DuckSource.js';
 import { INDEX_COL } from './rename.js';
+import { duckTypeToColType } from './duckTypes.js';
 import type { DFData, DFDataRow } from './wireTypes.js';
 
 /** Stat names produced in v1, in the order they should appear as pinned rows. */
@@ -47,6 +48,20 @@ function maybeNumber(v: string | number | null): SDVal {
   if (trimmed === '') return null;
   const n = Number(trimmed);
   return Number.isFinite(n) ? n : v;
+}
+
+/**
+ * min/max coercion is type-aware: numeric columns get a real number, every
+ * other column keeps the raw string. A VARCHAR column whose min/max looks
+ * numeric (`'00123'` ZIP codes, IDs) must NOT be coerced — that would strip
+ * leading zeros and misrepresent the pinned stat. Likewise dates/booleans stay
+ * as their SUMMARIZE string form.
+ */
+function minMaxForColType(v: string | number | null, duckType: string): SDVal {
+  const colType = duckTypeToColType(duckType);
+  if (colType === 'integer' || colType === 'float') return maybeNumber(v);
+  if (v === null || v === undefined) return null;
+  return v;
 }
 
 /** count × null_percentage (a 0–100 percentage) → integer null count. */
@@ -77,11 +92,11 @@ export function summarizeToSDType(rows: SummarizeRow[]): SDType {
       distinct_count: maybeNumber(r.approx_unique as string | number | null),
       mean: maybeNumber(r.avg),
       std: maybeNumber(r.std),
-      min: maybeNumber(r.min),
+      min: minMaxForColType(r.min, r.column_type),
       q25: maybeNumber(r.q25),
       q50: maybeNumber(r.q50),
       q75: maybeNumber(r.q75),
-      max: maybeNumber(r.max),
+      max: minMaxForColType(r.max, r.column_type),
     };
   }
   return sd;

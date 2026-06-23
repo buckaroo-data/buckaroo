@@ -83,6 +83,9 @@ describe('DuckBackend.initialState', () => {
     expect(cfg.column_config.map((c) => c.col_name)).toEqual(['a', 'b']);
     expect(cfg.column_config[0].header_name).toBe('price');
 
+    // the live infinite source MUST be keyed 'main' — the viewer only wires the
+    // on-demand datasource for that exact key; any other key renders empty.
+    expect(msg.df_display_args.main.data_key).toBe('main');
     // main rows are empty (delivered via infinite_request); stats are inline json
     expect(msg.df_data_dict.main).toEqual([]);
     const stats = msg.df_data_dict.all_stats as { format: string; data: unknown[] };

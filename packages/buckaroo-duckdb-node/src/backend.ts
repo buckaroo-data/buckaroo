@@ -28,13 +28,20 @@ import type {
 } from './wireTypes.js';
 
 export interface DuckBackendOptions {
-  /** display name / data key for the single source. Defaults to `'main'`. */
-  dataKey?: string;
   /** summary-stats key. Defaults to `'all_stats'`. */
   summaryStatsKey?: string;
   /** v1: empty. Reserved for search (`+ WHERE`) and quick-command transforms. */
   transforms?: QueryTransform[];
 }
+
+/**
+ * The live infinite source MUST be keyed `'main'`: the viewer
+ * (`BuckarooWidgetInfinite.getDataWrapper`) only wires the on-demand datasource
+ * when `data_key === 'main'`. Any other key is read as a preloaded static
+ * array out of `df_data_dict`, which we leave empty — so the grid would render
+ * empty and never issue `infinite_request`s. Not configurable for that reason.
+ */
+const MAIN_DATA_KEY = 'main';
 
 const READONLY_STATE: BuckarooState = {
   sampled: false,
@@ -60,7 +67,6 @@ function toBase64(bytes: Uint8Array): string {
 export class DuckBackend {
   private readonly source: DuckSource;
   private readonly baseStmt: string;
-  private readonly dataKey: string;
   private readonly summaryStatsKey: string;
   private readonly transforms: QueryTransform[];
 
@@ -70,7 +76,6 @@ export class DuckBackend {
   constructor(source: DuckSource, baseStmt: string, opts: DuckBackendOptions = {}) {
     this.source = source;
     this.baseStmt = baseStmt;
-    this.dataKey = opts.dataKey ?? 'main';
     this.summaryStatsKey = opts.summaryStatsKey ?? 'all_stats';
     this.transforms = opts.transforms ?? [];
   }
@@ -113,13 +118,13 @@ export class DuckBackend {
       },
       df_data_dict: {
         // main rows arrive on demand via infinite_request
-        [this.dataKey]: [],
+        [MAIN_DATA_KEY]: [],
         // stats are small scalar aggregates — emitted pre-pivoted as json
         [this.summaryStatsKey]: { format: 'json', data: statRows },
       },
       df_display_args: {
         main: {
-          data_key: this.dataKey,
+          data_key: MAIN_DATA_KEY,
           df_viewer_config: dfViewerConfig,
           summary_stats_key: this.summaryStatsKey,
         },
