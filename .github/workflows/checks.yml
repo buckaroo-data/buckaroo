@@ -57,6 +57,11 @@ jobs:
           cd packages/buckaroo-js-core
           pnpm install && pnpm run build
           pnpm run test
+      - name: Build and test buckaroo-duckdb-node
+        run: |
+          cd packages/buckaroo-duckdb-node
+          pnpm run build
+          SKIP_DUCKDB=1 pnpm run test
 
   BuildWheel:
     name: Build JS + Python Wheel
