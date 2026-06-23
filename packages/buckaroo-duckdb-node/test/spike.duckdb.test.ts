@@ -24,7 +24,31 @@ import type { DuckDBConnectionLike } from '../src/adapters/nodeApiDuckSource';
 import { buildRenamePlan } from '../src/rename';
 import { effectiveQuery, windowedQuery } from '../src/query';
 import { summarizeToSDType, sdTypeToStatRows } from '../src/stats';
+import { numericHistogramSql, parseNumericArgs, computeHistograms } from '../src/histogramSql';
+import { numericHistogram } from '../src/histogram';
 import type { DuckSource } from '../src/DuckSource';
+
+// The exact integer column from the Python producer's histogram test
+// (tests/unit/histogram_test.py:INT_ARR). DuckDB's quantile_cont +
+// width_bucket must reproduce numpy's 1st/99th-percentile meat histogram.
+const INT_ARR = [
+  33, 41, 11, 46, 42, 44, 31, 25, 16, 24, 26, 7, 19, 23, 20, 46, 10, 4, 31, 45, 40, 37, 48, 21,
+  19, 20, 19, 14, 14, 26, 36, 24, 21, 41, 19, 17, 24, 27, 32, 30, 19, 49, 22, 20, 16, 7, 45, 10,
+  23, 44, 28, 44, 15, 29, 34, 3, 44, 19, 20, 27, 1, 35, 34, 42, 12, 9, 21, 32, 40, 41, 49, 47,
+  16, 25, 20, 11, 28, 13, 30, 6, 34, 16, 37, 21, 7, 34, 34, 29, 24, 2, 7, 17, 13, 22, 13, 32, 11,
+  24, 24, 31, 11, 9, 39, 40, 36, 20, 46, 31, 37, 27, 25, 9, 27, 41, 13, 35, 33, 24, 8, 25, 12, 28,
+  26, 17, 7, 18, 12, 6, 45, 42, 32, 38, 31, 25, 33, 13, 24, 23, 40, 18, 33, 42, 7, 40, 48, 29, 27,
+  13, 38, 35, 33, 24, 40, 19, 47, 38, 8, 3, 6, 48, 9, 17, 13, 46, 6, 3, 34, 43, 6, 9, 28, 4, 49,
+  10, 14, 36, 48, 39, 1, 37, 41, 37, 43, 43, 6, 23, 6, 30, 27, 11, 19, 19, 34, 14, 37, 42, 15, 6,
+  48, 32,
+];
+
+// histogram_test.py:_assert_ha — the expected normalized meat populations.
+const EXPECTED_NORMALIZED = [
+  0.07179487179487179, 0.1076923076923077, 0.08205128205128205, 0.1282051282051282,
+  0.09743589743589744, 0.1076923076923077, 0.1282051282051282, 0.07692307692307693,
+  0.1076923076923077, 0.09230769230769231,
+];
 
 // Dynamically import the optional native module; skip the suite if absent.
 let connection: DuckDBConnectionLike | undefined;
@@ -145,5 +169,51 @@ describe.runIf(process.env.SKIP_DUCKDB !== '1')('DuckDB serialization spike', ()
     // 'name' (alias f): 101 rows, ~15 nulls (i%7==0 for i in 0..100)
     const nullRow = rows.find((r) => r.index === 'null_count')!;
     expect(Number(nullRow.f)).toBeGreaterThan(0);
+  });
+
+  it('numeric histogram clips to the 1st/99th percentile and matches numpy', async () => {
+    if (!source) return;
+    const stmt = effectiveQuery(`SELECT unnest([${INT_ARR.join(',')}]) AS a`);
+    const plan = buildRenamePlan(await source.describe(stmt));
+    const relation = plan.renamedRelation(stmt);
+
+    const argRows = await source.queryRows(numericHistogramSql(relation, 'a'));
+    const args = parseNumericArgs(argRows)!;
+
+    // 1st/99th percentile cut points (np.quantile linear == quantile_cont)
+    expect(args.lowTail).toBeCloseTo(1.99, 5);
+    expect(args.highTail).toBeCloseTo(49, 5);
+
+    // 10 meat bins whose normalized populations match the numpy fixture
+    expect(args.meatCounts).toHaveLength(10);
+    const total = args.meatCounts.reduce((a, b) => a + b, 0);
+    const normalized = args.meatCounts.map((c) => c / total);
+    normalized.forEach((p, i) => expect(p).toBeCloseTo(EXPECTED_NORMALIZED[i], 6));
+
+    // the rendered bars: low tail, 10 populations, high tail (no nulls → no NA)
+    const bars = numericHistogram(args, 1, 49, 0);
+    expect(bars).toHaveLength(12);
+    expect(bars[0].tail).toBe(1);
+    expect(bars[11].tail).toBe(1);
+    expect(bars.slice(1, 11).every((b) => typeof b.population === 'number')).toBe(true);
+  });
+
+  it('categorical histogram emits cat_pop bars for a string column', async () => {
+    if (!source) return;
+    // counts 4/3/3 (length 10) — no singleton category, so no unique/longtail bar
+    const stmt = effectiveQuery(
+      `SELECT unnest(['A','A','A','A','B','B','B','C','C','C']) AS cat`,
+    );
+    const plan = buildRenamePlan(await source.describe(stmt));
+    const relation = plan.renamedRelation(stmt);
+    const summarizeRows = await source.summarize(relation);
+    const sd = summarizeToSDType(summarizeRows);
+
+    const histos = await computeHistograms(source, relation, plan, sd, 10);
+    expect(histos.a).toEqual([
+      { name: 'A', cat_pop: 40 },
+      { name: 'B', cat_pop: 30 },
+      { name: 'C', cat_pop: 30 },
+    ]);
   });
 });
