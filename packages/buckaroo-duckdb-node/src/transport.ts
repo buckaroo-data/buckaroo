@@ -88,26 +88,50 @@ export class IpcDuckModel implements IModel {
   }
 }
 
+/** Pull the search term out of a `buckaroo_state_change` message, or '' if none. */
+export function extractSearchTerm(msg: {
+  new_state?: { quick_command_args?: Record<string, unknown> };
+  quick_command_args?: Record<string, unknown>;
+}): string {
+  const qa = msg?.new_state?.quick_command_args ?? msg?.quick_command_args;
+  const search = qa?.search;
+  if (Array.isArray(search) && search.length > 0 && search[0] != null) {
+    return String(search[0]);
+  }
+  return '';
+}
+
 /**
  * The main-process handler. Register with
  * `ipcMain.handle('buckaroo:msg', makeIpcMainHandler(backend))`.
  *
- * Returns the reply object the renderer re-emits as `"msg:custom"`. Unknown
- * message types (e.g. `buckaroo_state_change` quick commands) are no-ops in v1.
+ * Returns the reply object the renderer re-emits as `"msg:custom"`. A
+ * `buckaroo_state_change` carrying `quick_command_args.search` re-runs the
+ * search and replies with a fresh `initial_state` (filtered stats +
+ * highlight_phrase); other state changes are no-ops.
  */
 export function makeIpcMainHandler(
   backend: DuckBackend,
-): (event: unknown, msg: { type?: string; payload_args?: unknown }) => Promise<
-  InitialStateMessage | PayloadResponse | null
-> {
+): (
+  event: unknown,
+  msg: {
+    type?: string;
+    payload_args?: unknown;
+    new_state?: { quick_command_args?: Record<string, unknown> };
+    quick_command_args?: Record<string, unknown>;
+  },
+) => Promise<InitialStateMessage | PayloadResponse | null> {
   return async (_event, msg) => {
     switch (msg?.type) {
       case 'initial_state':
         return backend.initialState();
       case 'infinite_request':
         return backend.handleInfiniteRequest(msg.payload_args as never);
+      case 'buckaroo_state_change':
+        backend.setSearch(extractSearchTerm(msg));
+        return backend.initialState();
       default:
-        // viewer mode is read-only: buckaroo_state_change et al. are no-ops
+        // other read-only state changes are no-ops
         return null;
     }
   };

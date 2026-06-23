@@ -215,6 +215,19 @@ async function main() {
       } catch {
         return;
       }
+      // Search: re-run with the new term and resend the (filtered) initial_state.
+      if (msg.type === 'buckaroo_state_change') {
+        const search = msg.new_state?.quick_command_args?.search;
+        const term = Array.isArray(search) && search[0] != null ? String(search[0]) : '';
+        backend.setSearch(term);
+        try {
+          const refreshed = await backend.initialState();
+          ws.send(JSON.stringify(toLegacyInitialState(refreshed)));
+        } catch (err) {
+          console.error('search state_change failed:', err);
+        }
+        return;
+      }
       if (msg.type !== 'infinite_request') return; // read-only viewer: ignore the rest
 
       const args = msg.payload_args ?? {};

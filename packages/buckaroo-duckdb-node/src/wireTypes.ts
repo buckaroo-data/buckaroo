@@ -26,6 +26,12 @@ export interface ObjDisplayerA {
 export interface StringDisplayerA {
   displayer: 'string';
   max_length?: number;
+  /**
+   * Substrings to highlight in the rendered cell. Set under active search so
+   * the matched term is highlighted, mirroring the Python `Search` command's
+   * `highlight_phrase` SDResult update (pandas_commands.py).
+   */
+  highlight_phrase?: string[];
 }
 
 export interface FloatDisplayerA {
