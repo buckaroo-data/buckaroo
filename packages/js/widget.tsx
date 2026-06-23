@@ -259,7 +259,7 @@ function createPredecodingRender(Widget) {
 
 		const decodeAndRender = async () => {
 			const raw = model.get('df_data_dict');
-			const resolved = await srt.preResolveDFDataDict(raw);
+			const resolved = await srt.decodeDFDataDict(raw);
 			doRender(resolved);
 		};
 

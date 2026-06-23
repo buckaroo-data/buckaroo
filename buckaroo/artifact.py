@@ -6,7 +6,6 @@ in static HTML without a notebook kernel or server.
 Both df_data and summary_stats_data are serialized as parquet b64
 for compact transport. The JS side decodes them via resolveDFDataAsync().
 """
-import base64
 import json
 import re
 from io import BytesIO
@@ -14,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from buckaroo.serialization_utils import (prepare_df_for_serialization, _json_encode_cell, _coerce_for_json)
+from buckaroo.serialization_utils import (prepare_df_for_serialization, _json_encode_cell, _coerce_for_json, b64_payload)
 from buckaroo.dataflow.widget_extension_utils import configure_buckaroo
 from buckaroo.buckaroo_widget import BuckarooWidget
 
@@ -51,8 +50,9 @@ def _df_to_parquet_b64_tagged(df: pd.DataFrame) -> dict:
     buf = BytesIO()
     df2.to_parquet(buf, engine='pyarrow')
     buf.seek(0)
-    b64 = base64.b64encode(buf.read()).decode('ascii')
-    return {'format': 'parquet_b64', 'data': b64}
+    # Envelope wrapping unified via b64_payload (the static-transport shape).
+    env, _ = b64_payload(buf.read())
+    return env
 
 
 def prepare_buckaroo_artifact(df, column_config_overrides=None,

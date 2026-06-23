@@ -242,6 +242,90 @@ def to_parquet(df):
     return data.read()
 
 
+def buffer_payload(parquet_bytes: bytes, buffer_index: int = 0,
+                   layout: Any = None) -> Tuple[Dict[str, Any], List[bytes]]:
+    """Wrap pre-serialized parquet bytes as a ``parquet_buffer`` envelope.
+
+    The bytes ride a comm/websocket side-channel buffer addressed by
+    ``buffer_index``; the envelope just names which buffer holds this
+    dataframe. Returns ``(envelope, [parquet_bytes])`` so the caller can
+    splat the buffers list straight into ``self.send(msg, buffers)``.
+    """
+    env: Dict[str, Any] = {'format': 'parquet_buffer', 'buffer_index': buffer_index}
+    if layout is not None:
+        env['layout'] = layout
+    return env, [parquet_bytes]
+
+
+def b64_payload(parquet_bytes: bytes, layout: Any = None) -> Tuple[Dict[str, Any], List[bytes]]:
+    """Wrap pre-serialized parquet bytes as an inline ``parquet_b64`` envelope.
+
+    For transports with no binary side-channel (static HTML embeds). Returns
+    ``(envelope, [])`` — there are never out-of-band buffers for b64.
+    """
+    env: Dict[str, Any] = {'format': 'parquet_b64',
+        'data': base64.b64encode(parquet_bytes).decode('ascii')}
+    if layout is not None:
+        env['layout'] = layout
+    return env, []
+
+
+def encode_df(df, transport: str, layout: Any = None, fmt: Any = None,
+              to_parquet=to_parquet) -> Tuple[Dict[str, Any], List[bytes]]:
+    """Encode a dataframe to a transport envelope plus side-channel buffers.
+
+    The single Python-side counterpart to the JS ``decodeDFData``. The
+    envelope format is driven by the transport capability, with an explicit
+    ``fmt`` override:
+
+    * ``transport='comm'`` (anywidget/websocket/zmq — binary buffers OK) →
+      ``parquet_buffer``: bytes ride ``buffers[buffer_index]``.
+    * ``transport='static'`` (HTML embed — no side-channel) → ``parquet_b64``:
+      base64 parquet inline.
+    * ``fmt='json'`` (explicit) → ``json``: a record array inline.
+
+    ``layout='wide'`` marks the single-row ``{col}__{stat}`` summary-stats
+    shape; it rides on the envelope, orthogonal to the format. ``to_parquet``
+    lets each backend inject its own serializer (fastparquet/polars/pyarrow)
+    while sharing the envelope wrapping.
+
+    Returns ``(envelope_dict, buffers)``. ``buffers`` is ``[]`` unless ``fmt``
+    resolves to ``parquet_buffer``.
+    """
+    if fmt is None:
+        fmt = {'comm': 'parquet_buffer', 'static': 'parquet_b64'}.get(transport)
+        if fmt is None:
+            raise ValueError(f"unknown transport {transport!r} (expected 'comm' or 'static')")
+    if fmt == 'parquet_buffer':
+        return buffer_payload(to_parquet(df), layout=layout)
+    if fmt == 'parquet_b64':
+        return b64_payload(to_parquet(df), layout=layout)
+    if fmt == 'json':
+        env: Dict[str, Any] = {'format': 'json', 'data': pd_to_obj(force_to_pandas(df))}
+        if layout is not None:
+            env['layout'] = layout
+        return env, []
+    raise ValueError(f"unknown fmt {fmt!r}")
+
+
+def make_infinite_resp(key: Any, length: int, parquet_bytes: bytes,
+                       layout: Any = None) -> Tuple[Dict[str, Any], List[bytes]]:
+    """Build an ``infinite_resp`` message + buffers for a row-slice response.
+
+    The dataframe envelope is nested under ``payload`` (a bare
+    ``parquet_buffer`` envelope), kept separate from the cache-protocol
+    routing fields (``key``/``length``). The JS side decodes it with
+    ``decodeDFData(msg.payload, buffers)``. Returns ``(msg, buffers)``:
+
+    * anywidget/zmq senders do ``self.send(*make_infinite_resp(...))``.
+    * websocket senders return ``(msg, buffers[0])`` for the two-frame
+      JSON-then-binary write.
+    """
+    env, buffers = buffer_payload(parquet_bytes, layout=layout)
+    msg = {"type": "infinite_resp", "key": key, "length": length, "payload": env}
+    return msg, buffers
+
+
 def to_parquet_b64(df: pd.DataFrame) -> str:
     """Convert a DataFrame to a base64-encoded parquet string.
 
@@ -458,8 +542,10 @@ def sd_to_parquet_b64(sd: Dict[str, Any]) -> Dict[str, str]:
         buf = BytesIO()
         pq.write_table(table, buf)
         buf.seek(0)
-        b64 = base64.b64encode(buf.read()).decode('ascii')
-        return {'format': 'parquet_b64', 'layout': 'wide', 'data': b64}
+        # Envelope wrapping is unified via b64_payload; only the wide-table
+        # construction above is summary-stats specific.
+        env, _ = b64_payload(buf.read(), layout='wide')
+        return env
     except Exception as e:
         logger.warning("Failed to serialize summary stats as parquet, falling back to JSON: %r", e)
         return pd_to_obj(pd.DataFrame(sd))

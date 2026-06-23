@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 if TYPE_CHECKING:
     import polars as pl
-from buckaroo.serialization_utils import to_parquet, pd_to_obj, check_and_fix_df
+from buckaroo.serialization_utils import to_parquet, pd_to_obj, check_and_fix_df, make_infinite_resp
 from buckaroo.df_util import old_col_new_col, to_chars
 
 from buckaroo.dataflow.dataflow import CustomizableDataflow
@@ -101,7 +101,7 @@ def handle_infinite_request_buckaroo(
     from buckaroo.customizations.pandas_commands import search_df_str
     _unused, processed_df, merged_sd = dataflow.widget_args_tuple
     if processed_df is None:
-        return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0}, b"")
+        return ({"type": "infinite_resp", "key": payload_args, "length": 0}, b"")
     try:
         filtered_df = search_df_str(processed_df, search_string) if search_string else processed_df
         # Clamp window against the *filtered* size so a search that
@@ -120,11 +120,10 @@ def handle_infinite_request_buckaroo(
         else:
             slice_df = filtered_df[start:end]
 
-        parquet_bytes = to_parquet(slice_df)
-        msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": len(filtered_df)}
-        return msg, parquet_bytes
+        msg, buffers = make_infinite_resp(payload_args, len(filtered_df), to_parquet(slice_df))
+        return msg, buffers[0]
     except Exception:
-        return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0,
+        return ({"type": "infinite_resp", "key": payload_args, "length": 0,
             "error_info": traceback.format_exc()}, b"")
 
 
@@ -214,10 +213,9 @@ def handle_infinite_request_lazy(ldf: "pl.LazyFrame", orig_to_rw: dict, rw_to_or
 
     out = BytesIO()
     slice_df.write_parquet(out, compression="uncompressed")
-    parquet_bytes = out.getvalue()
 
-    msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": total_rows}
-    return msg, parquet_bytes
+    msg, buffers = make_infinite_resp(payload_args, total_rows, out.getvalue())
+    return msg, buffers[0]
 
 
 def load_file(path: str) -> pd.DataFrame:
@@ -313,6 +311,5 @@ def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[dict,
     else:
         slice_df = df[start:end]
 
-    parquet_bytes = to_parquet(slice_df)
-    msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": len(df)}
-    return msg, parquet_bytes
+    msg, buffers = make_infinite_resp(payload_args, len(df), to_parquet(slice_df))
+    return msg, buffers[0]

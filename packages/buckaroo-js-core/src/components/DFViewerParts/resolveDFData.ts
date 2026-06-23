@@ -1,21 +1,9 @@
 import { parquetRead, parquetMetadata } from 'hyparquet';
-import { DFData, DFDataRow, DFDataOrPayload, ParquetB64Payload } from './DFWhole';
-
-/**
- * Type guard: returns true if the value is a parquet-b64 tagged payload.
- */
-function isParquetB64(val: unknown): val is ParquetB64Payload {
-    return (
-        val !== null &&
-        typeof val === 'object' &&
-        !Array.isArray(val) &&
-        (val as any).format === 'parquet_b64' &&
-        typeof (val as any).data === 'string'
-    );
-}
+import { DFData, DFDataRow, DFDataOrPayload, DFEnvelope } from './DFWhole';
 
 // Simple LRU-ish cache keyed by the b64 string (reference equality would miss
-// when the trait is re-serialised with the same content).
+// when the trait is re-serialised with the same content). Only the inline
+// b64 path is cached — comm buffers are one-shot and have no stable key.
 const _cache = new Map<string, DFData>();
 const MAX_CACHE = 8;
 
@@ -38,6 +26,17 @@ function b64ToArrayBuffer(b64: string): ArrayBuffer {
         bytes[i] = bin.charCodeAt(i);
     }
     return bytes.buffer;
+}
+
+/**
+ * Extract the exact parquet bytes a comm side-channel buffer carries.
+ *
+ * anywidget / the WebSocket model hand each frame over as a DataView. Slice
+ * to the view's window so a non-zero byteOffset (shared backing buffer)
+ * doesn't feed stray bytes into hyparquet.
+ */
+function dataViewToArrayBuffer(dv: DataView): ArrayBuffer {
+    return dv.buffer.slice(dv.byteOffset, dv.byteOffset + dv.byteLength);
 }
 
 /**
@@ -134,15 +133,13 @@ export function pivotWideSummaryStats(wideRow: Record<string, any>): DFData {
     return rows;
 }
 
-function isWideFormat(payload: ParquetB64Payload): boolean {
-    return payload.layout === 'wide';
-}
-
-function decodeParquetRows(
-    payload: ParquetB64Payload,
-    rows: Record<string, any>[],
-): DFData {
-    if (isWideFormat(payload)) {
+/**
+ * Turn raw hyparquet rows into DFData, honoring the envelope's layout.
+ * 'wide' → pivot the single summary-stats row; otherwise JSON-parse each
+ * object/list/dict cell back to its native value.
+ */
+function parquetRowsToDFData(rows: Record<string, any>[], layout?: string): DFData {
+    if (layout === 'wide') {
         // Wide layout always serializes a single row.
         return rows.length === 0 ? [] : pivotWideSummaryStats(rows[0]);
     }
@@ -150,122 +147,98 @@ function decodeParquetRows(
 }
 
 /**
- * Synchronously resolve a DFDataOrPayload to DFData.
- *
- * - If the input is already a plain DFData array, return it as-is.
- * - If it is a parquet-b64 payload, decode and parse the parquet into DFData.
- * - Falls back to an empty array on errors.
- *
- * NOTE: hyparquet's parquetRead onComplete may fire asynchronously in some
- * bundler environments (e.g. esbuild standalone). In such cases this function
- * returns [] and the result is cached when onComplete fires. Prefer
- * resolveDFDataAsync() for reliable decoding.
+ * Read parquet bytes into raw hyparquet rows. Awaits onComplete so it works
+ * reliably across bundler environments (esbuild standalone fires async).
  */
-export function resolveDFData(val: DFDataOrPayload | undefined | null): DFData {
-    if (val === undefined || val === null) return [];
-    if (Array.isArray(val)) return val as DFData;
-
-    if (isParquetB64(val)) {
-        // Check cache — only return cached if non-empty (async decode may have
-        // cached [] before onComplete fired)
-        const cached = _cache.get(val.data);
-        if (cached && cached.length > 0) return cached;
-
+async function readParquetRows(buf: ArrayBuffer): Promise<Record<string, any>[]> {
+    const metadata = parquetMetadata(buf);
+    return await new Promise<Record<string, any>[]>((resolve, reject) => {
         try {
-            const buf = b64ToArrayBuffer(val.data);
-            const metadata = parquetMetadata(buf);
-            let result: DFData = [];
             parquetRead({
                 file: buf,
                 metadata,
                 rowFormat: 'object',
-                onComplete: (data: any[]) => {
-                    result = decodeParquetRows(val, data);
-                    cacheSet(val.data, result);
-                },
+                onComplete: (rows: any[]) => resolve(rows),
             });
-            // If synchronous (Jupyter/webpack), result is already populated
-            if (result.length > 0) {
-                cacheSet(val.data, result);
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+/**
+ * The one place that owns "how a dataframe payload is decoded".
+ *
+ * Consumes a transport envelope (or a plain pre-decoded DFData array, which
+ * passes through) and returns DFData. Awaited only at the ingestion edges —
+ * the comm/ws message handler, the df_data_dict trait hook, and the static
+ * mount — so the component tree stays synchronous on plain DFData.
+ *
+ * Branches:
+ *   - null/undefined  → []
+ *   - DFData array    → passthrough
+ *   - parquet_buffer  → bytes from buffers[buffer_index] → rows
+ *   - parquet_b64     → atob → bytes → rows (cached by the b64 string)
+ *   - json            → inline record array
+ * then for parquet-derived rows: layout 'wide' pivots, else parseParquetRow.
+ */
+export async function decodeDFData(
+    env: DFDataOrPayload | null | undefined,
+    buffers?: DataView[],
+): Promise<DFData> {
+    if (env === undefined || env === null) return [];
+    if (Array.isArray(env)) return env as DFData;
+
+    const envelope = env as DFEnvelope;
+    try {
+        if (envelope.format === 'json') {
+            return (envelope.data ?? []) as DFData;
+        }
+        if (envelope.format === 'parquet_b64') {
+            const cached = _cache.get(envelope.data);
+            if (cached && cached.length > 0) return cached;
+            const rows = await readParquetRows(b64ToArrayBuffer(envelope.data));
+            const result = parquetRowsToDFData(rows, envelope.layout);
+            cacheSet(envelope.data, result);
+            return result;
+        }
+        if (envelope.format === 'parquet_buffer') {
+            const dv = buffers?.[envelope.buffer_index];
+            if (dv === undefined) {
+                console.error(
+                    'decodeDFData: parquet_buffer envelope but buffers[%d] is missing',
+                    envelope.buffer_index,
+                );
+                return [];
             }
-            return result;
-        } catch (e) {
-            console.error('resolveDFData: failed to decode parquet_b64', e);
-            return [];
+            const rows = await readParquetRows(dataViewToArrayBuffer(dv));
+            return parquetRowsToDFData(rows, envelope.layout);
         }
+    } catch (e) {
+        console.error('decodeDFData: failed to decode envelope', envelope, e);
+        return [];
     }
 
-    // Unknown format — treat as empty
-    console.warn('resolveDFData: unknown payload format', val);
+    console.warn('decodeDFData: unknown envelope format', env);
     return [];
 }
 
 /**
- * Asynchronously resolve a DFDataOrPayload to DFData.
- *
- * Unlike resolveDFData(), this properly awaits hyparquet's parquetRead
- * so it works reliably in all bundler environments.
+ * Decode every envelope value in a df_data_dict to DFData. Plain-array values
+ * pass through. Used by the df_data_dict ingestion edge so the component tree
+ * receives decoded data end-to-end.
  */
-export async function resolveDFDataAsync(val: DFDataOrPayload | undefined | null): Promise<DFData> {
-    if (val === undefined || val === null) return [];
-    if (Array.isArray(val)) return val as DFData;
-
-    if (isParquetB64(val)) {
-        const cached = _cache.get(val.data);
-        if (cached && cached.length > 0) return cached;
-
-        try {
-            const buf = b64ToArrayBuffer(val.data);
-            const metadata = parquetMetadata(buf);
-            const data = await new Promise<any[]>((resolve, reject) => {
-                try {
-                    parquetRead({
-                        file: buf,
-                        metadata,
-                        rowFormat: 'object',
-                        onComplete: (rows: any[]) => resolve(rows),
-                    });
-                } catch (e) {
-                    reject(e);
-                }
-            });
-            const result = decodeParquetRows(val, data);
-            cacheSet(val.data, result);
-            return result;
-        } catch (e) {
-            console.error('resolveDFDataAsync: failed to decode parquet_b64', e);
-            return [];
-        }
-    }
-
-    console.warn('resolveDFDataAsync: unknown payload format', val);
-    return [];
-}
-
-/**
- * Pre-resolve all parquet_b64 values in a df_data_dict.
- *
- * Returns a new dict where parquet_b64 payloads have been decoded to DFData arrays.
- * This should be called before passing df_data_dict to React components so that
- * the synchronous resolveDFData() sees plain arrays and passes them through.
- */
-export async function preResolveDFDataDict(
-    dict: Record<string, DFDataOrPayload> | undefined | null
-): Promise<Record<string, DFDataOrPayload>> {
+export async function decodeDFDataDict(
+    dict: Record<string, DFDataOrPayload> | undefined | null,
+    buffers?: DataView[],
+): Promise<Record<string, DFData>> {
     if (!dict) return {};
-    const result: Record<string, DFDataOrPayload> = {};
-    const promises: Promise<void>[] = [];
-    for (const [key, val] of Object.entries(dict)) {
-        if (isParquetB64(val)) {
-            promises.push(
-                resolveDFDataAsync(val).then((resolved) => {
-                    result[key] = resolved;
-                })
-            );
-        } else {
-            result[key] = val;
-        }
-    }
-    await Promise.all(promises);
+    const result: Record<string, DFData> = {};
+    const entries = Object.entries(dict);
+    await Promise.all(
+        entries.map(async ([key, val]) => {
+            result[key] = await decodeDFData(val, buffers);
+        }),
+    );
     return result;
 }

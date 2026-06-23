@@ -11,10 +11,7 @@ from io import BytesIO
 import pandas as pd
 import pyarrow.parquet as pq
 
-from buckaroo.serialization_utils import (
-    encode_df, buffer_payload, b64_payload,
-    resolve_summary_stats_payload, sd_to_parquet_b64,
-)
+from buckaroo.serialization_utils import (encode_df, buffer_payload, b64_payload, resolve_summary_stats_payload, sd_to_parquet_b64)
 
 
 def _df():

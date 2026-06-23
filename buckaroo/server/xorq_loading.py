@@ -16,6 +16,7 @@ from pathlib import Path
 
 from buckaroo.server.git_state_guard import install_git_state_guard
 from buckaroo.server.window import clamp_window
+from buckaroo.serialization_utils import make_infinite_resp
 from buckaroo.xorq_buckaroo import (
     NoCleaningConfXorq, XorqAutocleaning, XorqDataflow, XorqDfStatsV2,
     XorqInfiniteSampling, _XORQ_ANALYSIS_KLASSES, _expr_count,
@@ -432,7 +433,7 @@ def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
     from buckaroo.customizations.xorq_commands import search_expr
     _unused, processed_df, merged_sd = xorq_dataflow.widget_args_tuple
     if processed_df is None:
-        return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0}, b"")
+        return ({"type": "infinite_resp", "key": payload_args, "length": 0}, b"")
 
     try:
         filtered_expr = search_expr(processed_df, search_string) if search_string else processed_df
@@ -451,8 +452,8 @@ def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
         start, end = clamp_window(
             payload_args.get("start"), payload_args.get("end"), total_length)
         parquet_bytes = window_to_parquet(filtered_expr, start, end, sort_col, ascending)
-        return ({"type": "infinite_resp", "key": payload_args, "data": [],
-            "length": total_length}, parquet_bytes)
+        msg, buffers = make_infinite_resp(payload_args, total_length, parquet_bytes)
+        return msg, buffers[0]
     except Exception:
-        return ({"type": "infinite_resp", "key": payload_args, "data": [],
+        return ({"type": "infinite_resp", "key": payload_args,
             "length": 0, "error_info": traceback.format_exc()}, b"")

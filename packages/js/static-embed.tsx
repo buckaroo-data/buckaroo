@@ -1,6 +1,6 @@
 import * as React from "react";
 import * as ReactDOM from "react-dom/client";
-import { BuckarooStaticTable, resolveDFDataAsync, preResolveDFDataDict } from "buckaroo-js-core";
+import { BuckarooStaticTable, decodeDFData, decodeDFDataDict } from "buckaroo-js-core";
 import "../buckaroo-js-core/dist/style.css";
 
 async function main() {
@@ -15,8 +15,8 @@ async function main() {
 
     // Pre-resolve parquet_b64 payloads before React render
     const [dfData, summaryStatsData] = await Promise.all([
-        resolveDFDataAsync(artifact.df_data),
-        resolveDFDataAsync(artifact.summary_stats_data),
+        decodeDFData(artifact.df_data),
+        decodeDFData(artifact.summary_stats_data),
     ]);
 
     const resolved: any = {
@@ -29,7 +29,7 @@ async function main() {
     // For Buckaroo mode, pre-resolve all parquet_b64 values in df_data_dict
     if (artifact.embed_type === "Buckaroo" && artifact.df_data_dict) {
         resolved.df_display_args = artifact.df_display_args;
-        resolved.df_data_dict = await preResolveDFDataDict(artifact.df_data_dict);
+        resolved.df_data_dict = await decodeDFDataDict(artifact.df_data_dict);
         // Ensure "main" key has the already-resolved data
         resolved.df_data_dict["main"] = dfData;
         resolved.df_meta = artifact.df_meta;

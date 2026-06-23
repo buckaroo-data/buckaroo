@@ -32,7 +32,7 @@ from .df_util import old_col_new_col
 from .pluggable_analysis_framework import perf_log
 from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from .pluggable_analysis_framework.xorq_stat_pipeline import XorqDfStatsV2
-from .serialization_utils import pd_to_obj, to_parquet
+from .serialization_utils import pd_to_obj, to_parquet, make_infinite_resp
 
 logger = logging.getLogger(__name__)
 
@@ -352,10 +352,7 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
                 ascending = new_payload_args.get('sort_direction') == 'asc'
 
             window_bytes = window_to_parquet(processed_df, start, end, sort_col, ascending)
-            self.send(
-                {"type": "infinite_resp", 'key': new_payload_args,
-                 'data': [], 'length': total_length},
-                [window_bytes])
+            self.send(*make_infinite_resp(new_payload_args, total_length, window_bytes))
 
             # Sorted requests don't piggyback a second window today.
             if sort:
@@ -365,14 +362,11 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
                 return
             extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
             extra_bytes = window_to_parquet(processed_df, extra_start, extra_end)
-            self.send(
-                {"type": "infinite_resp", 'key': second_pa,
-                 'data': [], 'length': total_length},
-                [extra_bytes])
+            self.send(*make_infinite_resp(second_pa, total_length, extra_bytes))
         except Exception as e:
             logger.error(e)
             stack_trace = traceback.format_exc()
             self.send(
                 {"type": "infinite_resp", 'key': new_payload_args,
-                 'data': [], 'error_info': stack_trace, 'length': 0})
+                 'error_info': stack_trace, 'length': 0})
             raise
