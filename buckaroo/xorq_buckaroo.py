@@ -352,7 +352,7 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
                 ascending = new_payload_args.get('sort_direction') == 'asc'
 
             window_bytes = window_to_parquet(processed_df, start, end, sort_col, ascending)
-            send_infinite_resp(self, new_payload_args, total_length, window_bytes)
+            send_infinite_resp(self, new_payload_args, total_length, window_bytes, json_columns=[])
 
             # Sorted requests don't piggyback a second window today.
             if sort:
@@ -362,7 +362,7 @@ class XorqBuckarooInfiniteWidget(XorqBuckarooWidget, BuckarooInfiniteWidget):
                 return
             extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
             extra_bytes = window_to_parquet(processed_df, extra_start, extra_end)
-            send_infinite_resp(self, second_pa, total_length, extra_bytes)
+            send_infinite_resp(self, second_pa, total_length, extra_bytes, json_columns=[])
         except Exception as e:
             logger.error(e)
             stack_trace = traceback.format_exc()

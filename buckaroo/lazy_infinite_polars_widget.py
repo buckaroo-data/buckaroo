@@ -782,7 +782,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
                 "sending slice [%s,%s) rows=%s total=%s",
                 start, end, len(slice_df), self.df_meta['total_rows'])
             send_infinite_resp(self, new_payload_args, self.df_meta['total_rows'],
-                self._to_parquet(slice_df))
+                self._to_parquet(slice_df), json_columns=[])
 
             second_pa = new_payload_args.get('second_request')
             if second_pa:
@@ -797,7 +797,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
                         "sending second slice [%s,%s) rows=%s total=%s",
                         s2, e2, len(slice2), self.df_meta['total_rows'])
                     send_infinite_resp(self, second_pa, self.df_meta['total_rows'],
-                        self._to_parquet(slice2))
+                        self._to_parquet(slice2), json_columns=[])
         except Exception as e:
             stack_trace = traceback.format_exc()
             self.send({"type": "infinite_resp", 'key': new_payload_args, 'error_info': stack_trace,

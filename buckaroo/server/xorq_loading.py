@@ -452,7 +452,8 @@ def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
         start, end = clamp_window(
             payload_args.get("start"), payload_args.get("end"), total_length)
         parquet_bytes = window_to_parquet(filtered_expr, start, end, sort_col, ascending)
-        return make_infinite_resp(payload_args, total_length, parquet_bytes)
+        # Native pyarrow parquet — strings are not JSON-wrapped.
+        return make_infinite_resp(payload_args, total_length, parquet_bytes, json_columns=[])
     except Exception:
         return ({"type": "infinite_resp", "key": payload_args,
             "length": 0, "error_info": traceback.format_exc()}, b"")

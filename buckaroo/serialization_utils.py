@@ -27,16 +27,23 @@ Transport = Literal['comm', 'static']
 Fmt = Literal['parquet_buffer', 'parquet_b64', 'json']
 
 
+# ``json_columns`` names exactly the columns whose string cells are JSON-encoded
+# (the fastparquet ``object_encoding='json'`` convention). The JS decoder
+# JSON-parses only those columns; when the key is absent it falls back to legacy
+# parse-all (correct for the pandas path). Native-parquet senders
+# (polars/xorq/pyarrow) emit ``json_columns: []`` so no string cell is parsed.
 class ParquetBufferEnvelope(TypedDict):
     format: Literal['parquet_buffer']
     buffer_index: int
     layout: NotRequired[Layout]
+    json_columns: NotRequired[List[str]]
 
 
 class ParquetB64Envelope(TypedDict):
     format: Literal['parquet_b64']
     data: str
     layout: NotRequired[Layout]
+    json_columns: NotRequired[List[str]]
 
 
 class JsonEnvelope(TypedDict):
@@ -281,36 +288,48 @@ def to_parquet(df: pd.DataFrame) -> bytes:
 
 
 def buffer_payload(parquet_bytes: bytes, buffer_index: int = 0,
-                   layout: Optional[Layout] = None) -> Tuple[ParquetBufferEnvelope, List[bytes]]:
+                   layout: Optional[Layout] = None,
+                   json_columns: Optional[List[str]] = None) -> Tuple[ParquetBufferEnvelope, List[bytes]]:
     """Wrap pre-serialized parquet bytes as a ``parquet_buffer`` envelope.
 
     The bytes ride a comm/websocket side-channel buffer addressed by
     ``buffer_index``; the envelope just names which buffer holds this
     dataframe. Returns ``(envelope, [parquet_bytes])`` so the caller can
     splat the buffers list straight into ``self.send(msg, buffers)``.
+
+    ``json_columns`` (when not ``None``) names the JSON-encoded columns for the
+    decoder; native-parquet senders pass ``[]``. ``None`` omits the key, leaving
+    the decoder on legacy parse-all (the pandas convention).
     """
     env: ParquetBufferEnvelope = {'format': 'parquet_buffer', 'buffer_index': buffer_index}
     if layout is not None:
         env['layout'] = layout
+    if json_columns is not None:
+        env['json_columns'] = json_columns
     return env, [parquet_bytes]
 
 
 def parquet_b64_payload(parquet_bytes: bytes,
-                        layout: Optional[Layout] = None) -> Tuple[ParquetB64Envelope, List[bytes]]:
+                        layout: Optional[Layout] = None,
+                        json_columns: Optional[List[str]] = None) -> Tuple[ParquetB64Envelope, List[bytes]]:
     """Wrap pre-serialized parquet bytes as an inline ``parquet_b64`` envelope.
 
     For transports with no binary side-channel (static HTML embeds). Returns
     ``(envelope, [])`` — there are never out-of-band buffers for b64.
+
+    ``json_columns`` is stamped onto the envelope as in :func:`buffer_payload`.
     """
     env: ParquetB64Envelope = {'format': 'parquet_b64',
         'data': base64.b64encode(parquet_bytes).decode('ascii')}
     if layout is not None:
         env['layout'] = layout
+    if json_columns is not None:
+        env['json_columns'] = json_columns
     return env, []
 
 
 def encode_df(df, transport: Transport, layout: Optional[Layout] = None, fmt: Optional[Fmt] = None,
-              to_parquet=to_parquet) -> Tuple[Envelope, List[bytes]]:
+              to_parquet=to_parquet, json_columns: Optional[List[str]] = None) -> Tuple[Envelope, List[bytes]]:
     """Encode a dataframe to a transport envelope plus side-channel buffers.
 
     The single Python-side counterpart to the JS ``decodeDFData``. The
@@ -336,9 +355,9 @@ def encode_df(df, transport: Transport, layout: Optional[Layout] = None, fmt: Op
         if fmt is None:
             raise ValueError(f"unknown transport {transport!r} (expected 'comm' or 'static')")
     if fmt == 'parquet_buffer':
-        return buffer_payload(to_parquet(df), layout=layout)
+        return buffer_payload(to_parquet(df), layout=layout, json_columns=json_columns)
     if fmt == 'parquet_b64':
-        return parquet_b64_payload(to_parquet(df), layout=layout)
+        return parquet_b64_payload(to_parquet(df), layout=layout, json_columns=json_columns)
     if fmt == 'json':
         env: JsonEnvelope = {'format': 'json', 'data': pd_to_obj(force_to_pandas(df))}
         if layout is not None:
@@ -348,7 +367,8 @@ def encode_df(df, transport: Transport, layout: Optional[Layout] = None, fmt: Op
 
 
 def make_infinite_resp(key: Dict[str, Any], length: int, parquet_bytes: bytes,
-                       layout: Optional[Layout] = None) -> Tuple[InfiniteRespMessage, bytes]:
+                       layout: Optional[Layout] = None,
+                       json_columns: Optional[List[str]] = None) -> Tuple[InfiniteRespMessage, bytes]:
     """Build an ``infinite_resp`` message + its single parquet buffer.
 
     The dataframe envelope is nested under ``payload`` (a bare
@@ -362,21 +382,22 @@ def make_infinite_resp(key: Dict[str, Any], length: int, parquet_bytes: bytes,
     * anywidget/zmq senders use :func:`send_infinite_resp`, which wraps the
       bytes in the ``buffers`` list anywidget's ``send`` expects.
     """
-    env, _ = buffer_payload(parquet_bytes, layout=layout)
+    env, _ = buffer_payload(parquet_bytes, layout=layout, json_columns=json_columns)
     msg: InfiniteRespMessage = {"type": "infinite_resp", "key": key,
         "length": length, "payload": env}
     return msg, parquet_bytes
 
 
 def send_infinite_resp(widget: Any, key: Dict[str, Any], length: int,
-                       parquet_bytes: bytes, layout: Optional[Layout] = None) -> None:
+                       parquet_bytes: bytes, layout: Optional[Layout] = None,
+                       json_columns: Optional[List[str]] = None) -> None:
     """Send an ``infinite_resp`` over an anywidget/zmq comm.
 
     Comm transports carry the parquet bytes in a ``buffers`` list; this wraps
     :func:`make_infinite_resp` + ``widget.send`` so callers don't juggle the
     ``(msg, bytes)`` → ``(msg, [bytes])`` shape themselves.
     """
-    msg, buf = make_infinite_resp(key, length, parquet_bytes, layout=layout)
+    msg, buf = make_infinite_resp(key, length, parquet_bytes, layout=layout, json_columns=json_columns)
     widget.send(msg, [buf])
 
 

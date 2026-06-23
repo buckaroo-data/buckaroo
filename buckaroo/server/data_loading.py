@@ -213,7 +213,8 @@ def handle_infinite_request_lazy(ldf: "pl.LazyFrame", orig_to_rw: dict, rw_to_or
     out = BytesIO()
     slice_df.write_parquet(out, compression="uncompressed")
 
-    return make_infinite_resp(payload_args, total_rows, out.getvalue())
+    # Native polars parquet — strings are not JSON-wrapped.
+    return make_infinite_resp(payload_args, total_rows, out.getvalue(), json_columns=[])
 
 
 def load_file(path: str) -> pd.DataFrame:
