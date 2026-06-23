@@ -1,11 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { DFData, DFViewerConfig, DFDataOrPayload } from "./DFViewerParts/DFWhole";
-import { resolveDFDataAsync } from "./DFViewerParts/resolveDFData";
+import { decodeDFData, decodeDFDataDict } from "./DFViewerParts/resolveDFData";
 import { DFViewer, DFViewerInfinite } from "./DFViewerParts/DFViewerInfinite";
 import { StatusBar } from "./StatusBar";
 import { BuckarooState, BuckarooOptions, DFMeta } from "./WidgetTypes";
 import { IDisplayArgs } from "./DFViewerParts/gridUtils";
-import { resolveDFData } from "./DFViewerParts/resolveDFData";
 
 export interface BuckarooArtifact {
     embed_type?: "DFViewer" | "Buckaroo";
@@ -32,16 +31,21 @@ export interface BuckarooArtifact {
 export function BuckarooStaticTable({ artifact }: { artifact: BuckarooArtifact }) {
     const [dfData, setDfData] = useState<DFData | null>(null);
     const [summaryStats, setSummaryStats] = useState<DFData | null>(null);
+    const [dfDataDict, setDfDataDict] = useState<Record<string, DFData>>({});
 
     useEffect(() => {
         let cancelled = false;
+        // Decode every envelope at this single ingestion edge so the
+        // component tree below receives plain DFData end-to-end.
         Promise.all([
-            resolveDFDataAsync(artifact.df_data),
-            resolveDFDataAsync(artifact.summary_stats_data),
-        ]).then(([data, stats]) => {
+            decodeDFData(artifact.df_data),
+            decodeDFData(artifact.summary_stats_data),
+            decodeDFDataDict(artifact.df_data_dict),
+        ]).then(([data, stats, dict]) => {
             if (!cancelled) {
                 setDfData(data);
                 setSummaryStats(stats);
+                setDfDataDict(dict);
             }
         });
         return () => { cancelled = true; };
@@ -56,6 +60,7 @@ export function BuckarooStaticTable({ artifact }: { artifact: BuckarooArtifact }
             <BuckarooStaticWidget
                 dfData={dfData}
                 summaryStats={summaryStats}
+                dfDataDict={dfDataDict}
                 artifact={artifact}
             />
         );
@@ -73,17 +78,18 @@ export function BuckarooStaticTable({ artifact }: { artifact: BuckarooArtifact }
 function BuckarooStaticWidget({
     dfData,
     summaryStats,
+    dfDataDict,
     artifact,
 }: {
     dfData: DFData;
     summaryStats: DFData;
+    dfDataDict: Record<string, DFData>;
     artifact: BuckarooArtifact;
 }) {
     const [buckarooState, setBuckarooState] = useState<BuckarooState>(artifact.buckaroo_state!);
     const [activeCol, setActiveCol] = useState<[string, string]>(["", ""]);
 
     const df_display_args = artifact.df_display_args!;
-    const df_data_dict = artifact.df_data_dict!;
 
     const cDisp = df_display_args[buckarooState.df_display];
 
@@ -91,15 +97,17 @@ function BuckarooStaticWidget({
         const dataKey = cDisp.data_key;
         const summaryKey = cDisp.summary_stats_key;
 
-        // For "main" key, use the pre-resolved dfData; otherwise resolve from dict
-        const data = dataKey === "main" ? dfData : resolveDFData(df_data_dict[dataKey]);
-        const stats = summaryKey === "all_stats" ? summaryStats : resolveDFData(df_data_dict[summaryKey]);
+        // df_data_dict is already decoded (BuckarooStaticTable ran
+        // decodeDFDataDict). For "main"/"all_stats" prefer the dedicated
+        // pre-decoded props; otherwise look up the decoded dict.
+        const data = dataKey === "main" ? dfData : (dfDataDict[dataKey] ?? []);
+        const stats = summaryKey === "all_stats" ? summaryStats : (dfDataDict[summaryKey] ?? []);
 
         return [
             { data_type: "Raw" as const, data, length: data.length },
             stats,
         ];
-    }, [buckarooState.df_display, cDisp, dfData, summaryStats, df_data_dict]);
+    }, [buckarooState.df_display, cDisp, dfData, summaryStats, dfDataDict]);
 
     return (
         <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"

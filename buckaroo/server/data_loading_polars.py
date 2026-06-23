@@ -28,7 +28,7 @@ from buckaroo.customizations.pl_autocleaning_conf import NoCleaningConfPl
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
 from buckaroo.polars_buckaroo import (
     PLSampling, local_analysis_klasses, prepare_df_for_serialization)
-from buckaroo.serialization_utils import pd_to_obj
+from buckaroo.serialization_utils import pd_to_obj, make_infinite_resp
 
 
 class PolarsServerSampling(PLSampling):
@@ -105,7 +105,7 @@ def handle_infinite_request_buckaroo_polars(
 
     _unused, processed_df, merged_sd = dataflow.widget_args_tuple
     if processed_df is None:
-        return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0}, b"")
+        return ({"type": "infinite_resp", "key": payload_args, "length": 0}, b"")
     try:
         if search_string:
             string_cols = [c for c, dt in zip(processed_df.columns, processed_df.dtypes)
@@ -140,9 +140,7 @@ def handle_infinite_request_buckaroo_polars(
 
         out = BytesIO()
         prepare_df_for_serialization(slice_df).write_parquet(out, compression="uncompressed")
-        parquet_bytes = out.getvalue()
-        msg = {"type": "infinite_resp", "key": payload_args, "data": [], "length": len(filtered_df)}
-        return msg, parquet_bytes
+        return make_infinite_resp(payload_args, len(filtered_df), out.getvalue())
     except Exception:
-        return ({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0,
+        return ({"type": "infinite_resp", "key": payload_args, "length": 0,
             "error_info": traceback.format_exc()}, b"")

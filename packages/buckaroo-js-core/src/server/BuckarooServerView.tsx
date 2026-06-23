@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { preResolveDFDataDict } from "../components/DFViewerParts/resolveDFData";
+import { decodeDFDataDict } from "../components/DFViewerParts/resolveDFData";
 import { WebSocketModel } from "./WebSocketModel";
 import {
     BuckarooView,
@@ -139,7 +139,7 @@ export function BuckarooServerView({
                 if (cancelled) return;
 
                 if (initialState.df_data_dict) {
-                    initialState.df_data_dict = await preResolveDFDataDict(initialState.df_data_dict);
+                    initialState.df_data_dict = await decodeDFDataDict(initialState.df_data_dict);
                 }
 
                 const model = new WebSocketModel(ws, initialState);

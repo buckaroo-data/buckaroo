@@ -13,7 +13,7 @@ import { WidgetDCFCell } from "./components/DCFCell";
 import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from "./components/BuckarooWidgetInfinite";
 // Re-export hyparquet functions for transcript parsing in widget.tsx
 import { parquetRead, parquetMetadata } from 'hyparquet';
-import { resolveDFData, resolveDFDataAsync, preResolveDFDataDict } from './components/DFViewerParts/resolveDFData';
+import { decodeDFData, decodeDFDataDict } from './components/DFViewerParts/resolveDFData';
 import { BuckarooStaticTable } from './components/BuckarooStaticTable';
 import { BuckarooServerView, buckarooWsUrl } from './server/BuckarooServerView';
 import { BuckarooView } from './server/BuckarooView';
@@ -53,9 +53,8 @@ export default {
     // Parquet parsing for transcript replay
     parquetRead,
     parquetMetadata,
-    resolveDFData,
-    resolveDFDataAsync,
-    preResolveDFDataDict,
+    decodeDFData,
+    decodeDFDataDict,
     BuckarooStaticTable,
     BuckarooServerView,
     BuckarooView,
@@ -83,9 +82,8 @@ export {
     SampleButton, HeaderNoArgs, Counter,
     parquetRead,
     parquetMetadata,
-    resolveDFData,
-    resolveDFDataAsync,
-    preResolveDFDataDict,
+    decodeDFData,
+    decodeDFDataDict,
     BuckarooStaticTable,
     BuckarooServerView,
     BuckarooView,

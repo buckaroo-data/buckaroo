@@ -248,19 +248,21 @@ export type DFDataRow = Record<
 
 export type DFData = DFDataRow[];
 
-// Tagged union for multi-format data transfer (JSON or parquet-b64)
-export interface ParquetB64Payload {
-    format: 'parquet_b64';
-    data: string;  // base64-encoded parquet bytes
-    // 'wide' = summary stats laid out as {col}__{stat} columns × 1 row,
-    // with native parquet types for numeric/bool scalars and JSON-encoded
-    // strings for str/list/dict values. Absent or 'row' = the legacy
-    // row-per-stat layout where every non-index cell is a JSON string.
-    layout?: 'wide' | 'row';
-}
+// Transport envelope — a tagged discriminated union on `format`. The single
+// JS decoder `decodeDFData` consumes these; the single Python `encode_df`
+// produces them. Bytes ride inline (`parquet_b64`/`json`) or in a comm
+// side-channel buffer (`parquet_buffer`, addressed by `buffer_index`).
+//
+// `layout` is orthogonal to transport: 'wide' marks the single-row
+// {col}__{stat} summary-stats shape that must be pivoted after decode.
+export type DFEnvelope =
+    | { format: 'parquet_buffer'; buffer_index: number; layout?: 'wide' | 'row' } // bytes in buffers[]
+    | { format: 'parquet_b64'; data: string; layout?: 'wide' | 'row' }            // base64 parquet, inline
+    | { format: 'json'; data: DFData; layout?: 'wide' | 'row' };                  // record array, inline
 
-// A value in df_data_dict can be plain JSON (DFData) or a tagged parquet payload
-export type DFDataOrPayload = DFData | ParquetB64Payload;
+// A value in df_data_dict / a wire payload can be plain JSON (DFData) or a
+// transport envelope. DFData passthrough is retained.
+export type DFDataOrPayload = DFData | DFEnvelope;
 
 /*
 When I want to start tagging metadata onto DFData

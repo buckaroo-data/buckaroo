@@ -18,7 +18,7 @@ import { stampLayoutType, isFitContentLayout } from "./DFViewerParts/displayArgs
 import { DatasourceOrRaw, DFViewerInfinite } from "./DFViewerParts/DFViewerInfinite";
 import { IDatasource, IGetRowsParams } from "ag-grid-community";
 import { KeyAwareSmartRowCache, PayloadArgs, PayloadResponse, RequestFN } from "./DFViewerParts/SmartRowCache";
-import { parquetRead, parquetMetadata } from 'hyparquet'
+import { decodeDFData } from "./DFViewerParts/resolveDFData";
 import { MessageBox } from "./MessageBox";
 
 // Trace memo/render boundaries on the search + df_display toggle paths.
@@ -103,9 +103,6 @@ export const getKeySmartRowCache = (model: any, setRespError:any) => {
         if (msg?.type !== "infinite_resp") {
             return
         }
-        if (msg.data === undefined) {
-            return
-        }
         const payload_response = msg as PayloadResponse;
         bkLog("model.on infinite_resp ← Python", {
             start: payload_response.key?.start,
@@ -119,18 +116,15 @@ export const getKeySmartRowCache = (model: any, setRespError:any) => {
             setRespError(payload_response.error_info)
             return
         }
-        const table_bytes = buffers[0]
-        const metadata = parquetMetadata(table_bytes.buffer)
-        parquetRead({
-            file: table_bytes.buffer,
-            metadata:metadata,
-            rowFormat: 'object',
-            onComplete: data => {
-                //@ts-ignore
-                const parqData:DFData = data as DFData
-                payload_response.data = parqData
-                src.addPayloadResponse(payload_response);
-            }
+        // No payload = no rows (e.g. an empty/no-data response). Nothing to add.
+        if (msg.payload === undefined) {
+            return
+        }
+        // The one transport primitive: decode the envelope (parquet bytes in
+        // buffers, or inline) into DFData, then hand it to the row cache.
+        decodeDFData(msg.payload, buffers).then((data: DFData) => {
+            payload_response.data = data
+            src.addPayloadResponse(payload_response);
         })
     })
     return src;

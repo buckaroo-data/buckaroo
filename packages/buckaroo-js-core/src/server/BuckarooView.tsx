@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from "../components/BuckarooWidgetInfinite";
-import { preResolveDFDataDict } from "../components/DFViewerParts/resolveDFData";
+import { decodeDFDataDict } from "../components/DFViewerParts/resolveDFData";
 import { DFMeta, BuckarooState, BuckarooOptions } from "../components/WidgetTypes";
 import { CommandConfigT } from "../components/CommandUtils";
 import { Operation } from "../components/OperationUtils";
@@ -37,8 +37,10 @@ const DEFAULT_BUCKAROO_OPTIONS: BuckarooOptions = {
 };
 const DEFAULT_COMMAND_CONFIG: CommandConfigT = { argspecs: {}, defaultArgs: {} };
 
-// Inline check — mirrors the (module-private) guard in resolveDFData.ts.
-// We can't import it directly without widening that module's API surface.
+// Inline check — true when any df_data_dict value is still a transport
+// envelope (any object carrying a `format` discriminator) rather than a
+// pre-decoded DFData array. Such values must run through decodeDFDataDict
+// before the widget consumes them.
 function hasUnresolvedParquet(dict: unknown): boolean {
     if (!dict || typeof dict !== "object") return false;
     for (const v of Object.values(dict as Record<string, unknown>)) {
@@ -46,8 +48,7 @@ function hasUnresolvedParquet(dict: unknown): boolean {
             v !== null &&
             typeof v === "object" &&
             !Array.isArray(v) &&
-            (v as any).format === "parquet_b64" &&
-            typeof (v as any).data === "string"
+            typeof (v as any).format === "string"
         ) {
             return true;
         }
@@ -161,7 +162,7 @@ export function BuckarooView({
     React.useEffect(() => { onMetadataRef.current = onMetadata; }, [onMetadata]);
 
     // Resolve any parquet-encoded payloads in df_data_dict. Pre-resolved
-    // dicts (e.g. when BuckarooServerView already ran preResolveDFDataDict)
+    // dicts (e.g. when BuckarooServerView already ran decodeDFDataDict)
     // pass through unchanged, so this is cheap in the common case. Skip
     // entirely when no resolution is needed — avoids a spurious re-render
     // for the BuckarooServerView path.
@@ -173,7 +174,7 @@ export function BuckarooView({
             setDataReady(true);
             return;
         }
-        preResolveDFDataDict(dict).then((d) => {
+        decodeDFDataDict(dict).then((d) => {
             if (cancelled) return;
             setDfDataDict(d as Record<string, DFData>);
             setDataReady(true);
@@ -201,7 +202,7 @@ export function BuckarooView({
         const onMeta = (metadata: BuckarooServerMetadata, prompt?: string) => {
             onMetadataRef.current?.(metadata, prompt);
             setDfMeta((model.get("df_meta") as DFMeta | undefined) ?? { ...DEFAULT_DF_META, total_rows: metadata?.rows ?? 0 });
-            preResolveDFDataDict((model.get("df_data_dict") as Record<string, DFDataOrPayload> | undefined) ?? {})
+            decodeDFDataDict((model.get("df_data_dict") as Record<string, DFDataOrPayload> | undefined) ?? {})
                 .then((d) => setDfDataDict(d as Record<string, DFData>));
             setDfDisplayArgs((model.get("df_display_args") as Record<string, IDisplayArgs> | undefined) ?? {});
             setBuckarooStateLocal((model.get("buckaroo_state") as BuckarooState | undefined) ?? DEFAULT_BUCKAROO_STATE);
@@ -212,7 +213,7 @@ export function BuckarooView({
         };
         const onDfMeta = (v: DFMeta) => setDfMeta(v);
         const onDfDataDict = (v: Record<string, DFDataOrPayload>) => {
-            preResolveDFDataDict(v).then((d) => setDfDataDict(d as Record<string, DFData>));
+            decodeDFDataDict(v).then((d) => setDfDataDict(d as Record<string, DFData>));
         };
         const onDfDisplayArgs = (v: Record<string, IDisplayArgs>) => setDfDisplayArgs(v);
         const onBState = (v: BuckarooState) => setBuckarooStateLocal(v);

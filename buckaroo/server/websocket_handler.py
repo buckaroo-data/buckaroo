@@ -196,7 +196,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         session = sessions.get(self.session_id)
 
         if not session or (session.df is None and session.ldf is None and session.xorq_dataflow is None):
-            self.write_message(json.dumps({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0,
+            self.write_message(json.dumps({"type": "infinite_resp", "key": payload_args, "length": 0,
                 "error_info": "No data loaded for this session"}))
             return
 
@@ -247,7 +247,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         except Exception:
             tb = traceback.format_exc()
             log.error("infinite_request error session=%s: %s", self.session_id, tb)
-            self.write_message(json.dumps({"type": "infinite_resp", "key": payload_args, "data": [], "length": 0,
+            self.write_message(json.dumps({"type": "infinite_resp", "key": payload_args, "length": 0,
                 "error_info": tb if _BUCKAROO_DEBUG else "Request failed"}))
 
     def on_close(self):

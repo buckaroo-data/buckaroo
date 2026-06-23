@@ -84,14 +84,14 @@ function ViewerApp({ model, src }: { model: WebSocketModel; src: any }) {
         const onMeta = (metadata: any, prompt?: string) => {
             updateFilenameDisplay(metadata, prompt);
             setDfMeta(model.get("df_meta") || { total_rows: metadata.rows || 0 });
-            srt.preResolveDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
+            srt.decodeDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
             setDfDisplayArgs(patchDisplayArgsHeight(model.get("df_display_args") || {}));
         };
         model.on("metadata", onMeta);
 
         const onDfMeta = (v: any) => setDfMeta(v);
         const onDfDataDict = (v: any) => {
-            srt.preResolveDFDataDict(v).then(setDfDataDict);
+            srt.decodeDFDataDict(v).then(setDfDataDict);
         };
         const onDfDisplayArgs = (v: any) => setDfDisplayArgs(patchDisplayArgsHeight(v));
         model.on("change:df_meta", onDfMeta);
@@ -145,7 +145,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
         const onMeta = (metadata: any, prompt?: string) => {
             updateFilenameDisplay(metadata, prompt);
             setDfMeta(model.get("df_meta") || { total_rows: 0 });
-            srt.preResolveDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
+            srt.decodeDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
             setDfDisplayArgs(patchDisplayArgsHeight(model.get("df_display_args") || {}));
             setBuckarooState(model.get("buckaroo_state") || {});
             setBuckarooOptions(model.get("buckaroo_options") || {});
@@ -169,7 +169,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
 
         // df_data_dict needs async pre-resolution of parquet_b64 values
         const onDfDataDict = (v: any) => {
-            srt.preResolveDFDataDict(v).then(setDfDataDict);
+            srt.decodeDFDataDict(v).then(setDfDataDict);
         };
         model.on("change:df_data_dict", onDfDataDict);
 
@@ -266,12 +266,12 @@ async function main() {
         ws.addEventListener("message", handler);
     });
 
-    // Pre-resolve parquet_b64 values in df_data_dict before creating the model.
-    // hyparquet's parquetRead is async in esbuild bundles, so synchronous
-    // resolveDFData() in React useMemo can't decode them. Pre-resolving here
-    // ensures components receive plain DFData arrays.
+    // Decode any envelope values in df_data_dict before creating the model.
+    // decodeDFData is async (hyparquet's parquetRead is async in esbuild
+    // bundles), so decoding here at the ingestion edge ensures components
+    // receive plain DFData arrays.
     if (initialState.df_data_dict) {
-        initialState.df_data_dict = await srt.preResolveDFDataDict(initialState.df_data_dict);
+        initialState.df_data_dict = await srt.decodeDFDataDict(initialState.df_data_dict);
     }
 
     // Update page title, filename bar, and prompt bar from initial state

@@ -29,7 +29,7 @@ from buckaroo.pluggable_analysis_framework.utils import json_postfix
 from buckaroo.styling_helpers import obj_, pinned_histogram
 from .pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
 from .df_util import old_col_new_col
-from .serialization_utils import sd_to_parquet_b64
+from .serialization_utils import sd_to_parquet_b64, send_infinite_resp
 from buckaroo.file_cache.base import AbstractFileCache, Executor as _SyncExec, ExecutorLog  # type: ignore
 from buckaroo.file_cache.multiprocessing_executor import MultiprocessingExecutor as _ParExec
 from buckaroo.file_cache.cache_utils import get_global_file_cache, get_global_executor_log
@@ -781,9 +781,8 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
             logger.info(
                 "sending slice [%s,%s) rows=%s total=%s",
                 start, end, len(slice_df), self.df_meta['total_rows'])
-            self.send({"type": "infinite_resp", 'key': new_payload_args, 'data': [],
-                'length': self.df_meta['total_rows']},
-                [self._to_parquet(slice_df)])
+            send_infinite_resp(self, new_payload_args, self.df_meta['total_rows'],
+                self._to_parquet(slice_df))
 
             second_pa = new_payload_args.get('second_request')
             if second_pa:
@@ -797,12 +796,11 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
                     logger.info(
                         "sending second slice [%s,%s) rows=%s total=%s",
                         s2, e2, len(slice2), self.df_meta['total_rows'])
-                    self.send({"type": "infinite_resp", 'key': second_pa, 'data': [],
-                        'length': self.df_meta['total_rows']},
-                        [self._to_parquet(slice2)])
+                    send_infinite_resp(self, second_pa, self.df_meta['total_rows'],
+                        self._to_parquet(slice2))
         except Exception as e:
             stack_trace = traceback.format_exc()
-            self.send({"type": "infinite_resp", 'key': new_payload_args, 'data': [], 'error_info': stack_trace,
+            self.send({"type": "infinite_resp", 'key': new_payload_args, 'error_info': stack_trace,
                 'length': 0},
                 [])
             logger.exception("error handling payload args: %s", e)
