@@ -28,7 +28,7 @@ from .pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.extension_utils import copy_extend
 
-from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, make_infinite_resp
+from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, send_infinite_resp
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import (Sampling, exception_protect)
 from .dataflow.styling_core import (ComponentConfig, DFViewerConfig, DisplayArgs, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
@@ -420,13 +420,13 @@ class BuckarooInfiniteWidget(BuckarooWidget):
                 converted_sort_column = processed_sd[sort]['orig_col_name']
                 sorted_df = processed_df.sort_values(by=[converted_sort_column], ascending=ascending)
                 slice_df = sorted_df[start:end]
-                self.send(*make_infinite_resp(new_payload_args, len(processed_df), to_parquet(slice_df)))
+                send_infinite_resp(self, new_payload_args, len(processed_df), to_parquet(slice_df))
                 if _BK_FLASH_ENABLED:
                     _bk_flash("infinite_resp → JS (sorted)", rows=len(slice_df),
                         total=len(processed_df))
             else:
                 slice_df = processed_df[start:end]
-                self.send(*make_infinite_resp(new_payload_args, len(processed_df), to_parquet(slice_df)))
+                send_infinite_resp(self, new_payload_args, len(processed_df), to_parquet(slice_df))
                 if _BK_FLASH_ENABLED:
                     _bk_flash("infinite_resp → JS", rows=len(slice_df),
                         total=len(processed_df))
@@ -437,7 +437,7 @@ class BuckarooInfiniteWidget(BuckarooWidget):
 
                 extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
                 extra_df = processed_df[extra_start:extra_end]
-                self.send(*make_infinite_resp(second_pa, len(processed_df), to_parquet(extra_df)))
+                send_infinite_resp(self, second_pa, len(processed_df), to_parquet(extra_df))
         except Exception as e:
             logger.error(e)
             stack_trace = traceback.format_exc()

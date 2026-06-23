@@ -348,22 +348,36 @@ def encode_df(df, transport: Transport, layout: Optional[Layout] = None, fmt: Op
 
 
 def make_infinite_resp(key: Dict[str, Any], length: int, parquet_bytes: bytes,
-                       layout: Optional[Layout] = None) -> Tuple[InfiniteRespMessage, List[bytes]]:
-    """Build an ``infinite_resp`` message + buffers for a row-slice response.
+                       layout: Optional[Layout] = None) -> Tuple[InfiniteRespMessage, bytes]:
+    """Build an ``infinite_resp`` message + its single parquet buffer.
 
     The dataframe envelope is nested under ``payload`` (a bare
     ``parquet_buffer`` envelope), kept separate from the cache-protocol
     routing fields (``key``/``length``). The JS side decodes it with
-    ``decodeDFData(msg.payload, buffers)``. Returns ``(msg, buffers)``:
+    ``decodeDFData(msg.payload, buffers)``. Returns ``(msg, parquet_bytes)`` —
+    one ``infinite_resp`` always carries exactly one dataframe:
 
-    * anywidget/zmq senders do ``self.send(*make_infinite_resp(...))``.
-    * websocket senders return ``(msg, buffers[0])`` for the two-frame
-      JSON-then-binary write.
+    * websocket senders ``return make_infinite_resp(...)`` directly for the
+      two-frame JSON-then-binary write.
+    * anywidget/zmq senders use :func:`send_infinite_resp`, which wraps the
+      bytes in the ``buffers`` list anywidget's ``send`` expects.
     """
-    env, buffers = buffer_payload(parquet_bytes, layout=layout)
+    env, _ = buffer_payload(parquet_bytes, layout=layout)
     msg: InfiniteRespMessage = {"type": "infinite_resp", "key": key,
         "length": length, "payload": env}
-    return msg, buffers
+    return msg, parquet_bytes
+
+
+def send_infinite_resp(widget: Any, key: Dict[str, Any], length: int,
+                       parquet_bytes: bytes, layout: Optional[Layout] = None) -> None:
+    """Send an ``infinite_resp`` over an anywidget/zmq comm.
+
+    Comm transports carry the parquet bytes in a ``buffers`` list; this wraps
+    :func:`make_infinite_resp` + ``widget.send`` so callers don't juggle the
+    ``(msg, bytes)`` → ``(msg, [bytes])`` shape themselves.
+    """
+    msg, buf = make_infinite_resp(key, length, parquet_bytes, layout=layout)
+    widget.send(msg, [buf])
 
 
 def to_parquet_b64(df: pd.DataFrame) -> str:

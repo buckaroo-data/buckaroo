@@ -120,8 +120,7 @@ def handle_infinite_request_buckaroo(
         else:
             slice_df = filtered_df[start:end]
 
-        msg, buffers = make_infinite_resp(payload_args, len(filtered_df), to_parquet(slice_df))
-        return msg, buffers[0]
+        return make_infinite_resp(payload_args, len(filtered_df), to_parquet(slice_df))
     except Exception:
         return ({"type": "infinite_resp", "key": payload_args, "length": 0,
             "error_info": traceback.format_exc()}, b"")
@@ -214,8 +213,7 @@ def handle_infinite_request_lazy(ldf: "pl.LazyFrame", orig_to_rw: dict, rw_to_or
     out = BytesIO()
     slice_df.write_parquet(out, compression="uncompressed")
 
-    msg, buffers = make_infinite_resp(payload_args, total_rows, out.getvalue())
-    return msg, buffers[0]
+    return make_infinite_resp(payload_args, total_rows, out.getvalue())
 
 
 def load_file(path: str) -> pd.DataFrame:
@@ -311,5 +309,4 @@ def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[dict,
     else:
         slice_df = df[start:end]
 
-    msg, buffers = make_infinite_resp(payload_args, len(df), to_parquet(slice_df))
-    return msg, buffers[0]
+    return make_infinite_resp(payload_args, len(df), to_parquet(slice_df))

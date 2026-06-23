@@ -8,7 +8,7 @@ from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget, Raw
 from buckaroo.df_util import old_col_new_col
 from .pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
 from .customizations.pl_stats_v2 import PL_ANALYSIS_V2
-from .serialization_utils import pd_to_obj, make_infinite_resp
+from .serialization_utils import pd_to_obj, send_infinite_resp
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .customizations.pl_autocleaning_conf import NoCleaningConfPl
 from .dataflow.dataflow import Sampling
@@ -126,13 +126,13 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
                 converted_sort_column = processed_sd[sort]['orig_col_name']
                 sorted_df = processed_df.with_row_index().sort(converted_sort_column, descending=not ascending)
                 slice_df = sorted_df[start:end]
-                self.send(*make_infinite_resp(new_payload_args, len(processed_df), to_parquet(slice_df)))
+                send_infinite_resp(self, new_payload_args, len(processed_df), to_parquet(slice_df))
                 if _BK_FLASH_ENABLED:
                     _bk_flash("infinite_resp → JS (sorted)", rows=len(slice_df),
                         total=len(processed_df))
             else:
                 slice_df = processed_df.with_row_index()[start:end]
-                self.send(*make_infinite_resp(new_payload_args, len(processed_df), to_parquet(slice_df)))
+                send_infinite_resp(self, new_payload_args, len(processed_df), to_parquet(slice_df))
                 if _BK_FLASH_ENABLED:
                     _bk_flash("infinite_resp → JS", rows=len(slice_df),
                         total=len(processed_df))
@@ -144,7 +144,7 @@ class PolarsBuckarooInfiniteWidget(PolarsBuckarooWidget, BuckarooInfiniteWidget)
                 extra_start, extra_end = second_pa.get('start'), second_pa.get('end')
                 extra_df = processed_df.with_row_index()[extra_start:extra_end]
                 extra_df['index'] = extra_df.index
-                self.send(*make_infinite_resp(second_pa, len(processed_df), to_parquet(extra_df)))
+                send_infinite_resp(self, second_pa, len(processed_df), to_parquet(extra_df))
                 if _BK_FLASH_ENABLED:
                     _bk_flash("infinite_resp → JS (second)", rows=len(extra_df))
         except Exception as e:

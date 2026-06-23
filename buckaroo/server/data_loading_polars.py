@@ -140,8 +140,7 @@ def handle_infinite_request_buckaroo_polars(
 
         out = BytesIO()
         prepare_df_for_serialization(slice_df).write_parquet(out, compression="uncompressed")
-        msg, buffers = make_infinite_resp(payload_args, len(filtered_df), out.getvalue())
-        return msg, buffers[0]
+        return make_infinite_resp(payload_args, len(filtered_df), out.getvalue())
     except Exception:
         return ({"type": "infinite_resp", "key": payload_args, "length": 0,
             "error_info": traceback.format_exc()}, b"")

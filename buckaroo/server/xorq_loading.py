@@ -452,8 +452,7 @@ def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
         start, end = clamp_window(
             payload_args.get("start"), payload_args.get("end"), total_length)
         parquet_bytes = window_to_parquet(filtered_expr, start, end, sort_col, ascending)
-        msg, buffers = make_infinite_resp(payload_args, total_length, parquet_bytes)
-        return msg, buffers[0]
+        return make_infinite_resp(payload_args, total_length, parquet_bytes)
     except Exception:
         return ({"type": "infinite_resp", "key": payload_args,
             "length": 0, "error_info": traceback.format_exc()}, b"")
