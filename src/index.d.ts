@@ -3,7 +3,7 @@ import { DFViewer, DFViewerInfinite } from './components/DFViewerParts/DFViewerI
 import { WidgetDCFCell } from './components/DCFCell';
 import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from './components/BuckarooWidgetInfinite';
 import { parquetRead, parquetMetadata } from 'hyparquet';
-import { resolveDFData, resolveDFDataAsync, preResolveDFDataDict } from './components/DFViewerParts/resolveDFData';
+import { decodeDFData, decodeDFDataDict } from './components/DFViewerParts/resolveDFData';
 import { BuckarooStaticTable } from './components/BuckarooStaticTable';
 import { BuckarooServerView, buckarooWsUrl } from './server/BuckarooServerView';
 import { BuckarooView } from './server/BuckarooView';
@@ -53,9 +53,8 @@ declare const _default: {
     Counter: () => import("react/jsx-runtime").JSX.Element;
     parquetRead: typeof parquetRead;
     parquetMetadata: typeof parquetMetadata;
-    resolveDFData: typeof resolveDFData;
-    resolveDFDataAsync: typeof resolveDFDataAsync;
-    preResolveDFDataDict: typeof preResolveDFDataDict;
+    decodeDFData: typeof decodeDFData;
+    decodeDFDataDict: typeof decodeDFDataDict;
     BuckarooStaticTable: typeof BuckarooStaticTable;
     BuckarooServerView: typeof BuckarooServerView;
     BuckarooView: typeof BuckarooView;
@@ -63,7 +62,7 @@ declare const _default: {
     WebSocketModel: typeof WebSocketModel;
 };
 export default _default;
-export { ColumnsEditor, DependentTabs, OperationViewer, WidgetDCFCell, DFViewer, DFViewerInfinite, DFViewerInfiniteDS, StatusBar, HistogramCell, CommandUtils, utils, BuckarooInfiniteWidget, getKeySmartRowCache, InfiniteEx, widgetUtils, SampleButton, HeaderNoArgs, Counter, parquetRead, parquetMetadata, resolveDFData, resolveDFDataAsync, preResolveDFDataDict, BuckarooStaticTable, BuckarooServerView, BuckarooView, buckarooWsUrl, WebSocketModel, };
+export { ColumnsEditor, DependentTabs, OperationViewer, WidgetDCFCell, DFViewer, DFViewerInfinite, DFViewerInfiniteDS, StatusBar, HistogramCell, CommandUtils, utils, BuckarooInfiniteWidget, getKeySmartRowCache, InfiniteEx, widgetUtils, SampleButton, HeaderNoArgs, Counter, parquetRead, parquetMetadata, decodeDFData, decodeDFDataDict, BuckarooStaticTable, BuckarooServerView, BuckarooView, buckarooWsUrl, WebSocketModel, };
 export type { IModel } from './server/IModel';
 export type { BuckarooViewProps, BuckarooServerMode, BuckarooServerMetadata } from './server/BuckarooView';
 export type { BuckarooServerViewProps } from './server/BuckarooServerView';
