@@ -73,6 +73,34 @@ def test_payload_slice_returns_requested_rows():
     assert out_df['a'].to_list() == [20, 30, 40]
 
 
+def test_infinite_resp_stamps_empty_json_columns_and_strings_survive():
+    """End-to-end producer contract for the native-parquet string fix (#937).
+
+    The lazy polars path writes native UTF8 parquet, so its infinite_resp must
+    stamp ``json_columns: []`` on the wire — telling the JS decoder to skip the
+    fastparquet-style JSON.parse — and the JSON-looking string cells must round
+    trip through the parquet buffer unchanged (no coercion to null/number/dict).
+    """
+    df = pl.DataFrame({'jnull': ['null', 'value'], 'jint': ['123', '45'],
+        'jobj': ['{"a": 1}', '{"b": 2}']})
+    w = LazyInfinitePolarsBuckarooWidget(df.lazy())
+    captured = _capture_sends(w)
+
+    w._handle_payload_args({'start': 0, 'end': 2})
+    assert len(captured) == 1
+    payload, buffers = captured[0]
+    # The native sender declares no JSON-encoded columns on the wire.
+    assert payload['payload']['json_columns'] == []
+
+    # Native parquet keeps the JSON-looking text as strings end-to-end.
+    out_df = pl.read_parquet(buffers[0])
+    rw = w.df_display_args['main']['df_viewer_config']['column_config']
+    by_orig = {c['header_name']: c['col_name'] for c in rw if c.get('header_name')}
+    assert out_df[by_orig['jnull']].to_list() == ['null', 'value']
+    assert out_df[by_orig['jint']].to_list() == ['123', '45']
+    assert out_df[by_orig['jobj']].to_list() == ['{"a": 1}', '{"b": 2}']
+
+
 def test_payload_sort_and_slice():
     df = pl.DataFrame({'x': [3, 1, 2, 5, 4]})
     ldf = df.lazy()

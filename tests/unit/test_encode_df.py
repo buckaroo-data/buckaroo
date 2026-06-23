@@ -80,6 +80,46 @@ def test_parquet_b64_payload_wraps_precomputed_bytes():
     assert buffers == []
 
 
+def test_json_columns_omitted_by_default():
+    # No json_columns arg → key absent → JS decoder stays on legacy parse-all
+    # (the pandas/fastparquet convention).
+    env, _ = encode_df(_df(), 'comm')
+    assert 'json_columns' not in env
+    env2, _ = encode_df(_df(), 'static')
+    assert 'json_columns' not in env2
+
+
+def test_json_columns_empty_list_stamped_on_both_transports():
+    # Native-parquet senders pass [] → key present and empty → decoder parses
+    # no string cell.
+    env, _ = encode_df(_df(), 'comm', json_columns=[])
+    assert env['format'] == 'parquet_buffer'
+    assert env['json_columns'] == []
+    env2, _ = encode_df(_df(), 'static', json_columns=[])
+    assert env2['format'] == 'parquet_b64'
+    assert env2['json_columns'] == []
+
+
+def test_json_columns_named_subset_threaded_through():
+    env, _ = encode_df(_df(), 'comm', json_columns=['a'])
+    assert env['json_columns'] == ['a']
+
+
+def test_buffer_payload_threads_json_columns():
+    # None omits the key; [] stamps the empty list.
+    env, _ = buffer_payload(b'PAR1fake')
+    assert 'json_columns' not in env
+    env2, _ = buffer_payload(b'PAR1fake', json_columns=[])
+    assert env2['json_columns'] == []
+
+
+def test_parquet_b64_payload_threads_json_columns():
+    env, _ = parquet_b64_payload(b'PAR1fake')
+    assert 'json_columns' not in env
+    env2, _ = parquet_b64_payload(b'PAR1fake', json_columns=['a', 'b'])
+    assert env2['json_columns'] == ['a', 'b']
+
+
 def test_resolve_summary_stats_still_decodes_wide_payload_from_encoder():
     """sd_to_parquet_b64 now routes its envelope through parquet_b64_payload; the
     decoder must still pivot it back to row-form DFData."""

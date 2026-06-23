@@ -50,3 +50,44 @@ describe('native-parquet string cells survive decodeDFData unchanged', () => {
         });
     }
 });
+
+// End-to-end exercise of the three json_columns branches against the real
+// polars bytes — the same frame decoded under each envelope variant. The
+// committed envelope carries json_columns: []; here we override it to pin the
+// decoder's behavior across the whole spectrum (parse-all → subset → none).
+describe('decodeDFData json_columns branches on native string bytes', () => {
+    const blob = fixture.backends.polars;
+    const bytes = () => [b64ToDataView(blob.data)];
+
+    it('absent json_columns → legacy parse-all coerces JSON-looking strings (the #937 bug)', async () => {
+        // No json_columns key ⇒ undefined ⇒ every string cell is JSON-parsed.
+        // This is exactly the corruption the fix prevents for native frames.
+        const env: DFEnvelope = { format: 'parquet_buffer', buffer_index: 0 };
+        const row0 = (await decodeDFData(env, bytes()))[0];
+        expect(row0.b).toBeNull();
+        expect(row0.c).toBe(true);
+        expect(row0.d).toBe(123);
+        expect(row0.e).toEqual({ a: 1 });
+        expect(row0.f).toEqual([1, 2]);
+    });
+
+    it('named subset → only listed columns are parsed, the rest stay strings', async () => {
+        // Declare just 'b' and 'd' as JSON-encoded: those coerce, the siblings
+        // (rewritten-name space) pass through untouched.
+        const env: DFEnvelope = { format: 'parquet_buffer', buffer_index: 0, json_columns: ['b', 'd'] };
+        const row0 = (await decodeDFData(env, bytes()))[0];
+        expect(row0.b).toBeNull();
+        expect(row0.d).toBe(123);
+        expect(row0.c).toBe('true');
+        expect(row0.e).toBe('{"a": 1}');
+        expect(row0.f).toBe('[1, 2]');
+    });
+
+    it('empty json_columns → nothing is parsed (the native-sender contract)', async () => {
+        const env: DFEnvelope = { format: 'parquet_buffer', buffer_index: 0, json_columns: [] };
+        const row0 = (await decodeDFData(env, bytes()))[0];
+        for (const col of ['b', 'c', 'd', 'e', 'f']) {
+            expect(typeof row0[col]).toBe('string');
+        }
+    });
+});
