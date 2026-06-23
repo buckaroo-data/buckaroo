@@ -193,6 +193,43 @@ def pl_df_with_weird_types_as_pandas():
     return pl_df_with_weird_types().to_pandas()
 
 
+# String cells whose *text* is valid JSON. The JS decoder (parseParquetRow in
+# resolveDFData.ts) JSON-parses every string cell, which is correct for the
+# pandas/fastparquet path (object cells arrive JSON-encoded) but corrupts the
+# native-parquet backends (polars/xorq/lazy), where "null" -> null, "123" ->
+# 123, '{"a": 1}' -> object. These frames pin that hazard down for both paths.
+_JSON_LIKE_STRINGS = {
+    'norm': ['alpha', 'beta', 'gamma'],
+    'jnull': ['null', 'value', 'still text'],
+    'jbool': ['true', 'false', 'maybe'],
+    'jint': ['123', '45', '0'],
+    'jobj': ['{"a": 1}', '{"b": 2}', '{}'],
+    'jarr': ['[1, 2]', '[3]', '[]'],
+}
+
+
+def df_with_json_like_strings() -> pd.DataFrame:
+    """Every cell is a string whose text happens to be valid JSON.
+
+    Exercises the cell-encoding seam: a faithful viewer must keep ``"null"``,
+    ``"123"`` and ``'{"a": 1}'`` as strings, never coercing them to
+    null/number/object. The pandas path JSON-encodes these on the wire, so
+    they round-trip; the native-parquet siblings below do not.
+    """
+    return pd.DataFrame(_JSON_LIKE_STRINGS)
+
+
+def pl_df_with_json_like_strings():
+    """Polars sibling of :func:`df_with_json_like_strings`.
+
+    Polars writes native parquet UTF8 (no JSON encoding), so this is the frame
+    that surfaces the ``decodeDFData`` string-coercion bug on the infinite
+    path. Must be displayed with PolarsBuckarooWidget.
+    """
+    import polars as pl
+    return pl.DataFrame(_JSON_LIKE_STRINGS)
+
+
 """
 Mkae a duplicate column dataframe
 
