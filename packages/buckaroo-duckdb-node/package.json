@@ -1,0 +1,76 @@
+{
+  "name": "buckaroo-duckdb-node",
+  "version": "0.12.0",
+  "description": "DuckDB-backed buckaroo backend for pure Node/Electron hosts. Produces the same wire payloads (initial_state, infinite_resp, wide summary stats) that buckaroo-js-core's DFViewerInfinite already speaks, with no Python kernel.",
+  "keywords": [
+    "buckaroo",
+    "duckdb",
+    "dataframe",
+    "data-viewer",
+    "electron",
+    "node"
+  ],
+  "license": "BSD-3-Clause",
+  "author": "Paddy Mullen",
+  "homepage": "https://github.com/buckaroo-data/buckaroo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/buckaroo-data/buckaroo.git",
+    "directory": "packages/buckaroo-duckdb-node"
+  },
+  "bugs": {
+    "url": "https://github.com/buckaroo-data/buckaroo/issues"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./node-api": {
+      "types": "./dist/adapters/nodeApiDuckSource.d.ts",
+      "import": "./dist/adapters/nodeApiDuckSource.js",
+      "default": "./dist/adapters/nodeApiDuckSource.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm run build"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "dependencies": {
+    "hyparquet": "^1.8.2"
+  },
+  "peerDependencies": {
+    "@duckdb/node-api": ">=1.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@duckdb/node-api": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@duckdb/node-api": "1.4.4-r.3",
+    "@types/node": "^22.15.3",
+    "typescript": "~5.6.2",
+    "vitest": "^2.1.8"
+  }
+}

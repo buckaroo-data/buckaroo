@@ -1,4 +1,5 @@
 packages:
   - "buckaroo-js-core"
+  - "buckaroo-duckdb-node"
   - "js"
 
