@@ -162,10 +162,12 @@ export type DFEnvelope = {
     format: 'parquet_buffer';
     buffer_index: number;
     layout?: 'wide' | 'row';
+    json_columns?: string[];
 } | {
     format: 'parquet_b64';
     data: string;
     layout?: 'wide' | 'row';
+    json_columns?: string[];
 } | {
     format: 'json';
     data: DFData;
