@@ -260,14 +260,6 @@ export type DFEnvelope =
     | { format: 'parquet_b64'; data: string; layout?: 'wide' | 'row' }            // base64 parquet, inline
     | { format: 'json'; data: DFData; layout?: 'wide' | 'row' };                  // record array, inline
 
-// Retained as an alias of the b64 envelope member for existing call sites /
-// fixtures that name it explicitly.
-export interface ParquetB64Payload {
-    format: 'parquet_b64';
-    data: string;  // base64-encoded parquet bytes
-    layout?: 'wide' | 'row';
-}
-
 // A value in df_data_dict / a wire payload can be plain JSON (DFData) or a
 // transport envelope. DFData passthrough is retained.
 export type DFDataOrPayload = DFData | DFEnvelope;

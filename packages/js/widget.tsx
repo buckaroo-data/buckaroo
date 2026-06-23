@@ -27,18 +27,6 @@ function toJsonSafe(val: any): any {
 }
 
 /**
- * Extract ArrayBuffer from various buffer wrapper types (DataView, Uint8Array, etc.)
- */
-function extractArrayBuffer(buffer: any): ArrayBuffer | null {
-	if (buffer instanceof ArrayBuffer) return buffer;
-	if (buffer instanceof DataView) return buffer.buffer;
-	if (buffer instanceof Uint8Array || (buffer && buffer.buffer instanceof ArrayBuffer)) {
-		return buffer.buffer;
-	}
-	return null;
-}
-
-/**
  * Set up transcript recording on a model. Listens to backbone events and records
  * to window._buckarooTranscript for debugging/replay in Storybook.
  * 
@@ -49,7 +37,7 @@ function setupTranscriptRecording(model: any) {
 	window._buckarooTranscript = window._buckarooTranscript || [];
 	
 	// Listen for custom messages (infinite_resp with parquet data)
-	const customMsgHandler = (msg: any, buffers?: ArrayBuffer[]) => {
+	const customMsgHandler = (msg: any, buffers?: DataView[]) => {
 		try {
 			console.info("[Transcript] custom_msg:", msg?.type);
 			// @ts-ignore
@@ -59,48 +47,33 @@ function setupTranscriptRecording(model: any) {
 				msg,
 				buffers_len: buffers?.length || 0,
 			});
-			
-			// Parse parquet buffers from infinite_resp messages
-			if (msg && msg.type === "infinite_resp" && buffers && buffers.length > 0) {
-				const rawBuffer = extractArrayBuffer(buffers[0]);
-				if (rawBuffer) {
-					console.info("[Transcript] Parsing parquet buffer, size:", rawBuffer.byteLength);
-					
-					// Use parquetRead/parquetMetadata from srt (buckaroo-js-core)
-					const parquetMetadataFn = (srt as any).parquetMetadata;
-					const parquetReadFn = (srt as any).parquetRead;
-					
-					if (parquetMetadataFn && parquetReadFn) {
-						try {
-							const metadata = parquetMetadataFn(rawBuffer);
-							parquetReadFn({
-								file: rawBuffer,
-								metadata,
-								rowFormat: "object",
-								onComplete: (rows: any[]) => {
-									console.info("[Transcript] Parquet parsed, rows:", rows?.length);
-									// @ts-ignore
-									window._buckarooTranscript.push({
-										ts: Date.now(),
-										event: "infinite_resp_parsed",
-										key: msg.key || null,
-										rows_len: Array.isArray(rows) ? rows.length : 0,
-										total_len: msg.length ?? null,
-										rows: toJsonSafe(rows || []),
-									});
-								},
-							});
-						} catch (e) {
-							console.warn("[Transcript] Failed to parse parquet:", e);
-							// @ts-ignore
-							window._buckarooTranscript.push({
-								ts: Date.now(),
-								event: "infinite_resp_parse_error",
-								error: String(e),
-							});
-						}
-					}
-				}
+
+			// Decode parquet rows from infinite_resp messages via the one
+			// transport decoder, which honors the payload envelope's
+			// buffer_index/layout and JSON-parses object cells.
+			if (msg && msg.type === "infinite_resp" && msg.payload !== undefined) {
+				srt.decodeDFData(msg.payload, buffers)
+					.then((rows: any[]) => {
+						console.info("[Transcript] Parquet parsed, rows:", rows?.length);
+						// @ts-ignore
+						window._buckarooTranscript.push({
+							ts: Date.now(),
+							event: "infinite_resp_parsed",
+							key: msg.key || null,
+							rows_len: Array.isArray(rows) ? rows.length : 0,
+							total_len: msg.length ?? null,
+							rows: toJsonSafe(rows || []),
+						});
+					})
+					.catch((e: unknown) => {
+						console.warn("[Transcript] Failed to parse parquet:", e);
+						// @ts-ignore
+						window._buckarooTranscript.push({
+							ts: Date.now(),
+							event: "infinite_resp_parse_error",
+							error: String(e),
+						});
+					});
 			}
 		} catch (e) {
 			console.warn("[Transcript] Error in customMsgHandler:", e);
