@@ -12,7 +12,7 @@
  * `float` displayer with zero fraction digits, not the `integer` displayer.
  */
 
-import type { DisplayerArgs } from './wireTypes';
+import type { DisplayerArgs } from './wireTypes.js';
 
 export type ColType = 'integer' | 'float' | 'datetime' | 'string' | 'obj';
 

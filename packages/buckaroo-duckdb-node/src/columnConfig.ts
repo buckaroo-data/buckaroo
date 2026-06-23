@@ -7,10 +7,10 @@
  * a fast-follow once the histogram SQL lands.
  */
 
-import type { RenamePlan } from './rename';
-import { INDEX_COL } from './rename';
-import { duckTypeToColType, displayerForColType } from './duckTypes';
-import type { ColumnConfig, DFViewerConfig, PinnedRowConfig } from './wireTypes';
+import type { RenamePlan } from './rename.js';
+import { INDEX_COL } from './rename.js';
+import { duckTypeToColType, displayerForColType } from './duckTypes.js';
+import type { ColumnConfig, DFViewerConfig, PinnedRowConfig } from './wireTypes.js';
 
 /**
  * The stat keys pinned in v1, in display order. Each must match a stat name

@@ -21,9 +21,9 @@
  * round-trip without changing the SDType producer.
  */
 
-import type { SummarizeRow, SDType, SDVal } from './DuckSource';
-import { INDEX_COL } from './rename';
-import type { DFData, DFDataRow } from './wireTypes';
+import type { SummarizeRow, SDType, SDVal } from './DuckSource.js';
+import { INDEX_COL } from './rename.js';
+import type { DFData, DFDataRow } from './wireTypes.js';
 
 /** Stat names produced in v1, in the order they should appear as pinned rows. */
 export const V1_STAT_NAMES = [

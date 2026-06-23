@@ -17,7 +17,7 @@
  * exact same space the rest of buckaroo (e.g. xorq_buckaroo) uses.
  */
 
-import type { DescribeRow } from './DuckSource';
+import type { DescribeRow } from './DuckSource.js';
 
 /** Reserved row-object key buckaroo uses for stat/pinned-row matching. */
 export const INDEX_COL = 'index';

@@ -9,8 +9,8 @@
  * rather than rewrites.
  */
 
-import type { RenamePlan } from './rename';
-import { INDEX_COL } from './rename';
+import type { RenamePlan } from './rename.js';
+import { INDEX_COL } from './rename.js';
 
 /**
  * A transform applied to the base statement before describe/stats/rows. v1

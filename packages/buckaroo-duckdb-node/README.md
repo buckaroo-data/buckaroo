@@ -8,6 +8,18 @@ so the viewer renders behind DuckDB exactly as it does behind pandas/polars.
 Tracks [#930](https://github.com/buckaroo-data/buckaroo/issues/930). See
 `docs/plans/930-duckdb-node-backend.md`.
 
+## See it running
+
+```bash
+pnpm install      # from packages/
+pnpm demo         # builds, then serves a live DuckDB-backed viewer
+```
+
+Open http://localhost:8780/ — a 250k-row DuckDB table with infinite scroll,
+sort, and summary stats, no Python. It renders against today's browser bundle
+via the legacy binary-frame protocol (no #933 needed); details in
+`examples/duckdb-ws-server/README.md`.
+
 ## Status (v1)
 
 Implemented and tested:

@@ -15,7 +15,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { DescribeRow, DuckSource, SummarizeRow } from '../DuckSource';
+import type { DescribeRow, DuckSource, SummarizeRow } from '../DuckSource.js';
 
 /**
  * The slice of `@duckdb/node-api`'s `DuckDBConnection` this adapter uses.

@@ -13,11 +13,11 @@
  * an IModel-over-IPC adapter (transport.ts) or any other transport.
  */
 
-import type { DuckSource } from './DuckSource';
-import { buildRenamePlan, INDEX_COL, type RenamePlan } from './rename';
-import { effectiveQuery, windowedQuery, type QueryTransform } from './query';
-import { buildDfViewerConfig } from './columnConfig';
-import { summarizeToSDType, sdTypeToStatRows } from './stats';
+import type { DuckSource } from './DuckSource.js';
+import { buildRenamePlan, INDEX_COL, type RenamePlan } from './rename.js';
+import { effectiveQuery, windowedQuery, type QueryTransform } from './query.js';
+import { buildDfViewerConfig } from './columnConfig.js';
+import { summarizeToSDType, sdTypeToStatRows } from './stats.js';
 import type {
   BuckarooOptions,
   BuckarooState,
@@ -25,7 +25,7 @@ import type {
   InitialStateMessage,
   PayloadArgs,
   PayloadResponse,
-} from './wireTypes';
+} from './wireTypes.js';
 
 export interface DuckBackendOptions {
   /** display name / data key for the single source. Defaults to `'main'`. */

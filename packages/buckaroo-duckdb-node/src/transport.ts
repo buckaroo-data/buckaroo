@@ -26,8 +26,8 @@
  * is no binary frame and no `buffers` array.
  */
 
-import type { DuckBackend } from './backend';
-import type { InitialStateMessage, PayloadResponse } from './wireTypes';
+import type { DuckBackend } from './backend.js';
+import type { InitialStateMessage, PayloadResponse } from './wireTypes.js';
 
 /** The `ipcRenderer.invoke`-shaped function the renderer hands in. */
 export type IpcInvoke = (channel: string, msg: unknown) => Promise<unknown>;
