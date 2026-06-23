@@ -1,6 +1,6 @@
 {
   "name": "buckaroo-duckdb-node",
-  "version": "0.12.0",
+  "version": "0.15.2",
   "description": "DuckDB-backed buckaroo backend for pure Node/Electron hosts. Produces the same wire payloads (initial_state, infinite_resp, wide summary stats) that buckaroo-js-core's DFViewerInfinite already speaks, with no Python kernel.",
   "keywords": [
     "buckaroo",
