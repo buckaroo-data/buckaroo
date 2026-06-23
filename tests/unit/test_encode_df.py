@@ -11,7 +11,7 @@ from io import BytesIO
 import pandas as pd
 import pyarrow.parquet as pq
 
-from buckaroo.serialization_utils import (encode_df, buffer_payload, b64_payload, resolve_summary_stats_payload, sd_to_parquet_b64)
+from buckaroo.serialization_utils import (encode_df, buffer_payload, parquet_b64_payload, resolve_summary_stats_payload, sd_to_parquet_b64)
 
 
 def _df():
@@ -73,15 +73,15 @@ def test_buffer_payload_wraps_precomputed_bytes():
     assert buffers == [b'PAR1fake']
 
 
-def test_b64_payload_wraps_precomputed_bytes():
-    env, buffers = b64_payload(b'PAR1fake')
+def test_parquet_b64_payload_wraps_precomputed_bytes():
+    env, buffers = parquet_b64_payload(b'PAR1fake')
     assert env['format'] == 'parquet_b64'
     assert base64.b64decode(env['data']) == b'PAR1fake'
     assert buffers == []
 
 
 def test_resolve_summary_stats_still_decodes_wide_payload_from_encoder():
-    """sd_to_parquet_b64 now routes its envelope through b64_payload; the
+    """sd_to_parquet_b64 now routes its envelope through parquet_b64_payload; the
     decoder must still pivot it back to row-form DFData."""
     sd = {'a': {'mean': 5.0, 'dtype': 'float64'},
           'b': {'mean': 2.0, 'dtype': 'int64'}}

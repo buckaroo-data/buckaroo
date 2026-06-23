@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from buckaroo.serialization_utils import (prepare_df_for_serialization, _json_encode_cell, _coerce_for_json, b64_payload)
+from buckaroo.serialization_utils import (prepare_df_for_serialization, _json_encode_cell, _coerce_for_json, parquet_b64_payload)
 from buckaroo.dataflow.widget_extension_utils import configure_buckaroo
 from buckaroo.buckaroo_widget import BuckarooWidget
 
@@ -50,8 +50,8 @@ def _df_to_parquet_b64_tagged(df: pd.DataFrame) -> dict:
     buf = BytesIO()
     df2.to_parquet(buf, engine='pyarrow')
     buf.seek(0)
-    # Envelope wrapping unified via b64_payload (the static-transport shape).
-    env, _ = b64_payload(buf.read())
+    # Envelope wrapping unified via parquet_b64_payload (the static-transport shape).
+    env, _ = parquet_b64_payload(buf.read())
     return env
 
 
