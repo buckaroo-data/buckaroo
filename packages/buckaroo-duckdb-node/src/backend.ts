@@ -18,6 +18,7 @@ import { buildRenamePlan, INDEX_COL, type RenamePlan } from './rename.js';
 import { effectiveQuery, windowedQuery, type QueryTransform } from './query.js';
 import { buildDfViewerConfig } from './columnConfig.js';
 import { summarizeToSDType, sdTypeToStatRows } from './stats.js';
+import { computeHistograms } from './histogramSql.js';
 import type {
   BuckarooOptions,
   BuckarooState,
@@ -96,15 +97,29 @@ export class DuckBackend {
   async initialState(): Promise<InitialStateMessage> {
     const plan = await this.ensurePlan();
 
-    // Stats over the renamed relation; column names come back as aliases. The
+    // Stats over the stats-safe relation (non-finite floats nulled so SUMMARIZE's
+    // STDDEV_SAMP doesn't overflow); column names come back as aliases. The
     // relation includes the synthesized, non-null `index` column, so its
     // SUMMARIZE count is the total row count — no extra count query needed.
-    const summarizeRows = await this.source.summarize(plan.renamedRelation(this.effectiveSql));
+    const summarizeRows = await this.source.summarize(plan.statsRelation(this.effectiveSql));
     const indexRow = summarizeRows.find((r) => r.column_name === INDEX_COL);
     this.totalRows = indexRow ? Number(indexRow.count) : 0;
 
     const sd = summarizeToSDType(summarizeRows);
     const statRows = sdTypeToStatRows(sd);
+
+    // The histogram bars are a per-column list of objects, not a scalar stat,
+    // so they ride as their own pinned row (injected right after dtype, the
+    // position the `histogram` pin in columnConfig expects) rather than through
+    // the SDType pivot.
+    const histos = await computeHistograms(
+      this.source,
+      plan.renamedRelation(this.effectiveSql),
+      plan,
+      sd,
+      this.totalRows,
+    );
+    statRows.splice(1, 0, { [INDEX_COL]: 'histogram', level_0: 'histogram', ...histos });
 
     const dfViewerConfig = buildDfViewerConfig(plan);
 

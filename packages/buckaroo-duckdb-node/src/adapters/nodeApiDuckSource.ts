@@ -61,6 +61,11 @@ export function createNodeApiDuckSource(
       return reader.getRowObjectsJson() as unknown as SummarizeRow[];
     },
 
+    async queryRows(sql: string): Promise<Array<Record<string, unknown>>> {
+      const reader = await connection.runAndReadAll(sql);
+      return reader.getRowObjectsJson();
+    },
+
     async copyToParquet(query: string): Promise<Uint8Array> {
       const dir = await mkdtemp(join(baseTmp, 'buckaroo-duck-'));
       const file = join(dir, `${randomUUID()}.parquet`);

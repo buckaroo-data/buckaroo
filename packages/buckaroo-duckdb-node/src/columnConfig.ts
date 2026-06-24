@@ -2,39 +2,45 @@
  * Build the `df_viewer_config` (column_config + pinned_rows + left_col_configs)
  * from the rename plan.
  *
- * Pinned rows reference only the v1 stats this backend actually computes from
- * `SUMMARIZE` (see stats.ts) so no pinned row renders empty. Histogram rows are
- * a fast-follow once the histogram SQL lands.
+ * Pinned rows reference only stats this backend actually computes — the
+ * `SUMMARIZE`-derived stats (see stats.ts) plus the `histogram` row the backend
+ * injects — so no pinned row renders empty.
  */
 
 import type { RenamePlan } from './rename.js';
 import { INDEX_COL } from './rename.js';
 import { duckTypeToColType, displayerForColType } from './duckTypes.js';
-import type { ColumnConfig, DFViewerConfig, PinnedRowConfig } from './wireTypes.js';
+import type {
+  ColumnConfig,
+  DFViewerConfig,
+  DisplayerArgs,
+  PinnedRowConfig,
+} from './wireTypes.js';
 
 /**
- * The stat keys pinned in v1, in display order. Each must match a stat name
- * produced by stats.ts (and therefore a wide `{col}__{stat}` column).
- * `dtype` renders via `obj`; the rest `inherit` the column's own displayer
- * (styling_helpers.py: obj_/inherit_).
+ * The stat keys pinned in v1, in display order. `dtype` renders via `obj`,
+ * `histogram` via the histogram displayer, and the rest `inherit` the column's
+ * own displayer (styling_helpers.py: obj_/inherit_/pinned_histogram). The
+ * histogram row sits right after dtype to match DefaultMainStyling.pinned_rows.
  */
-export const V1_PINNED_STATS: ReadonlyArray<{ stat: string; inherit: boolean }> = [
-  { stat: 'dtype', inherit: false },
-  { stat: 'null_count', inherit: true },
-  { stat: 'distinct_count', inherit: true },
-  { stat: 'mean', inherit: true },
-  { stat: 'std', inherit: true },
-  { stat: 'min', inherit: true },
-  { stat: 'q25', inherit: true },
-  { stat: 'q50', inherit: true },
-  { stat: 'q75', inherit: true },
-  { stat: 'max', inherit: true },
+export const V1_PINNED_STATS: ReadonlyArray<{ stat: string; displayer_args: DisplayerArgs }> = [
+  { stat: 'dtype', displayer_args: { displayer: 'obj' } },
+  { stat: 'histogram', displayer_args: { displayer: 'histogram' } },
+  { stat: 'null_count', displayer_args: { displayer: 'inherit' } },
+  { stat: 'distinct_count', displayer_args: { displayer: 'inherit' } },
+  { stat: 'mean', displayer_args: { displayer: 'inherit' } },
+  { stat: 'std', displayer_args: { displayer: 'inherit' } },
+  { stat: 'min', displayer_args: { displayer: 'inherit' } },
+  { stat: 'q25', displayer_args: { displayer: 'inherit' } },
+  { stat: 'q50', displayer_args: { displayer: 'inherit' } },
+  { stat: 'q75', displayer_args: { displayer: 'inherit' } },
+  { stat: 'max', displayer_args: { displayer: 'inherit' } },
 ];
 
 export function buildPinnedRows(): PinnedRowConfig[] {
-  return V1_PINNED_STATS.map(({ stat, inherit }) => ({
+  return V1_PINNED_STATS.map(({ stat, displayer_args }) => ({
     primary_key_val: stat,
-    displayer_args: inherit ? { displayer: 'inherit' } : { displayer: 'obj' },
+    displayer_args,
   }));
 }
 

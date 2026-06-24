@@ -61,6 +61,11 @@ function fakeSource(): DuckSource & { lastCopyQuery?: string } {
         },
       ];
     },
+    async queryRows(): Promise<Array<Record<string, unknown>>> {
+      // both columns are low-cardinality here (approx_unique ≤ 7), so only the
+      // categorical value-counts query runs; return a single dominant category.
+      return [{ name: 'x', c: 42, non_null: 42, unique_count: 0 }];
+    },
     async copyToParquet(query: string): Promise<Uint8Array> {
       src.lastCopyQuery = query;
       return new Uint8Array([1, 2, 3, 4]);
@@ -88,9 +93,23 @@ describe('DuckBackend.initialState', () => {
     expect(msg.df_display_args.main.data_key).toBe('main');
     // main rows are empty (delivered via infinite_request); stats are inline json
     expect(msg.df_data_dict.main).toEqual([]);
-    const stats = msg.df_data_dict.all_stats as { format: string; data: unknown[] };
+    const stats = msg.df_data_dict.all_stats as {
+      format: string;
+      data: Array<Record<string, unknown>>;
+    };
     expect(stats.format).toBe('json');
     expect(stats.data.length).toBeGreaterThan(0);
+
+    // the histogram pinned row sits right after dtype and carries a bar list
+    // per column (categorical fallback here)
+    expect(cfg.pinned_rows[1]).toEqual({
+      primary_key_val: 'histogram',
+      displayer_args: { displayer: 'histogram' },
+    });
+    const histoRow = stats.data.find((r) => r.index === 'histogram')!;
+    expect(stats.data.indexOf(histoRow)).toBe(1);
+    expect(histoRow.a).toEqual([{ name: 'x', cat_pop: 100 }]);
+    expect(histoRow.b).toEqual([{ name: 'x', cat_pop: 100 }]);
   });
 });
 

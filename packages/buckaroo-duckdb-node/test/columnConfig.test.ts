@@ -73,7 +73,7 @@ describe('buildColumnConfig', () => {
 });
 
 describe('buildPinnedRows / buildDfViewerConfig', () => {
-  it('pins only the v1 stats, dtype via obj and the rest via inherit', () => {
+  it('pins the v1 stats: dtype via obj, histogram via histogram, the rest inherit', () => {
     const pinned = buildPinnedRows();
     expect(pinned.map((p) => p.primary_key_val)).toEqual(
       V1_PINNED_STATS.map((s) => s.stat),
@@ -82,7 +82,11 @@ describe('buildPinnedRows / buildDfViewerConfig', () => {
       primary_key_val: 'dtype',
       displayer_args: { displayer: 'obj' },
     });
-    expect(pinned[1].displayer_args).toEqual({ displayer: 'inherit' });
+    expect(pinned[1]).toEqual({
+      primary_key_val: 'histogram',
+      displayer_args: { displayer: 'histogram' },
+    });
+    expect(pinned[2].displayer_args).toEqual({ displayer: 'inherit' });
   });
 
   it('assembles a full viewer config with a left index column', () => {
