@@ -53,10 +53,11 @@ export class IdentityView implements View {
     }
 
     public rowidsInRange(start: number, end: number): number[] {
+        const clampedStart = Math.max(0, start);
         const clampedEnd = Math.min(end, this._length);
-        if (clampedEnd <= start) return [];
-        const out: number[] = new Array(clampedEnd - start);
-        for (let i = 0; i < out.length; i++) out[i] = start + i;
+        if (clampedEnd <= clampedStart) return [];
+        const out: number[] = new Array(clampedEnd - clampedStart);
+        for (let i = 0; i < out.length; i++) out[i] = clampedStart + i;
         return out;
     }
 
@@ -86,9 +87,10 @@ export class SortView implements View {
     }
 
     public rowidsInRange(start: number, end: number): number[] {
+        const clampedStart = Math.max(0, start);
         const clampedEnd = Math.min(end, this.rowidOrder.length);
-        if (clampedEnd <= start) return [];
-        return Array.from(this.rowidOrder.subarray(start, clampedEnd));
+        if (clampedEnd <= clampedStart) return [];
+        return Array.from(this.rowidOrder.subarray(clampedStart, clampedEnd));
     }
 
     public viewKey(): string {
@@ -115,9 +117,10 @@ export class FilterView implements View {
     }
 
     public rowidsInRange(start: number, end: number): number[] {
+        const clampedStart = Math.max(0, start);
         const clampedEnd = Math.min(end, this.rowidSubset.length);
-        if (clampedEnd <= start) return [];
-        return Array.from(this.rowidSubset.subarray(start, clampedEnd));
+        if (clampedEnd <= clampedStart) return [];
+        return Array.from(this.rowidSubset.subarray(clampedStart, clampedEnd));
     }
 
     public viewKey(): string {
