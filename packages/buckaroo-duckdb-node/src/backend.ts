@@ -97,10 +97,11 @@ export class DuckBackend {
   async initialState(): Promise<InitialStateMessage> {
     const plan = await this.ensurePlan();
 
-    // Stats over the renamed relation; column names come back as aliases. The
+    // Stats over the stats-safe relation (non-finite floats nulled so SUMMARIZE's
+    // STDDEV_SAMP doesn't overflow); column names come back as aliases. The
     // relation includes the synthesized, non-null `index` column, so its
     // SUMMARIZE count is the total row count — no extra count query needed.
-    const summarizeRows = await this.source.summarize(plan.renamedRelation(this.effectiveSql));
+    const summarizeRows = await this.source.summarize(plan.statsRelation(this.effectiveSql));
     const indexRow = summarizeRows.find((r) => r.column_name === INDEX_COL);
     this.totalRows = indexRow ? Number(indexRow.count) : 0;
 

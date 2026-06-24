@@ -58,4 +58,22 @@ describe('buildRenamePlan', () => {
     expect(sql).toContain('(ROW_NUMBER() OVER ()) - 1 AS index');
     expect(sql).toContain('FROM (SELECT * FROM t) AS _buckaroo_src');
   });
+
+  it('statsRelation nulls non-finite floats but leaves other types untouched', () => {
+    const sql = plan.statsRelation('SELECT * FROM t');
+    // the DOUBLE column (alias a) is guarded against nan/±inf
+    expect(sql).toContain('CASE WHEN isfinite(a) THEN a ELSE NULL END AS a');
+    // BIGINT (b), VARCHAR (c), and the synthesized index pass through bare
+    expect(sql).not.toContain('isfinite(b)');
+    expect(sql).not.toContain('isfinite(c)');
+    expect(sql).toContain(`${INDEX_COL} FROM`);
+    // it wraps the renamed relation (so SUMMARIZE sees the aliased columns)
+    expect(sql).toContain('_buckaroo_src');
+  });
+
+  it('statsRelation does not guard DECIMAL (fixed-point cannot be non-finite)', () => {
+    const decPlan = buildRenamePlan([{ name: 'pnl', type: 'DECIMAL(12,4)' }]);
+    const sql = decPlan.statsRelation('SELECT * FROM t');
+    expect(sql).not.toContain('isfinite');
+  });
 });

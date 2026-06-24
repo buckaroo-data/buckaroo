@@ -45,6 +45,17 @@ export function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+/**
+ * Real IEEE-754 floating types — the only ones that can hold `nan`/`±inf`.
+ * DECIMAL/NUMERIC are fixed-point and cannot, so they're excluded from the
+ * non-finite guard (`statsRelation`).
+ */
+const REAL_FLOAT_TYPES = new Set(['DOUBLE', 'REAL', 'FLOAT', 'FLOAT4', 'FLOAT8']);
+
+function isRealFloatType(duckType: string): boolean {
+  return REAL_FLOAT_TYPES.has(duckType.trim().toUpperCase().replace(/\(.*$/, '').trim());
+}
+
 export interface RenamePlan {
   /** alias (`a`) → original column name. For `header_name` + sort reversal. */
   renameMap: Record<string, string>;
@@ -58,6 +69,15 @@ export interface RenamePlan {
    * Callers wrap this with ORDER BY / LIMIT / OFFSET.
    */
   renamedRelation(stmt: string): string;
+  /**
+   * The stats-only relation: `renamedRelation` with non-finite floats
+   * (`nan`/`±inf`) replaced by NULL. DuckDB's `SUMMARIZE` runs `STDDEV_SAMP`,
+   * which overflows ("out of range") on a non-finite value and aborts the whole
+   * stats query — so for summary statistics those values are treated as missing.
+   * Only this path is guarded; the row (COPY) and histogram paths keep every
+   * value (no coercion).
+   */
+  statsRelation(stmt: string): string;
 }
 
 /**
@@ -86,5 +106,15 @@ export function buildRenamePlan(describeRows: DescribeRow[]): RenamePlan {
     return `SELECT ${projections.join(', ')} FROM (${stmt}) AS _buckaroo_src`;
   };
 
-  return { renameMap, aliases, columns, renamedRelation };
+  const statsRelation = (stmt: string): string => {
+    const projections = columns.map((c) =>
+      isRealFloatType(c.type)
+        ? `CASE WHEN isfinite(${c.alias}) THEN ${c.alias} ELSE NULL END AS ${c.alias}`
+        : c.alias,
+    );
+    projections.push(INDEX_COL);
+    return `SELECT ${projections.join(', ')} FROM (${renamedRelation(stmt)}) AS _buckaroo_renamed`;
+  };
+
+  return { renameMap, aliases, columns, renamedRelation, statsRelation };
 }
