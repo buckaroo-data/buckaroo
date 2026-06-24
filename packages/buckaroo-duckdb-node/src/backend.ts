@@ -78,12 +78,15 @@ export class DuckBackend {
   private plan?: RenamePlan;
   /** Unfiltered row count — `df_meta.total_rows`. Stable across searches. */
   private totalRows = 0;
-  /** Rows after search — `df_meta.filtered_rows` and the infinite_resp length. */
-  private filteredRows = 0;
+  /** Unfiltered count, cached so repeated searches don't re-summarize the base. */
   private cachedTotal?: number;
+  /**
+   * Rows after search — `df_meta.filtered_rows` and the infinite_resp `length`.
+   * Cached against the current `searchTerm`; `setSearch` invalidates it so a row
+   * window can never report a stale count. `undefined` means "not yet computed".
+   */
+  private cachedFiltered?: number;
   private searchTerm: string;
-  /** The effective SQL the row/stats queries run against (base + search). */
-  private activeSql: string;
 
   constructor(source: DuckSource, baseStmt: string, opts: DuckBackendOptions = {}) {
     this.source = source;
@@ -91,7 +94,6 @@ export class DuckBackend {
     this.summaryStatsKey = opts.summaryStatsKey ?? 'all_stats';
     this.transforms = opts.transforms ?? [];
     this.searchTerm = opts.search ?? '';
-    this.activeSql = effectiveQuery(this.baseStmt, this.transforms);
   }
 
   /** The base effective SQL, search excluded. */
@@ -100,11 +102,17 @@ export class DuckBackend {
   }
 
   /**
-   * Set (or clear) the search term. The next `initialState` re-runs stats over
-   * the filtered set and re-points the row window; an empty term clears it.
+   * Set (or clear) the search term. Invalidates the cached filtered count so the
+   * next `initialState`/`infinite_request` recomputes against the new term; an
+   * empty term clears the filter. The active SQL is derived on demand (no cached
+   * copy to go stale), so a row window is consistent regardless of call order.
    */
   setSearch(term: string): void {
-    this.searchTerm = term ?? '';
+    const next = term ?? '';
+    if (next !== this.searchTerm) {
+      this.searchTerm = next;
+      this.cachedFiltered = undefined;
+    }
   }
 
   /** The original (pre-rename) text columns search targets. */
@@ -131,29 +139,30 @@ export class DuckBackend {
   async initialState(): Promise<InitialStateMessage> {
     const plan = await this.ensurePlan();
     const active = isActiveSearch(this.searchTerm) && this.searchColumns(plan).length > 0;
-    this.activeSql = this.searchEffectiveSql(plan);
 
     // Stats over the stats-safe (non-finite floats nulled so SUMMARIZE's
     // STDDEV_SAMP doesn't overflow), possibly search-filtered relation — pandas
     // re-runs summary stats on the filtered df, so we do too. The relation
     // includes the synthesized, non-null `index` column, so its SUMMARIZE count
     // is the row count of that set (filtered under search), no extra count
-    // query needed.
-    const summarizeRows = await this.source.summarize(plan.statsRelation(this.activeSql));
+    // query needed. Seed the filtered-count cache from this same SUMMARIZE so a
+    // following `infinite_request` doesn't re-run it.
+    const summarizeRows = await this.source.summarize(plan.statsRelation(this.searchEffectiveSql(plan)));
     const indexRow = summarizeRows.find((r) => r.column_name === INDEX_COL);
-    this.filteredRows = indexRow ? Number(indexRow.count) : 0;
+    const filteredRows = indexRow ? Number(indexRow.count) : 0;
+    this.cachedFiltered = filteredRows;
 
     // total_rows is the unfiltered count and never changes with search. Cache it
     // so repeated searches don't re-summarize the base relation; when search is
     // inactive the filtered count IS the total.
     if (!active) {
-      this.cachedTotal = this.filteredRows;
+      this.cachedTotal = filteredRows;
     } else if (this.cachedTotal === undefined) {
       const baseRows = await this.source.summarize(plan.renamedRelation(this.effectiveSql));
       const baseIndex = baseRows.find((r) => r.column_name === INDEX_COL);
-      this.cachedTotal = baseIndex ? Number(baseIndex.count) : this.filteredRows;
+      this.cachedTotal = baseIndex ? Number(baseIndex.count) : filteredRows;
     }
-    this.totalRows = this.cachedTotal ?? this.filteredRows;
+    this.totalRows = this.cachedTotal ?? filteredRows;
 
     const sd = summarizeToSDType(summarizeRows);
     const statRows = sdTypeToStatRows(sd);
@@ -179,8 +188,8 @@ export class DuckBackend {
       df_meta: {
         total_rows: this.totalRows,
         columns: plan.columns.length,
-        filtered_rows: this.filteredRows,
-        rows_shown: this.filteredRows,
+        filtered_rows: filteredRows,
+        rows_shown: filteredRows,
       },
       df_data_dict: {
         // main rows arrive on demand via infinite_request
@@ -214,14 +223,33 @@ export class DuckBackend {
   }
 
   /**
+   * The filtered row count for the current search. Cached and invalidated by
+   * `setSearch`, recomputed with one SUMMARIZE-count only when stale.
+   * `initialState` seeds the cache from its own SUMMARIZE, so the common
+   * state_change → initial_state → infinite_request flow never double-counts;
+   * a standalone `setSearch` followed directly by `infinite_request` recomputes
+   * here rather than reporting a stale length.
+   */
+  private async ensureFiltered(plan: RenamePlan): Promise<number> {
+    if (this.cachedFiltered === undefined) {
+      const rows = await this.source.summarize(plan.renamedRelation(this.searchEffectiveSql(plan)));
+      const indexRow = rows.find((r) => r.column_name === INDEX_COL);
+      this.cachedFiltered = indexRow ? Number(indexRow.count) : 0;
+    }
+    return this.cachedFiltered;
+  }
+
+  /**
    * Answer one `infinite_request`. The window runs against the active
-   * (search-filtered) SQL, is serialized through the COPY→parquet no-coercion
-   * path and returned inline as a `parquet_b64` envelope. `length` is the
-   * filtered row count so the grid scrolls only the matching rows.
+   * (search-filtered) SQL — derived on demand from the current term, never a
+   * cached copy that could go stale — serialized through the COPY→parquet
+   * no-coercion path and returned inline as a `parquet_b64` envelope. `length`
+   * is the filtered row count so the grid scrolls only the matching rows.
    */
   async handleInfiniteRequest(args: PayloadArgs): Promise<PayloadResponse> {
     const plan = await this.ensurePlan();
-    const sql = windowedQuery(this.activeSql, plan, {
+    const length = await this.ensureFiltered(plan);
+    const sql = windowedQuery(this.searchEffectiveSql(plan), plan, {
       start: args.start,
       end: args.end,
       sort: args.sort,
@@ -232,7 +260,7 @@ export class DuckBackend {
     return {
       type: 'infinite_resp',
       key: args,
-      length: this.filteredRows,
+      length,
       payload,
     };
   }

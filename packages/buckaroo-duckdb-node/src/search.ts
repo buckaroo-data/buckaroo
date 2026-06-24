@@ -23,7 +23,10 @@ export function isSearchableType(duckType: string): boolean {
   return base !== 'BOOLEAN' && base !== 'BOOL';
 }
 
-/** A no-op term — empty or whitespace — means "no filter". */
+/**
+ * An empty/absent term means "no filter". Whitespace is a real term — pandas
+ * `Search` no-ops only on `""` (`val == ""`), so we must not trim here.
+ */
 export function isActiveSearch(term: string | null | undefined): boolean {
   return typeof term === 'string' && term.length > 0;
 }
