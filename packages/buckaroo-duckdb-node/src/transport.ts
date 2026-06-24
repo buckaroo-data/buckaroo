@@ -51,6 +51,7 @@ export class IpcDuckModel implements IModel {
   private readonly channel: string;
   private readonly listeners = new Map<string, Set<Handler>>();
   private readonly state = new Map<string, unknown>();
+  private readonly pendingChanges = new Set<string>();
 
   constructor(invoke: IpcInvoke, opts: { channel?: string } = {}) {
     this.invoke = invoke;
@@ -58,11 +59,7 @@ export class IpcDuckModel implements IModel {
   }
 
   send(msg: unknown): void {
-    void this.invoke(this.channel, msg).then((reply) => {
-      if (reply !== undefined && reply !== null) {
-        this.emit('msg:custom', reply);
-      }
-    });
+    void this.invoke(this.channel, msg).then((reply) => this.applyReply(reply));
   }
 
   get(key: string): unknown {
@@ -70,10 +67,41 @@ export class IpcDuckModel implements IModel {
   }
   set(key: string, value: unknown): void {
     this.state.set(key, value);
+    this.pendingChanges.add(key);
     this.emit('change:' + key, value);
   }
+  /**
+   * Flush a pending `buckaroo_state` edit to the main process as a
+   * `buckaroo_state_change` (mirrors `WebSocketModel.save_changes`), then apply
+   * the returned `initial_state`. Without this the React search UI's
+   * `set('buckaroo_state', …)` never reaches the backend over IPC.
+   */
   save_changes(): void {
-    /* no-op: read-only viewer, no state to persist upstream */
+    const hadStateChange = this.pendingChanges.has('buckaroo_state');
+    this.pendingChanges.clear();
+    if (!hadStateChange) return;
+    const msg = { type: 'buckaroo_state_change', new_state: this.state.get('buckaroo_state') };
+    void this.invoke(this.channel, msg).then((reply) => this.applyReply(reply));
+  }
+
+  /**
+   * Route a main-process reply. An `initial_state` is fanned out as `change:*`
+   * events so the React tree re-renders (the filtered grid + highlight);
+   * anything else (an `infinite_resp`) is re-emitted as `msg:custom` for the
+   * row cache.
+   */
+  private applyReply(reply: unknown): void {
+    if (reply === undefined || reply === null) return;
+    const r = reply as { type?: string } & Record<string, unknown>;
+    if (r.type === 'initial_state') {
+      for (const [k, v] of Object.entries(r)) {
+        if (k === 'type') continue;
+        this.state.set(k, v);
+        this.emit('change:' + k, v);
+      }
+      return;
+    }
+    this.emit('msg:custom', reply);
   }
 
   on(event: string, handler: Handler): void {
