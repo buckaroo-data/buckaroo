@@ -16,7 +16,8 @@
  * The backend logic is identical; only the framing differs.)
  *
  * Run:  pnpm demo        (from packages/buckaroo-duckdb-node)
- * Then open the printed http://localhost:8780/ URL.
+ * Then open the printed http://localhost:9080/ URL. A view dropdown switches
+ * between DFViewer and the Infinite Buckaroo widget; search works in both.
  */
 
 import http from 'node:http';
@@ -31,7 +32,25 @@ import { DuckBackend } from '../../dist/index.js';
 import { createNodeApiDuckSource } from '../../dist/adapters/nodeApiDuckSource.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.PORT ?? 8780);
+// Default clear of tallyman's ports (companion :7860, Buckaroo subprocess :8700
+// and the 87xx band it allocates from) so the demo never collides with a
+// running tallyman. Override with PORT.
+const PORT = Number(process.env.PORT ?? 9080);
+
+// The two render paths the standalone bundle (packages/js/standalone.tsx)
+// exposes over the infinite/WS backend, selected by `initial_state.mode`.
+// The session id in the URL (/s/<view>) carries the choice; the dropdown in
+// the page just navigates between them.
+const VIEWS = [
+  { id: 'dfviewer', label: 'DFViewer', mode: 'viewer' },
+  { id: 'buckaroo', label: 'Buckaroo (Infinite)', mode: 'buckaroo' },
+];
+const DEFAULT_VIEW = VIEWS[0].id;
+
+/** Resolve a view id (from the URL) to the bundle's render mode; viewer by default. */
+function modeForView(view) {
+  return VIEWS.find((v) => v.id === view)?.mode ?? 'viewer';
+}
 
 // The browser bundle + CSS the buckaroo Python package builds into buckaroo/static.
 const STATIC_DIR =
@@ -82,7 +101,7 @@ function unwrapJsonEnvelope(value) {
   return value;
 }
 
-function toLegacyInitialState(msg) {
+function toLegacyInitialState(msg, mode = 'viewer') {
   const df_data_dict = {};
   for (const [k, v] of Object.entries(msg.df_data_dict)) {
     df_data_dict[k] = unwrapJsonEnvelope(v);
@@ -90,7 +109,7 @@ function toLegacyInitialState(msg) {
   return {
     type: 'initial_state',
     protocol_version: 1,
-    mode: 'viewer',
+    mode,
     prompt: '',
     metadata: { path: `duckdb://${TABLE}`, rows: msg.df_meta.total_rows },
     df_meta: msg.df_meta,
@@ -105,17 +124,22 @@ function toLegacyInitialState(msg) {
 // HTTP: session page + static assets.
 // ---------------------------------------------------------------------------
 
-function sessionHtml(sessionId) {
+function sessionHtml(view) {
+  const options = VIEWS.map(
+    (v) => `<option value="${v.id}"${v.id === view ? ' selected' : ''}>${v.label}</option>`,
+  ).join('');
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Buckaroo (DuckDB) — ${sessionId}</title>
+  <title>Buckaroo (DuckDB) — ${view}</title>
   <link rel="stylesheet" href="/static/compiled.css">
   <link rel="stylesheet" href="/static/standalone.css">
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100vh; background: #181d1f; }
     body { display: flex; flex-direction: column; }
+    #view-bar { padding: 4px 10px; font-family: sans-serif; font-size: 13px; color: #ccc; background: #1f2426; border-bottom: 1px solid #333; flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+    #view-bar select { background: #2a3033; color: #eee; border: 1px solid #444; border-radius: 3px; padding: 2px 6px; font-size: 13px; }
     #filename-bar { padding: 4px 10px; font-family: sans-serif; font-size: 13px; color: #ccc; background: #222; border-bottom: 1px solid #333; flex-shrink: 0; }
     #filename-bar:empty { display: none; }
     #prompt-bar { padding: 4px 10px; font-family: sans-serif; font-size: 12px; color: #999; background: #222; border-bottom: 1px solid #333; flex-shrink: 0; }
@@ -130,9 +154,20 @@ function sessionHtml(sessionId) {
   </style>
 </head>
 <body>
+  <div id="view-bar">
+    <label for="view-select">View</label>
+    <select id="view-select">${options}</select>
+    <span style="color:#777">— search works in both; switching reloads the session</span>
+  </div>
   <div id="filename-bar"></div>
   <div id="prompt-bar"></div>
   <div id="root"></div>
+  <script>
+    // The session id in the path IS the selected view; switching navigates to it.
+    document.getElementById('view-select').addEventListener('change', (e) => {
+      window.location.pathname = '/s/' + e.target.value;
+    });
+  </script>
   <script type="module" src="/static/standalone.js"></script>
 </body>
 </html>`;
@@ -175,11 +210,15 @@ async function main() {
     try {
       const url = new URL(req.url, `http://localhost:${PORT}`);
       if (url.pathname === '/') {
-        res.writeHead(302, { location: '/s/demo' }).end();
+        res.writeHead(302, { location: `/s/${DEFAULT_VIEW}` }).end();
       } else if (url.pathname.startsWith('/s/')) {
+        const requested = decodeURIComponent(url.pathname.slice(3));
+        // Normalize unknown sessions to the default view so the dropdown always
+        // reflects a real render mode.
+        const view = VIEWS.some((v) => v.id === requested) ? requested : DEFAULT_VIEW;
         res
           .writeHead(200, { 'content-type': 'text/html' })
-          .end(sessionHtml(decodeURIComponent(url.pathname.slice(3))));
+          .end(sessionHtml(view));
       } else if (url.pathname.startsWith('/static/')) {
         await serveStatic(req, res, url.pathname.slice('/static/'.length));
       } else {
@@ -196,12 +235,16 @@ async function main() {
       ws.close();
       return;
     }
+    // The WS path mirrors the page path (/ws/<view>); the view selects the
+    // standalone render mode (DFViewer vs Infinite Buckaroo).
+    const view = decodeURIComponent(req.url.slice('/ws/'.length).split(/[/?]/)[0]);
+    const mode = modeForView(view);
     // Each client gets its own backend instance over the shared connection.
     const backend = new DuckBackend(source, BASE_STMT);
 
     try {
       const initial = await backend.initialState();
-      ws.send(JSON.stringify(toLegacyInitialState(initial)));
+      ws.send(JSON.stringify(toLegacyInitialState(initial, mode)));
     } catch (err) {
       console.error('initial_state failed:', err);
       ws.close();
@@ -222,7 +265,7 @@ async function main() {
         backend.setSearch(term);
         try {
           const refreshed = await backend.initialState();
-          ws.send(JSON.stringify(toLegacyInitialState(refreshed)));
+          ws.send(JSON.stringify(toLegacyInitialState(refreshed, mode)));
         } catch (err) {
           console.error('search state_change failed:', err);
         }
