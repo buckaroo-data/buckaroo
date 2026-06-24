@@ -184,26 +184,44 @@ export function categoricalHistogram(
   return histo;
 }
 
+/** The categorical inputs `buildHistogram` needs (see `parseCategorical`). */
+export interface CategoricalArgs {
+  top: ValueCount[];
+  restSum: number;
+  uniqueCount: number;
+}
+
 /**
  * histogram.py:histogram — pick the numeric path only when the column is
  * numeric, has more than 5 distinct values, valid histogram args, and the
  * resulting numeric histogram has more than 5 bars; otherwise fall back to the
  * categorical histogram.
+ *
+ * The numeric and categorical inputs are fetched lazily so the categorical
+ * query only runs when the numeric path doesn't win — matching histogram.py's
+ * short-circuit. This is the single dispatcher: the production pipeline
+ * (histogramSql.ts:computeColumnHistogram) supplies SQL-backed fetchers, the
+ * unit tests supply in-memory ones, so the same branch logic is what ships.
  */
-export function buildHistogram(opts: {
+export async function buildHistogram(opts: {
   isNumeric: boolean;
   distinctCount: number;
   length: number;
   nanPer: number;
   min: number | null;
   max: number | null;
-  numericArgs: NumericHistogramArgs | null;
-  categorical: { top: ValueCount[]; restSum: number; uniqueCount: number };
-}): HistogramBar[] {
-  const { isNumeric, distinctCount, length, nanPer, min, max, numericArgs, categorical } = opts;
-  if (isNumeric && distinctCount > 5 && numericArgs && min !== null && max !== null) {
-    const temp = numericHistogram(numericArgs, min, max, nanPer);
-    if (temp.length > 5) return temp;
+  fetchNumericArgs: () => Promise<NumericHistogramArgs | null>;
+  fetchCategorical: () => Promise<CategoricalArgs>;
+}): Promise<HistogramBar[]> {
+  const { isNumeric, distinctCount, length, nanPer, min, max, fetchNumericArgs, fetchCategorical } =
+    opts;
+  if (isNumeric && distinctCount > 5 && min !== null && max !== null) {
+    const numericArgs = await fetchNumericArgs();
+    if (numericArgs) {
+      const temp = numericHistogram(numericArgs, min, max, nanPer);
+      if (temp.length > 5) return temp;
+    }
   }
+  const categorical = await fetchCategorical();
   return categoricalHistogram(length, categorical.top, categorical.restSum, categorical.uniqueCount, nanPer);
 }

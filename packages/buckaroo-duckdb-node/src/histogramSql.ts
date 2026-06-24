@@ -17,8 +17,8 @@
 import { quoteIdent } from './rename.js';
 import { duckTypeToColType } from './duckTypes.js';
 import {
-  numericHistogram,
-  categoricalHistogram,
+  buildHistogram,
+  type CategoricalArgs,
   type NumericHistogramArgs,
   type ValueCount,
 } from './histogram.js';
@@ -131,11 +131,7 @@ export function parseNumericArgs(rows: Array<Record<string, unknown>>): NumericH
 }
 
 /** Parse the categorical query rows into `categoricalHistogram` inputs. */
-export function parseCategorical(rows: Array<Record<string, unknown>>): {
-  top: ValueCount[];
-  restSum: number;
-  uniqueCount: number;
-} {
+export function parseCategorical(rows: Array<Record<string, unknown>>): CategoricalArgs {
   if (rows.length === 0) return { top: [], restSum: 0, uniqueCount: 0 };
   const nonNull = num(rows[0].non_null);
   const uniqueCount = num(rows[0].unique_count);
@@ -168,25 +164,22 @@ function colMeta(sd: SDType[string] | undefined, duckType: string, length: numbe
   };
 }
 
-async function computeColumnHistogram(
+function computeColumnHistogram(
   source: DuckSource,
   relation: string,
   alias: string,
   meta: ColMeta,
 ): Promise<HistogramBar[]> {
-  // Numeric path first; only fall through to a categorical query when the
-  // numeric histogram is unavailable (too few distinct values, no min/max, or a
-  // degenerate meat range), exactly like histogram.py:histogram.
-  if (meta.isNumeric && meta.distinctCount > 5 && meta.min !== null && meta.max !== null) {
-    const rows = await source.queryRows(numericHistogramSql(relation, alias));
-    const args = parseNumericArgs(rows);
-    if (args) {
-      const temp = numericHistogram(args, meta.min, meta.max, meta.nanPer);
-      if (temp.length > 5) return temp;
-    }
-  }
-  const cat = parseCategorical(await source.queryRows(categoricalHistogramSql(relation, alias)));
-  return categoricalHistogram(meta.length, cat.top, cat.restSum, cat.uniqueCount, meta.nanPer);
+  // The numeric-vs-categorical dispatch lives in histogram.ts:buildHistogram
+  // (the single, unit-tested copy). Here we only supply the lazy SQL fetchers,
+  // so the categorical query runs only when the numeric path doesn't win.
+  return buildHistogram({
+    ...meta,
+    fetchNumericArgs: async () =>
+      parseNumericArgs(await source.queryRows(numericHistogramSql(relation, alias))),
+    fetchCategorical: async () =>
+      parseCategorical(await source.queryRows(categoricalHistogramSql(relation, alias))),
+  });
 }
 
 /**

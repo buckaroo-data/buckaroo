@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   npRound0,
   fmtBucket,
@@ -137,46 +137,49 @@ describe('buildHistogram dispatcher (histogram.py:histogram)', () => {
   };
   const categorical = { top: [{ name: 'x', count: 8 }], restSum: 0, uniqueCount: 0 };
 
-  it('uses the numeric histogram when numeric with >5 distinct values', () => {
-    const bars = buildHistogram({
+  it('uses the numeric histogram (and skips the categorical fetch) when numeric with >5 distinct values', async () => {
+    const fetchCategorical = vi.fn(async () => categorical);
+    const bars = await buildHistogram({
       isNumeric: true,
       distinctCount: 50,
       length: 100,
       nanPer: 0,
       min: -1,
       max: 11,
-      numericArgs,
-      categorical,
+      fetchNumericArgs: async () => numericArgs,
+      fetchCategorical,
     });
     // low tail + 10 meat + high tail = 12 bars
     expect(bars).toHaveLength(12);
     expect(bars.some((b) => b.population !== undefined)).toBe(true);
+    // the numeric path won, so the categorical query must not run
+    expect(fetchCategorical).not.toHaveBeenCalled();
   });
 
-  it('falls back to categorical for low-cardinality numeric columns', () => {
-    const bars = buildHistogram({
+  it('falls back to categorical for low-cardinality numeric columns', async () => {
+    const bars = await buildHistogram({
       isNumeric: true,
       distinctCount: 3,
       length: 100,
       nanPer: 0,
       min: 0,
       max: 2,
-      numericArgs,
-      categorical,
+      fetchNumericArgs: async () => numericArgs,
+      fetchCategorical: async () => categorical,
     });
     expect(bars).toEqual([{ name: 'x', cat_pop: 8 }]);
   });
 
-  it('falls back to categorical when numeric args are missing (degenerate meat)', () => {
-    const bars = buildHistogram({
+  it('falls back to categorical when numeric args are missing (degenerate meat)', async () => {
+    const bars = await buildHistogram({
       isNumeric: true,
       distinctCount: 50,
       length: 100,
       nanPer: 0,
       min: 0,
       max: 2,
-      numericArgs: null,
-      categorical,
+      fetchNumericArgs: async () => null,
+      fetchCategorical: async () => categorical,
     });
     expect(bars).toEqual([{ name: 'x', cat_pop: 8 }]);
   });
