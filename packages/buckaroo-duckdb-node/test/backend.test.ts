@@ -214,6 +214,22 @@ describe('DuckBackend search', () => {
     expect(stringCol.displayer_args).toMatchObject({ highlight_phrase: ['Al'] });
   });
 
+  it('echoes the active search term in buckaroo_state so the StatusBar stays in sync', async () => {
+    // Without the echo, the returned buckaroo_state has empty quick_command_args,
+    // so the search cell's controlled value snaps back to '' while its local input
+    // still holds the term — StatusBar's debounce effect then resubmits forever.
+    const backend = new DuckBackend(searchableSource(), 'SELECT * FROM t');
+    await backend.initialState();
+    backend.setSearch('Al');
+    const msg = await backend.initialState();
+    expect(msg.buckaroo_state.quick_command_args).toEqual({ search: ['Al'] });
+
+    // clearing the search empties quick_command_args again
+    backend.setSearch('');
+    const cleared = await backend.initialState();
+    expect(cleared.buckaroo_state.quick_command_args).toEqual({});
+  });
+
   it('windows the filtered relation and returns the filtered length', async () => {
     const src = searchableSource();
     const backend = new DuckBackend(src, 'SELECT * FROM t');
