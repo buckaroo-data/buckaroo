@@ -231,6 +231,24 @@ describe('DuckBackend search', () => {
     expect(src.lastCopyQuery).toContain('contains(');
   });
 
+  it('a setSearch with no intervening initialState still windows the filtered set', async () => {
+    const src = searchableSource();
+    const backend = new DuckBackend(src, 'SELECT * FROM t');
+    await backend.initialState(); // seeds the unfiltered length (5)
+
+    // setSearch alone — the activeSql is derived on demand and the filtered
+    // length recomputed here, so the window can't serve the stale full count.
+    backend.setSearch('Al');
+    const resp = await backend.handleInfiniteRequest({
+      sourceName: 'main',
+      start: 0,
+      end: 10,
+      origEnd: 10,
+    });
+    expect(resp.length).toBe(2);
+    expect(src.lastCopyQuery).toContain('contains(');
+  });
+
   it('clearing the search restores the full view', async () => {
     const backend = new DuckBackend(searchableSource(), 'SELECT * FROM t');
     await backend.initialState();
