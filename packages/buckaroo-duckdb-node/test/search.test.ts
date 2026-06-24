@@ -46,8 +46,13 @@ describe('buildSearchTransform', () => {
     expect(buildSearchTransform(['name'], '').apply('SELECT 1')).toBe('SELECT 1');
   });
 
-  it('is a no-op when there are no text columns', () => {
-    expect(buildSearchTransform([], 'Al').apply('SELECT 1')).toBe('SELECT 1');
+  it('filters to zero rows when active with no text columns (pandas: empty result)', () => {
+    // pandas search_df_str starts from an all-false mask and ORs only string/
+    // object columns, so with zero text columns nothing matches — an active
+    // search must yield an empty result, not pass every row through.
+    expect(buildSearchTransform([], 'Al').apply('SELECT 1')).toBe(
+      'SELECT * FROM (SELECT 1) AS _search WHERE (1=0)',
+    );
   });
 
   it('reports its kind for the effective-query seam', () => {

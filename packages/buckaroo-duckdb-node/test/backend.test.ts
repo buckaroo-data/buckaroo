@@ -180,6 +180,58 @@ function searchableSource(): DuckSource & { summarizeQueries: string[]; lastCopy
   return src;
 }
 
+/**
+ * A fake with NO text columns. An active search must match nothing (its SQL
+ * carries the always-false `1=0` predicate → 0 rows); the unfiltered base
+ * reports 5.
+ */
+function numericOnlySource(): DuckSource & { lastCopyQuery?: string } {
+  const src: DuckSource & { lastCopyQuery?: string } = {
+    async describe(): Promise<DescribeRow[]> {
+      return [
+        { name: 'x', type: 'DOUBLE' },
+        { name: 'y', type: 'BIGINT' },
+      ];
+    },
+    async summarize(stmt: string): Promise<SummarizeRow[]> {
+      const count = stmt.includes('1=0') ? 0 : 5;
+      const base = (column_name: string, column_type: string): SummarizeRow => ({
+        column_name, column_type, min: null, max: null, approx_unique: count,
+        avg: null, std: null, q25: null, q50: null, q75: null, count, null_percentage: 0,
+      });
+      return [base('a', 'DOUBLE'), base('b', 'BIGINT'), base('index', 'BIGINT')];
+    },
+    async copyToParquet(query: string): Promise<Uint8Array> {
+      src.lastCopyQuery = query;
+      return new Uint8Array([9]);
+    },
+  };
+  return src;
+}
+
+/** A fake with a VARCHAR (searchable) and a BOOLEAN (string displayer, NOT searched). */
+function varcharAndBooleanSource(): DuckSource {
+  return {
+    async describe(): Promise<DescribeRow[]> {
+      return [
+        { name: 'label', type: 'VARCHAR' },
+        { name: 'flag', type: 'BOOLEAN' },
+      ];
+    },
+    async summarize(stmt: string): Promise<SummarizeRow[]> {
+      const count = stmt.includes('contains(') ? 2 : 5;
+      const base = (column_name: string, column_type: string): SummarizeRow => ({
+        column_name, column_type, min: null, max: null, approx_unique: count,
+        avg: null, std: null, q25: null, q50: null, q75: null, count, null_percentage: 0,
+      });
+      return [base('a', 'VARCHAR'), base('b', 'BOOLEAN'), base('index', 'BIGINT')];
+    },
+    async copyToParquet(): Promise<Uint8Array> {
+      return new Uint8Array([9]);
+    },
+  };
+}
+
 describe('DuckBackend search', () => {
   it('without search, filtered_rows equals total_rows and no highlight', async () => {
     const backend = new DuckBackend(searchableSource(), 'SELECT * FROM t');
@@ -274,5 +326,31 @@ describe('DuckBackend search', () => {
     const msg = await backend.initialState();
     expect(msg.df_meta.filtered_rows).toBe(5);
     expect(msg.df_meta.total_rows).toBe(5);
+  });
+
+  // Codex P2: an active search on a table with no text columns matches nothing
+  // (pandas returns an empty frame), not every row.
+  it('a search with no text columns yields zero filtered rows, total unchanged', async () => {
+    const backend = new DuckBackend(numericOnlySource(), 'SELECT * FROM t');
+    await backend.initialState(); // total = 5
+    backend.setSearch('Al');
+    const msg = await backend.initialState();
+    expect(msg.df_meta.total_rows).toBe(5);
+    expect(msg.df_meta.filtered_rows).toBe(0);
+  });
+
+  // Codex P3: BOOLEAN renders with the string displayer but is not searched, so
+  // highlight_phrase must land only on the columns the search predicate covers.
+  it('highlights only searched columns, not BOOLEAN string-displayer columns', async () => {
+    const backend = new DuckBackend(varcharAndBooleanSource(), 'SELECT * FROM t');
+    await backend.initialState();
+    backend.setSearch('Al');
+    const msg = await backend.initialState();
+    const cols = msg.df_display_args.main.df_viewer_config.column_config;
+    const label = cols.find((c) => c.col_name === 'a')!; // VARCHAR — searched
+    const flag = cols.find((c) => c.col_name === 'b')!; // BOOLEAN — string displayer, not searched
+    expect(label.displayer_args).toMatchObject({ highlight_phrase: ['Al'] });
+    expect(flag.displayer_args.displayer).toBe('string');
+    expect(flag.displayer_args).not.toHaveProperty('highlight_phrase');
   });
 });
