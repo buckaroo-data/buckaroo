@@ -204,7 +204,15 @@ export class DuckBackend {
           summary_stats_key: this.summaryStatsKey,
         },
       },
-      buckaroo_state: READONLY_STATE,
+      // Echo the active search term back in buckaroo_state. The StatusBar's
+      // search cell is controlled by quick_command_args.search; if we returned
+      // the bare READONLY_STATE (empty), its value would snap to '' while the
+      // input still holds the term, and its debounce effect would resubmit the
+      // search forever (a render-flicker loop). The Python path round-trips the
+      // term the same way.
+      buckaroo_state: isActiveSearch(this.searchTerm)
+        ? { ...READONLY_STATE, quick_command_args: { search: [this.searchTerm] } }
+        : READONLY_STATE,
       buckaroo_options: READONLY_OPTIONS,
     };
   }
