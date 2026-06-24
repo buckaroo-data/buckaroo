@@ -34,15 +34,20 @@ export function isActiveSearch(term: string | null | undefined): boolean {
 /**
  * Build the search `QueryTransform`. `columns` are the original (pre-rename)
  * text column names; the transform wraps the effective SQL in a `WHERE` that
- * keeps rows where any column contains the term. An empty term or no columns
- * makes `apply` a no-op so the seam composes cleanly either way.
+ * keeps rows where any column contains the term. An empty term makes `apply` a
+ * no-op; an active term with no text columns matches nothing (an always-false
+ * filter), mirroring pandas `search_df_str` (all-false mask OR-ed over zero
+ * string columns → empty frame) rather than passing every row through.
  */
 export function buildSearchTransform(columns: string[], term: string) {
   const needle = term.replace(/'/g, "''");
   return {
     kind: 'search',
     apply(sql: string): string {
-      if (!isActiveSearch(term) || columns.length === 0) return sql;
+      if (!isActiveSearch(term)) return sql;
+      if (columns.length === 0) {
+        return `SELECT * FROM (${sql}) AS _search WHERE (1=0)`;
+      }
       const preds = columns
         .map((c) => `contains(CAST(${quoteIdent(c)} AS VARCHAR), '${needle}')`)
         .join(' OR ');

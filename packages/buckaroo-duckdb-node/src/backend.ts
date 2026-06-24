@@ -138,7 +138,10 @@ export class DuckBackend {
 
   async initialState(): Promise<InitialStateMessage> {
     const plan = await this.ensurePlan();
-    const active = isActiveSearch(this.searchTerm) && this.searchColumns(plan).length > 0;
+    // A search is active whenever there's a term — even on a table with no text
+    // columns, where it correctly matches nothing (filtered_rows = 0) rather
+    // than falling back to the unfiltered view.
+    const active = isActiveSearch(this.searchTerm);
 
     // Stats over the stats-safe (non-finite floats nulled so SUMMARIZE's
     // STDDEV_SAMP doesn't overflow), possibly search-filtered relation — pandas
@@ -181,7 +184,15 @@ export class DuckBackend {
     statRows.splice(1, 0, { [INDEX_COL]: 'histogram', level_0: 'histogram', ...histos });
 
     const dfViewerConfig = buildDfViewerConfig(plan);
-    if (active) this.applyHighlight(dfViewerConfig, this.searchTerm);
+    if (active) {
+      // Highlight only the columns the search predicate actually covers. BOOLEAN
+      // renders with the `string` displayer but is excluded from the search, so
+      // gating on the displayer kind would wrongly highlight boolean cells.
+      const searchableAliases = new Set(
+        plan.columns.filter((c) => isSearchableType(c.type)).map((c) => c.alias),
+      );
+      this.applyHighlight(dfViewerConfig, this.searchTerm, searchableAliases);
+    }
 
     return {
       type: 'initial_state',
@@ -218,13 +229,18 @@ export class DuckBackend {
   }
 
   /**
-   * Inject `highlight_phrase` into every string-column displayer so the matched
-   * term is highlighted in the grid — the wire shape the Python `Search`
-   * command produces via its SDResult `highlight_phrase` update.
+   * Inject `highlight_phrase` into the displayer of every searched column so the
+   * matched term is highlighted in the grid — the wire shape the Python `Search`
+   * command produces via its SDResult `highlight_phrase` update. Gated on the
+   * searched aliases (not the displayer kind) so BOOLEAN columns, which also use
+   * the `string` displayer but aren't searched, are left alone.
    */
-  private applyHighlight(cfg: DFViewerConfig, term: string): void {
+  private applyHighlight(cfg: DFViewerConfig, term: string, searchable: Set<string>): void {
     for (const cc of cfg.column_config) {
-      if (cc.displayer_args.displayer === 'string') {
+      // Searched columns always carry the `string` displayer (isSearchableType
+      // ⊆ string-displayer types); the displayer check also narrows the type so
+      // `highlight_phrase` is valid.
+      if (searchable.has(cc.col_name) && cc.displayer_args.displayer === 'string') {
         cc.displayer_args = { ...cc.displayer_args, highlight_phrase: [term] };
       }
     }
