@@ -52,6 +52,18 @@ function modeForView(view) {
   return VIEWS.find((v) => v.id === view)?.mode ?? 'viewer';
 }
 
+// Lightweight wire logging so the search/scroll message flow is visible — set
+// QUIET=1 to silence. Each WS client gets a short id so interleaved sessions
+// stay readable, and a monotonic ms clock makes redundant sends (the source of
+// search flicker) obvious.
+const QUIET = process.env.QUIET === '1';
+let clientSeq = 0;
+function log(cid, dir, ...rest) {
+  if (QUIET) return;
+  const t = `${Math.round(process.uptime() * 1000)}ms`.padStart(8);
+  console.log(`${t}  ws#${cid} ${dir}`, ...rest);
+}
+
 // The browser bundle + CSS the buckaroo Python package builds into buckaroo/static.
 const STATIC_DIR =
   process.env.BUCKAROO_STATIC ??
@@ -239,11 +251,14 @@ async function main() {
     // standalone render mode (DFViewer vs Infinite Buckaroo).
     const view = decodeURIComponent(req.url.slice('/ws/'.length).split(/[/?]/)[0]);
     const mode = modeForView(view);
+    const cid = ++clientSeq;
+    log(cid, 'open', `view=${view} mode=${mode}`);
     // Each client gets its own backend instance over the shared connection.
     const backend = new DuckBackend(source, BASE_STMT);
 
     try {
       const initial = await backend.initialState();
+      log(cid, '→ initial_state', `total=${initial.df_meta.total_rows} filtered=${initial.df_meta.filtered_rows}`);
       ws.send(JSON.stringify(toLegacyInitialState(initial, mode)));
     } catch (err) {
       console.error('initial_state failed:', err);
@@ -262,9 +277,11 @@ async function main() {
       if (msg.type === 'buckaroo_state_change') {
         const search = msg.new_state?.quick_command_args?.search;
         const term = Array.isArray(search) && search[0] != null ? String(search[0]) : '';
+        log(cid, '← state_change', `search=${JSON.stringify(term)}`);
         backend.setSearch(term);
         try {
           const refreshed = await backend.initialState();
+          log(cid, '→ initial_state', `search=${JSON.stringify(term)} total=${refreshed.df_meta.total_rows} filtered=${refreshed.df_meta.filtered_rows}`);
           ws.send(JSON.stringify(toLegacyInitialState(refreshed, mode)));
         } catch (err) {
           console.error('search state_change failed:', err);
@@ -274,8 +291,10 @@ async function main() {
       if (msg.type !== 'infinite_request') return; // read-only viewer: ignore the rest
 
       const args = msg.payload_args ?? {};
+      log(cid, '← infinite_request', `start=${args.start} end=${args.end}${args.sort ? ` sort=${args.sort} ${args.sort_direction ?? ''}` : ''}`);
       try {
         const resp = await backend.handleInfiniteRequest(args);
+        log(cid, '→ infinite_resp', `length=${resp.length} bytes=${resp.payload.data.length}`);
         // Re-frame the inline parquet_b64 envelope as the legacy two-frame wire.
         const bytes = Buffer.from(resp.payload.data, 'base64');
         ws.send(
