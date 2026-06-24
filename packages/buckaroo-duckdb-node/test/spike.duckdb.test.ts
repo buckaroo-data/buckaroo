@@ -26,6 +26,7 @@ import { effectiveQuery, windowedQuery } from '../src/query';
 import { summarizeToSDType, sdTypeToStatRows } from '../src/stats';
 import { numericHistogramSql, parseNumericArgs, computeHistograms } from '../src/histogramSql';
 import { numericHistogram } from '../src/histogram';
+import { DuckBackend } from '../src/backend';
 import type { DuckSource } from '../src/DuckSource';
 
 // The exact integer column from the Python producer's histogram test
@@ -215,5 +216,41 @@ describe.runIf(process.env.SKIP_DUCKDB !== '1')('DuckDB serialization spike', ()
       { name: 'B', cat_pop: 30 },
       { name: 'C', cat_pop: 30 },
     ]);
+  });
+
+  it('search filters rows, stats counts, and highlights end to end', async () => {
+    if (!source) return;
+    const stmt = `SELECT * FROM (VALUES ('Alice', 1), ('Bob', 2), ('Charlie', 3), ('Alfred', 4)) t(name, n)`;
+    const backend = new DuckBackend(source, stmt);
+
+    const full = await backend.initialState();
+    expect(full.df_meta.total_rows).toBe(4);
+    expect(full.df_meta.filtered_rows).toBe(4);
+
+    // case-sensitive substring 'Al' matches Alice + Alfred, not Bob/Charlie
+    backend.setSearch('Al');
+    const filtered = await backend.initialState();
+    expect(filtered.df_meta.total_rows).toBe(4); // total unchanged
+    expect(filtered.df_meta.filtered_rows).toBe(2);
+
+    const strCol = filtered.df_display_args.main.df_viewer_config.column_config.find(
+      (c) => c.displayer_args.displayer === 'string',
+    )!;
+    expect(strCol.displayer_args).toMatchObject({ highlight_phrase: ['Al'] });
+
+    const resp = await backend.handleInfiniteRequest({
+      sourceName: 'main',
+      start: 0,
+      end: 10,
+      origEnd: 10,
+    });
+    expect(resp.length).toBe(2);
+    const matchRows = await readParquet(Buffer.from(resp.payload.data, 'base64'));
+    expect(matchRows.map((r) => r.a).sort()).toEqual(['Alfred', 'Alice']);
+
+    // clearing the search restores the full view
+    backend.setSearch('');
+    const restored = await backend.initialState();
+    expect(restored.df_meta.filtered_rows).toBe(4);
   });
 });

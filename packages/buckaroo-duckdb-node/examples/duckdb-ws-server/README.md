@@ -13,17 +13,24 @@ pnpm install          # once, from packages/
 pnpm demo             # builds the package, then starts the server
 ```
 
-Then open **http://localhost:8780/**.
+Then open **http://localhost:9080/**.
 
 Scroll the grid (rows stream in on demand), click a column header to sort, and
 read the pinned summary-stats rows (dtype, null_count, distinct_count, mean,
 std, min, q25/q50/q75, max).
 
+Use the **View** dropdown at the top to switch between **DFViewer** and the
+**Infinite Buckaroo** widget — both render the same DuckDB-backed session and
+both support search. Switching reloads the session under `/s/<view>`.
+
+The default port (`9080`) is kept clear of tallyman's ports (`:7860`, `:8700`)
+so the demo never collides with a running tallyman.
+
 Knobs (env vars):
 
 | var | default | meaning |
 |---|---|---|
-| `PORT` | `8780` | HTTP + WS port |
+| `PORT` | `9080` | HTTP + WS port |
 | `ROWS` | `250000` | synthetic table size |
 | `BUCKAROO_STATIC` | `../../../../buckaroo/static` | dir holding the browser bundle |
 

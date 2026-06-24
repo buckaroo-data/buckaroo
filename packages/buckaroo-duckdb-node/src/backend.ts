@@ -19,10 +19,12 @@ import { effectiveQuery, windowedQuery, type QueryTransform } from './query.js';
 import { buildDfViewerConfig } from './columnConfig.js';
 import { summarizeToSDType, sdTypeToStatRows } from './stats.js';
 import { computeHistograms } from './histogramSql.js';
+import { buildSearchTransform, isSearchableType, isActiveSearch } from './search.js';
 import type {
   BuckarooOptions,
   BuckarooState,
   DFEnvelope,
+  DFViewerConfig,
   InitialStateMessage,
   PayloadArgs,
   PayloadResponse,
@@ -31,8 +33,10 @@ import type {
 export interface DuckBackendOptions {
   /** summary-stats key. Defaults to `'all_stats'`. */
   summaryStatsKey?: string;
-  /** v1: empty. Reserved for search (`+ WHERE`) and quick-command transforms. */
+  /** Static transforms applied before search; reserved for quick commands. */
   transforms?: QueryTransform[];
+  /** Initial search term. Usually set later via `setSearch` on a state change. */
+  search?: string;
 }
 
 /**
@@ -72,17 +76,55 @@ export class DuckBackend {
   private readonly transforms: QueryTransform[];
 
   private plan?: RenamePlan;
+  /** Unfiltered row count — `df_meta.total_rows`. Stable across searches. */
   private totalRows = 0;
+  /** Unfiltered count, cached so repeated searches don't re-summarize the base. */
+  private cachedTotal?: number;
+  /**
+   * Rows after search — `df_meta.filtered_rows` and the infinite_resp `length`.
+   * Cached against the current `searchTerm`; `setSearch` invalidates it so a row
+   * window can never report a stale count. `undefined` means "not yet computed".
+   */
+  private cachedFiltered?: number;
+  private searchTerm: string;
 
   constructor(source: DuckSource, baseStmt: string, opts: DuckBackendOptions = {}) {
     this.source = source;
     this.baseStmt = baseStmt;
     this.summaryStatsKey = opts.summaryStatsKey ?? 'all_stats';
     this.transforms = opts.transforms ?? [];
+    this.searchTerm = opts.search ?? '';
   }
 
+  /** The base effective SQL, search excluded. */
   private get effectiveSql(): string {
     return effectiveQuery(this.baseStmt, this.transforms);
+  }
+
+  /**
+   * Set (or clear) the search term. Invalidates the cached filtered count so the
+   * next `initialState`/`infinite_request` recomputes against the new term; an
+   * empty term clears the filter. The active SQL is derived on demand (no cached
+   * copy to go stale), so a row window is consistent regardless of call order.
+   */
+  setSearch(term: string): void {
+    const next = term ?? '';
+    if (next !== this.searchTerm) {
+      this.searchTerm = next;
+      this.cachedFiltered = undefined;
+    }
+  }
+
+  /** The original (pre-rename) text columns search targets. */
+  private searchColumns(plan: RenamePlan): string[] {
+    return plan.columns.filter((c) => isSearchableType(c.type)).map((c) => c.origName);
+  }
+
+  /** Effective SQL with the search `+ WHERE` folded in (base SQL when inactive). */
+  private searchEffectiveSql(plan: RenamePlan): string {
+    if (!isActiveSearch(this.searchTerm)) return this.effectiveSql;
+    const transform = buildSearchTransform(this.searchColumns(plan), this.searchTerm);
+    return effectiveQuery(this.baseStmt, [...this.transforms, transform]);
   }
 
   /** Describe the (renamed) relation and cache the rename plan. */
@@ -96,14 +138,34 @@ export class DuckBackend {
 
   async initialState(): Promise<InitialStateMessage> {
     const plan = await this.ensurePlan();
+    // A search is active whenever there's a term — even on a table with no text
+    // columns, where it correctly matches nothing (filtered_rows = 0) rather
+    // than falling back to the unfiltered view.
+    const active = isActiveSearch(this.searchTerm);
 
-    // Stats over the stats-safe relation (non-finite floats nulled so SUMMARIZE's
-    // STDDEV_SAMP doesn't overflow); column names come back as aliases. The
-    // relation includes the synthesized, non-null `index` column, so its
-    // SUMMARIZE count is the total row count — no extra count query needed.
-    const summarizeRows = await this.source.summarize(plan.statsRelation(this.effectiveSql));
+    // Stats over the stats-safe (non-finite floats nulled so SUMMARIZE's
+    // STDDEV_SAMP doesn't overflow), possibly search-filtered relation — pandas
+    // re-runs summary stats on the filtered df, so we do too. The relation
+    // includes the synthesized, non-null `index` column, so its SUMMARIZE count
+    // is the row count of that set (filtered under search), no extra count
+    // query needed. Seed the filtered-count cache from this same SUMMARIZE so a
+    // following `infinite_request` doesn't re-run it.
+    const summarizeRows = await this.source.summarize(plan.statsRelation(this.searchEffectiveSql(plan)));
     const indexRow = summarizeRows.find((r) => r.column_name === INDEX_COL);
-    this.totalRows = indexRow ? Number(indexRow.count) : 0;
+    const filteredRows = indexRow ? Number(indexRow.count) : 0;
+    this.cachedFiltered = filteredRows;
+
+    // total_rows is the unfiltered count and never changes with search. Cache it
+    // so repeated searches don't re-summarize the base relation; when search is
+    // inactive the filtered count IS the total.
+    if (!active) {
+      this.cachedTotal = filteredRows;
+    } else if (this.cachedTotal === undefined) {
+      const baseRows = await this.source.summarize(plan.renamedRelation(this.effectiveSql));
+      const baseIndex = baseRows.find((r) => r.column_name === INDEX_COL);
+      this.cachedTotal = baseIndex ? Number(baseIndex.count) : filteredRows;
+    }
+    this.totalRows = this.cachedTotal ?? filteredRows;
 
     const sd = summarizeToSDType(summarizeRows);
     const statRows = sdTypeToStatRows(sd);
@@ -122,14 +184,23 @@ export class DuckBackend {
     statRows.splice(1, 0, { [INDEX_COL]: 'histogram', level_0: 'histogram', ...histos });
 
     const dfViewerConfig = buildDfViewerConfig(plan);
+    if (active) {
+      // Highlight only the columns the search predicate actually covers. BOOLEAN
+      // renders with the `string` displayer but is excluded from the search, so
+      // gating on the displayer kind would wrongly highlight boolean cells.
+      const searchableAliases = new Set(
+        plan.columns.filter((c) => isSearchableType(c.type)).map((c) => c.alias),
+      );
+      this.applyHighlight(dfViewerConfig, this.searchTerm, searchableAliases);
+    }
 
     return {
       type: 'initial_state',
       df_meta: {
         total_rows: this.totalRows,
         columns: plan.columns.length,
-        filtered_rows: this.totalRows,
-        rows_shown: this.totalRows,
+        filtered_rows: filteredRows,
+        rows_shown: filteredRows,
       },
       df_data_dict: {
         // main rows arrive on demand via infinite_request
@@ -144,19 +215,65 @@ export class DuckBackend {
           summary_stats_key: this.summaryStatsKey,
         },
       },
-      buckaroo_state: READONLY_STATE,
+      // Echo the active search term back in buckaroo_state. The StatusBar's
+      // search cell is controlled by quick_command_args.search; if we returned
+      // the bare READONLY_STATE (empty), its value would snap to '' while the
+      // input still holds the term, and its debounce effect would resubmit the
+      // search forever (a render-flicker loop). The Python path round-trips the
+      // term the same way.
+      buckaroo_state: isActiveSearch(this.searchTerm)
+        ? { ...READONLY_STATE, quick_command_args: { search: [this.searchTerm] } }
+        : READONLY_STATE,
       buckaroo_options: READONLY_OPTIONS,
     };
   }
 
   /**
-   * Answer one `infinite_request`. The window is serialized through the
-   * COPY→parquet no-coercion path and returned inline as a `parquet_b64`
-   * envelope (single JSON message, no binary side-channel frame).
+   * Inject `highlight_phrase` into the displayer of every searched column so the
+   * matched term is highlighted in the grid — the wire shape the Python `Search`
+   * command produces via its SDResult `highlight_phrase` update. Gated on the
+   * searched aliases (not the displayer kind) so BOOLEAN columns, which also use
+   * the `string` displayer but aren't searched, are left alone.
+   */
+  private applyHighlight(cfg: DFViewerConfig, term: string, searchable: Set<string>): void {
+    for (const cc of cfg.column_config) {
+      // Searched columns always carry the `string` displayer (isSearchableType
+      // ⊆ string-displayer types); the displayer check also narrows the type so
+      // `highlight_phrase` is valid.
+      if (searchable.has(cc.col_name) && cc.displayer_args.displayer === 'string') {
+        cc.displayer_args = { ...cc.displayer_args, highlight_phrase: [term] };
+      }
+    }
+  }
+
+  /**
+   * The filtered row count for the current search. Cached and invalidated by
+   * `setSearch`, recomputed with one SUMMARIZE-count only when stale.
+   * `initialState` seeds the cache from its own SUMMARIZE, so the common
+   * state_change → initial_state → infinite_request flow never double-counts;
+   * a standalone `setSearch` followed directly by `infinite_request` recomputes
+   * here rather than reporting a stale length.
+   */
+  private async ensureFiltered(plan: RenamePlan): Promise<number> {
+    if (this.cachedFiltered === undefined) {
+      const rows = await this.source.summarize(plan.renamedRelation(this.searchEffectiveSql(plan)));
+      const indexRow = rows.find((r) => r.column_name === INDEX_COL);
+      this.cachedFiltered = indexRow ? Number(indexRow.count) : 0;
+    }
+    return this.cachedFiltered;
+  }
+
+  /**
+   * Answer one `infinite_request`. The window runs against the active
+   * (search-filtered) SQL — derived on demand from the current term, never a
+   * cached copy that could go stale — serialized through the COPY→parquet
+   * no-coercion path and returned inline as a `parquet_b64` envelope. `length`
+   * is the filtered row count so the grid scrolls only the matching rows.
    */
   async handleInfiniteRequest(args: PayloadArgs): Promise<PayloadResponse> {
     const plan = await this.ensurePlan();
-    const sql = windowedQuery(this.effectiveSql, plan, {
+    const length = await this.ensureFiltered(plan);
+    const sql = windowedQuery(this.searchEffectiveSql(plan), plan, {
       start: args.start,
       end: args.end,
       sort: args.sort,
@@ -167,7 +284,7 @@ export class DuckBackend {
     return {
       type: 'infinite_resp',
       key: args,
-      length: this.totalRows,
+      length,
       payload,
     };
   }
