@@ -430,6 +430,18 @@ class LoadExprHandler(tornado.web.RequestHandler):
             "component_config", "column_config_overrides", "extra_grid_config",
             "init_sd", "skip_stat_columns"))
 
+        # Companion telemetry endpoint (#943): when present, the firstpull.*
+        # spans POST themselves to the companion as session-correlated records.
+        # Build the sink once here (on the IOLoop, where make_http_sink captures
+        # AsyncHTTPClient/IOLoop.current()) and stash it on the session so the WS
+        # first-pull spans reuse it. Built before the warm-session early-exit so a
+        # warm re-POST still re-arms telemetry for its fresh WS pull (#944) — the
+        # exit skips the pipeline, not the next time-to-first-rows. Absent →
+        # tele_sink is None and telemetry_context is a no-op, so normal buckaroo
+        # usage is unaffected.
+        telemetry_url = body.get("telemetry_url")
+        tele_sink = telemetry.make_http_sink(telemetry_url) if telemetry_url else None
+
         # Short-circuit: if this session is already loaded with the same
         # build_dir (and no new config was supplied), skip the expensive
         # pipeline and return cached metadata. Only fires when the caller
@@ -440,6 +452,13 @@ class LoadExprHandler(tornado.web.RequestHandler):
         existing = sessions.get(session_id)
         if (not force_reload and not has_config and existing
                 and existing.build_dir == build_dir and existing.metadata):
+            # The pipeline is skipped, but the refreshed page still opens a new
+            # WS and pulls a fresh time-to-first-rows. Re-arm first-pull telemetry
+            # on the existing session — rebind this request's sink and reset the
+            # seen flag — else the flag stays True from the prior load and the
+            # warm pull's span is silently dropped (#944).
+            existing.tele_sink = tele_sink
+            existing._perf_first_payload_seen = False
             if no_browser or not self.application.settings.get("open_browser", True):
                 browser_action = "skipped"
             else:
@@ -470,14 +489,6 @@ class LoadExprHandler(tornado.web.RequestHandler):
 
         project_root = body.get("project_root")
         cache_storage_path = body.get("cache_storage_path")
-        # Companion telemetry endpoint (#943): when present, the firstpull.*
-        # spans below POST themselves to the companion as session-correlated
-        # records. Build the sink once here (on the IOLoop) and stash it on the
-        # session below so the WS first-pull spans reuse it rather than
-        # rebuilding it. Absent → tele_sink is None and telemetry_context is a
-        # no-op, so normal buckaroo usage is unaffected.
-        telemetry_url = body.get("telemetry_url")
-        tele_sink = telemetry.make_http_sink(telemetry_url) if telemetry_url else None
 
         try:
             # session= correlates these spans across concurrent loads — the
