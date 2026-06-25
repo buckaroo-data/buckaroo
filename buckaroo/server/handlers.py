@@ -472,8 +472,10 @@ class LoadExprHandler(tornado.web.RequestHandler):
         cache_storage_path = body.get("cache_storage_path")
         # Companion telemetry endpoint (#943): when present, the firstpull.*
         # spans below POST themselves to the companion as session-correlated
-        # records. Absent → tele_sink is None and telemetry_context is a no-op,
-        # so normal buckaroo usage is unaffected.
+        # records. Build the sink once here (on the IOLoop) and stash it on the
+        # session below so the WS first-pull spans reuse it rather than
+        # rebuilding it. Absent → tele_sink is None and telemetry_context is a
+        # no-op, so normal buckaroo usage is unaffected.
         telemetry_url = body.get("telemetry_url")
         tele_sink = telemetry.make_http_sink(telemetry_url) if telemetry_url else None
 
@@ -528,7 +530,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.expr = expr
         session.build_dir = build_dir
         session.project_root = project_root
-        session.telemetry_url = telemetry_url
+        session.tele_sink = tele_sink
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
         # session so WS dispatch can no longer reach a stale dataflow.

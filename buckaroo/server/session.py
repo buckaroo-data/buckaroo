@@ -1,7 +1,7 @@
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Dict, Optional
 
 import pandas as pd
 # polars is optional — only used in lazy mode
@@ -34,10 +34,13 @@ class SessionState:
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     build_dir: Optional[str] = None  # xorq build dir, stored for /reload_expr
     project_root: Optional[str] = None  # project root for klass discovery
-    # Companion telemetry endpoint (#943). Set from the /load_expr payload; the
-    # WS handler reads it back to re-bind the telemetry sink for first-pull
-    # spans (the POST and the WS connection run in separate async contexts).
-    telemetry_url: Optional[str] = None
+    # Companion telemetry sink (#943): a fire-and-forget POST callable, built
+    # once from the /load_expr payload's telemetry_url on the IOLoop (where
+    # make_http_sink captures AsyncHTTPClient/IOLoop.current()). Stored here so
+    # the WS handler — a separate async context but the same IOLoop — reuses it
+    # for first-pull spans instead of rebuilding it. None when no telemetry_url
+    # was supplied, which leaves telemetry_context a no-op.
+    tele_sink: Optional[Callable[[Dict[str, Any]], None]] = None
     buckaroo_state: dict = field(default_factory=dict)
     # NOTE: ``search_string`` used to live here, but it's per-client typing
     # state (not a session-wide property). Two clients sharing a session

@@ -484,6 +484,43 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_telemetry_sink_built_once_not_rebuilt_by_ws(self):
+        """#944: the sink is built once in /load_expr and stored on the session;
+        the WS first-pull reuses session.tele_sink rather than rebuilding it.
+        Pin make_http_sink to exactly one call across the POST + WS exchange —
+        the WS still emits its span (proving reuse works), but a regression that
+        re-introduced make_http_sink in the WS path would push call_count to 2
+        and fail here even though span emission would look fine."""
+        captured: list = []
+        sink_factory = MagicMock(side_effect=lambda url, **kw: captured.append)
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            with patch.object(telemetry, "make_http_sink", sink_factory):
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": "lx-once", "build_dir": build_path,
+                     "telemetry_url": "http://companion.invalid/internal/telemetry"})
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/lx-once")
+                await ws.read_message()  # discard initial_state
+                ws.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {"start": 0, "end": 10,
+                        "sourceName": "default", "origEnd": 10}}))
+                await ws.read_message()  # json frame
+                await ws.read_message()  # binary frame
+                ws.close()
+
+            # Built exactly once (in /load_expr), not again in the WS path.
+            self.assertEqual(sink_factory.call_count, 1,
+                f"sink must be built once and reused; got {sink_factory.call_count} builds")
+            # ...and the reuse genuinely reaches the WS span (not a silent no-op).
+            self.assertIn("firstpull.ws_first_payload", [r["name"] for r in captured])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_load_expr_without_telemetry_url_is_silent(self):
         """#943: with no telemetry_url, the sink is never built — normal
         buckaroo usage emits nothing and is unaffected."""

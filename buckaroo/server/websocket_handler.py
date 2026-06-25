@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 import tornado.websocket
 
 from buckaroo.pluggable_analysis_framework import perf_log
-from buckaroo.server import telemetry
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
 from buckaroo.server.session import build_state_message
 
@@ -227,12 +226,11 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # screen load, so each gets its own span (window_to_parquet encode +
         # frame send), keyed by session= so they line up with the
         # firstpull.load_expr spans. Fire them when perf logging is on OR
-        # telemetry is wired for this session (#943), and bind the telemetry
-        # sink for just this initial load — genuine per-scroll row spans are
-        # deferred (v2).
+        # telemetry is wired for this session (#943), and bind the session's
+        # telemetry sink (built once in /load_expr) for just this initial load —
+        # genuine per-scroll row spans are deferred (v2).
         not_seen = not session._perf_first_payload_seen
-        tele_sink = (telemetry.make_http_sink(session.telemetry_url)
-                     if (session.telemetry_url and not_seen) else None)
+        tele_sink = session.tele_sink if not_seen else None
         first_payload = not_seen and (perf_log.enabled() or tele_sink is not None)
         try:
             with perf_log.telemetry_context(self.session_id, tele_sink):
