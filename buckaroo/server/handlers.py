@@ -15,6 +15,7 @@ from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.server.session import build_state_message
+from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
 log = logging.getLogger("buckaroo.server.handlers")
@@ -474,7 +475,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # records. Absent → tele_sink is None and telemetry_context is a no-op,
         # so normal buckaroo usage is unaffected.
         telemetry_url = body.get("telemetry_url")
-        tele_sink = perf_log.http_sink(telemetry_url) if telemetry_url else None
+        tele_sink = telemetry.make_http_sink(telemetry_url) if telemetry_url else None
 
         try:
             # session= correlates these spans across concurrent loads — the
@@ -534,6 +535,13 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.df = None
         session.dataflow = None
         session.ldf = None
+        # Re-arm first-pull telemetry (#944): this is a genuine reload (new
+        # expr / force_reload / new config — the warm-session early-exit above
+        # already returned for an identical reload), so the next WS pull is a
+        # fresh time-to-first-rows and must emit its firstpull.ws_first_payload
+        # span again. Without this the flag stays True from the prior load and
+        # every reload's first-pull telemetry is silently dropped.
+        session._perf_first_payload_seen = False
         session.metadata = metadata
         session.prompt = prompt
         if component_config:

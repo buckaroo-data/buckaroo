@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import tornado.websocket
 
 from buckaroo.pluggable_analysis_framework import perf_log
+from buckaroo.server import telemetry
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
 from buckaroo.server.session import build_state_message
 
@@ -221,21 +222,23 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 return handle_infinite_request_buckaroo(session.dataflow, pa, search_string=search)
             return handle_infinite_request(session.df, pa)
 
-        # First infinite_request for this session = time-to-first-rows. Span
-        # just that one (window_to_parquet encode + frame send), keyed by
-        # session= so it lines up with the firstpull.load_expr spans. Fire it
-        # when perf logging is on OR telemetry is wired for this session (#943),
-        # and bind the telemetry sink for just this first pull — per-scroll row
-        # spans are deferred (v2).
+        # First infinite_request for this session = time-to-first-rows. The
+        # first pull and its eager second window together make up the initial
+        # screen load, so each gets its own span (window_to_parquet encode +
+        # frame send), keyed by session= so they line up with the
+        # firstpull.load_expr spans. Fire them when perf logging is on OR
+        # telemetry is wired for this session (#943), and bind the telemetry
+        # sink for just this initial load — genuine per-scroll row spans are
+        # deferred (v2).
         not_seen = not session._perf_first_payload_seen
-        tele_sink = (perf_log.http_sink(session.telemetry_url)
+        tele_sink = (telemetry.make_http_sink(session.telemetry_url)
                      if (session.telemetry_url and not_seen) else None)
         first_payload = not_seen and (perf_log.enabled() or tele_sink is not None)
         try:
             with perf_log.telemetry_context(self.session_id, tele_sink):
-                span = (perf_log.perf_span("firstpull.ws_first_payload", session=self.session_id)
-                        if first_payload else nullcontext())
-                with span:
+                first_span = (perf_log.perf_span("firstpull.ws_first_payload", session=self.session_id)
+                              if first_payload else nullcontext())
+                with first_span:
                     resp_msg, parquet_bytes = _dispatch(payload_args)
                     # Two-frame sequence: JSON text frame, then binary Parquet frame
                     self.write_message(json.dumps(resp_msg))
@@ -244,13 +247,20 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 if first_payload:
                     session._perf_first_payload_seen = True
 
-                # Handle second_request (eager loading)
+                # Eager second window (#896). Instrument it as its OWN span
+                # rather than letting its work ride inside the first pull's
+                # context (where it would surface only as an unlabeled nested
+                # window_to_parquet record). Gated on first_payload too, so
+                # later per-scroll requests stay uninstrumented (v2).
                 second_pa = payload_args.get("second_request")
                 if second_pa:
-                    resp2, parquet2 = _dispatch(second_pa)
-                    self.write_message(json.dumps(resp2))
-                    if parquet2:
-                        self.write_message(parquet2, binary=True)
+                    second_span = (perf_log.perf_span("firstpull.ws_second_payload", session=self.session_id)
+                                   if first_payload else nullcontext())
+                    with second_span:
+                        resp2, parquet2 = _dispatch(second_pa)
+                        self.write_message(json.dumps(resp2))
+                        if parquet2:
+                            self.write_message(parquet2, binary=True)
         except Exception:
             tb = traceback.format_exc()
             log.error("infinite_request error session=%s: %s", self.session_id, tb)

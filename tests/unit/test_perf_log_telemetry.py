@@ -1,4 +1,4 @@
-"""Tests for the perf_log telemetry sink (#943).
+"""Tests for perf_log's telemetry span emission (#943).
 
 ``perf_span`` doubles as a telemetry span: when a sink is bound on the current
 context (see ``telemetry_context``) it emits a flat, OTel-shaped record
@@ -6,10 +6,13 @@ context (see ``telemetry_context``) it emits a flat, OTel-shaped record
 is decoupled from the ``BUCKAROO_PERF`` logging toggle — a sink is enough, so a
 telemetry session never flips global perf logging on for everyone. These tests
 run with perf logging *off* to lock that decoupling in.
+
+They cover the transport-agnostic machinery only (the sink is an injected
+callable). The server's real HTTP sink lives in ``buckaroo.server.telemetry``
+and is covered by ``tests/unit/server/test_telemetry_sink.py``.
 """
-import json
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import logging
+from unittest.mock import patch
 
 import pytest
 
@@ -42,6 +45,25 @@ def test_perf_span_emits_record_to_sink():
     assert r["name"] == "firstpull.load_expr"
     assert r["attrs"]["build_dir"] == "/x"
     assert r["t_end_ms"] >= r["t_start_ms"]
+
+
+def test_telemetry_only_session_writes_no_perf_log_line(caplog):
+    """Decoupling, the other direction: with BUCKAROO_PERF off, a bound sink
+    still emits the record, but perf_span writes no ``perf span=`` log line.
+    Wiring telemetry for one session must not turn perf logging on (the server's
+    root logger sits at DEBUG, so an ungated log.info would leak perf lines into
+    server.log for every telemetry session)."""
+    records = []
+    with caplog.at_level(logging.INFO, logger="buckaroo.perf"):
+        with perf_log.telemetry_context("sess-quiet", records.append):
+            with perf_log.perf_span("firstpull.load_expr"):
+                pass
+
+    assert len(records) == 1  # the record still emits
+    perf_lines = [r for r in caplog.records if r.getMessage().startswith("perf span=")]
+    assert perf_lines == [], (
+        f"telemetry-only session must not log perf lines; got "
+        f"{[r.getMessage() for r in perf_lines]}")
 
 
 def test_set_attr_inside_block_lands_in_record():
@@ -104,39 +126,31 @@ def test_sink_exception_does_not_propagate():
             pass  # no exception escapes
 
 
-class _Receiver(BaseHTTPRequestHandler):
-    received: list = []
+def test_emitted_timeline_derived_from_monotonic_duration():
+    """t_end_ms is the wall-clock anchor plus the monotonic perf_counter delta,
+    not a second time.time() read: the wall clock is read exactly once, so an
+    NTP step mid-span can't make t_end_ms precede t_start_ms (and the record's
+    duration always matches secs=)."""
+    class _FakeClock:
+        def __init__(self):
+            self._perf = iter([100.0, 100.5])  # t0, then +0.5s at span close
+            # Exactly one wall-clock value on purpose: a second read (the old
+            # behaviour) would raise StopIteration and fail this test.
+            self._time = iter([1000.0])
 
-    def do_POST(self):
-        n = int(self.headers["Content-Length"])
-        _Receiver.received.append(json.loads(self.rfile.read(n)))
-        self.send_response(200)
-        self.end_headers()
+        def perf_counter(self):
+            return next(self._perf)
 
-    def log_message(self, *_a):  # silence stderr access logs
-        pass
+        def time(self):
+            return next(self._time)
 
-
-def test_http_sink_posts_json_record():
-    """http_sink fire-and-forget POSTs each record as JSON; flush_telemetry
-    blocks until the in-flight POST lands."""
-    _Receiver.received = []
-    srv = HTTPServer(("127.0.0.1", 0), _Receiver)
-    port = srv.server_address[1]
-    t = threading.Thread(target=srv.serve_forever, daemon=True)
-    t.start()
-    try:
-        sink = perf_log.http_sink(f"http://127.0.0.1:{port}/internal/telemetry")
-        with perf_log.telemetry_context("sess-http", sink):
+    records = []
+    with patch.object(perf_log, "time", _FakeClock()):
+        with perf_log.telemetry_context("sess-clock", records.append):
             with perf_log.perf_span("firstpull.metadata"):
                 pass
-        perf_log.flush_telemetry(5.0)
-    finally:
-        srv.shutdown()
-        srv.server_close()
 
-    assert len(_Receiver.received) == 1
-    r = _Receiver.received[0]
-    assert r["name"] == "firstpull.metadata"
-    assert r["trace"] == "sess-http"
-    assert r["source"] == "server"
+    r = records[0]
+    assert r["t_start_ms"] == 1000.0 * 1000.0  # the single wall-clock anchor
+    assert r["t_end_ms"] == r["t_start_ms"] + 0.5 * 1000.0  # anchor + duration
+    assert r["t_end_ms"] >= r["t_start_ms"]

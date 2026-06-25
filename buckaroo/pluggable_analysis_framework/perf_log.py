@@ -29,12 +29,9 @@ stays quiet unless enabled, regardless of how noisy other loggers are.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
-import urllib.request
-from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -101,6 +98,12 @@ if _ENABLED:
 # concurrent requests on the single IOLoop don't clobber each other, and a
 # non-telemetry request stays a pure no-op (no sink → no emit).
 #
+# This module is transport-agnostic: the sink is just a ``Callable[[record],
+# None]`` injected by the caller. The server supplies one that POSTs to the
+# companion (``buckaroo.server.telemetry.make_http_sink``); that side owns the
+# IOLoop/transport so this leaf module pulls in no tornado/threading and stays
+# importable on the plain widget/stats path.
+#
 # Emission is decoupled from the BUCKAROO_PERF logging toggle: a span is live
 # when perf logging is enabled *or* a sink is present. So enabling telemetry for
 # one session never flips global perf logging on for everyone.
@@ -111,11 +114,6 @@ _source_var: ContextVar[str] = ContextVar(
     "buckaroo_perf_source", default="server")
 _sink_var: ContextVar[Optional[Callable[[Dict[str, Any]], None]]] = ContextVar(
     "buckaroo_perf_sink", default=None)
-
-# Lazily-created pool for fire-and-forget POSTs — telemetry must never block the
-# Tornado IOLoop (a hung/absent companion would otherwise stall every grid load).
-_telemetry_executor: Optional[ThreadPoolExecutor] = None
-_pending_posts: "set[Future]" = set()
 
 
 @contextmanager
@@ -137,50 +135,6 @@ def telemetry_context(session_id: Optional[str],
         _session_var.reset(t_sess)
         _source_var.reset(t_src)
         _sink_var.reset(t_sink)
-
-
-def _get_executor() -> ThreadPoolExecutor:
-    global _telemetry_executor
-    if _telemetry_executor is None:
-        _telemetry_executor = ThreadPoolExecutor(
-            max_workers=2, thread_name_prefix="buckaroo-telemetry")
-    return _telemetry_executor
-
-
-def _post_record(url: str, record: Dict[str, Any], timeout: float) -> None:
-    """POST one span record as JSON. Failures are swallowed — telemetry is
-    best-effort and must never surface as a request error."""
-    try:
-        data = json.dumps(record).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=data, method="POST",
-            headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=timeout).close()
-    except Exception:
-        log.debug("telemetry POST to %s failed", url, exc_info=True)
-
-
-def http_sink(url: str, timeout: float = 2.0) -> Callable[[Dict[str, Any]], None]:
-    """Return a sink that fire-and-forget POSTs each record to ``url``.
-
-    The POST runs on a background thread so a slow or absent companion can't
-    block the request that produced the span. Use :func:`flush_telemetry`
-    (tests, shutdown) to wait for in-flight POSTs.
-    """
-    def _sink(record: Dict[str, Any]) -> None:
-        fut = _get_executor().submit(_post_record, url, record, timeout)
-        _pending_posts.add(fut)
-        fut.add_done_callback(_pending_posts.discard)
-    return _sink
-
-
-def flush_telemetry(timeout: float = 5.0) -> None:
-    """Block until in-flight telemetry POSTs finish. For tests and shutdown."""
-    for fut in list(_pending_posts):
-        try:
-            fut.result(timeout)
-        except Exception:
-            pass
 
 
 def _emit_record(sink: Callable[[Dict[str, Any]], None], label: str,
@@ -226,9 +180,13 @@ def _fmt_fields(fields: dict) -> str:
 
 @contextmanager
 def perf_span(label: str, **fields):
-    """Time a block, log one ``perf span=<label> secs=<n> ...`` line, and — when
-    a telemetry sink is bound (see :func:`telemetry_context`) — emit a span
-    record to it.
+    """Time a block; log one ``perf span=<label> secs=<n> ...`` line when perf
+    logging is enabled (``BUCKAROO_PERF``); and — independently — emit a span
+    record to a telemetry sink when one is bound (see :func:`telemetry_context`).
+
+    The log line and the emitted record are decoupled: a telemetry-only session
+    emits records without writing perf log lines, so wiring telemetry for one
+    session never turns global perf logging on for everyone.
 
     Yields a span handle whose :meth:`_Span.set_attr` attaches attributes
     discovered inside the block (e.g. cache hit/miss). No-op (a couple of cheap
@@ -245,6 +203,10 @@ def perf_span(label: str, **fields):
         return
     span = _Span(dict(fields))
     t0 = time.perf_counter()
+    # Wall-clock anchor for the emitted record's timeline. The end is derived
+    # from the monotonic perf_counter delta below — not a second time.time()
+    # read — so the duration always matches secs= and an NTP step mid-span can't
+    # make t_end_ms land before t_start_ms.
     t_start_ms = time.time() * 1000.0
     errored = False
     try:
@@ -254,13 +216,17 @@ def perf_span(label: str, **fields):
         raise
     finally:
         secs = time.perf_counter() - t0
-        t_end_ms = time.time() * 1000.0
+        t_end_ms = t_start_ms + secs * 1000.0
         attrs = span.attrs
         if errored:
             attrs = {**attrs, "errored": "true"}
-        suffix = _fmt_fields(attrs)
-        log.info("perf span=%s secs=%.4f%s", label, secs,
-            f" {suffix}" if suffix else "")
+        # The log line is gated on perf logging; the record on a bound sink. A
+        # telemetry-only session (sink set, BUCKAROO_PERF off) emits the record
+        # but writes no perf line — the two outputs stay independent.
+        if _ENABLED:
+            suffix = _fmt_fields(attrs)
+            log.info("perf span=%s secs=%.4f%s", label, secs,
+                f" {suffix}" if suffix else "")
         if sink is not None:
             _emit_record(sink, label, t_start_ms, t_end_ms, attrs)
 
