@@ -619,6 +619,55 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
 
+    @tornado.testing.gen_test
+    async def test_first_pull_telemetry_rearms_after_warm_reload(self):
+        """#944: a WARM re-POST — same session+build_dir, no force_reload, no
+        config: the early-exit that returns cached metadata without re-running
+        the pipeline — must still re-arm first-pull telemetry. The refreshed
+        page's WS pull is a fresh time-to-first-rows. Before the fix the warm
+        exit left _perf_first_payload_seen True from the first load and never
+        (re)bound the sink, so the second pull's span was silently dropped.
+
+        Distinct from test_first_pull_telemetry_rearms_after_session_reload,
+        which exercises the force_reload (full-load) path; this one pins the
+        early-exit path that skips the pipeline entirely."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+
+            async def _load_and_pull(captured):
+                with patch.object(telemetry, "make_http_sink",
+                    lambda url, **kw: captured.append):
+                    await _post(self.get_http_port(), "/load_expr",
+                        {"session": "lx-warm", "build_dir": build_path,
+                         "telemetry_url": "http://companion.invalid/internal/telemetry"})
+                    ws = await tornado.websocket.websocket_connect(
+                        f"ws://localhost:{self.get_http_port()}/ws/lx-warm")
+                    await ws.read_message()  # discard initial_state
+                    ws.write_message(json.dumps({
+                        "type": "infinite_request",
+                        "payload_args": {"start": 0, "end": 10,
+                            "sourceName": "default", "origEnd": 10}}))
+                    await ws.read_message()  # json frame
+                    await ws.read_message()  # binary frame
+                    ws.close()
+
+            first: list = []
+            await _load_and_pull(first)
+            self.assertIn("firstpull.ws_first_payload", [r["name"] for r in first])
+
+            # Second load is a WARM re-POST (same session, same build_dir, no
+            # force_reload, no config): it hits the early-exit and returns cached
+            # metadata. It must still re-arm first-pull telemetry and rebind the
+            # sink, so the new pull's span lands in `second` rather than being
+            # dropped (flag still True) or routed to the stale first-load sink.
+            second: list = []
+            await _load_and_pull(second)
+            self.assertIn("firstpull.ws_first_payload", [r["name"] for r in second],
+                "a warm re-POST must re-arm first-pull telemetry")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
 
 class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
     """Tests for #896 (shared backend) and #899 (warm-session early-exit)."""
