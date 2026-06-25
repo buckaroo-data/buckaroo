@@ -166,6 +166,31 @@ describe("View contract — invariants across all view kinds", () => {
 });
 
 
+describe("View contract — rowidsInRange clamps a negative start", () => {
+    // rowidsInRange already clamps end at length() and returns [] for an
+    // inverted range (see the IdentityView/SortView tests above), so it is
+    // a defensive range accessor. A negative start must clamp to 0 the same
+    // way, and all three view kinds must agree. Otherwise a boundary window
+    // (the renderer asking for e.g. [-3, 2) near row 0) yields nonexistent
+    // negative rowids from IdentityView but an empty slice from
+    // SortView/FilterView — a silent divergence the RowStore can't satisfy.
+    const cases: Array<[string, View]> = [
+        ["IdentityView(8)", new IdentityView(8)],
+        ["SortView", new SortView("k", "asc", Int32Array.from([3, 1, 4, 1, 5, 9, 2, 6]))],
+        ["FilterView", new FilterView("f", Int32Array.from([3, 1, 4, 1, 5, 9, 2, 6]))],
+    ];
+
+    test.each(cases)("%s — rowidsInRange(-3, 2) clamps start to 0", (_label, v) => {
+        expect(v.rowidsInRange(-3, 2)).toStrictEqual(v.rowidsInRange(0, 2));
+    });
+
+    test("IdentityView never emits negative rowids for a negative start", () => {
+        const v = new IdentityView(10);
+        expect(v.rowidsInRange(-3, 2)).toStrictEqual([0, 1]);
+    });
+});
+
+
 describe("View — out-of-bounds positionAt", () => {
     // Phase 2 contract: callers are expected to clamp via length()
     // before calling positionAt. The view does not need to be defensive
