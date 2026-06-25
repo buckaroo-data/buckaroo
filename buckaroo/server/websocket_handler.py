@@ -232,33 +232,33 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         not_seen = not session._perf_first_payload_seen
         tele_sink = session.tele_sink if not_seen else None
         first_payload = not_seen and (perf_log.enabled() or tele_sink is not None)
+
+        def _dispatch_and_send(pa, span_label):
+            # Dispatch one window and send its two-frame reply: a JSON text
+            # frame, then the binary Parquet frame when non-empty. On the initial
+            # screen load each window is timed under its own span
+            # (window_to_parquet encode + frame send); later per-scroll requests
+            # run uninstrumented (first_payload False → nullcontext), deferred to
+            # v2.
+            span = (perf_log.perf_span(span_label, session=self.session_id)
+                    if first_payload else nullcontext())
+            with span:
+                resp, parquet = _dispatch(pa)
+                self.write_message(json.dumps(resp))
+                if parquet:
+                    self.write_message(parquet, binary=True)
+
         try:
             with perf_log.telemetry_context(self.session_id, tele_sink):
-                first_span = (perf_log.perf_span("firstpull.ws_first_payload", session=self.session_id)
-                              if first_payload else nullcontext())
-                with first_span:
-                    resp_msg, parquet_bytes = _dispatch(payload_args)
-                    # Two-frame sequence: JSON text frame, then binary Parquet frame
-                    self.write_message(json.dumps(resp_msg))
-                    if parquet_bytes:
-                        self.write_message(parquet_bytes, binary=True)
+                _dispatch_and_send(payload_args, "firstpull.ws_first_payload")
                 if first_payload:
                     session._perf_first_payload_seen = True
-
-                # Eager second window (#896). Instrument it as its OWN span
-                # rather than letting its work ride inside the first pull's
-                # context (where it would surface only as an unlabeled nested
-                # window_to_parquet record). Gated on first_payload too, so
-                # later per-scroll requests stay uninstrumented (v2).
+                # Eager second window (#896): its own span, not work riding inside
+                # the first pull's context where it would surface only as an
+                # unlabeled nested window_to_parquet record.
                 second_pa = payload_args.get("second_request")
                 if second_pa:
-                    second_span = (perf_log.perf_span("firstpull.ws_second_payload", session=self.session_id)
-                                   if first_payload else nullcontext())
-                    with second_span:
-                        resp2, parquet2 = _dispatch(second_pa)
-                        self.write_message(json.dumps(resp2))
-                        if parquet2:
-                            self.write_message(parquet2, binary=True)
+                    _dispatch_and_send(second_pa, "firstpull.ws_second_payload")
         except Exception:
             tb = traceback.format_exc()
             log.error("infinite_request error session=%s: %s", self.session_id, tb)
