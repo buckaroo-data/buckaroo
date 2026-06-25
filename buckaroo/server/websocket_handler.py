@@ -221,29 +221,36 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 return handle_infinite_request_buckaroo(session.dataflow, pa, search_string=search)
             return handle_infinite_request(session.df, pa)
 
+        # First infinite_request for this session = time-to-first-rows. Span
+        # just that one (window_to_parquet encode + frame send), keyed by
+        # session= so it lines up with the firstpull.load_expr spans. Fire it
+        # when perf logging is on OR telemetry is wired for this session (#943),
+        # and bind the telemetry sink for just this first pull — per-scroll row
+        # spans are deferred (v2).
+        not_seen = not session._perf_first_payload_seen
+        tele_sink = (perf_log.http_sink(session.telemetry_url)
+                     if (session.telemetry_url and not_seen) else None)
+        first_payload = not_seen and (perf_log.enabled() or tele_sink is not None)
         try:
-            # First infinite_request for this session = time-to-first-rows.
-            # Span just that one (window_to_parquet encode + frame send), keyed
-            # by session= so it lines up with the firstpull.load_expr spans.
-            first_payload = perf_log.enabled() and not session._perf_first_payload_seen
-            span = (perf_log.perf_span("firstpull.ws_first_payload", session=self.session_id)
-                    if first_payload else nullcontext())
-            with span:
-                resp_msg, parquet_bytes = _dispatch(payload_args)
-                # Two-frame sequence: JSON text frame, then binary Parquet frame
-                self.write_message(json.dumps(resp_msg))
-                if parquet_bytes:
-                    self.write_message(parquet_bytes, binary=True)
-            if first_payload:
-                session._perf_first_payload_seen = True
+            with perf_log.telemetry_context(self.session_id, tele_sink):
+                span = (perf_log.perf_span("firstpull.ws_first_payload", session=self.session_id)
+                        if first_payload else nullcontext())
+                with span:
+                    resp_msg, parquet_bytes = _dispatch(payload_args)
+                    # Two-frame sequence: JSON text frame, then binary Parquet frame
+                    self.write_message(json.dumps(resp_msg))
+                    if parquet_bytes:
+                        self.write_message(parquet_bytes, binary=True)
+                if first_payload:
+                    session._perf_first_payload_seen = True
 
-            # Handle second_request (eager loading)
-            second_pa = payload_args.get("second_request")
-            if second_pa:
-                resp2, parquet2 = _dispatch(second_pa)
-                self.write_message(json.dumps(resp2))
-                if parquet2:
-                    self.write_message(parquet2, binary=True)
+                # Handle second_request (eager loading)
+                second_pa = payload_args.get("second_request")
+                if second_pa:
+                    resp2, parquet2 = _dispatch(second_pa)
+                    self.write_message(json.dumps(resp2))
+                    if parquet2:
+                        self.write_message(parquet2, binary=True)
         except Exception:
             tb = traceback.format_exc()
             log.error("infinite_request error session=%s: %s", self.session_id, tb)

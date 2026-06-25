@@ -34,6 +34,10 @@ class SessionState:
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     build_dir: Optional[str] = None  # xorq build dir, stored for /reload_expr
     project_root: Optional[str] = None  # project root for klass discovery
+    # Companion telemetry endpoint (#943). Set from the /load_expr payload; the
+    # WS handler reads it back to re-bind the telemetry sink for first-pull
+    # spans (the POST and the WS connection run in separate async contexts).
+    telemetry_url: Optional[str] = None
     buckaroo_state: dict = field(default_factory=dict)
     # NOTE: ``search_string`` used to live here, but it's per-client typing
     # state (not a session-wide property). Two clients sharing a session

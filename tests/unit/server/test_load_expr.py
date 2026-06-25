@@ -398,6 +398,103 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
             shutil.rmtree(cache_root, ignore_errors=True)
 
+    @tornado.testing.gen_test
+    async def test_load_expr_telemetry_emits_session_correlated_spans(self):
+        """#943: POST /load_expr with telemetry_url must emit session-correlated
+        span records, including a firstpull.summary_stats span carrying the
+        cache hit/miss signal (#944) — the one signal only the server observes.
+        """
+        from unittest.mock import patch
+
+        from buckaroo.pluggable_analysis_framework import perf_log
+
+        captured: list = []
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            # Capture records in-process: http_sink → list.append, so no HTTP /
+            # threading flakiness — the wiring (telemetry_url → context → spans
+            # → cache attrs) is what's under test.
+            with patch.object(perf_log, "http_sink",
+                lambda url, **kw: captured.append):
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": "lx-telem", "build_dir": build_path,
+                     "telemetry_url": "http://companion.invalid/internal/telemetry"})
+            self.assertEqual(resp.code, 200)
+
+            names = [r["name"] for r in captured]
+            self.assertIn("firstpull.load_expr", names)
+            self.assertIn("firstpull.summary_stats", names)
+            # Every span shares the session id as its trace.
+            self.assertTrue(all(r["trace"] == "lx-telem" for r in captured),
+                f"all spans must carry the session trace; got {[r['trace'] for r in captured]}")
+            self.assertTrue(all(r["source"] == "server" for r in captured))
+
+            ss = next(r for r in captured if r["name"] == "firstpull.summary_stats")
+            self.assertIn("cache_status", ss["attrs"])
+            # Cold first load → a cache miss (or 'none'/'uncached'); never a hit.
+            self.assertNotEqual(ss["attrs"]["cache_status"], "hit")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_ws_first_payload_emits_telemetry_span(self):
+        """#943: the WS handler re-binds the telemetry sink from the session so
+        the firstpull.ws_first_payload span (time-to-first-rows) — emitted in a
+        different async context than the POST — is captured too."""
+        from unittest.mock import patch
+
+        from buckaroo.pluggable_analysis_framework import perf_log
+
+        captured: list = []
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            with patch.object(perf_log, "http_sink",
+                lambda url, **kw: captured.append):
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": "lx-ws-telem", "build_dir": build_path,
+                     "telemetry_url": "http://companion.invalid/internal/telemetry"})
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/lx-ws-telem")
+                await ws.read_message()  # discard initial_state
+                ws.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {"start": 0, "end": 10,
+                        "sourceName": "default", "origEnd": 10}}))
+                await ws.read_message()  # json frame
+                await ws.read_message()  # binary frame
+                ws.close()
+
+            names = [r["name"] for r in captured]
+            self.assertIn("firstpull.ws_first_payload", names)
+            ws_span = next(r for r in captured
+                if r["name"] == "firstpull.ws_first_payload")
+            self.assertEqual(ws_span["trace"], "lx-ws-telem")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_load_expr_without_telemetry_url_is_silent(self):
+        """#943: with no telemetry_url, the sink is never built — normal
+        buckaroo usage emits nothing and is unaffected."""
+        from unittest.mock import MagicMock, patch
+
+        from buckaroo.pluggable_analysis_framework import perf_log
+
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sink_factory = MagicMock()
+            with patch.object(perf_log, "http_sink", sink_factory):
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": "lx-no-telem", "build_dir": build_path})
+            self.assertEqual(resp.code, 200)
+            sink_factory.assert_not_called()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
 
 class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
     """Tests for #896 (shared backend) and #899 (warm-session early-exit)."""

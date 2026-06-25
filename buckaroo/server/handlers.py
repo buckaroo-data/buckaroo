@@ -469,12 +469,21 @@ class LoadExprHandler(tornado.web.RequestHandler):
 
         project_root = body.get("project_root")
         cache_storage_path = body.get("cache_storage_path")
+        # Companion telemetry endpoint (#943): when present, the firstpull.*
+        # spans below POST themselves to the companion as session-correlated
+        # records. Absent → tele_sink is None and telemetry_context is a no-op,
+        # so normal buckaroo usage is unaffected.
+        telemetry_url = body.get("telemetry_url")
+        tele_sink = perf_log.http_sink(telemetry_url) if telemetry_url else None
 
         try:
             # session= correlates these spans across concurrent loads — the
             # handler is async, so two /load_expr requests can interleave in
             # the log even though no await sits inside a single span.
-            with perf_log.perf_span("firstpull.load_expr", session=session_id, build_dir=build_dir):
+            with (
+                perf_log.telemetry_context(session_id, tele_sink),
+                perf_log.perf_span("firstpull.load_expr", session=session_id, build_dir=build_dir),
+            ):
                 # The harness reads "expression build" as just this call, so it
                 # gets its own span rather than being outer-minus-inner residual.
                 with perf_log.perf_span("firstpull.expr_load", session=session_id):
@@ -518,6 +527,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.expr = expr
         session.build_dir = build_dir
         session.project_root = project_root
+        session.telemetry_url = telemetry_url
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
         # session so WS dispatch can no longer reach a stale dataflow.
