@@ -783,6 +783,33 @@ class TestSnapshotCacheRun:
         assert len(lines) == 1, f"expected exactly one cache summary line, got {lines}"
         assert "miss(es)" in lines[0] and "snapshot(s) written" in lines[0]
 
+    def test_cache_run_stats_reports_status_and_timing(self, tmp_path):
+        """The public cache_run_stats() exposes the cold/warm outcome as a
+        structured signal — status + timing — for telemetry consumers (#943)."""
+        cache = self._cache(tmp_path)
+        cold = XorqStatPipeline(XORQ_STATS_V2, unit_test=False, cache_storage=cache)
+        cold.process_table(self._filter_chain_table())
+        cs = cold.cache_run_stats()
+        assert cs["cached"] is True
+        assert cs["status"] == "miss"
+        assert cs["misses"] > 0 and cs["hits"] == 0
+        assert cs["secs"] >= 0.0
+
+        warm = XorqStatPipeline(XORQ_STATS_V2, unit_test=False, cache_storage=cache)
+        warm.process_table(self._filter_chain_table())
+        ws = warm.cache_run_stats()
+        assert ws["status"] == "hit"
+        assert ws["hits"] > 0 and ws["misses"] == 0
+
+    def test_cache_run_stats_uncached(self):
+        """With no snapshot cache configured, the run reports status 'uncached'."""
+        p = XorqStatPipeline(XORQ_STATS_V2, unit_test=False)
+        p.process_table(self._filter_chain_table())
+        s = p.cache_run_stats()
+        assert s["cached"] is False
+        assert s["status"] == "uncached"
+        assert s["secs"] >= 0.0
+
     def test_cached_stats_match_uncached(self, tmp_path):
         """The cold (compute + write) and warm (snapshot-read) cache paths
         produce the same stats as a plain uncached run — the cache is a perf
