@@ -15,6 +15,7 @@ from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.server.session import build_state_message
+from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
 log = logging.getLogger("buckaroo.server.handlers")
@@ -429,6 +430,18 @@ class LoadExprHandler(tornado.web.RequestHandler):
             "component_config", "column_config_overrides", "extra_grid_config",
             "init_sd", "skip_stat_columns"))
 
+        # Companion telemetry endpoint (#943): when present, the firstpull.*
+        # spans POST themselves to the companion as session-correlated records.
+        # Build the sink once here (on the IOLoop, where make_http_sink captures
+        # AsyncHTTPClient/IOLoop.current()) and stash it on the session so the WS
+        # first-pull spans reuse it. Built before the warm-session early-exit so a
+        # warm re-POST still re-arms telemetry for its fresh WS pull (#944) — the
+        # exit skips the pipeline, not the next time-to-first-rows. Absent →
+        # tele_sink is None and telemetry_context is a no-op, so normal buckaroo
+        # usage is unaffected.
+        telemetry_url = body.get("telemetry_url")
+        tele_sink = telemetry.make_http_sink(telemetry_url) if telemetry_url else None
+
         # Short-circuit: if this session is already loaded with the same
         # build_dir (and no new config was supplied), skip the expensive
         # pipeline and return cached metadata. Only fires when the caller
@@ -439,6 +452,13 @@ class LoadExprHandler(tornado.web.RequestHandler):
         existing = sessions.get(session_id)
         if (not force_reload and not has_config and existing
                 and existing.build_dir == build_dir and existing.metadata):
+            # The pipeline is skipped, but the refreshed page still opens a new
+            # WS and pulls a fresh time-to-first-rows. Re-arm first-pull telemetry
+            # on the existing session — rebind this request's sink and reset the
+            # seen flag — else the flag stays True from the prior load and the
+            # warm pull's span is silently dropped (#944).
+            existing.tele_sink = tele_sink
+            existing._perf_first_payload_seen = False
             if no_browser or not self.application.settings.get("open_browser", True):
                 browser_action = "skipped"
             else:
@@ -474,7 +494,10 @@ class LoadExprHandler(tornado.web.RequestHandler):
             # session= correlates these spans across concurrent loads — the
             # handler is async, so two /load_expr requests can interleave in
             # the log even though no await sits inside a single span.
-            with perf_log.perf_span("firstpull.load_expr", session=session_id, build_dir=build_dir):
+            with (
+                perf_log.telemetry_context(session_id, tele_sink),
+                perf_log.perf_span("firstpull.load_expr", session=session_id, build_dir=build_dir),
+            ):
                 # The harness reads "expression build" as just this call, so it
                 # gets its own span rather than being outer-minus-inner residual.
                 with perf_log.perf_span("firstpull.expr_load", session=session_id):
@@ -518,12 +541,20 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.expr = expr
         session.build_dir = build_dir
         session.project_root = project_root
+        session.tele_sink = tele_sink
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
         # session so WS dispatch can no longer reach a stale dataflow.
         session.df = None
         session.dataflow = None
         session.ldf = None
+        # Re-arm first-pull telemetry (#944): this is a genuine reload (new
+        # expr / force_reload / new config — the warm-session early-exit above
+        # already returned for an identical reload), so the next WS pull is a
+        # fresh time-to-first-rows and must emit its firstpull.ws_first_payload
+        # span again. Without this the flag stays True from the prior load and
+        # every reload's first-pull telemetry is silently dropped.
+        session._perf_first_payload_seen = False
         session.metadata = metadata
         session.prompt = prompt
         if component_config:

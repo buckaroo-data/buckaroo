@@ -14,6 +14,7 @@ import pytest
 
 xo = pytest.importorskip("xorq.api")
 
+from buckaroo.pluggable_analysis_framework import perf_log  # noqa: E402
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (  # noqa: E402
     XorqStatPipeline,
     XorqColumn)
@@ -782,6 +783,53 @@ class TestSnapshotCacheRun:
                  if r.name == self._LOGGER and r.getMessage().startswith("xorq stat cache")]
         assert len(lines) == 1, f"expected exactly one cache summary line, got {lines}"
         assert "miss(es)" in lines[0] and "snapshot(s) written" in lines[0]
+
+    def test_cache_run_stats_reports_status_and_timing(self, tmp_path):
+        """The public cache_run_stats() exposes the cold/warm outcome as a
+        structured signal — status + timing — for telemetry consumers (#943)."""
+        cache = self._cache(tmp_path)
+        cold = XorqStatPipeline(XORQ_STATS_V2, unit_test=False, cache_storage=cache)
+        cold.process_table(self._filter_chain_table())
+        cs = cold.cache_run_stats()
+        assert cs["cached"] is True
+        assert cs["status"] == "miss"
+        assert cs["misses"] > 0 and cs["hits"] == 0
+        assert cs["secs"] >= 0.0
+
+        warm = XorqStatPipeline(XORQ_STATS_V2, unit_test=False, cache_storage=cache)
+        warm.process_table(self._filter_chain_table())
+        ws = warm.cache_run_stats()
+        assert ws["status"] == "hit"
+        assert ws["hits"] > 0 and ws["misses"] == 0
+
+    def test_cache_run_stats_uncached(self):
+        """With no snapshot cache configured, the run reports status 'uncached'."""
+        p = XorqStatPipeline(XORQ_STATS_V2, unit_test=False)
+        p.process_table(self._filter_chain_table())
+        s = p.cache_run_stats()
+        assert s["cached"] is False
+        assert s["status"] == "uncached"
+        assert s["secs"] >= 0.0
+
+    def test_internal_spans_emit_to_telemetry_sink_with_perf_off(self):
+        """#944: the stat.xorq.* spans must reach a bound telemetry sink even
+        when BUCKAROO_PERF logging is off — the same enabled-OR-sink decoupling
+        perf_span already uses. Before the fix _span() gated on
+        perf_log.enabled() alone and returned a no-op, so a telemetry-only run
+        emitted firstpull.* spans but never the stat.xorq.* timeline."""
+        records: list = []
+        saved = perf_log._ENABLED
+        perf_log._ENABLED = False
+        try:
+            pipeline = XorqStatPipeline(XORQ_STATS_V2, unit_test=False)
+            with perf_log.telemetry_context("sess-stat-span", records.append):
+                pipeline.process_table(self._filter_chain_table())
+        finally:
+            perf_log._ENABLED = saved
+        names = [r["name"] for r in records]
+        assert "stat.xorq.total" in names, (
+            f"stat.xorq.total span must emit to the sink with perf logging off; "
+            f"got {names}")
 
     def test_cached_stats_match_uncached(self, tmp_path):
         """The cold (compute + write) and warm (snapshot-read) cache paths

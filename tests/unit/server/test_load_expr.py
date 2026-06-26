@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import tempfile
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -16,6 +17,7 @@ import tornado.websocket
 
 xo = pytest.importorskip("xorq.api")
 
+from buckaroo.server import telemetry  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
@@ -397,6 +399,274 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
             shutil.rmtree(cache_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_load_expr_telemetry_emits_session_correlated_spans(self):
+        """#943: POST /load_expr with telemetry_url must emit session-correlated
+        span records, including a firstpull.summary_stats span carrying the
+        cache hit/miss signal (#944) — the one signal only the server observes.
+
+        A cache_storage_path is supplied so the cold load is a genuine cache
+        *miss* (every stat computed and written). That lets the test pin the
+        exact cache_status — and the numeric hit/miss counts riding with it —
+        rather than merely asserting "not a hit", which would still pass if the
+        signal regressed to None (key present, value empty).
+        """
+        captured: list = []
+        builds_root = tempfile.mkdtemp()
+        cache_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            # Capture records in-process: make_http_sink → list.append, so no
+            # HTTP round-trip — the wiring (telemetry_url → context → spans →
+            # cache attrs) is what's under test. The real POST has its own test
+            # (test_telemetry_sink.py).
+            with patch.object(telemetry, "make_http_sink",
+                lambda url, **kw: captured.append):
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": "lx-telem", "build_dir": build_path,
+                     "cache_storage_path": cache_root,
+                     "telemetry_url": "http://companion.invalid/internal/telemetry"})
+            self.assertEqual(resp.code, 200)
+
+            names = [r["name"] for r in captured]
+            self.assertIn("firstpull.load_expr", names)
+            self.assertIn("firstpull.summary_stats", names)
+            # Every span shares the session id as its trace.
+            self.assertTrue(all(r["trace"] == "lx-telem" for r in captured),
+                f"all spans must carry the session trace; got {[r['trace'] for r in captured]}")
+            self.assertTrue(all(r["source"] == "server" for r in captured))
+
+            ss = next(r for r in captured if r["name"] == "firstpull.summary_stats")
+            attrs = ss["attrs"]
+            # Cold load against a fresh cache_root → a pure miss: status="miss",
+            # zero hits, at least one miss. Pinning the value (not just "!= hit")
+            # makes a dropped signal (cache_status=None) fail here.
+            self.assertEqual(attrs["cache_status"], "miss")
+            self.assertEqual(attrs["cache_hits"], 0)
+            self.assertGreater(attrs["cache_misses"], 0)
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(cache_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_ws_first_payload_emits_telemetry_span(self):
+        """#943: the WS handler re-binds the telemetry sink from the session so
+        the firstpull.ws_first_payload span (time-to-first-rows) — emitted in a
+        different async context than the POST — is captured too."""
+        captured: list = []
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            with patch.object(telemetry, "make_http_sink",
+                lambda url, **kw: captured.append):
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": "lx-ws-telem", "build_dir": build_path,
+                     "telemetry_url": "http://companion.invalid/internal/telemetry"})
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/lx-ws-telem")
+                await ws.read_message()  # discard initial_state
+                ws.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {"start": 0, "end": 10,
+                        "sourceName": "default", "origEnd": 10}}))
+                await ws.read_message()  # json frame
+                await ws.read_message()  # binary frame
+                ws.close()
+
+            names = [r["name"] for r in captured]
+            self.assertIn("firstpull.ws_first_payload", names)
+            ws_span = next(r for r in captured
+                if r["name"] == "firstpull.ws_first_payload")
+            self.assertEqual(ws_span["trace"], "lx-ws-telem")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_telemetry_sink_built_once_not_rebuilt_by_ws(self):
+        """#944: the sink is built once in /load_expr and stored on the session;
+        the WS first-pull reuses session.tele_sink rather than rebuilding it.
+        Pin make_http_sink to exactly one call across the POST + WS exchange —
+        the WS still emits its span (proving reuse works), but a regression that
+        re-introduced make_http_sink in the WS path would push call_count to 2
+        and fail here even though span emission would look fine."""
+        captured: list = []
+        sink_factory = MagicMock(side_effect=lambda url, **kw: captured.append)
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            with patch.object(telemetry, "make_http_sink", sink_factory):
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": "lx-once", "build_dir": build_path,
+                     "telemetry_url": "http://companion.invalid/internal/telemetry"})
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/lx-once")
+                await ws.read_message()  # discard initial_state
+                ws.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {"start": 0, "end": 10,
+                        "sourceName": "default", "origEnd": 10}}))
+                await ws.read_message()  # json frame
+                await ws.read_message()  # binary frame
+                ws.close()
+
+            # Built exactly once (in /load_expr), not again in the WS path.
+            self.assertEqual(sink_factory.call_count, 1,
+                f"sink must be built once and reused; got {sink_factory.call_count} builds")
+            # ...and the reuse genuinely reaches the WS span (not a silent no-op).
+            self.assertIn("firstpull.ws_first_payload", [r["name"] for r in captured])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_load_expr_without_telemetry_url_is_silent(self):
+        """#943: with no telemetry_url, the sink is never built — normal
+        buckaroo usage emits nothing and is unaffected."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sink_factory = MagicMock()
+            with patch.object(telemetry, "make_http_sink", sink_factory):
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": "lx-no-telem", "build_dir": build_path})
+            self.assertEqual(resp.code, 200)
+            sink_factory.assert_not_called()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_first_pull_telemetry_rearms_after_session_reload(self):
+        """#944: reloading an expression into an existing session re-arms the
+        first-pull telemetry. _perf_first_payload_seen is reset on a genuine
+        /load_expr, so the next WS pull emits firstpull.ws_first_payload again.
+        Before the reset the flag stayed True from the first load and every
+        reload's time-to-first-rows span was silently dropped."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+
+            async def _load_and_pull(captured, *, force_reload):
+                body = {"session": "lx-rearm", "build_dir": build_path,
+                    "telemetry_url": "http://companion.invalid/internal/telemetry"}
+                if force_reload:
+                    body["force_reload"] = True
+                with patch.object(telemetry, "make_http_sink",
+                    lambda url, **kw: captured.append):
+                    await _post(self.get_http_port(), "/load_expr", body)
+                    ws = await tornado.websocket.websocket_connect(
+                        f"ws://localhost:{self.get_http_port()}/ws/lx-rearm")
+                    await ws.read_message()  # discard initial_state
+                    ws.write_message(json.dumps({
+                        "type": "infinite_request",
+                        "payload_args": {"start": 0, "end": 10,
+                            "sourceName": "default", "origEnd": 10}}))
+                    await ws.read_message()  # json frame
+                    await ws.read_message()  # binary frame
+                    ws.close()
+
+            first: list = []
+            await _load_and_pull(first, force_reload=False)
+            self.assertIn("firstpull.ws_first_payload", [r["name"] for r in first])
+
+            # Reload the same session (force_reload bypasses the warm-session
+            # early-exit so the full load path, and the re-arm, runs). The next
+            # first pull is a new time-to-first-rows and must emit again.
+            second: list = []
+            await _load_and_pull(second, force_reload=True)
+            self.assertIn("firstpull.ws_first_payload", [r["name"] for r in second],
+                "reloading the session must re-arm first-pull telemetry")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_ws_eager_second_request_emits_its_own_span(self):
+        """#944: the eager second_request (part of the initial screen load) is
+        instrumented as its own firstpull.ws_second_payload span — separate
+        from the first pull — rather than only surfacing as a nested
+        window_to_parquet record riding inside the first pull's context."""
+        captured: list = []
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            with patch.object(telemetry, "make_http_sink",
+                lambda url, **kw: captured.append):
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": "lx-second", "build_dir": build_path,
+                     "telemetry_url": "http://companion.invalid/internal/telemetry"})
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/lx-second")
+                await ws.read_message()  # discard initial_state
+                ws.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {"start": 0, "end": 5,
+                        "sourceName": "default", "origEnd": 5,
+                        "second_request": {"start": 5, "end": 10,
+                            "sourceName": "default", "origEnd": 10}}}))
+                await ws.read_message()  # first json frame
+                await ws.read_message()  # first binary frame
+                await ws.read_message()  # second json frame
+                await ws.read_message()  # second binary frame
+                ws.close()
+
+            names = [r["name"] for r in captured]
+            self.assertIn("firstpull.ws_first_payload", names)
+            self.assertIn("firstpull.ws_second_payload", names)
+            second = next(r for r in captured
+                if r["name"] == "firstpull.ws_second_payload")
+            self.assertEqual(second["trace"], "lx-second")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_first_pull_telemetry_rearms_after_warm_reload(self):
+        """#944: a WARM re-POST — same session+build_dir, no force_reload, no
+        config: the early-exit that returns cached metadata without re-running
+        the pipeline — must still re-arm first-pull telemetry. The refreshed
+        page's WS pull is a fresh time-to-first-rows. Before the fix the warm
+        exit left _perf_first_payload_seen True from the first load and never
+        (re)bound the sink, so the second pull's span was silently dropped.
+
+        Distinct from test_first_pull_telemetry_rearms_after_session_reload,
+        which exercises the force_reload (full-load) path; this one pins the
+        early-exit path that skips the pipeline entirely."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+
+            async def _load_and_pull(captured):
+                with patch.object(telemetry, "make_http_sink",
+                    lambda url, **kw: captured.append):
+                    await _post(self.get_http_port(), "/load_expr",
+                        {"session": "lx-warm", "build_dir": build_path,
+                         "telemetry_url": "http://companion.invalid/internal/telemetry"})
+                    ws = await tornado.websocket.websocket_connect(
+                        f"ws://localhost:{self.get_http_port()}/ws/lx-warm")
+                    await ws.read_message()  # discard initial_state
+                    ws.write_message(json.dumps({
+                        "type": "infinite_request",
+                        "payload_args": {"start": 0, "end": 10,
+                            "sourceName": "default", "origEnd": 10}}))
+                    await ws.read_message()  # json frame
+                    await ws.read_message()  # binary frame
+                    ws.close()
+
+            first: list = []
+            await _load_and_pull(first)
+            self.assertIn("firstpull.ws_first_payload", [r["name"] for r in first])
+
+            # Second load is a WARM re-POST (same session, same build_dir, no
+            # force_reload, no config): it hits the early-exit and returns cached
+            # metadata. It must still re-arm first-pull telemetry and rebind the
+            # sink, so the new pull's span lands in `second` rather than being
+            # dropped (flag still True) or routed to the stale first-load sink.
+            second: list = []
+            await _load_and_pull(second)
+            self.assertIn("firstpull.ws_first_payload", [r["name"] for r in second],
+                "a warm re-POST must re-arm first-pull telemetry")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
 
 
 class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):

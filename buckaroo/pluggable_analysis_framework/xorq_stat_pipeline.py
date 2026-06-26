@@ -56,7 +56,7 @@ def _new_cache_run_stats() -> Dict[str, Any]:
     Reset at the start of every run and summarised in one log line at the
     end (see ``_log_cache_stats``)."""
     return {"hits": 0, "misses": 0, "snapshots": 0, "bytes": 0,
-        "write_errors": 0}
+        "write_errors": 0, "secs": 0.0}
 
 
 def _to_python_scalar(val):
@@ -233,9 +233,35 @@ class XorqStatPipeline:
         base_path = getattr(getattr(self.cache_storage, "storage", None), "base_path", "?")
         log.info(
             "xorq stat cache [%s]: %d hit(s), %d miss(es), %d snapshot(s) "
-            "written (%d bytes), %d write error(s)",
+            "written (%d bytes), %d write error(s) in %.3fs",
             base_path, s["hits"], s["misses"], s["snapshots"], s["bytes"],
-            s["write_errors"])
+            s["write_errors"], s.get("secs", 0.0))
+
+    def cache_run_stats(self) -> Dict[str, Any]:
+        """Public snapshot of the last ``process_table`` run's summary-stat
+        cache outcome — the structured signal a telemetry consumer wants (#943).
+
+        ``{hits, misses, snapshots, bytes, write_errors, secs, cached, status}``
+        where ``status`` is ``hit`` / ``miss`` / ``mixed`` / ``none`` for a run
+        that used the snapshot cache, and ``uncached`` when no cache was
+        configured. ``secs`` is the wall-clock of the whole stats run.
+        """
+        s = dict(self._cache_stats)
+        cached = self.cache_storage is not None
+        hits, misses = s.get("hits", 0), s.get("misses", 0)
+        if not cached:
+            status = "uncached"
+        elif hits and misses:
+            status = "mixed"
+        elif hits:
+            status = "hit"
+        elif misses:
+            status = "miss"
+        else:
+            status = "none"
+        s["cached"] = cached
+        s["status"] = status
+        return s
 
     def unit_test(self) -> Tuple[bool, List[StatError]]:
         """Run pipeline against PERVERSE_DF wrapped as a xorq memtable.
@@ -270,10 +296,17 @@ class XorqStatPipeline:
             self._suppress_perf_summary = False
 
     def _span(self, label, **fields):
-        """perf_span when perf is on for this (non-unit-test) run, else no-op."""
-        if perf_log.enabled() and not self._suppress_perf_summary:
-            return perf_log.perf_span(label, **fields)
-        return nullcontext()
+        """perf_span for this run unless it's a unit-test validation run.
+
+        perf_span itself decides whether to time and emit (perf logging on *or* a
+        telemetry sink bound — see ``perf_log.perf_span``); this only adds the
+        unit-test suppression. Deferring the gate keeps ``stat.xorq.*`` spans on
+        the same enabled-OR-sink footing as the ``firstpull.*`` spans, so a
+        telemetry-only run (BUCKAROO_PERF off, sink bound) still emits the stats
+        timeline (#944)."""
+        if self._suppress_perf_summary:
+            return nullcontext()
+        return perf_log.perf_span(label, **fields)
 
     def process_table(self, table, skip_columns=None) -> Tuple[SDType, List[StatError]]:
         # Each per-column query runs directly against ``table`` (the source
@@ -284,10 +317,12 @@ class XorqStatPipeline:
         self._cache_stats = _new_cache_run_stats()
         self._perf = (perf_log.PerfRecorder()
                       if perf_log.enabled() and not self._suppress_perf_summary else None)
+        _t0 = time.perf_counter()
         with self._span("stat.xorq.total"):
             try:
                 return self._process_table_impl(table, skip_columns=skip_columns)
             finally:
+                self._cache_stats["secs"] = round(time.perf_counter() - _t0, 4)
                 self._log_cache_stats()
                 if self._perf is not None:
                     self._perf.label = (
@@ -490,6 +525,13 @@ class XorqDfStatsV2:
         self.stat_errors = []
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)
+
+    def cache_run_stats(self) -> dict:
+        """The summary-stat cache outcome of the last pipeline run (#943) —
+        the structured hit/miss/timing signal, delegating to
+        ``XorqStatPipeline.cache_run_stats`` for a consumer reading from the
+        stats wrapper."""
+        return self.ap.cache_run_stats()
 
     def add_analysis(self, a_obj):
         """Add an analysis class/stat func and reprocess the table.
