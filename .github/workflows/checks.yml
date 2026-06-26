@@ -311,7 +311,7 @@ jobs:
       - name: Run tests
         # Tolerant of the post-summary polars-stream / pyo3 SIGABRT — see scripts/run_pytest_tolerant.sh.
         run: scripts/run_pytest_tolerant.sh uv run --with pytest-cov pytest ./tests/unit -m "not slow" --color=yes --cov anywidget --cov-report xml
-      - uses: codecov/codecov-action@v6
+      - uses: codecov/codecov-action@v7
 
   TestPythonMaxVersions:
     name: Python / Test (Max Versions)
