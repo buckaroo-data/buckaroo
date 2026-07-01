@@ -173,16 +173,22 @@ class XorqDataflow(CustomizableDataflow):
                 processed_df, self.analysis_klasses, self.df_name,
                 debug=self.debug, cache_storage=cache_storage,
                 skip_columns=getattr(self, 'skip_stat_columns', None))
-            # Attach the summary-stat cache hit/miss/timing signal (#944) to the
-            # span so a telemetry consumer learns whether the stats were cached
-            # — the one signal only the server observes (#943). The pandas branch
-            # above already returned, so stats here is always an XorqDfStatsV2,
-            # which always exposes cache_run_stats(); call it unconditionally so
-            # a missing signal fails loudly rather than silently vanishing.
+            # Attach the summary-stat cache signal (#944) to the span so a
+            # telemetry consumer learns whether the stats were cached — the one
+            # signal only the server observes (#943). Carries the write side too
+            # (snapshots/bytes/write_errors, #951) so a cache that stops writing —
+            # or a run with write_errors > 0 — is visible to a telemetry consumer
+            # rather than only to a server log no deployment reads. The pandas
+            # branch above already returned, so stats here is always an
+            # XorqDfStatsV2, which always exposes cache_run_stats(); call it
+            # unconditionally so a missing signal fails loudly rather than
+            # silently vanishing.
             cs = stats.cache_run_stats()
             span.set_attr(
                 cache_status=cs.get("status"), cache_hits=cs.get("hits"),
-                cache_misses=cs.get("misses"), cache_secs=cs.get("secs"))
+                cache_misses=cs.get("misses"), cache_secs=cs.get("secs"),
+                cache_snapshots=cs.get("snapshots"), cache_bytes=cs.get("bytes"),
+                cache_write_errors=cs.get("write_errors"))
         sdf = stats.sdf
         if stats.errs:
             if self.debug:

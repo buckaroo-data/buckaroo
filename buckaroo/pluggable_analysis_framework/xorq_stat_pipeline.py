@@ -225,11 +225,27 @@ class XorqStatPipeline:
             self._cache_stats["write_errors"] += 1
             log.warning("xorq stat snapshot write failed for %s: %s", path, e)
 
-    def _log_cache_stats(self):
-        """One summary line per run when a snapshot cache is in play (#910)."""
+    def _log_cache_stats(self, span=None):
+        """Surface the per-run snapshot-cache outcome (#910, #951).
+
+        Two channels, so the write side is never invisible:
+
+        * ``span`` — attach the hit/miss/snapshot/byte/write-error counts to the
+          run's ``stat.xorq.total`` telemetry span. A bound telemetry sink then
+          carries the cache outcome (including ``write_errors``) to the operator
+          without a debug log build — the ``log.info`` line below lands in a
+          server log file no deployment reads (#951).
+        * ``log`` — one summary line per run for a local perf/debug session."""
         if self.cache_storage is None:
             return
         s = self._cache_stats
+        if span is not None:
+            cs = self.cache_run_stats()
+            span.set_attr(
+                cache_status=cs["status"], cache_hits=cs["hits"],
+                cache_misses=cs["misses"], cache_secs=cs["secs"],
+                cache_snapshots=cs["snapshots"], cache_bytes=cs["bytes"],
+                cache_write_errors=cs["write_errors"])
         base_path = getattr(getattr(self.cache_storage, "storage", None), "base_path", "?")
         log.info(
             "xorq stat cache [%s]: %d hit(s), %d miss(es), %d snapshot(s) "
@@ -318,12 +334,12 @@ class XorqStatPipeline:
         self._perf = (perf_log.PerfRecorder()
                       if perf_log.enabled() and not self._suppress_perf_summary else None)
         _t0 = time.perf_counter()
-        with self._span("stat.xorq.total"):
+        with self._span("stat.xorq.total") as span:
             try:
                 return self._process_table_impl(table, skip_columns=skip_columns)
             finally:
                 self._cache_stats["secs"] = round(time.perf_counter() - _t0, 4)
-                self._log_cache_stats()
+                self._log_cache_stats(span)
                 if self._perf is not None:
                     self._perf.label = (
                         f"xorq cols={len(table.columns)} "
