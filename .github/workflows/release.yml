@@ -266,3 +266,84 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         working-directory: packages/buckaroo-js-core
         run: npm publish --access public --provenance --loglevel=verbose
+
+  release-npm-duckdb-node:
+    name: Publish buckaroo-duckdb-node to npm
+    needs: release
+    if: needs.release.result == 'success'
+    # GitHub-hosted runner required: npm Trusted Publishing OIDC is only
+    # supported on github-hosted runners (Depot's depot-ubuntu-latest is
+    # treated as self-hosted and won't receive npm OIDC credentials).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.10.0
+
+      - name: Setup Node.js with npm registry
+        uses: actions/setup-node@v6
+        with:
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+          cache-dependency-path: 'packages/pnpm-lock.yaml'
+
+      - name: Install pnpm dependencies
+        working-directory: packages
+        run: pnpm install --frozen-lockfile
+
+      - name: Upgrade npm to a Trusted-Publishing-capable version
+        # Trusted Publishing requires npm >= 11.5.1. The global npm dir
+        # on github-hosted runners is root-owned, so sudo is needed.
+        run: sudo npm install -g npm@11.5.1
+
+      - name: OIDC diagnostics (compare against npm Trusted Publisher config)
+        # NOTE: the npm Trusted Publisher on npmjs.com must be configured to
+        # point to "release.yml" (not "release-buckaroo-duckdb-node.yml").
+        # See https://www.npmjs.com/package/buckaroo-duckdb-node/access
+        run: |
+          echo "npm version:              $(npm --version)"
+          echo "GITHUB_REPOSITORY:        ${GITHUB_REPOSITORY}"
+          echo "GITHUB_WORKFLOW_REF:      ${GITHUB_WORKFLOW_REF}"
+          echo "GITHUB_REF:               ${GITHUB_REF}"
+          echo "GITHUB_REF_NAME:          ${GITHUB_REF_NAME}"
+          echo "GITHUB_JOB:               ${GITHUB_JOB}"
+          echo "Job environment (yaml):   npm"
+          echo
+          echo "On npmjs.com the Trusted Publisher must match:"
+          echo "  Owner:        $(echo "${GITHUB_REPOSITORY}" | cut -d/ -f1)"
+          echo "  Repository:   $(echo "${GITHUB_REPOSITORY}" | cut -d/ -f2)"
+          echo "  Workflow:     $(basename "${GITHUB_WORKFLOW_REF%@*}")"
+          echo "  Environment:  npm  (or leave blank if no environment configured)"
+
+      - name: Set buckaroo-duckdb-node version to ${{ needs.release.outputs.version }}
+        working-directory: packages/buckaroo-duckdb-node
+        run: npm version "${{ needs.release.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Build buckaroo-duckdb-node
+        working-directory: packages/buckaroo-duckdb-node
+        run: pnpm run build
+
+      - name: Check if version already published
+        id: check
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+          if npm view "buckaroo-duckdb-node@${VERSION}" version >/dev/null 2>&1; then
+            echo "buckaroo-duckdb-node@${VERSION} already on npm — skipping publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm (Trusted Publishing + provenance)
+        if: steps.check.outputs.skip != 'true'
+        working-directory: packages/buckaroo-duckdb-node
+        run: npm publish --access public --provenance --loglevel=verbose
