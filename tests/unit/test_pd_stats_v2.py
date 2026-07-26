@@ -12,7 +12,7 @@ import pandas as pd
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 
-from buckaroo.customizations.pd_stats_v2 import (typing_stats, _type, base_summary_stats, numeric_stats, computed_default_summary_stats, histogram_series, histogram, pd_cleaning_stats, heuristic_fracs, orig_col_name, PD_ANALYSIS_V2)
+from buckaroo.customizations.pd_stats_v2 import (typing_stats, _type, base_summary_stats, numeric_stats, computed_default_summary_stats, histogram_series, histogram, pd_cleaning_stats, heuristic_fracs, orig_col_name, PD_ANALYSIS_V2, PD_AUTOCLEAN_DEFAULT_V2)
 
 
 # ============================================================================
@@ -335,6 +335,18 @@ class TestPdCleaningStats:
         assert result['int_parse'] > 0
         assert result['int_parse_fail'] > 0
 
+    def test_unhashable_column_is_not_integer_parseable(self):
+        result = pd_cleaning_stats(pd.Series(dtype=object), length=4)
+        assert result['int_parse'] == 0.0
+        assert result['int_parse_fail'] == 1.0
+
+    def test_default_autoclean_skips_safe_int_for_unhashable_column(self):
+        pipeline = StatPipeline(PD_AUTOCLEAN_DEFAULT_V2, unit_test=False)
+        summary, _ = pipeline.process_df(pd.DataFrame({'lists': [['a'], ['b']]}))
+        column_summary = next(iter(summary.values()))
+        assert column_summary['orig_col_name'] == 'lists'
+        assert column_summary['cleaning_ops'] == []
+
 
 # ============================================================================
 # Tests: heuristic_fracs
@@ -436,4 +448,3 @@ class TestFullPipeline:
         pipeline = StatPipeline(PD_ANALYSIS_V2, unit_test=True)
         passed, errors = pipeline._unit_test_result
         # Some errors may occur on edge cases, but shouldn't crash
-

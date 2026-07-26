@@ -248,6 +248,8 @@ PdCleaningResult = TypedDict('PdCleaningResult', {'int_parse_fail': float, 'int_
 def pd_cleaning_stats(value_counts: pd.Series, length: int) -> PdCleaningResult:
     """Compute int parsing stats for cleaning."""
     vc = value_counts
+    if vc.empty:
+        return {'int_parse_fail': 1.0, 'int_parse': 0.0}
     coerced_ser = pd.to_numeric(vc.index.values, errors='coerce', downcast='integer', dtype_backend='pyarrow')
     nan_sum = (pd.Series(coerced_ser).isna() * 1 * vc.values).sum()
     return {'int_parse_fail': nan_sum / length, 'int_parse': (length - nan_sum) / length}
