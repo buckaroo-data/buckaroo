@@ -464,3 +464,20 @@ def test_merge_column_in_input_rejected():
 
     with pytest.raises(ValueError, match="__buckaroo_merge"):
         col_join_dfs(df1, df2, join_columns=["id"], how="outer")
+
+
+def test_join_key_columns_use_color_static():
+    """Join-key columns get the constant color_static rule.
+
+    The categorical-map-of-identical-colors workaround predates color_static
+    landing in the compiled JS; the overrides should now emit the rule
+    directly so the Python types and the wire config say what they mean.
+    """
+    df1 = pd.DataFrame({"id": [1, 2, 3], "val": [10, 20, 30]})
+    df2 = pd.DataFrame({"id": [1, 2, 3], "val": [10, 25, 30]})
+
+    _m_df, overrides, _eqs = col_join_dfs(df1, df2, join_columns=["id"], how="outer")
+
+    cfg = overrides["id"]["color_map_config"]
+    assert cfg["color_rule"] == "color_static"
+    assert cfg["color"]
