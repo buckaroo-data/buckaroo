@@ -7,6 +7,7 @@ import {
     DatetimeLocaleDisplayerA,
     StringDisplayerA,
     ObjDisplayerA,
+    NumericAffixA,
 } from "./DFWhole";
 import * as _ from "lodash-es";
 
@@ -275,7 +276,30 @@ export const defaultDatetimeFormatter = (params: ValueFormatterParams): string =
     return dateDisplayerDefault(d);
 };
 
+// Wrap a formatter with prefix/suffix text. The affix goes inside any
+// alignment padding so padded columns stay aligned.
+export const withAffix = (
+    base: ValueFormatterFunc<unknown>,
+    { prefix = "", suffix = "" }: NumericAffixA,
+): ValueFormatterFunc<unknown> => {
+    if (!prefix && !suffix) {
+        return base;
+    }
+    return (params) => {
+        const formatted = base(params);
+        if (!formatted || typeof formatted !== "string") {
+            return formatted;
+        }
+        const [, lead, body, trail] = formatted.match(/^(\s*)(.*?)(\s*)$/s)!;
+        return `${lead}${prefix}${body}${suffix}${trail}`;
+    };
+};
+
 export function getFormatter(fArgs: FormatterArgs): ValueFormatterFunc<unknown> {
+    return withAffix(getBaseFormatter(fArgs), fArgs as NumericAffixA);
+}
+
+function getBaseFormatter(fArgs: FormatterArgs): ValueFormatterFunc<unknown> {
     switch (fArgs.displayer) {
         case "integer":
             return getIntegerFormatter(fArgs);

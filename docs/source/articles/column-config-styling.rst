@@ -181,6 +181,26 @@ and max fraction digits work like
            style="width:100%; height:260px; border:1px solid #e0e0e0; border-radius:4px; margin:1em 0;">
    </iframe>
 
+Prefix and suffix
+~~~~~~~~~~~~~~~~~
+
+The numeric displayers (``float``, ``integer`` and ``compact_number``)
+accept optional ``prefix`` and ``suffix`` strings. They are added to the
+formatted text only, so the cell value stays numeric and the column
+still sorts by number. Null values stay blank.
+
+.. code-block:: python
+
+    column_config_overrides = {
+        # 34_400_000 -> "$34.4M"
+        "contract_value": {"displayer_args": {"displayer": "compact_number",
+                                              "prefix": "$"}},
+        # values already in millions: 34.4 -> "$34.4M"
+        "salary_m":       {"displayer_args": {"displayer": "float",
+                                              "min_fraction_digits": 1,
+                                              "max_fraction_digits": 1,
+                                              "prefix": "$", "suffix": "M"}},
+    }
 
 Link displayer
 ~~~~~~~~~~~~~~

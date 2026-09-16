@@ -13,8 +13,8 @@ import {
 
 } from './gridUtils';
 import * as _ from "lodash-es";
-import { DFData, DFViewerConfig, NormalColumnConfig, MultiIndexColumnConfig, PinnedRowConfig, ColumnConfig } from "./DFWhole";
-import { getFloatFormatter, getCompactNumberFormatter, formatDuration, formatIsoDuration, getDurationFormatter } from './Displayer';
+import { DFData, DFViewerConfig, NormalColumnConfig, MultiIndexColumnConfig, PinnedRowConfig, ColumnConfig, FormatterArgs } from "./DFWhole";
+import { getFormatter, getFloatFormatter, getCompactNumberFormatter, formatDuration, formatIsoDuration, getDurationFormatter } from './Displayer';
 import { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 
 describe("testing utility functions in gridUtils ", () => {
@@ -94,6 +94,41 @@ describe("testing utility functions in gridUtils ", () => {
 
     const res5 = floatFormatter({'value': 1.5} as ValueFormatterParams);
     expect(res5).toBe("1.5  ");
+  });
+
+  describe("numeric prefix/suffix", () => {
+    const fmt = (args: FormatterArgs, value: unknown) =>
+      getFormatter(args)({ value } as ValueFormatterParams);
+
+    it("wraps compact_number output", () => {
+      const args = { displayer: "compact_number", prefix: "$" } as FormatterArgs;
+      expect(fmt(args, 34_400_000)).toBe("$34.4M");
+      expect(fmt(args, 950)).toBe("$950");
+    });
+
+    it("wraps float output inside the alignment padding", () => {
+      const args = {
+        displayer: "float", min_fraction_digits: 1, max_fraction_digits: 3, prefix: "$", suffix: "M",
+      } as FormatterArgs;
+      expect(fmt(args, 34.4)).toBe("$34.4M  ");
+      expect(fmt(args, 1.25)).toBe("$1.25M ");
+      expect(fmt(args, 1.125)).toBe("$1.125M");
+    });
+
+    it("wraps integer output inside the leading padding", () => {
+      const args = { displayer: "integer", min_digits: 1, max_digits: 4, suffix: "%" } as FormatterArgs;
+      expect(fmt(args, 42)).toBe("   42%");
+    });
+
+    it("leaves null and undefined empty", () => {
+      const args = { displayer: "compact_number", prefix: "$", suffix: "!" } as FormatterArgs;
+      expect(fmt(args, null)).toBe("");
+      expect(fmt(args, undefined)).toBe("");
+    });
+
+    it("is a no-op without prefix/suffix", () => {
+      expect(fmt({ displayer: "compact_number" }, 34_400_000)).toBe("34.4M");
+    });
   });
 
   it("should extract sdfts when only that is present from summary stats looking DFData ", () => {

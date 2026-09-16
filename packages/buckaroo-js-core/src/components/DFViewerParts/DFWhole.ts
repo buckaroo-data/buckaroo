@@ -23,7 +23,13 @@ export interface StringDisplayerA {
     highlight_regex?: string; // JS regex source (no slashes/flags); applied case-insensitively
     highlight_color?: string; // any CSS color; defaults to "yellow"
 }
-export interface FloatDisplayerA {
+// Literal text wrapped around a formatted number, e.g. prefix "$" + suffix "M".
+// The cell value stays numeric so sorting is unaffected.
+export interface NumericAffixA {
+    prefix?: string;
+    suffix?: string;
+}
+export interface FloatDisplayerA extends NumericAffixA {
     displayer: "float";
     min_fraction_digits: number;
     max_fraction_digits: number;
@@ -32,13 +38,13 @@ export interface FloatDisplayerA {
 export interface DatetimeDefaultDisplayerA {
     displayer: "datetimeDefault";
 }
-export interface IntegerDisplayerA {
+export interface IntegerDisplayerA extends NumericAffixA {
     displayer: "integer";
     min_digits: number;
     max_digits: number;
 }
 
-export interface CompactNumberDisplayerA {
+export interface CompactNumberDisplayerA extends NumericAffixA {
     displayer: "compact_number";
 }
 

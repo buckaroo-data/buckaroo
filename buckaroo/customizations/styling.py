@@ -15,6 +15,8 @@ _MIN_COL_PX = 30        # absolute floor
 def _formatted_char_count(displayer_args, column_metadata):
     """Estimate the character count of the widest formatted value."""
     d = displayer_args.get('displayer')
+    # numeric displayers may wrap the number in literal prefix/suffix text
+    affix = len(displayer_args.get('prefix', '')) + len(displayer_args.get('suffix', ''))
 
     if d == 'float':
         max_val = column_metadata.get('max', 0) or 0
@@ -25,15 +27,15 @@ def _formatted_char_count(displayer_args, column_metadata):
         frac = displayer_args.get('max_fraction_digits', 0)
         decimal = 1 if frac > 0 else 0
         sign = 1 if min_val < 0 else 0
-        return int_digits + commas + decimal + frac + sign
+        return int_digits + commas + decimal + frac + sign + affix
 
     if d == 'integer':
         max_digits = displayer_args.get('max_digits', 4)
         commas = (max_digits - 1) // 3
-        return max_digits + commas
+        return max_digits + commas + affix
 
     if d == 'compact_number':
-        return 5  # e.g. "5.7B"
+        return 5 + affix  # e.g. "5.7B"
 
     if d == 'string':
         return min(displayer_args.get('max_length', 20), 20)
