@@ -1,5 +1,5 @@
 import { ValueFormatterFunc, ValueFormatterParams } from 'ag-grid-community';
-import { DisplayerArgs, FloatDisplayerA, DatetimeLocaleDisplayerA, StringDisplayerA, ObjDisplayerA, CellRendererArgs, FormatterArgs } from './DFWhole';
+import { DisplayerArgs, FloatDisplayerA, DatetimeLocaleDisplayerA, StringDisplayerA, ObjDisplayerA, NumericAffixA, CellRendererArgs, FormatterArgs } from './DFWhole';
 export declare const basicIntFormatter: Intl.NumberFormat;
 export declare const getStringFormatter: (args: StringDisplayerA) => (params: ValueFormatterParams) => string;
 export declare const isValidDate: (possibleDate: any) => boolean;
@@ -22,6 +22,7 @@ export declare const formatDuration: (raw: string) => string;
 export declare const formatIsoDuration: (raw: string) => string;
 export declare const getDurationFormatter: () => (params: ValueFormatterParams) => string;
 export declare const defaultDatetimeFormatter: (params: ValueFormatterParams) => string;
+export declare const withAffix: (base: ValueFormatterFunc<unknown>, { prefix, suffix }: NumericAffixA) => ValueFormatterFunc<unknown>;
 export declare function getFormatter(fArgs: FormatterArgs): ValueFormatterFunc<unknown>;
 export declare function getCellRenderer(crArgs: CellRendererArgs): "agCheckboxCellRenderer" | ((props: {
     api: import('ag-grid-community').GridApi;

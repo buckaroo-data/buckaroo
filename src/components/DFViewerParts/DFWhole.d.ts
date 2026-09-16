@@ -15,7 +15,11 @@ export interface StringDisplayerA {
     highlight_regex?: string;
     highlight_color?: string;
 }
-export interface FloatDisplayerA {
+export interface NumericAffixA {
+    prefix?: string;
+    suffix?: string;
+}
+export interface FloatDisplayerA extends NumericAffixA {
     displayer: "float";
     min_fraction_digits: number;
     max_fraction_digits: number;
@@ -23,12 +27,12 @@ export interface FloatDisplayerA {
 export interface DatetimeDefaultDisplayerA {
     displayer: "datetimeDefault";
 }
-export interface IntegerDisplayerA {
+export interface IntegerDisplayerA extends NumericAffixA {
     displayer: "integer";
     min_digits: number;
     max_digits: number;
 }
-export interface CompactNumberDisplayerA {
+export interface CompactNumberDisplayerA extends NumericAffixA {
     displayer: "compact_number";
 }
 export interface DurationDisplayerA {
