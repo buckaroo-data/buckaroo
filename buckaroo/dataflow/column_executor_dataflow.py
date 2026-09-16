@@ -2,7 +2,7 @@
 # coding: utf-8
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING, cast
 from pathlib import Path
 import os
 import logging
@@ -15,7 +15,7 @@ from .styling_core import merge_sds
 from buckaroo.df_util import old_col_new_col
 from buckaroo.pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
 from buckaroo.customizations.polars_analysis import PL_Analysis_Klasses
-from buckaroo.file_cache.base import FileCache, ProgressNotification, ProgressListener, Executor, SimpleExecutorLog, ColumnExecutor as ColumnExecutorBase, MaybeFilepathLike
+from buckaroo.file_cache.base import FileCache, ProgressNotification, ProgressListener, Executor, SimpleExecutorLog, MaybeFilepathLike, ColumnResults
 from buckaroo.file_cache.multiprocessing_executor import MultiprocessingExecutor
 from buckaroo.file_cache.paf_column_executor import PAFColumnExecutor
 from .abc_dataflow import ABCDataflow
@@ -80,17 +80,17 @@ class ColumnExecutorDataflow(ABCDataflow[pl.LazyFrame]):
     # Analysis classes (extendable, like CustomizableDataflow)
     analysis_klasses: List[Type[PolarsAnalysis]] = PL_Analysis_Klasses.copy()
     # Column executor class (overridable for testing or custom behavior)
-    ColumnExecutorKlass: Type[ColumnExecutorBase] = PAFColumnExecutor
+    ColumnExecutorKlass: Type[PAFColumnExecutor] = PAFColumnExecutor
 
     def __init__(self, ldf: pl.LazyFrame, analysis_klasses: Optional[List[Type[PolarsAnalysis]]] = None,
-                 column_executor_class: Optional[Type[ColumnExecutorBase]] = None,
+                 column_executor_class: Optional[Type[PAFColumnExecutor]] = None,
                  executor_class: Optional[Type[Executor]] = None,
                  executor_log: Optional[SimpleExecutorLog] = None) -> None:
         super().__init__()
         self.raw_ldf = ldf
         if analysis_klasses is not None:
             self.analysis_klasses = list(analysis_klasses)
-        self._column_executor_class: Type[ColumnExecutorBase] = column_executor_class or self.ColumnExecutorKlass
+        self._column_executor_class: Type[PAFColumnExecutor] = column_executor_class or self.ColumnExecutorKlass
         self._executor_class: Type[Executor] = executor_class or Executor
         self.executor_log = executor_log or SimpleExecutorLog()
         self._initialize_df_meta()
@@ -138,7 +138,8 @@ class ColumnExecutorDataflow(ABCDataflow[pl.LazyFrame]):
         
         # Build rewritten name mapping using an empty frame with the same columns
         empty_pl_df = pl.DataFrame({c: [] for c in self.raw_ldf.collect_schema().names()})
-        orig_to_rw = dict(old_col_new_col(empty_pl_df))
+        # polars column names are always str
+        orig_to_rw = cast(Dict[str, str], dict(old_col_new_col(empty_pl_df)))
         
         # Check if we have cached merged_sd to pass to column executor
         
@@ -239,7 +240,8 @@ class ColumnExecutorDataflow(ABCDataflow[pl.LazyFrame]):
                     entry['__status__'] = 'error'
                 return
             # note.result is ColumnResults: Dict[str, ColumnResult] keyed by ORIGINAL column names
-            for orig_col, col_res in note.result.items():
+            results: ColumnResults = note.result
+            for orig_col, col_res in results.items():
                 stats = col_res.result or {}
                 rw = orig_to_rw.get(orig_col, orig_col)
                 entry = aggregated_summary.get(rw)
