@@ -251,7 +251,9 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     def add_analysis(self, analysis_klass):
         self.dataflow.add_analysis(analysis_klass)
 
-    def add_processing(self, df_processing_func):
+    # Positional-only so subclasses can name the function for their
+    # backend (XorqBuckarooWidget uses expr_processing_func).
+    def add_processing(self, df_processing_func, /):
         proc_func_name = df_processing_func.__name__
         class DecoratedProcessing(ColAnalysis):
             provides_defaults = {}

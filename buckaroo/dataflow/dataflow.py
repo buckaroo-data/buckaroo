@@ -373,7 +373,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     Still generic on ``DataFrameT``: both the pandas and polars backends
     use this class directly (bound to ``pd.DataFrame`` / ``pl.DataFrame``
     respectively), and ``XorqDataflow`` subclasses it as
-    ``CustomizableDataflow[XorqExpr]``.
+    ``CustomizableDataflow[XorqExpr | pd.DataFrame]``.
     """
     #analysis_klasses = [StylingAnalysis]
     analysis_klasses: List[Type[ColAnalysis]] = [StylingAnalysis]

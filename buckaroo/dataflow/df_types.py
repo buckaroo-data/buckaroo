@@ -25,7 +25,7 @@ Each eager backend binds it to its concrete frame type::
 
     CustomizableDataflow[pd.DataFrame]               # pandas
     CustomizableDataflow[pl.DataFrame]               # polars (eager)
-    XorqDataflow  ==  CustomizableDataflow[XorqExpr]  # xorq
+    XorqDataflow  ==  CustomizableDataflow[XorqExpr | pd.DataFrame]  # xorq
 
 There is no nominal base class spanning these three, so the bound is a
 structural ``Protocol``, not a shared superclass. ``DataFrameT`` is a
