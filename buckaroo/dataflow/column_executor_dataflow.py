@@ -13,7 +13,7 @@ from traitlets import Dict as TDict, Any as TAny, Unicode, observe
 
 from .styling_core import merge_sds
 from buckaroo.df_util import old_col_new_col
-from buckaroo.pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.customizations.polars_analysis import PL_Analysis_Klasses
 from buckaroo.file_cache.base import FileCache, ProgressNotification, ProgressListener, Executor, SimpleExecutorLog, MaybeFilepathLike, ColumnResults
 from buckaroo.file_cache.multiprocessing_executor import MultiprocessingExecutor
@@ -78,11 +78,11 @@ class ColumnExecutorDataflow(ABCDataflow[pl.LazyFrame]):
     progress_update_callback: Optional[Callable[[Dict[str, Dict[str, Any]]], None]] = None
 
     # Analysis classes (extendable, like CustomizableDataflow)
-    analysis_klasses: List[Type[PolarsAnalysis]] = PL_Analysis_Klasses.copy()
+    analysis_klasses: List[Type[ColAnalysis]] = PL_Analysis_Klasses.copy()
     # Column executor class (overridable for testing or custom behavior)
     ColumnExecutorKlass: Type[PAFColumnExecutor] = PAFColumnExecutor
 
-    def __init__(self, ldf: pl.LazyFrame, analysis_klasses: Optional[List[Type[PolarsAnalysis]]] = None,
+    def __init__(self, ldf: pl.LazyFrame, analysis_klasses: Optional[List[Type[ColAnalysis]]] = None,
                  column_executor_class: Optional[Type[PAFColumnExecutor]] = None,
                  executor_class: Optional[Type[Executor]] = None,
                  executor_log: Optional[SimpleExecutorLog] = None) -> None:
@@ -112,7 +112,7 @@ class ColumnExecutorDataflow(ABCDataflow[pl.LazyFrame]):
             'total_rows': total_rows}
 
 
-    def add_analysis(self, analysis_klass: Type[PolarsAnalysis]) -> None:
+    def add_analysis(self, analysis_klass: Type[ColAnalysis]) -> None:
         """
         Extend analysis_klasses set; deduplicate by cname.
         """

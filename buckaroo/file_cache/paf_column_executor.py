@@ -8,7 +8,8 @@ import logging
 import polars as pl
 
 from buckaroo.file_cache.base import ColumnExecutor, ColumnResults, ColumnResult, ExecutorArgs
-from buckaroo.pluggable_analysis_framework.polars_analysis_management import (PolarsAnalysis, polars_select_expressions, polars_series_stats_from_select_result)
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
+from buckaroo.pluggable_analysis_framework.polars_analysis_management import (polars_select_expressions, polars_series_stats_from_select_result)
 from buckaroo.pluggable_analysis_framework.polars_utils import split_to_dicts
 
 
@@ -19,7 +20,7 @@ class PAFColumnExecutor(ColumnExecutor[ExecutorArgs]):
     summary stats per column, and returns ColumnResults suitable for caching.
     """
 
-    def __init__(self, analyses: List[Type[PolarsAnalysis]], cached_merged_sd: dict[str, dict[str, Any]] | None = None,
+    def __init__(self, analyses: List[Type[ColAnalysis]], cached_merged_sd: dict[str, dict[str, Any]] | None = None,
             orig_to_rw_map: dict[str, str] | None = None) -> None:
         self.analyses = list(analyses)
         self.cached_merged_sd = cached_merged_sd or {}

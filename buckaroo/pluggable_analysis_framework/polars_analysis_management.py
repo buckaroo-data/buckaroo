@@ -16,7 +16,9 @@ class PolarsAnalysis(ColAnalysis):
     select_clauses:List[pl.Expr] = []
     column_ops: Mapping[str, Tuple[List[pl.DataType], Callable[[pl.Series], Any]]] = {}
 
-PAObjs: TypeAlias = List[Type[PolarsAnalysis]]
+# ColAnalysis, not PolarsAnalysis: the list also carries styling classes,
+# which contribute no select_clauses / column_ops.
+PAObjs: TypeAlias = List[Type[ColAnalysis]]
 
 def polars_select_expressions(unordered_objs: PAObjs) -> List[pl.Expr]:
     """

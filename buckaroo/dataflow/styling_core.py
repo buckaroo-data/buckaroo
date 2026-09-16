@@ -343,7 +343,7 @@ def index_names_empty(index:Any) -> bool:
 
 class StylingAnalysis(ColAnalysis):
     @classmethod
-    def get_left_col_configs(cls, df:pd.DataFrame) -> List[ColumnConfig]:
+    def get_left_col_configs(cls, df:DataFrameLike) -> List[ColumnConfig]:
         if not isinstance(df, pd.DataFrame):
             return [{'col_name': 'index', 'header_name':'index', 'displayer_args': {'displayer': 'obj'},
                      #'ag_grid_specs': {'pinned':'left'}
@@ -404,7 +404,7 @@ class StylingAnalysis(ColAnalysis):
     parquet_style_index: bool = True
 
     @classmethod
-    def get_index_name(cls, df:pd.DataFrame) -> str :
+    def get_index_name(cls, df:DataFrameLike) -> str :
         if cls.parquet_style_index:
             #"('index', '')"
             if isinstance(df.columns, pd.MultiIndex):
@@ -439,7 +439,7 @@ class StylingAnalysis(ColAnalysis):
         return cls.fix_column_config(col_name, col_name, {'displayer_args': {'displayer': 'obj'}})
 
     @classmethod
-    def get_dfviewer_config(cls, sd:SDType, df:pd.DataFrame) -> DFViewerConfig:
+    def get_dfviewer_config(cls, sd:SDType, df:DataFrameLike) -> DFViewerConfig:
         #index_config : ColumnConfig = cls.default_styling('index')
         return {
             'pinned_rows': cls.pinned_rows,
@@ -449,7 +449,7 @@ class StylingAnalysis(ColAnalysis):
             'component_config': cls.component_config}
                     
     @classmethod
-    def style_columns(cls, sd:SDType, df:pd.DataFrame) -> List[ColumnConfig]:
+    def style_columns(cls, sd:SDType, df:DataFrameLike) -> List[ColumnConfig]:
         ret_col_config: List[ColumnConfig] = []
         skip_orig_cols = []
         for col, col_meta in sd.items():
