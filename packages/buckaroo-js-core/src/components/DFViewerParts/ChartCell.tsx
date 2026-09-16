@@ -2,7 +2,7 @@ import * as _ from "lodash-es";
 import React from "react";
 import { createPortal } from "react-dom";
 
-import { Area, ComposedChart, Line, Tooltip, Bar } from "recharts";
+import { Area, ComposedChart, Line, Tooltip, Bar, YAxis } from "recharts";
 import { ChartDisplayerA } from "./DFWhole";
 
 
@@ -152,6 +152,11 @@ export const getChartCell = (multiChartCellProps: ChartDisplayerA) => {
                         setScreenCoords({ x: e.clientX, y: e.clientY });
                     }}
                 >
+                    {/* The 100x24 chart is CSS-scaled to fill its grid cell. A hidden
+                        axis with a little padding keeps a series sitting exactly at
+                        dataMin/dataMax off the plot border, where the clip rect would
+                        swallow half its stroke. */}
+                    <YAxis hide padding={{ top: 2, bottom: 2 }} />
                     <Bar
                         dataKey="barRed"
                         stroke="red"
@@ -200,6 +205,8 @@ export const getChartCell = (multiChartCellProps: ChartDisplayerA) => {
 
                     <Line
                         type="monotone"
+                        strokeWidth={1}
+                        dot={false}
                         dataKey="lineRed"
                         stroke="red"
                         fill="red"
@@ -207,6 +214,8 @@ export const getChartCell = (multiChartCellProps: ChartDisplayerA) => {
                     />
                     <Line
                         type="monotone"
+                        strokeWidth={1}
+                        dot={false}
                         dataKey="lineBlue"
                         stroke="blue"
                         fill="blue"
@@ -214,6 +223,8 @@ export const getChartCell = (multiChartCellProps: ChartDisplayerA) => {
                     />
                     <Line
                         type="monotone"
+                        strokeWidth={1}
+                        dot={false}
                         dataKey="lineGray"
                         stroke="gray"
                         fill="gray"
@@ -221,6 +232,8 @@ export const getChartCell = (multiChartCellProps: ChartDisplayerA) => {
                     />
                     <Line
                         type="monotone"
+                        strokeWidth={1}
+                        dot={false}
                         dataKey="lineCustom1"
                         stroke={custom1_color}
                         fill={custom1_color}
@@ -229,6 +242,8 @@ export const getChartCell = (multiChartCellProps: ChartDisplayerA) => {
                     />
                     <Line
                         type="monotone"
+                        strokeWidth={1}
+                        dot={false}
                         dataKey="lineCustom2"
                         stroke={custom2_color}
                         fill={custom2_color}
@@ -237,6 +252,8 @@ export const getChartCell = (multiChartCellProps: ChartDisplayerA) => {
                     />
                     <Line
                         type="monotone"
+                        strokeWidth={1}
+                        dot={false}
                         dataKey="lineCustom3"
                         stroke={custom3_color}
                         fill={custom3_color}
