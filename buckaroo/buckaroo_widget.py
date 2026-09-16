@@ -31,7 +31,7 @@ from buckaroo.extension_utils import copy_extend
 from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, send_infinite_resp
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import (Sampling, exception_protect)
-from .dataflow.styling_core import (ComponentConfig, DFViewerConfig, DisplayArgs, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
+from .dataflow.styling_core import (ComponentConfig, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
 from .dataflow.autocleaning import PandasAutocleaning
 from pathlib import Path
 
@@ -195,7 +195,9 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
 
 
     df_data_dict = Dict({}).tag(sync=True)
-    df_display_args: DisplayArgs = Dict({}).tag(sync=True)
+    # Dict[str, DisplayArgs] at runtime (keyed by display name); left
+    # unannotated because a traitlets Dict descriptor can't satisfy it.
+    df_display_args = Dict({}).tag(sync=True)
     #information about the dataframe
     df_meta = Dict({
         'columns': 5, # dummy data
@@ -287,7 +289,8 @@ class RawDFViewerWidget(BuckarooWidgetBase):
         {'a':  5  , 'b':20, 'c': 'Paddy'},
         {'a': 58.2, 'b': 9, 'c': 'Margaret'}]).tag(sync=True)
 
-    df_viewer_config: DFViewerConfig = Dict({
+    # DFViewerConfig-shaped; unannotated for the same traitlets reason.
+    df_viewer_config = Dict({
         'column_config': [],
         'pinned_rows': [],
         'first_col_configs':[]}).tag(sync=True)
