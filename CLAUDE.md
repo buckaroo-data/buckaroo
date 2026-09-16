@@ -51,7 +51,7 @@ CONTRIBUTING.md for installation.
 
 ## CI
 
-Runs on push to main and PRs. Key jobs: LintPython, TestJS, BuildWheel, TestPython (3.11-3.14), Playwright (Storybook, Jupyter, Marimo, WASM). Uses `depot-ubuntu-latest` runners.
+Runs on push to main and PRs. Key jobs: LintPython, TestJS, BuildWheel, TestPython (3.11-3.14), Playwright (Storybook, Jupyter, Marimo, WASM). Uses GitHub-hosted runners.
 
 ## Architecture Notes
 

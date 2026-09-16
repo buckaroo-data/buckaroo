@@ -377,7 +377,7 @@ requires-dist = [
     { name = "libcst", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "marimo", marker = "extra == 'dev'", specifier = ">=0.19.7" },
     { name = "marimo", marker = "extra == 'marimo'", specifier = ">=0.19.7" },
-    { name = "mcp", marker = "extra == 'mcp'" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = "<2" },
     { name = "mistune", marker = "extra == 'dev'", specifier = "<3.1" },
     { name = "nbstripout", marker = "extra == 'test'" },
     { name = "nbval", marker = "extra == 'dev'", specifier = ">=0.9" },

@@ -46,8 +46,7 @@ jobs:
   release-npm-duckdb-node:
     name: Publish buckaroo-duckdb-node to npm
     # GitHub-hosted runner required: npm Trusted Publishing OIDC is only
-    # supported on github-hosted runners (Depot's depot-ubuntu-latest is
-    # treated as self-hosted and won't receive npm OIDC credentials).
+    # supported on github-hosted runners.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: npm
@@ -61,7 +60,7 @@ jobs:
           version: 9.10.0
 
       - name: Setup Node.js with npm registry
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'

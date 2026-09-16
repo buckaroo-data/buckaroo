@@ -831,6 +831,31 @@ class TestSnapshotCacheRun:
             f"stat.xorq.total span must emit to the sink with perf logging off; "
             f"got {names}")
 
+    def test_cache_outcome_rides_total_span_to_telemetry(self, tmp_path):
+        """#951: the per-run snapshot-cache outcome — status, snapshots, bytes,
+        write_errors — rides the stat.xorq.total telemetry span, so a telemetry
+        consumer sees the write side without reading a server log.
+
+        Before the fix _log_cache_stats emitted only a log.info line the server
+        never surfaced, so a cache that stopped writing was invisible."""
+        records: list = []
+        saved = perf_log._ENABLED
+        perf_log._ENABLED = False
+        try:
+            pipeline = XorqStatPipeline(
+                XORQ_STATS_V2, unit_test=False, cache_storage=self._cache(tmp_path))
+            with perf_log.telemetry_context("sess-cache-write", records.append):
+                pipeline.process_table(self._filter_chain_table())
+        finally:
+            perf_log._ENABLED = saved
+        total = next(r for r in records if r["name"] == "stat.xorq.total")
+        attrs = total["attrs"]
+        # Cold run against a fresh cache dir → a pure miss that writes snapshots.
+        assert attrs["cache_status"] == "miss"
+        assert attrs["cache_snapshots"] > 0
+        assert attrs["cache_bytes"] > 0
+        assert attrs["cache_write_errors"] == 0
+
     def test_cached_stats_match_uncached(self, tmp_path):
         """The cold (compute + write) and warm (snapshot-read) cache paths
         produce the same stats as a plain uncached run — the cache is a perf

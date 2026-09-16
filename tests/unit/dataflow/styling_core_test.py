@@ -302,6 +302,16 @@ class TestFormattedCharCount:
         disp = {'displayer': 'compact_number'}
         assert _formatted_char_count(disp, {}) == 5
 
+    def test_numeric_prefix_suffix(self):
+        # prefix/suffix characters widen every numeric displayer
+        disp = {'displayer': 'compact_number', 'prefix': '$', 'suffix': ' USD'}
+        assert _formatted_char_count(disp, {}) == 5 + 1 + 4
+        disp = {'displayer': 'integer', 'max_digits': 7, 'prefix': '#'}
+        assert _formatted_char_count(disp, {}) == 7 + 2 + 1
+        disp = {'displayer': 'float', 'max_fraction_digits': 1, 'suffix': 'M'}
+        meta = {'max': 34.4, 'min': 0}
+        assert _formatted_char_count(disp, meta) == 2 + 0 + 1 + 1 + 0 + 1
+
     def test_string(self):
         disp = {'displayer': 'string', 'max_length': 35}
         # capped at 20

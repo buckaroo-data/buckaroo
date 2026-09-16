@@ -445,6 +445,12 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             self.assertEqual(attrs["cache_status"], "miss")
             self.assertEqual(attrs["cache_hits"], 0)
             self.assertGreater(attrs["cache_misses"], 0)
+            # The write side rides the span too (#951): the cold miss writes
+            # snapshots with no write errors, so a cache that stops writing — or a
+            # run with write_errors > 0 — is visible to the telemetry consumer.
+            self.assertGreater(attrs["cache_snapshots"], 0)
+            self.assertGreater(attrs["cache_bytes"], 0)
+            self.assertEqual(attrs["cache_write_errors"], 0)
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
             shutil.rmtree(cache_root, ignore_errors=True)
