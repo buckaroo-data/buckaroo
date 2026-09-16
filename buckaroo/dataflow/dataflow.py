@@ -75,6 +75,23 @@ class Autocleaning(Protocol):
     def run_code_generator(self, operations: TAny) -> TAny: ...
 
 
+class DfStats(Protocol):
+    """Structural interface of a summary-stats executor (``DFStatsClass``).
+
+    ``DfStatsV2`` (pandas), ``PlDfStatsV2`` (polars) and ``XorqDfStatsV2``
+    share this surface but no base class. The frame argument is ``Any``
+    because each executor accepts only its own backend's frame type.
+    """
+    sdf: TAny
+    errs: TAny
+    ap: TAny
+    def __init__(self, df: TAny, col_analysis_objs: TAny, /, operating_df_name: TAny = ...,
+                 debug: bool = ..., skip_columns: TAny = ...) -> None: ...
+    @classmethod
+    def verify_analysis_objects(cls, col_analysis_objs: TAny, /) -> None: ...
+    def add_analysis(self, a_obj: TAny, /) -> None: ...
+
+
 class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
     """This class is meant to only represent the dataflow through
     buckaroo with no accomodation for widget particulars
@@ -257,8 +274,8 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
             return self.cleaned[3]
 
     def _compute_processed_result(
-            self, cleaned_df: DataFrameT,
-            post_processing_method: str) -> Tuple[DataFrameT, SDType]:
+            self, cleaned_df: Optional[DataFrameT],
+            post_processing_method: str) -> Tuple[Optional[DataFrameT], SDType]:
         return (cleaned_df, {})
 
     def populate_df_meta(self):
@@ -361,7 +378,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     #analysis_klasses = [StylingAnalysis]
     analysis_klasses: List[Type[ColAnalysis]] = [StylingAnalysis]
     command_config = Dict({}).tag(sync=True)
-    DFStatsClass = DfStatsV2
+    DFStatsClass: Type[DfStats] = DfStatsV2
     sampling_klass = Sampling
 
     df_display_klasses: TDict[str, Type[StylingAnalysis]]  = {}
@@ -668,8 +685,8 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
 
     @override
     def _compute_processed_result(
-            self, cleaned_df: DataFrameT,
-            post_processing_method: str) -> Tuple[DataFrameT, SDType]:
+            self, cleaned_df: Optional[DataFrameT],
+            post_processing_method: str) -> Tuple[Optional[DataFrameT], SDType]:
         if post_processing_method == '':
             return (cleaned_df, {})
         else:
@@ -775,7 +792,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
             df_viewer_config = A_Klass.get_dfviewer_config(merged_sd, processed_df)
             base_column_config = df_viewer_config['column_config']
             df_viewer_config['column_config'] =  merge_column_config(
-                base_column_config, self.processed_df, self.column_config_overrides)
+                base_column_config, processed_df, self.column_config_overrides)
             disp_arg = {'data_key': A_Klass.data_key,
                 'df_viewer_config': df_viewer_config,
                 'summary_stats_key': A_Klass.summary_stats_key}

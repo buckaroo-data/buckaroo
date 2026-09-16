@@ -14,7 +14,7 @@ import logging
 import traceback
 import weakref
 from io import BytesIO
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
 
@@ -171,8 +171,11 @@ class XorqDataflow(CustomizableDataflow["XorqExpr"]):
                     'rewritten_col_name': rewritten_col}
             return empty, {}
         cache_storage = getattr(self, 'cache_storage', None)
+        # The owning widget injects XorqDfStatsV2 as DFStatsClass (via its
+        # InnerDataFlow subclass); the cast exposes cache_run_stats() below.
+        stats_klass = cast("type[XorqDfStatsV2]", self.DFStatsClass)
         with perf_log.perf_span("firstpull.summary_stats") as span:
-            stats = self.DFStatsClass(
+            stats = stats_klass(
                 processed_df, self.analysis_klasses, self.df_name,
                 debug=self.debug, cache_storage=cache_storage,
                 skip_columns=getattr(self, 'skip_stat_columns', None))
