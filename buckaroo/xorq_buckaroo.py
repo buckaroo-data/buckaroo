@@ -247,6 +247,37 @@ class XorqBuckarooWidget(BuckarooWidget):
     def _build_error_dataframe(self, e):
         return pd.DataFrame({'err': [str(e)]})
 
+    # TYPING TODO (deliberately unresolved, pending a check of tallyman):
+    #
+    # basedpyright reports two errors from this signature:
+    #   - here: "Method add_processing overrides class BuckarooWidgetBase in
+    #     an incompatible manner -- parameter 2 name mismatch: base is
+    #     df_processing_func, override is expr_processing_func"
+    #   - on XorqBuckarooInfiniteWidget: "Base classes ... define method
+    #     add_processing in incompatible way" (the same mismatch, reached
+    #     through its two base classes).
+    #
+    # The checker is right in principle: code holding a BuckarooWidgetBase
+    # may call add_processing(df_processing_func=f), and on a xorq widget
+    # that raises TypeError because this override's parameter is named
+    # expr_processing_func. Positional calls, add_processing(f), work either
+    # way.
+    #
+    # add_processing is public widget API, so every fix changes what callers
+    # may write:
+    #   1. Rename this parameter to df_processing_func. Breaks any caller
+    #      passing expr_processing_func=... to a xorq widget.
+    #   2. Make the base parameter positional-only
+    #      (def add_processing(self, df_processing_func, /)). Keeps this
+    #      name, but breaks any caller passing df_processing_func=... to a
+    #      pandas/polars widget.
+    #   3. Keep both names working: accept either keyword here, or add
+    #      "# pyright: ignore[reportIncompatibleMethodOverride]" and live
+    #      with the mismatch.
+    #
+    # Before picking one, check how tallyman (and any other downstream
+    # consumer) calls add_processing: positionally, or by which keyword. If
+    # every call is positional, option 2 is the cleanest.
     def add_processing(self, expr_processing_func):
         """Register a postprocessing function and switch to it.
 
