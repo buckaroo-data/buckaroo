@@ -193,7 +193,11 @@ export const TypedHistogramCell = ({histogramArr, context, className, colorSchem
                     isAnimationActive={false}
                 >
                     {histogramArr.map((bar, i) => (
-                        <Cell key={`population-${i}`} fill={bar.color ?? barFill} />
+                        <Cell
+                            key={`population-${i}`}
+                            fill={bar.color ?? barFill}
+                            stroke={bar.color ?? barStroke}
+                        />
                     ))}
                 </Bar>
                 <Bar
