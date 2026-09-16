@@ -45,7 +45,7 @@ jobs:
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
@@ -82,7 +82,7 @@ jobs:
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
@@ -374,7 +374,7 @@ jobs:
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
@@ -412,7 +412,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 9.10.0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
@@ -450,7 +450,7 @@ jobs:
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
@@ -554,7 +554,7 @@ jobs:
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
@@ -591,7 +591,7 @@ jobs:
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
@@ -630,7 +630,7 @@ jobs:
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
@@ -699,7 +699,7 @@ jobs:
         with:
           version: 9.10.0
       - name: Setup Node.js with pnpm cache
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           cache: 'pnpm'
           cache-dependency-path: 'packages/pnpm-lock.yaml'
