@@ -7,7 +7,7 @@ import warnings
 import pandas as pd
 from traitlets import Unicode, Any, observe, Dict
 
-from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, SDType
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, ErrDict, SDType
 from ..serialization_utils import pd_to_obj, sd_to_parquet_b64, project_sd
 from buckaroo.pluggable_analysis_framework.utils import (filter_analysis)
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
@@ -690,7 +690,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     ### start summary stats block
     #TAny closer to some error type
     @override
-    def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, TDict[str, TAny]]:
+    def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, ErrDict]:
         stats = self.DFStatsClass(
             processed_df,
             self.analysis_klasses,
@@ -722,7 +722,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         keep = wire_stat_keys(self.df_display_klasses.values(), self.pinned_rows)
         return sd_to_parquet_b64(project_sd(sd, keep))
 
-    def _df_to_obj(self, df: DataFrameT) -> TDict[str, TAny]:
+    def _df_to_obj(self, df: DataFrameT) -> List[TDict[str, TAny]]:
         return pd_to_obj(self.sampling_klass.serialize_sample(df))
     
     def add_analysis(self, analysis_klass:Type[ColAnalysis]) -> None:

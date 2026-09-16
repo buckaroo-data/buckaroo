@@ -18,6 +18,7 @@ server only imports this when ``/load`` is called with
 """
 import os
 import traceback
+from typing import Any, Mapping
 from io import BytesIO
 
 import polars as pl
@@ -93,7 +94,7 @@ def create_polars_dataflow(df, column_config_overrides=None, extra_grid_config=N
 
 def handle_infinite_request_buckaroo_polars(
     dataflow: PolarsServerDataflow, payload_args: dict, search_string: str = ""
-) -> tuple[dict, bytes]:
+) -> tuple[Mapping[str, Any], bytes]:
     """Polars analogue of :func:`handle_infinite_request_buckaroo`.
 
     ``search_string`` is the live-typed filter (#838) — applied as a

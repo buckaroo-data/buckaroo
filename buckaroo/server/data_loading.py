@@ -1,7 +1,7 @@
 import os
 import traceback
 from io import BytesIO
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Mapping
 import pandas as pd
 if TYPE_CHECKING:
     import polars as pl
@@ -89,7 +89,7 @@ def get_buckaroo_display_state(dataflow: ServerDataflow) -> dict:
 
 def handle_infinite_request_buckaroo(
     dataflow: ServerDataflow, payload_args: dict, search_string: str = ""
-) -> tuple[dict, bytes]:
+) -> tuple[Mapping[str, Any], bytes]:
     """Infinite scroll handler using the dataflow's processed_df and merged_sd.
 
     ``search_string`` (#838) is a live-typing filter applied here on top
@@ -180,7 +180,7 @@ def get_display_state_lazy(ldf: "pl.LazyFrame") -> tuple[dict, dict, dict]:
 
 
 def handle_infinite_request_lazy(ldf: "pl.LazyFrame", orig_to_rw: dict, rw_to_orig: dict, total_rows: int,
-        payload_args: dict) -> tuple[dict, bytes]:
+        payload_args: dict) -> tuple[Mapping[str, Any], bytes]:
     """Serve an infinite-scroll slice from a Polars LazyFrame."""
     import polars as pl
     from buckaroo.server.window import clamp_window
@@ -287,7 +287,7 @@ def get_metadata(df: pd.DataFrame, path: str) -> dict:
     return {"path": path, "rows": len(df), "columns": columns}
 
 
-def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[dict, bytes]:
+def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[Mapping[str, Any], bytes]:
     """Extract of BuckarooInfiniteWidget._handle_payload_args — transport-agnostic.
 
     The sort column name from the JS client uses renamed column names

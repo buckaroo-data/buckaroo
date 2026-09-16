@@ -5,6 +5,7 @@ from typing_extensions import NotRequired, TypeAlias
 
 import pandas as pd
 from buckaroo.df_util import ColIdentifier, old_col_new_col, to_chars
+from buckaroo.dataflow.df_types import DataFrameLike
 from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis, ColMeta, SDType)
 
 logger = logging.getLogger()
@@ -248,7 +249,7 @@ def merge_column(base, new):
 OverrideColumnConfig:TypeAlias = Dict[ColIdentifier, BaseColumnConfig]
 
 def merge_column_config(styled_column_config:List[ColumnConfig],
-                        df:pd.DataFrame,
+                        df:DataFrameLike,
     overide_column_configs:OverrideColumnConfig) -> List[ColumnConfig]:
 
     """
@@ -291,7 +292,7 @@ def rewrite_override_col_references(rewrites: Dict[ColIdentifier, ColIdentifier]
     return obj
 
 
-def merge_sd_overrides(final_sd:SDType, df:pd.DataFrame, overrides:SDType) -> SDType:
+def merge_sd_overrides(final_sd:SDType, df:DataFrameLike, overrides:SDType) -> SDType:
     """
       this is psecifically built for places where keys from the original dataframe will be used in 'overrides'
       those should be mapped onto the rewritten col_name
