@@ -3,6 +3,7 @@
   "pythonVersion": "3.11",
   "reportMissingImports": "error",
   "reportMissingTypeStubs": false,
+  "reportPrivateImportUsage": false,
   "include": [
     "buckaroo/dataflow/df_types.py",
     "buckaroo/dataflow/abc_dataflow.py",
