@@ -11,6 +11,7 @@ export interface HistogramBar {
     'longtail'?: number;
     'unique'?: number;
     'population'?: number;
+    'color'?: string;
 }
 export declare const HistogramCell: (props: {
     api: GridApi;
