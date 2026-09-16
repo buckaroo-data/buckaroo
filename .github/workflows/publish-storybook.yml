@@ -21,7 +21,7 @@ jobs:
     name: Python / Test
     permissions:
       contents: write
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

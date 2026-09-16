@@ -1,4 +1,0 @@
-self-hosted-runner:
-  labels:
-    - depot-ubuntu-latest
-    - depot-windows-2025
