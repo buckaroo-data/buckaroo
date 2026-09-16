@@ -11,7 +11,13 @@ logger = logging.getLogger()
 
 # Cell Renderer Types
 HistogramDisplayerA = TypedDict('HistogramDisplayerA', {'displayer': Literal["histogram"]})
-ChartDisplayerA = TypedDict('ChartDisplayerA', {'displayer': Literal["chart"]})
+ChartColors = TypedDict('ChartColors', {
+    'custom1_color': str,
+    'custom2_color': str,
+    'custom3_color': str})
+ChartDisplayerA = TypedDict('ChartDisplayerA', {
+    'displayer': Literal["chart"],
+    'colors': NotRequired[ChartColors]})
 LinkifyDisplayerA = TypedDict('LinkifyDisplayerA', {'displayer': Literal["linkify"]})
 BooleanCheckboxDisplayerA = TypedDict('BooleanCheckboxDisplayerA', {'displayer': Literal["boolean_checkbox"]})
 Base64PNGImageDisplayerA = TypedDict('Base64PNGImageDisplayerA', {'displayer': Literal["Base64PNGImageDisplayer"]})
@@ -80,7 +86,7 @@ FormatterArgs = Union[
 DisplayerArgs = Union[FormatterArgs, CellRendererArgs]
 
 # Color mapping types
-ColorMap = Union[Literal["BLUE_TO_YELLOW", "DIVERGING_RED_WHITE_BLUE"], List[str]]
+ColorMap = Union[Literal["BLUE_TO_YELLOW", "DIVERGING_RED_WHITE_BLUE", "DIVERGING_BLUE_WHITE_RED"], List[str]]
 
 ColorMapRules = TypedDict('ColorMapRules', {
     'color_rule': Literal["color_map"],
@@ -101,11 +107,17 @@ ColorFromColumn = TypedDict('ColorFromColumn', {
     'color_rule': Literal["color_from_column"],
     'val_column': str})
 
+# Constant color regardless of data value, e.g. to mark join-key columns.
+ColorStaticRules = TypedDict('ColorStaticRules', {
+    'color_rule': Literal["color_static"],
+    'color': str})
+
 ColorMappingConfig = Union[
     ColorMapRules,
     ColorWhenNotNullRules,
     ColorFromColumn,
-    ColorCategoricalRules
+    ColorCategoricalRules,
+    ColorStaticRules
 ]
 
 # Tooltip types

@@ -33,6 +33,7 @@ jest.mock("recharts", () => {
         Area: () => null,
         Bar: () => null,
         Line: () => null,
+        YAxis: () => null,
         Tooltip: () => null,
         ComposedChart: ({ children }: any) =>
             React.createElement("div", { "data-testid": "composedchart-mock" }, children),

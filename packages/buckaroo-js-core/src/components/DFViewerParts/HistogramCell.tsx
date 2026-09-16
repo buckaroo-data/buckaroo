@@ -2,7 +2,7 @@ import * as _ from "lodash-es";
 import React from "react";
 import { createPortal } from "react-dom";
 
-import { Bar, BarChart, Tooltip } from "recharts";
+import { Bar, BarChart, Cell, Tooltip } from "recharts";
 import { formatTooltipValue, getChartColors } from "./ChartCell";
 import { ColDef, Column, Context, GridApi } from "ag-grid-community";
 import { useColorScheme } from "../useColorScheme";
@@ -52,6 +52,9 @@ export interface HistogramBar {
     'longtail'?: number;
     'unique'?:number;
     'population'?: number;
+    // Optional per-bar fill for the population bar, e.g. so a diff view's
+    // change histogram shares the color key of the cells it summarizes.
+    'color'?: string;
 }
 
 
@@ -188,7 +191,15 @@ export const TypedHistogramCell = ({histogramArr, context, className, colorSchem
                     fill={barFill}
                     stackId="stack"
                     isAnimationActive={false}
-                />
+                >
+                    {histogramArr.map((bar, i) => (
+                        <Cell
+                            key={`population-${i}`}
+                            fill={bar.color ?? barFill}
+                            stroke={bar.color ?? barStroke}
+                        />
+                    ))}
+                </Bar>
                 <Bar
                     dataKey="tail"
                     stroke={barStroke}

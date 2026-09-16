@@ -75,8 +75,10 @@ jest.mock("recharts", () => {
         Area: () => null,
         Bar: () => null,
         BarChart: stub,
+        Cell: () => null,
         ComposedChart: stub,
         Line: () => null,
+        YAxis: () => null,
         Tooltip: () => null,
     };
 });
