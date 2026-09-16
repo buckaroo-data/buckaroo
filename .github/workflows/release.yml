@@ -19,7 +19,7 @@ permissions:
 jobs:
   release:
     name: Release
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: pypi
     outputs:
@@ -191,8 +191,7 @@ jobs:
     needs: release
     if: needs.release.result == 'success'
     # GitHub-hosted runner required: npm Trusted Publishing OIDC is only
-    # supported on github-hosted runners (Depot's depot-ubuntu-latest is
-    # treated as self-hosted and won't receive npm OIDC credentials).
+    # supported on github-hosted runners.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: npm
