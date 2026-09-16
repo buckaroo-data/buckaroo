@@ -41,7 +41,9 @@ StringDisplayerA = TypedDict('StringDisplayerA', {
 FloatDisplayerA = TypedDict('FloatDisplayerA', {
     'displayer': Literal["float"],
     'min_fraction_digits': int,
-    'max_fraction_digits': int})
+    'max_fraction_digits': int,
+    'prefix': NotRequired[str],
+    'suffix': NotRequired[str]})
 
 DatetimeDefaultDisplayerA = TypedDict('DatetimeDefaultDisplayerA', {
     'displayer': Literal["datetimeDefault"]})
@@ -54,10 +56,14 @@ DatetimeLocaleDisplayerA = TypedDict('DatetimeLocaleDisplayerA', {
 IntegerDisplayerA = TypedDict('IntegerDisplayerA', {
     'displayer': Literal["integer"],
     'min_digits': int,
-    'max_digits': int})
+    'max_digits': int,
+    'prefix': NotRequired[str],
+    'suffix': NotRequired[str]})
 
 CompactNumberDisplayerA = TypedDict('CompactNumberDisplayerA', {
-    'displayer': Literal["compact_number"]})
+    'displayer': Literal["compact_number"],
+    'prefix': NotRequired[str],
+    'suffix': NotRequired[str]})
 
 FormatterArgs = Union[
     ObjDisplayerA,
