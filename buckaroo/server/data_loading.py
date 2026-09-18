@@ -306,8 +306,8 @@ def handle_infinite_request(df: pd.DataFrame, payload_args: dict) -> tuple[Mappi
         orig_sort_col = rename_map.get(sort, sort)
         ascending = payload_args.get("sort_direction") == "asc"
         sorted_df = df.sort_values(by=[orig_sort_col], ascending=ascending)
-        slice_df = sorted_df[start:end]
+        slice_df = sorted_df.iloc[start:end]
     else:
-        slice_df = df[start:end]
+        slice_df = df.iloc[start:end]
 
     return make_infinite_resp(payload_args, len(df), to_parquet(slice_df))
