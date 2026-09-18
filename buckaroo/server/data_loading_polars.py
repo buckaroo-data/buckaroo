@@ -18,6 +18,7 @@ server only imports this when ``/load`` is called with
 """
 import os
 import traceback
+from typing import Any, Mapping
 from io import BytesIO
 
 import polars as pl
@@ -39,7 +40,7 @@ class PolarsServerSampling(PLSampling):
     serialize_limit = -1  # infinite mode — no per-page sample cap
 
 
-class PolarsServerDataflow(CustomizableDataflow):
+class PolarsServerDataflow(CustomizableDataflow[pl.DataFrame]):
     """Headless polars dataflow matching ``PolarsBuckarooInfiniteWidget``."""
     analysis_klasses = local_analysis_klasses
     autocleaning_klass = PandasAutocleaning
@@ -93,7 +94,7 @@ def create_polars_dataflow(df, column_config_overrides=None, extra_grid_config=N
 
 def handle_infinite_request_buckaroo_polars(
     dataflow: PolarsServerDataflow, payload_args: dict, search_string: str = ""
-) -> tuple[dict, bytes]:
+) -> tuple[Mapping[str, Any], bytes]:
     """Polars analogue of :func:`handle_infinite_request_buckaroo`.
 
     ``search_string`` is the live-typed filter (#838) — applied as a

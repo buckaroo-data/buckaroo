@@ -27,6 +27,7 @@ from .dataflow.column_executor_dataflow import ColumnExecutorDataflow
 from .customizations.polars_analysis import PL_Analysis_Klasses, NOT_STRUCTS
 from buckaroo.pluggable_analysis_framework.utils import json_postfix
 from buckaroo.styling_helpers import obj_, pinned_histogram
+from .pluggable_analysis_framework.col_analysis import ColAnalysis
 from .pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
 from .df_util import old_col_new_col
 from .serialization_utils import sd_to_parquet_b64, send_infinite_resp
@@ -537,7 +538,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
     def __init__(
         self,
         ldf: pl.LazyFrame, *,
-        analysis_klasses: Optional[List[Type[PolarsAnalysis]]] = None,
+        analysis_klasses: Optional[List[Type[ColAnalysis]]] = None,
         debug: bool = False,
         column_executor_class: Optional[type] = None,
         file_path: Optional[str] = None,
@@ -805,7 +806,7 @@ class LazyInfinitePolarsBuckarooWidget(anywidget.AnyWidget):
                 [])
             logger.exception("error handling payload args: %s", e)
 
-    def add_analysis(self, analysis_klass: Type[PolarsAnalysis],
+    def add_analysis(self, analysis_klass: Type[ColAnalysis],
             pinned_row_configs: Optional[List[Dict[str, Any]]] = None) -> None:
         """
         Add a new analysis class to the widget and trigger recomputation.

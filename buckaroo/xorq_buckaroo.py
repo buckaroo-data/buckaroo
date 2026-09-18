@@ -14,9 +14,12 @@ import logging
 import traceback
 import weakref
 from io import BytesIO
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from xorq.vendor.ibis.expr.types.relations import Table as XorqExpr
 import pyarrow as pa
 import pyarrow.parquet as pq
 from traitlets import Unicode
@@ -129,7 +132,10 @@ class XorqAutocleaning(PandasAutocleaning):
     """
 
 
-class XorqDataflow(CustomizableDataflow):
+# A post-processor may return a pandas DataFrame instead of an expression,
+# and a failing one yields a pandas error frame, so the carried frame is
+# either type.
+class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
     """Dataflow specialised for ibis/xorq expression inputs.
 
     Two pieces of behaviour differ from the pandas dataflow:
@@ -156,7 +162,7 @@ class XorqDataflow(CustomizableDataflow):
             'rows_shown': rows_shown,
             'total_rows': _expr_count(self.orig_df)}
 
-    def _get_summary_sd(self, processed_df):
+    def _get_summary_sd(self, processed_df: "XorqExpr | pd.DataFrame"):
         if _is_pandas(processed_df):
             # The error path (and any postprocessor that returns a pandas
             # DataFrame) doesn't go through XorqStatPipeline. Return a
@@ -168,8 +174,11 @@ class XorqDataflow(CustomizableDataflow):
                     'rewritten_col_name': rewritten_col}
             return empty, {}
         cache_storage = getattr(self, 'cache_storage', None)
+        # The owning widget injects XorqDfStatsV2 as DFStatsClass (via its
+        # InnerDataFlow subclass); the cast exposes cache_run_stats() below.
+        stats_klass = cast("type[XorqDfStatsV2]", self.DFStatsClass)
         with perf_log.perf_span("firstpull.summary_stats") as span:
-            stats = self.DFStatsClass(
+            stats = stats_klass(
                 processed_df, self.analysis_klasses, self.df_name,
                 debug=self.debug, cache_storage=cache_storage,
                 skip_columns=getattr(self, 'skip_stat_columns', None))
@@ -241,7 +250,7 @@ class XorqBuckarooWidget(BuckarooWidget):
     def _build_error_dataframe(self, e):
         return pd.DataFrame({'err': [str(e)]})
 
-    def add_processing(self, expr_processing_func):
+    def add_processing(self, expr_processing_func, /):
         """Register a postprocessing function and switch to it.
 
         ``expr_processing_func`` takes the current expression and returns
