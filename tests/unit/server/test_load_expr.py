@@ -950,9 +950,34 @@ class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(project_root, ignore_errors=True)
 
 
+def _bake_from_build(build_path, host_cache):
+    """Load the build with every cache node pointed at ``host_cache`` and
+    execute it, the way tallyman bakes its compute cache (load_expr +
+    ``portable.rewrite_cache_dirs``). Baking the in-memory expression instead
+    would not do on xorq>=0.4: the build copies local reads into
+    ``reads/``, so the loaded graph — and every cache key — differs from the
+    in-memory one. Kept independent of ``xorq_loading.redirect_cache_dir`` so
+    the test does not grade the redirect against itself."""
+    from attr import evolve
+    from xorq.common.utils.graph_utils import replace_nodes
+    from xorq.expr.relations import CachedNode
+
+    def replacer(node, kwargs):
+        if kwargs:
+            node = node.__recreate__(kwargs)
+        if isinstance(node, CachedNode):
+            cache = evolve(node.cache, storage=evolve(node.cache.storage, base_path=host_cache))
+            return node.__recreate__(dict(zip(node.__argnames__, node.__args__)) | {"cache": cache})
+        return node
+
+    baked = replace_nodes(replacer, xo.load_expr(build_path)).to_expr()
+    baked.execute()
+    return baked
+
+
 def _build_cached_expr_dir(root):
-    """Bake a two-level cached expression under ``<root>/host_cache`` and
-    build it to ``<root>/builds``, the way an embedder (tallyman) does.
+    """Build a two-level cached expression to ``<root>/builds`` and bake its
+    snapshots under ``<root>/host_cache``, as an embedder (tallyman) does.
 
     The aggregate's cache node wraps a filter that is itself cached, so the
     outer node's parent carries a nested ``CachedNode``. Returns
@@ -969,10 +994,9 @@ def _build_cached_expr_dir(root):
     t = xo.deferred_read_parquet(str(root / "t.parquet"))
     inner = t.filter(t.v > 0).cache(cache=cache())
     expr = inner.group_by("g").agg(s=inner.v.sum()).cache(cache=cache())
-    expr.execute()
-    op = expr.op()
-    outer_snapshot = Path(op.cache.storage.get_path(op.cache.calc_key(op.parent)))
     build_path = str(xo.build_expr(expr, builds_dir=root / "builds"))
+    op = _bake_from_build(build_path, host_cache).op()
+    outer_snapshot = Path(op.cache.storage.get_path(op.cache.calc_key(op.parent)))
     return build_path, host_cache, outer_snapshot
 
 
@@ -996,14 +1020,21 @@ class TestLoadExprCacheDir(tornado.testing.AsyncHTTPTestCase):
         self.root = tempfile.mkdtemp()
         # Stand in for ~/.cache/xorq so a miss is observable and never
         # writes into the real user cache.
+        # xorq <0.4 binds get_xorq_cache_dir into caching.storage at import;
+        # later versions look it up in caching_utils at call time.
+        from pathlib import Path
+        import xorq.caching.storage
         self.default_cache = os.path.join(self.root, "default_cache")
-        self._default_patch = patch(
-            "xorq.caching.storage.get_xorq_cache_dir",
-            return_value=__import__("pathlib").Path(self.default_cache))
-        self._default_patch.start()
+        targets = ["xorq.common.utils.caching_utils.get_xorq_cache_dir"]
+        if hasattr(xorq.caching.storage, "get_xorq_cache_dir"):
+            targets.append("xorq.caching.storage.get_xorq_cache_dir")
+        self._default_patches = [patch(t, return_value=Path(self.default_cache)) for t in targets]
+        for p in self._default_patches:
+            p.start()
 
     def tearDown(self):
-        self._default_patch.stop()
+        for p in self._default_patches:
+            p.stop()
         shutil.rmtree(self.root, ignore_errors=True)
         super().tearDown()
 

@@ -20,11 +20,6 @@ try:
 except ImportError:  # Windows — no flock; missing snapshots heal unlocked
     fcntl = None
 
-from attr import evolve
-from xorq.caching import ParquetStorage
-from xorq.common.utils.graph_utils import replace_nodes, walk_nodes
-from xorq.expr.relations import CachedNode
-
 from buckaroo.server.git_state_guard import install_git_state_guard
 from buckaroo.server.window import clamp_window
 from buckaroo.serialization_utils import make_infinite_resp
@@ -141,6 +136,12 @@ def redirect_cache_dir(expr, cache_dir):
     hashes its parent's storage, the outer node then misses too.
     ``replace_nodes`` descends those fields, so every node in the closure is
     redirected."""
+    # Lazy, like every xorq import here: tests import this module without
+    # buckaroo[xorq] installed.
+    from attr import evolve  # noqa: PLC0415
+    from xorq.caching import ParquetStorage  # noqa: PLC0415
+    from xorq.common.utils.graph_utils import replace_nodes  # noqa: PLC0415
+    from xorq.expr.relations import CachedNode  # noqa: PLC0415
     cache_dir = Path(cache_dir)
 
     def replacer(node, kwargs):
@@ -186,6 +187,9 @@ def heal_missing_snapshots(expr):
 
     Nodes are healed descendants-first, so an outer node's write reads the
     inner snapshots rather than writing them itself, unlocked."""
+    from xorq.caching import ParquetStorage  # noqa: PLC0415
+    from xorq.common.utils.graph_utils import walk_nodes  # noqa: PLC0415
+    from xorq.expr.relations import CachedNode  # noqa: PLC0415
     for node in reversed(walk_nodes((CachedNode,), expr)):
         storage = node.cache.storage
         if not isinstance(storage, ParquetStorage):
