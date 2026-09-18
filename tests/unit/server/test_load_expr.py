@@ -724,9 +724,9 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
             from buckaroo.server import xorq_loading
             original = xorq_loading.load_expr_build_dir
             call_count = []
-            def counting_loader(bd):
+            def counting_loader(bd, **kwargs):
                 call_count.append(bd)
-                return original(bd)
+                return original(bd, **kwargs)
 
             with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
                 await _post(self.get_http_port(), "/load_expr",
@@ -750,9 +750,9 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
             from buckaroo.server import xorq_loading
             original = xorq_loading.load_expr_build_dir
             calls = []
-            def counting_loader(bd):
+            def counting_loader(bd, **kwargs):
                 calls.append(bd)
-                return original(bd)
+                return original(bd, **kwargs)
 
             with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
                 await _post(self.get_http_port(), "/load_expr",
@@ -783,9 +783,9 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
             from buckaroo.server import xorq_loading
             original = xorq_loading.load_expr_build_dir
             calls = []
-            def counting_loader(bd):
+            def counting_loader(bd, **kwargs):
                 calls.append(bd)
-                return original(bd)
+                return original(bd, **kwargs)
 
             with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
                 await _post(self.get_http_port(), "/load_expr",

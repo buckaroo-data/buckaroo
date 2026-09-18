@@ -421,6 +421,11 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session_id = body.get("session") or uuid.uuid4().hex
         no_browser = bool(body.get("no_browser", False))
         force_reload = bool(body.get("force_reload", False))
+        # Directory the build's cache nodes read and write their snapshots in
+        # (#972). xorq serializes only a cache node's relative path, so without
+        # it every node resolves under ~/.cache/xorq and an embedder's baked
+        # snapshots are never read. Unset keeps xorq's default.
+        cache_dir = body.get("cache_dir")
 
         # Config-bearing fields that change how the result is computed or
         # rendered. If the caller passes any of these on a warm POST we must
@@ -451,7 +456,8 @@ class LoadExprHandler(tornado.web.RequestHandler):
         sessions = self.application.settings["sessions"]
         existing = sessions.get(session_id)
         if (not force_reload and not has_config and existing
-                and existing.build_dir == build_dir and existing.metadata):
+                and existing.build_dir == build_dir
+                and existing.cache_dir == cache_dir and existing.metadata):
             # The pipeline is skipped, but the refreshed page still opens a new
             # WS and pulls a fresh time-to-first-rows. Re-arm first-pull telemetry
             # on the existing session — rebind this request's sink and reset the
@@ -501,7 +507,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 # The harness reads "expression build" as just this call, so it
                 # gets its own span rather than being outer-minus-inner residual.
                 with perf_log.perf_span("firstpull.expr_load", session=session_id):
-                    expr = xorq_loading.load_expr_build_dir(build_dir)
+                    expr = xorq_loading.load_expr_build_dir(build_dir, cache_dir=cache_dir)
                 extra_klasses = (
                     xorq_loading.load_project_stat_klasses(project_root)
                     + xorq_loading.load_project_post_processing_klasses(project_root)
@@ -540,6 +546,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.backend = "xorq"
         session.expr = expr
         session.build_dir = build_dir
+        session.cache_dir = cache_dir
         session.project_root = project_root
         session.tele_sink = tele_sink
         session.xorq_dataflow = xorq_dataflow
