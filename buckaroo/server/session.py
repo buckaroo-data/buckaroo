@@ -33,6 +33,10 @@ class SessionState:
     xorq_dataflow: Any = None  # XorqServerDataflow when backend="xorq"
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     build_dir: Optional[str] = None  # xorq build dir, stored for /reload_expr
+    # /load_expr cache_dir (#972): where the expr's cache nodes resolve. The
+    # redirect is baked into ``expr``, so /reload_expr keeps it by reusing the
+    # expr; stored so a warm re-POST with a different cache_dir reloads.
+    cache_dir: Optional[str] = None
     project_root: Optional[str] = None  # project root for klass discovery
     # Companion telemetry sink (#943): a fire-and-forget POST callable, built
     # once from the /load_expr payload's telemetry_url on the IOLoop (where

@@ -9,10 +9,16 @@ installed still imports cleanly.
 from __future__ import annotations
 
 import builtins
+import contextlib
 import inspect
 import logging
 import traceback
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows — no flock; missing snapshots heal unlocked
+    fcntl = None
 
 from buckaroo.server.git_state_guard import install_git_state_guard
 from buckaroo.server.window import clamp_window
@@ -78,7 +84,7 @@ class XorqServerDataflow(XorqDataflow):
         super().__init__(expr, *args, **kwargs)
 
 
-def load_expr_build_dir(build_dir: str):
+def load_expr_build_dir(build_dir: str, cache_dir=None):
     """Rehydrate an ibis expression from a xorq build directory.
 
     Wrapper around ``xorq.api.load_expr``. Build dirs that contain
@@ -93,7 +99,15 @@ def load_expr_build_dir(build_dir: str):
     (cached in ``xorq.config.options.default_backend``). Calling it here
     pre-warms that singleton so xorq's own internal paths (e.g.
     ``deferred_reads_to_memtables``) reuse the same SessionContext on
-    every call rather than minting a new one."""
+    every call rather than minting a new one.
+
+    xorq serializes only a cache node's ``relative_path``, so a loaded
+    ``CachedNode`` resolves under ``~/.cache/xorq`` whatever directory the
+    build was baked into. ``cache_dir`` points every parquet-backed cache
+    node at that directory instead (``redirect_cache_dir``) and heals any
+    snapshot that is missing there under a lock (``heal_missing_snapshots``),
+    so an embedder's baked snapshots are read rather than recomputed into a
+    second copy (#972). Unset, xorq's default resolution is unchanged."""
     from xorq.api import load_expr  # noqa: PLC0415  (lazy, see module docstring)
     from xorq.vendor import ibis  # noqa: PLC0415
     from xorq import config as xorq_config  # noqa: PLC0415
@@ -105,7 +119,87 @@ def load_expr_build_dir(build_dir: str):
     # Also set the ibis-vendor option for any ibis-internal paths that use it.
     if ibis.options.default_backend is None:
         ibis.options.default_backend = con
-    return load_expr(build_dir)
+    expr = load_expr(build_dir)
+    if cache_dir:
+        expr = redirect_cache_dir(expr, cache_dir)
+        heal_missing_snapshots(expr)
+    return expr
+
+
+def redirect_cache_dir(expr, cache_dir):
+    """Point every parquet-backed ``CachedNode`` at ``cache_dir``.
+
+    xorq's own ``load_expr(cache_dir=...)`` does this with
+    ``expr.op().replace``, which does not descend into ``Expr``-valued fields
+    (``CachedNode.parent``, ``RemoteTable.remote_expr``). A cache node nested
+    in another's parent keeps ``base_path=None`` — and because a cache key
+    hashes its parent's storage, the outer node then misses too.
+    ``replace_nodes`` descends those fields, so every node in the closure is
+    redirected."""
+    # Lazy, like every xorq import here: tests import this module without
+    # buckaroo[xorq] installed.
+    from attr import evolve  # noqa: PLC0415
+    from xorq.caching import ParquetStorage  # noqa: PLC0415
+    from xorq.common.utils.graph_utils import replace_nodes  # noqa: PLC0415
+    from xorq.expr.relations import CachedNode  # noqa: PLC0415
+    cache_dir = Path(cache_dir)
+
+    def replacer(node, kwargs):
+        if kwargs:
+            node = node.__recreate__(kwargs)
+        if isinstance(node, CachedNode) and isinstance(node.cache.storage, ParquetStorage):
+            cache = evolve(node.cache, storage=evolve(node.cache.storage, base_path=cache_dir))
+            return node.__recreate__(dict(zip(node.__argnames__, node.__args__)) | {"cache": cache})
+        return node
+
+    return replace_nodes(replacer, expr).to_expr()
+
+
+@contextlib.contextmanager
+def _snapshot_lock(snapshot_path: Path):
+    """Exclusive ``flock`` on ``<snapshot_path>.lock`` for the duration.
+
+    The lock file is left in place: unlinking it would let a waiter hold a
+    lock on an inode a newcomer no longer sees."""
+    if fcntl is None:
+        yield
+        return
+    lock_path = snapshot_path.with_name(snapshot_path.name + ".lock")
+    with open(lock_path, "a+") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def heal_missing_snapshots(expr):
+    """Write each parquet cache node's snapshot that is missing, under a lock.
+
+    With a shared ``cache_dir`` the server is a second writer into the
+    embedder's cache. ``ParquetStorage.put`` writes through a fixed
+    ``<key>.parquet.tmp`` with no lock, so two cold writers of one key can
+    leave a corrupt file that ``exists()`` then reports as a hit. Each missing
+    snapshot is therefore written while holding an exclusive ``flock`` on
+    ``<snapshot path>.lock`` (e.g. ``<cache_dir>/parquet/<key>.parquet.lock``),
+    and existence is re-checked after acquiring it. Embedders writing into the
+    same directory should take the same lock around their own writes.
+
+    Nodes are healed descendants-first, so an outer node's write reads the
+    inner snapshots rather than writing them itself, unlocked."""
+    from xorq.caching import ParquetStorage  # noqa: PLC0415
+    from xorq.common.utils.graph_utils import walk_nodes  # noqa: PLC0415
+    from xorq.expr.relations import CachedNode  # noqa: PLC0415
+    for node in reversed(walk_nodes((CachedNode,), expr)):
+        storage = node.cache.storage
+        if not isinstance(storage, ParquetStorage):
+            continue
+        key = node.cache.calc_key(node.parent)
+        if storage.exists(key):
+            continue
+        with _snapshot_lock(Path(storage.get_path(key))):
+            if not storage.exists(key):
+                node.cache.set_default(node.parent, node.parent.op())
 
 
 def get_xorq_metadata(xorq_dataflow: XorqServerDataflow, build_dir: str) -> dict:
