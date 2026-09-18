@@ -1,6 +1,6 @@
 import copy
 import logging
-from typing import Iterable, TypedDict, Union, List, Dict, Any, Literal, Optional
+from typing import Iterable, TypedDict, Union, List, Dict, Any, Literal
 from typing_extensions import NotRequired, TypeAlias
 
 import pandas as pd
@@ -434,10 +434,35 @@ class StylingAnalysis(ColAnalysis):
     summary_stats_key: str = 'all_stats'
 
     @classmethod
-    def default_styling(cls, col_name:Union[Iterable[str], str], orig_col_name:Optional[ColIdentifier]=None, /) -> ColumnConfig:
-        if orig_col_name is None:
-            orig_col_name = col_name
-        return cls.fix_column_config(col_name, orig_col_name, {'displayer_args': {'displayer': 'obj'}})
+    def default_styling(cls, col_name:Union[Iterable[str], str], /) -> ColumnConfig:
+        return cls.fix_column_config(col_name, col_name, {'displayer_args': {'displayer': 'obj'}})
+
+    @classmethod
+    def style_column_with_fallback(cls, col:str, col_meta:ColMeta, orig_col_name:ColIdentifier) -> ColumnConfig:
+        """Try each style_column in the MRO, most specific first.
+
+        A subclass that raises (or returns something that isn't a column
+        config) falls back to its parent's styling instead of bare obj, so a
+        bug in an extension only costs that column the extension's tweaks.
+        Every attempt gets its own copy of col_meta so edits made by a
+        failing style_column don't leak into the next attempt or the sd.
+        """
+        for klass in cls.__mro__:
+            if 'style_column' not in klass.__dict__:
+                continue
+            style_column = klass.__dict__['style_column'].__get__(None, cls)
+            try:
+                return cls.fix_column_config(col, orig_col_name, style_column(col, dict(col_meta)))
+            except Exception as exc:
+                if len(col_meta) == 0 and len(cls.requires_summary) > 0:
+                    # this is called in instantiation without col_meta, and that can cause failures
+                    # we want to just swallow these errors and not warn
+                    continue
+                # something unexpected happened here, warn so that the developer is notified
+                logger.warning(f"Warning, styling failed from {klass.__qualname__}.style_column (via {cls}) on column {col} with col_meta {col_meta}, falling back to the parent class")
+                logger.warning(exc)
+        # StylingAnalysis.style_column can't raise, so this is only reachable if it was patched out
+        return cls.fix_column_config(col, orig_col_name, {'displayer_args': {'displayer': 'obj'}})
 
     @classmethod
     def get_dfviewer_config(cls, sd:SDType, df:pd.DataFrame) -> DFViewerConfig:
@@ -459,30 +484,17 @@ class StylingAnalysis(ColAnalysis):
                 skip_orig_cols.append(col)
 
         rewrites= dict( old_col_new_col(df))
+        rewritten_to_orig = {v: k for k, v in rewrites.items()}
         for col, col_meta in sd.items():
-            try:
-                orig_col_name = col_meta.get('orig_col_name')
-                if orig_col_name in skip_orig_cols or col_meta.get('merge_rule', None) == 'hidden':
-
-                    continue
-                #it actually gets tuples here
-                base_style: ColumnConfig = cls.fix_column_config(col, orig_col_name,  cls.style_column(col, col_meta))
-            except Exception as exc:
-                if len(col_meta) == 0 and len(cls.requires_summary) > 0:
-                    # this is called in instantiation without col_meta, and that can cause failures
-                    # we want to just swallow these errors and not warn
-                    pass
-                else:
-                    # something unexpected happened here, warn so that the develoepr is notified
-                    logger.warning(f"Warning, styling failed from {cls} on column {col} with col_meta {col_meta} using default_styling instead")
-                    logger.warning(exc)
-                # Always provide a style, not providing a style
-                # results in no display which is a very bad user
-                # experience
-                # keep the real header so a failure only costs this column its styling
-                base_style = cls.default_styling(col, col_meta.get('orig_col_name'))
-
-
+            if col_meta.get('orig_col_name') in skip_orig_cols or col_meta.get('merge_rule', None) == 'hidden':
+                continue
+            # the column's identity (header / col_path) is the framework's job, not the styling
+            # class's, so it's resolved outside of styling and survives any styling failure
+            orig_col_name = col_meta.get('orig_col_name')
+            if orig_col_name is None:
+                orig_col_name = rewritten_to_orig.get(col, col)
+            #it actually gets tuples here
+            base_style: ColumnConfig = cls.style_column_with_fallback(col, col_meta, orig_col_name)
 
             if 'column_config_override' in col_meta:
                 #column_config_override, sent by the instantiation, gets set later
