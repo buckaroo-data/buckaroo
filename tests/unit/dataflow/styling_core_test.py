@@ -405,3 +405,30 @@ class TestEstimateMinWidthPx:
         compact_w = estimate_min_width_px(compact_disp, 'a', meta)
         assert compact_w < float_w
 
+
+
+class RaisingStyling(StylingAnalysis):
+    requires_summary = []
+
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        raise NameError("boom")
+
+
+def test_failed_style_column_keeps_header_name() -> None:
+    """A style_column exception falls back to obj styling but keeps the real header (#966)."""
+    simple_df = pd.DataFrame({'foo': [10, 20, 30], 'bar': ['foo', 'bar', 'baz']})
+    dfvc = RaisingStyling.get_dfviewer_config(
+        {'a': {'orig_col_name': 'foo'}, 'b': {'orig_col_name': 'bar'}}, simple_df)
+    assert dfvc['column_config'] == [
+        {'col_name': 'a', 'header_name': 'foo', 'displayer_args': {'displayer': 'obj'}},
+        {'col_name': 'b', 'header_name': 'bar', 'displayer_args': {'displayer': 'obj'}}]
+
+
+def test_failed_style_column_keeps_col_path() -> None:
+    """Same as above for multi-index columns: the fallback keeps col_path."""
+    mic_df = get_multiindex_cols_df()
+    fake_sd: SDType = {'a': {'orig_col_name': ('foo', 'a')}, 'b': {'orig_col_name': ('foo', 'b')}}
+    col_config = RaisingStyling.get_dfviewer_config(fake_sd, mic_df)['column_config']
+    assert [cc['col_path'] for cc in col_config] == [('foo', 'a'), ('foo', 'b')]
+    assert [cc['field'] for cc in col_config] == ['a', 'b']
