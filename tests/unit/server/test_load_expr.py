@@ -948,3 +948,56 @@ class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
             shutil.rmtree(project_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_preserves_load_expr_config(self):
+        """#957: /reload_expr must rebuild the dataflow with the same
+        cache_storage_path, column_config_overrides, extra_grid_config,
+        init_sd and skip_stat_columns the session was loaded with — a
+        reloaded session is the same session with fresh klasses, not a
+        stripped-down one with stat caching off and column config gone."""
+        builds_root = tempfile.mkdtemp()
+        project_root = tempfile.mkdtemp()
+        cache_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "re-keeps-config"
+            overrides = {"name": {"displayer_args": {"displayer": "string", "max_length": 5000}}}
+            grid_cfg = {"rowHeight": 70, "pinnedRowHeight": 21}
+            init_sd = {"idx": {"displayer_args": {"displayer": "string", "max_length": 200}}}
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path,
+                 "project_root": project_root, "cache_storage_path": cache_root,
+                 "column_config_overrides": overrides, "extra_grid_config": grid_cfg,
+                 "init_sd": init_sd, "skip_stat_columns": ["idx"]})
+            self.assertEqual(resp.code, 200)
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+            await ws.read_message()  # discard initial_state
+
+            reload_resp = await _post(
+                self.get_http_port(), f"/reload_expr/{sid}", {})
+            self.assertEqual(reload_resp.code, 200)
+
+            dataflow = self._app.settings["sessions"].get(sid).xorq_dataflow
+            self.assertIsNotNone(dataflow.cache_storage,
+                "reload dropped cache_storage_path — stats recompute uncached")
+            self.assertEqual(dataflow.column_config_overrides, overrides)
+            self.assertEqual(dataflow.init_sd, init_sd)
+            self.assertEqual(dataflow.skip_stat_columns, {"idx"})
+
+            # The broadcast the open client renders must still carry the
+            # caller's column and grid config.
+            msg = json.loads(await ws.read_message())
+            self.assertEqual(msg["type"], "initial_state")
+            dvc = msg["df_display_args"]["main"]["df_viewer_config"]
+            self.assertEqual(dvc.get("extra_grid_config"), grid_cfg)
+            by_header = {cc.get("header_name"): cc for cc in dvc["column_config"]}
+            self.assertEqual(by_header["name"]["displayer_args"]["max_length"], 5000)
+            self.assertEqual(by_header["idx"]["displayer_args"]["max_length"], 200)
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(project_root, ignore_errors=True)
+            shutil.rmtree(cache_root, ignore_errors=True)
