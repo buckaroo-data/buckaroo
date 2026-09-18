@@ -34,6 +34,10 @@ class SessionState:
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     build_dir: Optional[str] = None  # xorq build dir, stored for /reload_expr
     project_root: Optional[str] = None  # project root for klass discovery
+    # The /load_expr dataflow config (cache_storage_path, column_config_overrides,
+    # extra_grid_config, init_sd, skip_stat_columns), replayed by /reload_expr so
+    # a reload keeps stat caching and column config (#957).
+    dataflow_kwargs: dict = field(default_factory=dict)
     # Companion telemetry sink (#943): a fire-and-forget POST callable, built
     # once from the /load_expr payload's telemetry_url on the IOLoop (where
     # make_http_sink captures AsyncHTTPClient/IOLoop.current()). Stored here so
