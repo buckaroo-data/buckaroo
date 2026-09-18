@@ -969,7 +969,7 @@ class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
                 {"session": sid, "build_dir": build_path,
                  "project_root": project_root, "cache_storage_path": cache_root,
                  "column_config_overrides": overrides, "extra_grid_config": grid_cfg,
-                 "init_sd": init_sd, "skip_stat_columns": ["idx"]})
+                 "init_sd": init_sd, "skip_stat_columns": ["name"]})
             self.assertEqual(resp.code, 200)
 
             ws = await tornado.websocket.websocket_connect(
@@ -985,7 +985,7 @@ class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
                 "reload dropped cache_storage_path — stats recompute uncached")
             self.assertEqual(dataflow.column_config_overrides, overrides)
             self.assertEqual(dataflow.init_sd, init_sd)
-            self.assertEqual(dataflow.skip_stat_columns, {"idx"})
+            self.assertEqual(dataflow.skip_stat_columns, {"name"})
 
             # The broadcast the open client renders must still carry the
             # caller's column and grid config.
