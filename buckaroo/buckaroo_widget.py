@@ -11,7 +11,7 @@ import os
 import sys
 import traceback
 from datetime import datetime
-from typing import Literal, Union
+from typing import Any as TAny, ClassVar, Literal, Type, Union
 import pandas as pd
 import json
 import logging
@@ -31,9 +31,13 @@ from buckaroo.extension_utils import copy_extend
 from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, send_infinite_resp
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import (Sampling, exception_protect)
-from .dataflow.styling_core import (ComponentConfig, DFViewerConfig, DisplayArgs, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
+from .dataflow.styling_core import (ComponentConfig, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
 from .dataflow.autocleaning import PandasAutocleaning
 from pathlib import Path
+
+# pandas backend binding of the generic dataflow. Mirrors PolarsDataflow
+# (polars_buckaroo) and XorqDataflow (xorq_buckaroo).
+PandasDataflow = CustomizableDataflow[pd.DataFrame]
 
 logger = logging.getLogger()
 
@@ -184,11 +188,16 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     autocleaning_klass = PandasAutocleaning #override the base CustomizableDataFlow klass
     DFStatsClass = DfStatsV2 # Pandas Specific
     autoclean_conf = tuple([CleaningConf, NoCleaningConf]) #override the base CustomizableDataFlow conf
-    dataflow_klass = CustomizableDataflow
+    # The composed dataflow's backend binding. Typed broadly here (one slot,
+    # specialised per backend subclass) — the precise binding lives in the
+    # named alias/subclass assigned: PandasDataflow / PolarsDataflow / XorqDataflow.
+    dataflow_klass: ClassVar[Type[CustomizableDataflow[TAny]]] = PandasDataflow
 
 
     df_data_dict = Dict({}).tag(sync=True)
-    df_display_args: DisplayArgs = Dict({}).tag(sync=True)
+    # Dict[str, DisplayArgs] at runtime (keyed by display name); left
+    # unannotated because a traitlets Dict descriptor can't satisfy it.
+    df_display_args = Dict({}).tag(sync=True)
     #information about the dataframe
     df_meta = Dict({
         'columns': 5, # dummy data
@@ -242,7 +251,9 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
     def add_analysis(self, analysis_klass):
         self.dataflow.add_analysis(analysis_klass)
 
-    def add_processing(self, df_processing_func):
+    # Positional-only so subclasses can name the function for their
+    # backend (XorqBuckarooWidget uses expr_processing_func).
+    def add_processing(self, df_processing_func, /):
         proc_func_name = df_processing_func.__name__
         class DecoratedProcessing(ColAnalysis):
             provides_defaults = {}
@@ -280,7 +291,8 @@ class RawDFViewerWidget(BuckarooWidgetBase):
         {'a':  5  , 'b':20, 'c': 'Paddy'},
         {'a': 58.2, 'b': 9, 'c': 'Margaret'}]).tag(sync=True)
 
-    df_viewer_config: DFViewerConfig = Dict({
+    # DFViewerConfig-shaped; unannotated for the same traitlets reason.
+    df_viewer_config = Dict({
         'column_config': [],
         'pinned_rows': [],
         'first_col_configs':[]}).tag(sync=True)

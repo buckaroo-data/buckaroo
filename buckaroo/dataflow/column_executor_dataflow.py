@@ -2,7 +2,7 @@
 # coding: utf-8
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Type, Callable, TYPE_CHECKING, cast
 from pathlib import Path
 import os
 import logging
@@ -13,9 +13,9 @@ from traitlets import Dict as TDict, Any as TAny, Unicode, observe
 
 from .styling_core import merge_sds
 from buckaroo.df_util import old_col_new_col
-from buckaroo.pluggable_analysis_framework.polars_analysis_management import PolarsAnalysis
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.customizations.polars_analysis import PL_Analysis_Klasses
-from buckaroo.file_cache.base import FileCache, ProgressNotification, ProgressListener, Executor, SimpleExecutorLog, ColumnExecutor as ColumnExecutorBase, MaybeFilepathLike
+from buckaroo.file_cache.base import FileCache, ProgressNotification, ProgressListener, Executor, SimpleExecutorLog, MaybeFilepathLike, ColumnResults
 from buckaroo.file_cache.multiprocessing_executor import MultiprocessingExecutor
 from buckaroo.file_cache.paf_column_executor import PAFColumnExecutor
 from .abc_dataflow import ABCDataflow
@@ -27,8 +27,14 @@ if TYPE_CHECKING:
     from buckaroo.file_cache.batch_planning import PlanningFunction
 
 
-class ColumnExecutorDataflow(ABCDataflow):
+class ColumnExecutorDataflow(ABCDataflow[pl.LazyFrame]):
     """A minimal DataFlow focused on column-executor-driven summary stats for Polars LazyFrames.
+
+    Binds the abstract base's unbounded ``FrameT`` to ``pl.LazyFrame``. A
+    LazyFrame is never materialised, so it cannot meet the eager
+    ``DataFrameLike`` contract (no ``len`` / row-slice) — which is why this
+    class inherits ``ABCDataflow`` directly rather than the eager
+    ``CustomizableDataflow`` body, and supplies its own executor pipeline.
 
     - Works with a LazyFrame and avoids materializing the dataframe on load.
 
@@ -72,19 +78,19 @@ class ColumnExecutorDataflow(ABCDataflow):
     progress_update_callback: Optional[Callable[[Dict[str, Dict[str, Any]]], None]] = None
 
     # Analysis classes (extendable, like CustomizableDataflow)
-    analysis_klasses: List[Type[PolarsAnalysis]] = PL_Analysis_Klasses.copy()
+    analysis_klasses: List[Type[ColAnalysis]] = PL_Analysis_Klasses.copy()
     # Column executor class (overridable for testing or custom behavior)
-    ColumnExecutorKlass: Type[ColumnExecutorBase] = PAFColumnExecutor
+    ColumnExecutorKlass: Type[PAFColumnExecutor] = PAFColumnExecutor
 
-    def __init__(self, ldf: pl.LazyFrame, analysis_klasses: Optional[List[Type[PolarsAnalysis]]] = None,
-                 column_executor_class: Optional[Type[ColumnExecutorBase]] = None,
+    def __init__(self, ldf: pl.LazyFrame, analysis_klasses: Optional[List[Type[ColAnalysis]]] = None,
+                 column_executor_class: Optional[Type[PAFColumnExecutor]] = None,
                  executor_class: Optional[Type[Executor]] = None,
                  executor_log: Optional[SimpleExecutorLog] = None) -> None:
         super().__init__()
         self.raw_ldf = ldf
         if analysis_klasses is not None:
             self.analysis_klasses = list(analysis_klasses)
-        self._column_executor_class: Type[ColumnExecutorBase] = column_executor_class or self.ColumnExecutorKlass
+        self._column_executor_class: Type[PAFColumnExecutor] = column_executor_class or self.ColumnExecutorKlass
         self._executor_class: Type[Executor] = executor_class or Executor
         self.executor_log = executor_log or SimpleExecutorLog()
         self._initialize_df_meta()
@@ -106,7 +112,7 @@ class ColumnExecutorDataflow(ABCDataflow):
             'total_rows': total_rows}
 
 
-    def add_analysis(self, analysis_klass: Type[PolarsAnalysis]) -> None:
+    def add_analysis(self, analysis_klass: Type[ColAnalysis]) -> None:
         """
         Extend analysis_klasses set; deduplicate by cname.
         """
@@ -132,7 +138,8 @@ class ColumnExecutorDataflow(ABCDataflow):
         
         # Build rewritten name mapping using an empty frame with the same columns
         empty_pl_df = pl.DataFrame({c: [] for c in self.raw_ldf.collect_schema().names()})
-        orig_to_rw = dict(old_col_new_col(empty_pl_df))
+        # polars column names are always str
+        orig_to_rw = cast(Dict[str, str], dict(old_col_new_col(empty_pl_df)))
         
         # Check if we have cached merged_sd to pass to column executor
         
@@ -233,7 +240,8 @@ class ColumnExecutorDataflow(ABCDataflow):
                     entry['__status__'] = 'error'
                 return
             # note.result is ColumnResults: Dict[str, ColumnResult] keyed by ORIGINAL column names
-            for orig_col, col_res in note.result.items():
+            results: ColumnResults = note.result
+            for orig_col, col_res in results.items():
                 stats = col_res.result or {}
                 rw = orig_to_rw.get(orig_col, orig_col)
                 entry = aggregated_summary.get(rw)
@@ -364,7 +372,9 @@ class ColumnExecutorDataflow(ABCDataflow):
                     # Don't re-raise, let it fail silently and use defaults
 
     @property
-    def processed_df(self) -> Any:
+    def processed_df(self) -> Optional[pl.LazyFrame]:
+        # Lazy: the frame is never materialised, so there is no processed
+        # frame to render. Always None (matches ABCDataflow's Optional[FrameT]).
         return None
 
     @observe('merged_sd')

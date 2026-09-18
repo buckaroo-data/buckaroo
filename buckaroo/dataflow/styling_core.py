@@ -5,6 +5,7 @@ from typing_extensions import NotRequired, TypeAlias
 
 import pandas as pd
 from buckaroo.df_util import ColIdentifier, old_col_new_col, to_chars
+from buckaroo.dataflow.df_types import DataFrameLike
 from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis, ColMeta, SDType)
 
 logger = logging.getLogger()
@@ -248,7 +249,7 @@ def merge_column(base, new):
 OverrideColumnConfig:TypeAlias = Dict[ColIdentifier, BaseColumnConfig]
 
 def merge_column_config(styled_column_config:List[ColumnConfig],
-                        df:pd.DataFrame,
+                        df:DataFrameLike,
     overide_column_configs:OverrideColumnConfig) -> List[ColumnConfig]:
 
     """
@@ -291,7 +292,7 @@ def rewrite_override_col_references(rewrites: Dict[ColIdentifier, ColIdentifier]
     return obj
 
 
-def merge_sd_overrides(final_sd:SDType, df:pd.DataFrame, overrides:SDType) -> SDType:
+def merge_sd_overrides(final_sd:SDType, df:DataFrameLike, overrides:SDType) -> SDType:
     """
       this is psecifically built for places where keys from the original dataframe will be used in 'overrides'
       those should be mapped onto the rewritten col_name
@@ -342,7 +343,7 @@ def index_names_empty(index:Any) -> bool:
 
 class StylingAnalysis(ColAnalysis):
     @classmethod
-    def get_left_col_configs(cls, df:pd.DataFrame) -> List[ColumnConfig]:
+    def get_left_col_configs(cls, df:DataFrameLike) -> List[ColumnConfig]:
         if not isinstance(df, pd.DataFrame):
             return [{'col_name': 'index', 'header_name':'index', 'displayer_args': {'displayer': 'obj'},
                      #'ag_grid_specs': {'pinned':'left'}
@@ -403,7 +404,7 @@ class StylingAnalysis(ColAnalysis):
     parquet_style_index: bool = True
 
     @classmethod
-    def get_index_name(cls, df:pd.DataFrame) -> str :
+    def get_index_name(cls, df:DataFrameLike) -> str :
         if cls.parquet_style_index:
             #"('index', '')"
             if isinstance(df.columns, pd.MultiIndex):
@@ -438,7 +439,7 @@ class StylingAnalysis(ColAnalysis):
         return cls.fix_column_config(col_name, col_name, {'displayer_args': {'displayer': 'obj'}})
 
     @classmethod
-    def get_dfviewer_config(cls, sd:SDType, df:pd.DataFrame) -> DFViewerConfig:
+    def get_dfviewer_config(cls, sd:SDType, df:DataFrameLike) -> DFViewerConfig:
         #index_config : ColumnConfig = cls.default_styling('index')
         return {
             'pinned_rows': cls.pinned_rows,
@@ -448,7 +449,7 @@ class StylingAnalysis(ColAnalysis):
             'component_config': cls.component_config}
                     
     @classmethod
-    def style_columns(cls, sd:SDType, df:pd.DataFrame) -> List[ColumnConfig]:
+    def style_columns(cls, sd:SDType, df:DataFrameLike) -> List[ColumnConfig]:
         ret_col_config: List[ColumnConfig] = []
         skip_orig_cols = []
         for col, col_meta in sd.items():

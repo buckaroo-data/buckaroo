@@ -2,7 +2,7 @@ from io import BytesIO
 import base64
 import json
 import pandas as pd
-from typing import Dict, Any, List, Tuple, Optional, Literal, Union, TypedDict, NotRequired
+from typing import Dict, Any, List, Mapping, Tuple, Optional, Literal, Union, TypedDict, NotRequired
 from pandas._libs.tslibs import timezones
 from pandas.core.dtypes.dtypes import DatetimeTZDtype
 try:
@@ -553,7 +553,7 @@ def _stat_value_to_pa_array(val: Any) -> Any:
     return pa.array([_json_encode_cell(val)], type=pa.string())
 
 
-def project_sd(sd: Dict[str, Any], keep_keys: Any) -> Dict[str, Any]:
+def project_sd(sd: Mapping[Any, Any], keep_keys: Any) -> Dict[str, Any]:
     """Project a summary-stats dict down to ``keep_keys`` per column.
 
     ``sd`` is ``{short_col: {stat_name: value}}``. Each column's inner stat
