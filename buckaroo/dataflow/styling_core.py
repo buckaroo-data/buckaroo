@@ -1,6 +1,6 @@
 import copy
 import logging
-from typing import Iterable, TypedDict, Union, List, Dict, Any, Literal
+from typing import Iterable, TypedDict, Union, List, Dict, Any, Literal, Optional
 from typing_extensions import NotRequired, TypeAlias
 
 import pandas as pd
@@ -434,8 +434,10 @@ class StylingAnalysis(ColAnalysis):
     summary_stats_key: str = 'all_stats'
 
     @classmethod
-    def default_styling(cls, col_name:Union[Iterable[str], str], /) -> ColumnConfig:
-        return cls.fix_column_config(col_name, col_name, {'displayer_args': {'displayer': 'obj'}})
+    def default_styling(cls, col_name:Union[Iterable[str], str], orig_col_name:Optional[ColIdentifier]=None, /) -> ColumnConfig:
+        if orig_col_name is None:
+            orig_col_name = col_name
+        return cls.fix_column_config(col_name, orig_col_name, {'displayer_args': {'displayer': 'obj'}})
 
     @classmethod
     def get_dfviewer_config(cls, sd:SDType, df:pd.DataFrame) -> DFViewerConfig:
@@ -477,7 +479,8 @@ class StylingAnalysis(ColAnalysis):
                 # Always provide a style, not providing a style
                 # results in no display which is a very bad user
                 # experience
-                base_style = cls.default_styling(col)
+                # keep the real header so a failure only costs this column its styling
+                base_style = cls.default_styling(col, col_meta.get('orig_col_name'))
 
 
 

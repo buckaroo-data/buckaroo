@@ -432,3 +432,9 @@ def test_failed_style_column_keeps_col_path() -> None:
     col_config = RaisingStyling.get_dfviewer_config(fake_sd, mic_df)['column_config']
     assert [cc['col_path'] for cc in col_config] == [('foo', 'a'), ('foo', 'b')]
     assert [cc['field'] for cc in col_config] == ['a', 'b']
+
+
+def test_failed_style_column_without_orig_col_name() -> None:
+    """Instantiation passes an empty col_meta; the fallback still uses the rewritten id."""
+    col_config = RaisingStyling.style_columns({'a': {}}, pd.DataFrame({'foo': [1]}))
+    assert col_config == [{'col_name': 'a', 'header_name': 'a', 'displayer_args': {'displayer': 'obj'}}]
