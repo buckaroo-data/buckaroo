@@ -449,7 +449,9 @@ class StylingAnalysis(ColAnalysis):
         failing style_column don't leak into the next attempt or the sd.
         """
         for klass in cls.__mro__:
-            if 'style_column' not in klass.__dict__:
+            if 'style_column' not in klass.__dict__ or klass is StylingAnalysis:
+                # StylingAnalysis' own style_column is the plain obj config that
+                # default_styling returns, and default_styling ends the chain below
                 continue
             style_column = klass.__dict__['style_column'].__get__(None, cls)
             try:
@@ -462,8 +464,14 @@ class StylingAnalysis(ColAnalysis):
                 # something unexpected happened here, warn so that the developer is notified
                 logger.warning(f"Warning, styling failed from {klass.__qualname__}.style_column (via {cls}) on column {col} with col_meta {col_meta}, falling back to the parent class")
                 logger.warning(exc)
-        # StylingAnalysis.style_column can't raise, so this is only reachable if it was patched out
-        return cls.fix_column_config(col, orig_col_name, {'displayer_args': {'displayer': 'obj'}})
+        # default_styling is the documented hook for customising the fallback, so it gets
+        # the last word. fix_column_config re-applies the identity resolved for this column.
+        try:
+            return cls.fix_column_config(col, orig_col_name, cls.default_styling(col))
+        except Exception as exc:
+            logger.warning(f"Warning, {cls}.default_styling failed on column {col}, using obj")
+            logger.warning(exc)
+            return cls.fix_column_config(col, orig_col_name, {'displayer_args': {'displayer': 'obj'}})
 
     @classmethod
     def get_dfviewer_config(cls, sd:SDType, df:DataFrameLike) -> DFViewerConfig:

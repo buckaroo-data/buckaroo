@@ -132,13 +132,19 @@ class DefaultMainStyling(StylingAnalysis):
         # ag_grid_specs from column_metadata (e.g. init_sd carrying
         # {'wrapText': True, 'width': 400}) overlay on top of styling's
         # computed minWidth. Shallow merge — caller wins per-key.
-        if 'ag_grid_specs' in column_metadata:
+        # isinstance rather than a bare `in`: init_sd is user-authored, and a
+        # malformed value here used to raise, which cost the column its styling.
+        if isinstance(column_metadata.get('ag_grid_specs'), dict):
             base_config['ag_grid_specs'].update(column_metadata['ag_grid_specs'])
 
         # init_sd's delete_keys drops top-level keys that style_column added
         # by default — e.g. the tooltip_config that string / time / binary /
         # categorical / fallback branches unconditionally attach.
-        for k in column_metadata.get('delete_keys', ()):
+        delete_keys = column_metadata.get('delete_keys') or ()
+        if isinstance(delete_keys, str):
+            # delete_keys='tooltip_config' means the one key, not its characters
+            delete_keys = (delete_keys,)
+        for k in delete_keys:
             base_config.pop(k, None)
 
         return base_config

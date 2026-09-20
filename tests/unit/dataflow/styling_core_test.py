@@ -532,4 +532,4 @@ def test_overridden_default_styling_is_used_as_the_last_resort() -> None:
     col_config = CustomDefaultStyling.style_columns(
         {'a': {'orig_col_name': 'foo'}}, pd.DataFrame({'foo': [1]}))
     assert col_config == [{'col_name': 'a', 'header_name': 'foo',
-                           'displayer_args': {'displayer': 'string', 'max_length': 5}}]
+        'displayer_args': {'displayer': 'string', 'max_length': 5}}]
