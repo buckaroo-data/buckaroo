@@ -1,4 +1,5 @@
 from typing import Any, TypedDict
+import pytest
 import polars as pl
 from buckaroo.dataflow.autocleaning import (
     merge_ops, format_ops, AutocleaningConfig, PandasAutocleaning, _rekey_op_sd_to_internal)
@@ -296,3 +297,31 @@ def test_style_column_delete_keys_drops_tooltip():
     # Other styled keys unaffected
     assert cc['displayer_args']['displayer'] == 'string'
     assert 'minWidth' in cc['ag_grid_specs']
+
+
+BAD_INIT_SD_META = [
+    # init_sd is user-authored, so every one of these is a plausible typo
+    ('ag_grid_specs not a dict', {'_type': 'integer', 'ag_grid_specs': 'wrapText'}),
+    ('delete_keys None', {'_type': 'string', 'delete_keys': None}),
+    ('delete_keys a bare key', {'_type': 'string', 'delete_keys': 'tooltip_config'}),
+    ('displayer_args not a dict', {'_type': 'string', 'displayer_args': 'string'}),
+    ('_type unknown', {'_type': 'quaternion'}),
+    ('_type not a string', {'_type': 5}),
+]
+
+
+@pytest.mark.parametrize('label,col_meta', BAD_INIT_SD_META, ids=[x[0] for x in BAD_INIT_SD_META])
+def test_style_column_survives_malformed_col_meta(label, col_meta):
+    """The base styling has to hold up against anything init_sd can carry —
+    it's the class every failing subclass falls back to."""
+    cc = DefaultMainStyling.style_column('a', col_meta)
+    assert isinstance(cc, dict)
+    assert 'displayer' in cc['displayer_args']
+
+
+def test_style_column_delete_keys_accepts_a_bare_key():
+    """delete_keys: 'tooltip_config' is the obvious typo for ['tooltip_config'].
+    Iterating the string would delete nothing and silently keep the tooltip."""
+    col_meta = {'_type': 'string', 'orig_col_name': 'comments',
+        'delete_keys': 'tooltip_config'}
+    assert 'tooltip_config' not in DefaultMainStyling.style_column('a', col_meta)

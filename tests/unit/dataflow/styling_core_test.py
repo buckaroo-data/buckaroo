@@ -510,3 +510,26 @@ def test_fallback_sees_unmutated_col_meta() -> None:
     assert MutateThenRaiseStyling.style_columns(sd, FALLBACK_DF) == \
         DefaultMainStyling.style_columns(FALLBACK_SD, FALLBACK_DF)
     assert sd == FALLBACK_SD
+
+
+class CustomDefaultStyling(StylingAnalysis):
+    """A class that customises the fallback by overriding default_styling."""
+    requires_summary = []
+
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        raise NameError("boom")
+
+    @classmethod
+    def default_styling(cls, col_name, /):
+        return cls.fix_column_config(
+            col_name, col_name, {'displayer_args': {'displayer': 'string', 'max_length': 5}})
+
+
+def test_overridden_default_styling_is_used_as_the_last_resort() -> None:
+    """default_styling stays the hook for customising the fallback, and the
+    column keeps the identity style_columns resolved for it."""
+    col_config = CustomDefaultStyling.style_columns(
+        {'a': {'orig_col_name': 'foo'}}, pd.DataFrame({'foo': [1]}))
+    assert col_config == [{'col_name': 'a', 'header_name': 'foo',
+                           'displayer_args': {'displayer': 'string', 'max_length': 5}}]
