@@ -1,7 +1,8 @@
+import copy
 from typing import Dict, List
 import pandas as pd
 from buckaroo.dataflow.styling_core import ColumnConfig, DFViewerConfig, NormalColumnConfig, PartialColConfig, StylingAnalysis, merge_sd_overrides, rewrite_override_col_references
-from buckaroo.customizations.styling import (_formatted_char_count, estimate_min_width_px, _HISTOGRAM_MIN_PX, _MIN_COL_PX)
+from buckaroo.customizations.styling import (DefaultMainStyling, _formatted_char_count, estimate_min_width_px, _HISTOGRAM_MIN_PX, _MIN_COL_PX)
 from buckaroo.ddd_library import get_basic_df2, get_multiindex_index_df, get_multiindex_index_multiindex_with_names_cols_df, get_multiindex_index_with_names_multiindex_cols_df, get_multiindex_with_names_both, get_multiindex_with_names_index_df, get_multiindex_cols_df, get_multiindex_with_names_cols_df, get_tuple_cols_df
 from buckaroo.df_util import ColIdentifier
 from buckaroo.pluggable_analysis_framework.col_analysis import SDType
@@ -405,3 +406,107 @@ class TestEstimateMinWidthPx:
         compact_w = estimate_min_width_px(compact_disp, 'a', meta)
         assert compact_w < float_w
 
+
+
+class RaisingStyling(StylingAnalysis):
+    requires_summary = []
+
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        raise NameError("boom")
+
+
+def test_failed_style_column_keeps_header_name() -> None:
+    """A style_column exception falls back to obj styling but keeps the real header (#966)."""
+    simple_df = pd.DataFrame({'foo': [10, 20, 30], 'bar': ['foo', 'bar', 'baz']})
+    dfvc = RaisingStyling.get_dfviewer_config(
+        {'a': {'orig_col_name': 'foo'}, 'b': {'orig_col_name': 'bar'}}, simple_df)
+    assert dfvc['column_config'] == [
+        {'col_name': 'a', 'header_name': 'foo', 'displayer_args': {'displayer': 'obj'}},
+        {'col_name': 'b', 'header_name': 'bar', 'displayer_args': {'displayer': 'obj'}}]
+
+
+def test_failed_style_column_keeps_col_path() -> None:
+    """Same as above for multi-index columns: the fallback keeps col_path."""
+    mic_df = get_multiindex_cols_df()
+    fake_sd: SDType = {'a': {'orig_col_name': ('foo', 'a')}, 'b': {'orig_col_name': ('foo', 'b')}}
+    col_config = RaisingStyling.get_dfviewer_config(fake_sd, mic_df)['column_config']
+    assert [cc['col_path'] for cc in col_config] == [('foo', 'a'), ('foo', 'b')]
+    assert [cc['field'] for cc in col_config] == ['a', 'b']
+
+
+def test_failed_style_column_without_orig_col_name() -> None:
+    """col_meta without orig_col_name (the instantiation pass) still gets the real header from df."""
+    col_config = RaisingStyling.style_columns({'a': {}}, pd.DataFrame({'foo': [1]}))
+    assert col_config == [{'col_name': 'a', 'header_name': 'foo', 'displayer_args': {'displayer': 'obj'}}]
+
+
+def test_style_column_without_orig_col_name() -> None:
+    """Successful styling without orig_col_name must not produce header_name 'None'."""
+    col_config = StylingAnalysis.style_columns({'a': {}}, pd.DataFrame({'foo': [1]}))
+    assert col_config == [{'col_name': 'a', 'header_name': 'foo', 'displayer_args': {'displayer': 'obj'}}]
+
+
+FALLBACK_DF = pd.DataFrame({'foo': [10, 20, 30], 'bar': ['x', 'y', 'z']})
+FALLBACK_SD: SDType = {
+    'a': {'orig_col_name': 'foo', '_type': 'integer'},
+    'b': {'orig_col_name': 'bar', '_type': 'string'}}
+
+
+class RaisingMainStyling(DefaultMainStyling):
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        raise NameError("boom")
+
+
+class ColoredMainStyling(DefaultMainStyling):
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        base = super().style_column(col, column_metadata)
+        base['color_map_config'] = {'color_rule': 'color_static', 'color': 'red'}
+        return base
+
+
+class RaisingColoredStyling(ColoredMainStyling):
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        raise NameError("boom")
+
+
+class NoneReturningMainStyling(DefaultMainStyling):
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        return None
+
+
+class MutateThenRaiseStyling(DefaultMainStyling):
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        column_metadata['_type'] = 'string'
+        raise NameError("boom")
+
+
+def test_failed_style_column_falls_back_to_parent() -> None:
+    """A failing subclass falls back to its parent's style_column, not bare obj."""
+    assert RaisingMainStyling.style_columns(FALLBACK_SD, FALLBACK_DF) == \
+        DefaultMainStyling.style_columns(FALLBACK_SD, FALLBACK_DF)
+
+
+def test_failed_style_column_falls_back_to_nearest_parent() -> None:
+    """The fallback walks the MRO, so an intermediate class's styling is kept."""
+    assert RaisingColoredStyling.style_columns(FALLBACK_SD, FALLBACK_DF) == \
+        ColoredMainStyling.style_columns(FALLBACK_SD, FALLBACK_DF)
+
+
+def test_non_dict_style_column_falls_back_to_parent() -> None:
+    """Returning something that isn't a column config counts as a failure."""
+    assert NoneReturningMainStyling.style_columns(FALLBACK_SD, FALLBACK_DF) == \
+        DefaultMainStyling.style_columns(FALLBACK_SD, FALLBACK_DF)
+
+
+def test_fallback_sees_unmutated_col_meta() -> None:
+    """Edits a failing style_column made to column_metadata don't leak into the fallback or the sd."""
+    sd = copy.deepcopy(FALLBACK_SD)
+    assert MutateThenRaiseStyling.style_columns(sd, FALLBACK_DF) == \
+        DefaultMainStyling.style_columns(FALLBACK_SD, FALLBACK_DF)
+    assert sd == FALLBACK_SD
