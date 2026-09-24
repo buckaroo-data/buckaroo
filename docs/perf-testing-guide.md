@@ -75,7 +75,9 @@ It covers all three stat backends and the first pull uniformly:
 - **First data pull** — `firstpull.summary_stats`,
   `firstpull.window_to_parquet`, and the server-side spans that decompose a
   `/load_expr` into the three numbers a perf harness wants: `firstpull.expr_load`
-  (expression build, just `load_expr_build_dir`), `firstpull.dataflow_construct`
+  (expression build, just `load_expr_build_dir`), `firstpull.cache_heal` (only
+  with a `cache_dir`: writing the snapshots missing from it, counted in
+  `snapshots_written`), `firstpull.dataflow_construct`
   (stats run — the `stat.xorq.*` spans break it down further), and
   `firstpull.metadata`, all nested under the outer `firstpull.load_expr` total;
   plus `firstpull.ws_first_payload` (time-to-first-rows — the parquet encode and

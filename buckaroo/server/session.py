@@ -33,6 +33,11 @@ class SessionState:
     xorq_dataflow: Any = None  # XorqServerDataflow when backend="xorq"
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     build_dir: Optional[str] = None  # xorq build dir, stored for /reload_expr
+    # /load_expr cache_dir (#972): where the expr's cache nodes resolve. The
+    # redirect is baked into ``expr``, so /reload_expr keeps it by reusing the
+    # expr; stored so a re-POST that omits cache_dir keeps it and one that
+    # changes it reloads.
+    cache_dir: Optional[str] = None
     project_root: Optional[str] = None  # project root for klass discovery
     # The /load_expr dataflow config (cache_storage_path, column_config_overrides,
     # extra_grid_config, init_sd, skip_stat_columns), replayed by /reload_expr so

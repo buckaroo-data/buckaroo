@@ -421,6 +421,19 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session_id = body.get("session") or uuid.uuid4().hex
         no_browser = bool(body.get("no_browser", False))
         force_reload = bool(body.get("force_reload", False))
+        # Directory the build's cache nodes read and write their snapshots in
+        # (#972). xorq serializes only a cache node's relative path, so without
+        # it every node resolves under ~/.cache/xorq and an embedder's baked
+        # snapshots are never read. Unset keeps xorq's default. Used verbatim,
+        # not resolved: xorq hashes it into the key of every cache node above
+        # another, so it must be spelled as the embedder baked with. Absolute,
+        # since a relative path would resolve against the server's cwd.
+        cache_dir = body.get("cache_dir")
+        if cache_dir is not None and not (isinstance(cache_dir, str) and os.path.isabs(cache_dir)):
+            self.set_status(400)
+            self.write({"error_code": "invalid_cache_dir",
+                "message": f"cache_dir must be an absolute path, got {cache_dir!r}"})
+            return
 
         # Config-bearing fields that change how the result is computed or
         # rendered. If the caller passes any of these on a warm POST we must
@@ -450,8 +463,16 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # config-bearing field — to bypass this and re-run the full pipeline.
         sessions = self.application.settings["sessions"]
         existing = sessions.get(session_id)
+        # cache_dir carries over like the rest of a loaded session: a re-POST
+        # that omits it keeps the session's rather than falling back to
+        # ~/.cache/xorq and recomputing the embedder's snapshots there.
+        if cache_dir is None and existing is not None:
+            cache_dir = existing.cache_dir
+        # /load swaps a session to pandas without clearing build_dir, so the
+        # backend is checked too — else its pandas metadata comes back here.
         if (not force_reload and not has_config and existing
-                and existing.build_dir == build_dir and existing.metadata):
+                and existing.backend == "xorq" and existing.build_dir == build_dir
+                and existing.cache_dir == cache_dir and existing.metadata):
             # The pipeline is skipped, but the refreshed page still opens a new
             # WS and pulls a fresh time-to-first-rows. Re-arm first-pull telemetry
             # on the existing session — rebind this request's sink and reset the
@@ -476,6 +497,16 @@ class LoadExprHandler(tornado.web.RequestHandler):
             self.write({"error_code": "xorq_not_installed",
                 "message": "xorq is not installed on this server. "
                 "Install with `pip install buckaroo[xorq]`."})
+            return
+
+        # Checked up front rather than inferred from the load's exception:
+        # xorq reports a missing build dir as an OSError, and a
+        # FileNotFoundError from later in the load (the cache heal) is a load
+        # failure for a build dir that exists.
+        if not (isinstance(build_dir, str) and os.path.isdir(build_dir)):
+            self.set_status(404)
+            self.write({"error_code": "build_dir_not_found",
+                "message": f"Build directory not found: {build_dir}"})
             return
 
         prompt = body.get("prompt", "")
@@ -506,7 +537,14 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 # The harness reads "expression build" as just this call, so it
                 # gets its own span rather than being outer-minus-inner residual.
                 with perf_log.perf_span("firstpull.expr_load", session=session_id):
-                    expr = xorq_loading.load_expr_build_dir(build_dir)
+                    expr = xorq_loading.load_expr_build_dir(build_dir, cache_dir=cache_dir)
+                if cache_dir:
+                    # Runs cached sub-graphs, so it is timed apart from the
+                    # expression build. Runs before the dataflow, whose queries
+                    # would otherwise have xorq write each missing snapshot
+                    # through its own shared tmp file.
+                    with perf_log.perf_span("firstpull.cache_heal", session=session_id) as span:
+                        span.set_attr(snapshots_written=len(xorq_loading.heal_missing_snapshots(expr)))
                 extra_klasses = (
                     xorq_loading.load_project_stat_klasses(project_root)
                     + xorq_loading.load_project_post_processing_klasses(project_root)
@@ -520,11 +558,6 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 # unmeasured inside the outer firstpull.load_expr total.
                 with perf_log.perf_span("firstpull.metadata", session=session_id):
                     metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, build_dir)
-        except FileNotFoundError:
-            self.set_status(404)
-            self.write({"error_code": "build_dir_not_found",
-                "message": f"Build directory not found: {build_dir}"})
-            return
         except Exception:
             tb = traceback.format_exc()
             log.error("load_expr error build_dir=%s: %s", build_dir, tb)
@@ -542,6 +575,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.backend = "xorq"
         session.expr = expr
         session.build_dir = build_dir
+        session.cache_dir = cache_dir
         session.project_root = project_root
         session.dataflow_kwargs = dataflow_kwargs
         session.tele_sink = tele_sink

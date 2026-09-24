@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -17,7 +18,14 @@ import tornado.websocket
 
 xo = pytest.importorskip("xorq.api")
 
-from buckaroo.server import telemetry  # noqa: E402
+import xorq.caching.storage  # noqa: E402
+from attr import evolve  # noqa: E402
+from xorq.caching import ParquetSnapshotCache, ParquetStorage  # noqa: E402
+from xorq.common.utils.graph_utils import replace_nodes, walk_nodes  # noqa: E402
+from xorq.common.utils.provenance_utils import read_parquet_provenance  # noqa: E402
+from xorq.expr.relations import CachedNode  # noqa: E402
+
+from buckaroo.server import telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
@@ -724,9 +732,9 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
             from buckaroo.server import xorq_loading
             original = xorq_loading.load_expr_build_dir
             call_count = []
-            def counting_loader(bd):
+            def counting_loader(bd, **kwargs):
                 call_count.append(bd)
-                return original(bd)
+                return original(bd, **kwargs)
 
             with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
                 await _post(self.get_http_port(), "/load_expr",
@@ -750,9 +758,9 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
             from buckaroo.server import xorq_loading
             original = xorq_loading.load_expr_build_dir
             calls = []
-            def counting_loader(bd):
+            def counting_loader(bd, **kwargs):
                 calls.append(bd)
-                return original(bd)
+                return original(bd, **kwargs)
 
             with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
                 await _post(self.get_http_port(), "/load_expr",
@@ -783,9 +791,9 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
             from buckaroo.server import xorq_loading
             original = xorq_loading.load_expr_build_dir
             calls = []
-            def counting_loader(bd):
+            def counting_loader(bd, **kwargs):
                 calls.append(bd)
-                return original(bd)
+                return original(bd, **kwargs)
 
             with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
                 await _post(self.get_http_port(), "/load_expr",
@@ -803,6 +811,31 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
                 self.assertEqual(len(calls), 2, "new config must bypass the early-exit")
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_warm_exit_requires_a_xorq_session(self):
+        """/load swaps a session to pandas but leaves its build_dir, so a later
+        /load_expr of the same build must reload instead of taking the
+        warm-session early-exit and returning the pandas metadata."""
+        root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(os.path.join(root, "builds"))
+            csv_path = os.path.join(root, "t.csv")
+            pd.DataFrame({"a": [1, 2, 3]}).to_csv(csv_path, index=False)
+            sid = "lx-xorq-pandas-xorq"
+            for path, body in (
+                    ("/load_expr", {"build_dir": build_path}),
+                    ("/load", {"path": csv_path, "mode": "buckaroo"}),
+                    ("/load_expr", {"build_dir": build_path})):
+                resp = await _post(self.get_http_port(), path, {"session": sid, **body})
+                self.assertEqual(resp.code, 200, resp.body)
+            self.assertEqual(json.loads(resp.body)["rows"], 10,
+                "early-exit returned the pandas session's metadata")
+            session = self._app.settings["sessions"].get(sid)
+            self.assertEqual(session.backend, "xorq")
+            self.assertIsNotNone(session.xorq_dataflow)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
     def test_shared_backend_singleton(self):
         """#896: load_expr_build_dir must call xorq.config.default_backend()
@@ -1001,3 +1034,331 @@ class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
             shutil.rmtree(project_root, ignore_errors=True)
             shutil.rmtree(cache_root, ignore_errors=True)
+
+
+def _bake_from_build(build_path, host_cache):
+    """Load the build with every cache node pointed at ``host_cache`` and
+    execute it, the way tallyman bakes its compute cache (load_expr +
+    ``portable.rewrite_cache_dirs``). Baking the in-memory expression instead
+    would not do on xorq>=0.4: the build copies local reads into
+    ``reads/``, so the loaded graph — and every cache key — differs from the
+    in-memory one. Kept independent of ``xorq_loading.redirect_cache_dir`` so
+    the test does not grade the redirect against itself."""
+
+    def replacer(node, kwargs):
+        if kwargs:
+            node = node.__recreate__(kwargs)
+        if isinstance(node, CachedNode):
+            cache = evolve(node.cache, storage=evolve(node.cache.storage, base_path=host_cache))
+            return node.__recreate__(dict(zip(node.__argnames__, node.__args__)) | {"cache": cache})
+        return node
+
+    baked = replace_nodes(replacer, xo.load_expr(build_path)).to_expr()
+    baked.execute()
+    return baked
+
+
+def _build_cached_expr_dir(root):
+    """Build a two-level cached expression to ``<root>/builds`` and bake its
+    snapshots under ``<root>/host_cache``, as an embedder (tallyman) does.
+
+    The aggregate's cache node wraps a filter that is itself cached, so the
+    outer node's parent carries a nested ``CachedNode``. Returns
+    ``(build_path, host_cache, outer_snapshot_path)``."""
+    root = Path(root)
+    pd.DataFrame({"g": [1, 1, 2], "v": [1.0, 2.0, 3.0]}).to_parquet(root / "t.parquet")
+    host_cache = root / "host_cache"
+
+    def cache():
+        return ParquetSnapshotCache.from_kwargs(source=xo.connect(), base_path=host_cache)
+
+    t = xo.deferred_read_parquet(str(root / "t.parquet"))
+    inner = t.filter(t.v > 0).cache(cache=cache())
+    expr = inner.group_by("g").agg(s=inner.v.sum()).cache(cache=cache())
+    build_path = str(xo.build_expr(expr, builds_dir=root / "builds"))
+    op = _bake_from_build(build_path, host_cache).op()
+    outer_snapshot = Path(op.cache.storage.get_path(op.cache.calc_key(op.parent)))
+    return build_path, host_cache, outer_snapshot
+
+
+def _cache_node_paths(expr):
+    return [Path(n.cache.storage.get_path(n.cache.calc_key(n.parent)))
+        for n in walk_nodes((CachedNode,), expr)]
+
+
+def _build_shared_cache_expr_dir(root):
+    """Build, without baking, a DAG in which one cached filter feeds both a
+    cached aggregate and an uncached one, unioned at the root. Returns
+    ``(build_path, host_cache)``."""
+    root = Path(root)
+    pd.DataFrame({"g": [1, 1, 2], "v": [1.0, 2.0, 3.0]}).to_parquet(root / "t.parquet")
+    host_cache = root / "host_cache"
+    # One backend for both caches: the union needs both branches on it.
+    con = xo.connect()
+
+    def cache():
+        return ParquetSnapshotCache.from_kwargs(source=con, base_path=host_cache)
+
+    t = xo.deferred_read_parquet(str(root / "t.parquet"))
+    inner = t.filter(t.v > 0).cache(cache=cache())
+    cached_agg = inner.group_by("g").agg(s=inner.v.sum()).cache(cache=cache())
+    plain_agg = inner.group_by("g").agg(s=inner.v.max())
+    build_path = str(xo.build_expr(cached_agg.union(plain_agg), builds_dir=root / "builds"))
+    return build_path, host_cache
+
+
+def _load_and_heal(build_path, cache_dir):
+    """Load the build pointed at ``cache_dir`` and heal its missing
+    snapshots, as POST /load_expr does before building the dataflow."""
+    expr = xorq_loading.load_expr_build_dir(build_path, cache_dir=str(cache_dir))
+    xorq_loading.heal_missing_snapshots(expr)
+    return expr
+
+
+class TestLoadExprCacheDir(tornado.testing.AsyncHTTPTestCase):
+    """#972: /load_expr must be able to point the build's cache nodes at the
+    embedder's cache directory rather than xorq's default ~/.cache/xorq."""
+
+    def get_app(self):
+        return make_app()
+
+    def setUp(self):
+        super().setUp()
+        self.root = tempfile.mkdtemp()
+        # Stand in for ~/.cache/xorq so a miss is observable and never
+        # writes into the real user cache.
+        # xorq <0.4 binds get_xorq_cache_dir into caching.storage at import;
+        # later versions look it up in caching_utils at call time.
+        self.default_cache = os.path.join(self.root, "default_cache")
+        targets = ["xorq.common.utils.caching_utils.get_xorq_cache_dir"]
+        if hasattr(xorq.caching.storage, "get_xorq_cache_dir"):
+            targets.append("xorq.caching.storage.get_xorq_cache_dir")
+        self._default_patches = [patch(t, return_value=Path(self.default_cache)) for t in targets]
+        for p in self._default_patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._default_patches:
+            p.stop()
+        shutil.rmtree(self.root, ignore_errors=True)
+        super().tearDown()
+
+    def _default_cache_parquets(self):
+        return sorted(Path(self.default_cache).rglob("*.parquet"))
+
+    def test_load_expr_build_dir_redirects_nested_cache_nodes(self):
+        """Every cache node, the one nested in the outer node's parent
+        included, resolves under cache_dir and finds the baked snapshot."""
+        build_path, host_cache, _ = _build_cached_expr_dir(self.root)
+        expr = xorq_loading.load_expr_build_dir(build_path, cache_dir=str(host_cache))
+        paths = _cache_node_paths(expr)
+        self.assertEqual(len(paths), 2)
+        for p in paths:
+            self.assertIn(host_cache, p.parents)
+            self.assertTrue(p.exists(), f"baked snapshot not found at {p}")
+
+    def test_load_expr_build_dir_without_cache_dir_unchanged(self):
+        """Unset cache_dir keeps xorq's default resolution."""
+        build_path, host_cache, _ = _build_cached_expr_dir(self.root)
+        expr = xorq_loading.load_expr_build_dir(build_path)
+        for p in _cache_node_paths(expr):
+            self.assertNotIn(host_cache, p.parents)
+
+    @tornado.testing.gen_test
+    async def test_load_expr_reads_embedder_snapshots(self):
+        """POST /load_expr with cache_dir serves the baked snapshots: nothing
+        is written under the default cache dir, the host cache gains no
+        files, and the session keeps cache_dir."""
+        build_path, host_cache, _ = _build_cached_expr_dir(self.root)
+        baked = sorted(host_cache.rglob("*.parquet"))
+        sid = "lx-cache-dir"
+        resp = await _post(self.get_http_port(), "/load_expr",
+            {"session": sid, "build_dir": build_path, "cache_dir": str(host_cache)})
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual(json.loads(resp.body)["rows"], 2)
+
+        self.assertEqual(self._default_cache_parquets(), [],
+            "load_expr re-executed a cached sub-graph into the default cache dir")
+        self.assertEqual(sorted(host_cache.rglob("*.parquet")), baked)
+        session = self._app.settings["sessions"].get(sid)
+        self.assertEqual(session.cache_dir, str(host_cache))
+        for p in _cache_node_paths(session.expr):
+            self.assertIn(host_cache, p.parents)
+
+    @tornado.testing.gen_test
+    async def test_warm_repost_with_new_cache_dir_reloads(self):
+        """A repeat POST that changes cache_dir must not take the warm-session
+        early-exit — the loaded expression still points at the old dir."""
+        build_path, host_cache, _ = _build_cached_expr_dir(self.root)
+        sid = "lx-cache-dir-change"
+        resp = await _post(self.get_http_port(), "/load_expr",
+            {"session": sid, "build_dir": build_path})
+        self.assertEqual(resp.code, 200, resp.body)
+        resp = await _post(self.get_http_port(), "/load_expr",
+            {"session": sid, "build_dir": build_path, "cache_dir": str(host_cache)})
+        self.assertEqual(resp.code, 200, resp.body)
+        session = self._app.settings["sessions"].get(sid)
+        self.assertEqual(session.cache_dir, str(host_cache))
+        for p in _cache_node_paths(session.expr):
+            self.assertIn(host_cache, p.parents)
+
+    def test_heal_writes_through_its_own_tmp_file(self):
+        """xorq's ``ParquetStorage.put`` writes through a fixed
+        ``<key>.parquet.tmp``, so two writers of one key clobber each other's
+        partial file. The heal writes a missing snapshot through a temp file
+        of its own and takes no lock: another writer's in-flight tmp is left
+        alone, and no ``.lock`` file is left in the embedder's cache."""
+        build_path, host_cache, outer_snapshot = _build_cached_expr_dir(self.root)
+        outer_snapshot.unlink()
+        other_tmp = outer_snapshot.with_name(outer_snapshot.name + ".tmp")
+        other_tmp.write_bytes(b"another writer, mid-write")
+        expr = _load_and_heal(build_path, host_cache)
+        self.assertTrue(other_tmp.exists(),
+            "the heal wrote through xorq's fixed tmp and renamed another writer's file")
+        self.assertEqual(other_tmp.read_bytes(), b"another writer, mid-write")
+        self.assertEqual(sorted(host_cache.rglob("*.tmp")), [other_tmp])
+        self.assertEqual(sorted(host_cache.rglob("*.lock")), [])
+        self.assertTrue(outer_snapshot.exists())
+        self.assertEqual(sorted(expr.execute()["s"]), [3.0, 3.0])
+
+    def test_heal_leaves_inner_snapshot_under_baked_outer(self):
+        """A missing inner snapshot under a baked outer one is never read,
+        because the outer snapshot answers every query, so the heal must not
+        recompute it (xorq's own execute() doesn't)."""
+        build_path, host_cache, outer_snapshot = _build_cached_expr_dir(self.root)
+        paths = _cache_node_paths(
+            xorq_loading.redirect_cache_dir(xo.load_expr(build_path), host_cache))
+        inner_snapshot = next(p for p in paths if p != outer_snapshot)
+        inner_snapshot.unlink()
+        _load_and_heal(build_path, host_cache)
+        self.assertFalse(inner_snapshot.exists(),
+            "the heal recomputed an inner snapshot the baked outer one makes unreachable")
+        self.assertEqual(sorted(host_cache.rglob("*.parquet")), [outer_snapshot])
+
+    def test_heal_writes_shared_inner_before_outer(self):
+        """When a cached filter is shared by a cached aggregate and, through an
+        uncached aggregate, the root, the heal must still write the filter's
+        snapshot before the cached aggregate's. Otherwise running the
+        aggregate's parent has xorq write the filter through its own put."""
+        build_path, host_cache = _build_shared_cache_expr_dir(self.root)
+        put_keys = []
+        xorq_put = ParquetStorage.put
+
+        def recording_put(storage, key, value, parquet_metadata=None):
+            put_keys.append(key)
+            return xorq_put(storage, key, value, parquet_metadata=parquet_metadata)
+
+        with patch.object(ParquetStorage, "put", recording_put):
+            expr = _load_and_heal(build_path, host_cache)
+        self.assertEqual(put_keys, [],
+            "a snapshot was written by xorq's put rather than by the heal")
+        paths = _cache_node_paths(expr)
+        self.assertEqual(len(paths), 2)
+        for p in paths:
+            self.assertTrue(p.exists(), f"heal did not write {p}")
+
+    def test_heal_stamps_root_provenance(self):
+        """xorq stamps provenance on the snapshot of the root cache node it
+        executes. A root snapshot the heal writes carries the same metadata
+        the embedder's own execute() would have written."""
+        build_path, host_cache, outer_snapshot = _build_cached_expr_dir(self.root)
+        baked = read_parquet_provenance(outer_snapshot)
+        self.assertTrue(baked)
+        outer_snapshot.unlink()
+        _load_and_heal(build_path, host_cache)
+        self.assertEqual(read_parquet_provenance(outer_snapshot), baked)
+
+    def test_heal_logs_each_snapshot_it_writes(self):
+        """A heal against a baked cache usually means ``cache_dir`` is spelled
+        differently from the path the snapshots were baked under: xorq hashes
+        ``base_path`` into the outer node's key, so the lookup misses and the
+        snapshot is recomputed. Each write is logged with its path so the
+        mismatch is visible."""
+        build_path, host_cache, outer_snapshot = _build_cached_expr_dir(self.root)
+        outer_snapshot.unlink()
+        with self.assertLogs("buckaroo.server.xorq_loading", level="INFO") as logs:
+            _load_and_heal(build_path, host_cache)
+        self.assertTrue(any(str(outer_snapshot) in line for line in logs.output), logs.output)
+
+    @tornado.testing.gen_test
+    async def test_cache_dir_must_be_an_absolute_path(self):
+        """A relative cache_dir would resolve against the server's working
+        directory, not the embedder's, and a non-string can't be a path.
+        Both are rejected with 400."""
+        build_path = _build_expr_dir(os.path.join(self.root, "builds"))
+        for bad in ("relative/cache", 1, ["/abs"]):
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-bad-cache-dir", "build_dir": build_path, "cache_dir": bad})
+            self.assertEqual(resp.code, 400, (bad, resp.body))
+            self.assertEqual(json.loads(resp.body)["error_code"], "invalid_cache_dir")
+
+    @tornado.testing.gen_test
+    async def test_repost_without_cache_dir_keeps_the_sessions(self):
+        """cache_dir persists across re-POSTs like the other config. A warm
+        re-POST that omits it takes the early-exit, and a forced reload that
+        omits it still points at the session's cache_dir, never ~/.cache/xorq."""
+        build_path, host_cache, _ = _build_cached_expr_dir(self.root)
+        sid = "lx-cache-dir-sticky"
+        resp = await _post(self.get_http_port(), "/load_expr",
+            {"session": sid, "build_dir": build_path, "cache_dir": str(host_cache)})
+        self.assertEqual(resp.code, 200, resp.body)
+        original = xorq_loading.load_expr_build_dir
+        calls = []
+
+        def counting_loader(bd, **kwargs):
+            calls.append(bd)
+            return original(bd, **kwargs)
+
+        with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path})
+            self.assertEqual(resp.code, 200, resp.body)
+            self.assertEqual(calls, [], "a warm re-POST without cache_dir re-ran the pipeline")
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path, "force_reload": True})
+            self.assertEqual(resp.code, 200, resp.body)
+            self.assertEqual(len(calls), 1)
+        session = self._app.settings["sessions"].get(sid)
+        self.assertEqual(session.cache_dir, str(host_cache))
+        for p in _cache_node_paths(session.expr):
+            self.assertIn(host_cache, p.parents)
+        self.assertEqual(self._default_cache_parquets(), [])
+
+    @tornado.testing.gen_test
+    async def test_missing_build_dir_is_not_found(self):
+        """A build dir that doesn't exist is a 404 build_dir_not_found. xorq
+        reports it as an OSError from reading ``profiles.yaml``, not a
+        FileNotFoundError, so the handler can't rely on the exception type."""
+        resp = await _post(self.get_http_port(), "/load_expr",
+            {"session": "lx-no-build", "build_dir": os.path.join(self.root, "nope")})
+        self.assertEqual(resp.code, 404, resp.body)
+        self.assertEqual(json.loads(resp.body)["error_code"], "build_dir_not_found")
+
+    @tornado.testing.gen_test
+    async def test_heal_file_not_found_is_a_load_error(self):
+        """A FileNotFoundError raised by the heal (a snapshot dir pruned
+        mid-write, say) is a load failure (500) for a build dir that exists,
+        not build_dir_not_found."""
+        build_path, host_cache, _ = _build_cached_expr_dir(self.root)
+        with patch.object(xorq_loading, "heal_missing_snapshots",
+            side_effect=FileNotFoundError(str(host_cache / "parquet"))):
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-heal-fnf", "build_dir": build_path, "cache_dir": str(host_cache)})
+        self.assertEqual(resp.code, 500, resp.body)
+        self.assertEqual(json.loads(resp.body)["error_code"], "load_expr_error")
+
+    @tornado.testing.gen_test
+    async def test_cache_heal_has_its_own_span(self):
+        """The heal runs cached sub-graphs, so it gets its own
+        firstpull.cache_heal span instead of inflating firstpull.expr_load,
+        which the perf harness reads as just the expression build."""
+        build_path, host_cache, outer_snapshot = _build_cached_expr_dir(self.root)
+        outer_snapshot.unlink()
+        captured: list = []
+        with patch.object(telemetry, "make_http_sink", lambda url, **kw: captured.append):
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-heal-span", "build_dir": build_path,
+                 "cache_dir": str(host_cache),
+                 "telemetry_url": "http://companion.invalid/internal/telemetry"})
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertIn("firstpull.cache_heal", [r["name"] for r in captured])
