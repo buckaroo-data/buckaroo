@@ -18,8 +18,12 @@ import tornado.websocket
 
 xo = pytest.importorskip("xorq.api")
 
+import xorq.caching.storage  # noqa: E402
+from attr import evolve  # noqa: E402
 from xorq.caching import ParquetSnapshotCache, ParquetStorage  # noqa: E402
+from xorq.common.utils.graph_utils import replace_nodes, walk_nodes  # noqa: E402
 from xorq.common.utils.provenance_utils import read_parquet_provenance  # noqa: E402
+from xorq.expr.relations import CachedNode  # noqa: E402
 
 from buckaroo.server import telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
@@ -1040,9 +1044,6 @@ def _bake_from_build(build_path, host_cache):
     ``reads/``, so the loaded graph — and every cache key — differs from the
     in-memory one. Kept independent of ``xorq_loading.redirect_cache_dir`` so
     the test does not grade the redirect against itself."""
-    from attr import evolve
-    from xorq.common.utils.graph_utils import replace_nodes
-    from xorq.expr.relations import CachedNode
 
     def replacer(node, kwargs):
         if kwargs:
@@ -1064,8 +1065,6 @@ def _build_cached_expr_dir(root):
     The aggregate's cache node wraps a filter that is itself cached, so the
     outer node's parent carries a nested ``CachedNode``. Returns
     ``(build_path, host_cache, outer_snapshot_path)``."""
-    from pathlib import Path
-    from xorq.caching import ParquetSnapshotCache
     root = Path(root)
     pd.DataFrame({"g": [1, 1, 2], "v": [1.0, 2.0, 3.0]}).to_parquet(root / "t.parquet")
     host_cache = root / "host_cache"
@@ -1083,9 +1082,6 @@ def _build_cached_expr_dir(root):
 
 
 def _cache_node_paths(expr):
-    from pathlib import Path
-    from xorq.common.utils.graph_utils import walk_nodes
-    from xorq.expr.relations import CachedNode
     return [Path(n.cache.storage.get_path(n.cache.calc_key(n.parent)))
         for n in walk_nodes((CachedNode,), expr)]
 
@@ -1133,8 +1129,6 @@ class TestLoadExprCacheDir(tornado.testing.AsyncHTTPTestCase):
         # writes into the real user cache.
         # xorq <0.4 binds get_xorq_cache_dir into caching.storage at import;
         # later versions look it up in caching_utils at call time.
-        from pathlib import Path
-        import xorq.caching.storage
         self.default_cache = os.path.join(self.root, "default_cache")
         targets = ["xorq.common.utils.caching_utils.get_xorq_cache_dir"]
         if hasattr(xorq.caching.storage, "get_xorq_cache_dir"):
@@ -1150,13 +1144,11 @@ class TestLoadExprCacheDir(tornado.testing.AsyncHTTPTestCase):
         super().tearDown()
 
     def _default_cache_parquets(self):
-        from pathlib import Path
         return sorted(Path(self.default_cache).rglob("*.parquet"))
 
     def test_load_expr_build_dir_redirects_nested_cache_nodes(self):
         """Every cache node, the one nested in the outer node's parent
         included, resolves under cache_dir and finds the baked snapshot."""
-        from buckaroo.server import xorq_loading
         build_path, host_cache, _ = _build_cached_expr_dir(self.root)
         expr = xorq_loading.load_expr_build_dir(build_path, cache_dir=str(host_cache))
         paths = _cache_node_paths(expr)
@@ -1167,7 +1159,6 @@ class TestLoadExprCacheDir(tornado.testing.AsyncHTTPTestCase):
 
     def test_load_expr_build_dir_without_cache_dir_unchanged(self):
         """Unset cache_dir keeps xorq's default resolution."""
-        from buckaroo.server import xorq_loading
         build_path, host_cache, _ = _build_cached_expr_dir(self.root)
         expr = xorq_loading.load_expr_build_dir(build_path)
         for p in _cache_node_paths(expr):
