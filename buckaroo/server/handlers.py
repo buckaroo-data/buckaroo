@@ -486,15 +486,20 @@ class LoadExprHandler(tornado.web.RequestHandler):
 
         prompt = body.get("prompt", "")
         component_config = body.get("component_config")
-        column_config_overrides = body.get("column_config_overrides")
-        extra_grid_config = body.get("extra_grid_config")
-        init_sd = body.get("init_sd")
-        # Columns whose summary stats are supplied via init_sd and must not be
-        # recomputed (e.g. a diff reusing each source column's stats).
-        skip_stat_columns = body.get("skip_stat_columns")
+        # Everything the dataflow is constructed with besides the expression and
+        # the klasses. Stored on the session so /reload_expr rebuilds with the
+        # same config rather than a stripped-down dataflow (#957).
+        # skip_stat_columns: columns whose summary stats are supplied via init_sd
+        # and must not be recomputed (e.g. a diff reusing each source column's
+        # stats).
+        dataflow_kwargs = {
+            "cache_storage_path": body.get("cache_storage_path"),
+            "column_config_overrides": body.get("column_config_overrides"),
+            "extra_grid_config": body.get("extra_grid_config"),
+            "init_sd": body.get("init_sd"),
+            "skip_stat_columns": body.get("skip_stat_columns")}
 
         project_root = body.get("project_root")
-        cache_storage_path = body.get("cache_storage_path")
 
         try:
             # session= correlates these spans across concurrent loads — the
@@ -516,10 +521,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 with perf_log.perf_span("firstpull.dataflow_construct", session=session_id):
                     xorq_dataflow = xorq_loading.XorqServerDataflow(
                         expr, skip_main_serial=True, extra_klasses=extra_klasses,
-                        cache_storage_path=cache_storage_path,
-                        column_config_overrides=column_config_overrides,
-                        extra_grid_config=extra_grid_config, init_sd=init_sd,
-                        skip_stat_columns=skip_stat_columns)
+                        **dataflow_kwargs)
                 # Spanning metadata too leaves only the small klass-load step
                 # unmeasured inside the outer firstpull.load_expr total.
                 with perf_log.perf_span("firstpull.metadata", session=session_id):
@@ -548,6 +550,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.build_dir = build_dir
         session.cache_dir = cache_dir
         session.project_root = project_root
+        session.dataflow_kwargs = dataflow_kwargs
         session.tele_sink = tele_sink
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
@@ -767,11 +770,15 @@ class ReloadExprHandler(tornado.web.RequestHandler):
     """POST /reload_expr/<session_id> — refresh post-processing and stat
     klasses on a live xorq session without restarting the server.
 
-    Re-scans ``<project_root>/stats/`` and ``<project_root>/post_processing/``
-    for the session's stored project root, rebuilds the ``XorqServerDataflow``
-    with the fresh klass list, and broadcasts the updated ``command_config``
-    and ``buckaroo_options`` to all open WebSocket clients. The expression
-    and its cached stats are reused — no re-execute against the data backend.
+    Re-scans ``<project_root>/stats/``, ``<project_root>/post_processing/``
+    and the display klasses for the session's stored project root, rebuilds
+    the ``XorqServerDataflow`` with the fresh klass list, and broadcasts the
+    updated ``command_config`` and ``buckaroo_options`` to all open WebSocket
+    clients. The expression is reused as-is (the build dir is not re-read),
+    and the rebuild replays the session's stored ``/load_expr`` config
+    (``SessionState.dataflow_kwargs``) — so stats already in the
+    ``cache_storage_path`` store are cache hits, and column overrides,
+    extra grid config, init_sd and skip_stat_columns survive the reload.
 
     Returns 404 when the session does not exist, 400 when it is not a xorq
     session or has no project_root recorded, 501 when xorq is not installed."""
@@ -812,7 +819,8 @@ class ReloadExprHandler(tornado.web.RequestHandler):
                 + xorq_loading.load_project_post_processing_klasses(session.project_root)
                 + xorq_loading.load_project_display_klasses(session.project_root))
             xorq_dataflow = xorq_loading.XorqServerDataflow(
-                session.expr, skip_main_serial=True, extra_klasses=extra_klasses)
+                session.expr, skip_main_serial=True, extra_klasses=extra_klasses,
+                **session.dataflow_kwargs)
         except Exception:
             tb = traceback.format_exc()
             log.error("reload_expr error session=%s: %s", session_id, tb)
