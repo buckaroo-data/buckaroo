@@ -9,16 +9,14 @@ installed still imports cleanly.
 from __future__ import annotations
 
 import builtins
-import contextlib
 import inspect
 import logging
+import os
 import traceback
+import uuid
 from pathlib import Path
 
-try:
-    import fcntl
-except ImportError:  # Windows — no flock; missing snapshots heal unlocked
-    fcntl = None
+import pyarrow.parquet as pq
 
 from buckaroo.server.git_state_guard import install_git_state_guard
 from buckaroo.server.window import clamp_window
@@ -104,10 +102,11 @@ def load_expr_build_dir(build_dir: str, cache_dir=None):
     xorq serializes only a cache node's ``relative_path``, so a loaded
     ``CachedNode`` resolves under ``~/.cache/xorq`` whatever directory the
     build was baked into. ``cache_dir`` points every parquet-backed cache
-    node at that directory instead (``redirect_cache_dir``) and heals any
-    snapshot that is missing there under a lock (``heal_missing_snapshots``),
-    so an embedder's baked snapshots are read rather than recomputed into a
-    second copy (#972). Unset, xorq's default resolution is unchanged."""
+    node at that directory instead (``redirect_cache_dir``), so an embedder's
+    baked snapshots are read rather than recomputed into a second copy
+    (#972). Unset, xorq's default resolution is unchanged. Snapshots missing
+    from ``cache_dir`` are written by ``heal_missing_snapshots``, which the
+    caller runs (and times) separately."""
     from xorq.api import load_expr  # noqa: PLC0415  (lazy, see module docstring)
     from xorq.vendor import ibis  # noqa: PLC0415
     from xorq import config as xorq_config  # noqa: PLC0415
@@ -122,7 +121,6 @@ def load_expr_build_dir(build_dir: str, cache_dir=None):
     expr = load_expr(build_dir)
     if cache_dir:
         expr = redirect_cache_dir(expr, cache_dir)
-        heal_missing_snapshots(expr)
     return expr
 
 
@@ -155,51 +153,96 @@ def redirect_cache_dir(expr, cache_dir):
     return replace_nodes(replacer, expr).to_expr()
 
 
-@contextlib.contextmanager
-def _snapshot_lock(snapshot_path: Path):
-    """Exclusive ``flock`` on ``<snapshot_path>.lock`` for the duration.
+def _outermost_cache_nodes(expr):
+    """The ``CachedNode``s reachable from ``expr`` without passing through
+    another one: the snapshots a query of ``expr`` reads first."""
+    from xorq.common.utils.graph_utils import gen_children_of, to_node  # noqa: PLC0415
+    from xorq.expr.relations import CachedNode  # noqa: PLC0415
+    seen, found, stack = set(), [], [to_node(expr)]
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        if isinstance(node, CachedNode):
+            found.append(node)
+        else:
+            stack.extend(gen_children_of(node))
+    return found
 
-    The lock file is left in place: unlinking it would let a waiter hold a
-    lock on an inode a newcomer no longer sees."""
-    if fcntl is None:
-        yield
-        return
-    lock_path = snapshot_path.with_name(snapshot_path.name + ".lock")
-    with open(lock_path, "a+") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+def _write_snapshot(parent, path: Path, parquet_metadata=None):
+    """Execute ``parent`` into the parquet snapshot at ``path``.
+
+    The rows go to a temp file no other writer uses, which ``os.replace``
+    then moves into place atomically: the snapshot appears whole or not at
+    all, and another writer of the same key costs duplicate work, never a
+    corrupt file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with parent.to_pyarrow_batches() as batches:
+            schema = batches.schema
+            if parquet_metadata:
+                schema = schema.with_metadata((schema.metadata or {}) | parquet_metadata)
+            with pq.ParquetWriter(str(tmp_path), schema) as writer:
+                for batch in batches:
+                    writer.write_batch(batch)
+        os.replace(tmp_path, path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def heal_missing_snapshots(expr):
-    """Write each parquet cache node's snapshot that is missing, under a lock.
+    """Write the parquet snapshots a query of ``expr`` would find missing,
+    and return their paths.
 
     With a shared ``cache_dir`` the server is a second writer into the
-    embedder's cache. ``ParquetStorage.put`` writes through a fixed
-    ``<key>.parquet.tmp`` with no lock, so two cold writers of one key can
-    leave a corrupt file that ``exists()`` then reports as a hit. Each missing
-    snapshot is therefore written while holding an exclusive ``flock`` on
-    ``<snapshot path>.lock`` (e.g. ``<cache_dir>/parquet/<key>.parquet.lock``),
-    and existence is re-checked after acquiring it. Embedders writing into the
-    same directory should take the same lock around their own writes.
+    embedder's cache. xorq's ``ParquetStorage.put`` writes through a fixed
+    ``<key>.parquet.tmp``, so two writers of one key can clobber each
+    other's partial file and leave a corrupt snapshot that ``exists()``
+    reports as a hit. The heal writes each snapshot itself instead, through
+    ``_write_snapshot``, and takes no lock that another process could hold.
 
-    Nodes are healed descendants-first, so an outer node's write reads the
-    inner snapshots rather than writing them itself, unlocked."""
+    The walk follows xorq's lazy read path. A cache node whose snapshot
+    exists answers every query below it, so nothing under it is touched. A
+    missing one first has the snapshots its parent reads healed, so running
+    the parent reads them rather than having xorq ``put`` them. Only the
+    root's snapshot gets provenance, as in xorq's executor.
+
+    Each write is logged: against a baked cache it usually means
+    ``cache_dir`` is spelled differently from the path the embedder baked
+    with, which xorq hashes into the key of every cache node above
+    another."""
     from xorq.caching import ParquetStorage  # noqa: PLC0415
-    from xorq.common.utils.graph_utils import walk_nodes  # noqa: PLC0415
-    from xorq.expr.relations import CachedNode  # noqa: PLC0415
-    for node in reversed(walk_nodes((CachedNode,), expr)):
-        storage = node.cache.storage
-        if not isinstance(storage, ParquetStorage):
-            continue
-        key = node.cache.calc_key(node.parent)
-        if storage.exists(key):
-            continue
-        with _snapshot_lock(Path(storage.get_path(key))):
-            if not storage.exists(key):
-                node.cache.set_default(node.parent, node.parent.op())
+    from xorq.common.utils.provenance_utils import build_provenance_metadata  # noqa: PLC0415
+    root = expr.op()
+    visited = set()
+    written = []
+
+    def heal(node):
+        if node in visited:
+            return
+        visited.add(node)
+        cache = node.cache
+        key = cache.calc_key(node.parent)
+        if cache.storage.exists(key):
+            return
+        for inner in _outermost_cache_nodes(node.parent):
+            heal(inner)
+        # Any other storage is left for xorq to write at query time.
+        if not isinstance(cache.storage, ParquetStorage):
+            return
+        path = Path(cache.storage.get_path(key))
+        metadata = (build_provenance_metadata(expr, cache.strategy, cache.storage)
+            if node is root else None)
+        log.info("cache_dir heal: writing missing snapshot %s", path)
+        _write_snapshot(node.parent, path, metadata)
+        written.append(path)
+
+    for node in _outermost_cache_nodes(expr):
+        heal(node)
+    return written
 
 
 def get_xorq_metadata(xorq_dataflow: XorqServerDataflow, build_dir: str) -> dict:

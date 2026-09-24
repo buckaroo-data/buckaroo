@@ -1211,45 +1211,6 @@ class TestLoadExprCacheDir(tornado.testing.AsyncHTTPTestCase):
         for p in _cache_node_paths(session.expr):
             self.assertIn(host_cache, p.parents)
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="flock is POSIX-only")
-    def test_missing_snapshot_heal_waits_on_lock(self):
-        """With a shared cache_dir the server is a second writer. A missing
-        snapshot is healed under an flock on ``<snapshot>.lock`` and existence
-        is re-checked after acquiring it, so a snapshot another writer produced
-        while holding the lock is read, not overwritten."""
-        import fcntl
-        import threading
-        from buckaroo.server import xorq_loading
-        build_path, host_cache, outer_snapshot = _build_cached_expr_dir(self.root)
-        outer_snapshot.unlink()
-        lock_path = outer_snapshot.with_name(outer_snapshot.name + ".lock")
-
-        result: dict = {}
-
-        def load():
-            try:
-                result["expr"] = xorq_loading.load_expr_build_dir(
-                    build_path, cache_dir=str(host_cache))
-            except Exception as e:  # surfaced by the assertions below
-                result["error"] = e
-
-        with open(lock_path, "a+") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-            worker = threading.Thread(target=load)
-            worker.start()
-            worker.join(timeout=1.0)
-            self.assertTrue(worker.is_alive(),
-                "load did not wait on the snapshot lock held by another writer")
-            # The other writer heals the snapshot, with values the real
-            # aggregate would never produce, then releases.
-            pd.DataFrame({"g": [1, 2], "s": [999.0, 999.0]}).to_parquet(outer_snapshot)
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
-        worker.join(timeout=30)
-        self.assertFalse(worker.is_alive())
-        self.assertNotIn("error", result)
-        self.assertEqual(list(result["expr"].execute()["s"]), [999.0, 999.0],
-            "load overwrote the snapshot another writer produced under the lock")
-
     def test_heal_writes_through_its_own_tmp_file(self):
         """xorq's ``ParquetStorage.put`` writes through a fixed
         ``<key>.parquet.tmp``, so two writers of one key clobber each other's
