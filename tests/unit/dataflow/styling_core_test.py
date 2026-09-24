@@ -112,7 +112,22 @@ def test_index_styling5():
 def test_index_styling6():
     assert [{'col_path':['', '', 'index_name_1'], 'field':'index_a', 'displayer_args': {'displayer': 'obj'}},
         {'col_path':['level_a', 'level_b', 'index_name_2'], 'field':'index_b', 'displayer_args': {'displayer': 'obj'}}] == StylingAnalysis.get_left_col_configs(get_multiindex_with_names_both())
-        
+
+def test_index_styling_non_str_level_names():
+    # col_path is string[] on the JS side. MultiIndex level names are already str()'d;
+    # a single-level index or columns name has to be too
+    df = pd.DataFrame({'x': [1, 2]})
+    df.index.name = 7
+    df.columns.name = 3
+    assert [{'col_path':['3', '7'], 'field':'index', 'displayer_args': {'displayer': 'obj'}}] == \
+        StylingAnalysis.get_left_col_configs(df)
+
+    mi_df = pd.DataFrame({'x': [1, 2]}, index=pd.MultiIndex.from_tuples([(1, 2), (3, 4)], names=['p', 'q']))
+    mi_df.columns.name = 3
+    assert [{'col_path':['3', 'p'], 'field':'index_a', 'displayer_args': {'displayer': 'obj'}},
+        {'col_path':['3', 'q'], 'field':'index_b', 'displayer_args': {'displayer': 'obj'}}] == \
+        StylingAnalysis.get_left_col_configs(mi_df)
+
 
 def test_get_dfviewer_config_merge_hidden():
     sd: SDType = {'a':
