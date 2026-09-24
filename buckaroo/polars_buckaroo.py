@@ -12,6 +12,7 @@ from .serialization_utils import pd_to_obj, send_infinite_resp
 from .customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from .customizations.pl_autocleaning_conf import NoCleaningConfPl
 from .dataflow.dataflow import CustomizableDataflow, Sampling
+from .dataflow.styling_core import InitSD
 from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.widget_extension_utils import configure_buckaroo
 from .styling_helpers import obj_, pinned_histogram, pinned_filtered_histogram
@@ -194,7 +195,7 @@ class PolarsDFViewerInfinite(PolarsBuckarooInfiniteWidget):
         column_config_overrides=None,
         pinned_rows=None, extra_grid_config=None,
         component_config=None,
-        init_sd=None, skip_stat_columns=None, record_transcript=False):
+        init_sd:InitSD | None=None, skip_stat_columns=None, record_transcript=False):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
             extra_grid_config, component_config, init_sd,
             skip_stat_columns=skip_stat_columns, record_transcript=record_transcript)

@@ -24,6 +24,7 @@ from io import BytesIO
 import polars as pl
 
 from buckaroo.dataflow.dataflow import CustomizableDataflow
+from buckaroo.dataflow.styling_core import InitSD
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
 from buckaroo.customizations.pl_autocleaning_conf import NoCleaningConfPl
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
@@ -87,7 +88,8 @@ def get_metadata_polars(df: pl.DataFrame, path: str) -> dict:
     return {"path": path, "rows": len(df), "columns": columns}
 
 
-def create_polars_dataflow(df, column_config_overrides=None, extra_grid_config=None, init_sd=None) -> PolarsServerDataflow:
+def create_polars_dataflow(df, column_config_overrides=None, extra_grid_config=None,
+        init_sd: InitSD | None = None) -> PolarsServerDataflow:
     return PolarsServerDataflow(df, column_config_overrides=column_config_overrides,
         extra_grid_config=extra_grid_config, init_sd=init_sd, skip_main_serial=True)
 
