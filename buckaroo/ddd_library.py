@@ -133,6 +133,34 @@ def get_multiindex_with_names_both() -> pd.DataFrame:
         index=row_index)
 
 
+def _sales_df() -> pd.DataFrame:
+    return pd.DataFrame({
+        'region':  ['east', 'east', 'west', 'west', 'east', 'west', 'east', 'west'],
+        'year':    [2023, 2024, 2023, 2024, 2023, 2024, 2024, 2023],
+        'quarter': [1, 1, 2, 2, 3, 3, 4, 4],
+        'revenue': [10.5, 12.0, 8.25, 9.0, 11.0, 7.5, 13.25, 6.0],
+        'units':   [100, 120, 80, 90, 110, 75, 130, 60]})
+
+def get_multiindex_int_cols_df() -> pd.DataFrame:
+    """pivot_table with a values list: columns ('revenue', 2023), ('revenue', 2024), ...
+
+    The values level is unnamed and the 'year' level holds ints."""
+    return _sales_df().pivot_table(index='region', columns='year', values=['revenue', 'units'], aggfunc='sum')
+
+def get_multiindex_int_levels_df() -> pd.DataFrame:
+    """unstack onto two int levels: columns (2023, 1), (2023, 3), ... named ['year', 'quarter']
+
+    Year/quarter pairs a region never had come out NaN."""
+    return _sales_df().groupby(['region', 'year', 'quarter'])['revenue'].sum().unstack(['year', 'quarter'])
+
+def get_multiindex_int_names_df() -> pd.DataFrame:
+    """Pivot of a headerless CSV. Its columns are labelled 0, 1, 2, ..., so the column
+    levels are named 1 and 2 and the index is named 0, on top of int level values."""
+    headerless = _sales_df()[['region', 'year', 'quarter', 'revenue']]
+    headerless.columns = range(4)
+    return headerless.pivot_table(index=0, columns=[1, 2], values=3, aggfunc='sum')
+
+
 def df_with_infinity() -> pd.DataFrame:
     return pd.DataFrame({'a': [np.nan, np.inf, np.inf * -1]})
 
