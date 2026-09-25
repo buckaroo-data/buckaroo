@@ -160,6 +160,12 @@ def get_multiindex_int_names_df() -> pd.DataFrame:
     headerless.columns = range(4)
     return headerless.pivot_table(index=0, columns=[1, 2], values=3, aggfunc='sum')
 
+def get_multiindex_partly_named_index_df() -> pd.DataFrame:
+    """pd.concat of a dict of frames. The dict keys become an unnamed outer index level
+    above the named 'region' level. The columns axis is named 'year' and holds ints."""
+    by_year = _sales_df().pivot_table(index='region', columns='year', values='revenue', aggfunc='sum')
+    return pd.concat({'actual': by_year, 'budget': by_year * 1.1})
+
 
 def df_with_infinity() -> pd.DataFrame:
     return pd.DataFrame({'a': [np.nan, np.inf, np.inf * -1]})
