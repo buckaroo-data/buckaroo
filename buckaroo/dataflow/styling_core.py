@@ -448,7 +448,7 @@ class StylingAnalysis(ColAnalysis):
             else:
                 local_col_path = base_col_path.copy()
                 if not index_names_empty(df.index):
-                    local_col_path.append(str(idx_name))
+                    local_col_path.append('' if idx_name is None else str(idx_name))
                 if i == last_level and not index_names_empty(df.columns):
                     # the column level names go on the last index column
                     for j, cl in enumerate(col_levels):
