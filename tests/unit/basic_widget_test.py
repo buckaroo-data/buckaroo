@@ -2,7 +2,8 @@ import pytest
 import pandas as pd
 from IPython.display import display
 from buckaroo.buckaroo_widget import BuckarooWidget
-from buckaroo.ddd_library import get_multiindex_cols_df
+from buckaroo.ddd_library import (get_multiindex_cols_df, get_multiindex_int_cols_df, get_multiindex_int_levels_df,
+    get_multiindex_int_names_df)
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 from .fixtures import (word_only_df)
 from buckaroo.serialization_utils import (DuplicateColumnsException)
@@ -268,6 +269,24 @@ def test_multi_index_cols() -> None:
 
     assert col_config[0]['col_path'] == ('foo', 'a')
     assert col_config[1]['col_path'] == ('foo', 'b')
+
+def test_multi_index_int_cols() -> None:
+    # a data column's col_path is the frame's own label, int levels included
+    for df in [get_multiindex_int_cols_df(), get_multiindex_int_levels_df(), get_multiindex_int_names_df()]:
+        col_config = BuckarooWidget(df).df_display_args['main']['df_viewer_config']['column_config']
+        assert [cc['col_path'] for cc in col_config] == list(df.columns)
+
+def test_multi_index_int_cols_overrides() -> None:
+    # column_config_overrides are keyed by the frame's own labels, so int-containing tuples
+    df = get_multiindex_int_cols_df()
+    color_map_config = {'color_rule': 'color_map', 'map_name': 'BLUE_TO_YELLOW'}
+    bw = BuckarooWidget(df, column_config_overrides={
+        ('revenue', 2024): {'merge_rule': 'hidden'},
+        ('units', 2023): {'color_map_config': color_map_config}})
+    col_config = bw.df_display_args['main']['df_viewer_config']['column_config']
+    assert [cc['col_path'] for cc in col_config] == [('revenue', 2023), ('units', 2023), ('units', 2024)]
+    assert col_config[1]['color_map_config'] == color_map_config
+    assert 'color_map_config' not in col_config[2]
     
 def atest_symbol_meta():    
     """verifies that a symbol with a meta key can be added and

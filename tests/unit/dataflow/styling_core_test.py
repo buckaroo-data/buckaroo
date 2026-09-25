@@ -3,7 +3,7 @@ from typing import Dict, List
 import pandas as pd
 from buckaroo.dataflow.styling_core import ColumnConfig, DFViewerConfig, NormalColumnConfig, PartialColConfig, StylingAnalysis, merge_sd_overrides, rewrite_override_col_references
 from buckaroo.customizations.styling import (DefaultMainStyling, _formatted_char_count, estimate_min_width_px, _HISTOGRAM_MIN_PX, _MIN_COL_PX)
-from buckaroo.ddd_library import get_basic_df2, get_multiindex_index_df, get_multiindex_index_multiindex_with_names_cols_df, get_multiindex_index_with_names_multiindex_cols_df, get_multiindex_with_names_both, get_multiindex_with_names_index_df, get_multiindex_cols_df, get_multiindex_with_names_cols_df, get_tuple_cols_df, get_multiindex_int_cols_df
+from buckaroo.ddd_library import get_basic_df2, get_multiindex_index_df, get_multiindex_index_multiindex_with_names_cols_df, get_multiindex_index_with_names_multiindex_cols_df, get_multiindex_with_names_both, get_multiindex_with_names_index_df, get_multiindex_cols_df, get_multiindex_with_names_cols_df, get_tuple_cols_df, get_multiindex_int_cols_df, get_multiindex_int_levels_df, get_multiindex_int_names_df
 from buckaroo.df_util import ColIdentifier
 from buckaroo.pluggable_analysis_framework.col_analysis import SDType
 BASIC_DF = get_basic_df2()
@@ -133,6 +133,14 @@ def test_index_styling_int_cols_unnamed_level():
     # level. An unnamed level gets a blank header, as it does when no level is named
     assert [{'col_path':['', 'year', 'region'], 'field':'index', 'displayer_args': {'displayer': 'obj'}}] == \
         StylingAnalysis.get_left_col_configs(get_multiindex_int_cols_df())
+
+def test_index_styling_int_levels():
+    assert [{'col_path':['year', 'quarter', 'region'], 'field':'index', 'displayer_args': {'displayer': 'obj'}}] == \
+        StylingAnalysis.get_left_col_configs(get_multiindex_int_levels_df())
+
+def test_index_styling_int_level_names():
+    assert [{'col_path':['1', '2', '0'], 'field':'index', 'displayer_args': {'displayer': 'obj'}}] == \
+        StylingAnalysis.get_left_col_configs(get_multiindex_int_names_df())
 
 
 def test_get_dfviewer_config_merge_hidden():
