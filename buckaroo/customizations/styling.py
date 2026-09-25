@@ -69,7 +69,7 @@ class DefaultMainStyling(StylingAnalysis):
 
 
     @classmethod
-    def style_column(kls, col:str, column_metadata: Any) -> Any:
+    def style_column(cls, col:str, column_metadata: Any) -> Any:
         # `_type` is the discriminator for displayer choice. If column_metadata
         # is empty (polars/index edge case) or arrives without `_type` — e.g.
         # a no-cleaning run where only an op-contributed entry (highlight_*)
@@ -126,7 +126,7 @@ class DefaultMainStyling(StylingAnalysis):
         header_name = column_metadata.get('orig_col_name', col)
         has_histogram = any(
             pr.get('displayer_args', {}).get('displayer') == 'histogram'
-            for pr in kls.pinned_rows)
+            for pr in cls.pinned_rows)
         min_w = estimate_min_width_px(disp, header_name, column_metadata, has_histogram)
         base_config['ag_grid_specs'] = {'minWidth': min_w}
         # ag_grid_specs from column_metadata (e.g. init_sd carrying

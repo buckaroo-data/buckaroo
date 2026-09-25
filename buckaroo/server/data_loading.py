@@ -24,12 +24,12 @@ class ServerSampling(Sampling):
     pre_limit = 1_000_000
 
     @classmethod
-    def pre_stats_sample(kls, df):
+    def pre_stats_sample(cls, df):
         df = check_and_fix_df(df)
-        if len(df.columns) > kls.max_columns:
-            df = df[df.columns[:kls.max_columns]]
-        if kls.pre_limit and len(df) > kls.pre_limit:
-            sampled = df.sample(kls.pre_limit)
+        if len(df.columns) > cls.max_columns:
+            df = df[df.columns[:cls.max_columns]]
+        if cls.pre_limit and len(df) > cls.pre_limit:
+            sampled = df.sample(cls.pre_limit)
             if isinstance(sampled, pd.DataFrame):
                 return sampled.sort_index()
             return sampled

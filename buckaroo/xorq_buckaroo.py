@@ -264,7 +264,7 @@ class XorqBuckarooWidget(BuckarooWidget):
             provides_defaults = {}
 
             @classmethod
-            def post_process_df(kls, expr):
+            def post_process_df(cls, expr):
                 return [expr_processing_func(expr), {}]
 
             post_processing_method = proc_func_name

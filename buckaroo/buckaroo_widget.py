@@ -58,16 +58,16 @@ def _bk_flash(event, **extra):
 
 class PdSampling(Sampling):
     @classmethod
-    def pre_stats_sample(kls, df):
+    def pre_stats_sample(cls, df):
         # this is a bad place for fixing the dataframe, but for now
         # it's expedient. There probably should be a nother processing
         # step
         df = check_and_fix_df(df)
-        if len(df.columns) > kls.max_columns:
+        if len(df.columns) > cls.max_columns:
             print("Removing excess columns, found %d columns" %  len(df.columns))
-            df = df[df.columns[:kls.max_columns]]
-        if kls.pre_limit and len(df) > kls.pre_limit:
-            sampled = df.sample(kls.pre_limit)
+            df = df[df.columns[:cls.max_columns]]
+        if cls.pre_limit and len(df) > cls.pre_limit:
+            sampled = df.sample(cls.pre_limit)
             if isinstance(sampled, pd.DataFrame):
                 return sampled.sort_index()
             return sampled
@@ -115,7 +115,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
               'secondary_df_viewer_config': EMPTY_DFVIEWER_CONFIG}}
         args_dict['args']['summary_stats_data'] = []
         if include_summary_stats:
-            1/0 # not supported yet
+            raise NotImplementedError("include_summary_stats isn't supported yet")
             # summary_stats data is big, and most of the time you won't want to serialize it
             #args_dict['summary_stats_data'] = {} #desrialize here
 
@@ -145,6 +145,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         self.record_transcript = record_transcript
         self.exception = None
         kls = self.__class__
+        widget = self
         class InnerDataFlow(kls.dataflow_klass):
             sampling_klass = kls.sampling_klass
             autocleaning_klass = kls.autocleaning_klass
@@ -152,8 +153,8 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
             autoclean_conf= kls.autoclean_conf
             analysis_klasses = kls.analysis_klasses
 
-            def _df_to_obj(idfself, df:pd.DataFrame):
-                return self._df_to_obj(df)
+            def _df_to_obj(self, df:pd.DataFrame):
+                return widget._df_to_obj(df)
 
         self.dataflow = InnerDataFlow(
             orig_df,
@@ -258,7 +259,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         class DecoratedProcessing(ColAnalysis):
             provides_defaults = {}
             @classmethod
-            def post_process_df(kls, df):
+            def post_process_df(cls, df):
                 new_df = df_processing_func(df)
                 return [new_df, {}]
             post_processing_method = proc_func_name
