@@ -391,10 +391,8 @@ def safedel(dct:Dict[str, Any], key:str) -> Dict[str, Any]:
 #Union[pd.Index[Any], pd.MultiIndex]
 def get_index_level_names(index:Any) -> List[str]:
     if isinstance(index, pd.MultiIndex):
-        if all(x is None for x in index.names):
-            index_level_names = ['' for idx_name in index.names]
-        else:
-            index_level_names = [str(idx_name) for idx_name in index.names]
+        # an unnamed level gets a blank header even when other levels are named
+        index_level_names = ['' if idx_name is None else str(idx_name) for idx_name in index.names]
     elif index.name is not None:
         index_level_names = [str(index.name)]
     else:
