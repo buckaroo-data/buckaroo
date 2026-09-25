@@ -11,7 +11,7 @@ from buckaroo.df_util import old_col_new_col, to_chars
 from buckaroo.dataflow.dataflow import CustomizableDataflow
 from buckaroo.dataflow.dataflow_extras import Sampling
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
-from buckaroo.dataflow.styling_core import StylingAnalysis
+from buckaroo.dataflow.styling_core import InitSD, StylingAnalysis
 from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
 from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from buckaroo.customizations.pd_autoclean_conf import CleaningConf, NoCleaningConf
@@ -50,7 +50,8 @@ class ServerDataflow(CustomizableDataflow[pd.DataFrame]):
         return pd_to_obj(df)
 
 
-def create_dataflow(df: pd.DataFrame, column_config_overrides=None, extra_grid_config=None, init_sd=None) -> ServerDataflow:
+def create_dataflow(df: pd.DataFrame, column_config_overrides=None, extra_grid_config=None,
+        init_sd: InitSD | None = None) -> ServerDataflow:
     """Instantiate the full Buckaroo analysis pipeline headlessly.
 
     Accepts the same per-column / per-grid configuration kwargs that

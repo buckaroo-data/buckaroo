@@ -16,6 +16,7 @@ from .dataflow_extras import (exception_protect, Sampling)
 from .styling_core import (
     EMPTY_DF_DISPLAY_ARG,
     ComponentConfig,
+    InitSD,
     OverrideColumnConfig,
     PinnedRowConfig,
     merge_sd_overrides,
@@ -387,8 +388,10 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     def __init__(self, orig_df, debug=False,
                  column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
                  pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
-                 component_config:Union[Literal[None], ComponentConfig]=None, init_sd=None, skip_main_serial=False,
+                 component_config:Union[Literal[None], ComponentConfig]=None,
+                 init_sd:Union[Literal[None], InitSD]=None, skip_main_serial=False,
                  skip_stat_columns=None):
+        self.init_sd: InitSD
         if init_sd is None:
             self.init_sd = {}
         else:

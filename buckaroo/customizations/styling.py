@@ -1,5 +1,5 @@
 from buckaroo.dataflow.dataflow import StylingAnalysis
-from typing import Any
+from typing import Any, Dict
 from buckaroo.styling_helpers import obj_, float_, inherit_, pinned_histogram
 
 # Pixel-width estimation constants, calibrated to AG-Grid theme with
@@ -79,7 +79,7 @@ class DefaultMainStyling(StylingAnalysis):
 
         digits = 3
         t = column_metadata['_type']
-        base_config = {'col_name':str(col)}
+        base_config: Dict[str, Any] = {'col_name':str(col)}
         if t == 'integer':
             disp = {'displayer': 'float', 'min_fraction_digits':0, 'max_fraction_digits':0}
         elif t == 'float':
