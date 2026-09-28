@@ -1,12 +1,12 @@
 import copy
 import logging
-from typing import Iterable, TypedDict, Union, List, Dict, Any, Literal
-from typing_extensions import NotRequired, TypeAlias
+from typing import TYPE_CHECKING, Iterable, Mapping, Sequence, Union, List, Dict, Any, Literal, cast
+from typing_extensions import NotRequired, TypeAlias, TypedDict
 
 import pandas as pd
 from buckaroo.df_util import ColIdentifier, old_col_new_col, to_chars
 from buckaroo.dataflow.df_types import DataFrameLike
-from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis, ColMeta, SDType)
+from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis, ColMeta, SDType, SDVals)
 
 logger = logging.getLogger()
 
@@ -43,7 +43,11 @@ BooleanDisplayerA = TypedDict('BooleanDisplayerA', {
 
 StringDisplayerA = TypedDict('StringDisplayerA', {
     'displayer': Literal["string"],
-    'max_length': NotRequired[int]})
+    'max_length': NotRequired[int],
+    # case-insensitive <mark> highlighting; highlight_regex wins if both are set
+    'highlight_phrase': NotRequired[Union[str, List[str]]],
+    'highlight_regex': NotRequired[str],
+    'highlight_color': NotRequired[str]})
 
 FloatDisplayerA = TypedDict('FloatDisplayerA', {
     'displayer': Literal["float"],
@@ -55,9 +59,10 @@ FloatDisplayerA = TypedDict('FloatDisplayerA', {
 DatetimeDefaultDisplayerA = TypedDict('DatetimeDefaultDisplayerA', {
     'displayer': Literal["datetimeDefault"]})
 
+DatetimeLocale = Literal["en-US", "en-GB", "en-CA", "fr-FR", "es-ES", "de-DE", "ja-JP"]
 DatetimeLocaleDisplayerA = TypedDict('DatetimeLocaleDisplayerA', {
     'displayer': Literal["datetimeLocaleString"],
-    'locale': Literal["en-US", "en-GB", "en-CA", "fr-FR", "es-ES", "de-DE", "ja-JP"],
+    'locale': DatetimeLocale,
     'args': Dict[str, Any]})
 
 IntegerDisplayerA = TypedDict('IntegerDisplayerA', {
@@ -72,6 +77,9 @@ CompactNumberDisplayerA = TypedDict('CompactNumberDisplayerA', {
     'prefix': NotRequired[str],
     'suffix': NotRequired[str]})
 
+DurationDisplayerA = TypedDict('DurationDisplayerA', {
+    'displayer': Literal["duration"]})
+
 FormatterArgs = Union[
     ObjDisplayerA,
     BooleanDisplayerA,
@@ -80,11 +88,39 @@ FormatterArgs = Union[
     DatetimeDefaultDisplayerA,
     DatetimeLocaleDisplayerA,
     IntegerDisplayerA,
-    CompactNumberDisplayerA
+    CompactNumberDisplayerA,
+    DurationDisplayerA
 ]
 
+# pinned rows only: render with the column's own displayer
+InheritDisplayerA = TypedDict('InheritDisplayerA', {'displayer': Literal["inherit"]})
+
 # Combined displayer types
-DisplayerArgs = Union[FormatterArgs, CellRendererArgs]
+DisplayerArgs = Union[FormatterArgs, CellRendererArgs, InheritDisplayerA]
+
+# every displayer name in DisplayerArgs, keep the two in step
+DisplayerName = Literal[
+    "obj", "boolean", "string", "float", "datetimeDefault", "datetimeLocaleString", "integer",
+    "compact_number", "duration", "histogram", "chart", "linkify", "boolean_checkbox",
+    "Base64PNGImageDisplayer", "SVGDisplayer", "inherit"]
+
+# init_sd's displayer_args is shallow-merged over the displayer_args style_column
+# computes, so any subset of any displayer's keys is valid there
+DisplayerArgsOverride = TypedDict('DisplayerArgsOverride', {
+    'displayer': NotRequired[DisplayerName],
+    'max_length': NotRequired[int],
+    'highlight_phrase': NotRequired[Union[str, List[str]]],
+    'highlight_regex': NotRequired[str],
+    'highlight_color': NotRequired[str],
+    'min_fraction_digits': NotRequired[int],
+    'max_fraction_digits': NotRequired[int],
+    'min_digits': NotRequired[int],
+    'max_digits': NotRequired[int],
+    'prefix': NotRequired[str],
+    'suffix': NotRequired[str],
+    'locale': NotRequired[DatetimeLocale],
+    'args': NotRequired[Dict[str, Any]],
+    'colors': NotRequired[ChartColors]})
 
 # Color mapping types
 ColorMap = Union[Literal["BLUE_TO_YELLOW", "DIVERGING_RED_WHITE_BLUE", "DIVERGING_BLUE_WHITE_RED"], List[str]]
@@ -131,13 +167,21 @@ SummarySeriesTooltip = TypedDict('SummarySeriesTooltip', {
 
 TooltipConfig = Union[SimpleTooltip, SummarySeriesTooltip]
 
+# Handed to AG-Grid as a ColDef, which is what DFWhole.ts types it as. Not mirrored
+# here: ColDef is a large third-party interface, much of it callbacks that can't
+# come from Python, so Any is the honest value type for a pass-through.
+AGGridColDef: TypeAlias = Dict[str, Any]
+
+# only 'hidden' does anything: the column is dropped from the column config
+MergeRule = Literal["hidden"]
+
 # Column config types
 BaseColumnConfig = TypedDict('BaseColumnConfig', {
     'displayer_args': DisplayerArgs,
     'color_map_config': NotRequired[ColorMappingConfig],
     'tooltip_config': NotRequired[TooltipConfig],
-    'ag_grid_specs': NotRequired[Dict[str, Any]]  # AGGrid_ColDef
-})
+    'ag_grid_specs': NotRequired[AGGridColDef],
+    'merge_rule': NotRequired[MergeRule]})
 
 NormalColumnConfig = TypedDict('NormalColumnConfig', {
     'col_name': str,
@@ -145,18 +189,51 @@ NormalColumnConfig = TypedDict('NormalColumnConfig', {
     'displayer_args': DisplayerArgs,
     'color_map_config': NotRequired[ColorMappingConfig],
     'tooltip_config': NotRequired[TooltipConfig],
-    'ag_grid_specs': NotRequired[Dict[str, Any]]  # AGGrid_ColDef
-})
+    'ag_grid_specs': NotRequired[AGGridColDef],
+    'merge_rule': NotRequired[MergeRule]})
 
 MultiIndexColumnConfig = TypedDict('MultiIndexColumnConfig', {
-    'col_path': List[str],
+    'col_path': Sequence[str],  # a tuple for data columns, a list for the index
     'field': str,
     'displayer_args': DisplayerArgs,
     'color_map_config': NotRequired[ColorMappingConfig],
     'tooltip_config': NotRequired[TooltipConfig],
-    'ag_grid_specs': NotRequired[Dict[str, Any]]  # AGGrid_ColDef
-})
+    'ag_grid_specs': NotRequired[AGGridColDef],
+    'merge_rule': NotRequired[MergeRule]})
 ColumnConfig = Union[NormalColumnConfig, MultiIndexColumnConfig]
+
+# closed and extra_items below are PEP 728. typing_extensions raises on them at
+# runtime before 4.13, and Pyodide 0.27 (marimo's WASM export) ships 4.12, so these
+# two are defined for type checkers only and are plain dicts at runtime.
+if TYPE_CHECKING:
+    # A column_config_overrides entry, or an init_sd column_config_override: any
+    # subset of a column config, merged over what styling produced. Closed, because
+    # an override can't carry the column's identity (col_name, col_path, ...).
+    PartialColConfig = TypedDict('PartialColConfig',
+        {'displayer_args': NotRequired[DisplayerArgs], 'color_map_config': NotRequired[ColorMappingConfig],
+         'tooltip_config': NotRequired[TooltipConfig], 'ag_grid_specs': NotRequired[AGGridColDef],
+         'merge_rule': NotRequired[MergeRule]},
+        closed=True)
+
+    # One column's init_sd entry. The keys listed are display config that styling
+    # reads; any other key is a summary stat for that column, typed like ColMeta's.
+    InitColMeta = TypedDict('InitColMeta', {
+        'displayer_args': NotRequired[DisplayerArgsOverride],
+        'ag_grid_specs': NotRequired[AGGridColDef],
+        # top-level column config keys to drop, e.g. ['tooltip_config']. A bare
+        # str is an Iterable[str] too, so this is deliberately a List
+        'delete_keys': NotRequired[List[str]],
+        # copied into a string displayer's displayer_args
+        'highlight_phrase': NotRequired[Union[str, List[str]]],
+        'highlight_regex': NotRequired[str],
+        'highlight_color': NotRequired[str],
+        'merge_rule': NotRequired[MergeRule],
+        'column_config_override': NotRequired[PartialColConfig]}, extra_items=SDVals)
+else:
+    PartialColConfig = Dict[str, Any]
+    InitColMeta = Dict[str, Any]
+OverrideColumnConfig:TypeAlias = Dict[ColIdentifier, PartialColConfig]
+InitSD: TypeAlias = Dict[ColIdentifier, InitColMeta]
 
 
 PinnedRowConfig = TypedDict('PinnedRowConfig', {
@@ -246,8 +323,6 @@ def merge_column(base, new):
     return ret
 
 
-OverrideColumnConfig:TypeAlias = Dict[ColIdentifier, BaseColumnConfig]
-
 def merge_column_config(styled_column_config:List[ColumnConfig],
                         df:DataFrameLike,
     overide_column_configs:OverrideColumnConfig) -> List[ColumnConfig]:
@@ -273,26 +348,27 @@ def merge_column_config(styled_column_config:List[ColumnConfig],
         ret_column_config.append(row)
     return ret_column_config
 
-PartialColConfig:TypeAlias = Dict[str, Union[str, Dict[str, str]]]
-def rewrite_override_col_references(rewrites: Dict[ColIdentifier, ColIdentifier], override:PartialColConfig) -> PartialColConfig:
+def rewrite_override_col_references(rewrites: Mapping[ColIdentifier, str], override:PartialColConfig) -> PartialColConfig:
     obj = copy.deepcopy(override)
-    if obj.get('color_map_config'):
-        if obj['color_map_config'].get('val_column'):
-            val_col = obj['color_map_config']['val_column']
+    color_map_config = obj.get('color_map_config')
+    if color_map_config:
+        if 'val_column' in color_map_config and color_map_config['val_column']:
+            val_col = color_map_config['val_column']
             # Only rewrite if the column exists in rewrites, otherwise keep original
-            obj['color_map_config']['val_column'] = rewrites.get(val_col, val_col)
+            color_map_config['val_column'] = rewrites.get(val_col, val_col)
 
-        if obj['color_map_config'].get('exist_column'):
-            exist_col = obj['color_map_config']['exist_column']
-            obj['color_map_config']['exist_column'] = rewrites.get(exist_col, exist_col)
-    if obj.get('tooltip_config'):
-        if obj['tooltip_config'].get('val_column'):
-            val_col = obj['tooltip_config']['val_column']
-            obj['tooltip_config']['val_column'] = rewrites.get(val_col, val_col)
+        if 'exist_column' in color_map_config and color_map_config['exist_column']:
+            exist_col = color_map_config['exist_column']
+            color_map_config['exist_column'] = rewrites.get(exist_col, exist_col)
+    tooltip_config = obj.get('tooltip_config')
+    if tooltip_config:
+        if 'val_column' in tooltip_config and tooltip_config['val_column']:
+            val_col = tooltip_config['val_column']
+            tooltip_config['val_column'] = rewrites.get(val_col, val_col)
     return obj
 
 
-def merge_sd_overrides(final_sd:SDType, df:DataFrameLike, overrides:SDType) -> SDType:
+def merge_sd_overrides(final_sd:SDType, df:DataFrameLike, overrides:Mapping[ColIdentifier, Mapping[str, SDVals]]) -> SDType:
     """
       this is psecifically built for places where keys from the original dataframe will be used in 'overrides'
       those should be mapped onto the rewritten col_name
@@ -315,12 +391,10 @@ def safedel(dct:Dict[str, Any], key:str) -> Dict[str, Any]:
 #Union[pd.Index[Any], pd.MultiIndex]
 def get_index_level_names(index:Any) -> List[str]:
     if isinstance(index, pd.MultiIndex):
-        if all(x is None for x in index.names):
-            index_level_names = ['' for idx_name in index.names]
-        else:
-            index_level_names = [str(idx_name) for idx_name in index.names]
+        # an unnamed level gets a blank header even when other levels are named
+        index_level_names = ['' if idx_name is None else str(idx_name) for idx_name in index.names]
     elif index.name is not None:
-        index_level_names = [index.name]
+        index_level_names = [str(index.name)]
     else:
         index_level_names = []
     return index_level_names
@@ -330,7 +404,7 @@ def get_empty_index_level_arr(index:Any) -> List[str]:
     if isinstance(index, pd.MultiIndex):
         index_level_names = ['' for idx_name in index.names]
     elif index.name is not None:
-        index_level_names = [index.name]
+        index_level_names = [str(index.name)]
     else:
         index_level_names = []
     return index_level_names
@@ -359,11 +433,12 @@ class StylingAnalysis(ColAnalysis):
             if index_names_empty(df.index):
                 col_levels.append('index')
             else:
-                col_levels.append(df.index.name)
+                col_levels.append(str(df.index.name))
             return [{'col_path':col_levels, 'field':'index',
                 'displayer_args': {'displayer': 'obj'}}]
         ccs:List[ColumnConfig] = []
 
+        last_level = len(df.index.names) - 1
         for i, idx_name in enumerate(df.index.names):
             if idx_name is None and index_names_empty(df.columns):
                 # if len(base_col_path) == 0:
@@ -371,16 +446,15 @@ class StylingAnalysis(ColAnalysis):
                 ccs.append({'header_name':'', 'col_name':'index_' + to_chars(i),
                     'displayer_args': {'displayer': 'obj'}})
             else:
-                if index_names_empty(df.index):
-                    local_col_path = base_col_path.copy()
-                else:
-                    local_col_path = base_col_path.copy()
-                    local_col_path.append(str(idx_name))
+                local_col_path = base_col_path.copy()
+                if not index_names_empty(df.index):
+                    local_col_path.append('' if idx_name is None else str(idx_name))
+                if i == last_level and not index_names_empty(df.columns):
+                    # the column level names go on the last index column
+                    for j, cl in enumerate(col_levels):
+                        local_col_path[j] = cl
                 ccs.append({'col_path': local_col_path, 'field':'index_' + to_chars(i),
                     'displayer_args': {'displayer': 'obj'}})
-        if not index_names_empty(df.columns):
-            for i, cl in enumerate(col_levels):
-                ccs[-1]['col_path'][i] = cl
         # ccs[-1]['ag_grid_specs'] = {
 	# 	    'headerClass': ['last-index-header-class'],
 	# 	    'cellClass': ['last-index-cell-class'],
@@ -416,18 +490,21 @@ class StylingAnalysis(ColAnalysis):
     
     @classmethod
     def fix_column_config(cls, col: ColIdentifier, orig_col_name: ColIdentifier, base_cc:BaseColumnConfig) -> ColumnConfig:
-        safedel(base_cc, 'col_name')
-        safedel(base_cc, 'col_path')
-        safedel(base_cc, 'field')
-        safedel(base_cc, 'header_name')
+        # swaps whatever identity keys style_column left for the resolved ones, which is
+        # the step that turns a BaseColumnConfig into a ColumnConfig
+        cc = cast(Dict[str, Any], base_cc)
+        safedel(cc, 'col_name')
+        safedel(cc, 'col_path')
+        safedel(cc, 'field')
+        safedel(cc, 'header_name')
 
         if isinstance(orig_col_name, tuple):
-            base_cc['col_path'] = orig_col_name
-            base_cc['field'] = str(col)  # sometimes numbers still creep in here
+            cc['col_path'] = orig_col_name
+            cc['field'] = str(col)  # sometimes numbers still creep in here
         else:
-            base_cc['col_name'] = col
-            base_cc['header_name'] = str(orig_col_name)  # sometimes numbers still creep in here
-        return base_cc
+            cc['col_name'] = col
+            cc['header_name'] = str(orig_col_name)  # sometimes numbers still creep in here
+        return cast(ColumnConfig, cc)
     
     #what is the key for this in the df_display_args_dictionary
     df_display_name: str = "main"
@@ -439,7 +516,7 @@ class StylingAnalysis(ColAnalysis):
         return cls.fix_column_config(col_name, col_name, {'displayer_args': {'displayer': 'obj'}})
 
     @classmethod
-    def style_column_with_fallback(cls, col:str, col_meta:ColMeta, orig_col_name:ColIdentifier) -> ColumnConfig:
+    def style_column_with_fallback(cls, col:ColIdentifier, col_meta:ColMeta, orig_col_name:ColIdentifier) -> ColumnConfig:
         """Try each style_column in the MRO, most specific first.
 
         A subclass that raises (or returns something that isn't a column
@@ -493,22 +570,24 @@ class StylingAnalysis(ColAnalysis):
                 skip_orig_cols.append(col)
 
         rewrites= dict( old_col_new_col(df))
-        rewritten_to_orig = {v: k for k, v in rewrites.items()}
+        rewritten_to_orig: Dict[ColIdentifier, ColIdentifier] = {v: k for k, v in rewrites.items()}
         for col, col_meta in sd.items():
             if col_meta.get('orig_col_name') in skip_orig_cols or col_meta.get('merge_rule', None) == 'hidden':
                 continue
             # the column's identity (header / col_path) is the framework's job, not the styling
-            # class's, so it's resolved outside of styling and survives any styling failure
-            orig_col_name = col_meta.get('orig_col_name')
+            # class's, so it's resolved outside of styling and survives any styling failure.
+            # ColMeta's value type doesn't describe orig_col_name, the frame's own column label
+            orig_col_name = cast(Union[ColIdentifier, None], col_meta.get('orig_col_name'))
             if orig_col_name is None:
                 orig_col_name = rewritten_to_orig.get(col, col)
             #it actually gets tuples here
             base_style: ColumnConfig = cls.style_column_with_fallback(col, col_meta, orig_col_name)
 
             if 'column_config_override' in col_meta:
-                #column_config_override, sent by the instantiation, gets set later
-                cco: ColumnConfig = col_meta['column_config_override'] # pyright: ignore[reportAssignmentType]
-                base_style.update(rewrite_override_col_references(rewrites, cco)) # pyright: ignore[reportCallIssue, reportArgumentType]
+                #column_config_override, sent by the instantiation, gets set later.
+                # It reaches here through the untyped sd; InitColMeta types it on the way in
+                cco = cast(PartialColConfig, col_meta['column_config_override'])
+                base_style.update(rewrite_override_col_references(rewrites, cco))
 
             if base_style.get('merge_rule') == 'hidden':
                 continue

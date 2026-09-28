@@ -31,7 +31,7 @@ from buckaroo.extension_utils import copy_extend
 from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, send_infinite_resp
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import (Sampling, exception_protect)
-from .dataflow.styling_core import (ComponentConfig, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
+from .dataflow.styling_core import (ComponentConfig, InitSD, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
 from .dataflow.autocleaning import PandasAutocleaning
 from pathlib import Path
 
@@ -129,7 +129,7 @@ class BuckarooWidgetBase(anywidget.AnyWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None, skip_stat_columns=None, skip_main_serial=False, record_transcript=False):
+        init_sd:Union[Literal[None], InitSD]=None, skip_stat_columns=None, skip_main_serial=False, record_transcript=False):
         """
         BuckarooWidget was originally designed to extend CustomizableDataFlow
 
@@ -399,7 +399,7 @@ class BuckarooInfiniteWidget(BuckarooWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None, skip_stat_columns=None, record_transcript=False):
+        init_sd:Union[Literal[None], InitSD]=None, skip_stat_columns=None, record_transcript=False):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
             extra_grid_config, component_config, init_sd,
             skip_stat_columns=skip_stat_columns,
@@ -472,7 +472,7 @@ class DFViewerInfinite(BuckarooInfiniteWidget):
         column_config_overrides:Union[Literal[None], OverrideColumnConfig]=None,
         pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
         component_config:Union[Literal[None], ComponentConfig]=None,
-        init_sd=None, skip_stat_columns=None):
+        init_sd:Union[Literal[None], InitSD]=None, skip_stat_columns=None):
         super().__init__(orig_df, debug, column_config_overrides, pinned_rows,
             extra_grid_config, component_config, init_sd,
             skip_stat_columns=skip_stat_columns)
