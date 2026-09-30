@@ -1,6 +1,6 @@
 import copy
 import logging
-from typing import TYPE_CHECKING, Iterable, Mapping, Sequence, Union, List, Dict, Any, Literal, cast
+from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence, Tuple, Union, List, Dict, Any, Literal, cast
 from typing_extensions import NotRequired, TypeAlias, TypedDict
 
 import pandas as pd
@@ -234,6 +234,87 @@ else:
     InitColMeta = Dict[str, Any]
 OverrideColumnConfig:TypeAlias = Dict[ColIdentifier, PartialColConfig]
 InitSD: TypeAlias = Dict[ColIdentifier, InitColMeta]
+
+
+class DisplayConfigError(ValueError):
+    """init_sd or column_config_overrides holds a display config key of the wrong
+    shape. ``problems`` has one line per bad key, naming the column and the key."""
+    def __init__(self, problems: List[str]):
+        self.problems = problems
+        super().__init__("invalid display config:\n" + "\n".join(f"  {p}" for p in problems))
+
+
+def _is_str_list(v: Any) -> bool:
+    return isinstance(v, (list, tuple)) and all(isinstance(x, str) for x in v)
+
+
+# (check, what it wants) per display config key: runtime twins of PartialColConfig
+# and InitColMeta, which only exist for the type checker, so keep the keys in step.
+# dict rather than Mapping, matching the isinstance guards in style_column.
+KeyChecks: TypeAlias = Dict[str, Tuple[Callable[[Any], bool], str]]
+_DICT = (lambda v: isinstance(v, dict), 'a dict')
+_HIDDEN = (lambda v: v == 'hidden', "'hidden'")
+_PARTIAL_COL_CONFIG_CHECKS: KeyChecks = {
+    'displayer_args': _DICT, 'color_map_config': _DICT, 'tooltip_config': _DICT,
+    'ag_grid_specs': _DICT, 'merge_rule': _HIDDEN}
+_INIT_COL_META_CHECKS: KeyChecks = {
+    'displayer_args': _DICT, 'ag_grid_specs': _DICT,
+    # a bare str is the one key, which is how style_column reads it
+    'delete_keys': (lambda v: isinstance(v, str) or _is_str_list(v), 'a list of str'),
+    'highlight_phrase': (lambda v: isinstance(v, str) or _is_str_list(v), 'a str or a list of str'),
+    'highlight_regex': (lambda v: isinstance(v, str), 'a str'),
+    'highlight_color': (lambda v: isinstance(v, str), 'a str'),
+    'merge_rule': _HIDDEN, 'column_config_override': _DICT}
+
+
+def _describe(v: Any) -> str:
+    r = repr(v)
+    return f"{type(v).__name__} {r if len(r) <= 60 else r[:57] + '...'}"
+
+
+def _col_entries(name: str, configs: Any, problems: List[str]) -> List[Tuple[str, Dict[str, Any]]]:
+    """(where, entry) for each column of a column -> config dict, noting what isn't a dict"""
+    if configs is None:
+        return []
+    if not isinstance(configs, dict):
+        problems.append(f"{name}: expected a dict of column -> config, got {_describe(configs)}")
+        return []
+    entries: List[Tuple[str, Dict[str, Any]]] = []
+    for col, conf in cast(Dict[Any, Any], configs).items():
+        where = f"{name}[{col!r}]"
+        if isinstance(conf, dict):
+            entries.append((where, cast(Dict[str, Any], conf)))
+        else:
+            problems.append(f"{where}: expected a dict, got {_describe(conf)}")
+    return entries
+
+
+def _check_keys(where: str, conf: Dict[str, Any], checks: KeyChecks, problems: List[str]) -> None:
+    for key, (ok, wanted) in checks.items():
+        if key in conf and not ok(conf[key]):
+            problems.append(f"{where}[{key!r}]: expected {wanted}, got {_describe(conf[key])}")
+
+
+def validate_display_config(init_sd: Any, column_config_overrides: Any) -> None:
+    """Check init_sd and column_config_overrides where they enter, raising one
+    DisplayConfigError that lists every malformed key.
+
+    Most of this config never meets a type checker: notebook calls, JSON on the
+    wire, project display files. Only the keys styling reads are checked. An init_sd
+    entry also carries summary stats, and an override is merged straight over the
+    column config, so hosts set keys the types don't list (e.g. header_name).
+    style_column keeps its own guards for values a ColAnalysis adds to the sd."""
+    problems: List[str] = []
+    for where, conf in _col_entries('init_sd', init_sd, problems):
+        _check_keys(where, conf, _INIT_COL_META_CHECKS, problems)
+        cco = conf.get('column_config_override')
+        if isinstance(cco, dict):
+            _check_keys(f"{where}['column_config_override']", cast(Dict[str, Any], cco),
+                _PARTIAL_COL_CONFIG_CHECKS, problems)
+    for where, conf in _col_entries('column_config_overrides', column_config_overrides, problems):
+        _check_keys(where, conf, _PARTIAL_COL_CONFIG_CHECKS, problems)
+    if problems:
+        raise DisplayConfigError(problems)
 
 
 PinnedRowConfig = TypedDict('PinnedRowConfig', {

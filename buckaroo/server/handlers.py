@@ -12,6 +12,7 @@ import tornado.web
 
 from buckaroo.server.data_loading import (load_file, get_metadata, get_display_state, create_dataflow, get_buckaroo_display_state, load_file_lazy, get_metadata_lazy, get_display_state_lazy)
 from buckaroo.compare import col_join_dfs
+from buckaroo.dataflow.styling_core import DisplayConfigError, validate_display_config
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.server.session import build_state_message
@@ -53,6 +54,18 @@ def _check_dependency(module_name: str) -> bool:
         return True
     except ImportError:
         return False
+
+
+def _reject_invalid_display_config(handler: tornado.web.RequestHandler, body: dict) -> bool:
+    """400 when the body's init_sd / column_config_overrides is malformed. Checked
+    before the session or the data is touched, so a typo costs only the response."""
+    try:
+        validate_display_config(body.get("init_sd"), body.get("column_config_overrides"))
+    except DisplayConfigError as e:
+        handler.set_status(400)
+        handler.write({"error_code": "invalid_display_config", "message": str(e), "problems": e.problems})
+        return True
+    return False
 
 
 class HealthHandler(tornado.web.RequestHandler):
@@ -305,6 +318,9 @@ class LoadHandler(tornado.web.RequestHandler):
                 "message": "backend='polars' is only valid with mode='buckaroo'"})
             return
 
+        if _reject_invalid_display_config(self, body):
+            return
+
         column_config_overrides = body.get("column_config_overrides")
         extra_grid_config = body.get("extra_grid_config")
         init_sd = body.get("init_sd")
@@ -433,6 +449,9 @@ class LoadExprHandler(tornado.web.RequestHandler):
             self.set_status(400)
             self.write({"error_code": "invalid_cache_dir",
                 "message": f"cache_dir must be an absolute path, got {cache_dir!r}"})
+            return
+
+        if _reject_invalid_display_config(self, body):
             return
 
         # Config-bearing fields that change how the result is computed or
