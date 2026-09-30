@@ -32,6 +32,7 @@ import {
 import {
     getAutoSize,
     getHeightStyle2,
+    HeaderSort,
     HeightStyleI,
     SetColumnFunc
 } from "./gridUtils";
@@ -173,6 +174,12 @@ export function DFViewerInfinite({
     // a rowId, even though their `index` values overlap (row 0 in main is a
     // different record than row 0 in summary).
     data_key?: string;
+    // Sort the grid starts with, by header_name. Read once when the grid
+    // mounts; later changes are ignored. An unknown column is ignored.
+    initial_sort?: HeaderSort;
+    // Called with the grid's sort, by header_name, whenever it changes.
+    // null when unsorted or sorted on more than one column.
+    on_sort_change?: (sort: HeaderSort | null) => void;
 }) {
     /*
     The idea is to do some pre-setup here for
