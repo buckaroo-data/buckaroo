@@ -100,6 +100,8 @@ export function BuckarooServerView({
     style,
     className,
     autoHeight,
+    sort,
+    onSortChange,
 }: BuckarooServerViewProps): React.ReactElement {
     const [ready, setReady] = React.useState<ReadyState | null>(null);
     const [error, setError] = React.useState<Error | null>(null);
@@ -196,6 +198,8 @@ export function BuckarooServerView({
             style={style}
             className={className}
             autoHeight={autoHeight}
+            sort={sort}
+            onSortChange={onSortChange}
         />
     );
 }

@@ -7,7 +7,7 @@ import {
 import * as _ from "lodash-es";
 import { DFData, DFDataRow, DFViewerConfig, SDFT } from "./DFWhole";
 
-import { getCellRendererSelector, dfToAgrid, extractPinnedRows, extractSDFT } from "./gridUtils";
+import { getCellRendererSelector, dfToAgrid, extractPinnedRows, extractSDFT, headerSortFromColumnState, withInitialSort } from "./gridUtils";
 
 import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
 import {
@@ -19,6 +19,7 @@ import {
     ClientSideRowModelModule,
     InfiniteRowModelModule,
     CellStyleModule,
+    ColumnApiModule,
     ColumnAutoSizeModule,
     PinnedRowModule,
     RowSelectionModule,
@@ -44,6 +45,9 @@ ModuleRegistry.registerModules([
     ClientSideRowModelModule,
     InfiniteRowModelModule,
     CellStyleModule,
+    // getColumnState / applyColumnState: the sort reported to on_sort_change
+    // and the per-view column state saved on view_name changes
+    ColumnApiModule,
     ColumnAutoSizeModule,
     PinnedRowModule,
     RowSelectionModule,
@@ -151,6 +155,8 @@ export function DFViewerInfinite({
     max_rows_in_configs,
     view_name,
     data_key,
+    initial_sort,
+    on_sort_change,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -240,6 +246,8 @@ export function DFViewerInfinite({
                     effectiveScheme={effectiveScheme}
                     view_name={view_name}
                     data_key={data_key}
+                    initial_sort={initial_sort}
+                    on_sort_change={on_sort_change}
                 />
             </div>
         </div>)
@@ -257,6 +265,8 @@ export function DFViewerInfiniteInner({
     effectiveScheme,
     view_name,
     data_key,
+    initial_sort,
+    on_sort_change,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -273,6 +283,8 @@ export function DFViewerInfiniteInner({
     effectiveScheme?: 'light' | 'dark';
     view_name?: string;
     data_key?: string;
+    initial_sort?: HeaderSort;
+    on_sort_change?: (sort: HeaderSort | null) => void;
 }) {
     /*
     const lastProps = useRef<any>(null);
@@ -309,9 +321,25 @@ export function DFViewerInfiniteInner({
         renderStartTime.current = now;
     }, [data_wrapper, df_viewer_config, summary_stats_data, activeCol, outside_df_params, error_info]);
     */
+    // initial_sort is read once. AG Grid only applies initialSort to columns
+    // it is creating, so the frozen value also rides along harmlessly when
+    // df_viewer_config changes on a live grid.
+    const initialSortRef = useRef(initial_sort);
     const styledColumns = useMemo(() => {
-        return dfToAgrid(df_viewer_config);
+        return withInitialSort(dfToAgrid(df_viewer_config), df_viewer_config, initialSortRef.current);
     }, [df_viewer_config]);
+
+    // Refs so the grid's onSortChanged, built once in gridOptions, sees the
+    // current callback and column config. Updated in an effect declared
+    // before the view_name effect below: a caller that stops passing
+    // on_sort_change on a view switch (BuckarooInfiniteWidget, leaving main)
+    // must not hear about the sort reset that effect applies.
+    const onSortChangeRef = useRef(on_sort_change);
+    const sortConfigRef = useRef(df_viewer_config);
+    useEffect(() => {
+        onSortChangeRef.current = on_sort_change;
+        sortConfigRef.current = df_viewer_config;
+    }, [on_sort_change, df_viewer_config]);
 
     // Column defs are ready
 
@@ -395,6 +423,11 @@ export function DFViewerInfiniteInner({
         },
         onRowDataUpdated: (_params) => {
             bkLog("AgGrid onRowDataUpdated (cells repainted)");
+        },
+        onSortChanged: (event: SortChangedEvent) => {
+            const report = onSortChangeRef.current;
+            if (report === undefined) return;
+            report(headerSortFromColumnState(sortConfigRef.current, event.api.getColumnState()));
         },
         columnDefs:styledColumns,
         getRowId,
@@ -619,6 +652,7 @@ const getDsGridOptions = (origGridOptions: GridOptions, maxRowsWithoutScrolling:
             // every time the sort is changed, scroll back to the top row.
             // Setting a sort and being in the middle of it makes no sense
             api.ensureIndexVisible(0);
+            origGridOptions.onSortChanged?.(event);
         },
         rowBuffer: 20,
         rowModelType: "infinite",

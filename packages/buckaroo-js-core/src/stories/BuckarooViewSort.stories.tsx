@@ -56,8 +56,8 @@ const sortRows = (rows: Row[], sort?: string, direction?: string): Row[] => {
 };
 
 const makeFakeModel = (onRequest: (pa: PayloadArgs) => void): IModel => {
-  const handlers = new Map<string, Set<(...args: any[]) => void>>();
-  const emit = (event: string, ...args: any[]) => handlers.get(event)?.forEach((h) => h(...args));
+  const handlers = new Map<string, Set<(...args: unknown[]) => void>>();
+  const emit = (event: string, ...args: unknown[]) => handlers.get(event)?.forEach((h) => h(...args));
   return {
     send: (msg) => {
       if (msg?.type !== "infinite_request") return;

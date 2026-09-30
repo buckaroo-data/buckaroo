@@ -130,6 +130,8 @@ export function BuckarooView({
     style,
     className,
     autoHeight,
+    sort,
+    onSortChange,
 }: BuckarooViewProps): React.ReactElement {
     // If the caller passed raw initial_state straight off the wire,
     // df_data_dict may still contain parquet_b64 payload objects. Those
@@ -172,6 +174,19 @@ export function BuckarooView({
 
     const onMetadataRef = React.useRef(onMetadata);
     React.useEffect(() => { onMetadataRef.current = onMetadata; }, [onMetadata]);
+
+    // The sort a grid mounts with: the `sort` prop at first, then the last
+    // sort the grid reported. BuckarooInfiniteWidget remounts its grid when
+    // operations, cleaning or post-processing change, and the new grid has to
+    // come back with the sort the host was last told about. Later changes to
+    // the `sort` prop are ignored.
+    const sortRef = React.useRef<HeaderSort | undefined>(sort);
+    const onSortChangeRef = React.useRef(onSortChange);
+    React.useEffect(() => { onSortChangeRef.current = onSortChange; }, [onSortChange]);
+    const handleSortChange = React.useCallback((s: HeaderSort | null) => {
+        sortRef.current = s ?? undefined;
+        onSortChangeRef.current?.(s);
+    }, []);
 
     // Resolve any parquet-encoded payloads in df_data_dict. Pre-resolved
     // dicts (e.g. when BuckarooServerView already ran decodeDFDataDict)
@@ -308,6 +323,8 @@ export function BuckarooView({
                     on_buckaroo_state={onBuckarooState}
                     buckaroo_options={buckarooOptions}
                     src={src}
+                    initial_sort={sortRef.current}
+                    on_sort_change={handleSortChange}
                 />
             ) : (
                 <DFViewerInfiniteDS
@@ -316,6 +333,8 @@ export function BuckarooView({
                     df_display_args={effectiveDisplayArgs}
                     src={src}
                     df_id={"server"}
+                    initial_sort={sortRef.current}
+                    on_sort_change={handleSortChange}
                 />
             )}
         </div>
