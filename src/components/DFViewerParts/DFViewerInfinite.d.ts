@@ -1,6 +1,6 @@
 import { DFData, DFViewerConfig } from './DFWhole';
 import { IDatasource } from 'ag-grid-community';
-import { HeaderSort, HeightStyleI, SetColumnFunc, ThemeConfig } from './gridUtils';
+import { HeightStyleI, SetColumnFunc, ThemeConfig } from './gridUtils';
 export interface DatasourceWrapper {
     datasource: IDatasource;
     data_type: "DataSource";
@@ -23,8 +23,6 @@ export declare function DFViewerInfinite({ data_wrapper, df_viewer_config, summa
     max_rows_in_configs?: number;
     view_name?: string;
     data_key?: string;
-    initial_sort?: HeaderSort;
-    on_sort_change?: (sort: HeaderSort | null) => void;
 }): import("react/jsx-runtime").JSX.Element;
 export declare function DFViewerInfiniteInner({ data_wrapper, df_viewer_config, summary_stats_data, activeCol, setActiveCol, outside_df_params, renderStartTime: _renderStartTime, hs, themeConfig, effectiveScheme, view_name, data_key, }: {
     data_wrapper: DatasourceOrRaw;
