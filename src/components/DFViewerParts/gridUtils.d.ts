@@ -35,8 +35,9 @@ export interface HeaderSort {
 /** The colId of the visible column whose header_name is `column`. */
 export declare function resolveSortColId(config: DFViewerConfig, column: string): string | undefined;
 /** Sets initialSort on the column def `sort` names, so the grid's first row
- *  request is already sorted. An unknown column leaves colDefs unchanged. */
-export declare function withInitialSort(colDefs: (ColDef | ColGroupDef)[], config: DFViewerConfig, sort?: HeaderSort): (ColDef | ColGroupDef)[];
+ *  request is already sorted. An unknown column leaves colDefs unchanged and,
+ *  when warnIfUnknown, logs a console.warn naming it. */
+export declare function withInitialSort(colDefs: (ColDef | ColGroupDef)[], config: DFViewerConfig, sort?: HeaderSort, warnIfUnknown?: boolean): (ColDef | ColGroupDef)[];
 /** The grid's sort by header_name. null when the grid is unsorted, sorted on
  *  more than one column (getDs only sends single-column sorts), or sorted on
  *  a column that has no header_name. */
