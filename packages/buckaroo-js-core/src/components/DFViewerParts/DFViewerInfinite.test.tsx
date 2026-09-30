@@ -161,8 +161,13 @@ describe("DFViewerInfinite host sort (#984)", () => {
     return ensureIndexVisible;
   };
 
+  let warnSpy: jest.SpyInstance;
   beforeEach(() => {
     latestAgGridProps = null;
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
   });
 
   it("initial_sort resolves a header name to the visible column; a hidden column with the same header never matches", () => {
@@ -189,6 +194,52 @@ describe("DFViewerInfinite host sort (#984)", () => {
       />,
     );
     expect(latestAgGridProps.columnDefs.some((c: any) => c.initialSort !== undefined)).toBe(false);
+  });
+
+  it("warns once per mount, naming the column, when initial_sort matches no visible header", () => {
+    const onSortChange = jest.fn();
+    const { rerender } = render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+        initial_sort={{ column: "age", direction: "asc" }}
+        on_sort_change={onSortChange}
+      />,
+    );
+    // a new df_viewer_config rebuilds the column defs; that's a re-render, not a new mount
+    rerender(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={{ ...diffConfig }}
+        setActiveCol={jest.fn()}
+        initial_sort={{ column: "age", direction: "asc" }}
+        on_sort_change={onSortChange}
+      />,
+    );
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0][0])).toContain("age");
+    expect(onSortChange).not.toHaveBeenCalled();
+  });
+
+  it("doesn't warn for a known initial_sort column, or when there's no initial_sort", () => {
+    const { unmount } = render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+        initial_sort={{ column: "fare", direction: "desc" }}
+      />,
+    );
+    unmount();
+    render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+      />,
+    );
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it("reads initial_sort once; a later change doesn't touch the column defs", () => {
