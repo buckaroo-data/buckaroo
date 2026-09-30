@@ -11,7 +11,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
+import pytest
 
+from buckaroo.customizations.styling import DefaultMainStyling
+from buckaroo.dataflow import styling_core
+from buckaroo.server import xorq_loading
 from buckaroo.server.xorq_loading import load_project_display_klasses
 
 MINIMAL_DISPLAY = (
@@ -157,3 +162,86 @@ def test_multiple_files_all_collected(tmp_path: Path):
     klasses = load_project_display_klasses(tmp_path)
     display_names = sorted(k.df_display_name for k in klasses)
     assert display_names == ["alpha", "beta", "gamma"]
+
+
+# getattr isn't in the sandbox builtins, so this compiles and loads fine and
+# only raises NameError once a column is styled.
+GETATTR_DISPLAY = (
+    "class GetattrDisplay(DefaultMainStyling):\n"
+    "    df_display_name = 'main'\n"
+    "    @classmethod\n"
+    "    def style_column(cls, col, column_metadata):\n"
+    "        base = super().style_column(col, column_metadata)\n"
+    "        base['ag_grid_specs'] = getattr(cls, 'extra_specs', {})\n"
+    "        return base\n")
+
+STYLE_DF = pd.DataFrame({"foo": [10, 20, 30], "bar": ["x", "y", "z"]})
+STYLE_SD = {
+    "a": {"orig_col_name": "foo", "_type": "integer"},
+    "b": {"orig_col_name": "bar", "_type": "string"}}
+
+
+def test_safe_builtin_names_is_public():
+    assert "len" in xorq_loading.SAFE_BUILTIN_NAMES
+    assert "getattr" not in xorq_loading.SAFE_BUILTIN_NAMES
+
+
+def test_compile_display_source_returns_display_klasses():
+    klasses = xorq_loading.compile_display_source(MINIMAL_DISPLAY, "my_display")
+    assert [k.df_display_name for k in klasses] == ["my_display"]
+
+
+def test_compile_display_source_injects_the_loader_bases():
+    """Same sandbox as the file loader: styling base classes and super() are in scope."""
+    klasses = xorq_loading.compile_display_source(
+        "class SuperDisplay(DefaultMainStyling):\n"
+        "    df_display_name = 'main'\n"
+        "    @classmethod\n"
+        "    def style_column(cls, col, sd):\n"
+        "        return super().style_column(col, sd)\n", "super_display")
+    assert len(klasses) == 1
+    assert issubclass(klasses[0], DefaultMainStyling)
+    klasses[0].style_column("a", {})
+
+
+def test_compile_display_source_raises_where_the_loader_skips(tmp_path: Path):
+    """The loader logs and skips a file that fails to exec; compile_display_source raises."""
+    source = (
+        "import os\n"
+        "class Evil(ColAnalysis):\n"
+        "    df_display_name = 'evil'\n")
+    d = tmp_path / "display"
+    d.mkdir()
+    (d / "evil.py").write_text(source)
+    assert load_project_display_klasses(tmp_path) == []
+    with pytest.raises(ImportError):
+        xorq_loading.compile_display_source(source, "evil")
+
+
+def test_compile_display_source_raises_on_syntax_error():
+    with pytest.raises(SyntaxError):
+        xorq_loading.compile_display_source("class Broken(:\n", "broken")
+
+
+def test_compile_display_source_rejects_a_name_the_loader_would_skip():
+    with pytest.raises(ValueError):
+        xorq_loading.compile_display_source(MINIMAL_DISPLAY, "my-display")
+
+
+def test_check_styling_reports_a_klass_that_loads_but_cannot_style():
+    """The motivating case for #983: the class compiles, every column's styling
+    raises, and rendering hides it by falling back to DefaultMainStyling."""
+    [klass] = xorq_loading.compile_display_source(GETATTR_DISPLAY, "getattr_display")
+    failures = styling_core.check_styling(klass, STYLE_SD, STYLE_DF)
+    assert [(f.col, f.orig_col_name, f.klass) for f in failures] == [
+        ("a", "foo", klass), ("b", "bar", klass)]
+    assert all(isinstance(f.exc, NameError) and "getattr" in str(f.exc) for f in failures)
+    # rendering is unchanged: it still falls back to the parent's styling
+    assert klass.style_columns(STYLE_SD, STYLE_DF) == \
+        DefaultMainStyling.style_columns(STYLE_SD, STYLE_DF)
+
+
+def test_check_styling_rejects_a_klass_that_does_no_styling():
+    [klass] = xorq_loading.compile_display_source(MINIMAL_DISPLAY, "my_display")
+    with pytest.raises(TypeError):
+        styling_core.check_styling(klass, STYLE_SD, STYLE_DF)
