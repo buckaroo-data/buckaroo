@@ -1,3 +1,4 @@
+import { HeaderSort } from '../components/DFViewerParts/gridUtils';
 import { IModel } from './IModel';
 import * as React from "react";
 export type BuckarooServerMode = "viewer" | "buckaroo";
@@ -34,6 +35,16 @@ export interface BuckarooViewProps {
      *  embed height looks wrong for both small and large dataframes.
      *  Overrides any `component_config.layoutType` set by the server. */
     autoHeight?: boolean;
+    /** Sort the main view starts with. `column` is a header name (the
+     *  column name the user sees), not the rewritten a, b, c... id, so the
+     *  same value works across sessions whose frames lay columns out
+     *  differently. Read once, on mount; later changes are ignored. An
+     *  unknown column is ignored. */
+    sort?: HeaderSort;
+    /** Called with the main view's sort, by header name, whenever it
+     *  changes. `null` when the grid is unsorted or sorted on more than one
+     *  column. Pair with `sort` to carry a sort across sessions. */
+    onSortChange?: (sort: HeaderSort | null) => void;
 }
 export declare function pickMode(rawMode: unknown): BuckarooServerMode;
 /**
@@ -46,4 +57,4 @@ export declare function pickMode(rawMode: unknown): BuckarooServerMode;
  * where you just want a WebSocket connection from the React tree, use
  * {@link BuckarooServerView}, which is a thin wrapper around this component.
  */
-export declare function BuckarooView({ model, initialState, mode, onMetadata, style, className, autoHeight, }: BuckarooViewProps): React.ReactElement;
+export declare function BuckarooView({ model, initialState, mode, onMetadata, style, className, autoHeight, sort, onSortChange, }: BuckarooViewProps): React.ReactElement;
