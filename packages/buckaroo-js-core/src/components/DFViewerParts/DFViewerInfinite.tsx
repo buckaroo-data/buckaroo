@@ -325,8 +325,13 @@ export function DFViewerInfiniteInner({
     // it is creating, so the frozen value also rides along harmlessly when
     // df_viewer_config changes on a live grid.
     const initialSortRef = useRef(initial_sort);
+    // Warn about an unknown initial_sort column on the first build of the
+    // column defs only; later df_viewer_config changes rebuild them without
+    // it being a new mount.
+    const mountedRef = useRef(false);
+    useEffect(() => { mountedRef.current = true; }, []);
     const styledColumns = useMemo(() => {
-        return withInitialSort(dfToAgrid(df_viewer_config), df_viewer_config, initialSortRef.current);
+        return withInitialSort(dfToAgrid(df_viewer_config), df_viewer_config, initialSortRef.current, !mountedRef.current);
     }, [df_viewer_config]);
 
     // Refs so the grid's onSortChanged, built once in gridOptions, sees the

@@ -437,15 +437,20 @@ export function resolveSortColId(config: DFViewerConfig, column: string): string
 }
 
 /** Sets initialSort on the column def `sort` names, so the grid's first row
- *  request is already sorted. An unknown column leaves colDefs unchanged. */
+ *  request is already sorted. An unknown column leaves colDefs unchanged and,
+ *  when warnIfUnknown, logs a console.warn naming it. */
 export function withInitialSort(
     colDefs: (ColDef|ColGroupDef)[], config: DFViewerConfig, sort?: HeaderSort,
+    warnIfUnknown: boolean = true,
 ): (ColDef|ColGroupDef)[] {
   if (sort === undefined) {
     return colDefs;
   }
   const colId = resolveSortColId(config, sort.column);
   if (colId === undefined) {
+    if (warnIfUnknown) {
+      console.warn(`[buckaroo] initial sort column ${JSON.stringify(sort.column)} matches no visible column header; loading unsorted`);
+    }
     return colDefs;
   }
   return colDefs.map((cd) =>
