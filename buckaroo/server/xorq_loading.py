@@ -265,11 +265,11 @@ def get_xorq_metadata(xorq_dataflow: XorqServerDataflow, build_dir: str) -> dict
 # walk ``col.__class__.__mro__``); acceptable because the project owner is
 # trusted (the buckaroo subprocess only reads project paths a host like
 # pydata-app explicitly passed in).
-_SAFE_BUILTIN_NAMES = ("True", "False", "None", "abs", "min", "max", "round", "sum", "len", "int", "float", "str", "bool", "list", "tuple", "dict", "set", "range", "enumerate", "zip", "map", "filter", "isinstance", "issubclass", "type")
+SAFE_BUILTIN_NAMES = ("True", "False", "None", "abs", "min", "max", "round", "sum", "len", "int", "float", "str", "bool", "list", "tuple", "dict", "set", "range", "enumerate", "zip", "map", "filter", "isinstance", "issubclass", "type")
 
 
 def _safe_builtins() -> dict:
-    return {n: getattr(builtins, n) for n in _SAFE_BUILTIN_NAMES}
+    return {n: getattr(builtins, n) for n in SAFE_BUILTIN_NAMES}
 
 
 def load_project_stat_klasses(project_root) -> list:
@@ -491,10 +491,7 @@ def load_project_display_klasses(project_root) -> list:
     if not display_dir.is_dir():
         return []
 
-    from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: PLC0415
-    from buckaroo.customizations.styling import (  # noqa: PLC0415
-        DefaultMainStyling, DefaultSummaryStatsStyling, StylingAnalysis)
-
+    bases = _display_bases()
     klasses: list = []
     for path in sorted(display_dir.glob("*.py")):
         if path.name.startswith("_"):
@@ -505,12 +502,39 @@ def load_project_display_klasses(project_root) -> list:
                 path)
             continue
         try:
-            found = _compile_project_display(path, ColAnalysis,
-                DefaultMainStyling, DefaultSummaryStatsStyling, StylingAnalysis)
-            klasses.extend(found)
+            klasses.extend(_compile_project_display(path, *bases))
         except Exception as e:
             log.warning("project display %s skipped: %s", path, e)
     return klasses
+
+
+def compile_display_source(source: str, name: str) -> list:
+    """Exec display source text the way ``load_project_display_klasses``
+    execs a ``display/<name>.py`` file, and return the display klasses it
+    defines.
+
+    Same sandbox builtins and injected base classes as the loader, but
+    where the loader logs and skips a file that fails, this raises, so a
+    host can vet source before writing it into a project. ``name`` plays
+    the file stem's part and must be a python identifier, as the loader
+    requires. Loading doesn't style anything; ``check_styling`` in
+    ``buckaroo.dataflow.styling_core`` catches a klass that loads but
+    can't style a column.
+    """
+    if not name.isidentifier():
+        raise ValueError(
+            f"display name {name!r} is not a valid python identifier; "
+            "load_project_display_klasses would skip it")
+    return _exec_display_source(source, name, name, *_display_bases())
+
+
+def _display_bases() -> tuple:
+    """ColAnalysis and the styling classes a display file can subclass
+    without importing them."""
+    from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: PLC0415
+    from buckaroo.customizations.styling import (  # noqa: PLC0415
+        DefaultMainStyling, DefaultSummaryStatsStyling, StylingAnalysis)
+    return ColAnalysis, DefaultMainStyling, DefaultSummaryStatsStyling, StylingAnalysis
 
 
 def _compile_project_display(path: Path, ColAnalysis, *extra_bases):
@@ -518,7 +542,10 @@ def _compile_project_display(path: Path, ColAnalysis, *extra_bases):
     ``df_display_name`` found in its namespace. Raises on syntax errors
     so the loader can log-and-skip. Returns an empty list when a valid
     file defines no qualifying classes (not an error)."""
-    source = path.read_text()
+    return _exec_display_source(path.read_text(), str(path.stem), str(path), ColAnalysis, *extra_bases)
+
+
+def _exec_display_source(source: str, name: str, filename: str, ColAnalysis, *extra_bases) -> list:
     safe = _safe_builtins()
     # __build_class__ is the CPython hook that executes class bodies; without
     # it, any ``class Foo:`` statement raises NameError. Adding it opens more
@@ -530,13 +557,13 @@ def _compile_project_display(path: Path, ColAnalysis, *extra_bases):
     safe["__build_class__"] = __build_class__
     safe["classmethod"] = classmethod
     safe["staticmethod"] = staticmethod
-    # super() is a builtin but not in _SAFE_BUILTIN_NAMES; without it,
+    # super() is a builtin but not in SAFE_BUILTIN_NAMES; without it,
     # calling super() inside any method succeeds at class-definition time
     # but raises NameError at render time — the common override pattern
     # (subclass DefaultMainStyling, call super().style_column(...)) would
     # silently break.
     safe["super"] = super
-    globs: dict = {"__builtins__": safe, "__name__": str(path.stem), "ColAnalysis": ColAnalysis}
+    globs: dict = {"__builtins__": safe, "__name__": name, "ColAnalysis": ColAnalysis}
     for base in extra_bases:
         globs[base.__name__] = base
 
@@ -544,7 +571,7 @@ def _compile_project_display(path: Path, ColAnalysis, *extra_bases):
     # user-defined klasses — they're context for the file, not the output.
     injected_ids = {id(ColAnalysis)} | {id(b) for b in extra_bases}
 
-    exec(compile(source, str(path), "exec"), globs)
+    exec(compile(source, filename, "exec"), globs)
 
     found = []
     for obj in globs.values():

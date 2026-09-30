@@ -1,6 +1,6 @@
 import copy
 import logging
-from typing import TYPE_CHECKING, Iterable, Mapping, Sequence, Union, List, Dict, Any, Literal, cast
+from typing import TYPE_CHECKING, Callable, Iterable, Iterator, Mapping, NamedTuple, Sequence, Tuple, Union, List, Dict, Any, Literal, cast
 from typing_extensions import NotRequired, TypeAlias, TypedDict
 
 import pandas as pd
@@ -516,6 +516,18 @@ class StylingAnalysis(ColAnalysis):
         return cls.fix_column_config(col_name, col_name, {'displayer_args': {'displayer': 'obj'}})
 
     @classmethod
+    def _style_column_chain(cls) -> List[Tuple[type, Callable[[ColIdentifier, ColMeta], BaseColumnConfig]]]:
+        """Every style_column in the MRO, most specific first, bound to cls."""
+        chain: List[Tuple[type, Callable[[ColIdentifier, ColMeta], BaseColumnConfig]]] = []
+        for klass in cls.__mro__:
+            if 'style_column' not in klass.__dict__ or klass is StylingAnalysis:
+                # StylingAnalysis' own style_column is the plain obj config that
+                # default_styling returns, and default_styling ends the fallback chain
+                continue
+            chain.append((klass, klass.__dict__['style_column'].__get__(None, cls)))
+        return chain
+
+    @classmethod
     def style_column_with_fallback(cls, col:ColIdentifier, col_meta:ColMeta, orig_col_name:ColIdentifier) -> ColumnConfig:
         """Try each style_column in the MRO, most specific first.
 
@@ -525,12 +537,7 @@ class StylingAnalysis(ColAnalysis):
         Every attempt gets its own copy of col_meta so edits made by a
         failing style_column don't leak into the next attempt or the sd.
         """
-        for klass in cls.__mro__:
-            if 'style_column' not in klass.__dict__ or klass is StylingAnalysis:
-                # StylingAnalysis' own style_column is the plain obj config that
-                # default_styling returns, and default_styling ends the chain below
-                continue
-            style_column = klass.__dict__['style_column'].__get__(None, cls)
+        for klass, style_column in cls._style_column_chain():
             try:
                 return cls.fix_column_config(col, orig_col_name, style_column(col, dict(col_meta)))
             except Exception as exc:
@@ -561,16 +568,16 @@ class StylingAnalysis(ColAnalysis):
             'component_config': cls.component_config}
                     
     @classmethod
-    def style_columns(cls, sd:SDType, df:DataFrameLike) -> List[ColumnConfig]:
-        ret_col_config: List[ColumnConfig] = []
+    def _columns_to_style(cls, sd:SDType, df:DataFrameLike) -> Iterator[Tuple[ColIdentifier, ColMeta, ColIdentifier]]:
+        """(col, col_meta, orig_col_name) for each column style_columns styles, in order.
+        Hidden columns are left out."""
         skip_orig_cols = []
         for col, col_meta in sd.items():
             #FIXME: why does this come up here too
             if col_meta.get('merge_rule', None) == 'hidden':
                 skip_orig_cols.append(col)
 
-        rewrites= dict( old_col_new_col(df))
-        rewritten_to_orig: Dict[ColIdentifier, ColIdentifier] = {v: k for k, v in rewrites.items()}
+        rewritten_to_orig: Dict[ColIdentifier, ColIdentifier] = {v: k for k, v in old_col_new_col(df)}
         for col, col_meta in sd.items():
             if col_meta.get('orig_col_name') in skip_orig_cols or col_meta.get('merge_rule', None) == 'hidden':
                 continue
@@ -581,6 +588,13 @@ class StylingAnalysis(ColAnalysis):
             if orig_col_name is None:
                 orig_col_name = rewritten_to_orig.get(col, col)
             #it actually gets tuples here
+            yield col, col_meta, orig_col_name
+
+    @classmethod
+    def style_columns(cls, sd:SDType, df:DataFrameLike) -> List[ColumnConfig]:
+        ret_col_config: List[ColumnConfig] = []
+        rewrites= dict( old_col_new_col(df))
+        for col, col_meta, orig_col_name in cls._columns_to_style(sd, df):
             base_style: ColumnConfig = cls.style_column_with_fallback(col, col_meta, orig_col_name)
 
             if 'column_config_override' in col_meta:
@@ -593,6 +607,42 @@ class StylingAnalysis(ColAnalysis):
                 continue
             ret_col_config.append(base_style)
         return ret_col_config
+
+
+class StylingFailure(NamedTuple):
+    """A column check_styling couldn't style."""
+    col: ColIdentifier
+    orig_col_name: ColIdentifier
+    klass: type  # the class whose style_column raised
+    exc: Exception
+
+
+def check_styling(klass: type, sd: SDType, df: DataFrameLike) -> List[StylingFailure]:
+    """Style each column the way style_columns does, but report failures instead of falling back.
+
+    Rendering hides a broken style_column behind its parent's styling and a log line,
+    so a display class can lose its styling on every column without anyone noticing.
+    A column fails here when the most specific style_column raises or returns something
+    that isn't a column config, whether or not a parent's would have worked. Every
+    column is tried; an empty list means they all styled. The sd isn't modified.
+    """
+    if not (isinstance(klass, type) and issubclass(klass, StylingAnalysis)):
+        raise TypeError(f"check_styling needs a StylingAnalysis subclass, got {klass!r}")
+    chain = klass._style_column_chain()
+    if chain:
+        owner, first_attempt = chain[0]
+    else:
+        # nothing overrides style_column, so rendering goes straight to default_styling
+        owner = next(k for k in klass.__mro__ if 'default_styling' in k.__dict__)
+        def first_attempt(col: ColIdentifier, col_meta: ColMeta, /) -> BaseColumnConfig:
+            return klass.default_styling(col)
+    failures: List[StylingFailure] = []
+    for col, col_meta, orig_col_name in klass._columns_to_style(sd, df):
+        try:
+            klass.fix_column_config(col, orig_col_name, first_attempt(col, dict(col_meta)))
+        except Exception as exc:
+            failures.append(StylingFailure(col, orig_col_name, owner, exc))
+    return failures
 
 
 # Stat keys the JS color-map rule reads per column straight off the wire
