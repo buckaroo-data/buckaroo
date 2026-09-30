@@ -632,3 +632,19 @@ def test_check_styling_skips_hidden_columns() -> None:
     """Hidden columns are never styled for display, so they can't fail."""
     sd: SDType = {**FALLBACK_SD, 'b': {**FALLBACK_SD['b'], 'merge_rule': 'hidden'}}
     assert styling_core.check_styling(RaisingOnStringStyling, sd, FALLBACK_DF) == []
+
+
+class RaisingDefaultOnlyStyling(StylingAnalysis):
+    """Overrides only default_styling, which is where rendering starts for this class."""
+    requires_summary = []
+
+    @classmethod
+    def default_styling(cls, col_name, /):
+        raise NameError("boom")
+
+
+def test_check_styling_checks_default_styling_when_nothing_overrides_style_column() -> None:
+    failures = styling_core.check_styling(RaisingDefaultOnlyStyling, FALLBACK_SD, FALLBACK_DF)
+    assert [(f.col, f.klass) for f in failures] == [
+        ('a', RaisingDefaultOnlyStyling), ('b', RaisingDefaultOnlyStyling)]
+    assert styling_core.check_styling(StylingAnalysis, FALLBACK_SD, FALLBACK_DF) == []
