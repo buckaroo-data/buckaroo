@@ -4,7 +4,7 @@ import { DFData } from './DFViewerParts/DFWhole';
 import { BuckarooState, BuckarooOptions, DFMeta } from './WidgetTypes';
 import { CommandConfigT } from './CommandUtils';
 import { Operation } from './OperationUtils';
-import { IDisplayArgs } from './DFViewerParts/gridUtils';
+import { HeaderSort, IDisplayArgs } from './DFViewerParts/gridUtils';
 import { DatasourceOrRaw } from './DFViewerParts/DFViewerInfinite';
 import { IDatasource } from 'ag-grid-community';
 import { KeyAwareSmartRowCache } from './DFViewerParts/SmartRowCache';
@@ -30,6 +30,12 @@ export declare function BuckarooInfiniteWidget({ df_data_dict, df_display_args, 
      *  false → domLayout "normal" (fills parent container).
      *  undefined → server value wins. */
     autoHeight?: boolean;
+    /** Sort, by header_name, the grid starts with. Applies to the main
+     *  df_display only, and only when the grid mounts. */
+    initial_sort?: HeaderSort;
+    /** Called with the main df_display's sort, by header_name, when it
+     *  changes. Sorts in other df_display views are not reported. */
+    on_sort_change?: (sort: HeaderSort | null) => void;
 }): import("react/jsx-runtime").JSX.Element;
 export declare function DFViewerInfiniteDS({ df_meta, df_data_dict, df_display_args, src, df_id, message_log, show_message_box, autoHeight, }: {
     df_meta: DFMeta;
@@ -46,4 +52,8 @@ export declare function DFViewerInfiniteDS({ df_meta, df_data_dict, df_display_a
     /** When provided, overrides server-sent component_config.layoutType.
      *  true → domLayout "autoHeight"; false → "normal"; undefined → server wins. */
     autoHeight?: boolean;
+    /** Sort, by header_name, the grid starts with. Read once on mount. */
+    initial_sort?: HeaderSort;
+    /** Called with the grid's sort, by header_name, when it changes. */
+    on_sort_change?: (sort: HeaderSort | null) => void;
 }): import("react/jsx-runtime").JSX.Element;

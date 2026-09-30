@@ -25,6 +25,13 @@ export interface IDisplayArgs {
     df_viewer_config: DFViewerConfig;
     summary_stats_key: string;
 }
+/** A single-column sort named by the column's header_name, which is stable
+ *  across frames, rather than AG Grid's colId, which is the positional
+ *  rewritten name (a, b, c...) and differs from frame to frame. */
+export interface HeaderSort {
+    column: string;
+    direction: "asc" | "desc";
+}
 export interface TimedIDatasource extends IDatasource {
     createTime: Date;
 }
