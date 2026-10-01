@@ -1,6 +1,7 @@
 import copy
 import logging
-from typing import TYPE_CHECKING, Iterable, Mapping, Sequence, Union, List, Dict, Any, Literal, cast
+import numbers
+from typing import TYPE_CHECKING, Iterable, Mapping, Sequence, Tuple, Union, List, Dict, Any, Literal, cast
 from typing_extensions import NotRequired, TypeAlias, TypedDict
 
 import pandas as pd
@@ -175,13 +176,21 @@ AGGridColDef: TypeAlias = Dict[str, Any]
 # only 'hidden' does anything: the column is dropped from the column config
 MergeRule = Literal["hidden"]
 
+# the column order keys (#990) sit next to merge_rule. order_column_config consumes them,
+# so they never reach the frontend, and None counts as unset so a later layer can clear one
+PreferOrder = Literal["first", "last"]
+ORDERING_KEYS = ('absolute_order', 'prefer_order', 'order_group')
+
 # Column config types
 BaseColumnConfig = TypedDict('BaseColumnConfig', {
     'displayer_args': DisplayerArgs,
     'color_map_config': NotRequired[ColorMappingConfig],
     'tooltip_config': NotRequired[TooltipConfig],
     'ag_grid_specs': NotRequired[AGGridColDef],
-    'merge_rule': NotRequired[MergeRule]})
+    'merge_rule': NotRequired[MergeRule],
+    'absolute_order': NotRequired[Union[int, None]],
+    'prefer_order': NotRequired[Union[PreferOrder, None]],
+    'order_group': NotRequired[Union[int, None]]})
 
 NormalColumnConfig = TypedDict('NormalColumnConfig', {
     'col_name': str,
@@ -190,7 +199,10 @@ NormalColumnConfig = TypedDict('NormalColumnConfig', {
     'color_map_config': NotRequired[ColorMappingConfig],
     'tooltip_config': NotRequired[TooltipConfig],
     'ag_grid_specs': NotRequired[AGGridColDef],
-    'merge_rule': NotRequired[MergeRule]})
+    'merge_rule': NotRequired[MergeRule],
+    'absolute_order': NotRequired[Union[int, None]],
+    'prefer_order': NotRequired[Union[PreferOrder, None]],
+    'order_group': NotRequired[Union[int, None]]})
 
 MultiIndexColumnConfig = TypedDict('MultiIndexColumnConfig', {
     'col_path': Sequence[str],  # a tuple for data columns, a list for the index
@@ -199,7 +211,10 @@ MultiIndexColumnConfig = TypedDict('MultiIndexColumnConfig', {
     'color_map_config': NotRequired[ColorMappingConfig],
     'tooltip_config': NotRequired[TooltipConfig],
     'ag_grid_specs': NotRequired[AGGridColDef],
-    'merge_rule': NotRequired[MergeRule]})
+    'merge_rule': NotRequired[MergeRule],
+    'absolute_order': NotRequired[Union[int, None]],
+    'prefer_order': NotRequired[Union[PreferOrder, None]],
+    'order_group': NotRequired[Union[int, None]]})
 ColumnConfig = Union[NormalColumnConfig, MultiIndexColumnConfig]
 
 # closed and extra_items below are PEP 728. typing_extensions raises on them at
@@ -212,7 +227,8 @@ if TYPE_CHECKING:
     PartialColConfig = TypedDict('PartialColConfig',
         {'displayer_args': NotRequired[DisplayerArgs], 'color_map_config': NotRequired[ColorMappingConfig],
          'tooltip_config': NotRequired[TooltipConfig], 'ag_grid_specs': NotRequired[AGGridColDef],
-         'merge_rule': NotRequired[MergeRule]},
+         'merge_rule': NotRequired[MergeRule], 'absolute_order': NotRequired[Union[int, None]],
+         'prefer_order': NotRequired[Union[PreferOrder, None]], 'order_group': NotRequired[Union[int, None]]},
         closed=True)
 
     # One column's init_sd entry. The keys listed are display config that styling
@@ -228,6 +244,10 @@ if TYPE_CHECKING:
         'highlight_regex': NotRequired[str],
         'highlight_color': NotRequired[str],
         'merge_rule': NotRequired[MergeRule],
+        # None clears these too, but an init_sd entry's values have to fit SDVals
+        'absolute_order': NotRequired[int],
+        'prefer_order': NotRequired[PreferOrder],
+        'order_group': NotRequired[int],
         'column_config_override': NotRequired[PartialColConfig]}, extra_items=SDVals)
 else:
     PartialColConfig = Dict[str, Any]
@@ -349,22 +369,73 @@ def merge_column_config(styled_column_config:List[ColumnConfig],
     return order_column_config(ret_column_config, df)
 
 
+PREFER_RANK = {'first': 0, None: 1, 'last': 2}
+
+
 def order_column_config(column_config:List[ColumnConfig], df:DataFrameLike) -> List[ColumnConfig]:
     """
-      puts column configs in the df's column order.
+      puts column configs in display order and strips the ordering keys.
 
-      styling emits configs in merged_sd's key order, which is whichever sd layer named a
-      column first. A search only names the string columns, so that order isn't the one
-      to display (#988). A config that isn't one of the df's columns goes after them,
-      in the order it came in.
+      The default is the df's column order. styling emits configs in merged_sd's key order,
+      which is whichever sd layer named a column first, and a search only names the string
+      columns (#988). A config that isn't one of the df's columns goes after them.
+
+      The ordering keys (#990) change that: columns sort by order_group, with ungrouped columns
+      after every numbered group, then by prefer_order within the group. absolute_order is
+      applied last, as a 0-based position among the displayed columns.
       """
     position: Dict[Any, int] = {new_col: i for i, (_, new_col) in enumerate(old_col_new_col(df))}
+    rows = [cast(Dict[str, Any], cc) for cc in column_config]
+    check_ordering_keys(rows)
 
-    def col_position(cc:ColumnConfig) -> int:
+    def sort_key(row:Dict[str, Any]) -> Tuple[bool, int, int, int]:
+        group = row.get('order_group')
+        ungrouped = group is None
         # multi-index configs carry the rewritten name in field rather than col_name
-        row = cast(Dict[str, Any], cc)
-        return position.get(row.get('col_name', row.get('field')), len(position))
-    return sorted(column_config, key=col_position)
+        df_position = position.get(row.get('col_name', row.get('field')), len(position))
+        return (ungrouped, 0 if ungrouped else int(group), PREFER_RANK[row.get('prefer_order')], df_position)
+
+    ordered = sorted(rows, key=sort_key)
+    ret = [row for row in ordered if row.get('absolute_order') is None]
+    placed = sorted((row for row in ordered if row.get('absolute_order') is not None),
+        key=lambda row: int(row['absolute_order']))
+    for row in placed:
+        # inserting in ascending index order lands each column at its own index,
+        # and an index past the end appends
+        ret.insert(int(row['absolute_order']), row)
+    return [cast(ColumnConfig, {k: v for k, v in row.items() if k not in ORDERING_KEYS}) for row in ret]
+
+
+def _is_position(val:Any) -> bool:
+    # bool is an int subclass, but True isn't a position
+    return isinstance(val, numbers.Integral) and not isinstance(val, bool) and int(val) >= 0
+
+
+def check_ordering_keys(rows:List[Dict[str, Any]]) -> None:
+    """
+      raises one ValueError listing every malformed ordering key and every absolute_order
+      that two columns share. The values can come from any sd layer or override, so this
+      is the one place that sees all of them.
+      """
+    problems: List[str] = []
+    taken: Dict[int, Any] = {}
+    for row in rows:
+        col = row.get('header_name', row.get('col_path'))
+        for key in ('absolute_order', 'order_group'):
+            val = row.get(key)
+            if val is not None and not _is_position(val):
+                problems.append(f"column {col!r}: {key} must be an int >= 0, got {val!r}")
+        prefer = row.get('prefer_order')
+        if prefer is not None and prefer not in ('first', 'last'):
+            problems.append(f"column {col!r}: prefer_order must be 'first' or 'last', got {prefer!r}")
+        absolute = row.get('absolute_order')
+        if absolute is not None and _is_position(absolute):
+            if int(absolute) in taken:
+                problems.append(f"columns {taken[int(absolute)]!r} and {col!r} both have absolute_order {int(absolute)}")
+            else:
+                taken[int(absolute)] = col
+    if problems:
+        raise ValueError("bad column ordering keys:\n  " + "\n  ".join(problems))
 
 def rewrite_override_col_references(rewrites: Mapping[ColIdentifier, str], override:PartialColConfig) -> PartialColConfig:
     obj = copy.deepcopy(override)
@@ -600,6 +671,10 @@ class StylingAnalysis(ColAnalysis):
                 orig_col_name = rewritten_to_orig.get(col, col)
             #it actually gets tuples here
             base_style: ColumnConfig = cls.style_column_with_fallback(col, col_meta, orig_col_name)
+            # the ordering keys sit next to merge_rule in the sd, merge_column_config's ordering pass reads them
+            for key in ORDERING_KEYS:
+                if key in col_meta:
+                    cast(Dict[str, Any], base_style)[key] = col_meta[key]
 
             if 'column_config_override' in col_meta:
                 #column_config_override, sent by the instantiation, gets set later.

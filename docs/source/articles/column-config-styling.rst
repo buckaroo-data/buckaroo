@@ -33,7 +33,8 @@ Three independent properties can be set per column — they compose:
 
 Plus the structural ``merge_rule: "hidden"`` for dropping a column from
 view (commonly used together with ``color_map_config`` so the source
-column doesn't show up in the table).
+column doesn't show up in the table), and three keys that change the
+column order, described in `Column order`_.
 
 The same configs work in every entry point — widget, static artifact,
 or server:
@@ -591,6 +592,44 @@ DataFrame display configuration in the session state. When the user
 changes the cleaning method or post-processing option, the dataflow
 rebuilds ``df_display_args`` from scratch — but ``column_config_overrides``
 is re-applied afterwards so per-column styling survives interaction.
+
+
+Column order
+------------
+
+Columns appear in the dataframe's column order. Three keys, set at the
+same level as ``merge_rule``, change that:
+
+- ``order_group`` (an int, 0 or more) sorts columns by group. Columns
+  without a group come after every numbered group, so primary keys in
+  group 0 stay first. Group numbers don't need to be contiguous.
+- ``prefer_order`` (``"first"`` or ``"last"``) moves a column to the
+  front or back of its own group.
+- ``absolute_order`` (an int, 0 or more) puts a column at that 0-based
+  position among the displayed columns. It's applied after the other two.
+
+.. code-block:: python
+
+    # df has the columns foo, bar, baz, boof, bop
+    BuckarooWidget(df, column_config_overrides={"baz": {"absolute_order": 0}})
+    # displays baz, foo, bar, boof, bop
+
+    BuckarooWidget(df, column_config_overrides={
+        "bop": {"order_group": 0},
+        "boof": {"prefer_order": "first"}})
+    # displays bop, boof, foo, bar, baz
+
+The keys work in ``column_config_overrides``, ``init_sd``, a
+post-processing function's sd, and a command's ``SDResult``, with the
+same precedence as every other key. Hidden columns don't take a
+position, an ``absolute_order`` past the last column puts that column
+at the end, and ``None`` clears a value an earlier layer set. Two columns
+with the same ``absolute_order``, or a value of the wrong type, raise
+``ValueError``.
+
+Reordering the dataframe itself also changes the display order, but it
+renumbers buckaroo's internal column ids (``a``, ``b``, ``c`` ...), which
+are positional. The keys leave the frame alone.
 
 
 Building your own styling functions
