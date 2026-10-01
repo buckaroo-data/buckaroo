@@ -304,6 +304,28 @@ class TestSearch:
         assert w.df_meta["filtered_rows"] == 5
 
 
+def _interleaved_expr():
+    return xo.memtable(
+        {"score": [10, 20, 30, 40, 50], "name": ["Alice", "Bob", "Charlie", "Daria", "Eve"],
+         "rank": [5, 4, 3, 2, 1], "role": ["admin", "user", "admin", "user", "guest"]})
+
+
+@pytest.mark.parametrize("widget_klass", [XorqBuckarooWidget, XorqBuckarooInfiniteWidget])
+def test_search_keeps_column_order(widget_klass):
+    """Search's sd_updates only name the string columns, that mustn't move them to the front (#988)"""
+    w = widget_klass(_interleaved_expr())
+
+    def headers():
+        return [cc["header_name"] for cc in w.df_display_args["main"]["df_viewer_config"]["column_config"]]
+
+    assert headers() == ["score", "name", "rank", "role"]
+    state = w.buckaroo_state.copy()
+    state["quick_command_args"] = {"search": ["admin"]}
+    w.buckaroo_state = state
+    assert w.df_meta["filtered_rows"] == 2
+    assert headers() == ["score", "name", "rank", "role"]
+
+
 def _find_cc(column_config, col_name):
     for entry in column_config:
         if entry.get("col_name") == col_name:

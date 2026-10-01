@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 from IPython.display import display
-from buckaroo.buckaroo_widget import BuckarooWidget
+from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget
 from buckaroo.ddd_library import (get_multiindex_cols_df, get_multiindex_int_cols_df, get_multiindex_int_levels_df,
     get_multiindex_int_names_df)
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
@@ -222,6 +222,32 @@ def test_quick_commands_run():
     # dataflow.merged_operations is the combination of quick_args (and possibly cleaning_ops) + operations that are executed.  Resetting bw.operations after this is merged would result in a loop
     # the ops from cleaning and quick_args are tagged so that they can be treated differently, changing cleaning or quick_args shouldn't affect manually editted operations
     #assert bw.operations == [[sQ('search'), s('df'), "col", "aa"]]
+
+
+ORDER_DF = pd.DataFrame({'n1': [1, 2, 3], 's1': ['ab', 'b', 'c'], 'n2': [1.0, 2.0, 3.0], 's2': ['x', 'ay', 'z']})
+
+
+def display_headers(bw):
+    return {display: [cc['header_name'] for cc in args['df_viewer_config']['column_config']]
+        for display, args in bw.df_display_args.items()}
+
+
+@pytest.mark.parametrize("widget_klass", [BuckarooWidget, BuckarooInfiniteWidget])
+def test_search_keeps_column_order(widget_klass):
+    """Search's sd_updates only name the string columns, that mustn't move them to the front (#988)"""
+    bw = widget_klass(ORDER_DF)
+    before = display_headers(bw)
+    assert before['main'] == ['n1', 's1', 'n2', 's2']
+    bw.buckaroo_state = {**bw.buckaroo_state, 'quick_command_args': {'search': ['a']}}
+    assert len(bw.dataflow.processed_df) == 2
+    assert display_headers(bw) == before
+
+
+@pytest.mark.parametrize("widget_klass", [BuckarooWidget, BuckarooInfiniteWidget])
+def test_init_sd_keeps_column_order(widget_klass):
+    """an init_sd that names one column doesn't move it to the front"""
+    bw = widget_klass(ORDER_DF, init_sd={'s2': {'column_config_override': {'displayer_args': {'displayer': 'string'}}}})
+    assert display_headers(bw)['main'] == ['n1', 's1', 'n2', 's2']
 
 
 def test_quick_command_args_change_does_not_double_fire_operation_result():
