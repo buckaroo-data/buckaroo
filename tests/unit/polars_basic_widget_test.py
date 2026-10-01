@@ -1,4 +1,5 @@
 import os
+import pytest
 import polars as pl
 from polars import functions as F
 import numpy as np
@@ -293,6 +294,22 @@ def test_polars_search():
     
 
     """
+
+@pytest.mark.parametrize("widget_klass", [PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget])
+def test_polars_search_keeps_column_order(widget_klass):
+    """Search's sd_updates only name the string columns, that mustn't move them to the front (#988)"""
+    df = pl.DataFrame({'n1': [1, 2, 3], 's1': ['ab', 'b', 'c'], 'n2': [1.0, 2.0, 3.0], 's2': ['x', 'ay', 'z']})
+    bw = widget_klass(df)
+
+    def headers():
+        return [cc['header_name'] for cc in bw.df_display_args['main']['df_viewer_config']['column_config']]
+
+    assert headers() == ['n1', 's1', 'n2', 's2']
+    temp_buckaroo_state = bw.buckaroo_state.copy()
+    temp_buckaroo_state['quick_command_args'] = {'search': ['a']}
+    bw.buckaroo_state = temp_buckaroo_state
+    assert len(bw.dataflow.processed_df) == 2
+    assert headers() == ['n1', 's1', 'n2', 's2']
 
 def get_named_col_pldf():
     return pl.DataFrame({'foo':[1,2,3],

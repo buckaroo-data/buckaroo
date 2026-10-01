@@ -152,6 +152,46 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_ws_search_keeps_column_order(self):
+        """Search's sd_updates only name the string column; the grid
+        must keep the expression's column order, not move `name` ahead
+        of `idx` (#988)."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-order", "build_dir": build_path})
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/lx-order")
+
+            def headers(msg):
+                return [cc["header_name"] for cc in
+                    msg["df_display_args"]["main"]["df_viewer_config"]["column_config"]]
+
+            initial = json.loads(await ws.read_message())
+            self.assertEqual(headers(initial), ["idx", "name"])
+
+            ws.write_message(json.dumps({
+                "type": "buckaroo_state_change",
+                "new_state": {
+                    "post_processing": "",
+                    "cleaning_method": "",
+                    "quick_command_args": {"search": ["alpha"]},
+                    "df_display": "main",
+                    "show_commands": False,
+                    "sampled": False,
+                    "search_string": "alpha",
+                }}))
+            searched = json.loads(await ws.read_message())
+            self.assertEqual(searched["type"], "initial_state")
+            self.assertEqual(headers(searched), ["idx", "name"])
+
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_ws_search_string_rowfetch(self):
         """Regression for #838: a ``buckaroo_state_change`` carrying only
         ``search_string`` (no ``quick_command_args.search``) must filter

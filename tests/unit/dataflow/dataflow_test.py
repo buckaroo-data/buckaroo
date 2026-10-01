@@ -143,8 +143,31 @@ def test_merge_column_config_hide():
 
     expected = [
             {'header_name':'foo', 'col_name':'a', 'displayer_args': {'displayer': 'obj'}}]
-        
+
     assert expected == merged
+
+
+def test_merge_column_config_follows_df_order():
+    """Display order is the df's column order, not the order the sd layers named the columns in (#988)"""
+    computed_column_config = [
+            {'header_name':'s1', 'col_name':'b', 'displayer_args': {'displayer': 'obj'}},
+            {'header_name':'s2', 'col_name':'d', 'displayer_args': {'displayer': 'obj'}},
+            {'header_name':'n1', 'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
+            {'header_name':'n2', 'col_name':'c', 'displayer_args': {'displayer': 'obj'}}]
+    temp_df=pd.DataFrame({'n1':[], 's1':[], 'n2':[], 's2':[]})
+    merged = dft.merge_column_config(computed_column_config, temp_df, {})
+    assert [c['col_name'] for c in merged] == ['a', 'b', 'c', 'd']
+
+
+def test_merge_column_config_unknown_cols_last():
+    """A config whose col_name isn't one of the df's columns goes after the df's columns"""
+    computed_column_config = [
+            {'header_name':'stale', 'col_name':'z', 'displayer_args': {'displayer': 'obj'}},
+            {'header_name':'bar', 'col_name':'b', 'displayer_args': {'displayer': 'obj'}},
+            {'header_name':'foo', 'col_name':'a', 'displayer_args': {'displayer': 'obj'}}]
+    temp_df=pd.DataFrame({'foo':[], 'bar':[]})
+    merged = dft.merge_column_config(computed_column_config, temp_df, {})
+    assert [c['col_name'] for c in merged] == ['a', 'b', 'z']
 
 
 
