@@ -12,7 +12,10 @@ from buckaroo.dataflow.styling_core import StylingAnalysis
 from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
 from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from buckaroo.jlisp.lisp_utils import (s, sQ)
-from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf)
+from buckaroo.customizations.pd_autoclean_conf import (NoCleaningConf, BASE_COMMANDS)
+from buckaroo.customizations.pandas_commands import Command
+from buckaroo.jlisp.configure_utils import SDResult
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.dataflow.autocleaning import AutocleaningConfig
 from buckaroo.buckaroo_widget import AutocleaningBuckaroo
 
@@ -248,6 +251,78 @@ def test_init_sd_keeps_column_order(widget_klass):
     """an init_sd that names one column doesn't move it to the front"""
     bw = widget_klass(ORDER_DF, init_sd={'s2': {'column_config_override': {'displayer_args': {'displayer': 'string'}}}})
     assert display_headers(bw)['main'] == ['n1', 's1', 'n2', 's2']
+
+
+@pytest.mark.parametrize("widget_klass", [BuckarooWidget, BuckarooInfiniteWidget])
+def test_init_sd_ordering_keys(widget_klass):
+    """ordering keys in init_sd are keyed by the real column name, like merge_rule (#990)"""
+    bw = widget_klass(ORDER_DF, init_sd={'s2': {'absolute_order': 0}, 'n2': {'prefer_order': 'first'}})
+    assert display_headers(bw)['main'] == ['s2', 'n2', 'n1', 's1']
+
+
+def test_column_config_overrides_ordering_keys():
+    bw = BuckarooWidget(ORDER_DF, column_config_overrides={'s1': {'order_group': 0}, 'n1': {'order_group': 1}})
+    assert display_headers(bw)['main'] == ['s1', 'n1', 'n2', 's2']
+
+
+def test_ordering_key_precedence():
+    """the same merge precedence as every other key, column_config_overrides wins over init_sd"""
+    bw = BuckarooWidget(ORDER_DF, init_sd={'s2': {'absolute_order': 0}},
+        column_config_overrides={'s2': {'absolute_order': 2}})
+    assert display_headers(bw)['main'] == ['n1', 's1', 's2', 'n2']
+
+
+def test_duplicate_absolute_order_across_layers_raises():
+    with pytest.raises(ValueError, match='absolute_order'):
+        BuckarooWidget(ORDER_DF, init_sd={'s2': {'absolute_order': 0}},
+            column_config_overrides={'n2': {'absolute_order': 0}})
+
+
+class MoveToFront(Command):
+    command_default = [s('move_to_front'), s('df'), "col"]
+    command_pattern = [None]
+
+    @staticmethod
+    def transform(df, col):
+        return SDResult(df, {col: {'absolute_order': 0}})
+
+    @staticmethod
+    def transform_to_py(df, col):
+        return "    # display: move %r to the front" % col
+
+
+class MoveConf(NoCleaningConf):
+    command_klasses = BASE_COMMANDS + [MoveToFront]
+
+
+class MoveWidget(BuckarooWidget):
+    autoclean_conf = tuple([MoveConf])
+
+
+def test_command_sets_ordering_keys():
+    """a Command reorders by returning ordering keys in its SDResult, the way it hides with merge_rule"""
+    bw = MoveWidget(ORDER_DF)
+    bw.operations = [[{'symbol': 'move_to_front'}, {'symbol': 'df'}, 'n2']]
+    assert display_headers(bw)['main'] == ['n2', 'n1', 's1', 's2']
+
+
+class S2FirstPost(ColAnalysis):
+    post_processing_method = 's2_first'
+
+    @classmethod
+    def post_process_df(kls, df):
+        return [df, {'s2': {'absolute_order': 0}}]
+
+
+class S2FirstWidget(BuckarooWidget):
+    analysis_klasses = BuckarooWidget.analysis_klasses + [S2FirstPost]
+
+
+def test_post_processing_sets_ordering_keys():
+    bw = S2FirstWidget(ORDER_DF)
+    assert display_headers(bw)['main'] == ['n1', 's1', 'n2', 's2']
+    bw.buckaroo_state = {**bw.buckaroo_state, 'post_processing': 's2_first'}
+    assert display_headers(bw)['main'] == ['s2', 'n1', 's1', 'n2']
 
 
 def test_quick_command_args_change_does_not_double_fire_operation_result():

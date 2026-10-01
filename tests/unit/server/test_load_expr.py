@@ -192,6 +192,29 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_init_sd_ordering_keys(self):
+        """An embedder's init_sd can reorder the grid with absolute_order,
+        and the key doesn't reach the frontend (#990)."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-order-keys", "build_dir": build_path,
+                 "init_sd": {"name": {"absolute_order": 0}}})
+            self.assertEqual(resp.code, 200)
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/lx-order-keys")
+            initial = json.loads(await ws.read_message())
+            column_config = initial["df_display_args"]["main"]["df_viewer_config"]["column_config"]
+            self.assertEqual([cc["header_name"] for cc in column_config], ["name", "idx"])
+            self.assertEqual([cc for cc in column_config if "absolute_order" in cc], [])
+
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_ws_search_string_rowfetch(self):
         """Regression for #838: a ``buckaroo_state_change`` carrying only
         ``search_string`` (no ``quick_command_args.search``) must filter

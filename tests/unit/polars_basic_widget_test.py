@@ -311,6 +311,14 @@ def test_polars_search_keeps_column_order(widget_klass):
     assert len(bw.dataflow.processed_df) == 2
     assert headers() == ['n1', 's1', 'n2', 's2']
 
+@pytest.mark.parametrize("widget_klass", [PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget])
+def test_polars_init_sd_ordering_keys(widget_klass):
+    """ordering keys in init_sd reorder the polars grid (#990)"""
+    df = pl.DataFrame({'n1': [1, 2, 3], 's1': ['ab', 'b', 'c'], 'n2': [1.0, 2.0, 3.0], 's2': ['x', 'ay', 'z']})
+    bw = widget_klass(df, init_sd={'s2': {'absolute_order': 0}, 'n1': {'prefer_order': 'last'}})
+    assert [cc['header_name'] for cc in bw.df_display_args['main']['df_viewer_config']['column_config']] == \
+        ['s2', 's1', 'n2', 'n1']
+
 def get_named_col_pldf():
     return pl.DataFrame({'foo':[1,2,3],
         'bar':["asdf","iiu", "asd999"],
