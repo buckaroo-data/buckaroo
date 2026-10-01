@@ -66,4 +66,3 @@ export { ColumnsEditor, DependentTabs, OperationViewer, WidgetDCFCell, DFViewer,
 export type { IModel } from './server/IModel';
 export type { BuckarooViewProps, BuckarooServerMode, BuckarooServerMetadata } from './server/BuckarooView';
 export type { BuckarooServerViewProps } from './server/BuckarooServerView';
-export type { HeaderSort } from './components/DFViewerParts/gridUtils';

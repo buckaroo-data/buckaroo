@@ -1,4 +1,4 @@
-import { CellRendererSelectorResult, ColDef, ColGroupDef, ColumnState, DomLayoutType, ICellRendererParams, IDatasource, SizeColumnsToContentStrategy, SizeColumnsToFitProvidedWidthStrategy, Theme } from 'ag-grid-community';
+import { CellRendererSelectorResult, ColDef, ColGroupDef, DomLayoutType, ICellRendererParams, IDatasource, SizeColumnsToContentStrategy, SizeColumnsToFitProvidedWidthStrategy, Theme } from 'ag-grid-community';
 import { DFWhole, DisplayerArgs, ColumnConfig, DFViewerConfig, ComponentConfig, NormalColumnConfig, MultiIndexColumnConfig, ColDefOrGroup, DFData, SDFT, PinnedRowConfig } from './DFWhole';
 import { CSSProperties, Dispatch, SetStateAction } from '../../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { CommandConfigT } from '../CommandUtils';
@@ -25,23 +25,6 @@ export interface IDisplayArgs {
     df_viewer_config: DFViewerConfig;
     summary_stats_key: string;
 }
-/** A single-column sort named by the column's header_name, which is stable
- *  across frames, rather than AG Grid's colId, which is the positional
- *  rewritten name (a, b, c...) and differs from frame to frame. */
-export interface HeaderSort {
-    column: string;
-    direction: "asc" | "desc";
-}
-/** The colId of the visible column whose header_name is `column`. */
-export declare function resolveSortColId(config: DFViewerConfig, column: string): string | undefined;
-/** Sets initialSort on the column def `sort` names, so the grid's first row
- *  request is already sorted. An unknown column leaves colDefs unchanged and,
- *  when warnIfUnknown, logs a console.warn naming it. */
-export declare function withInitialSort(colDefs: (ColDef | ColGroupDef)[], config: DFViewerConfig, sort?: HeaderSort, warnIfUnknown?: boolean): (ColDef | ColGroupDef)[];
-/** The grid's sort by header_name. null when the grid is unsorted, sorted on
- *  more than one column (getDs only sends single-column sorts), or sorted on
- *  a column that has no header_name. */
-export declare function headerSortFromColumnState(config: DFViewerConfig, state: ColumnState[]): HeaderSort | null;
 export interface TimedIDatasource extends IDatasource {
     createTime: Date;
 }
