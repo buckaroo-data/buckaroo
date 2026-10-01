@@ -159,6 +159,17 @@ def test_merge_column_config_follows_df_order():
     assert [c['col_name'] for c in merged] == ['a', 'b', 'c', 'd']
 
 
+def test_merge_column_config_follows_df_order_multiindex():
+    """multi-index column configs carry the rewritten name in field, not col_name"""
+    mi_df = pd.DataFrame([[1, 2, 3]], columns=pd.MultiIndex.from_tuples([('foo', 'a'), ('foo', 'b'), ('bar', 'a')]))
+    computed_column_config = [
+            {'col_path':('bar', 'a'), 'field':'c', 'displayer_args': {'displayer': 'obj'}},
+            {'col_path':('foo', 'a'), 'field':'a', 'displayer_args': {'displayer': 'obj'}},
+            {'col_path':('foo', 'b'), 'field':'b', 'displayer_args': {'displayer': 'obj'}}]
+    merged = dft.merge_column_config(computed_column_config, mi_df, {})
+    assert [c['field'] for c in merged] == ['a', 'b', 'c']
+
+
 def test_merge_column_config_unknown_cols_last():
     """A config whose col_name isn't one of the df's columns goes after the df's columns"""
     computed_column_config = [
