@@ -346,7 +346,25 @@ def merge_column_config(styled_column_config:List[ColumnConfig],
 
             continue
         ret_column_config.append(row)
-    return ret_column_config
+    return order_column_config(ret_column_config, df)
+
+
+def order_column_config(column_config:List[ColumnConfig], df:DataFrameLike) -> List[ColumnConfig]:
+    """
+      puts column configs in the df's column order.
+
+      styling emits configs in merged_sd's key order, which is whichever sd layer named a
+      column first. A search only names the string columns, so that order isn't the one
+      to display (#988). A config that isn't one of the df's columns goes after them,
+      in the order it came in.
+      """
+    position: Dict[Any, int] = {new_col: i for i, (_, new_col) in enumerate(old_col_new_col(df))}
+
+    def col_position(cc:ColumnConfig) -> int:
+        # multi-index configs carry the rewritten name in field rather than col_name
+        row = cast(Dict[str, Any], cc)
+        return position.get(row.get('col_name', row.get('field')), len(position))
+    return sorted(column_config, key=col_position)
 
 def rewrite_override_col_references(rewrites: Mapping[ColIdentifier, str], override:PartialColConfig) -> PartialColConfig:
     obj = copy.deepcopy(override)
