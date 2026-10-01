@@ -326,6 +326,14 @@ def test_search_keeps_column_order(widget_klass):
     assert headers() == ["score", "name", "rank", "role"]
 
 
+@pytest.mark.parametrize("widget_klass", [XorqBuckarooWidget, XorqBuckarooInfiniteWidget])
+def test_init_sd_ordering_keys(widget_klass):
+    """ordering keys in init_sd reorder the xorq grid (#990)"""
+    w = widget_klass(_interleaved_expr(), init_sd={"role": {"order_group": 0}, "rank": {"absolute_order": 0}})
+    assert [cc["header_name"] for cc in w.df_display_args["main"]["df_viewer_config"]["column_config"]] == \
+        ["rank", "role", "score", "name"]
+
+
 def _find_cc(column_config, col_name):
     for entry in column_config:
         if entry.get("col_name") == col_name:

@@ -1,6 +1,9 @@
 import sys
+import numpy as np
 import pandas as pd
+import pytest
 from buckaroo.dataflow.dataflow import DataFlow
+from buckaroo.df_util import to_chars
 from buckaroo.dataflow import dataflow as dft
 from buckaroo.dataflow.autocleaning import SENTINEL_DF_1, SENTINEL_DF_2
 
@@ -179,6 +182,102 @@ def test_merge_column_config_unknown_cols_last():
     temp_df=pd.DataFrame({'foo':[], 'bar':[]})
     merged = dft.merge_column_config(computed_column_config, temp_df, {})
     assert [c['col_name'] for c in merged] == ['a', 'b', 'z']
+
+
+ORDERING_KEYS = {'absolute_order', 'prefer_order', 'order_group'}
+FIVE_COLS = ['foo', 'bar', 'baz', 'boof', 'bop']
+
+
+def ordered_configs(cols, overrides):
+    """the column configs merge_column_config produces for a df with columns `cols`"""
+    temp_df = pd.DataFrame({c: [] for c in cols})
+    computed_column_config = [{'header_name': c, 'col_name': to_chars(i), 'displayer_args': {'displayer': 'obj'}}
+        for i, c in enumerate(cols)]
+    return dft.merge_column_config(computed_column_config, temp_df, overrides)
+
+
+def ordered_headers(cols, overrides):
+    return [cc['header_name'] for cc in ordered_configs(cols, overrides)]
+
+
+def test_absolute_order():
+    """the column is taken out of its place and put at that 0-based position (#990)"""
+    assert ordered_headers(FIVE_COLS, {'baz': {'absolute_order': 0}}) == ['baz', 'foo', 'bar', 'boof', 'bop']
+    assert ordered_headers(FIVE_COLS, {'foo': {'absolute_order': 3}}) == ['bar', 'baz', 'boof', 'foo', 'bop']
+    # absolutes go in ascending index order, so each lands at its own index
+    assert ordered_headers(FIVE_COLS, {'bop': {'absolute_order': 2}, 'baz': {'absolute_order': 0}}) == \
+        ['baz', 'foo', 'bop', 'bar', 'boof']
+    # positions computed with numpy are fine
+    assert ordered_headers(FIVE_COLS, {'baz': {'absolute_order': np.int64(0)}}) == ['baz', 'foo', 'bar', 'boof', 'bop']
+
+
+def test_absolute_order_past_the_end():
+    assert ordered_headers(FIVE_COLS, {'foo': {'absolute_order': 99}}) == ['bar', 'baz', 'boof', 'bop', 'foo']
+
+
+def test_prefer_order():
+    assert ordered_headers(FIVE_COLS, {'boof': {'prefer_order': 'first'}, 'bar': {'prefer_order': 'last'}}) == \
+        ['boof', 'foo', 'baz', 'bop', 'bar']
+
+
+def test_order_group():
+    """numbered groups come first in group order, ungrouped columns after all of them"""
+    assert ordered_headers(['name', 'id', 'ts', 'val'], {'id': {'order_group': 0}, 'ts': {'order_group': 1}}) == \
+        ['id', 'ts', 'name', 'val']
+    # gaps between group numbers are fine
+    assert ordered_headers(['name', 'id', 'ts', 'val'], {'id': {'order_group': 5}, 'ts': {'order_group': 20}}) == \
+        ['id', 'ts', 'name', 'val']
+
+
+def test_prefer_order_is_within_the_group():
+    """a 'first' column with no group goes to the front of the ungrouped columns, not ahead of group 0"""
+    assert ordered_headers(['name', 'id', 'ts', 'note'],
+        {'id': {'order_group': 0}, 'note': {'prefer_order': 'first'}}) == ['id', 'note', 'name', 'ts']
+
+
+def test_absolute_order_beats_groups():
+    assert ordered_headers(['name', 'id', 'ts'], {'id': {'order_group': 0}, 'ts': {'absolute_order': 0}}) == \
+        ['ts', 'id', 'name']
+
+
+def test_hidden_columns_take_no_position():
+    assert ordered_headers(['a1', 'b1', 'c1', 'd1'], {'b1': {'merge_rule': 'hidden'}, 'd1': {'absolute_order': 1}}) == \
+        ['a1', 'd1', 'c1']
+
+
+def test_none_unsets_an_ordering_key():
+    """a later layer clears an earlier layer's value with None"""
+    temp_df = pd.DataFrame({'foo': [], 'bar': []})
+    computed_column_config = [
+            {'header_name':'foo', 'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
+            {'header_name':'bar', 'col_name':'b', 'displayer_args': {'displayer': 'obj'}, 'absolute_order': 0}]
+    merged = dft.merge_column_config(computed_column_config, temp_df, {'bar': {'absolute_order': None}})
+    assert merged == [
+            {'header_name':'foo', 'col_name':'a', 'displayer_args': {'displayer': 'obj'}},
+            {'header_name':'bar', 'col_name':'b', 'displayer_args': {'displayer': 'obj'}}]
+
+
+def test_ordering_keys_are_stripped():
+    """the ordering pass consumes the keys, the frontend never sees them"""
+    merged = ordered_configs(FIVE_COLS, {'baz': {'absolute_order': 0, 'prefer_order': 'last', 'order_group': 2},
+        'foo': {'absolute_order': None}})
+    assert [cc for cc in merged if ORDERING_KEYS & set(cc)] == []
+
+
+def test_duplicate_absolute_order_raises():
+    with pytest.raises(ValueError, match='absolute_order') as exc_info:
+        ordered_headers(FIVE_COLS, {'baz': {'absolute_order': 0}, 'bop': {'absolute_order': 0}})
+    assert "'baz'" in str(exc_info.value) and "'bop'" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("key, val", [
+    ('absolute_order', -1), ('absolute_order', True), ('absolute_order', 1.0), ('absolute_order', '1'),
+    ('order_group', -1), ('order_group', False), ('order_group', 0.5),
+    ('prefer_order', 'frist'), ('prefer_order', 0)])
+def test_bad_ordering_values_raise(key, val):
+    with pytest.raises(ValueError, match=key) as exc_info:
+        ordered_headers(FIVE_COLS, {'baz': {key: val}})
+    assert "'baz'" in str(exc_info.value)
 
 
 
