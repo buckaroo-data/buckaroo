@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { decodeDFDataDict } from "../components/DFViewerParts/resolveDFData";
+import { HeaderSort } from "../components/DFViewerParts/gridUtils";
 import { WebSocketModel } from "./WebSocketModel";
 import {
     BuckarooView,
@@ -65,6 +66,16 @@ export interface BuckarooServerViewProps {
      *  fixed embed height looks wrong for both small and large dataframes.
      *  Overrides any `component_config.layoutType` set by the server. */
     autoHeight?: boolean;
+
+    /** Sort the main view starts with, e.g. restored from a URL. `column`
+     *  is a header name, not the rewritten a, b, c... id. Read once per
+     *  session, when the grid mounts; later changes are ignored. An unknown
+     *  column is ignored. */
+    sort?: HeaderSort;
+
+    /** Called with the main view's sort, by header name, whenever it
+     *  changes; `null` when unsorted or sorted on more than one column. */
+    onSortChange?: (sort: HeaderSort | null) => void;
 }
 
 interface ReadyState {
@@ -89,6 +100,8 @@ export function BuckarooServerView({
     style,
     className,
     autoHeight,
+    sort,
+    onSortChange,
 }: BuckarooServerViewProps): React.ReactElement {
     const [ready, setReady] = React.useState<ReadyState | null>(null);
     const [error, setError] = React.useState<Error | null>(null);
@@ -185,6 +198,8 @@ export function BuckarooServerView({
             style={style}
             className={className}
             autoHeight={autoHeight}
+            sort={sort}
+            onSortChange={onSortChange}
         />
     );
 }

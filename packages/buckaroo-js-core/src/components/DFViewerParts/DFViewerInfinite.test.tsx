@@ -131,3 +131,174 @@ describe("DFViewerInfinite", () => {
     expect(latestAgGridProps.datasource.rowCount).toBe(50);
   });
 });
+
+describe("DFViewerInfinite host sort (#984)", () => {
+  // Laid out like tallyman's diff frame: `b` holds the before value and is
+  // hidden, `c` is the after value shown under the header "fare". The
+  // rewritten ids are positional, so a host can only name the column by
+  // header.
+  const diffConfig: DFViewerConfig = {
+    pinned_rows: [],
+    left_col_configs: [{ col_name: "index", header_name: "index", displayer_args: { displayer: "obj" } }],
+    column_config: [
+      { col_name: "a", header_name: "name", displayer_args: { displayer: "obj" } },
+      { col_name: "b", header_name: "fare", displayer_args: { displayer: "obj" }, ag_grid_specs: { hide: true } },
+      { col_name: "c", header_name: "fare", displayer_args: { displayer: "obj" } },
+    ],
+  };
+  const dsWrapper = {
+    data_type: "DataSource" as const,
+    length: 50,
+    datasource: { rowCount: 50, getRows: jest.fn() },
+  };
+  const initialSortOf = (field: string) =>
+    latestAgGridProps.columnDefs.find((c: any) => c.field === field)?.initialSort;
+  const fireSortChanged = (columnState: any[]) => {
+    const ensureIndexVisible = jest.fn();
+    latestAgGridProps.gridOptions.onSortChanged({
+      api: { getColumnState: () => columnState, ensureIndexVisible },
+    });
+    return ensureIndexVisible;
+  };
+
+  let warnSpy: jest.SpyInstance;
+  beforeEach(() => {
+    latestAgGridProps = null;
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it("initial_sort resolves a header name to the visible column; a hidden column with the same header never matches", () => {
+    render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+        initial_sort={{ column: "fare", direction: "desc" }}
+      />,
+    );
+    expect(initialSortOf("c")).toBe("desc");
+    expect(initialSortOf("b")).toBeUndefined();
+    expect(initialSortOf("a")).toBeUndefined();
+  });
+
+  it("ignores an initial_sort naming a column the frame doesn't have", () => {
+    render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+        initial_sort={{ column: "age", direction: "asc" }}
+      />,
+    );
+    expect(latestAgGridProps.columnDefs.some((c: any) => c.initialSort !== undefined)).toBe(false);
+  });
+
+  it("warns once per mount, naming the column, when initial_sort matches no visible header", () => {
+    const onSortChange = jest.fn();
+    const { rerender } = render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+        initial_sort={{ column: "age", direction: "asc" }}
+        on_sort_change={onSortChange}
+      />,
+    );
+    // a new df_viewer_config rebuilds the column defs; that's a re-render, not a new mount
+    rerender(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={{ ...diffConfig }}
+        setActiveCol={jest.fn()}
+        initial_sort={{ column: "age", direction: "asc" }}
+        on_sort_change={onSortChange}
+      />,
+    );
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0][0])).toContain("age");
+    expect(onSortChange).not.toHaveBeenCalled();
+  });
+
+  it("doesn't warn for a known initial_sort column, or when there's no initial_sort", () => {
+    const { unmount } = render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+        initial_sort={{ column: "fare", direction: "desc" }}
+      />,
+    );
+    unmount();
+    render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+      />,
+    );
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("reads initial_sort once; a later change doesn't touch the column defs", () => {
+    const { rerender } = render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+        initial_sort={{ column: "fare", direction: "desc" }}
+      />,
+    );
+    rerender(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+        initial_sort={{ column: "name", direction: "asc" }}
+      />,
+    );
+    expect(initialSortOf("c")).toBe("desc");
+    expect(initialSortOf("a")).toBeUndefined();
+  });
+
+  it("reports a sort change by header name, and still scrolls back to the top", () => {
+    const onSortChange = jest.fn();
+    render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+        on_sort_change={onSortChange}
+      />,
+    );
+    const ensureIndexVisible = fireSortChanged([
+      { colId: "a", sort: null },
+      { colId: "c", sort: "asc", sortIndex: 0 },
+    ]);
+    expect(onSortChange).toHaveBeenLastCalledWith({ column: "fare", direction: "asc" });
+    expect(ensureIndexVisible).toHaveBeenCalledWith(0);
+  });
+
+  it("reports null when the sort is cleared or spans more than one column", () => {
+    const onSortChange = jest.fn();
+    render(
+      <DFViewerInfinite
+        data_wrapper={dsWrapper}
+        df_viewer_config={diffConfig}
+        setActiveCol={jest.fn()}
+        on_sort_change={onSortChange}
+      />,
+    );
+    fireSortChanged([{ colId: "a", sort: null }, { colId: "c", sort: null }]);
+    expect(onSortChange).toHaveBeenLastCalledWith(null);
+
+    fireSortChanged([
+      { colId: "a", sort: "asc", sortIndex: 0 },
+      { colId: "c", sort: "desc", sortIndex: 1 },
+    ]);
+    expect(onSortChange).toHaveBeenLastCalledWith(null);
+    expect(onSortChange).toHaveBeenCalledTimes(2);
+  });
+});

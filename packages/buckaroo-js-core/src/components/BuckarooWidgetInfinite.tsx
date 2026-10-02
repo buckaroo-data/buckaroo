@@ -12,6 +12,7 @@ import { CommandConfigT } from "./CommandUtils";
 import { Operation } from "./OperationUtils";
 import {
     getDs,
+    HeaderSort,
     IDisplayArgs,
 } from "./DFViewerParts/gridUtils";
 import { stampLayoutType, isFitContentLayout } from "./DFViewerParts/displayArgsUtils";
@@ -144,6 +145,8 @@ export function BuckarooInfiniteWidget({
         src,
         dataframe_id,
         autoHeight,
+        initial_sort,
+        on_sort_change,
     }: {
         df_meta: DFMeta;
         df_data_dict: Record<string, DFData>;
@@ -178,6 +181,12 @@ export function BuckarooInfiniteWidget({
          *  false → domLayout "normal" (fills parent container).
          *  undefined → server value wins. */
         autoHeight?: boolean;
+        /** Sort, by header_name, the grid starts with. Applies to the main
+         *  df_display only, and only when the grid mounts. */
+        initial_sort?: HeaderSort;
+        /** Called with the main df_display's sort, by header_name, when it
+         *  changes. Sorts in other df_display views are not reported. */
+        on_sort_change?: (sort: HeaderSort | null) => void;
     }) {
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
         // so having it live between relaods is key
@@ -212,6 +221,7 @@ export function BuckarooInfiniteWidget({
         );
 
         const cDisp = effectiveDisplayArgs[buckaroo_state.df_display];
+        const onMain = buckaroo_state.df_display === "main";
         const fitContent = isFitContentLayout(effectiveDisplayArgs);
 
         const [data_wrapper, summaryStatsData] = useMemo(
@@ -346,6 +356,10 @@ export function BuckarooInfiniteWidget({
                         error_info={""}
                         view_name={buckaroo_state.df_display}
                         data_key={cDisp.data_key}
+                        // Host sort belongs to the main view. Other views
+                        // neither start from it nor report their own sorts.
+                        initial_sort={onMain ? initial_sort : undefined}
+                        on_sort_change={onMain ? on_sort_change : undefined}
                     />
                 </div>
                 {buckaroo_state.show_commands ? (
@@ -372,6 +386,8 @@ export function DFViewerInfiniteDS({
         message_log,
         show_message_box,
         autoHeight,
+        initial_sort,
+        on_sort_change,
     }: {
         df_meta: DFMeta;
         df_data_dict: Record<string, DFData>;
@@ -383,6 +399,10 @@ export function DFViewerInfiniteDS({
         /** When provided, overrides server-sent component_config.layoutType.
          *  true → domLayout "autoHeight"; false → "normal"; undefined → server wins. */
         autoHeight?: boolean;
+        /** Sort, by header_name, the grid starts with. Read once on mount. */
+        initial_sort?: HeaderSort;
+        /** Called with the grid's sort, by header_name, when it changes. */
+        on_sort_change?: (sort: HeaderSort | null) => void;
     }) {
         // DFViewerInfiniteDS rendering
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
@@ -447,6 +467,8 @@ export function DFViewerInfiniteDS({
                         activeCol={activeCol}
                         setActiveCol={setActiveCol}
                         error_info={""}
+                        initial_sort={initial_sort}
+                        on_sort_change={on_sort_change}
                     />
                 </div>
 
