@@ -330,6 +330,20 @@ class LoadHandler(tornado.web.RequestHandler):
         if file_obj is None:
             return
 
+        # ``row_order_column`` (#995): the host's no-ties ordering column,
+        # by original name. Checked against the loaded frame so a typo is
+        # a 400, not a silently ignored hint; reset on every /load because
+        # it describes this frame, not the session.
+        row_order_column = body.get("row_order_column")
+        if row_order_column is not None:
+            col_names = [c["name"] for c in metadata["columns"]]
+            if not isinstance(row_order_column, str) or row_order_column not in col_names:
+                self.set_status(400)
+                self.write({"error_code": "invalid_row_order_column",
+                    "message": f"row_order_column {row_order_column!r} is not a column of {path}"})
+                return
+        session.row_order_column = row_order_column
+
         if mode == "lazy":
             self._load_lazy_polars(session, path, file_obj, metadata)
         else:

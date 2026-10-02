@@ -94,15 +94,22 @@ def create_polars_dataflow(df, column_config_overrides=None, extra_grid_config=N
         extra_grid_config=extra_grid_config, init_sd=init_sd, skip_main_serial=True)
 
 
-def handle_infinite_request_buckaroo_polars(
-    dataflow: PolarsServerDataflow, payload_args: dict, search_string: str = ""
-) -> tuple[Mapping[str, Any], bytes]:
+def handle_infinite_request_buckaroo_polars(dataflow: PolarsServerDataflow, payload_args: dict, search_string: str = "",
+        row_order_column: str | None = None) -> tuple[Mapping[str, Any], bytes]:
     """Polars analogue of :func:`handle_infinite_request_buckaroo`.
 
     ``search_string`` is the live-typed filter (#838) — applied as a
     literal substring match across all polars ``String`` columns.
     Literal (``literal=True``) so user typing isn't treated as regex;
     this matches the pandas server path's ``search_df_str`` semantics.
+
+    ``row_order_column`` (#995) names a no-ties column in the frame (by
+    its original name, e.g. tallyman's ``__row_order``). A sorted page
+    is ordered by ``[sort_col, row_order_column]`` with the user's
+    direction on the sort key and row order ascending; an unsorted page
+    by ``row_order_column`` alone. So the same request returns the same
+    rows, and the same rows the xorq path returns for the same hint
+    (#974). Without it, ties keep input order (``maintain_order``).
     """
     from buckaroo.server.window import clamp_window
 
@@ -135,9 +142,15 @@ def handle_infinite_request_buckaroo_polars(
         if sort:
             ascending = payload_args.get("sort_direction") == "asc"
             converted_sort_column = merged_sd[sort]["orig_col_name"]
+            sort_cols, descending = [converted_sort_column], [not ascending]
+            if row_order_column:
+                sort_cols.append(row_order_column)
+                descending.append(False)
             sorted_df = filtered_df.with_row_index().sort(
-                converted_sort_column, descending=not ascending)
+                sort_cols, descending=descending, maintain_order=True)
             slice_df = sorted_df[start:end]
+        elif row_order_column:
+            slice_df = filtered_df.with_row_index().sort(row_order_column)[start:end]
         else:
             slice_df = filtered_df.with_row_index()[start:end]
 
