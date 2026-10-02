@@ -1,5 +1,7 @@
+import io
 import json
 import os
+import random
 import sys
 import tempfile
 from unittest import mock
@@ -23,6 +25,18 @@ def make_app():
 def _write_test_csv(path):
     df = pd.DataFrame({"name": ["Alice", "Bob", "Charlie", "Diana", "Eve"], "age": [30, 25, 35, 28, 32],
         "score": [88.5, 92.3, 76.1, 95.0, 81.7]})
+    df.to_csv(path, index=False)
+    return df
+
+
+def _write_tie_csv(path, n=40):
+    """``g`` has many ties; ``ro`` is 0..n-1 shuffled relative to file
+    order, so a page tie-broken on ``ro`` differs from one tie-broken on
+    file order (#995)."""
+    rng = random.Random(0)
+    ro = list(range(n))
+    rng.shuffle(ro)
+    df = pd.DataFrame({"g": [rng.randrange(3) for _ in range(n)], "ro": ro})
     df.to_csv(path, index=False)
     return df
 
@@ -209,6 +223,48 @@ class TestLoad(tornado.testing.AsyncHTTPTestCase):
                 session = self._app.settings["sessions"].get("plain-1")
                 dvc = session.df_display_args["main"]["df_viewer_config"]
                 self.assertEqual(dvc.get("extra_grid_config"), {})
+            finally:
+                os.unlink(f.name)
+
+
+    def test_load_polars_rejects_unknown_row_order_column(self):
+        """#995: ``row_order_column`` names the host's no-ties ordering
+        column; a name that isn't in the frame is a 400, not a silently
+        ignored hint."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_tie_csv(f.name)
+            try:
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "ro-bad", "path": f.name, "mode": "buckaroo",
+                        "backend": "polars", "row_order_column": "nope"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 400)
+                body = json.loads(resp.body)
+                self.assertEqual(body["error_code"], "invalid_row_order_column")
+                self.assertIn("nope", body["message"])
+            finally:
+                os.unlink(f.name)
+
+    def test_load_polars_stores_row_order_column_on_session(self):
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_tie_csv(f.name)
+            try:
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "ro-ok", "path": f.name, "mode": "buckaroo",
+                        "backend": "polars", "row_order_column": "ro"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+                session = self._app.settings["sessions"].get("ro-ok")
+                self.assertEqual(session.row_order_column, "ro")
+
+                # A re-POST without the hint clears it: the hint describes
+                # the frame it was sent with, not the session.
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "ro-ok", "path": f.name, "mode": "buckaroo",
+                        "backend": "polars"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+                self.assertIsNone(session.row_order_column)
             finally:
                 os.unlink(f.name)
 
@@ -447,6 +503,48 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
 
                 binary_frame = await ws.read_message()
                 self.assertIsInstance(binary_frame, bytes)
+
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_ws_polars_sort_breaks_ties_on_row_order_column(self):
+        """#995 end to end: a /load with ``backend="polars"`` and
+        ``row_order_column`` pages a sorted request with ties broken on
+        that column, not on polars' undefined tie order."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_tie_csv(f.name)
+            try:
+                resp = await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": "ws-ro", "path": f.name, "mode": "buckaroo",
+                        "backend": "polars", "row_order_column": "ro"}))
+                self.assertEqual(resp.code, 200)
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/ws-ro")
+                await ws.read_message()  # initial_state
+
+                # "a" is the renamed "g" column.
+                ws.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {
+                        "start": 0, "end": 40,
+                        "sourceName": "sorted", "origEnd": 40,
+                        "sort": "a", "sort_direction": "asc"
+                    }
+                }))
+                resp = json.loads(await ws.read_message())
+                self.assertEqual(resp["type"], "infinite_resp")
+                self.assertNotIn("error_info", resp)
+                page = pd.read_parquet(io.BytesIO(await ws.read_message()))
+
+                self.assertEqual(list(page["a"]), sorted(page["a"]))
+                rows = list(zip(page["a"], page["b"]))
+                for (g0, ro0), (g1, ro1) in zip(rows, rows[1:]):
+                    if g0 == g1:
+                        self.assertLess(ro0, ro1, rows)
 
                 ws.close()
             finally:
