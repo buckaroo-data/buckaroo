@@ -828,3 +828,19 @@ class TestLoadTelemetry(tornado.testing.AsyncHTTPTestCase):
                 self.assertIn("firstpull.ws_first_payload", [r["name"] for r in second])
             finally:
                 os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_load_without_telemetry_url_is_silent(self):
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sink_factory = mock.MagicMock()
+                with mock.patch.object(telemetry, "make_http_sink", sink_factory):
+                    resp = await self._load({"session": "ld-no-telem", "path": f.name,
+                        "mode": "buckaroo"})
+                self.assertEqual(resp.code, 200)
+                sink_factory.assert_not_called()
+                session = self._app.settings["sessions"].get("ld-no-telem")
+                self.assertIsNone(session.tele_sink)
+            finally:
+                os.unlink(f.name)

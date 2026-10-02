@@ -212,14 +212,16 @@ class LoadHandler(tornado.web.RequestHandler):
         port = self.application.settings["port"]
         return find_or_create_session_window(session_id, port, reload_if_found=True)
 
-    def _load_polars_with_error_handling(self, path: str):
+    def _load_polars_with_error_handling(self, path: str, session_id: str):
         """Eager polars load for ``backend='polars'``. Errors share the
         same shape as the pandas loader so the response surface is
         identical from the client's POV."""
         try:
             from buckaroo.server.data_loading_polars import load_file_polars, get_metadata_polars
-            df = load_file_polars(path)
-            metadata = get_metadata_polars(df, path)
+            with perf_log.perf_span("firstpull.file_load", session=session_id):
+                df = load_file_polars(path)
+            with perf_log.perf_span("firstpull.metadata", session=session_id):
+                metadata = get_metadata_polars(df, path)
             return df, metadata
         except FileNotFoundError:
             self.set_status(404)
@@ -245,16 +247,24 @@ class LoadHandler(tornado.web.RequestHandler):
             self.write(resp)
             return None, None
 
-    def _load_file_with_error_handling(self, path: str, is_lazy: bool):
-        """Load file and handle errors. Returns (file_obj, metadata) or (None, None)."""
+    def _load_file_with_error_handling(self, path: str, is_lazy: bool, session_id: str):
+        """Load file and handle errors. Returns (file_obj, metadata) or (None, None).
+
+        The read and the metadata step are spanned separately: on the lazy
+        path the metadata is where the row count is actually collected, so
+        it is the cost worth seeing on its own."""
         try:
             if is_lazy:
-                ldf = load_file_lazy(path)
-                metadata = get_metadata_lazy(ldf, path)
+                with perf_log.perf_span("firstpull.file_load", session=session_id):
+                    ldf = load_file_lazy(path)
+                with perf_log.perf_span("firstpull.metadata", session=session_id):
+                    metadata = get_metadata_lazy(ldf, path)
                 return ldf, metadata
             else:
-                df = load_file(path)
-                metadata = get_metadata(df, path)
+                with perf_log.perf_span("firstpull.file_load", session=session_id):
+                    df = load_file(path)
+                with perf_log.perf_span("firstpull.metadata", session=session_id):
+                    metadata = get_metadata(df, path)
                 return df, metadata
         except FileNotFoundError:
             self.set_status(404)
@@ -309,6 +319,15 @@ class LoadHandler(tornado.web.RequestHandler):
         extra_grid_config = body.get("extra_grid_config")
         init_sd = body.get("init_sd")
 
+        # Companion telemetry endpoint (#943, #996): same contract as
+        # /load_expr. When present, the firstpull.* spans below POST themselves
+        # to the companion as session-correlated records, and the sink is
+        # stashed on the session so the WS first-pull spans reuse it. Built
+        # here on the IOLoop, where make_http_sink captures IOLoop.current().
+        # Absent → tele_sink is None and telemetry_context is a no-op.
+        telemetry_url = body.get("telemetry_url")
+        tele_sink = telemetry.make_http_sink(telemetry_url) if telemetry_url else None
+
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
@@ -322,44 +341,56 @@ class LoadHandler(tornado.web.RequestHandler):
         if component_config:
             session.component_config = component_config
 
-        # Load data in appropriate mode
-        if backend == "polars" and mode == "buckaroo":
-            file_obj, metadata = self._load_polars_with_error_handling(path)
-        else:
-            file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
-        if file_obj is None:
-            return
-
-        if mode == "lazy":
-            self._load_lazy_polars(session, path, file_obj, metadata)
-        else:
-            session.df = file_obj
-            session.metadata = metadata
-            if mode == "buckaroo":
-                if backend == "polars":
-                    from buckaroo.server.data_loading_polars import create_polars_dataflow
-                    dataflow = create_polars_dataflow(file_obj,
-                        column_config_overrides=column_config_overrides,
-                        extra_grid_config=extra_grid_config, init_sd=init_sd)
-                else:
-                    dataflow = create_dataflow(file_obj,
-                        column_config_overrides=column_config_overrides,
-                        extra_grid_config=extra_grid_config, init_sd=init_sd)
-                session.dataflow = dataflow
-                buckaroo_state = get_buckaroo_display_state(dataflow)
-                session.df_display_args = buckaroo_state["df_display_args"]
-                session.df_data_dict = buckaroo_state["df_data_dict"]
-                session.df_meta = buckaroo_state["df_meta"]
-                session.buckaroo_state = buckaroo_state["buckaroo_state"]
-                session.buckaroo_options = buckaroo_state["buckaroo_options"]
-                session.command_config = buckaroo_state["command_config"]
-                session.operation_results = buckaroo_state["operation_results"]
-                session.operations = buckaroo_state["operations"]
+        # session= correlates the spans across concurrent loads — the handler
+        # is async, so two /load requests can interleave in the perf log.
+        with perf_log.telemetry_context(session_id, tele_sink):
+            # Load data in appropriate mode
+            if backend == "polars" and mode == "buckaroo":
+                file_obj, metadata = self._load_polars_with_error_handling(path, session_id)
             else:
-                display_state = get_display_state(file_obj, path)
-                session.df_display_args = display_state["df_display_args"]
-                session.df_data_dict = display_state["df_data_dict"]
-                session.df_meta = display_state["df_meta"]
+                file_obj, metadata = self._load_file_with_error_handling(
+                    path, is_lazy=(mode == "lazy"), session_id=session_id)
+            if file_obj is None:
+                return
+
+            if mode == "lazy":
+                self._load_lazy_polars(session, path, file_obj, metadata)
+            else:
+                session.df = file_obj
+                session.metadata = metadata
+                if mode == "buckaroo":
+                    with perf_log.perf_span("firstpull.dataflow_construct", session=session_id):
+                        if backend == "polars":
+                            from buckaroo.server.data_loading_polars import create_polars_dataflow
+                            dataflow = create_polars_dataflow(file_obj,
+                                column_config_overrides=column_config_overrides,
+                                extra_grid_config=extra_grid_config, init_sd=init_sd)
+                        else:
+                            dataflow = create_dataflow(file_obj,
+                                column_config_overrides=column_config_overrides,
+                                extra_grid_config=extra_grid_config, init_sd=init_sd)
+                    session.dataflow = dataflow
+                    buckaroo_state = get_buckaroo_display_state(dataflow)
+                    session.df_display_args = buckaroo_state["df_display_args"]
+                    session.df_data_dict = buckaroo_state["df_data_dict"]
+                    session.df_meta = buckaroo_state["df_meta"]
+                    session.buckaroo_state = buckaroo_state["buckaroo_state"]
+                    session.buckaroo_options = buckaroo_state["buckaroo_options"]
+                    session.command_config = buckaroo_state["command_config"]
+                    session.operation_results = buckaroo_state["operation_results"]
+                    session.operations = buckaroo_state["operations"]
+                else:
+                    display_state = get_display_state(file_obj, path)
+                    session.df_display_args = display_state["df_display_args"]
+                    session.df_data_dict = display_state["df_data_dict"]
+                    session.df_meta = display_state["df_meta"]
+
+        # Bind this request's sink and re-arm first-pull telemetry (#944): the
+        # data just changed, so the next WS pull is a fresh time-to-first-rows
+        # and must emit firstpull.ws_first_payload again. Set only after a
+        # successful load so a failed /load doesn't re-arm the stale data.
+        session.tele_sink = tele_sink
+        session._perf_first_payload_seen = False
 
         # Merge component_config into df_display_args if provided
         if component_config and session.df_display_args:

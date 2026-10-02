@@ -44,7 +44,7 @@ class SessionState:
     # a reload keeps stat caching and column config (#957).
     dataflow_kwargs: dict = field(default_factory=dict)
     # Companion telemetry sink (#943): a fire-and-forget POST callable, built
-    # once from the /load_expr payload's telemetry_url on the IOLoop (where
+    # once from the /load or /load_expr payload's telemetry_url on the IOLoop (where
     # make_http_sink captures AsyncHTTPClient/IOLoop.current()). Stored here so
     # the WS handler — a separate async context but the same IOLoop — reuses it
     # for first-pull spans instead of rebuilding it. None when no telemetry_url
