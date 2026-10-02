@@ -3,6 +3,7 @@ from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.polars_buckaroo import PolarsBuckarooWidget, PolarsBuckarooInfiniteWidget
 from buckaroo.jlisp.lisp_utils import s
 import polars as pl
+import pytest
 from polars.testing import assert_frame_equal
 
 
@@ -291,3 +292,10 @@ def test_column_config_overrides_preserves_highlight_phrase_and_color():
     assert b_args['max_length'] == 2000
     assert b_args['highlight_phrase'] == ['area']
     assert b_args['highlight_color'] == 'red'
+
+
+def test_polars_widget_malformed_display_config_raises():
+    with pytest.raises(ValueError, match='delete_keys'):
+        PolarsBuckarooInfiniteWidget(simple_df, init_sd={'str_col': {'delete_keys': None}})
+    with pytest.raises(ValueError, match='merge_rule'):
+        PolarsBuckarooInfiniteWidget(simple_df, column_config_overrides={'str_col': {'merge_rule': 'hiden'}})

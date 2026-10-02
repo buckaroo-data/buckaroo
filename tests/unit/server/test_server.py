@@ -194,6 +194,28 @@ class TestLoad(tornado.testing.AsyncHTTPTestCase):
             finally:
                 os.unlink(f.name)
 
+    def test_load_rejects_malformed_display_config(self):
+        """A malformed init_sd / column_config_overrides is the caller's
+        mistake: 400 naming the column and key, and no session is created."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                for i, bad in enumerate([
+                        {"init_sd": {"name": {"ag_grid_specs": "wrapText"}}},
+                        {"column_config_overrides": {"name": {"merge_rule": "hiden"}}}]):
+                    session_id = f"bad-dc-{i}"
+                    resp = self.fetch("/load", method="POST",
+                        body=json.dumps({"session": session_id, "path": f.name, "mode": "buckaroo", **bad}),
+                        headers={"Content-Type": "application/json"})
+                    self.assertEqual(resp.code, 400, bad)
+                    body = json.loads(resp.body)
+                    self.assertEqual(body["error_code"], "invalid_display_config")
+                    self.assertIn("name", body["message"])
+                    self.assertEqual(len(body["problems"]), 1)
+                    self.assertIsNone(self._app.settings["sessions"].get(session_id))
+            finally:
+                os.unlink(f.name)
+
     def test_load_buckaroo_without_optional_configs_keeps_defaults(self):
         """Default behaviour: omitting the new kwargs leaves
         extra_grid_config as the empty-dict default the headless dataflow
