@@ -2,11 +2,13 @@ import json
 import os
 import sys
 import tempfile
+from unittest import mock
 
 import pandas as pd
 import pytest
 import tornado.testing
 
+from buckaroo.server import telemetry
 from buckaroo.server.app import make_app as _make_app
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Temp file locking prevents cleanup on Windows")
@@ -186,3 +188,40 @@ class TestLoadCompare(tornado.testing.AsyncHTTPTestCase):
             finally:
                 os.unlink(f1.name)
                 os.unlink(f2.name)
+
+
+class TestLoadCompareTelemetry(tornado.testing.AsyncHTTPTestCase):
+    """#996: /load_compare takes ``telemetry_url`` like /load and /load_expr,
+    storing the sink on the session and timing its steps as firstpull.* spans."""
+
+    def get_app(self):
+        return make_app()
+
+    def test_load_compare_emits_firstpull_spans(self):
+        df1 = pd.DataFrame({"id": [1, 2, 3], "val": [10, 20, 30]})
+        df2 = pd.DataFrame({"id": [1, 2, 4], "val": [10, 99, 40]})
+        captured: list = []
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f1, \
+             tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f2:
+            _write_df(df1, f1.name)
+            _write_df(df2, f2.name)
+            try:
+                with mock.patch.object(telemetry, "make_http_sink", lambda url, **kw: captured.append):
+                    resp = self.fetch("/load_compare", method="POST",
+                        body=json.dumps({"session": "cmp-telem", "path1": f1.name, "path2": f2.name,
+                            "join_columns": ["id"],
+                            "telemetry_url": "http://companion.invalid/internal/telemetry"}),
+                        headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+            finally:
+                os.unlink(f1.name)
+                os.unlink(f2.name)
+        names = [r["name"] for r in captured]
+        self.assertIn("firstpull.load_compare", names)
+        # One file_load per input, then the join.
+        self.assertEqual(names.count("firstpull.file_load"), 2)
+        self.assertIn("firstpull.compare", names)
+        self.assertTrue(all(r["trace"] == "cmp-telem" for r in captured))
+        session = self._app.settings["sessions"].get("cmp-telem")
+        self.assertIsNotNone(session.tele_sink)
+        self.assertFalse(session._perf_first_payload_seen)
