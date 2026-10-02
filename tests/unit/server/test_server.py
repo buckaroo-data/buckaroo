@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sys
 import tempfile
 from unittest import mock
@@ -683,3 +684,158 @@ class TestLoadPushesToWebSocket(tornado.testing.AsyncHTTPTestCase):
                 ws.close()
             finally:
                 os.unlink(f.name)
+
+
+def _write_polars_project(root, stat_source="def compute(ser): return ser.len()\n"):
+    """A project root with one klass of each kind for the polars engine (#994):
+    ``stats/polars/foo.py``, ``post_processing/polars/bar.py`` and
+    ``display/my_display.py``. ``stats/xorq_only.py`` is the xorq contract and
+    must not be picked up by a polars session."""
+    os.makedirs(os.path.join(root, "stats", "polars"))
+    os.makedirs(os.path.join(root, "post_processing", "polars"))
+    os.makedirs(os.path.join(root, "display"))
+    with open(os.path.join(root, "stats", "polars", "foo.py"), "w") as f:
+        f.write(stat_source)
+    with open(os.path.join(root, "stats", "xorq_only.py"), "w") as f:
+        f.write("def compute(col): return col.count()\n")
+    with open(os.path.join(root, "post_processing", "polars", "bar.py"), "w") as f:
+        f.write("def process(df): return df.head(2)\n")
+    with open(os.path.join(root, "display", "my_display.py"), "w") as f:
+        f.write("class MyDisplay(ColAnalysis):\n    df_display_name = 'my_display'\n")
+
+
+def _stat_for(session, orig_col_name):
+    """The full summary stats for one column of a /load session, keyed by
+    the column's original name. ``merged_sd`` carries every stat the
+    pipeline produced; the wire copy in ``df_data_dict`` is projected down
+    to the pinned rows (#880), so project stats are checked here."""
+    merged_sd = session.dataflow.merged_sd
+    return next(sd for sd in merged_sd.values() if sd.get("orig_col_name") == orig_col_name)
+
+
+class TestLoadPolarsProjectRoot(tornado.testing.AsyncHTTPTestCase):
+    """#994: /load with backend=polars honours ``project_root`` the way
+    /load_expr does, with the engine of a stat or post-processing file
+    picked by its subdirectory (``stats/polars/``, ``post_processing/polars/``)."""
+
+    def get_app(self):
+        return make_app()
+
+    def setUp(self):
+        super().setUp()
+        self.project_root = tempfile.mkdtemp()
+        fd, self.csv_path = tempfile.mkstemp(suffix=".csv")
+        os.close(fd)
+        _write_test_csv(self.csv_path)
+
+    def tearDown(self):
+        shutil.rmtree(self.project_root, ignore_errors=True)
+        os.unlink(self.csv_path)
+        super().tearDown()
+
+    async def _load(self, sid, **extra):
+        body = {"session": sid, "path": self.csv_path, "mode": "buckaroo",
+            "backend": "polars", "project_root": self.project_root, **extra}
+        resp = await _async_fetch(self.get_http_port(), "/load", method="POST", body=json.dumps(body))
+        self.assertEqual(resp.code, 200, resp.body)
+        return self._app.settings["sessions"].get(sid)
+
+    @tornado.testing.gen_test
+    async def test_load_polars_loads_project_stats(self):
+        _write_polars_project(self.project_root)
+        session = await self._load("pr-stats")
+        self.assertEqual(session.project_root, self.project_root)
+        age = _stat_for(session, "age")
+        self.assertEqual(age["foo"], 5)
+        self.assertNotIn("xorq_only", age)
+
+    @tornado.testing.gen_test
+    async def test_load_polars_loads_project_post_processing(self):
+        """``bar`` is offered in buckaroo_options and selecting it over the
+        WS transforms the rows the infinite request returns."""
+        _write_polars_project(self.project_root)
+        sid = "pr-pp"
+        session = await self._load(sid)
+        self.assertIn("bar", session.buckaroo_options["post_processing"])
+
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+        await ws.read_message()  # initial_state
+        ws.write_message(json.dumps({
+            "type": "buckaroo_state_change",
+            "new_state": {"post_processing": "bar", "cleaning_method": "",
+                "quick_command_args": {}, "df_display": "main",
+                "show_commands": False, "sampled": False, "search_string": ""}}))
+        broadcast = json.loads(await ws.read_message())
+        self.assertEqual(broadcast["type"], "initial_state")
+        self.assertEqual(broadcast["df_meta"]["filtered_rows"], 2)
+
+        ws.write_message(json.dumps({
+            "type": "infinite_request",
+            "payload_args": {"start": 0, "end": 5, "sourceName": "default", "origEnd": 5}}))
+        r = json.loads(await ws.read_message())
+        self.assertEqual(r["type"], "infinite_resp")
+        self.assertEqual(r["length"], 2)
+        await ws.read_message()  # binary frame
+        ws.close()
+
+    @tornado.testing.gen_test
+    async def test_load_polars_loads_project_display_klass(self):
+        _write_polars_project(self.project_root)
+        session = await self._load("pr-display")
+        self.assertIn("my_display", session.buckaroo_options["df_display"])
+        self.assertIn("my_display", session.df_display_args)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_polars_picks_up_edited_stat(self):
+        """Editing ``stats/polars/foo.py`` and POSTing /reload_expr rebuilds
+        the polars dataflow with the fresh klasses, keeps the /load config
+        and broadcasts the new state to open WS clients."""
+        _write_polars_project(self.project_root)
+        sid = "pr-reload"
+        grid_cfg = {"rowHeight": 70, "pinnedRowHeight": 21}
+        session = await self._load(sid, extra_grid_config=grid_cfg)
+        self.assertEqual(_stat_for(session, "age")["foo"], 5)
+
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+        await ws.read_message()  # initial_state
+
+        with open(os.path.join(self.project_root, "stats", "polars", "foo.py"), "w") as f:
+            f.write("def compute(ser): return ser.len() * 2\n")
+        resp = await _async_fetch(self.get_http_port(), f"/reload_expr/{sid}", method="POST", body="{}")
+        self.assertEqual(resp.code, 200, resp.body)
+        body = json.loads(resp.body)
+        self.assertEqual(body["session"], sid)
+        # foo + bar + MyDisplay
+        self.assertEqual(body["klasses_loaded"], 3)
+
+        session = self._app.settings["sessions"].get(sid)
+        self.assertEqual(_stat_for(session, "age")["foo"], 10)
+        self.assertEqual(session.dataflow.extra_grid_config, grid_cfg)
+
+        msg = json.loads(await ws.read_message())
+        self.assertEqual(msg["type"], "initial_state")
+        self.assertIn("bar", msg["buckaroo_options"]["post_processing"])
+        dvc = msg["df_display_args"]["main"]["df_viewer_config"]
+        self.assertEqual(dvc.get("extra_grid_config"), grid_cfg)
+        ws.close()
+
+    @tornado.testing.gen_test
+    async def test_reload_alias_route(self):
+        """``/reload/<id>`` is the engine-neutral name for ``/reload_expr/<id>``."""
+        _write_polars_project(self.project_root)
+        sid = "pr-alias"
+        await self._load(sid)
+        resp = await _async_fetch(self.get_http_port(), f"/reload/{sid}", method="POST", body="{}")
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual(json.loads(resp.body)["klasses_loaded"], 3)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_polars_without_project_root(self):
+        sid = "pr-no-root"
+        body = {"session": sid, "path": self.csv_path, "mode": "buckaroo", "backend": "polars"}
+        await _async_fetch(self.get_http_port(), "/load", method="POST", body=json.dumps(body))
+        resp = await _async_fetch(self.get_http_port(), f"/reload_expr/{sid}", method="POST", body="{}")
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(json.loads(resp.body)["error_code"], "no_project_root")
