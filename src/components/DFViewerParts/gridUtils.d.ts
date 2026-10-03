@@ -28,7 +28,7 @@ export interface IDisplayArgs {
 export interface TimedIDatasource extends IDatasource {
     createTime: Date;
 }
-export declare const getDs: (src: KeyAwareSmartRowCache, onRowCount?: (outsideParamsSig: string, count: number) => void) => TimedIDatasource;
+export declare const getDs: (src: KeyAwareSmartRowCache) => TimedIDatasource;
 export type SetColumnFunc = (newCol: [string, string]) => void;
 export type PossibleAutosizeStrategy = SizeColumnsToFitProvidedWidthStrategy | SizeColumnsToContentStrategy;
 interface HeightStyleArgs {
