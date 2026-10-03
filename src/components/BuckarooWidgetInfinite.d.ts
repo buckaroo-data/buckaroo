@@ -1,7 +1,7 @@
 import { default as React } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { OperationResult } from './DependentTabs';
 import { DFData } from './DFViewerParts/DFWhole';
-import { BuckarooState, LiveSearchMode, BuckarooOptions, DFMeta } from './WidgetTypes';
+import { BuckarooState, BuckarooOptions, DFMeta } from './WidgetTypes';
 import { CommandConfigT } from './CommandUtils';
 import { Operation } from './OperationUtils';
 import { IDisplayArgs } from './DFViewerParts/gridUtils';
@@ -12,7 +12,7 @@ export declare const bkTs: () => string;
 export declare const makeStaticInfiniteDs: (data: DFData, _label?: string) => IDatasource;
 export declare const getDataWrapper: (data_key: string, df_data_dict: Record<string, DFData>, ds: IDatasource, total_rows?: number) => DatasourceOrRaw;
 export declare const getKeySmartRowCache: (model: any, setRespError: any) => KeyAwareSmartRowCache;
-export declare function BuckarooInfiniteWidget({ df_data_dict, df_display_args, df_meta, operations, on_operations, operation_results, command_config, buckaroo_state, on_buckaroo_state, buckaroo_options, src, dataframe_id, autoHeight, liveSearchMode, }: {
+export declare function BuckarooInfiniteWidget({ df_data_dict, df_display_args, df_meta, operations, on_operations, operation_results, command_config, buckaroo_state, on_buckaroo_state, buckaroo_options, src, dataframe_id, autoHeight, }: {
     df_meta: DFMeta;
     df_data_dict: Record<string, DFData>;
     df_display_args: Record<string, IDisplayArgs>;
@@ -30,13 +30,6 @@ export declare function BuckarooInfiniteWidget({ df_data_dict, df_display_args, 
      *  false → domLayout "normal" (fills parent container).
      *  undefined → server value wins. */
     autoHeight?: boolean;
-    /** Where the search box sends its term (#998). "dataflow" (default)
-     *  is quick_command_args.search, which Python reruns the dataflow
-     *  for. Server entry points pass "rows": the term goes out as
-     *  buckaroo_state.search_string, which only filters row fetches, so
-     *  the summary stats stay the unfiltered frame's and the status
-     *  bar's filtered count is taken from the row response instead. */
-    liveSearchMode?: LiveSearchMode;
 }): import("react/jsx-runtime").JSX.Element;
 export declare function DFViewerInfiniteDS({ df_meta, df_data_dict, df_display_args, src, df_id, message_log, show_message_box, autoHeight, }: {
     df_meta: DFMeta;
