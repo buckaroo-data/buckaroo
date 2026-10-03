@@ -10,6 +10,7 @@ import tornado.httpclient
 import tornado.testing
 import tornado.websocket
 
+from buckaroo.server import telemetry
 from buckaroo.server.app import make_app as _make_app
 
 # Temp file cleanup fails on Windows due to file locking (WinError 32)
@@ -681,5 +682,165 @@ class TestLoadPushesToWebSocket(tornado.testing.AsyncHTTPTestCase):
                 self.assertIn("df_meta", pushed)
 
                 ws.close()
+            finally:
+                os.unlink(f.name)
+
+
+class TestLoadTelemetry(tornado.testing.AsyncHTTPTestCase):
+    """#996: /load takes ``telemetry_url`` like /load_expr does, so a grid loaded
+    through /load (pandas, polars or lazy) reports its firstpull.* spans to the
+    companion and the WS first pull finds a sink on the session.
+
+    Records are captured in-process (make_http_sink → list.append); the real
+    POST has its own test in test_telemetry_sink.py."""
+
+    TELEMETRY_URL = "http://companion.invalid/internal/telemetry"
+
+    def get_app(self):
+        return make_app()
+
+    async def _load(self, body):
+        return await _async_fetch(self.get_http_port(), "/load",
+            method="POST", body=json.dumps(body))
+
+    async def _first_pull(self, sid):
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+        await ws.read_message()  # discard initial_state
+        ws.write_message(json.dumps({
+            "type": "infinite_request",
+            "payload_args": {"start": 0, "end": 5,
+                "sourceName": "default", "origEnd": 5}}))
+        await ws.read_message()  # json frame
+        await ws.read_message()  # binary frame
+        ws.close()
+
+    def _assert_session_correlated(self, captured, sid, expected_names):
+        names = [r["name"] for r in captured]
+        for name in expected_names:
+            self.assertIn(name, names, f"missing span {name}; got {names}")
+        self.assertTrue(all(r["trace"] == sid for r in captured),
+            f"all spans must carry the session trace; got {[r['trace'] for r in captured]}")
+        self.assertTrue(all(r["source"] == "server" for r in captured))
+
+    @tornado.testing.gen_test
+    async def test_load_pandas_buckaroo_emits_session_correlated_spans(self):
+        captured: list = []
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                with mock.patch.object(telemetry, "make_http_sink",
+                    lambda url, **kw: captured.append):
+                    resp = await self._load({"session": "ld-telem", "path": f.name,
+                        "mode": "buckaroo", "telemetry_url": self.TELEMETRY_URL})
+                self.assertEqual(resp.code, 200)
+                self._assert_session_correlated(captured, "ld-telem",
+                    ["firstpull.file_load", "firstpull.dataflow_construct",
+                     "firstpull.metadata"])
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_load_polars_backend_emits_session_correlated_spans(self):
+        captured: list = []
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                with mock.patch.object(telemetry, "make_http_sink",
+                    lambda url, **kw: captured.append):
+                    resp = await self._load({"session": "ld-telem-pl", "path": f.name,
+                        "mode": "buckaroo", "backend": "polars",
+                        "telemetry_url": self.TELEMETRY_URL})
+                self.assertEqual(resp.code, 200)
+                self._assert_session_correlated(captured, "ld-telem-pl",
+                    ["firstpull.file_load", "firstpull.dataflow_construct",
+                     "firstpull.metadata"])
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_load_lazy_emits_file_load_and_metadata_spans(self):
+        # mode="lazy" builds no dataflow, so only the file read and the
+        # metadata (schema + row count) steps exist to span.
+        captured: list = []
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                with mock.patch.object(telemetry, "make_http_sink",
+                    lambda url, **kw: captured.append):
+                    resp = await self._load({"session": "ld-telem-lazy", "path": f.name,
+                        "mode": "lazy", "telemetry_url": self.TELEMETRY_URL})
+                self.assertEqual(resp.code, 200)
+                self._assert_session_correlated(captured, "ld-telem-lazy",
+                    ["firstpull.file_load", "firstpull.metadata"])
+                self.assertNotIn("firstpull.dataflow_construct",
+                    [r["name"] for r in captured])
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_load_ws_first_payload_uses_session_sink(self):
+        """The issue's visible symptom: with no sink on the session, the WS
+        first-pull span is never sent to the companion."""
+        captured: list = []
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                with mock.patch.object(telemetry, "make_http_sink",
+                    lambda url, **kw: captured.append):
+                    await self._load({"session": "ld-ws-telem", "path": f.name,
+                        "mode": "buckaroo", "telemetry_url": self.TELEMETRY_URL})
+                    await self._first_pull("ld-ws-telem")
+                ws_span = next((r for r in captured
+                    if r["name"] == "firstpull.ws_first_payload"), None)
+                self.assertIsNotNone(ws_span,
+                    f"no ws_first_payload span; got {[r['name'] for r in captured]}")
+                self.assertEqual(ws_span["trace"], "ld-ws-telem")
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_load_rearms_first_pull_telemetry_on_reload(self):
+        """A second /load on the same session is a fresh time-to-first-rows:
+        _perf_first_payload_seen is reset so the next WS pull emits again."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ld-rearm"
+                first: list = []
+                with mock.patch.object(telemetry, "make_http_sink",
+                    lambda url, **kw: first.append):
+                    await self._load({"session": sid, "path": f.name,
+                        "mode": "buckaroo", "telemetry_url": self.TELEMETRY_URL})
+                    await self._first_pull(sid)
+                self.assertIn("firstpull.ws_first_payload", [r["name"] for r in first])
+                session = self._app.settings["sessions"].get(sid)
+                self.assertTrue(session._perf_first_payload_seen)
+
+                second: list = []
+                with mock.patch.object(telemetry, "make_http_sink",
+                    lambda url, **kw: second.append):
+                    await self._load({"session": sid, "path": f.name,
+                        "mode": "buckaroo", "telemetry_url": self.TELEMETRY_URL})
+                    self.assertFalse(session._perf_first_payload_seen,
+                        "reloading the session must re-arm first-pull telemetry")
+                    await self._first_pull(sid)
+                self.assertIn("firstpull.ws_first_payload", [r["name"] for r in second])
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_load_without_telemetry_url_is_silent(self):
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sink_factory = mock.MagicMock()
+                with mock.patch.object(telemetry, "make_http_sink", sink_factory):
+                    resp = await self._load({"session": "ld-no-telem", "path": f.name,
+                        "mode": "buckaroo"})
+                self.assertEqual(resp.code, 200)
+                sink_factory.assert_not_called()
+                session = self._app.settings["sessions"].get("ld-no-telem")
+                self.assertIsNone(session.tele_sink)
             finally:
                 os.unlink(f.name)
