@@ -30,6 +30,10 @@ class SessionState:
     mode: str = "viewer"  # "viewer", "buckaroo", or "lazy"
     backend: str = "pandas"  # "pandas" | "xorq"; meaningful when mode="buckaroo"
     dataflow: Any = None  # ServerDataflow when backend="pandas"
+    # /load row_order_column (#995): a no-ties column in the loaded frame
+    # that pages tie-break on (tallyman's ``__row_order``). Set per /load,
+    # since it describes the frame that was sent with it; None without one.
+    row_order_column: Optional[str] = None
     xorq_dataflow: Any = None  # XorqServerDataflow when backend="xorq"
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     build_dir: Optional[str] = None  # xorq build dir, stored for /reload_expr

@@ -309,6 +309,31 @@ class LoadHandler(tornado.web.RequestHandler):
         extra_grid_config = body.get("extra_grid_config")
         init_sd = body.get("init_sd")
 
+        # Load and validate before touching the session: a rejected re-POST
+        # (404, 400 invalid_file, 400 invalid_row_order_column) must leave
+        # the previous load's mode, backend and dataflow in place, or the WS
+        # dispatch no longer matches the dataflow.
+        # Load data in appropriate mode
+        if backend == "polars" and mode == "buckaroo":
+            file_obj, metadata = self._load_polars_with_error_handling(path)
+        else:
+            file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
+        if file_obj is None:
+            return
+
+        # ``row_order_column`` (#995): the host's no-ties ordering column,
+        # by original name. Checked against the loaded frame so a typo is
+        # a 400, not a silently ignored hint; reset on every /load because
+        # it describes this frame, not the session.
+        row_order_column = body.get("row_order_column")
+        if row_order_column is not None:
+            col_names = [c["name"] for c in metadata["columns"]]
+            if not isinstance(row_order_column, str) or row_order_column not in col_names:
+                self.set_status(400)
+                self.write({"error_code": "invalid_row_order_column",
+                    "message": f"row_order_column {row_order_column!r} is not a column of {path}"})
+                return
+
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
         session.mode = mode
@@ -321,14 +346,7 @@ class LoadHandler(tornado.web.RequestHandler):
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
-
-        # Load data in appropriate mode
-        if backend == "polars" and mode == "buckaroo":
-            file_obj, metadata = self._load_polars_with_error_handling(path)
-        else:
-            file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
-        if file_obj is None:
-            return
+        session.row_order_column = row_order_column
 
         if mode == "lazy":
             self._load_lazy_polars(session, path, file_obj, metadata)
