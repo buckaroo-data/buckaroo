@@ -103,6 +103,17 @@ def handle_infinite_request_buckaroo_polars(
     literal substring match across all polars ``String`` columns.
     Literal (``literal=True``) so user typing isn't treated as regex;
     this matches the pandas server path's ``search_df_str`` semantics.
+
+    Paging is repeatable (#995): a sort orders by ``[sort_col, "index"]``
+    where ``index`` is the row index attached by ``with_row_index()`` and
+    is always ascending, so rows with equal sort keys come out in input
+    order whichever way the sort column goes. Polars leaves the order of
+    equal keys unspecified otherwise. With no sort, the slice is taken in
+    input order (``filter`` preserves it). The index is the position in
+    ``processed_df``, which with ``pre_limit = False`` is the file's row
+    order, so a host doesn't need to supply its own ordering column; the
+    flip side is that a host can't ask for a tie order other than the
+    file's.
     """
     from buckaroo.server.window import clamp_window
 
@@ -136,7 +147,7 @@ def handle_infinite_request_buckaroo_polars(
             ascending = payload_args.get("sort_direction") == "asc"
             converted_sort_column = merged_sd[sort]["orig_col_name"]
             sorted_df = filtered_df.with_row_index().sort(
-                converted_sort_column, descending=not ascending)
+                [converted_sort_column, "index"], descending=[not ascending, False])
             slice_df = sorted_df[start:end]
         else:
             slice_df = filtered_df.with_row_index()[start:end]
