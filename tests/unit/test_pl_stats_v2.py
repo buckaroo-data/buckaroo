@@ -259,6 +259,15 @@ class TestPlBaseSummaryStats:
         assert errors == []
         assert result['mode'] == 'a'
 
+    def test_mode_all_null_is_none(self, monkeypatch):
+        self._forbid_series_mode(monkeypatch)
+        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        ser = pl.Series('test', [None, None], dtype=pl.Int64)
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['mode'] is None
+        assert len(result['value_counts']) == 0
+
 
 # ============================================================================
 # Tests: pl_numeric_stats

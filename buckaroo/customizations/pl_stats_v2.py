@@ -60,18 +60,26 @@ def pl_typing_stats(ser: RawSeries) -> PlTypingResult:
 # Base Summary Stats (polars series API)
 # ============================================================
 
-def _pl_vc_to_pd(ser: pl.Series) -> pd.Series:
-    """Convert polars value_counts() to a pd.Series sorted desc by count.
+def _pl_value_counts(ser: pl.Series) -> pl.DataFrame:
+    """value_counts of the non-null values, sorted desc by count then asc by value.
+
+    value_counts(sort=True) orders by count only and leaves tied values in
+    encounter order; the second key makes the first row (the mode) deterministic.
+    """
+    return ser.drop_nulls().value_counts().sort(['count', ser.name], descending=[True, False])
+
+
+def _pl_vc_to_pd(vc: pl.DataFrame, name: str) -> pd.Series:
+    """Convert a _pl_value_counts frame to a pd.Series sorted desc by count.
 
     This lets us reuse computed_default_summary_stats and histogram
     which expect a pd.Series value_counts.
     """
-    vc = ser.drop_nulls().value_counts(sort=True)
     # Cast count to int64 to match the previous .to_list() path's effective
     # dtype. Keeps `categorical_dict`'s `full_long_tail - unique_count`
     # subtraction signed (counts come back as uint32, which underflows on 0-N).
     counts = vc['count'].to_numpy().astype(np.int64, copy=False)
-    return pd.Series(counts, index=vc[ser.name].to_numpy())
+    return pd.Series(counts, index=vc[name].to_numpy())
 
 
 @stat()
@@ -82,8 +90,11 @@ def pl_base_summary_stats(ser: RawSeries) -> BaseSummaryResult:
     is_numeric = ser.dtype.is_numeric()
     is_bool = ser.dtype == pl.Boolean
 
-    base = {'length': length, 'null_count': null_count, 'value_counts': _pl_vc_to_pd(ser),
-        'mode': ser.drop_nulls().mode().item(0) if null_count < length else None, 'min': float('nan'),
+    # The mode is the first row of the value_counts; calling ser.mode() would
+    # be a second group-by over the column (#997).
+    vc = _pl_value_counts(ser)
+    base = {'length': length, 'null_count': null_count, 'value_counts': _pl_vc_to_pd(vc, ser.name),
+        'mode': vc[ser.name].item(0) if null_count < length else None, 'min': float('nan'),
         'max': float('nan')}
 
     if is_numeric and not is_bool and null_count < length:

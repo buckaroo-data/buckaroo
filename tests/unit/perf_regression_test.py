@@ -107,12 +107,12 @@ def test_pl_vc_to_pd_not_using_to_list():
     from buckaroo.customizations.pl_stats_v2 import _pl_vc_to_pd
 
     ser = pl.Series('a', list(range(50_000)))
+    vc = ser.drop_nulls().value_counts(sort=True)
 
     def fast_baseline():
-        vc = ser.drop_nulls().value_counts(sort=True)
         return pd.Series(vc['count'].to_numpy(), index=vc[ser.name].to_numpy())
 
-    impl_t = _best_of(lambda: _pl_vc_to_pd(ser), n=5)
+    impl_t = _best_of(lambda: _pl_vc_to_pd(vc, ser.name), n=5)
     fast_t = _best_of(fast_baseline, n=5)
 
     # Current (.to_list) is ~9x slower than baseline; fixed (.to_numpy)
