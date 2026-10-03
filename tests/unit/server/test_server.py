@@ -834,6 +834,39 @@ class TestLoadPolarsProjectRoot(tornado.testing.AsyncHTTPTestCase):
         ws.close()
 
     @tornado.testing.gen_test
+    async def test_reload_after_selected_post_processor_removed(self):
+        """A reload whose stored ``buckaroo_state`` names a post-processor
+        that has since been deleted must succeed, drop the stale selection
+        and stop offering the method, instead of 500ing on every later
+        reload until the client picks another method."""
+        _write_polars_project(self.project_root)
+        sid = "pr-stale-pp"
+        await self._load(sid)
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+        await ws.read_message()  # initial_state
+        ws.write_message(json.dumps({
+            "type": "buckaroo_state_change",
+            "new_state": {"post_processing": "bar", "cleaning_method": "",
+                "quick_command_args": {}, "df_display": "main",
+                "show_commands": False, "sampled": False, "search_string": ""}}))
+        await ws.read_message()  # broadcast initial_state
+        session = self._app.settings["sessions"].get(sid)
+        self.assertEqual(session.buckaroo_state["post_processing"], "bar")
+
+        os.unlink(os.path.join(self.project_root, "post_processing", "polars", "bar.py"))
+        for _ in range(2):
+            resp = await _async_fetch(
+                self.get_http_port(), f"/reload_expr/{sid}", method="POST", body="{}")
+            self.assertEqual(resp.code, 200, resp.body)
+
+        session = self._app.settings["sessions"].get(sid)
+        self.assertNotIn("bar", session.buckaroo_options["post_processing"])
+        self.assertEqual(session.buckaroo_state["post_processing"], "")
+        self.assertEqual(session.dataflow.post_processing_method, "")
+        ws.close()
+
+    @tornado.testing.gen_test
     async def test_reload_alias_route(self):
         """``/reload/<id>`` is the engine-neutral name for ``/reload_expr/<id>``."""
         _write_polars_project(self.project_root)
