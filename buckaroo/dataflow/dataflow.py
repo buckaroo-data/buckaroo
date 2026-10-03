@@ -90,6 +90,8 @@ class DfStats(Protocol):
                  debug: bool = ..., skip_columns: TAny = ...) -> None: ...
     @classmethod
     def verify_analysis_objects(cls, col_analysis_objs: TAny, /) -> None: ...
+    @classmethod
+    def operating_rows(cls, rows: int, cols: int, /) -> int: ...
     def add_analysis(self, a_obj: TAny, /) -> None: ...
 
 
@@ -416,7 +418,9 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         self.df_display_args = {}
         self.setup_options_from_analysis()
         self.orig_df = orig_df
-        # I don't like this seapration of 
+        # pre_stats_sample caps columns and fixes the frame; it keeps every
+        # row. The pre_limit row sample is applied in _get_summary_sd, so the
+        # grid pages the whole frame while the stats read a sample (#992).
         super().__init__(self.sampling_klass.pre_stats_sample(orig_df))
         self.populate_auto_clean_options()
         self.populate_df_meta()
@@ -438,15 +442,25 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
                 # I need to recompute this when sampling changes
                 'filtered_rows': 0,
                 'rows_shown': 0,
-                'total_rows': 0}
+                'total_rows': 0,
+                'stats_sampled': False,
+                'stats_rows': 0}
 
             return
+        n_rows = len(self.processed_df)
+        n_cols = len(self.processed_df.columns)
+        # Two caps shrink the stats input: the sampling class's pre_limit
+        # (applied in _get_summary_sd) and the executor's own sample.
+        stats_rows = self.DFStatsClass.operating_rows(
+            self.sampling_klass.stats_sample_rows(n_rows), n_cols)
         self.df_meta = {
-            'columns': len(self.processed_df.columns),
+            'columns': n_cols,
             # I need to recompute this when sampling changes
-            'filtered_rows': len(self.processed_df),
-            'rows_shown': min(len(self.processed_df), self.sampling_klass.serialize_limit),  
-            'total_rows': len(self.orig_df)}
+            'filtered_rows': n_rows,
+            'rows_shown': min(n_rows, self.sampling_klass.serialize_limit),
+            'total_rows': len(self.orig_df),
+            'stats_sampled': stats_rows < n_rows,
+            'stats_rows': stats_rows}
 
     # buckaroo_options is BuckarooOptions-shaped at runtime, but it's a
     # traitlets ``Dict`` trait, so we let it inherit the base ``Any`` rather
@@ -712,7 +726,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     @override
     def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, ErrDict]:
         stats = self.DFStatsClass(
-            processed_df,
+            self.sampling_klass.stats_sample(processed_df),
             self.analysis_klasses,
             self.df_name, debug=self.debug,
             skip_columns=getattr(self, 'skip_stat_columns', None))
@@ -751,7 +765,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         """
 
         stats = self.DFStatsClass(
-            self.processed_df,
+            self.sampling_klass.stats_sample(self.processed_df),
             self.analysis_klasses,
             self.df_name, debug=self.debug)
         stats.add_analysis(analysis_klass)

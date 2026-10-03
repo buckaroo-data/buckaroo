@@ -35,8 +35,9 @@ from buckaroo.serialization_utils import pd_to_obj, make_infinite_resp
 
 class PolarsServerSampling(PLSampling):
     """Server-mode polars sampling. Inherits ``PLSampling``'s widget
-    defaults but caps pre-stats work at ``pre_limit`` so a multi-million-row
-    /load doesn't OOM the stats pipeline."""
+    defaults but caps the stats input at ``pre_limit`` rows so a
+    multi-million-row /load doesn't OOM the stats pipeline. The frame the
+    grid pages keeps every row (#992)."""
     pre_limit = 1_000_000
     serialize_limit = -1  # infinite mode — no per-page sample cap
 

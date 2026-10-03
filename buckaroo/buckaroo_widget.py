@@ -66,11 +66,6 @@ class PdSampling(Sampling):
         if len(df.columns) > cls.max_columns:
             print("Removing excess columns, found %d columns" %  len(df.columns))
             df = df[df.columns[:cls.max_columns]]
-        if cls.pre_limit and len(df) > cls.pre_limit:
-            sampled = df.sample(cls.pre_limit)
-            if isinstance(sampled, pd.DataFrame):
-                return sampled.sort_index()
-            return sampled
         return df
     pre_limit = 1_000_000
 

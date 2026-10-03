@@ -4,6 +4,9 @@ export interface DFMeta {
     columns: number;
     filtered_rows: number;
     rows_shown: number;
+    // true when the summary stats describe a row sample of stats_rows rows
+    stats_sampled?: boolean;
+    stats_rows?: number;
 }
 
 export interface BuckarooOptions {

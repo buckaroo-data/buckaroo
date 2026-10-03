@@ -525,6 +525,11 @@ class XorqDfStatsV2:
         # (issue #709). DAG validation still runs as part of __init__.
         XorqStatPipeline(objs, unit_test=False)
 
+    @classmethod
+    def operating_rows(cls, rows, cols, /):
+        # Stats push down to the backend over the whole table; no sample.
+        return rows
+
     def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False,
                  cache_storage=None, skip_columns=None):
         self.table = table
