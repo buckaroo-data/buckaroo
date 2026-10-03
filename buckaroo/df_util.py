@@ -21,8 +21,16 @@ def to_chars(n:int) -> str:
     digits = to_digits(n, 26)
     return "".join(map(lambda x: chr(x+97), digits))
 
+def column_names(df:DataFrameLike) -> List[ColIdentifier]:
+    # A polars LazyFrame resolves its schema on ``.columns`` and warns about
+    # it; ``collect_schema()`` is the quiet form. Pandas has no such method.
+    collect_schema = getattr(df, 'collect_schema', None)
+    if collect_schema is not None:
+        return collect_schema().names()
+    return list(df.columns)
+
 def old_col_new_col(df:DataFrameLike) -> List[Tuple[ColIdentifier, str]]:
-    return [(orig_ser_name, to_chars(i))  for i, orig_ser_name  in enumerate(df.columns)]
+    return [(orig_ser_name, to_chars(i))  for i, orig_ser_name  in enumerate(column_names(df))]
 
 def get_rewrite_dict(df:DataFrameLike) -> Dict[str,str]:
     rewrites = dict( old_col_new_col(df))

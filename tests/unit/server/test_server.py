@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+from io import BytesIO
 from unittest import mock
 
 import pandas as pd
@@ -252,6 +253,47 @@ class TestLoadPolarsLazy(tornado.testing.AsyncHTTPTestCase):
             self.assertEqual(stats["null_count"], 0)
             self.assertEqual(stats["min"], 0)
             self.assertEqual(stats["max"], self.N_ROWS - 1)
+        finally:
+            os.unlink(path)
+
+    def test_load_polars_eager_mode_still_reads_whole_frame(self):
+        """``polars_mode: "eager"`` keeps the pre-#993 behaviour so the two
+        can be compared on one server."""
+        path = self._write_parquet()
+        try:
+            resp = self.fetch("/load", method="POST",
+                body=json.dumps({"session": "pl-eager-1", "path": path, "mode": "buckaroo", "backend": "polars",
+                    "polars_mode": "eager"}),
+                headers={"Content-Type": "application/json"})
+            self.assertEqual(resp.code, 200)
+            session = self._app.settings["sessions"].get("pl-eager-1")
+            self.assertIsInstance(session.dataflow.processed_df, pl.DataFrame)
+            self.assertNotIn("stats_omitted", session.df_meta)
+        finally:
+            os.unlink(path)
+
+    @tornado.testing.gen_test
+    async def test_ws_window_from_lazy_session(self):
+        path = self._write_parquet()
+        try:
+            resp = await _async_fetch(self.get_http_port(), "/load", method="POST",
+                body=json.dumps({"session": "pl-lazy-ws", "path": path, "mode": "buckaroo", "backend": "polars"}))
+            self.assertEqual(resp.code, 200)
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/pl-lazy-ws")
+            await ws.read_message()  # initial_state
+
+            ws.write_message(json.dumps({"type": "infinite_request",
+                "payload_args": {"start": 1000, "end": 1100, "sourceName": "default", "origEnd": 1100}}))
+            resp = json.loads(await ws.read_message())
+            self.assertEqual(resp["type"], "infinite_resp")
+            self.assertEqual(resp["length"], self.N_ROWS)
+            binary_frame = await ws.read_message()
+            df = pl.read_parquet(BytesIO(binary_frame))
+            self.assertEqual(df["index"].to_list(), list(range(1000, 1100)))
+            self.assertEqual(df["a"].to_list(), list(range(1000, 1100)))
+            ws.close()
         finally:
             os.unlink(path)
 

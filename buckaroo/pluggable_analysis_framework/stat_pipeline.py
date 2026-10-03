@@ -191,6 +191,11 @@ class StatPipeline:
     """
 
     EXTERNAL_KEYS = frozenset({'orig_col_name', 'rewritten_col_name'})
+    # Keys a caller may supply per column through ``initial_stats``. The
+    # whole-DAG validation at construction accepts them as providers; the
+    # per-column DAG only counts the ones actually supplied, so a stat
+    # whose seed is missing for a column is skipped rather than run.
+    SEED_KEYS: frozenset = frozenset()
 
     @property
     def ordered_a_objs(self):
@@ -225,7 +230,7 @@ class StatPipeline:
 
         # Validate the full DAG (raises DAGConfigError if invalid)
         self.ordered_stat_funcs = build_typed_dag(
-            self.all_stat_funcs, external_keys=self.EXTERNAL_KEYS)
+            self.all_stat_funcs, external_keys=self.EXTERNAL_KEYS | self.SEED_KEYS)
 
         # Build key -> StatFunc mapping for error reporting
         self._key_to_func: Dict[str, StatFunc] = {}
@@ -354,7 +359,7 @@ class StatPipeline:
 
         try:
             new_funcs = _normalize_inputs(new_inputs)
-            new_ordered = build_typed_dag(new_funcs, external_keys=self.EXTERNAL_KEYS)
+            new_ordered = build_typed_dag(new_funcs, external_keys=self.EXTERNAL_KEYS | self.SEED_KEYS)
         except DAGConfigError as e:
             return False, [StatError(column="<dag>", stat_key="<config>", error=e, stat_func=None)]
 

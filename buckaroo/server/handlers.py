@@ -212,13 +212,15 @@ class LoadHandler(tornado.web.RequestHandler):
         port = self.application.settings["port"]
         return find_or_create_session_window(session_id, port, reload_if_found=True)
 
-    def _load_polars_with_error_handling(self, path: str):
-        """Eager polars load for ``backend='polars'``. Errors share the
+    def _load_polars_with_error_handling(self, path: str, lazy: bool):
+        """Polars load for ``backend='polars'`` — a LazyFrame over the file
+        when ``lazy`` (#993), an eager read otherwise. Errors share the
         same shape as the pandas loader so the response surface is
         identical from the client's POV."""
         try:
-            from buckaroo.server.data_loading_polars import load_file_polars, get_metadata_polars
-            df = load_file_polars(path)
+            from buckaroo.server.data_loading_polars import (
+                load_file_polars, load_file_polars_lazy, get_metadata_polars)
+            df = load_file_polars_lazy(path) if lazy else load_file_polars(path)
             metadata = get_metadata_polars(df, path)
             return df, metadata
         except FileNotFoundError:
@@ -304,6 +306,10 @@ class LoadHandler(tornado.web.RequestHandler):
             self.write({"error_code": "invalid_backend",
                 "message": "backend='polars' is only valid with mode='buckaroo'"})
             return
+        # ``polars_mode`` picks how a backend='polars' session holds the file:
+        # "lazy" (default) keeps a LazyFrame over it (#993), "eager" reads
+        # the whole table into the session as before.
+        polars_mode = str(body.get("polars_mode", "lazy")).lower()
 
         column_config_overrides = body.get("column_config_overrides")
         extra_grid_config = body.get("extra_grid_config")
@@ -324,7 +330,7 @@ class LoadHandler(tornado.web.RequestHandler):
 
         # Load data in appropriate mode
         if backend == "polars" and mode == "buckaroo":
-            file_obj, metadata = self._load_polars_with_error_handling(path)
+            file_obj, metadata = self._load_polars_with_error_handling(path, lazy=(polars_mode == "lazy"))
         else:
             file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
         if file_obj is None:
