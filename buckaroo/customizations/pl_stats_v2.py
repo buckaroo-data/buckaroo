@@ -19,9 +19,10 @@ import polars as pl
 
 from buckaroo.pluggable_analysis_framework.stat_func import stat, RawSeries
 from buckaroo.pluggable_analysis_framework.column_filters import is_numeric_not_bool
+from buckaroo.pluggable_analysis_framework.polars_utils import vc_frame_to_pd
 
 # Reused unchanged from pd_stats_v2 — operate on stat dict, not raw series
-from buckaroo.customizations.pd_stats_v2 import (_type, computed_default_summary_stats, histogram, cleaning_gen_ops, BaseSummaryResult, NumericStatsResult, HistogramSeriesResult)
+from buckaroo.customizations.pd_stats_v2 import (_type, computed_default_summary_stats, histogram, cleaning_gen_ops, NumericStatsResult, HistogramSeriesResult)
 
 
 # ============================================================
@@ -66,25 +67,51 @@ def _pl_vc_to_pd(ser: pl.Series) -> pd.Series:
     This lets us reuse computed_default_summary_stats and histogram
     which expect a pd.Series value_counts.
     """
-    vc = ser.drop_nulls().value_counts(sort=True)
-    # Cast count to int64 to match the previous .to_list() path's effective
-    # dtype. Keeps `categorical_dict`'s `full_long_tail - unique_count`
-    # subtraction signed (counts come back as uint32, which underflows on 0-N).
-    counts = vc['count'].to_numpy().astype(np.int64, copy=False)
-    return pd.Series(counts, index=vc[ser.name].to_numpy())
+    return vc_frame_to_pd(ser.drop_nulls().value_counts(sort=True), ser.name)
+
+
+PlValueCountsResult = TypedDict('PlValueCountsResult', {'value_counts': pd.Series})
 
 
 @stat()
-def pl_base_summary_stats(ser: RawSeries) -> BaseSummaryResult:
-    """Compute basic summary stats for a polars column."""
+def pl_value_counts(ser: RawSeries) -> PlValueCountsResult:
+    """value_counts of one polars column, per Series.
+
+    ``PlDfStatsV2`` computes the same thing for every column in one batch
+    (``polars_utils.batch_value_counts``) and seeds it into the accumulator,
+    in which case this stat is skipped.
+    """
+    return {'value_counts': _pl_vc_to_pd(ser)}
+
+
+PlBaseSummaryResult = TypedDict('PlBaseSummaryResult',
+    {'length': int, 'null_count': int, 'mode': Any, 'min': Any, 'max': Any})
+
+
+def _mode_from_value_counts(value_counts: pd.Series) -> Any:
+    """First row of value_counts; numpy scalars become Python scalars so the
+    result matches what ``Series.mode().item(0)`` returned."""
+    if len(value_counts) == 0:
+        return None
+    top = value_counts.index[0]
+    return top.item() if isinstance(top, np.generic) else top
+
+
+@stat()
+def pl_base_summary_stats(ser: RawSeries, value_counts: pd.Series) -> PlBaseSummaryResult:
+    """Compute basic summary stats for a polars column.
+
+    ``mode`` is the first row of ``value_counts`` rather than a second
+    group-by over the column (#997). Which of several tied values wins was
+    unspecified before and still is.
+    """
     length = len(ser)
     null_count = int(ser.null_count())
     is_numeric = ser.dtype.is_numeric()
     is_bool = ser.dtype == pl.Boolean
 
-    base = {'length': length, 'null_count': null_count, 'value_counts': _pl_vc_to_pd(ser),
-        'mode': ser.drop_nulls().mode().item(0) if null_count < length else None, 'min': float('nan'),
-        'max': float('nan')}
+    base = {'length': length, 'null_count': null_count, 'mode': _mode_from_value_counts(value_counts),
+        'min': float('nan'), 'max': float('nan')}
 
     if is_numeric and not is_bool and null_count < length:
         non_null = ser.drop_nulls()
@@ -175,8 +202,8 @@ def pl_cleaning_stats(ser: RawSeries) -> PlCleaningResult:
 # Convenience pipeline lists
 # ============================================================
 
-PL_ANALYSIS_V2 = [pl_typing_stats, _type, pl_base_summary_stats, pl_numeric_stats, computed_default_summary_stats,
-    pl_histogram_series, histogram]
+PL_ANALYSIS_V2 = [pl_typing_stats, _type, pl_value_counts, pl_base_summary_stats, pl_numeric_stats,
+    computed_default_summary_stats, pl_histogram_series, histogram]
 
 # Autocleaning analysis set: int-parse detection -> safe_int op.
 PL_AUTOCLEAN_DEFAULT_V2 = [pl_cleaning_stats, cleaning_gen_ops]

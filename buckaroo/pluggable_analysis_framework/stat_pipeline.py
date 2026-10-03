@@ -246,13 +246,19 @@ class StatPipeline:
         1. Filters stat functions by column dtype
         2. Executes in topological order with Ok/Err accumulator
         3. Returns (plain_dict, errors)
+
+        ``initial_stats`` seeds the accumulator. A stat whose every provided
+        key is seeded has nothing left to compute and is skipped, so a value
+        supplied up front (e.g. a batched ``value_counts``) is never
+        overwritten by the per-column stat that would otherwise produce it.
         """
         # Build column-specific DAG (filters by dtype)
         external = set(self.EXTERNAL_KEYS)
+        stat_funcs = self.all_stat_funcs
         if initial_stats:
             external |= set(initial_stats.keys())
-        column_funcs = build_column_dag(
-            self.all_stat_funcs, column_dtype, external_keys=external)
+            stat_funcs = [sf for sf in stat_funcs if not all(sk.name in initial_stats for sk in sf.provides)]
+        column_funcs = build_column_dag(stat_funcs, column_dtype, external_keys=external)
 
         # Execute in order
         accumulator: Dict[str, StatResult] = {}
@@ -276,14 +282,19 @@ class StatPipeline:
 
         return resolve_accumulator(accumulator, column_name, col_key_to_func)
 
-    def process_df(self, df: pd.DataFrame, debug: bool = False,
-                   skip_columns=None) -> Tuple[SDType, List[StatError]]:
+    def process_df(self, df: pd.DataFrame, debug: bool = False, skip_columns=None,
+            column_initial_stats: Optional[Dict[Any, Dict[str, Any]]] = None) -> Tuple[SDType, List[StatError]]:
         """Process all columns of a DataFrame.
 
         ``skip_columns`` names columns whose summary stats are supplied
         externally (e.g. via ``init_sd`` — reused from a source dataframe in a
         diff). They still appear in the output with structural metadata, but no
         stat functions run for them, so the column is never scanned.
+
+        ``column_initial_stats`` maps an original column name to stats computed
+        ahead of the per-column pass (e.g. ``value_counts`` batched across the
+        whole frame); they seed that column's accumulator, see
+        ``process_column``.
 
         Returns:
             (summary_dict, all_errors) where summary_dict is SDType-compatible
@@ -296,6 +307,7 @@ class StatPipeline:
             self.timings = []
 
         skip = set(skip_columns or ())
+        column_initial_stats = column_initial_stats or {}
         summary: SDType = {}
         all_errors: List[StatError] = []
 
@@ -307,10 +319,11 @@ class StatPipeline:
                 continue
             ser = df[orig_col_name]
             col_dtype = ser.dtype
+            initial_stats = {'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name}
+            initial_stats.update(column_initial_stats.get(orig_col_name, {}))
 
             col_result, col_errors = self.process_column(column_name=rewritten_col_name, column_dtype=col_dtype,
-                raw_series=ser, sampled_series=ser, raw_dataframe=df,
-                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name})
+                raw_series=ser, sampled_series=ser, raw_dataframe=df, initial_stats=initial_stats)
 
             summary[rewritten_col_name] = col_result
             all_errors.extend(col_errors)

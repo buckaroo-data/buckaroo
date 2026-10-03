@@ -11,8 +11,10 @@ import pandas as pd
 import polars as pl
 
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
+from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+from buckaroo.pluggable_analysis_framework.polars_utils import batch_value_counts
 
-from buckaroo.customizations.pl_stats_v2 import (pl_typing_stats, _type, pl_base_summary_stats, pl_numeric_stats, computed_default_summary_stats, pl_histogram_series, histogram, PL_ANALYSIS_V2)
+from buckaroo.customizations.pl_stats_v2 import (pl_typing_stats, _type, pl_value_counts, pl_base_summary_stats, pl_numeric_stats, computed_default_summary_stats, pl_histogram_series, histogram, PL_ANALYSIS_V2)
 from buckaroo.customizations.styling import DefaultMainStyling
 
 
@@ -177,7 +179,7 @@ class TestPlTypeComputed:
 
 class TestPlBaseSummaryStats:
     def test_numeric_basics(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
         ser = pl.Series('test', [1, 2, 3, 4, 5])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert errors == []
@@ -188,14 +190,14 @@ class TestPlBaseSummaryStats:
         assert 'mean' not in result
 
     def test_with_nulls(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
         ser = pl.Series('test', [1, None, 3, None, 5])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['null_count'] == 2
         assert result['length'] == 5
 
     def test_string_column(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
         ser = pl.Series('test', ['a', 'b', 'c'])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 3
@@ -206,7 +208,7 @@ class TestPlBaseSummaryStats:
 
     def test_bool_column(self):
         """Bool columns should NOT get numeric min/max."""
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
         ser = pl.Series('test', [True, False, True])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 3
@@ -214,7 +216,7 @@ class TestPlBaseSummaryStats:
         assert math.isnan(result['min'])
 
     def test_value_counts_present(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
         ser = pl.Series('test', [1, 1, 2, 3])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert isinstance(result['value_counts'], pd.Series)
@@ -273,7 +275,7 @@ class TestPlNumericStats:
 
 class TestPlHistogram:
     def _make_pipeline(self):
-        return StatPipeline([pl_typing_stats, pl_base_summary_stats, pl_numeric_stats,
+        return StatPipeline([pl_typing_stats, pl_value_counts, pl_base_summary_stats, pl_numeric_stats,
             computed_default_summary_stats,
             pl_histogram_series, histogram], unit_test=False)
 
@@ -432,3 +434,120 @@ class TestPlFullPipeline:
             assert actual == expected_displayer, (
                 f"{ser.dtype}: expected {expected_displayer!r}, got {actual!r}"
             )
+
+
+# ============================================================================
+# Tests: batched value_counts (#997)
+# ============================================================================
+
+def _no_ties_df():
+    """Every value in a column has a distinct count, so value_counts order
+    and mode are fully determined and the two code paths can be compared."""
+    return pl.DataFrame({'ints': [1, 2, 2, 3, 3, 3, None], 'floats': [1.5, 2.5, 2.5, 3.5, 3.5, 3.5, None],
+        'strs': ['a', 'b', 'b', 'c', 'c', 'c', None], 'bools': [True, False, False, False, True, None, None],
+        'dts': [datetime(2021, 1, 1), datetime(2021, 1, 2), datetime(2021, 1, 2), datetime(2021, 1, 3),
+            datetime(2021, 1, 3), datetime(2021, 1, 3), None]})
+
+
+def _assert_stat_equal(actual, expected, path):
+    if isinstance(expected, pd.Series):
+        pd.testing.assert_series_equal(actual, expected, obj=path)
+    elif isinstance(expected, np.ndarray):
+        np.testing.assert_array_equal(actual, expected, err_msg=path)
+    elif isinstance(expected, dict):
+        assert set(actual) == set(expected), path
+        for k in expected:
+            _assert_stat_equal(actual[k], expected[k], f"{path}.{k}")
+    elif isinstance(expected, (list, tuple)):
+        assert len(actual) == len(expected), path
+        for i, (a, e) in enumerate(zip(actual, expected)):
+            _assert_stat_equal(a, e, f"{path}[{i}]")
+    elif isinstance(expected, float) and math.isnan(expected):
+        assert isinstance(actual, float) and math.isnan(actual), path
+    else:
+        assert actual == expected, path
+        assert type(actual) is type(expected), path
+
+
+def _assert_sd_equal(actual, expected):
+    assert set(actual) == set(expected)
+    for col in expected:
+        _assert_stat_equal(actual[col], expected[col], col)
+
+
+class TestPlBatchValueCounts:
+    def test_pl_df_stats_makes_no_per_series_value_counts_calls(self, monkeypatch):
+        """PlDfStatsV2 collects every column's value_counts in one batch; the
+        per-Series stat never runs."""
+        calls = []
+        orig_value_counts = pl.Series.value_counts
+
+        def counting_value_counts(self, *args, **kwargs):
+            calls.append(self.name)
+            return orig_value_counts(self, *args, **kwargs)
+
+        monkeypatch.setattr(pl.Series, 'value_counts', counting_value_counts)
+        stats = PlDfStatsV2(_no_ties_df(), PL_ANALYSIS_V2)
+        assert stats.errs == {}
+        assert calls == []
+        assert len(stats.sdf) == 5
+        for col_stats in stats.sdf.values():
+            assert isinstance(col_stats['value_counts'], pd.Series)
+
+    def test_batched_value_counts_match_per_series_results(self):
+        df = _no_ties_df()
+        expected, errors = StatPipeline(PL_ANALYSIS_V2, unit_test=False).process_df(df)
+        assert errors == []
+
+        batched = batch_value_counts(df)
+        assert set(batched) == set(df.columns)
+        column_initial_stats = {col: {'value_counts': vc} for col, vc in batched.items()}
+        actual, errors = StatPipeline(PL_ANALYSIS_V2, unit_test=False).process_df(
+            df, column_initial_stats=column_initial_stats)
+        assert errors == []
+        _assert_sd_equal(actual, expected)
+
+        _assert_sd_equal(PlDfStatsV2(df, PL_ANALYSIS_V2).sdf, expected)
+
+    def test_supplied_value_counts_preempt_the_per_series_stat(self):
+        """A value_counts handed in through initial_stats is the one the rest
+        of the DAG sees, including mode."""
+        ser = pl.Series('x', [1, 1, 2])
+        supplied = pd.Series([5, 4, 3], index=[9, 8, 7])
+        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        result, errors = pipeline.process_column('x', ser.dtype, raw_series=ser,
+            initial_stats={'value_counts': supplied})
+        assert errors == []
+        assert result['value_counts'] is supplied
+        assert result['mode'] == 9
+        assert result['most_freq'] == 9
+        assert result['distinct_count'] == 3
+        assert result['length'] == 3
+
+    def test_process_column_without_initial_value_counts_uses_the_series(self):
+        ser = pl.Series('x', [1, 1, 2])
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
+        result, errors = pipeline.process_column('x', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['value_counts'].to_dict() == {1: 2, 2: 1}
+        assert result['mode'] == 1
+        assert result['null_count'] == 0
+
+    def test_batch_value_counts_skips_object_columns(self):
+        """polars panics (not raises) on Object columns inside collect_all, so
+        they stay on the per-Series path and the rest of the frame is batched."""
+        df = pl.DataFrame({'o': pl.Series([object(), object(), None], dtype=pl.Object), 'i': [1, 2, 2]})
+        batched = batch_value_counts(df)
+        assert set(batched) == {'i'}
+        assert batched['i'].to_dict() == {2: 2, 1: 1}
+        stats = PlDfStatsV2(df, PL_ANALYSIS_V2)
+        assert stats.errs == {}
+        for col_stats in stats.sdf.values():
+            assert isinstance(col_stats['value_counts'], pd.Series)
+
+    def test_batch_value_counts_honours_column_subset(self):
+        df = _no_ties_df()
+        batched = batch_value_counts(df, columns=['ints', 'strs'])
+        assert set(batched) == {'ints', 'strs'}
+        assert batched['strs'].to_dict() == {'c': 3, 'b': 2, 'a': 1}
+        assert batched['ints'].dtype == np.int64
