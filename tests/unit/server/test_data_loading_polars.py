@@ -18,6 +18,7 @@ from io import BytesIO
 import polars as pl
 import pytest
 
+from buckaroo.customizations.pl_lazy_stats import collect_lazy_stats
 from buckaroo.server.data_loading_polars import (create_polars_dataflow, handle_infinite_request_buckaroo_polars, load_file_polars)
 
 
@@ -189,3 +190,35 @@ def test_lazy_summary_stats_numeric_column(tmp_path):
     assert a["_type"] == "integer"
     assert dataflow.merged_sd["b"]["_type"] == "string"
     assert "value_counts" in dataflow.df_meta["stats_omitted"]
+
+
+def test_lazy_stats_over_a_sample_past_the_cap(tmp_path):
+    """Exact distinct counts, value counts and quantiles aren't
+    bounded-memory, so a scan over the cap is summarised from a sample of
+    about ``sample_rows`` rows: the whole table is never the input."""
+    stats = collect_lazy_stats(pl.scan_parquet(_write_parquet(tmp_path)), sample_rows=300)
+    ident = stats["id"]
+    assert 0 < ident["length"] <= 300
+    assert ident["distinct_count"] <= ident["length"]
+    assert ident["min"] == 0 and ident["max"] == N_ROWS - 1  # first and last rows are in the sample
+
+
+def test_lazy_stats_under_the_cap_are_exact(tmp_path):
+    stats = collect_lazy_stats(pl.scan_parquet(_write_parquet(tmp_path)), sample_rows=N_ROWS)
+    assert stats["id"]["length"] == N_ROWS
+    assert stats["id"]["distinct_count"] == N_ROWS
+    assert stats["name"]["distinct_count"] == N_ROWS - N_ROWS // 100 + 1
+
+
+def test_lazy_sort_with_search_matches_eager(tmp_path):
+    """Sort and search together, with nulls in the sort column: the lazy
+    window must equal the eager one, row index included."""
+    path = str(tmp_path / "nulls.parquet")
+    vals = [None if i % 7 == 0 else (i * 37) % 1000 + i / 10000 for i in range(N_ROWS)]
+    pl.DataFrame({"v": vals, "s": ["alice" if i % 3 == 0 else f"n{i}" for i in range(N_ROWS)]}).write_parquet(path)
+    lazy, eager = create_polars_dataflow(pl.scan_parquet(path)), create_polars_dataflow(pl.read_parquet(path))
+    for direction in ("asc", "desc"):
+        payload = {"sort": "a", "sort_direction": direction}
+        _m, lazy_df = _window(lazy, 20, 60, payload=payload, search_string="alice")
+        _m, eager_df = _window(eager, 20, 60, payload=payload, search_string="alice")
+        assert lazy_df.equals(eager_df), direction

@@ -12,6 +12,7 @@ import tornado.httpclient
 import tornado.testing
 import tornado.websocket
 
+from buckaroo.customizations import pl_lazy_stats
 from buckaroo.server.app import make_app as _make_app
 
 # Temp file cleanup fails on Windows due to file locking (WinError 32)
@@ -269,6 +270,51 @@ class TestLoadPolarsLazy(tornado.testing.AsyncHTTPTestCase):
             session = self._app.settings["sessions"].get("pl-eager-1")
             self.assertIsInstance(session.dataflow.processed_df, pl.DataFrame)
             self.assertNotIn("stats_omitted", session.df_meta)
+        finally:
+            os.unlink(path)
+
+    def test_load_polars_rejects_unknown_polars_mode(self):
+        resp = self.fetch("/load", method="POST",
+            body=json.dumps({"session": "pl-bad", "path": "/tmp/x.parquet", "mode": "buckaroo", "backend": "polars",
+                "polars_mode": "streaming"}),
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(json.loads(resp.body)["error_code"], "invalid_polars_mode")
+
+    def test_load_polars_csv_type_change_after_inference_is_load_error(self):
+        """polars infers csv dtypes from the first 100 rows, so a later row
+        that doesn't parse fails when stats first read it, not when the scan
+        opens. The client must get the same JSON ``load_error`` the eager
+        path returns, not an HTML 500."""
+        f = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
+        f.write("x,y\n" + "".join(f"{i},a\n" for i in range(500)) + "notanumber,b\n")
+        f.close()
+        try:
+            for polars_mode in ("lazy", "eager"):
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": f"pl-csv-{polars_mode}", "path": f.name, "mode": "buckaroo",
+                        "backend": "polars", "polars_mode": polars_mode}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 500, polars_mode)
+                self.assertEqual(json.loads(resp.body)["error_code"], "load_error", polars_mode)
+        finally:
+            os.unlink(f.name)
+
+    def test_load_polars_lazy_session_reports_sampled_stats(self):
+        """Past the stats sample cap the lazy session says its stats
+        describe a sample, and the session still serves every row."""
+        path = self._write_parquet()
+        try:
+            with mock.patch.object(pl_lazy_stats, "LAZY_STATS_SAMPLE_ROWS", 500):
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "pl-lazy-sampled", "path": path, "mode": "buckaroo",
+                        "backend": "polars"}),
+                    headers={"Content-Type": "application/json"})
+            self.assertEqual(resp.code, 200)
+            session = self._app.settings["sessions"].get("pl-lazy-sampled")
+            self.assertTrue(session.df_meta["stats_sampled"])
+            self.assertEqual(session.df_meta["total_rows"], self.N_ROWS)
+            self.assertLessEqual(session.dataflow.merged_sd["a"]["length"], 500)
         finally:
             os.unlink(path)
 
