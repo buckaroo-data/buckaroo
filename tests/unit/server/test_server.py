@@ -1,7 +1,9 @@
+import gc
 import json
 import os
 import sys
 import tempfile
+import weakref
 from unittest import mock
 
 import pandas as pd
@@ -683,3 +685,148 @@ class TestLoadPushesToWebSocket(tornado.testing.AsyncHTTPTestCase):
                 ws.close()
             finally:
                 os.unlink(f.name)
+
+
+def _bump_mtime(path, seconds=1):
+    """Move ``path``'s mtime forward so a rewrite in the same tick still
+    looks like a different file to a (path, mtime, size) key."""
+    st = os.stat(path)
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + seconds * 1_000_000_000))
+
+
+class TestSharedFrameCache(tornado.testing.AsyncHTTPTestCase):
+    """``/load`` holds one eager frame per file, shared across sessions (#993).
+
+    Two sessions on the same unchanged file get the same frame object; a
+    rewritten file loads fresh; the frame is released once no session
+    holds it (eviction or re-pointing the session at another file)."""
+
+    def get_app(self):
+        from buckaroo.server.session import SessionManager
+        # Negative TTL: every session without a WS client is idle, so
+        # evict_idle_sessions() removes it on the first pass.
+        self.sessions = SessionManager(ttl_s=-1.0)
+        return _make_app(sessions=self.sessions, open_browser=False)
+
+    def _load(self, session_id, path, backend):
+        resp = self.fetch("/load", method="POST",
+            body=json.dumps({"session": session_id, "path": path, "mode": "buckaroo", "backend": backend}),
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 200, resp.body)
+        return json.loads(resp.body)
+
+    def _check_shared_then_fresh(self, path, backend):
+        self._load("share-1", path, backend)
+        self._load("share-2", path, backend)
+        s1 = self.sessions.get("share-1")
+        s2 = self.sessions.get("share-2")
+        self.assertIs(s1.df, s2.df)
+        self.assertIs(s1.dataflow.raw_df, s2.dataflow.raw_df)
+        self.assertIs(s1.dataflow.raw_df, s1.df)
+
+        # Same session, same unchanged file: still the one frame.
+        self._load("share-1", path, backend)
+        self.assertIs(self.sessions.get("share-1").df, s2.df)
+
+        # Rewrite the file (new content, new mtime): a new frame, while the
+        # sessions that loaded the old content keep theirs.
+        pd.DataFrame({"name": ["Zed"], "age": [1], "score": [0.5]}).to_csv(path, index=False)
+        _bump_mtime(path)
+        body = self._load("share-3", path, backend)
+        self.assertEqual(body["rows"], 1)
+        s3 = self.sessions.get("share-3")
+        self.assertIsNot(s3.df, s1.df)
+        self.assertEqual(len(s3.df), 1)
+        self.assertEqual(len(s1.df), 5)
+
+    def test_load_polars_shares_frame_across_sessions(self):
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                self._check_shared_then_fresh(f.name, "polars")
+            finally:
+                os.unlink(f.name)
+
+    def test_load_pandas_shares_frame_across_sessions(self):
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                self._check_shared_then_fresh(f.name, "pandas")
+            finally:
+                os.unlink(f.name)
+
+    def test_frame_released_on_repoint_and_eviction(self):
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as fa, \
+                tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as fb:
+            _write_test_csv(fa.name)
+            _write_test_csv(fb.name)
+            try:
+                frames = self.sessions.frames
+                self._load("rel-1", fa.name, "polars")
+                self._load("rel-2", fa.name, "polars")
+                self.assertEqual([k.path for k in frames.keys()], [fa.name])
+
+                # Re-pointing rel-2 at another file drops its hold on fa.
+                self._load("rel-2", fb.name, "polars")
+                self.assertEqual(sorted(k.path for k in frames.keys()), sorted([fa.name, fb.name]))
+
+                # Evict rel-1 only (rel-2 has a client, so it stays): fa's
+                # frame has no holder left and goes; fb's stays.
+                self.sessions.get("rel-2").ws_clients.add(object())
+                self.assertEqual(self.sessions.evict_idle_sessions(), 1)
+                self.assertEqual([k.path for k in frames.keys()], [fb.name])
+
+                self.sessions.get("rel-2").ws_clients.clear()
+                self.assertEqual(self.sessions.evict_idle_sessions(), 1)
+                self.assertEqual(len(frames), 0)
+            finally:
+                os.unlink(fa.name)
+                os.unlink(fb.name)
+
+    def test_switch_to_lazy_frees_the_eager_frame(self):
+        """Switching a session to mode=lazy drops its hold on the cached
+        frame, so the session must stop pinning it too: ``df`` and
+        ``dataflow`` (whose ``raw_df`` is the same frame) are cleared and the
+        frame is garbage once no one else holds it."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                self._load("lazy-sw", f.name, "polars")
+                session = self.sessions.get("lazy-sw")
+                frame_ref = weakref.ref(session.df)
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "lazy-sw", "path": f.name, "mode": "lazy"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200, resp.body)
+                self.assertEqual(len(self.sessions.frames), 0)
+                self.assertIsNone(session.df)
+                self.assertIsNone(session.dataflow)
+                gc.collect()
+                self.assertIsNone(frame_ref())
+            finally:
+                os.unlink(f.name)
+
+
+def test_frame_cache_failed_load_keeps_previous_hold():
+    """A loader that raises must not cost the session its existing hold:
+    the handler returns an error and the session keeps its old frame."""
+    from buckaroo.server.frame_cache import FrameCache
+
+    def _boom(path):
+        raise ValueError("Unsupported file format: .xyz")
+
+    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as fa, \
+            tempfile.NamedTemporaryFile(suffix=".xyz", delete=False) as fb:
+        _write_test_csv(fa.name)
+        try:
+            frames = FrameCache()
+            first = frames.acquire("s", "pandas", fa.name, pd.read_csv)
+            with pytest.raises(ValueError):
+                frames.acquire("s", "pandas", fb.name, _boom)
+            assert [k.path for k in frames.keys()] == [fa.name]
+            assert frames.acquire("s", "pandas", fa.name, pd.read_csv) is first
+            frames.release("s")
+            assert len(frames) == 0
+        finally:
+            os.unlink(fa.name)
+            os.unlink(fb.name)

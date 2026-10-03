@@ -169,6 +169,12 @@ class LoadHandler(tornado.web.RequestHandler):
 
     def _load_lazy_polars(self, session, path: str, ldf, metadata: dict):
         """Set up lazy polars session state."""
+        # The lazy path holds no eager frame (the caller already released the
+        # session's frame-cache hold), so drop the references that would keep
+        # a prior /load frame alive: ``df`` and the dataflow whose ``raw_df``
+        # is that frame (#993).
+        session.df = None
+        session.dataflow = None
         display_state, orig_to_rw, rw_to_orig = get_display_state_lazy(ldf)
         display_state["df_meta"]["total_rows"] = metadata["rows"]
 
@@ -212,13 +218,14 @@ class LoadHandler(tornado.web.RequestHandler):
         port = self.application.settings["port"]
         return find_or_create_session_window(session_id, port, reload_if_found=True)
 
-    def _load_polars_with_error_handling(self, path: str):
-        """Eager polars load for ``backend='polars'``. Errors share the
-        same shape as the pandas loader so the response surface is
-        identical from the client's POV."""
+    def _load_polars_with_error_handling(self, session, path: str):
+        """Eager polars load for ``backend='polars'``, through the shared
+        frame cache (#993). Errors share the same shape as the pandas
+        loader so the response surface is identical from the client's POV."""
+        frames = self.application.settings["sessions"].frames
         try:
             from buckaroo.server.data_loading_polars import load_file_polars, get_metadata_polars
-            df = load_file_polars(path)
+            df = frames.acquire(session.session_id, "polars", path, load_file_polars)
             metadata = get_metadata_polars(df, path)
             return df, metadata
         except FileNotFoundError:
@@ -245,15 +252,20 @@ class LoadHandler(tornado.web.RequestHandler):
             self.write(resp)
             return None, None
 
-    def _load_file_with_error_handling(self, path: str, is_lazy: bool):
-        """Load file and handle errors. Returns (file_obj, metadata) or (None, None)."""
+    def _load_file_with_error_handling(self, session, path: str, is_lazy: bool):
+        """Load file and handle errors. Returns (file_obj, metadata) or (None, None).
+
+        The eager read goes through the shared frame cache (#993); the lazy
+        path holds no frame, so it drops any hold the session had."""
+        frames = self.application.settings["sessions"].frames
         try:
             if is_lazy:
+                frames.release(session.session_id)
                 ldf = load_file_lazy(path)
                 metadata = get_metadata_lazy(ldf, path)
                 return ldf, metadata
             else:
-                df = load_file(path)
+                df = frames.acquire(session.session_id, "pandas", path, load_file)
                 metadata = get_metadata(df, path)
                 return df, metadata
         except FileNotFoundError:
@@ -324,9 +336,9 @@ class LoadHandler(tornado.web.RequestHandler):
 
         # Load data in appropriate mode
         if backend == "polars" and mode == "buckaroo":
-            file_obj, metadata = self._load_polars_with_error_handling(path)
+            file_obj, metadata = self._load_polars_with_error_handling(session, path)
         else:
-            file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
+            file_obj, metadata = self._load_file_with_error_handling(session, path, is_lazy=(mode == "lazy"))
         if file_obj is None:
             return
 
@@ -581,7 +593,9 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.tele_sink = tele_sink
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
-        # session so WS dispatch can no longer reach a stale dataflow.
+        # session so WS dispatch can no longer reach a stale dataflow,
+        # and drop the session's hold on that /load frame (#993).
+        sessions.frames.release(session_id)
         session.df = None
         session.dataflow = None
         session.ldf = None
@@ -759,6 +773,8 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         # Store session state
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path1)
+        # The merged frame is this session's own, not a shared /load frame.
+        sessions.frames.release(session_id)
         session.df = merged_df
         session.metadata = {"path": path1, "path2": path2, "rows": len(merged_df),
             "columns": [{"name": str(c), "dtype": str(merged_df[c].dtype)} for c in merged_df.columns]}
