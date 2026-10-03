@@ -586,3 +586,17 @@ class TestPlDfStatsV2Prepass:
         assert small.skipped_stats == {}
         assert small.sdf['b']['most_freq'] == '0'
         assert isinstance(small.sdf['a']['histogram'], list)
+
+    def test_object_column_keeps_distinct_stats(self):
+        """A pl.Object column gets distinct_count and the ratios derived from
+        it, as on main, even though n_unique does not support Object."""
+        from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+        df = pl.DataFrame({'objs': pl.Series([object(), object(), object()], dtype=pl.Object), 'ints': [1, 2, 3]})
+        stats = PlDfStatsV2(df, PL_ANALYSIS_V2)
+        assert stats.errs == {}
+        col = stats.sdf['a']
+        assert col['distinct_count'] == 3
+        assert col['distinct_per'] == 1.0
+        assert col['empty_count'] == 0
+        assert col['non_null_count'] == 3
+        assert col['nan_per'] == 0.0
