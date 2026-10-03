@@ -432,3 +432,99 @@ class TestPlFullPipeline:
             assert actual == expected_displayer, (
                 f"{ser.dtype}: expected {expected_displayer!r}, got {actual!r}"
             )
+
+
+# ============================================================================
+# Tests: PlDfStatsV2 pre-pass (#999)
+# ============================================================================
+
+def _prepass_fixture_df():
+    # mode has no ties in any column, so the per-series and pre-pass paths
+    # can be compared key by key.
+    return pl.DataFrame({
+        'ints': [1, 2, 2, None, 5, 5, 5, 8],
+        'floats': [1.5, 2.5, None, 4.5, 4.5, 6.0, 7.0, 8.0],
+        'strs': ['a', 'b', '', 'a', None, 'a', 'c', ''],
+        'bools': [True, False, True, True, None, False, True, True]})
+
+
+class TestPlDfStatsV2Prepass:
+    def test_large_frame_is_not_sampled(self):
+        """A 60k x 20 frame exceeds FAST_SUMMARY_WHEN_GREATER (1M cells).
+        Today it is cut to a 50,000-row sample, so length reads 50000 and
+        distinct_count of a unique-id column caps at 50000."""
+        from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+        n = 60_000
+        df = pl.DataFrame({f'c{i}': np.arange(n) + i for i in range(20)})
+        stats = PlDfStatsV2(df, PL_ANALYSIS_V2)
+        assert stats.errs == {}
+        for col_stats in stats.sdf.values():
+            assert col_stats['length'] == n
+            assert col_stats['null_count'] == 0
+            assert col_stats['distinct_count'] == n
+            assert col_stats['distinct_per'] == 1.0
+
+    def test_scalar_stats_come_from_the_prepass(self, monkeypatch):
+        """null_count/min/max are computed once for the whole frame in the
+        pre-pass select, never per pl.Series."""
+        from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+        calls = {'null_count': 0, 'min': 0, 'max': 0}
+
+        def counting(name):
+            orig = getattr(pl.Series, name)
+
+            def wrapped(self, *args, **kwargs):
+                calls[name] += 1
+                return orig(self, *args, **kwargs)
+            return wrapped
+
+        for name in calls:
+            monkeypatch.setattr(pl.Series, name, counting(name))
+
+        stats = PlDfStatsV2(_prepass_fixture_df(), PL_ANALYSIS_V2)
+        assert stats.errs == {}
+        assert calls == {'null_count': 0, 'min': 0, 'max': 0}
+        assert stats.sdf['a']['null_count'] == 1
+        assert stats.sdf['a']['min'] == 1
+        assert stats.sdf['a']['max'] == 8
+        assert stats.sdf['b']['min'] == 1.5
+        assert math.isnan(stats.sdf['c']['min'])
+
+    def test_temporal_min_max(self):
+        """The pre-pass gives temporal columns a real min/max (today: nan)."""
+        from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+        df = pl.DataFrame({'dates': [datetime(2020, 1, d) for d in (3, 1, 7, 1)] + [None]})
+        stats = PlDfStatsV2(df, PL_ANALYSIS_V2)
+        assert stats.errs == {}
+        assert stats.sdf['a']['min'] == datetime(2020, 1, 1)
+        assert stats.sdf['a']['max'] == datetime(2020, 1, 7)
+        assert stats.sdf['a']['mode'] == datetime(2020, 1, 1)
+        assert stats.sdf['a']['null_count'] == 1
+
+    def test_value_counts_gated_above_max_rows(self, monkeypatch):
+        """Above max_rows, value_counts and everything that needs it (mode,
+        most_freq, histogram, ...) are reported as not computed; the
+        pre-pass stats still come through."""
+        from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+        from buckaroo.customizations import pl_stats_v2
+        monkeypatch.setattr(pl_stats_v2.pl_value_counts_stats._stat_func, 'max_rows', 100)
+        df = pl.DataFrame({'ids': list(range(101)), 'strs': [str(i % 7) for i in range(101)]})
+        stats = PlDfStatsV2(df, PL_ANALYSIS_V2)
+        assert stats.errs == {}
+        for col in ('a', 'b'):
+            col_stats = stats.sdf[col]
+            assert col_stats['length'] == 101
+            assert col_stats['null_count'] == 0
+            assert col_stats['nan_per'] == 0.0
+            for key in ('value_counts', 'mode', 'most_freq', 'histogram', 'unique_count'):
+                assert col_stats[key] is None, (col, key)
+            assert 'value_counts' in stats.skipped_stats[col]
+            assert 'histogram' in stats.skipped_stats[col]
+        assert stats.sdf['a']['distinct_count'] == 101
+        assert stats.sdf['a']['min'] == 0 and stats.sdf['a']['max'] == 100
+        assert stats.sdf['b']['distinct_count'] == 7
+
+        small = PlDfStatsV2(df.head(100), PL_ANALYSIS_V2)
+        assert small.skipped_stats == {}
+        assert small.sdf['b']['most_freq'] == '0'
+        assert isinstance(small.sdf['a']['histogram'], list)

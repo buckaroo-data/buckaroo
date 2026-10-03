@@ -736,3 +736,95 @@ class TestIntegration:
             assert col_stats['length'] == 4
             assert isinstance(col_stats['distinct_per'], float)
             assert col_stats['distinct_per'] > 0
+
+
+# ============================================================================
+# Tests: max_rows gating and per-column initial_stats (#999)
+# ============================================================================
+
+def _capped_stats():
+    """capped_count runs on frames of at most 100 rows; capped_double needs it."""
+    @stat(max_rows=100)
+    def capped_count(ser: RawSeries) -> int:
+        return int(ser.count())
+
+    @stat()
+    def capped_double(capped_count: int) -> int:
+        return capped_count * 2
+
+    return capped_count, capped_double
+
+
+class TestMaxRows:
+    def test_decorator_stores_max_rows(self):
+        capped_count, _ = _capped_stats()
+        assert capped_count._stat_func.max_rows == 100
+        assert length._stat_func.max_rows is None
+
+    def test_runs_at_max_rows(self):
+        capped_count, capped_double = _capped_stats()
+        pipeline = StatPipeline([length, capped_count, capped_double], unit_test=False)
+        df = pd.DataFrame({'a': range(100)})
+        result, errors = pipeline.process_df(df)
+        assert errors == []
+        assert result['a']['capped_count'] == 100
+        assert result['a']['capped_double'] == 200
+        assert pipeline.skipped_stats == {}
+
+    def test_skipped_above_max_rows_and_reported(self):
+        """One row over the cap: the stat and its dependents are not run.
+        Their keys are present as None and listed in skipped_stats."""
+        capped_count, capped_double = _capped_stats()
+        pipeline = StatPipeline([length, capped_count, capped_double], unit_test=False)
+        df = pd.DataFrame({'a': range(101), 'b': range(101)})
+        result, errors = pipeline.process_df(df)
+        assert errors == []
+        assert result['a']['length'] == 101
+        assert result['a']['capped_count'] is None
+        assert result['a']['capped_double'] is None
+        assert pipeline.skipped_stats == {'a': ['capped_count', 'capped_double'],
+            'b': ['capped_count', 'capped_double']}
+
+    def test_process_column_row_count(self):
+        capped_count, _ = _capped_stats()
+        pipeline = StatPipeline([capped_count], unit_test=False)
+        ser = pd.Series(range(5))
+        result, _ = pipeline.process_column('x', ser.dtype, raw_series=ser, row_count=101)
+        assert result['capped_count'] is None
+        result, _ = pipeline.process_column('x', ser.dtype, raw_series=ser, row_count=5)
+        assert result['capped_count'] == 5
+        # No row count given: nothing is gated.
+        result, _ = pipeline.process_column('x', ser.dtype, raw_series=ser)
+        assert result['capped_count'] == 5
+
+
+class TestInitialStats:
+    def test_provided_keys_replace_the_provider(self):
+        """A stat whose every provided key is in initial_stats does not run;
+        dependents read the supplied value."""
+        calls = []
+
+        @stat()
+        def length(ser: RawSeries) -> int:
+            calls.append(1)
+            return len(ser)
+
+        pipeline = StatPipeline([length, distinct_count, distinct_per], unit_test=False)
+        ser = pd.Series([1, 2, 3, 1, 2])
+        result, errors = pipeline.process_column('x', ser.dtype, raw_series=ser, initial_stats={'length': 10})
+        assert errors == []
+        assert calls == []
+        assert result['length'] == 10
+        assert result['distinct_per'] == 3 / 10
+
+    def test_process_df_per_column_initial_stats(self):
+        pipeline = StatPipeline([length, null_count, nan_per], unit_test=False)
+        df = pd.DataFrame({'a': [1, 2, None, 4], 'b': [None, 2, None, None]})
+        result, errors = pipeline.process_df(df, initial_stats={'a': {'length': 8, 'null_count': 4}})
+        assert errors == []
+        assert result['a']['length'] == 8
+        assert result['a']['null_count'] == 4
+        assert result['a']['nan_per'] == 0.5
+        assert result['b']['length'] == 4
+        assert result['b']['null_count'] == 3
+        assert result['b']['orig_col_name'] == 'b'
