@@ -61,11 +61,30 @@ class Sampling:
 
     @classmethod
     def pre_stats_sample(kls, df, /):
+        """Prepare the frame the dataflow carries: drop columns past
+        ``max_columns``, keep every row. The ``pre_limit`` row sample is
+        ``stats_sample`` and reaches only ``DFStatsClass`` (#992)."""
         if len(df.columns) > kls.max_columns:
             print("Removing excess columns, found %d columns" %  len(df.columns))
             df = df[df.columns[:kls.max_columns]]
-        if kls.pre_limit and len(df) > kls.pre_limit:
-            sampled = df.sample(kls.pre_limit)
+        return df
+
+    @classmethod
+    def stats_sample_rows(kls, n_rows: int, /) -> int:
+        """Rows ``stats_sample`` keeps from a frame of ``n_rows`` rows."""
+        if kls.pre_limit and n_rows > kls.pre_limit:
+            return kls.pre_limit
+        return n_rows
+
+    @classmethod
+    def stats_sample(kls, df, /):
+        """The frame ``DFStatsClass`` reads: a ``pre_limit``-row sample when
+        the frame is larger, otherwise the frame itself."""
+        if not kls.pre_limit:
+            return df
+        n_rows = kls.stats_sample_rows(len(df))
+        if n_rows < len(df):
+            sampled = df.sample(n_rows)
             if isinstance(sampled, pd.DataFrame):
                 return sampled.sort_index()
             return sampled

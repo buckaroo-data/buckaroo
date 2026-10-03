@@ -3,6 +3,8 @@ import pytest
 from buckaroo.pluggable_analysis_framework.col_analysis import (ColAnalysis)
 from buckaroo.pluggable_analysis_framework.stat_func import stat, RawSeries
 from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
+from buckaroo.dataflow.dataflow_extras import Sampling
+from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from buckaroo.buckaroo_widget import BuckarooWidget, BuckarooInfiniteWidget
 from buckaroo.jlisp.lisp_utils import (s, sQ)
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
@@ -621,3 +623,86 @@ def test_search_op_delivers_highlight_phrase_into_displayer_args():
     assert b_args['highlight_phrase'] == ['area']
     c_args = _find_cc(cc, 'c')['displayer_args']
     assert 'highlight_phrase' not in c_args
+
+
+@stat()
+def length(ser: RawSeries) -> int:
+    return len(ser)
+
+
+class SmallStatsSampling(Sampling):
+    pre_limit = 100
+
+
+class SampledStatsDFC(ACDFC):
+    """``pre_limit`` bounds the rows DFStatsClass reads, not the rows the
+    dataflow carries (#992)."""
+    sampling_klass = SmallStatsSampling
+    analysis_klasses = [length, StylingAnalysis]
+
+
+def test_pre_limit_samples_stats_not_the_table():
+    """Before #992 ``CustomizableDataflow.__init__`` handed
+    ``pre_stats_sample(orig_df)`` in as the raw frame, so a frame over
+    ``pre_limit`` rows was displayed as a random sample of itself. The
+    frame must stay whole and in order; only the stats input shrinks."""
+    df = pd.DataFrame({'x': range(1000)})
+    dfc = SampledStatsDFC(df)
+
+    assert len(dfc.processed_df) == 1000
+    assert dfc.processed_df['x'].tolist() == list(range(1000))
+    assert dfc.df_meta['total_rows'] == 1000
+    assert dfc.df_meta['filtered_rows'] == 1000
+    assert dfc.df_meta['stats_sampled'] is True
+    assert dfc.df_meta['stats_rows'] == 100
+    assert dfc.summary_sd['a']['length'] <= 100
+
+
+def test_stats_not_sampled_under_pre_limit():
+    df = pd.DataFrame({'x': range(50)})
+    dfc = SampledStatsDFC(df)
+
+    assert dfc.df_meta['stats_sampled'] is False
+    assert dfc.df_meta['stats_rows'] == 50
+    assert dfc.summary_sd['a']['length'] == 50
+
+
+class LegacyStats:
+    """A ``DFStatsClass`` written against the pre-#992 ``DfStats`` Protocol:
+    ``verify_analysis_objects``, ``__init__``, ``add_analysis``, ``sdf``,
+    ``errs``, ``ap``, and no ``operating_rows``. It delegates to
+    ``DfStatsV2`` rather than subclassing it so nothing is inherited."""
+
+    @classmethod
+    def verify_analysis_objects(cls, col_analysis_objs):
+        DfStatsV2.verify_analysis_objects(col_analysis_objs)
+
+    def __init__(self, df, col_analysis_objs, operating_df_name=None,
+                 debug=False, skip_columns=None):
+        self._inner = DfStatsV2(df, col_analysis_objs, operating_df_name,
+            debug=debug, skip_columns=skip_columns)
+        self.sdf = self._inner.sdf
+        self.errs = self._inner.errs
+        self.ap = self._inner.ap
+
+    def add_analysis(self, a_obj):
+        self._inner.add_analysis(a_obj)
+        self.sdf = self._inner.sdf
+        self.errs = self._inner.errs
+
+
+class LegacyStatsDFC(ACDFC):
+    DFStatsClass = LegacyStats
+    analysis_klasses = [length, StylingAnalysis]
+
+
+def test_legacy_dfstats_without_operating_rows_constructs():
+    """``populate_df_meta`` must not require ``operating_rows`` on a
+    duck-typed ``DFStatsClass``; an executor without it reads every row
+    it is handed, so ``stats_rows`` falls back to the sampled row count."""
+    df = pd.DataFrame({'x': range(50)})
+    dfc = LegacyStatsDFC(df)
+
+    assert dfc.df_meta['stats_rows'] == 50
+    assert dfc.df_meta['stats_sampled'] is False
+    assert dfc.summary_sd['a']['length'] == 50

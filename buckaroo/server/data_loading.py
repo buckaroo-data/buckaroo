@@ -28,11 +28,6 @@ class ServerSampling(Sampling):
         df = check_and_fix_df(df)
         if len(df.columns) > cls.max_columns:
             df = df[df.columns[:cls.max_columns]]
-        if cls.pre_limit and len(df) > cls.pre_limit:
-            sampled = df.sample(cls.pre_limit)
-            if isinstance(sampled, pd.DataFrame):
-                return sampled.sort_index()
-            return sampled
         return df
 
 

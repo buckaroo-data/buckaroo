@@ -151,7 +151,8 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
         if self.processed_df is None:
             self.df_meta = {
                 'columns': 0, 'filtered_rows': 0,
-                'rows_shown': 0, 'total_rows': 0}
+                'rows_shown': 0, 'total_rows': 0,
+                'stats_sampled': False, 'stats_rows': 0}
             return
         rows = _expr_count(self.processed_df)
         limit = self.sampling_klass.serialize_limit
@@ -160,7 +161,10 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
             'columns': len(self.processed_df.columns),
             'filtered_rows': rows,
             'rows_shown': rows_shown,
-            'total_rows': _expr_count(self.orig_df)}
+            'total_rows': _expr_count(self.orig_df),
+            # Stats push down over the whole expression; nothing is sampled.
+            'stats_sampled': False,
+            'stats_rows': rows}
 
     def _get_summary_sd(self, processed_df: "XorqExpr | pd.DataFrame"):
         if _is_pandas(processed_df):

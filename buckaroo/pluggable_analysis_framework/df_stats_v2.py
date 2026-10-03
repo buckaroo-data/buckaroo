@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from typing import Type
 
-import numpy as np
 import pandas as pd
 
 from .col_analysis import AObjs, ColAnalysis
@@ -53,14 +52,19 @@ class DfStatsV2:
         if self.errs:
             output_full_reproduce(self.errs, self.sdf, operating_df_name)
 
+    @classmethod
+    def operating_rows(cls, rows: int, cols: int, /) -> int:
+        """Rows the executor reads from a ``rows`` x ``cols`` frame: a 50k
+        sample once the cell count passes ``FAST_SUMMARY_WHEN_GREATER``."""
+        if rows * cols > FAST_SUMMARY_WHEN_GREATER:
+            return min(50_000, rows)
+        return rows
+
     def get_operating_df(self, df: pd.DataFrame, force_full_eval: bool) -> pd.DataFrame:
         """Downsample large DataFrames for performance."""
-        rows = len(df)
-        cols = len(df.columns)
-        item_count = rows * cols
-
-        if item_count > FAST_SUMMARY_WHEN_GREATER:
-            return df.sample(np.min([50_000, len(df)]))
+        n_rows = self.operating_rows(len(df), len(df.columns))
+        if n_rows < len(df):
+            return df.sample(n_rows)
         return df
 
     def add_analysis(self, a_obj: Type[ColAnalysis]) -> None:
@@ -87,10 +91,18 @@ class PlDfStatsV2:
     def verify_analysis_objects(cls, objs):
         StatPipeline(objs)
 
-    def get_operating_df(self, df):
-        rows, cols = len(df), len(df.columns)
+    @classmethod
+    def operating_rows(cls, rows: int, cols: int, /) -> int:
+        """Rows the executor reads from a ``rows`` x ``cols`` frame: a 50k
+        sample once the cell count passes ``FAST_SUMMARY_WHEN_GREATER``."""
         if rows * cols > FAST_SUMMARY_WHEN_GREATER:
-            return df.sample(n=min(50_000, rows), seed=42)
+            return min(50_000, rows)
+        return rows
+
+    def get_operating_df(self, df):
+        n_rows = self.operating_rows(len(df), len(df.columns))
+        if n_rows < len(df):
+            return df.sample(n=n_rows, seed=42)
         return df
 
     def __init__(self, df, col_analysis_objs, operating_df_name=None, debug=False, skip_columns=None):

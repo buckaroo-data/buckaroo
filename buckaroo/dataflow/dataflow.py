@@ -82,6 +82,13 @@ class DfStats(Protocol):
     ``DfStatsV2`` (pandas), ``PlDfStatsV2`` (polars) and ``XorqDfStatsV2``
     share this surface but no base class. The frame argument is ``Any``
     because each executor accepts only its own backend's frame type.
+
+    An executor may also define ``operating_rows(rows, cols) -> int``, a
+    classmethod giving the row count it actually reads from a frame of that
+    size. It is deliberately not a member of this Protocol, because the
+    dataflow does not require it: ``populate_df_meta`` looks it up with
+    ``getattr`` and treats a missing one as "reads every row it is handed"
+    (#992).
     """
     sdf: TAny
     errs: TAny
@@ -416,7 +423,9 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         self.df_display_args = {}
         self.setup_options_from_analysis()
         self.orig_df = orig_df
-        # I don't like this seapration of 
+        # pre_stats_sample caps columns and fixes the frame; it keeps every
+        # row. The pre_limit row sample is applied in _get_summary_sd, so the
+        # grid pages the whole frame while the stats read a sample (#992).
         super().__init__(self.sampling_klass.pre_stats_sample(orig_df))
         self.populate_auto_clean_options()
         self.populate_df_meta()
@@ -438,15 +447,28 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
                 # I need to recompute this when sampling changes
                 'filtered_rows': 0,
                 'rows_shown': 0,
-                'total_rows': 0}
+                'total_rows': 0,
+                'stats_sampled': False,
+                'stats_rows': 0}
 
             return
+        n_rows = len(self.processed_df)
+        n_cols = len(self.processed_df.columns)
+        # Two caps shrink the stats input: the sampling class's pre_limit
+        # (applied in _get_summary_sd) and the executor's own sample. A
+        # DFStatsClass written against the pre-#992 Protocol has no
+        # operating_rows; such an executor reads every row it is handed.
+        sample_rows = self.sampling_klass.stats_sample_rows(n_rows)
+        operating_rows = getattr(self.DFStatsClass, 'operating_rows', None)
+        stats_rows = operating_rows(sample_rows, n_cols) if operating_rows else sample_rows
         self.df_meta = {
-            'columns': len(self.processed_df.columns),
+            'columns': n_cols,
             # I need to recompute this when sampling changes
-            'filtered_rows': len(self.processed_df),
-            'rows_shown': min(len(self.processed_df), self.sampling_klass.serialize_limit),  
-            'total_rows': len(self.orig_df)}
+            'filtered_rows': n_rows,
+            'rows_shown': min(n_rows, self.sampling_klass.serialize_limit),
+            'total_rows': len(self.orig_df),
+            'stats_sampled': stats_rows < n_rows,
+            'stats_rows': stats_rows}
 
     # buckaroo_options is BuckarooOptions-shaped at runtime, but it's a
     # traitlets ``Dict`` trait, so we let it inherit the base ``Any`` rather
@@ -712,7 +734,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     @override
     def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, ErrDict]:
         stats = self.DFStatsClass(
-            processed_df,
+            self.sampling_klass.stats_sample(processed_df),
             self.analysis_klasses,
             self.df_name, debug=self.debug,
             skip_columns=getattr(self, 'skip_stat_columns', None))
@@ -751,7 +773,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         """
 
         stats = self.DFStatsClass(
-            self.processed_df,
+            self.sampling_klass.stats_sample(self.processed_df),
             self.analysis_klasses,
             self.df_name, debug=self.debug)
         stats.add_analysis(analysis_klass)

@@ -13,6 +13,7 @@ review:
 import json
 import os
 import tempfile
+from io import BytesIO
 
 import polars as pl
 import pytest
@@ -89,3 +90,32 @@ def test_load_file_polars_ndjson_still_works():
 def test_load_file_polars_unsupported_extension():
     with pytest.raises(ValueError, match="Unsupported file format"):
         load_file_polars("/tmp/foo.xyz")
+
+
+def test_load_over_pre_limit_pages_every_row_in_order():
+    """#992: ``PolarsServerSampling.pre_limit`` (1M) used to replace the
+    dataflow's frame with a random 1M-row sample, so a larger file paged
+    through a shuffled subset of itself. The frame the handler pages must
+    hold every row in file order; the row cap applies to the stats input
+    only, and ``df_meta`` says so."""
+    n = 1_200_000
+    df = pl.DataFrame({"row": range(n)})
+    dataflow = create_polars_dataflow(df)
+    _unused, processed_df, _sd = dataflow.widget_args_tuple
+
+    assert len(processed_df) == n
+    assert dataflow.df_meta["filtered_rows"] == n
+    assert dataflow.df_meta["total_rows"] == n
+    assert dataflow.df_meta["stats_sampled"] is True
+    assert dataflow.df_meta["stats_rows"] < n
+
+    msg, parquet = handle_infinite_request_buckaroo_polars(dataflow, _payload(0, 5))
+    assert msg["length"] == n
+    first = pl.read_parquet(BytesIO(parquet))
+    assert first["a"].to_list() == [0, 1, 2, 3, 4]
+    assert first["index"].to_list() == [0, 1, 2, 3, 4]
+
+    msg, parquet = handle_infinite_request_buckaroo_polars(dataflow, _payload(n - 3, n))
+    last = pl.read_parquet(BytesIO(parquet))
+    assert last["a"].to_list() == [n - 3, n - 2, n - 1]
+    assert last["index"].to_list() == [n - 3, n - 2, n - 1]
