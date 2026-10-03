@@ -884,11 +884,22 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         # cleaning_method / quick_command_args before the reload doesn't
         # silently get unfiltered results while the UI still shows their
         # previous selection.
-        bs = session.buckaroo_state
-        if bs.get("post_processing"):
-            dataflow.post_processing_method = bs["post_processing"]
-        if bs.get("cleaning_method"):
-            dataflow.cleaning_method = bs["cleaning_method"]
+        # A selection naming a method the reload no longer offers (its file
+        # was deleted or renamed) is dropped from the session state instead
+        # of replayed, which would fail on every later reload too.
+        bs = dict(session.buckaroo_state)
+        for state_key, attr in (("post_processing", "post_processing_method"),
+                ("cleaning_method", "cleaning_method")):
+            selected = bs.get(state_key)
+            if not selected:
+                continue
+            if selected in dataflow.buckaroo_options.get(state_key, []):
+                setattr(dataflow, attr, selected)
+            else:
+                log.warning("reload_expr session=%s: %s %r is no longer available, "
+                    "resetting it", session_id, state_key, selected)
+                bs[state_key] = ""
+        session.buckaroo_state = bs
         if bs.get("quick_command_args"):
             dataflow.quick_command_args = bs["quick_command_args"]
 

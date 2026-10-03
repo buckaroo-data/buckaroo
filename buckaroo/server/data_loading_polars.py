@@ -47,10 +47,12 @@ class PolarsServerDataflow(CustomizableDataflow[pl.DataFrame]):
     ``extra_klasses`` is an optional list of additional ``@stat()``-decorated
     functions or ``ColAnalysis`` subclasses folded into ``analysis_klasses``
     at the per-instance level, as on ``XorqServerDataflow``. ``LoadHandler``
-    uses it for the project klasses under ``<project_root>`` (#994); the
-    built-in polars klasses are kept first so a stat-key collision resolves
-    to the built-in, while a project display klass (last-wins by
-    ``df_display_name``) overrides the built-in ``main``."""
+    uses it for the project klasses under ``<project_root>`` (#994). The
+    built-in polars klasses come first and the project klasses after them,
+    and the later klass wins: a project stat that provides a key a built-in
+    also provides (``mean``, ``length``, ...) replaces the built-in's value
+    for that key, and a project display klass overrides the built-in
+    ``main`` by ``df_display_name``."""
     analysis_klasses = local_analysis_klasses
     autocleaning_klass = PandasAutocleaning
     autoclean_conf = tuple([NoCleaningConfPl])

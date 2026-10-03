@@ -867,6 +867,17 @@ class TestLoadPolarsProjectRoot(tornado.testing.AsyncHTTPTestCase):
         ws.close()
 
     @tornado.testing.gen_test
+    async def test_project_stat_overrides_builtin_stat_key(self):
+        """A project stat providing a key a built-in polars stat also
+        provides replaces the built-in's value (later klass wins), as the
+        ``PolarsServerDataflow`` docstring says."""
+        os.makedirs(os.path.join(self.project_root, "stats", "polars"))
+        with open(os.path.join(self.project_root, "stats", "polars", "mean.py"), "w") as f:
+            f.write("def compute(ser): return -999\n")
+        session = await self._load("pr-override")
+        self.assertEqual(_stat_for(session, "age")["mean"], -999)
+
+    @tornado.testing.gen_test
     async def test_reload_alias_route(self):
         """``/reload/<id>`` is the engine-neutral name for ``/reload_expr/<id>``."""
         _write_polars_project(self.project_root)
