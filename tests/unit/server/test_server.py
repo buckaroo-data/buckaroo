@@ -550,6 +550,72 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
             finally:
                 os.unlink(f.name)
 
+    async def _load_pandas_then_reject(self, session_id, path, bad_body, expected_code, expected_error):
+        """A pandas /load that succeeds, then a re-POST on the same session
+        that /load rejects. Returns the session after the rejection, having
+        checked that the WS pager still serves the first load's frame."""
+        port = self.get_http_port()
+        resp = await _async_fetch(port, "/load", method="POST",
+            body=json.dumps({"session": session_id, "path": path, "mode": "buckaroo"}))
+        self.assertEqual(resp.code, 200)
+        session = self._app.settings["sessions"].get(session_id)
+        dataflow_before = session.dataflow
+        self.assertIsNotNone(dataflow_before)
+
+        resp = await _async_fetch(port, "/load", method="POST",
+            body=json.dumps({"session": session_id, "mode": "buckaroo", **bad_body}))
+        self.assertEqual(resp.code, expected_code)
+        self.assertEqual(json.loads(resp.body)["error_code"], expected_error)
+
+        # The rejected request must not have touched the session.
+        self.assertEqual(session.backend, "pandas")
+        self.assertEqual(session.path, path)
+        self.assertIs(session.dataflow, dataflow_before)
+        self.assertIsNone(session.row_order_column)
+
+        ws = await tornado.websocket.websocket_connect(f"ws://localhost:{port}/ws/{session_id}")
+        await ws.read_message()  # initial_state
+        ws.write_message(json.dumps({
+            "type": "infinite_request",
+            "payload_args": {"start": 0, "end": 10, "sourceName": "sorted", "origEnd": 10,
+                "sort": "a", "sort_direction": "asc"}}))
+        resp = json.loads(await ws.read_message())
+        self.assertEqual(resp["type"], "infinite_resp")
+        self.assertNotIn("error_info", resp, resp.get("error_info"))
+        page = pd.read_parquet(io.BytesIO(await ws.read_message()))
+        self.assertEqual(len(page), 10)
+        ws.close()
+        return session
+
+    @tornado.testing.gen_test
+    async def test_load_rejected_row_order_column_leaves_session_untouched(self):
+        """#995 review: a re-POST with ``backend="polars"`` and an unknown
+        ``row_order_column`` is a 400, and the session must still be the
+        pandas session the previous /load built. Otherwise the backend
+        flips to polars while the pandas dataflow stays, and the WS
+        dispatch feeds a pandas frame to the polars pager."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_tie_csv(f.name)
+            try:
+                await self._load_pandas_then_reject("ro-reject",
+                    f.name, {"path": f.name, "backend": "polars", "row_order_column": "nope"},
+                    400, "invalid_row_order_column")
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_load_missing_file_leaves_session_untouched(self):
+        """Same ordering as above for the 404 path: a re-POST whose file
+        doesn't exist leaves the previous load's session state in place."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_tie_csv(f.name)
+            try:
+                await self._load_pandas_then_reject("missing-reject",
+                    f.name, {"path": "/nonexistent/x.csv", "backend": "polars"},
+                    404, "file_not_found")
+            finally:
+                os.unlink(f.name)
+
     @tornado.testing.gen_test
     async def test_ws_search_string_pandas_buckaroo(self):
         """Regression for #838: ``search_string`` set via state_change
