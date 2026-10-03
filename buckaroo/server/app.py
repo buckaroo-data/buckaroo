@@ -31,6 +31,9 @@ def make_app(sessions: SessionManager | None = None, port: int = 8888, open_brow
             (r"/load", LoadHandler),
             (r"/load_expr", LoadExprHandler),
             (r"/reload_expr/([^/]+)", ReloadExprHandler),
+            # Backend-neutral spelling of the same handler (#994): it reloads
+            # polars /load sessions as well as xorq /load_expr ones.
+            (r"/reload/([^/]+)", ReloadExprHandler),
             (r"/load_compare", LoadCompareHandler),
             (r"/s/([^/]+)", SessionPageHandler),
             (r"/ws/([^/]+)", DataStreamHandler),

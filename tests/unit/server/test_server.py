@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sys
 import tempfile
 from unittest import mock
@@ -683,3 +684,141 @@ class TestLoadPushesToWebSocket(tornado.testing.AsyncHTTPTestCase):
                 ws.close()
             finally:
                 os.unlink(f.name)
+
+
+def _write_polars_project(root):
+    """A project_root with one file per channel, plus an unmarked (xorq)
+    stat that a polars session must leave alone (#994)."""
+    os.makedirs(os.path.join(root, "stats"))
+    os.makedirs(os.path.join(root, "post_processing"))
+    os.makedirs(os.path.join(root, "display"))
+    with open(os.path.join(root, "stats", "row_count.py"), "w") as f:
+        f.write("ENGINE = 'polars'\ndef compute(ser):\n    return len(ser)\n")
+    with open(os.path.join(root, "stats", "ibis_count.py"), "w") as f:
+        f.write("def compute(col):\n    return col.count()\n")
+    with open(os.path.join(root, "post_processing", "head_two.py"), "w") as f:
+        f.write("ENGINE = 'polars'\ndef process(df):\n    return df.head(2)\n")
+    with open(os.path.join(root, "display", "my_display.py"), "w") as f:
+        f.write("class MyDisplay(DefaultMainStyling):\n    df_display_name = 'my_display'\n")
+
+
+class TestLoadPolarsProjectRoot(tornado.testing.AsyncHTTPTestCase):
+    """POST /load with backend="polars" honours project_root the way
+    /load_expr does, and /reload_expr refreshes the session's klasses (#994)."""
+
+    def get_app(self):
+        return make_app()
+
+    def setUp(self):
+        super().setUp()
+        pytest.importorskip("polars")
+        self.csv_fd, self.csv_path = tempfile.mkstemp(suffix=".csv")
+        os.close(self.csv_fd)
+        _write_test_csv(self.csv_path)
+        self.project_root = tempfile.mkdtemp()
+        _write_polars_project(self.project_root)
+
+    def tearDown(self):
+        os.unlink(self.csv_path)
+        shutil.rmtree(self.project_root, ignore_errors=True)
+        super().tearDown()
+
+    def _load_body(self, sid, **extra):
+        return json.dumps({"session": sid, "path": self.csv_path, "mode": "buckaroo",
+            "backend": "polars", "project_root": self.project_root, **extra})
+
+    def test_load_polars_applies_project_klasses(self):
+        resp = self.fetch("/load", method="POST", body=self._load_body("pl-pr-1"),
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 200)
+
+        session = self._app.settings["sessions"].get("pl-pr-1")
+        self.assertEqual(session.project_root, self.project_root)
+        # The polars stat ran against every column; the unmarked xorq stat
+        # was not loaded into a polars session.
+        name_stats = session.dataflow.summary_sd["a"]
+        self.assertEqual(name_stats["row_count"], 5)
+        self.assertNotIn("ibis_count", name_stats)
+        self.assertIn("head_two", session.buckaroo_options["post_processing"])
+        self.assertIn("my_display", session.df_display_args)
+
+    def test_load_polars_without_project_root_keeps_builtins_only(self):
+        body = json.loads(self._load_body("pl-no-pr"))
+        del body["project_root"]
+        resp = self.fetch("/load", method="POST", body=json.dumps(body),
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 200)
+        session = self._app.settings["sessions"].get("pl-no-pr")
+        self.assertIsNone(session.project_root)
+        self.assertNotIn("row_count", session.dataflow.summary_sd["a"])
+        self.assertEqual(session.buckaroo_options["post_processing"], [""])
+
+    @tornado.testing.gen_test
+    async def test_polars_post_processor_selectable_over_ws(self):
+        sid = "pl-pr-ws"
+        await _async_fetch(self.get_http_port(), "/load", method="POST", body=self._load_body(sid))
+        ws = await tornado.websocket.websocket_connect(f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+        initial = json.loads(await ws.read_message())
+        self.assertIn("head_two", initial["buckaroo_options"]["post_processing"])
+
+        ws.write_message(json.dumps({"type": "buckaroo_state_change",
+            "new_state": {**initial["buckaroo_state"], "post_processing": "head_two"}}))
+        rebroadcast = json.loads(await ws.read_message())
+        self.assertEqual(rebroadcast["type"], "initial_state")
+        self.assertEqual(rebroadcast["buckaroo_state"]["post_processing"], "head_two")
+
+        ws.write_message(json.dumps({"type": "infinite_request",
+            "payload_args": {"start": 0, "end": 10, "sourceName": "default", "origEnd": 10}}))
+        resp = json.loads(await ws.read_message())
+        self.assertEqual(resp["type"], "infinite_resp")
+        self.assertEqual(resp["length"], 2)
+        await ws.read_message()  # parquet frame
+        ws.close()
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_polars_session_picks_up_new_post_processor(self):
+        sid = "pl-pr-reload"
+        await _async_fetch(self.get_http_port(), "/load", method="POST",
+            body=self._load_body(sid, extra_grid_config={"rowHeight": 70}))
+        ws = await tornado.websocket.websocket_connect(f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+        initial = json.loads(await ws.read_message())
+        self.assertNotIn("head_three", initial["buckaroo_options"]["post_processing"])
+
+        with open(os.path.join(self.project_root, "post_processing", "head_three.py"), "w") as f:
+            f.write("ENGINE = 'polars'\ndef process(df):\n    return df.head(3)\n")
+
+        resp = await _async_fetch(self.get_http_port(), f"/reload_expr/{sid}", method="POST", body="{}")
+        self.assertEqual(resp.code, 200, resp.body)
+        body = json.loads(resp.body)
+        self.assertEqual(body["session"], sid)
+        # row_count, head_two, head_three, MyDisplay
+        self.assertEqual(body["klasses_loaded"], 4)
+
+        pushed = json.loads(await ws.read_message())
+        self.assertEqual(pushed["type"], "initial_state")
+        self.assertIn("head_three", pushed["buckaroo_options"]["post_processing"])
+        # The rebuilt dataflow keeps the /load config and the data.
+        dvc = pushed["df_display_args"]["main"]["df_viewer_config"]
+        self.assertEqual(dvc.get("extra_grid_config"), {"rowHeight": 70})
+        session = self._app.settings["sessions"].get(sid)
+        self.assertEqual(session.dataflow.summary_sd["a"]["row_count"], 5)
+        ws.close()
+
+    @tornado.testing.gen_test
+    async def test_reload_alias_route(self):
+        """/reload/<id> is the backend-neutral spelling of /reload_expr/<id>."""
+        sid = "pl-pr-alias"
+        await _async_fetch(self.get_http_port(), "/load", method="POST", body=self._load_body(sid))
+        resp = await _async_fetch(self.get_http_port(), f"/reload/{sid}", method="POST", body="{}")
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual(json.loads(resp.body)["klasses_loaded"], 3)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_polars_without_project_root_is_400(self):
+        sid = "pl-no-pr-reload"
+        body = json.loads(self._load_body(sid))
+        del body["project_root"]
+        await _async_fetch(self.get_http_port(), "/load", method="POST", body=json.dumps(body))
+        resp = await _async_fetch(self.get_http_port(), f"/reload_expr/{sid}", method="POST", body="{}")
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(json.loads(resp.body)["error_code"], "no_project_root")
