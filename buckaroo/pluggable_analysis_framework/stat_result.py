@@ -43,6 +43,32 @@ class Err:
 StatResult = Union[Ok, Err]
 
 
+class _NotComputedSentinel:
+    """Value of a stat key the pipeline skipped on purpose: a
+    ``@stat(max_rows=N)`` stat on a frame with more than N rows, or a
+    dependent of one. Distinct from None (a computed null) and from an Err (a
+    failure). Falsy; serializes to the wire as the string ``not computed``
+    (``_json_encode_cell`` falls back to ``str``)."""
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self):
+        return '<NOT_COMPUTED>'
+
+    def __str__(self):
+        return 'not computed'
+
+    def __bool__(self):
+        return False
+
+
+NOT_COMPUTED = _NotComputedSentinel()
+
+
 @dataclass
 class StatError:
     """Error report from stat pipeline execution, with reproduction support."""

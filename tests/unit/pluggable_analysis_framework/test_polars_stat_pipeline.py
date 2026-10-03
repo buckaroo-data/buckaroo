@@ -72,10 +72,11 @@ class TestMaxRows:
         assert null_count._stat_func.max_rows is None
 
     def test_build_column_dag_gates_on_row_count(self):
+        stat_funcs = [f._stat_func for f in ALL_STATS]
         names = lambda funcs: {sf.name for sf in funcs}  # noqa: E731
-        assert {'value_counts', 'most_freq'} <= names(build_column_dag(ALL_STATS, pl.Int64))
-        assert {'value_counts', 'most_freq'} <= names(build_column_dag(ALL_STATS, pl.Int64, row_count=100))
-        gated = names(build_column_dag(ALL_STATS, pl.Int64, row_count=101))
+        assert {'value_counts', 'most_freq'} <= names(build_column_dag(stat_funcs, pl.Int64))
+        assert {'value_counts', 'most_freq'} <= names(build_column_dag(stat_funcs, pl.Int64, row_count=100))
+        gated = names(build_column_dag(stat_funcs, pl.Int64, row_count=101))
         # The gated stat and its dependent drop; everything else stays.
         assert 'value_counts' not in gated
         assert 'most_freq' not in gated

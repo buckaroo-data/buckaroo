@@ -110,7 +110,31 @@ class XorqExecute:
     pass
 
 
-RAW_MARKER_TYPES = (RawSeries, SampledSeries, RawDataFrame, XorqColumn, XorqExpr, XorqExecute)
+class PlColumn:
+    """Marker type: 'give me this column as a polars expression'.
+
+    The polars twin of XorqColumn, used by PolarsStatPipeline's batch-select
+    phase. A stat taking a PlColumn returns a ``pl.Expr`` that the pipeline
+    folds, with every other column's, into one ``frame.select(...)``; the
+    return annotation names the scalar type that lands in the accumulator.
+
+    Unlike an ibis column, ``pl.col(name)`` carries no dtype, so the injected
+    value is an instance of this class: ``name``, ``dtype`` (from the frame's
+    schema, for picking an expression the way a xorq stat branches on
+    ``col.type()``) and ``expr`` (``pl.col(name)``).
+    """
+    __slots__ = ('name', 'dtype', 'expr')
+
+    def __init__(self, name, dtype, expr):
+        self.name = name
+        self.dtype = dtype
+        self.expr = expr
+
+    def __repr__(self):
+        return f"PlColumn({self.name!r}, {self.dtype})"
+
+
+RAW_MARKER_TYPES = (RawSeries, SampledSeries, RawDataFrame, XorqColumn, XorqExpr, XorqExecute, PlColumn)
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +167,8 @@ class StatFunc:
         provides: list of StatKeys this function produces
         needs_raw: True if any parameter is RawSeries/SampledSeries/RawDataFrame
         column_filter: optional predicate on column dtype
+        max_rows: skip this stat (and, by cascade, its dependents) on frames
+            with more rows than this; None = no limit
         quiet: suppress error reporting
         default: fallback value on failure (MISSING = no fallback)
     """
@@ -152,6 +178,7 @@ class StatFunc:
     provides: List[StatKey]
     needs_raw: bool
     column_filter: Optional[Callable] = None
+    max_rows: Optional[int] = None
     quiet: bool = False
     default: Any = field(default_factory=lambda: MISSING)
 
@@ -248,18 +275,23 @@ def _get_requires_from_params(sig: inspect.Signature, hints: dict) -> tuple:
 # @stat decorator
 # ---------------------------------------------------------------------------
 
-def stat(column_filter=None, quiet=False, default=MISSING):
+def stat(column_filter=None, quiet=False, default=MISSING, max_rows=None):
     """Decorator that converts a function into a StatFunc.
 
     The function signature IS the contract:
       - Parameter names/types become `requires`
       - Function name (or each TypedDict / MultipleProvides field) becomes
         `provides`
-      - RawSeries/SampledSeries/Xorq* params indicate raw data needs
+      - RawSeries/SampledSeries/Xorq*/PlColumn params indicate raw data needs
 
     Single-provider stats: name the function the same as the accumulator
     key the rest of the DAG expects. Use ``MultipleProvides`` (a TypedDict
     alias) when one function should write several keys.
+
+    ``max_rows`` gates the stat on the frame's row count: on a frame with
+    more rows it is left out of the column's DAG, its dependents cascade
+    out with it, and the pipeline reports every such key as
+    ``NOT_COMPUTED`` (see ``StatPipeline.process_column``).
 
     Usage::
 
@@ -274,6 +306,10 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         @stat(default=0)
         def safe_ratio(a: int, b: int) -> float:
             return a / b
+
+        @stat(max_rows=10_000_000)
+        def value_counts(ser: RawSeries) -> pd.Series:
+            return ser.value_counts()
 
         class TypingResult(MultipleProvides):
             is_numeric: bool
@@ -296,7 +332,7 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         provides_keys = _get_provides_from_return_type(func.__name__, return_type)
 
         stat_func = StatFunc(name=func.__name__, func=func, requires=requires, provides=provides_keys,
-            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default)
+            needs_raw=needs_raw, column_filter=column_filter, max_rows=max_rows, quiet=quiet, default=default)
 
         # Attach metadata to the function so pipeline can find it
         func._stat_func = stat_func

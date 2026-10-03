@@ -12,7 +12,8 @@ import polars as pl
 
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
 
-from buckaroo.customizations.pl_stats_v2 import (pl_typing_stats, _type, pl_base_summary_stats, pl_numeric_stats, computed_default_summary_stats, pl_histogram_series, histogram, PL_ANALYSIS_V2)
+from buckaroo.customizations.pl_stats_v2 import (pl_typing_stats, _type, pl_ratio_stats, pl_freq_stats, pl_histogram_series, histogram, PL_ANALYSIS_V2, PL_BASE_SUMMARY_STATS, PL_NUMERIC_STATS)
+from buckaroo.pluggable_analysis_framework.polars_stat_pipeline import PolarsStatPipeline
 from buckaroo.customizations.styling import DefaultMainStyling
 
 
@@ -172,12 +173,12 @@ class TestPlTypeComputed:
 
 
 # ============================================================================
-# Tests: pl_base_summary_stats
+# Tests: the base summary stats (length / null_count / min / max / value_counts)
 # ============================================================================
 
 class TestPlBaseSummaryStats:
     def test_numeric_basics(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = PolarsStatPipeline(PL_BASE_SUMMARY_STATS, unit_test=False)
         ser = pl.Series('test', [1, 2, 3, 4, 5])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert errors == []
@@ -188,14 +189,14 @@ class TestPlBaseSummaryStats:
         assert 'mean' not in result
 
     def test_with_nulls(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = PolarsStatPipeline(PL_BASE_SUMMARY_STATS, unit_test=False)
         ser = pl.Series('test', [1, None, 3, None, 5])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['null_count'] == 2
         assert result['length'] == 5
 
     def test_string_column(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = PolarsStatPipeline(PL_BASE_SUMMARY_STATS, unit_test=False)
         ser = pl.Series('test', ['a', 'b', 'c'])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 3
@@ -206,7 +207,7 @@ class TestPlBaseSummaryStats:
 
     def test_bool_column(self):
         """Bool columns should NOT get numeric min/max."""
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = PolarsStatPipeline(PL_BASE_SUMMARY_STATS, unit_test=False)
         ser = pl.Series('test', [True, False, True])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 3
@@ -214,7 +215,7 @@ class TestPlBaseSummaryStats:
         assert math.isnan(result['min'])
 
     def test_value_counts_present(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = PolarsStatPipeline(PL_BASE_SUMMARY_STATS, unit_test=False)
         ser = pl.Series('test', [1, 1, 2, 3])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert isinstance(result['value_counts'], pd.Series)
@@ -222,12 +223,12 @@ class TestPlBaseSummaryStats:
 
 
 # ============================================================================
-# Tests: pl_numeric_stats
+# Tests: the numeric batch stats (mean / std / median)
 # ============================================================================
 
 class TestPlNumericStats:
     def test_int_column(self):
-        pipeline = StatPipeline([pl_numeric_stats], unit_test=False)
+        pipeline = PolarsStatPipeline(PL_NUMERIC_STATS, unit_test=False)
         ser = pl.Series('test', [1, 2, 3, 4, 5])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert errors == []
@@ -236,14 +237,14 @@ class TestPlNumericStats:
         assert isinstance(result['std'], float)
 
     def test_float_column(self):
-        pipeline = StatPipeline([pl_numeric_stats], unit_test=False)
+        pipeline = PolarsStatPipeline(PL_NUMERIC_STATS, unit_test=False)
         ser = pl.Series('test', [1.0, 2.0, 3.0])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['mean'] == 2.0
 
     def test_bool_column_excluded(self):
         """Bool columns are excluded by column_filter — keys absent."""
-        pipeline = StatPipeline([pl_numeric_stats], unit_test=False)
+        pipeline = PolarsStatPipeline(PL_NUMERIC_STATS, unit_test=False)
         ser = pl.Series('test', [True, False, True])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert 'mean' not in result
@@ -252,14 +253,14 @@ class TestPlNumericStats:
 
     def test_string_column_excluded(self):
         """String columns are excluded by column_filter — keys absent."""
-        pipeline = StatPipeline([pl_numeric_stats], unit_test=False)
+        pipeline = PolarsStatPipeline(PL_NUMERIC_STATS, unit_test=False)
         ser = pl.Series('test', ['a', 'b', 'c'])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert 'mean' not in result
 
     def test_all_null_numeric(self):
         """All-null numeric column returns nan, not 0."""
-        pipeline = StatPipeline([pl_numeric_stats], unit_test=False)
+        pipeline = PolarsStatPipeline(PL_NUMERIC_STATS, unit_test=False)
         ser = pl.Series('test', [None, None, None], dtype=pl.Float64)
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert math.isnan(result['mean'])
@@ -273,9 +274,8 @@ class TestPlNumericStats:
 
 class TestPlHistogram:
     def _make_pipeline(self):
-        return StatPipeline([pl_typing_stats, pl_base_summary_stats, pl_numeric_stats,
-            computed_default_summary_stats,
-            pl_histogram_series, histogram], unit_test=False)
+        return PolarsStatPipeline([pl_typing_stats] + PL_BASE_SUMMARY_STATS + PL_NUMERIC_STATS
+            + [pl_ratio_stats, pl_freq_stats, pl_histogram_series, histogram], unit_test=False)
 
     def test_numeric_histogram(self):
         pipeline = self._make_pipeline()
@@ -328,7 +328,7 @@ class TestPlFullPipeline:
         """Pipeline handles a polars DataFrame with mixed column types."""
         df = pl.DataFrame({'ints': [1, 2, 3, 4, 5], 'floats': [1.1, 2.2, 3.3, 4.4, 5.5],
             'strs': ['a', 'b', 'c', 'd', 'e'], 'bools': [True, False, True, False, True]})
-        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        pipeline = PolarsStatPipeline(PL_ANALYSIS_V2, unit_test=False)
         result, errors = pipeline.process_df(df)
         assert len(result) == 4
 
@@ -354,12 +354,12 @@ class TestPlFullPipeline:
     def test_no_errors_on_simple_df(self):
         """Simple DataFrame should produce zero errors."""
         df = pl.DataFrame({'a': [1, 2, 3], 'b': ['x', 'y', 'z']})
-        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        pipeline = PolarsStatPipeline(PL_ANALYSIS_V2, unit_test=False)
         result, errors = pipeline.process_df(df)
         assert errors == []
 
     def test_empty_df(self):
-        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        pipeline = PolarsStatPipeline(PL_ANALYSIS_V2, unit_test=False)
         result, errors = pipeline.process_df(pl.DataFrame({}))
         assert result == {}
         assert errors == []
@@ -368,7 +368,7 @@ class TestPlFullPipeline:
         """Verify _type is correct per column type."""
         df = pl.DataFrame({'ints': [1, 2, 3], 'floats': [1.0, 2.0, 3.0], 'strs': ['a', 'b', 'c'],
             'bools': [True, False, True]})
-        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        pipeline = PolarsStatPipeline(PL_ANALYSIS_V2, unit_test=False)
         result, errors = pipeline.process_df(df)
 
         # Collect _type values
@@ -379,7 +379,7 @@ class TestPlFullPipeline:
         """Duration columns should be classified as 'duration', not 'datetime' (issue #622)."""
         df = pl.DataFrame({'duration': [100, 200, 125, 500], 'ints': [1, 2, 3, 4]},
             schema={'duration': pl.Duration(), 'ints': pl.Int64})
-        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        pipeline = PolarsStatPipeline(PL_ANALYSIS_V2, unit_test=False)
         result, errors = pipeline.process_df(df)
 
         types = {col_stats['_type'] for col_stats in result.values()}
@@ -388,7 +388,7 @@ class TestPlFullPipeline:
 
     def test_duration_column_styled_with_duration_displayer(self):
         """Duration columns should use 'duration' displayer, not 'datetimeLocaleString' (issue #622)."""
-        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        pipeline = PolarsStatPipeline(PL_ANALYSIS_V2, unit_test=False)
         df = pl.DataFrame({"d": [100, 200, 125, 500]}, schema={"d": pl.Duration()})
         result, _ = pipeline.process_df(df)
         col_stats = list(result.values())[0]
@@ -404,7 +404,7 @@ class TestPlFullPipeline:
             'time_col': [dt.time(14, 30), dt.time(9, 15), dt.time(12, 0)],
             'cat_col': pl.Series(['x', 'y', 'z']).cast(pl.Categorical),
             'dec_col': pl.Series(['1.50', '2.75', '3.00']).cast(pl.Decimal(10, 2)), 'bin_col': [b'aa', b'bb', b'cc']})
-        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        pipeline = PolarsStatPipeline(PL_ANALYSIS_V2, unit_test=False)
         result, _ = pipeline.process_df(df)
 
         types = {col_stats['_type'] for col_stats in result.values()}
@@ -415,7 +415,7 @@ class TestPlFullPipeline:
 
     def test_styling_for_new_types(self):
         """Verify correct displayer for each new type."""
-        pipeline = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+        pipeline = PolarsStatPipeline(PL_ANALYSIS_V2, unit_test=False)
 
         test_cases = [
             (pl.Series('t', [dt.time(14, 30)]), 'string'),

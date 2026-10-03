@@ -113,3 +113,44 @@ The pluggable analysis framework runs different functions on analysis functions 
 2. Run all of the ``summary`` methods and build the ``summary_df``
 3. extract table_hints from the ``summary_df``
 
+
+
+Polars stats: the batch select and ``max_rows``
+================================================
+
+``PolarsStatPipeline`` runs polars stats in two phases, the polars twin of
+the xorq pipeline described in :doc:`xorq-stats`:
+
+1. **Batch select.** A ``@stat`` whose only input is a ``PlColumn`` returns
+   a ``pl.Expr``. The pipeline builds one expression per column the stat's
+   ``column_filter`` accepts and runs all of them in a single
+   ``frame.select(...)``, so polars evaluates every column in parallel. The
+   frame can be a ``LazyFrame`` such as ``pl.scan_parquet(...)``.
+
+2. **Per column.** ``RawSeries`` stats (``value_counts``, the histogram
+   bins, typing) and computed stats run through the usual typed DAG with
+   the batch values already in place.
+
+The injected ``PlColumn`` carries ``name``, ``dtype`` and ``expr``
+(``pl.col(name)``); the return annotation is the scalar type that lands in
+the summary:
+
+.. code-block:: python
+
+    from buckaroo.pluggable_analysis_framework.stat_func import stat, PlColumn
+
+    @stat()
+    def empty_count(col: PlColumn) -> int:
+        if col.dtype == pl.String:
+            return (col.expr == "").sum()
+        return pl.lit(0)
+
+A stat that doesn't scale takes ``max_rows``. On a frame with more rows
+than that it is left out of every column's DAG, its dependents cascade out
+with it, and each such key is set to ``NOT_COMPUTED`` (a falsy sentinel
+that reaches the client as the string ``not computed``). The pipeline's
+``gated_keys``, mirrored on ``PlDfStatsV2``, lists the keys skipped on the
+last run. ``value_counts`` in ``PL_ANALYSIS_V2`` is gated at 10,000,000
+rows, which takes ``mode``, the ``*_freq`` keys and ``histogram`` with it;
+``length``, ``null_count``, ``distinct_count``, ``min``/``max``,
+``mean``/``std``/``median`` and the ratios derived from them still run.

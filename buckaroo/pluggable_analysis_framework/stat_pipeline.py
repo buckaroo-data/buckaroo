@@ -17,9 +17,9 @@ from buckaroo.df_util import old_col_new_col
 
 from . import perf_log
 from .col_analysis import ColAnalysis, ErrDict, SDType
-from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqExpr, XorqExecute, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
-from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator
-from .typed_dag import build_typed_dag, build_column_dag, DAGConfigError
+from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqExpr, XorqExecute, PlColumn, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
+from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, NOT_COMPUTED, resolve_accumulator
+from .typed_dag import build_typed_dag, build_column_dag, gated_stat_keys, DAGConfigError
 from .utils import PERVERSE_DF
 
 
@@ -82,6 +82,18 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
     - Multi-value return unpacking (TypedDict returns)
     - Default fallback on error
     """
+    if any(req.type is PlColumn for req in sf.requires):
+        # Batch-phase stat: PolarsStatPipeline fills its key before the
+        # per-column phase. Reaching here with the key missing means the stat
+        # was handed to a pipeline with no batch phase.
+        if all(sk.name in accumulator for sk in sf.provides):
+            return
+        err = DAGConfigError(
+            f"'{sf.name}' takes a PlColumn and only runs in PolarsStatPipeline's batch phase")
+        for sk in sf.provides:
+            accumulator[sk.name] = Err(error=err, stat_func_name=sf.name, column_name=column_name, inputs={})
+        return
+
     # Build kwargs from requires
     kwargs = {}
     has_upstream_err = False
@@ -219,6 +231,9 @@ class StatPipeline:
         # When record_timings is True: list of (column, stat_name, seconds) tuples
         # captured during the most recent process_df call.
         self.timings: List[Tuple[str, str, float]] = []
+        # Keys the row gate (@stat(max_rows=...)) left NOT_COMPUTED on any
+        # column in the most recent process_df call, sorted.
+        self.gated_keys: List[str] = []
         # Set during the unit_test() DAG self-check so its PERVERSE_DF run
         # doesn't emit a perf summary.
         self._suppress_perf_summary = False
@@ -240,25 +255,35 @@ class StatPipeline:
             self._unit_test_result = self.unit_test()
 
     def process_column(self, column_name: str, column_dtype, raw_series=None, sampled_series=None, raw_dataframe=None,
-            initial_stats: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[StatError]]:
+            initial_stats: Optional[Dict[str, Any]] = None, row_count: Optional[int] = None) -> Tuple[Dict[str, Any], List[StatError]]:
         """Process a single column through the stat DAG.
 
-        1. Filters stat functions by column dtype
+        1. Filters stat functions by column dtype and, given ``row_count``,
+           by ``max_rows``
         2. Executes in topological order with Ok/Err accumulator
         3. Returns (plain_dict, errors)
+
+        ``initial_stats`` values go into the accumulator as ``Ok``; a value
+        that is already an ``Ok``/``Err`` (a batch-phase result) goes in as is.
+        Keys the row gate removed, directly or through the cascade, come back
+        in the plain dict as ``NOT_COMPUTED``; nothing is reported for them in
+        ``errors``.
         """
-        # Build column-specific DAG (filters by dtype)
+        # Build column-specific DAG (filters by dtype and row count)
         external = set(self.EXTERNAL_KEYS)
         if initial_stats:
             external |= set(initial_stats.keys())
         column_funcs = build_column_dag(
-            self.all_stat_funcs, column_dtype, external_keys=external)
+            self.all_stat_funcs, column_dtype, external_keys=external, row_count=row_count)
+        gated: List[str] = []
+        if row_count is not None and any(sf.max_rows is not None for sf in self.all_stat_funcs):
+            gated = gated_stat_keys(self.all_stat_funcs, column_dtype, external, column_funcs)
 
         # Execute in order
         accumulator: Dict[str, StatResult] = {}
         if initial_stats:
             for k, v in initial_stats.items():
-                accumulator[k] = Ok(v)
+                accumulator[k] = v if isinstance(v, (Ok, Err)) else Ok(v)
         record_timings = self.record_timings
         for sf in column_funcs:
             if record_timings:
@@ -274,7 +299,10 @@ class StatPipeline:
             for sk in sf.provides:
                 col_key_to_func[sk.name] = sf
 
-        return resolve_accumulator(accumulator, column_name, col_key_to_func)
+        plain, errors = resolve_accumulator(accumulator, column_name, col_key_to_func)
+        for key in gated:
+            plain[key] = NOT_COMPUTED
+        return plain, errors
 
     def process_df(self, df: pd.DataFrame, debug: bool = False,
                    skip_columns=None) -> Tuple[SDType, List[StatError]]:
@@ -310,17 +338,21 @@ class StatPipeline:
 
             col_result, col_errors = self.process_column(column_name=rewritten_col_name, column_dtype=col_dtype,
                 raw_series=ser, sampled_series=ser, raw_dataframe=df,
-                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name})
+                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name},
+                row_count=len(df))
 
             summary[rewritten_col_name] = col_result
             all_errors.extend(col_errors)
 
+        self.gated_keys = collect_gated_keys(summary)
+        self._perf_summary(len(df), summary)
+        return summary, all_errors
+
+    def _perf_summary(self, row_count: int, summary: SDType) -> None:
         if self.record_timings and perf_log.enabled() and not self._suppress_perf_summary:
-            rec = perf_log.PerfRecorder(label=f"stats rows={len(df)} cols={len(summary)}")
+            rec = perf_log.PerfRecorder(label=f"stats rows={row_count} cols={len(summary)}")
             rec.extend_timings("pandas/polars", self.timings)
             rec.summary()
-
-        return summary, all_errors
 
     def unit_test(self) -> Tuple[bool, List[StatError]]:
         """Test the pipeline against PERVERSE_DF."""
@@ -420,6 +452,11 @@ class StatPipeline:
             if err.stat_func is not None:
                 print(err.reproduce_code())
                 print()
+
+
+def collect_gated_keys(summary: SDType) -> List[str]:
+    """The keys left NOT_COMPUTED on any column of ``summary``, sorted."""
+    return sorted({k for col in summary.values() for k, v in col.items() if v is NOT_COMPUTED})
 
 
 def errors_to_errdict(errors: List[StatError]) -> ErrDict:

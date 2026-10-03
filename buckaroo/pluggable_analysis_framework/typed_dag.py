@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import graphlib
 import warnings
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .stat_func import StatFunc, StatKey, RAW_MARKER_TYPES
 
@@ -100,25 +100,34 @@ def build_typed_dag(stat_funcs: List[StatFunc], external_keys: Set[str] = frozen
     return [func_map[name] for name in order if name in func_map]
 
 
-def build_column_dag(all_stat_funcs: List[StatFunc], column_dtype, external_keys: Set[str] = frozenset()) -> List[StatFunc]:
+def row_gated(sf: StatFunc, row_count: Optional[int]) -> bool:
+    """True when ``sf.max_rows`` is set and the frame has more rows than that."""
+    return row_count is not None and sf.max_rows is not None and row_count > sf.max_rows
+
+
+def build_column_dag(all_stat_funcs: List[StatFunc], column_dtype, external_keys: Set[str] = frozenset(),
+        row_count: Optional[int] = None) -> List[StatFunc]:
     """Filter stat functions by column dtype and build DAG.
 
-    Functions whose column_filter rejects this dtype are excluded.
-    Functions whose requirements become unsatisfiable after filtering
-    are also excluded (cascade removal). This is NOT an error — it
-    means the stat doesn't apply to this column type.
+    Functions whose column_filter rejects this dtype are excluded, as are
+    functions whose ``max_rows`` is below ``row_count`` (the row gate; a
+    ``row_count`` of None applies no gate). Functions whose requirements
+    become unsatisfiable after filtering are also excluded (cascade
+    removal). This is NOT an error — it means the stat doesn't apply to
+    this column type, or doesn't run on a frame this size.
 
     Args:
         all_stat_funcs: full set of stat functions
         column_dtype: the dtype of the column being processed
+        row_count: the frame's row count, for ``max_rows`` gating
 
     Returns:
         Topologically sorted list of applicable StatFunc objects
     """
-    # Step 1: filter by column_filter predicate
+    # Step 1: filter by column_filter predicate and the row gate
     candidates = [
         sf for sf in all_stat_funcs
-        if sf.column_filter is None or sf.column_filter(column_dtype)
+        if (sf.column_filter is None or sf.column_filter(column_dtype)) and not row_gated(sf, row_count)
     ]
 
     # Step 2: iteratively remove funcs with unmet deps until stable
@@ -144,3 +153,19 @@ def build_column_dag(all_stat_funcs: List[StatFunc], column_dtype, external_keys
         return []
 
     return build_typed_dag(candidates, external_keys=external_keys)
+
+
+def gated_stat_keys(all_stat_funcs: List[StatFunc], column_dtype, external_keys: Set[str],
+        gated_funcs: List[StatFunc]) -> List[str]:
+    """Keys the row gate removed from one column's DAG.
+
+    ``gated_funcs`` is the DAG ``build_column_dag`` built with a row_count;
+    any key the ungated DAG provides that it doesn't is gated, directly or
+    through the cascade. Sorted, so callers can compare lists.
+    """
+    kept = {sf.name for sf in gated_funcs}
+    keys: Set[str] = set()
+    for sf in build_column_dag(all_stat_funcs, column_dtype, external_keys=external_keys):
+        if sf.name not in kept:
+            keys.update(sk.name for sk in sf.provides)
+    return sorted(keys)
