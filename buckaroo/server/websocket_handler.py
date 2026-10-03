@@ -93,13 +93,24 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # to this client only. Never touches the session, never broadcasts.
             new_search = new_state.get("search_string", "")
             new_search = new_search if isinstance(new_search, str) else ""
-            if self.search_string != new_search:
+            search_changed = self.search_string != new_search
+            if search_changed:
                 self.search_string = new_search
                 if not dataflow_changed:
                     self._send_highlight_overlay(session, reply_seq=state_seq)
 
             # Skip if no effective change to the fields that drive the dataflow.
             if not dataflow_changed:
+                # A client that numbers its changes drops a reply older than
+                # its latest change, so every numbered change needs an answer
+                # (#998). A no-op change that follows a dataflow change would
+                # otherwise leave the earlier reply dropped and nothing
+                # newer to apply. The reply carries the current display
+                # config (with this client's typed-term highlight, if any, so
+                # it isn't wiped) and the change's own state, so a
+                # show_commands toggle isn't undone by the reply.
+                if state_seq is not None and not search_changed:
+                    self._send_state_ack(session, new_state, state_seq)
                 log.debug("buckaroo_state_change no-op session=%s — skipping rebroadcast", self.session_id)
                 return
 
@@ -156,6 +167,46 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 err["details"] = tb
             self.write_message(json.dumps(err))
 
+    def _send_state_ack(self, session, new_state, state_seq):
+        """Answer a numbered ``buckaroo_state_change`` that changed no
+        dataflow field and no search term (#998), so the client's newest
+        change has a reply and an older, dropped one isn't the last word.
+
+        Sends this client the session's current state with ``new_state`` as
+        its ``buckaroo_state``: the session doesn't track ``show_commands``,
+        ``df_display`` or ``sampled``, and the reply must not undo them. When
+        the client has a typed search term the highlight overlay is applied,
+        as it is on every keystroke, so the term stays highlighted.
+        """
+        if not session.df_display_args:
+            return
+        msg = build_state_message(session, search_string=self.search_string, reply_seq=state_seq)
+        msg["buckaroo_state"] = {**new_state, "search_string": self.search_string}
+        if self.search_string:
+            msg["df_display_args"] = self._with_highlight(session.df_display_args, self.search_string)
+        try:
+            self.write_message(json.dumps(msg))
+        except Exception:
+            log.debug("state ack write failed for session=%s", self.session_id)
+
+    @staticmethod
+    def _with_highlight(df_display_args, term):
+        """Deep copy of ``df_display_args`` with ``term`` as the
+        ``highlight_phrase`` of every string column; an empty ``term``
+        clears it."""
+        overlay = copy.deepcopy(df_display_args)
+        for dva in overlay.values():
+            dvc = (dva or {}).get("df_viewer_config") or {}
+            for col in dvc.get("column_config", []) or []:
+                disp = col.get("displayer_args")
+                if not isinstance(disp, dict) or disp.get("displayer") != "string":
+                    continue
+                if term:
+                    disp["highlight_phrase"] = [term]
+                else:
+                    disp.pop("highlight_phrase", None)
+        return overlay
+
     def _send_highlight_overlay(self, session, reply_seq=None):
         """Send this client an ``initial_state`` with highlight_phrase
         injected into every string-column ``displayer_args`` so live-typed
@@ -180,18 +231,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         """
         if not session.df_display_args:
             return
-        term = self.search_string
-        overlay = copy.deepcopy(session.df_display_args)
-        for dva in overlay.values():
-            dvc = (dva or {}).get("df_viewer_config") or {}
-            for col in dvc.get("column_config", []) or []:
-                disp = col.get("displayer_args")
-                if not isinstance(disp, dict) or disp.get("displayer") != "string":
-                    continue
-                if term:
-                    disp["highlight_phrase"] = [term]
-                else:
-                    disp.pop("highlight_phrase", None)
+        overlay = self._with_highlight(session.df_display_args, self.search_string)
 
         # Pass self.search_string so the overlay's buckaroo_state
         # round-trips the typed term back to this client (Codex P1 on

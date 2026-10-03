@@ -752,6 +752,32 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                 os.unlink(f.name)
 
     @tornado.testing.gen_test
+    async def test_state_change_without_seq_stays_silent_on_no_op(self):
+        """A client that sends no ``state_seq`` gets no reply for a change
+        that touches no dataflow field, as before #998."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-state-noseq-noop"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws.read_message()
+
+                ws.write_message(json.dumps({"type": "buckaroo_state_change",
+                    "new_state": {"post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": True, "sampled": False, "search_string": ""}}))
+                with self.assertRaises(asyncio.TimeoutError):
+                    await asyncio.wait_for(ws.read_message(), timeout=0.5)
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
     async def test_ws_request_no_data_loaded(self):
         ws = await tornado.websocket.websocket_connect(
             f"ws://localhost:{self.get_http_port()}/ws/no-data-session")
