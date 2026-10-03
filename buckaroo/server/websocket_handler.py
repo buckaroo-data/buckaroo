@@ -58,9 +58,13 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         if msg_type == "infinite_request":
             self._handle_infinite_request(msg.get("payload_args", {}))
         elif msg_type == "buckaroo_state_change":
-            self._handle_buckaroo_state_change(msg.get("new_state") or {})
+            # state_seq (#998): the client's own counter for this change,
+            # echoed back as reply_seq on the initial_state it gets so it
+            # can drop a reply that an overlapping later change superseded.
+            # Optional; a client that sends none gets none back.
+            self._handle_buckaroo_state_change(msg.get("new_state") or {}, state_seq=msg.get("state_seq"))
 
-    def _handle_buckaroo_state_change(self, new_state):
+    def _handle_buckaroo_state_change(self, new_state, state_seq=None):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
         if not session or session.mode != "buckaroo":
@@ -92,7 +96,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             if self.search_string != new_search:
                 self.search_string = new_search
                 if not dataflow_changed:
-                    self._send_highlight_overlay(session)
+                    self._send_highlight_overlay(session, reply_seq=state_seq)
 
             # Skip if no effective change to the fields that drive the dataflow.
             if not dataflow_changed:
@@ -134,10 +138,13 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # client gets its own search_string re-injected so a
             # dataflow rebuild from one tab doesn't silently clear the
             # search box on another (or on the typing client itself).
+            # Only the originating client gets reply_seq (#998): the
+            # others made no change, so every copy is current for them.
             for client in list(session.ws_clients):
                 try:
                     msg = build_state_message(session,
-                        search_string=getattr(client, "search_string", ""))
+                        search_string=getattr(client, "search_string", ""),
+                        reply_seq=state_seq if client is self else None)
                     client.write_message(json.dumps(msg))
                 except Exception:
                     session.ws_clients.discard(client)
@@ -149,10 +156,16 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 err["details"] = tb
             self.write_message(json.dumps(err))
 
-    def _send_highlight_overlay(self, session):
+    def _send_highlight_overlay(self, session, reply_seq=None):
         """Send this client an ``initial_state`` with highlight_phrase
         injected into every string-column ``displayer_args`` so live-typed
         matches highlight in the grid (#851).
+
+        ``reply_seq`` is the ``state_seq`` of the change being answered
+        (#998). The overlay replaces the client's ``buckaroo_state`` just as
+        a dataflow broadcast does, so it carries the token for the same
+        reason: an overlay for an earlier term must not land after a later
+        dataflow change and put the client's state back.
 
         Per-client because ``search_string`` is per-client — another
         client's term must not bleed into this one's highlight, and a
@@ -184,7 +197,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # round-trips the typed term back to this client (Codex P1 on
         # #854 — without it the JS clears the search box on every
         # keystroke).
-        msg = build_state_message(session, search_string=self.search_string)
+        msg = build_state_message(session, search_string=self.search_string, reply_seq=reply_seq)
         msg["df_display_args"] = overlay
         try:
             self.write_message(json.dumps(msg))
