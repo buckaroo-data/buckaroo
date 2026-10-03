@@ -732,4 +732,25 @@ describe("BuckarooInfiniteWidget — rows-first live search (#998)", () => {
     });
     expect(statusBarProps[statusBarProps.length - 1].dfMeta.filtered_rows).toBe(3);
   });
+
+  it("rows mode: a search with zero matches shows 0, not the unfiltered count", () => {
+    // An empty row response makes the cache call the datasource's fail
+    // callback (verifyResp rejects data.length === 0), so the success-callback
+    // observer never runs. The status bar must still show 0, as main does.
+    const requests: PayloadArgs[] = [];
+    const src = new KeyAwareSmartRowCache((pa) => requests.push(pa));
+    render(
+      <BuckarooInfiniteWidget
+        {...baseProps(src)}
+        buckaroo_state={{ ...initialState, search_string: "zzzz" }}
+        liveSearchMode="rows"
+      />,
+    );
+    expect(requests.length).toBe(1);
+    expect(baseDfMeta.filtered_rows).not.toBe(0);
+    act(() => {
+      src.addPayloadResponse({ key: requests[0], data: [], length: 0 });
+    });
+    expect(statusBarProps[statusBarProps.length - 1].dfMeta.filtered_rows).toBe(0);
+  });
 });

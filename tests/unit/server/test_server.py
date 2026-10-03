@@ -546,6 +546,54 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                 os.unlink(f.name)
 
     @tornado.testing.gen_test
+    async def test_dataflow_rebroadcast_keeps_highlight_phrase_for_active_search(self):
+        """#998 review: a dataflow-triggered ``initial_state`` broadcast
+        while a client has a live ``search_string`` must still carry that
+        client's ``highlight_phrase``. Rows stay filtered by the term, so
+        dropping the highlight leaves the grid half-searched until the next
+        keystroke."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-search-highlight-rebroadcast"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws.read_message()  # initial_state on connect
+
+                def highlight_phrases(msg):
+                    phrases = []
+                    for dva in msg["df_display_args"].values():
+                        dvc = (dva or {}).get("df_viewer_config") or {}
+                        for col in dvc.get("column_config", []) or []:
+                            disp = col.get("displayer_args")
+                            if isinstance(disp, dict) and "highlight_phrase" in disp:
+                                phrases.append(disp["highlight_phrase"])
+                    return phrases
+
+                state = {"post_processing": "", "cleaning_method": "",
+                    "quick_command_args": {}, "df_display": "main",
+                    "show_commands": False, "sampled": False,
+                    "search_string": "Ali"}
+                ws.write_message(json.dumps({"type": "buckaroo_state_change", "new_state": state}))
+                overlay = json.loads(await ws.read_message())
+                self.assertEqual(overlay["type"], "initial_state")
+                self.assertIn(["Ali"], highlight_phrases(overlay))
+
+                # A dataflow field changes while the same search_string stays active.
+                ws.write_message(json.dumps({"type": "buckaroo_state_change",
+                    "new_state": {**state, "quick_command_args": {"search": [""]}}}))
+                broadcast = json.loads(await ws.read_message())
+                self.assertEqual(broadcast["type"], "initial_state")
+                self.assertEqual(broadcast["buckaroo_state"].get("search_string"), "Ali")
+                self.assertIn(["Ali"], highlight_phrases(broadcast))
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
     async def test_search_string_resets_on_load_reuse(self):
         """Codex P1 (#839): session.search_string must be cleared when
         /load replaces data on an existing buckaroo-mode session — else
