@@ -10,7 +10,7 @@ from buckaroo.server.session import SessionManager
 SERVER_START_TIME = time.time()
 
 
-def make_app(sessions: SessionManager | None = None, port: int = 8888, open_browser: bool = True,
+def make_app(sessions: SessionManager | None = None, port: int = 8888, open_browser: bool = False,
         datasets: list | None = None) -> tornado.web.Application:
     """Build the tornado app.
 
@@ -19,7 +19,11 @@ def make_app(sessions: SessionManager | None = None, port: int = 8888, open_brow
     dict, with ``kind`` in ``("pandas", "lazy", "xorq")``. ``None`` /
     ``[]`` means no datasets configured: the page omits the dropdown
     entirely rather than shipping the author's filesystem layout. See
-    issue #811."""
+    issue #811.
+
+    ``open_browser`` is off unless asked for: the CLI passes it from
+    ``--no-browser``, and a test or script building a throwaway server
+    shouldn't open a window per ``/load``."""
     if sessions is None:
         sessions = SessionManager()
 
