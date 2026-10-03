@@ -219,6 +219,10 @@ class StatPipeline:
         # When record_timings is True: list of (column, stat_name, seconds) tuples
         # captured during the most recent process_df call.
         self.timings: List[Tuple[str, str, float]] = []
+        # column -> sorted keys that were not computed because a stat's
+        # max_rows is below the frame's row count (directly or by cascade).
+        # Those keys are None in the column's result dict.
+        self.skipped_stats: Dict[str, List[str]] = {}
         # Set during the unit_test() DAG self-check so its PERVERSE_DF run
         # doesn't emit a perf summary.
         self._suppress_perf_summary = False
@@ -240,19 +244,30 @@ class StatPipeline:
             self._unit_test_result = self.unit_test()
 
     def process_column(self, column_name: str, column_dtype, raw_series=None, sampled_series=None, raw_dataframe=None,
-            initial_stats: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[StatError]]:
+            initial_stats: Optional[Dict[str, Any]] = None,
+            row_count: Optional[int] = None) -> Tuple[Dict[str, Any], List[StatError]]:
         """Process a single column through the stat DAG.
 
-        1. Filters stat functions by column dtype
+        1. Filters stat functions by column dtype, by ``max_rows`` against
+           ``row_count``, and by what ``initial_stats`` already supplies
+           (a stat whose every provided key is supplied is not run)
         2. Executes in topological order with Ok/Err accumulator
         3. Returns (plain_dict, errors)
+
+        Keys gated out by ``max_rows`` are None in the result and recorded
+        in ``self.skipped_stats[column_name]``.
         """
         # Build column-specific DAG (filters by dtype)
-        external = set(self.EXTERNAL_KEYS)
-        if initial_stats:
-            external |= set(initial_stats.keys())
-        column_funcs = build_column_dag(
-            self.all_stat_funcs, column_dtype, external_keys=external)
+        provided = frozenset(initial_stats.keys()) if initial_stats else frozenset()
+        external = set(self.EXTERNAL_KEYS) | provided
+        column_funcs = build_column_dag(self.all_stat_funcs, column_dtype, external_keys=external, row_count=row_count,
+            provided_keys=provided)
+        skipped: List[str] = []
+        if row_count is not None and any(sf.max_rows is not None for sf in self.all_stat_funcs):
+            ungated = build_column_dag(self.all_stat_funcs, column_dtype, external_keys=external,
+                provided_keys=provided)
+            ran = {sk.name for sf in column_funcs for sk in sf.provides}
+            skipped = sorted({sk.name for sf in ungated for sk in sf.provides} - ran)
 
         # Execute in order
         accumulator: Dict[str, StatResult] = {}
@@ -274,16 +289,25 @@ class StatPipeline:
             for sk in sf.provides:
                 col_key_to_func[sk.name] = sf
 
-        return resolve_accumulator(accumulator, column_name, col_key_to_func)
+        plain, errors = resolve_accumulator(accumulator, column_name, col_key_to_func)
+        for key in skipped:
+            plain.setdefault(key, None)
+        if skipped:
+            self.skipped_stats[column_name] = skipped
+        return plain, errors
 
-    def process_df(self, df: pd.DataFrame, debug: bool = False,
-                   skip_columns=None) -> Tuple[SDType, List[StatError]]:
+    def process_df(self, df: pd.DataFrame, debug: bool = False, skip_columns=None,
+            initial_stats: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[SDType, List[StatError]]:
         """Process all columns of a DataFrame.
 
         ``skip_columns`` names columns whose summary stats are supplied
         externally (e.g. via ``init_sd`` — reused from a source dataframe in a
         diff). They still appear in the output with structural metadata, but no
         stat functions run for them, so the column is never scanned.
+
+        ``initial_stats`` maps a column name to stats computed up front for it
+        (e.g. by one batch query over the frame). A stat whose every provided
+        key is supplied this way is not run for that column.
 
         Returns:
             (summary_dict, all_errors) where summary_dict is SDType-compatible
@@ -294,8 +318,10 @@ class StatPipeline:
 
         if self.record_timings:
             self.timings = []
+        self.skipped_stats = {}
 
         skip = set(skip_columns or ())
+        row_count = len(df)
         summary: SDType = {}
         all_errors: List[StatError] = []
 
@@ -307,10 +333,12 @@ class StatPipeline:
                 continue
             ser = df[orig_col_name]
             col_dtype = ser.dtype
+            col_initial: Dict[str, Any] = {'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name}
+            if initial_stats and orig_col_name in initial_stats:
+                col_initial.update(initial_stats[orig_col_name])
 
             col_result, col_errors = self.process_column(column_name=rewritten_col_name, column_dtype=col_dtype,
-                raw_series=ser, sampled_series=ser, raw_dataframe=df,
-                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name})
+                raw_series=ser, sampled_series=ser, raw_dataframe=df, initial_stats=col_initial, row_count=row_count)
 
             summary[rewritten_col_name] = col_result
             all_errors.extend(col_errors)

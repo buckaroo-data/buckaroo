@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import graphlib
 import warnings
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .stat_func import StatFunc, StatKey, RAW_MARKER_TYPES
 
@@ -100,26 +100,36 @@ def build_typed_dag(stat_funcs: List[StatFunc], external_keys: Set[str] = frozen
     return [func_map[name] for name in order if name in func_map]
 
 
-def build_column_dag(all_stat_funcs: List[StatFunc], column_dtype, external_keys: Set[str] = frozenset()) -> List[StatFunc]:
+def build_column_dag(all_stat_funcs: List[StatFunc], column_dtype, external_keys: Set[str] = frozenset(),
+        row_count: Optional[int] = None, provided_keys: Set[str] = frozenset()) -> List[StatFunc]:
     """Filter stat functions by column dtype and build DAG.
 
-    Functions whose column_filter rejects this dtype are excluded.
+    Functions whose column_filter rejects this dtype are excluded, as are
+    functions with ``max_rows`` below ``row_count`` (when given) and
+    functions whose every provided key is in ``provided_keys`` — a value
+    supplied up front (e.g. from a batch pre-pass) stands in for the stat.
     Functions whose requirements become unsatisfiable after filtering
     are also excluded (cascade removal). This is NOT an error — it
-    means the stat doesn't apply to this column type.
+    means the stat doesn't apply to this column type, or to this frame.
 
     Args:
         all_stat_funcs: full set of stat functions
         column_dtype: the dtype of the column being processed
+        external_keys: keys satisfied outside the DAG (no provider needed)
+        row_count: rows in the frame, for ``max_rows`` gating; None = no gating
+        provided_keys: keys whose values are supplied up front for this column
 
     Returns:
         Topologically sorted list of applicable StatFunc objects
     """
-    # Step 1: filter by column_filter predicate
+    # Step 1: filter by column_filter predicate, max_rows, and pre-supplied keys
     candidates = [
         sf for sf in all_stat_funcs
-        if sf.column_filter is None or sf.column_filter(column_dtype)
+        if (sf.column_filter is None or sf.column_filter(column_dtype))
+        and not (sf.max_rows is not None and row_count is not None and row_count > sf.max_rows)
+        and not (provided_keys and all(sk.name in provided_keys for sk in sf.provides))
     ]
+    external_keys = set(external_keys) | set(provided_keys)
 
     # Step 2: iteratively remove funcs with unmet deps until stable
     prev_count = -1

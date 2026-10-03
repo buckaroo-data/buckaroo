@@ -817,6 +817,15 @@ class TestInitialStats:
         assert result['length'] == 10
         assert result['distinct_per'] == 3 / 10
 
+    def test_partially_provided_stat_still_runs(self):
+        """freq_stats provides most_freq and freq_count; supplying only one
+        of them leaves the stat in the DAG and its result wins."""
+        pipeline = StatPipeline([freq_stats], unit_test=False)
+        ser = pd.Series([1, 1, 2])
+        result, _ = pipeline.process_column('x', ser.dtype, raw_series=ser, initial_stats={'most_freq': 99})
+        assert result['most_freq'] == 1
+        assert result['freq_count'] == 2
+
     def test_process_df_per_column_initial_stats(self):
         pipeline = StatPipeline([length, null_count, nan_per], unit_test=False)
         df = pd.DataFrame({'a': [1, 2, None, 4], 'b': [None, 2, None, None]})

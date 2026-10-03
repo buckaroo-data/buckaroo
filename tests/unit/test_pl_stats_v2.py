@@ -8,11 +8,12 @@ from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
+import pytest
 import polars as pl
 
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
 
-from buckaroo.customizations.pl_stats_v2 import (pl_typing_stats, _type, pl_base_summary_stats, pl_numeric_stats, computed_default_summary_stats, pl_histogram_series, histogram, PL_ANALYSIS_V2)
+from buckaroo.customizations.pl_stats_v2 import (pl_typing_stats, _type, pl_scalar_stats, pl_distinct_stats, pl_value_counts_stats, pl_numeric_stats, pl_computed_summary_stats, pl_freq_stats, pl_histogram_series, histogram, PL_ANALYSIS_V2)
 from buckaroo.customizations.styling import DefaultMainStyling
 
 
@@ -172,12 +173,12 @@ class TestPlTypeComputed:
 
 
 # ============================================================================
-# Tests: pl_base_summary_stats
+# Tests: pl_scalar_stats / pl_value_counts_stats
 # ============================================================================
 
 class TestPlBaseSummaryStats:
     def test_numeric_basics(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_scalar_stats, pl_value_counts_stats], unit_test=False)
         ser = pl.Series('test', [1, 2, 3, 4, 5])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert errors == []
@@ -188,14 +189,14 @@ class TestPlBaseSummaryStats:
         assert 'mean' not in result
 
     def test_with_nulls(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_scalar_stats, pl_value_counts_stats], unit_test=False)
         ser = pl.Series('test', [1, None, 3, None, 5])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['null_count'] == 2
         assert result['length'] == 5
 
     def test_string_column(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_scalar_stats, pl_value_counts_stats], unit_test=False)
         ser = pl.Series('test', ['a', 'b', 'c'])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 3
@@ -206,7 +207,7 @@ class TestPlBaseSummaryStats:
 
     def test_bool_column(self):
         """Bool columns should NOT get numeric min/max."""
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_scalar_stats, pl_value_counts_stats], unit_test=False)
         ser = pl.Series('test', [True, False, True])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 3
@@ -214,7 +215,7 @@ class TestPlBaseSummaryStats:
         assert math.isnan(result['min'])
 
     def test_value_counts_present(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_scalar_stats, pl_value_counts_stats], unit_test=False)
         ser = pl.Series('test', [1, 1, 2, 3])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert isinstance(result['value_counts'], pd.Series)
@@ -273,9 +274,9 @@ class TestPlNumericStats:
 
 class TestPlHistogram:
     def _make_pipeline(self):
-        return StatPipeline([pl_typing_stats, pl_base_summary_stats, pl_numeric_stats,
-            computed_default_summary_stats,
-            pl_histogram_series, histogram], unit_test=False)
+        return StatPipeline([pl_typing_stats, pl_scalar_stats, pl_distinct_stats, pl_value_counts_stats,
+            pl_numeric_stats, pl_computed_summary_stats, pl_freq_stats, pl_histogram_series, histogram],
+            unit_test=False)
 
     def test_numeric_histogram(self):
         pipeline = self._make_pipeline()
@@ -490,6 +491,40 @@ class TestPlDfStatsV2Prepass:
         assert stats.sdf['b']['min'] == 1.5
         assert math.isnan(stats.sdf['c']['min'])
 
+    def test_small_fixture_matches_todays_values(self):
+        """Values captured from PlDfStatsV2 on main at 992fdb3 for this fixture."""
+        from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+        stats = PlDfStatsV2(_prepass_fixture_df(), PL_ANALYSIS_V2)
+        assert stats.errs == {}
+        sdf = stats.sdf
+        expected = {
+            'a': {'_type': 'integer', 'length': 8, 'null_count': 1, 'min': 1, 'max': 8, 'mean': 4.0,
+                'std': pytest.approx(2.449489742783178), 'median': 5.0, 'distinct_count': 4, 'empty_count': 0,
+                'unique_count': 2, 'most_freq': 5, 'mode': 5, 'nan_per': 0.125, 'distinct_per': 0.5,
+                'non_null_count': 7, 'histogram_bins': [2.0, 2.3, 2.6, 2.9, 3.2, 3.5, 3.8, 4.1, 4.4,
+                    pytest.approx(4.7), 5.0]},
+            'b': {'_type': 'float', 'length': 8, 'null_count': 1, 'min': 1.5, 'max': 8.0,
+                'mean': pytest.approx(4.857142857142857), 'std': pytest.approx(2.340126166724879), 'median': 4.5,
+                'distinct_count': 6, 'empty_count': 0, 'unique_count': 5, 'most_freq': 4.5, 'mode': 4.5,
+                'nan_per': 0.125, 'distinct_per': 0.75, 'non_null_count': 7},
+            'c': {'_type': 'string', 'length': 8, 'null_count': 1, 'distinct_count': 4, 'empty_count': 2,
+                'empty_per': 0.25, 'unique_count': 2, 'most_freq': 'a', 'mode': 'a', 'nan_per': 0.125,
+                'distinct_per': 0.5, 'non_null_count': 7, 'histogram_bins': []},
+            'd': {'_type': 'boolean', 'length': 8, 'null_count': 1, 'distinct_count': 2, 'empty_count': 0,
+                'unique_count': 0, 'most_freq': True, 'mode': True, 'nan_per': 0.125, 'distinct_per': 0.25,
+                'non_null_count': 7, 'histogram_bins': []},
+        }
+        for col, exp in expected.items():
+            for key, val in exp.items():
+                assert sdf[col][key] == val, (col, key, sdf[col][key])
+        for col in ('c', 'd'):
+            assert math.isnan(sdf[col]['min']) and math.isnan(sdf[col]['max'])
+            assert 'mean' not in sdf[col] and 'std' not in sdf[col] and 'median' not in sdf[col]
+        assert sdf['a']['value_counts'].to_dict() == {1: 1, 2: 2, 5: 3, 8: 1}
+        assert sdf['c']['value_counts'].to_dict() == {'': 2, 'a': 3, 'b': 1, 'c': 1}
+        assert sdf['a']['histogram'][0] == {'cat_pop': 38.0, 'name': '5'}
+        assert sdf['b']['histogram'][1] == {'name': '2.5–2.95', 'population': 20.0}
+
     def test_temporal_min_max(self):
         """The pre-pass gives temporal columns a real min/max (today: nan)."""
         from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
@@ -500,6 +535,29 @@ class TestPlDfStatsV2Prepass:
         assert stats.sdf['a']['max'] == datetime(2020, 1, 7)
         assert stats.sdf['a']['mode'] == datetime(2020, 1, 1)
         assert stats.sdf['a']['null_count'] == 1
+
+    def test_prepass_matches_per_series_path(self):
+        """Running PL_ANALYSIS_V2 per series with no pre-pass gives the same
+        values, key by key, as PlDfStatsV2 with the pre-pass."""
+        from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+        df = _prepass_fixture_df().with_columns(
+            pl.Series('dates', [datetime(2020, 1, d) for d in (3, 1, 7, 1, 2, 2, 2, 5)]))
+        per_series, errors = StatPipeline(PL_ANALYSIS_V2, unit_test=False).process_df(df)
+        assert errors == []
+        with_prepass = PlDfStatsV2(df, PL_ANALYSIS_V2).sdf
+        assert set(per_series) == set(with_prepass)
+        for col in per_series:
+            assert set(per_series[col]) == set(with_prepass[col]), col
+            for key, val in per_series[col].items():
+                got = with_prepass[col][key]
+                if key == 'value_counts':
+                    assert val.to_dict() == got.to_dict(), (col, key)
+                elif key == 'histogram_args':
+                    assert bool(val) == bool(got), (col, key)
+                elif isinstance(val, float) and math.isnan(val):
+                    assert math.isnan(got), (col, key)
+                else:
+                    assert val == got, (col, key, val, got)
 
     def test_value_counts_gated_above_max_rows(self, monkeypatch):
         """Above max_rows, value_counts and everything that needs it (mode,
