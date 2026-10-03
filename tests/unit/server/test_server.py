@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sys
@@ -631,6 +632,148 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                     "B's broadcast copy must carry B's empty search_string, not A's")
                 ws_a.close()
                 ws_b.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_state_change_seq_echoed_to_originating_client_only(self):
+        """#998: a ``buckaroo_state_change`` that carries ``state_seq`` gets
+        that value back as ``reply_seq`` on the ``initial_state`` sent to
+        the client that made the change. The broadcast copy another
+        client receives carries no ``reply_seq``, so that client applies
+        it as it does any unsolicited state push."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-state-seq"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+
+                ws_a = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                first = json.loads(await ws_a.read_message())
+                self.assertNotIn("reply_seq", first, "a fresh connection's initial_state is unsolicited")
+                ws_b = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws_b.read_message()
+
+                ws_a.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "state_seq": 7,
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {"sort": "name"},
+                        "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": ""}}))
+                msg_a = json.loads(await ws_a.read_message())
+                msg_b = json.loads(await ws_b.read_message())
+                self.assertEqual(msg_a["type"], "initial_state")
+                self.assertEqual(msg_a.get("reply_seq"), 7)
+                self.assertEqual(msg_b["type"], "initial_state")
+                self.assertNotIn("reply_seq", msg_b)
+                ws_a.close()
+                ws_b.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_state_change_seq_echoed_on_highlight_overlay(self):
+        """#998: the per-client highlight overlay answers a state change
+        too, so it carries ``reply_seq`` like a dataflow broadcast does.
+        Otherwise an overlay for an earlier term could land after a later
+        dataflow change and put the client's ``buckaroo_state`` back."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-state-seq-overlay"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws.read_message()
+
+                ws.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "state_seq": 3,
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": "Alice"}}))
+                overlay = json.loads(await ws.read_message())
+                self.assertEqual(overlay["type"], "initial_state")
+                self.assertEqual(overlay.get("reply_seq"), 3)
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_state_change_seq_answered_for_no_op_change(self):
+        """#998: a ``buckaroo_state_change`` with a ``state_seq`` is always
+        answered, even when it changes no dataflow field. The client drops
+        a reply older than its latest seq, so when a dataflow change (seq 1)
+        is followed at once by a ``show_commands`` toggle (seq 2) the seq-1
+        reply is dropped as stale. Without a reply for seq 2 the new
+        df_display_args / df_data_dict never reach the client. The reply
+        carries the change's own ``buckaroo_state`` so the toggle isn't undone."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-state-seq-noop"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws.read_message()
+
+                base = {"post_processing": "", "cleaning_method": "",
+                    "quick_command_args": {"search": ["Al"]}, "df_display": "main",
+                    "show_commands": False, "sampled": False, "search_string": ""}
+                ws.write_message(json.dumps({"type": "buckaroo_state_change",
+                    "state_seq": 1, "new_state": base}))
+                ws.write_message(json.dumps({"type": "buckaroo_state_change",
+                    "state_seq": 2, "new_state": {**base, "show_commands": True}}))
+
+                first = json.loads(await ws.read_message())
+                second = json.loads(await asyncio.wait_for(ws.read_message(), timeout=5))
+                self.assertEqual(first.get("reply_seq"), 1)
+                self.assertEqual(second["type"], "initial_state")
+                self.assertEqual(second.get("reply_seq"), 2)
+                self.assertTrue(second["buckaroo_state"]["show_commands"])
+                self.assertEqual(second["df_display_args"], first["df_display_args"])
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_state_change_without_seq_stays_silent_on_no_op(self):
+        """A client that sends no ``state_seq`` gets no reply for a change
+        that touches no dataflow field, as before #998."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-state-noseq-noop"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws.read_message()
+
+                ws.write_message(json.dumps({"type": "buckaroo_state_change",
+                    "new_state": {"post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": True, "sampled": False, "search_string": ""}}))
+                with self.assertRaises(asyncio.TimeoutError):
+                    await asyncio.wait_for(ws.read_message(), timeout=0.5)
+                ws.close()
             finally:
                 os.unlink(f.name)
 

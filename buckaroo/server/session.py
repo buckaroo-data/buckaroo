@@ -81,7 +81,7 @@ this field is the runtime escape hatch."""
 
 
 def build_state_message(session: "SessionState", metadata: dict | None = None,
-                         search_string: str = "") -> dict:
+                         search_string: str = "", reply_seq: int | None = None) -> dict:
     """Build the full ``initial_state`` WebSocket payload from a session.
 
     Args:
@@ -94,6 +94,14 @@ def build_state_message(session: "SessionState", metadata: dict | None = None,
             search box. The session itself never owns this value; callers
             must pass the right value per recipient (typically
             ``handler.search_string``).
+        reply_seq: The ``state_seq`` of the ``buckaroo_state_change`` this
+            message answers (#998). Set only on the copy sent to the client
+            that made the change; that client drops a reply older than its
+            latest change so an overlapping rerun can't put its
+            ``buckaroo_state`` back. Omitted (``None``) for the broadcast
+            copies other clients get, the ``/load`` push and a fresh
+            connection, which the client applies unconditionally. Optional
+            on the wire, so it doesn't bump ``PROTOCOL_VERSION``.
 
     Returns:
         A dict ready to be JSON-serialised and sent to WebSocket clients.
@@ -102,6 +110,8 @@ def build_state_message(session: "SessionState", metadata: dict | None = None,
         "metadata": metadata if metadata is not None else session.metadata,
         "prompt": session.prompt, "df_display_args": session.df_display_args, "df_data_dict": session.df_data_dict,
         "df_meta": session.df_meta, "mode": session.mode}
+    if reply_seq is not None:
+        msg["reply_seq"] = reply_seq
     if session.mode == "buckaroo":
         # Per-client search_string overlay (#851 Codex P1): the snapshot
         # on the session is search-agnostic; we re-inject the recipient's
