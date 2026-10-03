@@ -20,5 +20,7 @@ export interface BuckarooState {
     post_processing: string | false;
     df_display: string;
     show_commands: string | false;
+    search_string?: string;
 }
+export type LiveSearchMode = "dataflow" | "rows";
 export type BKeys = "sampled" | "cleaning_method" | "post_processing" | "df_display";
