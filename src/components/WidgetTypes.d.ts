@@ -3,8 +3,6 @@ export interface DFMeta {
     columns: number;
     filtered_rows: number;
     rows_shown: number;
-    stats_sampled?: boolean;
-    stats_rows?: number;
 }
 export interface BuckarooOptions {
     sampled: string[];
