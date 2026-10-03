@@ -31,22 +31,8 @@ import pytest
 pl = pytest.importorskip("polars")
 
 from buckaroo.pluggable_analysis_framework.stat_func import RawSeries, XorqColumn  # noqa: E402
-
-
-def load_project_stat_klasses(*args, **kwargs):
-    # Imported per call so that a missing buckaroo.server.project_loading
-    # fails each test as an ImportError instead of aborting collection of
-    # the whole unit suite.
-    from buckaroo.server import project_loading
-
-    return project_loading.load_project_stat_klasses(*args, **kwargs)
-
-
-def load_project_post_processing_klasses(*args, **kwargs):
-    from buckaroo.server import project_loading
-
-    return project_loading.load_project_post_processing_klasses(*args, **kwargs)
-
+from buckaroo.server.project_loading import (  # noqa: E402
+    load_project_post_processing_klasses, load_project_stat_klasses)
 
 XORQ_STAT = "def compute(col):\n    return col.count()\n"
 POLARS_STAT = (

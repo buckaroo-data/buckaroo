@@ -42,12 +42,27 @@ class PolarsServerSampling(PLSampling):
 
 
 class PolarsServerDataflow(CustomizableDataflow[pl.DataFrame]):
-    """Headless polars dataflow matching ``PolarsBuckarooInfiniteWidget``."""
+    """Headless polars dataflow matching ``PolarsBuckarooInfiniteWidget``.
+
+    ``extra_klasses`` is an optional list of additional ``@stat()``-decorated
+    functions or ``ColAnalysis`` subclasses folded into ``analysis_klasses``
+    at the per-instance level, the same extension point
+    ``XorqServerDataflow`` has. ``LoadHandler.post`` uses it for the
+    project-authored klasses under ``project_root`` (#994); the built-ins
+    are kept first so collisions resolve to the built-in.
+    """
     analysis_klasses = local_analysis_klasses
     autocleaning_klass = PandasAutocleaning
     autoclean_conf = tuple([NoCleaningConfPl])
     DFStatsClass = PlDfStatsV2
     sampling_klass = PolarsServerSampling
+
+    def __init__(self, df, *args, extra_klasses=None, **kwargs):
+        if extra_klasses:
+            # Per-instance override — the class-level list is left untouched
+            # so other sessions don't inherit one project's klasses.
+            self.analysis_klasses = list(local_analysis_klasses) + list(extra_klasses)
+        super().__init__(df, *args, **kwargs)
 
     def _df_to_obj(self, df):
         # Matches PolarsBuckarooWidget._df_to_obj — pandas frames pass
@@ -89,9 +104,10 @@ def get_metadata_polars(df: pl.DataFrame, path: str) -> dict:
 
 
 def create_polars_dataflow(df, column_config_overrides=None, extra_grid_config=None,
-        init_sd: InitSD | None = None) -> PolarsServerDataflow:
+        init_sd: InitSD | None = None, extra_klasses=None) -> PolarsServerDataflow:
     return PolarsServerDataflow(df, column_config_overrides=column_config_overrides,
-        extra_grid_config=extra_grid_config, init_sd=init_sd, skip_main_serial=True)
+        extra_grid_config=extra_grid_config, init_sd=init_sd, extra_klasses=extra_klasses,
+        skip_main_serial=True)
 
 
 def handle_infinite_request_buckaroo_polars(
