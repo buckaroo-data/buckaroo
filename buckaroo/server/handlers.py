@@ -11,6 +11,7 @@ import tornado.escape
 import tornado.web
 
 from buckaroo.server.data_loading import (load_file, get_metadata, get_display_state, create_dataflow, get_buckaroo_display_state, load_file_lazy, get_metadata_lazy, get_display_state_lazy)
+from buckaroo.server import project_loading
 from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
@@ -308,6 +309,16 @@ class LoadHandler(tornado.web.RequestHandler):
         column_config_overrides = body.get("column_config_overrides")
         extra_grid_config = body.get("extra_grid_config")
         init_sd = body.get("init_sd")
+        # Everything the dataflow is constructed with besides the frame and
+        # the klasses, stored on the session so /reload_expr rebuilds with
+        # the same config (#957, #994).
+        dataflow_kwargs = {
+            "column_config_overrides": column_config_overrides,
+            "extra_grid_config": extra_grid_config, "init_sd": init_sd}
+        # Project klasses under <project_root> load for backend="polars"
+        # (stats/polars, post_processing/polars, display — #994). Stored for
+        # every backend so /reload_expr can report what the session has.
+        project_root = body.get("project_root")
 
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, path)
@@ -318,6 +329,8 @@ class LoadHandler(tornado.web.RequestHandler):
         session.backend = backend
         session.xorq_dataflow = None
         session.expr = None
+        session.project_root = project_root
+        session.dataflow_kwargs = dataflow_kwargs
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
@@ -338,9 +351,10 @@ class LoadHandler(tornado.web.RequestHandler):
             if mode == "buckaroo":
                 if backend == "polars":
                     from buckaroo.server.data_loading_polars import create_polars_dataflow
-                    dataflow = create_polars_dataflow(file_obj,
-                        column_config_overrides=column_config_overrides,
-                        extra_grid_config=extra_grid_config, init_sd=init_sd)
+                    extra_klasses = (project_loading.load_project_polars_klasses(project_root)
+                        if project_root else [])
+                    dataflow = create_polars_dataflow(file_obj, extra_klasses=extra_klasses,
+                        **dataflow_kwargs)
                 else:
                     dataflow = create_dataflow(file_obj,
                         column_config_overrides=column_config_overrides,
@@ -545,10 +559,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
                     # through its own shared tmp file.
                     with perf_log.perf_span("firstpull.cache_heal", session=session_id) as span:
                         span.set_attr(snapshots_written=len(xorq_loading.heal_missing_snapshots(expr)))
-                extra_klasses = (
-                    xorq_loading.load_project_stat_klasses(project_root)
-                    + xorq_loading.load_project_post_processing_klasses(project_root)
-                    + xorq_loading.load_project_display_klasses(project_root)
+                extra_klasses = (xorq_loading.load_project_xorq_klasses(project_root)
                     if project_root else [])
                 with perf_log.perf_span("firstpull.dataflow_construct", session=session_id):
                     xorq_dataflow = xorq_loading.XorqServerDataflow(
@@ -794,21 +805,24 @@ class LoadCompareHandler(tornado.web.RequestHandler):
 
 
 class ReloadExprHandler(tornado.web.RequestHandler):
-    """POST /reload_expr/<session_id> — refresh post-processing and stat
-    klasses on a live xorq session without restarting the server.
+    """POST /reload_expr/<session_id> (alias /reload/<session_id>) — refresh
+    the project klasses on a live xorq or polars session without restarting
+    the server.
 
-    Re-scans ``<project_root>/stats/``, ``<project_root>/post_processing/``
-    and the display klasses for the session's stored project root, rebuilds
-    the ``XorqServerDataflow`` with the fresh klass list, and broadcasts the
-    updated ``command_config`` and ``buckaroo_options`` to all open WebSocket
-    clients. The expression is reused as-is (the build dir is not re-read),
-    and the rebuild replays the session's stored ``/load_expr`` config
-    (``SessionState.dataflow_kwargs``) — so stats already in the
+    Re-scans the session's stored project root (``<project_root>/stats/``,
+    ``post_processing/`` and ``display/`` for xorq; ``stats/polars/``,
+    ``post_processing/polars/`` and ``display/`` for polars — #994), rebuilds
+    the dataflow with the fresh klass list, and broadcasts the updated
+    ``command_config`` and ``buckaroo_options`` to all open WebSocket
+    clients. The data is reused as-is (the build dir is not re-read, the
+    file is not reloaded), and the rebuild replays the session's stored
+    load config (``SessionState.dataflow_kwargs``) — so stats already in the
     ``cache_storage_path`` store are cache hits, and column overrides,
     extra grid config, init_sd and skip_stat_columns survive the reload.
 
-    Returns 404 when the session does not exist, 400 when it is not a xorq
-    session or has no project_root recorded, 501 when xorq is not installed."""
+    Returns 404 when the session does not exist, 400 when it is a pandas
+    session or has no project_root recorded, 501 when a xorq session's
+    xorq is not installed."""
 
     async def post(self, session_id):
         sessions = self.application.settings["sessions"]
@@ -819,40 +833,46 @@ class ReloadExprHandler(tornado.web.RequestHandler):
                 "message": f"Session not found: {session_id}"})
             return
 
-        if session.backend != "xorq" or session.xorq_dataflow is None:
+        is_xorq = session.backend == "xorq" and session.xorq_dataflow is not None
+        is_polars = session.backend == "polars" and session.dataflow is not None
+        if not (is_xorq or is_polars):
             self.set_status(400)
             self.write({"error_code": "not_xorq_session",
-                "message": "Session is not a xorq session"})
+                "message": "Session is not a xorq or polars session"})
             return
 
         if not session.project_root:
             self.set_status(400)
             self.write({"error_code": "no_project_root",
-                "message": "Session has no project_root — pass project_root to /load_expr first"})
+                "message": "Session has no project_root — pass project_root to /load_expr or /load first"})
             return
 
-        try:
-            from buckaroo.server import xorq_loading
-        except ImportError:
-            self.set_status(501)
-            self.write({"error_code": "xorq_not_installed",
-                "message": "xorq is not installed on this server. "
-                "Install with `pip install buckaroo[xorq]`."})
-            return
+        if is_xorq:
+            try:
+                from buckaroo.server import xorq_loading
+            except ImportError:
+                self.set_status(501)
+                self.write({"error_code": "xorq_not_installed",
+                    "message": "xorq is not installed on this server. "
+                    "Install with `pip install buckaroo[xorq]`."})
+                return
 
         try:
-            extra_klasses = (
-                xorq_loading.load_project_stat_klasses(session.project_root)
-                + xorq_loading.load_project_post_processing_klasses(session.project_root)
-                + xorq_loading.load_project_display_klasses(session.project_root))
-            xorq_dataflow = xorq_loading.XorqServerDataflow(
-                session.expr, skip_main_serial=True, extra_klasses=extra_klasses,
-                **session.dataflow_kwargs)
+            if is_xorq:
+                extra_klasses = xorq_loading.load_project_xorq_klasses(session.project_root)
+                dataflow = xorq_loading.XorqServerDataflow(
+                    session.expr, skip_main_serial=True, extra_klasses=extra_klasses,
+                    **session.dataflow_kwargs)
+            else:
+                from buckaroo.server.data_loading_polars import create_polars_dataflow
+                extra_klasses = project_loading.load_project_polars_klasses(session.project_root)
+                dataflow = create_polars_dataflow(session.df, extra_klasses=extra_klasses,
+                    **session.dataflow_kwargs)
         except Exception:
             tb = traceback.format_exc()
             log.error("reload_expr error session=%s: %s", session_id, tb)
             resp: dict = {"error_code": "reload_expr_error",
-                "message": "Failed to reload xorq klasses"}
+                "message": "Failed to reload project klasses"}
             if _BUCKAROO_DEBUG:
                 resp["details"] = tb
             self.set_status(500)
@@ -866,14 +886,17 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         # previous selection.
         bs = session.buckaroo_state
         if bs.get("post_processing"):
-            xorq_dataflow.post_processing_method = bs["post_processing"]
+            dataflow.post_processing_method = bs["post_processing"]
         if bs.get("cleaning_method"):
-            xorq_dataflow.cleaning_method = bs["cleaning_method"]
+            dataflow.cleaning_method = bs["cleaning_method"]
         if bs.get("quick_command_args"):
-            xorq_dataflow.quick_command_args = bs["quick_command_args"]
+            dataflow.quick_command_args = bs["quick_command_args"]
 
-        refreshed = get_buckaroo_display_state(xorq_dataflow)
-        session.xorq_dataflow = xorq_dataflow
+        refreshed = get_buckaroo_display_state(dataflow)
+        if is_xorq:
+            session.xorq_dataflow = dataflow
+        else:
+            session.dataflow = dataflow
         session.df_display_args = refreshed["df_display_args"]
         session.df_data_dict = refreshed["df_data_dict"]
         session.df_meta = refreshed["df_meta"]

@@ -31,6 +31,7 @@ def make_app(sessions: SessionManager | None = None, port: int = 8888, open_brow
             (r"/load", LoadHandler),
             (r"/load_expr", LoadExprHandler),
             (r"/reload_expr/([^/]+)", ReloadExprHandler),
+            (r"/reload/([^/]+)", ReloadExprHandler),
             (r"/load_compare", LoadCompareHandler),
             (r"/s/([^/]+)", SessionPageHandler),
             (r"/ws/([^/]+)", DataStreamHandler),

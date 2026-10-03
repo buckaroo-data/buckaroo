@@ -701,7 +701,7 @@ def _write_polars_project(root, stat_source="def compute(ser): return ser.len()\
     with open(os.path.join(root, "post_processing", "polars", "bar.py"), "w") as f:
         f.write("def process(df): return df.head(2)\n")
     with open(os.path.join(root, "display", "my_display.py"), "w") as f:
-        f.write("class MyDisplay(ColAnalysis):\n    df_display_name = 'my_display'\n")
+        f.write("class MyDisplay(DefaultMainStyling):\n    df_display_name = 'my_display'\n")
 
 
 def _stat_for(session, orig_col_name):
@@ -785,6 +785,18 @@ class TestLoadPolarsProjectRoot(tornado.testing.AsyncHTTPTestCase):
         session = await self._load("pr-display")
         self.assertIn("my_display", session.buckaroo_options["df_display"])
         self.assertIn("my_display", session.df_display_args)
+
+    @tornado.testing.gen_test
+    async def test_load_polars_without_project_root_keeps_defaults(self):
+        _write_polars_project(self.project_root)
+        sid = "pr-none"
+        body = {"session": sid, "path": self.csv_path, "mode": "buckaroo", "backend": "polars"}
+        resp = await _async_fetch(self.get_http_port(), "/load", method="POST", body=json.dumps(body))
+        self.assertEqual(resp.code, 200)
+        session = self._app.settings["sessions"].get(sid)
+        self.assertIsNone(session.project_root)
+        self.assertEqual(session.buckaroo_options["post_processing"], [""])
+        self.assertNotIn("foo", _stat_for(session, "age"))
 
     @tornado.testing.gen_test
     async def test_reload_expr_polars_picks_up_edited_stat(self):

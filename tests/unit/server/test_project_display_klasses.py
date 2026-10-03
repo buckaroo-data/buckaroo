@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from buckaroo.server.xorq_loading import load_project_display_klasses
+from buckaroo.server.project_loading import load_project_display_klasses
 
 MINIMAL_DISPLAY = (
     "class MyDisplay(ColAnalysis):\n"
