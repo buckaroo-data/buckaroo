@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 import polars as pl
+import pytest
 
 from buckaroo.pluggable_analysis_framework.stat_func import stat, PlColumn, RawSeries
 from buckaroo.pluggable_analysis_framework.stat_result import NOT_COMPUTED
@@ -32,6 +33,11 @@ def null_count(col: PlColumn) -> int:
 @stat()
 def length(col: PlColumn) -> int:
     return col.expr.len()
+
+
+@stat()
+def distinct_count(col: PlColumn) -> int:
+    return col.expr.n_unique()
 
 
 @stat(column_filter=is_numeric_not_bool)
@@ -145,6 +151,30 @@ class TestPolarsBatchPhase:
         assert result['null_count'] is None
         assert len(errors) == 1
         assert 'PolarsStatPipeline' in str(errors[0].error)
+
+    @pytest.mark.parametrize('weird_name', ['^a$', '*', '^.*$'])
+    def test_regex_like_column_names_do_not_corrupt_other_columns(self, weird_name):
+        """pl.col('^a$') is a regex selector that can expand to any number of
+        outputs; the batch select must address columns literally."""
+        df = pl.DataFrame({weird_name: [1, 2, 2], 'b': [1, 2, 3]})
+        pipeline = PolarsStatPipeline([null_count, length, distinct_count, non_null_count], unit_test=False)
+        sd, errors = pipeline.process_df(df)
+        assert errors == []
+        assert sd['a']['orig_col_name'] == weird_name
+        assert (sd['a']['length'], sd['a']['null_count'], sd['a']['distinct_count']) == (3, 0, 2)
+        assert (sd['b']['length'], sd['b']['null_count'], sd['b']['distinct_count']) == (3, 0, 3)
+
+    def test_one_failing_expression_keeps_the_columns_other_batch_stats(self):
+        """distinct_count can't run on pl.Object; length and null_count on the
+        same column still can."""
+        df = pl.DataFrame({'o': pl.Series([object(), object(), None], dtype=pl.Object), 'b': [1, 2, 3]})
+        pipeline = PolarsStatPipeline([null_count, length, distinct_count], unit_test=False)
+        sd, errors = pipeline.process_df(df)
+        assert sd['a']['length'] == 3
+        assert sd['a']['null_count'] == 1
+        assert sd['a']['distinct_count'] is None
+        assert [e.stat_func_name for e in errors] == ['distinct_count']
+        assert (sd['b']['length'], sd['b']['null_count'], sd['b']['distinct_count']) == (3, 0, 3)
 
 
 # ============================================================================
