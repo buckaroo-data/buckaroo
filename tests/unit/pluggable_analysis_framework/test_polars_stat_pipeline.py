@@ -173,7 +173,7 @@ class TestPolarsBatchPhase:
         assert sd['a']['length'] == 3
         assert sd['a']['null_count'] == 1
         assert sd['a']['distinct_count'] is None
-        assert [e.stat_func_name for e in errors] == ['distinct_count']
+        assert [e.stat_key for e in errors] == ['distinct_count']
         assert (sd['b']['length'], sd['b']['null_count'], sd['b']['distinct_count']) == (3, 0, 3)
 
 

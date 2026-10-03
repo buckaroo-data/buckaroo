@@ -94,11 +94,16 @@ class PolarsStatPipeline(StatPipeline):
         """Evaluate every batch stat for every column in one select.
 
         Returns ``{column: {stat_key: Ok | Err}}``; a column_filter'd or
-        row-gated stat leaves no key. If the one select fails, each column's
-        expressions are retried on their own, so one bad column doesn't blank
-        the rest.
+        row-gated stat leaves no key. Each expression addresses its column by
+        position (``pl.nth``), because ``pl.col(name)`` reads a name like
+        ``^a$`` or ``*`` as a selector that expands to zero or many outputs.
+
+        If the one select fails, each column's expressions are retried
+        together, and a column whose select still fails is retried one
+        expression at a time, so one bad expression costs only its own stat.
         """
         results: Dict[str, Dict[str, StatResult]] = {col: {} for col in columns}
+        position = {name: i for i, name in enumerate(schema.names())}
         items: List[Tuple[str, StatFunc, Any]] = []
         for sf in (funcs if funcs is not None else self._batch_funcs()):
             if row_gated(sf, row_count):
@@ -110,7 +115,7 @@ class PolarsStatPipeline(StatPipeline):
                 if sf.column_filter is not None and not sf.column_filter(dtype):
                     continue
                 try:
-                    expr = sf.func(**{param: PlColumn(col, dtype, pl.col(col))})
+                    expr = sf.func(**{param: PlColumn(col, dtype, pl.nth(position[col]))})
                     if expr is None:
                         continue
                     expr = expr.alias(f"{len(items)}")
@@ -123,24 +128,32 @@ class PolarsStatPipeline(StatPipeline):
 
         t0 = time.perf_counter()
         try:
-            self._assign(results, items, lf.select([e for _, _, e in items]).collect().row(0))
+            self._select_assign(results, lf, items)
         except Exception:
             for col in columns:
                 col_items = [it for it in items if it[0] == col]
                 if not col_items:
                     continue
                 try:
-                    self._assign(results, col_items, lf.select([e for _, _, e in col_items]).collect().row(0))
-                except Exception as e:
-                    for _, sf, _ in col_items:
-                        results[col][sf.provides[0].name] = Err(error=e, stat_func_name=sf.name, column_name=col,
-                            inputs={'col': col})
+                    self._select_assign(results, lf, col_items)
+                except Exception:
+                    for item in col_items:
+                        try:
+                            self._select_assign(results, lf, [item])
+                        except Exception as e:
+                            results[col][item[1].provides[0].name] = Err(error=e, stat_func_name=item[1].name,
+                                column_name=col, inputs={'col': col})
         if self.record_timings:
             self.timings.append(('<batch>', 'pl_batch_select', time.perf_counter() - t0))
         return results
 
     @staticmethod
-    def _assign(results, items, row) -> None:
+    def _select_assign(results, lf, items) -> None:
+        """Run one select for ``items`` and record the values; assigns nothing
+        unless the select returns exactly one value per item."""
+        row = lf.select([e for _, _, e in items]).collect().row(0)
+        if len(row) != len(items):
+            raise ValueError(f"batch select returned {len(row)} values for {len(items)} expressions")
         for (col, sf, _), val in zip(items, row):
             results[col][sf.provides[0].name] = Ok(val)
 
