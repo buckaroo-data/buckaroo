@@ -7,9 +7,9 @@
  * Tests assert CURRENT behavior on main (Option A in docs/rerender-test-plan.md).
  * Tests tagged "[captures current flash]" are tracking pain, not validating it.
  */
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { BuckarooInfiniteWidget } from "./BuckarooWidgetInfinite";
-import { KeyAwareSmartRowCache } from "./DFViewerParts/SmartRowCache";
+import { KeyAwareSmartRowCache, PayloadArgs } from "./DFViewerParts/SmartRowCache";
 import { getSpyCalls, resetSpy, setMockColumnState } from "../test-utils/agGridSpy";
 import { BuckarooState, BuckarooOptions, DFMeta } from "./WidgetTypes";
 import { DFViewerConfig } from "./DFViewerParts/DFWhole";
@@ -20,9 +20,14 @@ jest.mock("ag-grid-react", () =>
 );
 jest.mock("./useColorScheme", () => ({ useColorScheme: () => "light" }));
 
-// StatusBar also instantiates AgGridReact; stub it so the spy only counts the data grid.
+// StatusBar also instantiates AgGridReact; stub it so the spy only counts the
+// data grid. Keep its props so the #998 tests can read the dfMeta it was given.
+let statusBarProps: any[] = [];
 jest.mock("./StatusBar", () => ({
-  StatusBar: () => <div data-testid="status-bar-stub" />,
+  StatusBar: (props: any) => {
+    statusBarProps.push(props);
+    return <div data-testid="status-bar-stub" />;
+  },
 }));
 
 // DFViewerInfinite-prop capture for identity-stability assertion.
@@ -92,6 +97,7 @@ const mkSrc = () => new KeyAwareSmartRowCache(() => {});
 beforeEach(() => {
   resetSpy();
   dfvCalls = [];
+  statusBarProps = [];
 });
 
 describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
@@ -654,5 +660,79 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
       const last = applyCallsOnReturn[applyCallsOnReturn.length - 1];
       expect(last.state).toEqual(mainSavedState);
     });
+  });
+});
+
+/**
+ * Server-mode rows-first live search (#998).
+ *
+ * `buckaroo_state.search_string` is the per-client row-only search path
+ * (#838). The widget has to treat it like `quick_command_args.search` for
+ * row identity: it must reach `outside_df_params` so the SmartRowCache
+ * sourceName changes (no stale rows for the previous term) and the purge
+ * effect refetches, without remounting the grid.
+ */
+describe("BuckarooInfiniteWidget — rows-first live search (#998)", () => {
+  // Not a prop on main yet; spread loosely so the file type-checks red.
+  const rowsMode = { liveSearchMode: "rows" } as Record<string, unknown>;
+
+  const baseProps = (src: KeyAwareSmartRowCache) => ({
+    df_data_dict: { summary_stats: [] },
+    df_display_args: baseDisplayArgs,
+    df_meta: baseDfMeta,
+    operations: [] as any[],
+    on_operations: jest.fn(),
+    operation_results: {} as any,
+    command_config: { argspecs: {}, defaultArgs: {} },
+    buckaroo_options: baseOptions,
+    src,
+    on_buckaroo_state: jest.fn(),
+  });
+
+  it("search_string change reaches outside_df_params and purges, without a remount", () => {
+    const src = mkSrc();
+    const props = baseProps(src);
+    const { rerender } = render(
+      <BuckarooInfiniteWidget {...props} buckaroo_state={initialState} {...rowsMode} />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
+    const sigBefore = JSON.stringify(dfvCalls[dfvCalls.length - 1].outside_df_params);
+    const purgesBefore = getSpyCalls().purgeInfiniteCache;
+
+    rerender(
+      <BuckarooInfiniteWidget
+        {...props}
+        buckaroo_state={{ ...initialState, search_string: "alle" } as BuckarooState}
+        {...rowsMode}
+      />,
+    );
+    expect(getSpyCalls().mountCount).toBe(1);
+    expect(JSON.stringify(dfvCalls[dfvCalls.length - 1].outside_df_params)).not.toBe(sigBefore);
+    expect(getSpyCalls().purgeInfiniteCache).toBeGreaterThan(purgesBefore);
+  });
+
+  it("rows mode: the status bar's filtered count follows the row response length", () => {
+    // Summary stats stay those of the unfiltered frame on this path, so
+    // df_meta.filtered_rows from the server is the unfiltered count. The
+    // infinite_resp length is the filtered count; the status bar must show it.
+    const requests: PayloadArgs[] = [];
+    const src = new KeyAwareSmartRowCache((pa) => requests.push(pa));
+    render(
+      <BuckarooInfiniteWidget
+        {...baseProps(src)}
+        buckaroo_state={{ ...initialState, search_string: "alle" } as BuckarooState}
+        {...rowsMode}
+      />,
+    );
+    // The AG-Grid spy calls getRows once per datasource.
+    expect(requests.length).toBe(1);
+    act(() => {
+      src.addPayloadResponse({
+        key: requests[0],
+        data: [{ index: 0, a: 1 }, { index: 1, a: 2 }, { index: 2, a: 3 }],
+        length: 3,
+      });
+    });
+    expect(statusBarProps[statusBarProps.length - 1].dfMeta.filtered_rows).toBe(3);
   });
 });
