@@ -149,10 +149,13 @@ That combination is what shook the most bugs out.
 
 ## Common traps
 
-- **Sampling kicks in at 1M cells.** `DfStatsV2.get_operating_df` and
-  the polars equivalent downsample to 50k rows when `rows × cols >
-  FAST_SUMMARY_WHEN_GREATER`. Numbers from 500k synthetic and 100k
-  synthetic are *not directly comparable* because of this.
+- **Pandas sampling kicks in at 1M cells.** `DfStatsV2.get_operating_df`
+  downsamples to 50k rows when `rows × cols > FAST_SUMMARY_WHEN_GREATER`.
+  Numbers from 500k synthetic and 100k synthetic are *not directly
+  comparable* because of this. Polars (`PlDfStatsV2`) no longer samples:
+  its scalar stats come from one select over the whole frame and
+  `value_counts` is skipped above `VALUE_COUNTS_MAX_ROWS` (#999), so its
+  per-stat profile has a different shape from pandas'.
 - **`unit_test=True` is on by default in `StatPipeline.__init__`.**
   Every widget construction runs the full pipeline against
   `PERVERSE_DF` to validate the DAG. Adds tens of ms; especially

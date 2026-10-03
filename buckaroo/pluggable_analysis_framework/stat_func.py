@@ -145,6 +145,7 @@ class StatFunc:
         column_filter: optional predicate on column dtype
         quiet: suppress error reporting
         default: fallback value on failure (MISSING = no fallback)
+        max_rows: run only on frames with at most this many rows (None = always)
     """
     name: str
     func: Callable
@@ -154,6 +155,7 @@ class StatFunc:
     column_filter: Optional[Callable] = None
     quiet: bool = False
     default: Any = field(default_factory=lambda: MISSING)
+    max_rows: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +250,7 @@ def _get_requires_from_params(sig: inspect.Signature, hints: dict) -> tuple:
 # @stat decorator
 # ---------------------------------------------------------------------------
 
-def stat(column_filter=None, quiet=False, default=MISSING):
+def stat(column_filter=None, quiet=False, default=MISSING, max_rows=None):
     """Decorator that converts a function into a StatFunc.
 
     The function signature IS the contract:
@@ -256,6 +258,10 @@ def stat(column_filter=None, quiet=False, default=MISSING):
       - Function name (or each TypedDict / MultipleProvides field) becomes
         `provides`
       - RawSeries/SampledSeries/Xorq* params indicate raw data needs
+
+    ``max_rows`` gates the stat on the frame's row count: above it the stat
+    and everything that depends on it are left out of the column's DAG
+    (see ``build_column_dag``) and reported in ``StatPipeline.skipped_stats``.
 
     Single-provider stats: name the function the same as the accumulator
     key the rest of the DAG expects. Use ``MultipleProvides`` (a TypedDict
@@ -274,6 +280,10 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         @stat(default=0)
         def safe_ratio(a: int, b: int) -> float:
             return a / b
+
+        @stat(max_rows=10_000_000)
+        def value_counts(ser: RawSeries) -> pd.Series:
+            return ser.value_counts()
 
         class TypingResult(MultipleProvides):
             is_numeric: bool
@@ -296,7 +306,7 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         provides_keys = _get_provides_from_return_type(func.__name__, return_type)
 
         stat_func = StatFunc(name=func.__name__, func=func, requires=requires, provides=provides_keys,
-            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default)
+            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default, max_rows=max_rows)
 
         # Attach metadata to the function so pipeline can find it
         func._stat_func = stat_func
