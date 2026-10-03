@@ -2,14 +2,17 @@ import json
 import os
 import sys
 import tempfile
+from io import BytesIO
 from unittest import mock
 
 import pandas as pd
+import polars as pl
 import pytest
 import tornado.httpclient
 import tornado.testing
 import tornado.websocket
 
+from buckaroo.customizations import pl_lazy_stats
 from buckaroo.server.app import make_app as _make_app
 
 # Temp file cleanup fails on Windows due to file locking (WinError 32)
@@ -241,6 +244,134 @@ class TestLoad(tornado.testing.AsyncHTTPTestCase):
                 self.assertEqual(dvc.get("extra_grid_config"), {})
             finally:
                 os.unlink(f.name)
+
+
+class TestLoadPolarsLazy(tornado.testing.AsyncHTTPTestCase):
+    """``backend='polars'`` sessions hold a LazyFrame over the file (#993),
+    so a session never keeps the whole table in memory. Stats and the
+    first window must still come back correct through the server."""
+    N_ROWS = 1500
+
+    def get_app(self):
+        return make_app()
+
+    def _write_parquet(self):
+        f = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
+        f.close()
+        pl.DataFrame({"id": list(range(self.N_ROWS)),
+            "name": ["alice" if i % 100 == 0 else f"name{i}" for i in range(self.N_ROWS)],
+            "val": [i * 0.5 for i in range(self.N_ROWS)]}).write_parquet(f.name)
+        return f.name
+
+    def test_load_polars_holds_lazyframe(self):
+        path = self._write_parquet()
+        try:
+            resp = self.fetch("/load", method="POST",
+                body=json.dumps({"session": "pl-lazy-1", "path": path, "mode": "buckaroo", "backend": "polars"}),
+                headers={"Content-Type": "application/json"})
+            self.assertEqual(resp.code, 200)
+            body = json.loads(resp.body)
+            self.assertEqual(body["rows"], self.N_ROWS)
+
+            session = self._app.settings["sessions"].get("pl-lazy-1")
+            self.assertIsInstance(session.dataflow.processed_df, pl.LazyFrame)
+            self.assertNotIsInstance(session.df, pl.DataFrame)
+            self.assertEqual(session.df_meta["total_rows"], self.N_ROWS)
+            # summary stats ran over the scan
+            stats = session.dataflow.merged_sd["a"]
+            self.assertEqual(stats["orig_col_name"], "id")
+            self.assertEqual(stats["length"], self.N_ROWS)
+            self.assertEqual(stats["null_count"], 0)
+            self.assertEqual(stats["min"], 0)
+            self.assertEqual(stats["max"], self.N_ROWS - 1)
+        finally:
+            os.unlink(path)
+
+    def test_load_polars_eager_mode_still_reads_whole_frame(self):
+        """``polars_mode: "eager"`` keeps the pre-#993 behaviour so the two
+        can be compared on one server."""
+        path = self._write_parquet()
+        try:
+            resp = self.fetch("/load", method="POST",
+                body=json.dumps({"session": "pl-eager-1", "path": path, "mode": "buckaroo", "backend": "polars",
+                    "polars_mode": "eager"}),
+                headers={"Content-Type": "application/json"})
+            self.assertEqual(resp.code, 200)
+            session = self._app.settings["sessions"].get("pl-eager-1")
+            self.assertIsInstance(session.dataflow.processed_df, pl.DataFrame)
+            self.assertNotIn("stats_omitted", session.df_meta)
+        finally:
+            os.unlink(path)
+
+    def test_load_polars_rejects_unknown_polars_mode(self):
+        resp = self.fetch("/load", method="POST",
+            body=json.dumps({"session": "pl-bad", "path": "/tmp/x.parquet", "mode": "buckaroo", "backend": "polars",
+                "polars_mode": "streaming"}),
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(json.loads(resp.body)["error_code"], "invalid_polars_mode")
+
+    def test_load_polars_csv_type_change_after_inference_is_load_error(self):
+        """polars infers csv dtypes from the first 100 rows, so a later row
+        that doesn't parse fails when stats first read it, not when the scan
+        opens. The client must get the same JSON ``load_error`` the eager
+        path returns, not an HTML 500."""
+        f = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
+        f.write("x,y\n" + "".join(f"{i},a\n" for i in range(500)) + "notanumber,b\n")
+        f.close()
+        try:
+            for polars_mode in ("lazy", "eager"):
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": f"pl-csv-{polars_mode}", "path": f.name, "mode": "buckaroo",
+                        "backend": "polars", "polars_mode": polars_mode}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 500, polars_mode)
+                self.assertEqual(json.loads(resp.body)["error_code"], "load_error", polars_mode)
+        finally:
+            os.unlink(f.name)
+
+    def test_load_polars_lazy_session_reports_sampled_stats(self):
+        """Past the stats sample cap the lazy session says its stats
+        describe a sample, and the session still serves every row."""
+        path = self._write_parquet()
+        try:
+            with mock.patch.object(pl_lazy_stats, "LAZY_STATS_SAMPLE_ROWS", 500):
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "pl-lazy-sampled", "path": path, "mode": "buckaroo",
+                        "backend": "polars"}),
+                    headers={"Content-Type": "application/json"})
+            self.assertEqual(resp.code, 200)
+            session = self._app.settings["sessions"].get("pl-lazy-sampled")
+            self.assertTrue(session.df_meta["stats_sampled"])
+            self.assertEqual(session.df_meta["total_rows"], self.N_ROWS)
+            self.assertLessEqual(session.dataflow.merged_sd["a"]["length"], 500)
+        finally:
+            os.unlink(path)
+
+    @tornado.testing.gen_test
+    async def test_ws_window_from_lazy_session(self):
+        path = self._write_parquet()
+        try:
+            resp = await _async_fetch(self.get_http_port(), "/load", method="POST",
+                body=json.dumps({"session": "pl-lazy-ws", "path": path, "mode": "buckaroo", "backend": "polars"}))
+            self.assertEqual(resp.code, 200)
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/pl-lazy-ws")
+            await ws.read_message()  # initial_state
+
+            ws.write_message(json.dumps({"type": "infinite_request",
+                "payload_args": {"start": 1000, "end": 1100, "sourceName": "default", "origEnd": 1100}}))
+            resp = json.loads(await ws.read_message())
+            self.assertEqual(resp["type"], "infinite_resp")
+            self.assertEqual(resp["length"], self.N_ROWS)
+            binary_frame = await ws.read_message()
+            df = pl.read_parquet(BytesIO(binary_frame))
+            self.assertEqual(df["index"].to_list(), list(range(1000, 1100)))
+            self.assertEqual(df["a"].to_list(), list(range(1000, 1100)))
+            ws.close()
+        finally:
+            os.unlink(path)
 
 
 class TestSessionPage(tornado.testing.AsyncHTTPTestCase):

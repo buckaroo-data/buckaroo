@@ -212,13 +212,15 @@ class LoadHandler(tornado.web.RequestHandler):
         port = self.application.settings["port"]
         return find_or_create_session_window(session_id, port, reload_if_found=True)
 
-    def _load_polars_with_error_handling(self, path: str):
-        """Eager polars load for ``backend='polars'``. Errors share the
+    def _load_polars_with_error_handling(self, path: str, lazy: bool):
+        """Polars load for ``backend='polars'`` — a LazyFrame over the file
+        when ``lazy`` (#993), an eager read otherwise. Errors share the
         same shape as the pandas loader so the response surface is
         identical from the client's POV."""
         try:
-            from buckaroo.server.data_loading_polars import load_file_polars, get_metadata_polars
-            df = load_file_polars(path)
+            from buckaroo.server.data_loading_polars import (
+                load_file_polars, load_file_polars_lazy, get_metadata_polars)
+            df = load_file_polars_lazy(path) if lazy else load_file_polars(path)
             metadata = get_metadata_polars(df, path)
             return df, metadata
         except FileNotFoundError:
@@ -236,14 +238,30 @@ class LoadHandler(tornado.web.RequestHandler):
             self.write({"error_code": "invalid_file", "message": str(e)})
             return None, None
         except Exception:
-            tb = traceback.format_exc()
-            log.error("polars load error path=%s: %s", path, tb)
-            resp: dict = {"error_code": "load_error", "message": "Failed to load file"}
-            if _BUCKAROO_DEBUG:
-                resp["details"] = tb
-            self.set_status(500)
-            self.write(resp)
+            self._write_polars_load_error(path)
             return None, None
+
+    def _write_polars_load_error(self, path: str) -> None:
+        tb = traceback.format_exc()
+        log.error("polars load error path=%s: %s", path, tb)
+        resp: dict = {"error_code": "load_error", "message": "Failed to load file"}
+        if _BUCKAROO_DEBUG:
+            resp["details"] = tb
+        self.set_status(500)
+        self.write(resp)
+
+    def _create_polars_dataflow_with_error_handling(self, path: str, file_obj, **kwargs):
+        """Build the polars dataflow, or write ``load_error`` and return None.
+        A lazy session defers reading the file until here: polars infers csv
+        dtypes from the first rows only, so a later row that doesn't parse
+        first fails when the stats select reads it. The eager path fails in
+        the load itself, with this same response."""
+        try:
+            from buckaroo.server.data_loading_polars import create_polars_dataflow
+            return create_polars_dataflow(file_obj, **kwargs)
+        except Exception:
+            self._write_polars_load_error(path)
+            return None
 
     def _load_file_with_error_handling(self, path: str, is_lazy: bool):
         """Load file and handle errors. Returns (file_obj, metadata) or (None, None)."""
@@ -304,6 +322,15 @@ class LoadHandler(tornado.web.RequestHandler):
             self.write({"error_code": "invalid_backend",
                 "message": "backend='polars' is only valid with mode='buckaroo'"})
             return
+        # ``polars_mode`` picks how a backend='polars' session holds the file:
+        # "lazy" (default) keeps a LazyFrame over it (#993), "eager" reads
+        # the whole table into the session as before.
+        polars_mode = str(body.get("polars_mode", "lazy")).lower()
+        if polars_mode not in ("eager", "lazy"):
+            self.set_status(400)
+            self.write({"error_code": "invalid_polars_mode",
+                "message": f"polars_mode must be 'eager' or 'lazy', got {polars_mode!r}"})
+            return
 
         column_config_overrides = body.get("column_config_overrides")
         extra_grid_config = body.get("extra_grid_config")
@@ -324,7 +351,16 @@ class LoadHandler(tornado.web.RequestHandler):
 
         # Load data in appropriate mode
         if backend == "polars" and mode == "buckaroo":
-            file_obj, metadata = self._load_polars_with_error_handling(path)
+            file_obj, metadata = self._load_polars_with_error_handling(path, lazy=(polars_mode == "lazy"))
+            if file_obj is None:
+                return
+            # built before the session takes the frame, so a file that fails
+            # here leaves the session as it was
+            polars_dataflow = self._create_polars_dataflow_with_error_handling(path, file_obj,
+                column_config_overrides=column_config_overrides, extra_grid_config=extra_grid_config,
+                init_sd=init_sd)
+            if polars_dataflow is None:
+                return
         else:
             file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
         if file_obj is None:
@@ -337,10 +373,7 @@ class LoadHandler(tornado.web.RequestHandler):
             session.metadata = metadata
             if mode == "buckaroo":
                 if backend == "polars":
-                    from buckaroo.server.data_loading_polars import create_polars_dataflow
-                    dataflow = create_polars_dataflow(file_obj,
-                        column_config_overrides=column_config_overrides,
-                        extra_grid_config=extra_grid_config, init_sd=init_sd)
+                    dataflow = polars_dataflow
                 else:
                     dataflow = create_dataflow(file_obj,
                         column_config_overrides=column_config_overrides,

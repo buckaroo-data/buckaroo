@@ -44,16 +44,21 @@ PlTypingResult = TypedDict('PlTypingResult',
      'is_time': bool, 'is_decimal': bool, 'is_binary': bool, 'memory_usage': int})
 
 
-@stat()
-def pl_typing_stats(ser: RawSeries) -> PlTypingResult:
-    """Compute dtype and type flags for a polars column."""
-    dt = ser.dtype
+def pl_dtype_typing(dt: pl.DataType) -> dict:
+    """dtype string and type flags for a polars dtype. Shared with the lazy
+    path (``pl_lazy_stats``), which has a schema but no series."""
     return {'dtype': str(dt), 'is_numeric': dt.is_numeric() and dt.base_type() is not pl.Decimal,
         'is_integer': dt.is_integer(), 'is_float': dt.is_float(), 'is_bool': dt == pl.Boolean,
         'is_datetime': dt.is_temporal() and dt not in (pl.Duration, pl.Time), 'is_timedelta': dt == pl.Duration,
         'is_string': dt in (pl.Utf8, pl.String), 'is_categorical': dt == pl.Categorical or isinstance(dt, pl.Enum),
         'is_period': False, 'is_interval': False, 'is_time': dt == pl.Time, 'is_decimal': dt.base_type() is pl.Decimal,
-        'is_binary': dt == pl.Binary, 'memory_usage': ser.estimated_size()}
+        'is_binary': dt == pl.Binary}
+
+
+@stat()
+def pl_typing_stats(ser: RawSeries) -> PlTypingResult:
+    """Compute dtype and type flags for a polars column."""
+    return {**pl_dtype_typing(ser.dtype), 'memory_usage': ser.estimated_size()}
 
 
 # ============================================================
