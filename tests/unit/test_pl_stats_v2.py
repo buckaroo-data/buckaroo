@@ -179,7 +179,7 @@ class TestPlTypeComputed:
 
 class TestPlBaseSummaryStats:
     def test_numeric_basics(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
         ser = pl.Series('test', [1, 2, 3, 4, 5])
         result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert errors == []
@@ -190,14 +190,14 @@ class TestPlBaseSummaryStats:
         assert 'mean' not in result
 
     def test_with_nulls(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
         ser = pl.Series('test', [1, None, 3, None, 5])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['null_count'] == 2
         assert result['length'] == 5
 
     def test_string_column(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
         ser = pl.Series('test', ['a', 'b', 'c'])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 3
@@ -208,7 +208,7 @@ class TestPlBaseSummaryStats:
 
     def test_bool_column(self):
         """Bool columns should NOT get numeric min/max."""
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
         ser = pl.Series('test', [True, False, True])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert result['length'] == 3
@@ -216,7 +216,7 @@ class TestPlBaseSummaryStats:
         assert math.isnan(result['min'])
 
     def test_value_counts_present(self):
-        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        pipeline = StatPipeline([pl_value_counts, pl_base_summary_stats], unit_test=False)
         ser = pl.Series('test', [1, 1, 2, 3])
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert isinstance(result['value_counts'], pd.Series)
@@ -275,7 +275,7 @@ class TestPlNumericStats:
 
 class TestPlHistogram:
     def _make_pipeline(self):
-        return StatPipeline([pl_typing_stats, pl_base_summary_stats, pl_numeric_stats,
+        return StatPipeline([pl_typing_stats, pl_value_counts, pl_base_summary_stats, pl_numeric_stats,
             computed_default_summary_stats,
             pl_histogram_series, histogram], unit_test=False)
 
