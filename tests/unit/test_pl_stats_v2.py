@@ -220,6 +220,43 @@ class TestPlBaseSummaryStats:
         assert isinstance(result['value_counts'], pd.Series)
         assert result['value_counts'].iloc[0] == 2  # '1' is most frequent
 
+    def _forbid_series_mode(self, monkeypatch):
+        """pl.Series.mode is a second group-by over the column; the mode must
+        come from the value_counts already computed (#997)."""
+        def _raise(self_, *args, **kwargs):
+            raise AssertionError('pl.Series.mode must not be called')
+        monkeypatch.setattr(pl.Series, 'mode', _raise)
+
+    def test_mode_from_value_counts(self, monkeypatch):
+        self._forbid_series_mode(monkeypatch)
+        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        ser = pl.Series('test', [5, 5, 5, 2, 2, 9])
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['mode'] == 5
+
+    def test_mode_tie_is_smaller_value(self, monkeypatch):
+        self._forbid_series_mode(monkeypatch)
+        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        ser = pl.Series('test', [3, 1, 3, 1, 2])
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['mode'] == 1
+
+        ser = pl.Series('test', ['b', 'a', 'b', 'a', 'c'])
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['mode'] == 'a'
+
+    def test_mode_all_null_is_none(self, monkeypatch):
+        self._forbid_series_mode(monkeypatch)
+        pipeline = StatPipeline([pl_base_summary_stats], unit_test=False)
+        ser = pl.Series('test', [None, None], dtype=pl.Int64)
+        result, errors = pipeline.process_column('test', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert result['mode'] is None
+        assert len(result['value_counts']) == 0
+
 
 # ============================================================================
 # Tests: pl_numeric_stats
