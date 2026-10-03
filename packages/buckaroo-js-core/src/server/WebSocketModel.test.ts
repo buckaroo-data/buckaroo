@@ -49,6 +49,7 @@ const searchState = (term: string): BuckarooState => ({
 });
 const STATE_A = searchState("alle");
 const STATE_B = searchState("allen");
+const STATE_C = searchState("other-tab");
 
 const METADATA = { path: "x.parquet", rows: 3, columns: ["a"] };
 
@@ -111,6 +112,57 @@ describe("WebSocketModel initial_state while a buckaroo_state_change is outstand
         expect(onDfDataDict).toHaveBeenCalledTimes(1);
         expect(model.get("buckaroo_state").quick_command_args).toEqual(STATE_B.quick_command_args);
         expect(appliedTerm(model)).toBe("allen");
+    });
+
+    it("applies an unrelated initial_state when nothing is outstanding", () => {
+        const [ws, model] = makeModel();
+        ws.deliver(initialStateFor(STATE_C));
+        expect(model.get("buckaroo_state").quick_command_args).toEqual(STATE_C.quick_command_args);
+        expect(appliedTerm(model)).toBe("other-tab");
+    });
+
+    it("applies another tab's change once the matching reply has been applied", () => {
+        const [ws, model] = makeModel();
+        sendChange(model, STATE_A);
+        ws.deliver(initialStateFor(STATE_A));
+        ws.deliver(initialStateFor(STATE_C));
+        expect(appliedTerm(model)).toBe("other-tab");
+    });
+
+    it("a change that touches no dataflow field leaves nothing outstanding", () => {
+        const [ws, model] = makeModel();
+        sendChange(model, { ...BASE_STATE, df_display: "summary" });
+        ws.deliver(initialStateFor(STATE_C));
+        expect(appliedTerm(model)).toBe("other-tab");
+    });
+
+    it("sending the server's current dataflow state back leaves nothing outstanding", () => {
+        const [ws, model] = makeModel();
+        ws.deliver(initialStateFor(STATE_C));
+        sendChange(model, STATE_C);
+        ws.deliver(initialStateFor(STATE_A));
+        expect(appliedTerm(model)).toBe("alle");
+    });
+
+    it("state_change_error clears the outstanding change", () => {
+        const [ws, model] = makeModel();
+        sendChange(model, STATE_A);
+        ws.deliver({ type: "error", error_code: "state_change_error", message: "Failed to apply state change" });
+        ws.deliver(initialStateFor(STATE_C));
+        expect(appliedTerm(model)).toBe("other-tab");
+    });
+
+    it("applies a new dataset's initial_state while a change is outstanding", () => {
+        const [ws, model] = makeModel();
+        sendChange(model, STATE_A);
+        const loaded = initialStateFor(BASE_STATE, { metadata: { path: "y.parquet", rows: 9, columns: ["b"] } });
+        ws.deliver(loaded);
+        expect(model.get("metadata")).toEqual(loaded.metadata);
+        expect(model.get("buckaroo_state").quick_command_args).toEqual({});
+        // The outstanding change was against the old dataset; the new one's
+        // replies flow as usual.
+        ws.deliver(initialStateFor(STATE_C, { metadata: loaded.metadata }));
+        expect(appliedTerm(model)).toBe("other-tab");
     });
 });
 
