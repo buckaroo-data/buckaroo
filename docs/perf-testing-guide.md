@@ -81,9 +81,15 @@ It covers all three stat backends and the first pull uniformly:
   (stats run — the `stat.xorq.*` spans break it down further), and
   `firstpull.metadata`, all nested under the outer `firstpull.load_expr` total;
   plus `firstpull.ws_first_payload` (time-to-first-rows — the parquet encode and
-  frame send of the first `infinite_request`, emitted once per session). The
-  server spans carry `session=` so they correlate across concurrent loads. In
-  the server these land in `~/.buckaroo/logs/server.log`.
+  frame send of the first `infinite_request`, emitted once per session). A
+  `/load` decomposes the same way under `firstpull.load` (with `path=`,
+  `backend=` and `mode=`): `firstpull.file_load` (the file read),
+  `firstpull.metadata`, and in `mode="buckaroo"` `firstpull.dataflow_construct`
+  (the stats run, for pandas and polars). `/load_compare` emits
+  `firstpull.load_compare` around one `firstpull.file_load` per input and
+  `firstpull.compare` for the join. The server spans carry `session=` so they
+  correlate across concurrent loads. In the server these land in
+  `~/.buckaroo/logs/server.log`.
 
 Lines are `key=value` and greppable (`grep 'perf span=' server.log`),
 so external harnesses can parse `secs=` for a named span. The
