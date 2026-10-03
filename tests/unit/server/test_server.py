@@ -5,6 +5,7 @@ import tempfile
 from unittest import mock
 
 import pandas as pd
+import polars as pl
 import pytest
 import tornado.httpclient
 import tornado.testing
@@ -211,6 +212,48 @@ class TestLoad(tornado.testing.AsyncHTTPTestCase):
                 self.assertEqual(dvc.get("extra_grid_config"), {})
             finally:
                 os.unlink(f.name)
+
+
+class TestLoadPolarsLazy(tornado.testing.AsyncHTTPTestCase):
+    """``backend='polars'`` sessions hold a LazyFrame over the file (#993),
+    so a session never keeps the whole table in memory. Stats and the
+    first window must still come back correct through the server."""
+    N_ROWS = 1500
+
+    def get_app(self):
+        return make_app()
+
+    def _write_parquet(self):
+        f = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
+        f.close()
+        pl.DataFrame({"id": list(range(self.N_ROWS)),
+            "name": ["alice" if i % 100 == 0 else f"name{i}" for i in range(self.N_ROWS)],
+            "val": [i * 0.5 for i in range(self.N_ROWS)]}).write_parquet(f.name)
+        return f.name
+
+    def test_load_polars_holds_lazyframe(self):
+        path = self._write_parquet()
+        try:
+            resp = self.fetch("/load", method="POST",
+                body=json.dumps({"session": "pl-lazy-1", "path": path, "mode": "buckaroo", "backend": "polars"}),
+                headers={"Content-Type": "application/json"})
+            self.assertEqual(resp.code, 200)
+            body = json.loads(resp.body)
+            self.assertEqual(body["rows"], self.N_ROWS)
+
+            session = self._app.settings["sessions"].get("pl-lazy-1")
+            self.assertIsInstance(session.dataflow.processed_df, pl.LazyFrame)
+            self.assertNotIsInstance(session.df, pl.DataFrame)
+            self.assertEqual(session.df_meta["total_rows"], self.N_ROWS)
+            # summary stats ran over the scan
+            stats = session.dataflow.merged_sd["a"]
+            self.assertEqual(stats["orig_col_name"], "id")
+            self.assertEqual(stats["length"], self.N_ROWS)
+            self.assertEqual(stats["null_count"], 0)
+            self.assertEqual(stats["min"], 0)
+            self.assertEqual(stats["max"], self.N_ROWS - 1)
+        finally:
+            os.unlink(path)
 
 
 class TestSessionPage(tornado.testing.AsyncHTTPTestCase):
