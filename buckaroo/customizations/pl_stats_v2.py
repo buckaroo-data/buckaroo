@@ -61,12 +61,19 @@ def pl_typing_stats(ser: RawSeries) -> PlTypingResult:
 # ============================================================
 
 def _pl_value_counts(ser: pl.Series) -> pl.DataFrame:
-    """value_counts of the non-null values, sorted desc by count then asc by value.
+    """value_counts of the non-null values, sorted desc by count."""
+    return ser.drop_nulls().value_counts(sort=True)
 
-    value_counts(sort=True) orders by count only and leaves tied values in
-    encounter order; the second key makes the first row (the mode) deterministic.
+
+def _pl_mode_from_vc(vc: pl.DataFrame, name: str) -> Any:
+    """The most frequent value of a _pl_value_counts frame; ties go to the smallest value.
+
+    Filtering to the top count and taking the min is linear. A full
+    (count, value) sort to break ties costs as much as the group-by this
+    replaces on high-cardinality columns.
     """
-    return ser.drop_nulls().value_counts().sort(['count', ser.name], descending=[True, False])
+    top = vc['count'].max()
+    return vc.filter(pl.col('count') == top)[name].min()
 
 
 def _pl_vc_to_pd(vc: pl.DataFrame, name: str) -> pd.Series:
@@ -90,11 +97,11 @@ def pl_base_summary_stats(ser: RawSeries) -> BaseSummaryResult:
     is_numeric = ser.dtype.is_numeric()
     is_bool = ser.dtype == pl.Boolean
 
-    # The mode is the first row of the value_counts; calling ser.mode() would
-    # be a second group-by over the column (#997).
+    # The mode comes from the value_counts; calling ser.mode() would be a
+    # second group-by over the column (#997).
     vc = _pl_value_counts(ser)
     base = {'length': length, 'null_count': null_count, 'value_counts': _pl_vc_to_pd(vc, ser.name),
-        'mode': vc[ser.name].item(0) if null_count < length else None, 'min': float('nan'),
+        'mode': _pl_mode_from_vc(vc, ser.name) if null_count < length else None, 'min': float('nan'),
         'max': float('nan')}
 
     if is_numeric and not is_bool and null_count < length:
