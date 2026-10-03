@@ -82,6 +82,13 @@ class DfStats(Protocol):
     ``DfStatsV2`` (pandas), ``PlDfStatsV2`` (polars) and ``XorqDfStatsV2``
     share this surface but no base class. The frame argument is ``Any``
     because each executor accepts only its own backend's frame type.
+
+    An executor may also define ``operating_rows(rows, cols) -> int``, a
+    classmethod giving the row count it actually reads from a frame of that
+    size. It is deliberately not a member of this Protocol, because the
+    dataflow does not require it: ``populate_df_meta`` looks it up with
+    ``getattr`` and treats a missing one as "reads every row it is handed"
+    (#992).
     """
     sdf: TAny
     errs: TAny
@@ -90,8 +97,6 @@ class DfStats(Protocol):
                  debug: bool = ..., skip_columns: TAny = ...) -> None: ...
     @classmethod
     def verify_analysis_objects(cls, col_analysis_objs: TAny, /) -> None: ...
-    @classmethod
-    def operating_rows(cls, rows: int, cols: int, /) -> int: ...
     def add_analysis(self, a_obj: TAny, /) -> None: ...
 
 
@@ -450,9 +455,12 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         n_rows = len(self.processed_df)
         n_cols = len(self.processed_df.columns)
         # Two caps shrink the stats input: the sampling class's pre_limit
-        # (applied in _get_summary_sd) and the executor's own sample.
-        stats_rows = self.DFStatsClass.operating_rows(
-            self.sampling_klass.stats_sample_rows(n_rows), n_cols)
+        # (applied in _get_summary_sd) and the executor's own sample. A
+        # DFStatsClass written against the pre-#992 Protocol has no
+        # operating_rows; such an executor reads every row it is handed.
+        sample_rows = self.sampling_klass.stats_sample_rows(n_rows)
+        operating_rows = getattr(self.DFStatsClass, 'operating_rows', None)
+        stats_rows = operating_rows(sample_rows, n_cols) if operating_rows else sample_rows
         self.df_meta = {
             'columns': n_cols,
             # I need to recompute this when sampling changes
