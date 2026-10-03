@@ -466,7 +466,10 @@ export class SmartRowCache {
 
 export type RequestFN = (pa: PayloadArgs) => void
 export type FoundRowsCB = (df: DFData, length: number) => void;
-export type FailCB = () => void;
+/** Called when a request can't be filled. `emptyResultLength` is set only
+ *  when the server answered with zero rows (not on an error), and carries the
+ *  response's total length so a caller can still report the filtered count. */
+export type FailCB = (emptyResultLength?: number) => void;
 
 
 function verifyResp(resp: PayloadResponse):boolean {
@@ -644,7 +647,7 @@ export class KeyAwareSmartRowCache {
             if(verifyResp(resp)) {
                 success(this.getRows(resp.key), src.sentLength);
             } else {
-                fail()
+                fail(resp.length)
             }
             delete this.waitingCallbacks[cbKey]
         }

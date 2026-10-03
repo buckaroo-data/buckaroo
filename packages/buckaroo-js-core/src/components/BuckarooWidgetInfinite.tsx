@@ -206,25 +206,14 @@ export function BuckarooInfiniteWidget({
             // invariant under those state changes; refresh is driven by
             // effectiveDataframeId (remount) and outsideDFSig (purge).
             bkLog("mainDs useMemo recomputed");
-            const ds = getDs(src);
-            if (liveSearchMode !== "rows") {
-                return ds;
-            }
-            // Same datasource, with the success callback observed so the
-            // status bar can show the filtered count the server reported.
-            const getRows = (params: IGetRowsParams) => {
-                const sig = JSON.stringify(params.context?.outside_df_params);
-                ds.getRows({
-                    ...params,
-                    successCallback: (rows, lastRow) => {
-                        if (typeof lastRow === "number" && lastRow >= 0) {
-                            setLiveRowCount({ sig, count: lastRow });
-                        }
-                        params.successCallback(rows, lastRow);
-                    },
-                });
-            };
-            return { ...ds, getRows };
+            // In rows mode the status bar shows the filtered count the
+            // server reported, so the datasource reports each response's length.
+            return getDs(
+                src,
+                liveSearchMode === "rows"
+                    ? (sig, count) => setLiveRowCount({ sig, count })
+                    : undefined,
+            );
         }, [src, liveSearchMode]);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 

@@ -30,6 +30,24 @@ _BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
 _DATAFLOW_FIELDS = ("post_processing", "cleaning_method", "quick_command_args")
 
 
+def _with_highlight_phrase(df_display_args, term):
+    """Deep copy of ``df_display_args`` with ``highlight_phrase`` set to
+    ``[term]`` on every string-column displayer, or removed when ``term`` is
+    empty. The shared session snapshot is never mutated."""
+    overlay = copy.deepcopy(df_display_args)
+    for dva in overlay.values():
+        dvc = (dva or {}).get("df_viewer_config") or {}
+        for col in dvc.get("column_config", []) or []:
+            disp = col.get("displayer_args")
+            if not isinstance(disp, dict) or disp.get("displayer") != "string":
+                continue
+            if term:
+                disp["highlight_phrase"] = [term]
+            else:
+                disp.pop("highlight_phrase", None)
+    return overlay
+
+
 class DataStreamHandler(tornado.websocket.WebSocketHandler):
     def open(self, session_id):
         self.session_id = session_id
@@ -133,11 +151,17 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # Broadcast updated state to all connected clients. Each
             # client gets its own search_string re-injected so a
             # dataflow rebuild from one tab doesn't silently clear the
-            # search box on another (or on the typing client itself).
+            # search box on another (or on the typing client itself). A
+            # client with a live term also gets its highlight_phrase
+            # re-injected: the rows stay filtered by it, and the dataflow
+            # only produces a highlight for quick_command_args.search (#998).
             for client in list(session.ws_clients):
                 try:
-                    msg = build_state_message(session,
-                        search_string=getattr(client, "search_string", ""))
+                    client_search = getattr(client, "search_string", "")
+                    msg = build_state_message(session, search_string=client_search)
+                    if client_search and msg.get("df_display_args"):
+                        msg["df_display_args"] = _with_highlight_phrase(
+                            msg["df_display_args"], client_search)
                     client.write_message(json.dumps(msg))
                 except Exception:
                     session.ws_clients.discard(client)
@@ -168,17 +192,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         if not session.df_display_args:
             return
         term = self.search_string
-        overlay = copy.deepcopy(session.df_display_args)
-        for dva in overlay.values():
-            dvc = (dva or {}).get("df_viewer_config") or {}
-            for col in dvc.get("column_config", []) or []:
-                disp = col.get("displayer_args")
-                if not isinstance(disp, dict) or disp.get("displayer") != "string":
-                    continue
-                if term:
-                    disp["highlight_phrase"] = [term]
-                else:
-                    disp.pop("highlight_phrase", None)
+        overlay = _with_highlight_phrase(session.df_display_args, term)
 
         # Pass self.search_string so the overlay's buckaroo_state
         # round-trips the typed term back to this client (Codex P1 on

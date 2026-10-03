@@ -37,7 +37,7 @@ import { getTooltipParams } from "./SeriesSummaryTooltip";
 import { getFormatterFromArgs, getCellRenderer, objFormatter, getFormatter } from "./Displayer";
 import { CSSProperties, Dispatch, SetStateAction } from "react";
 import { CommandConfigT } from "../CommandUtils";
-import { KeyAwareSmartRowCache, PayloadArgs } from "./SmartRowCache";
+import { FoundRowsCB, KeyAwareSmartRowCache, PayloadArgs } from "./SmartRowCache";
 
 
 // for now colDef stuff with less than 3 implementantions should stay in this file
@@ -421,6 +421,10 @@ export interface TimedIDatasource extends IDatasource {
 
 export const getDs = (
     src: KeyAwareSmartRowCache,
+    /** Observes the total row count each row response reports, tagged with
+     *  the outside_df_params signature of the request it answered. Fires for
+     *  an empty response too (the cache reports that through the fail path). */
+    onRowCount?: (outsideParamsSig: string, count: number) => void,
 ): TimedIDatasource => {
     const createTime =  new Date();
     const dsLoc: TimedIDatasource = {
@@ -437,11 +441,20 @@ export const getDs = (
                 sort: sm.length === 1 ? sm[0].colId : undefined,
                 sort_direction: sm.length === 1 ? sm[0].sort : undefined,
             };
-            const failWrapper = () => {
+            const successWrapper: FoundRowsCB = (rows, lastRow) => {
+                if (onRowCount && typeof lastRow === "number" && lastRow >= 0) {
+                    onRowCount(outside_params_string, lastRow);
+                }
+                params.successCallback(rows, lastRow);
+            };
+            const failWrapper = (emptyResultLength?: number) => {
                 console.error("[buckaroo] getRows request failed", dsPayloadArgs)
+                if (onRowCount && typeof emptyResultLength === "number") {
+                    onRowCount(outside_params_string, emptyResultLength);
+                }
                 params.failCallback()
             }
-            src.getRequestRows(dsPayloadArgs, params.successCallback, failWrapper)
+            src.getRequestRows(dsPayloadArgs, successWrapper, failWrapper)
         }
     };
     return dsLoc;
