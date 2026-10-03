@@ -780,3 +780,28 @@ class TestSharedFrameCache(tornado.testing.AsyncHTTPTestCase):
             finally:
                 os.unlink(fa.name)
                 os.unlink(fb.name)
+
+
+def test_frame_cache_failed_load_keeps_previous_hold():
+    """A loader that raises must not cost the session its existing hold:
+    the handler returns an error and the session keeps its old frame."""
+    from buckaroo.server.frame_cache import FrameCache
+
+    def _boom(path):
+        raise ValueError("Unsupported file format: .xyz")
+
+    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as fa, \
+            tempfile.NamedTemporaryFile(suffix=".xyz", delete=False) as fb:
+        _write_test_csv(fa.name)
+        try:
+            frames = FrameCache()
+            first = frames.acquire("s", "pandas", fa.name, pd.read_csv)
+            with pytest.raises(ValueError):
+                frames.acquire("s", "pandas", fb.name, _boom)
+            assert [k.path for k in frames.keys()] == [fa.name]
+            assert frames.acquire("s", "pandas", fa.name, pd.read_csv) is first
+            frames.release("s")
+            assert len(frames) == 0
+        finally:
+            os.unlink(fa.name)
+            os.unlink(fb.name)

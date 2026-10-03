@@ -6,6 +6,8 @@ from typing import Any, Callable, Dict, Optional
 import pandas as pd
 # polars is optional — only used in lazy mode
 
+from buckaroo.server.frame_cache import FrameCache
+
 log = logging.getLogger("buckaroo.server.session")
 
 _DEFAULT_SESSION_TTL_S = 3600.0      # 1 hour idle before eviction
@@ -126,6 +128,9 @@ class SessionManager:
 
     def __init__(self, ttl_s: float = _DEFAULT_SESSION_TTL_S, eviction_interval_s: float = _DEFAULT_EVICTION_INTERVAL_S) -> None:
         self.sessions: dict[str, SessionState] = {}
+        # Eager /load frames shared across sessions (#993); a session's
+        # hold is dropped when it is evicted or loads something else.
+        self.frames = FrameCache()
         self._ttl_s = ttl_s
         self._eviction_interval_s = eviction_interval_s
         self._evicted_count = 0
@@ -163,6 +168,7 @@ class SessionManager:
         ]
         for sid in to_evict:
             del self.sessions[sid]
+            self.frames.release(sid)
             log.info("Evicted idle session=%s", sid)
         if to_evict:
             self._evicted_count += len(to_evict)
