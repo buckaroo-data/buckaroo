@@ -1,7 +1,9 @@
+import gc
 import json
 import os
 import sys
 import tempfile
+import weakref
 from unittest import mock
 
 import pandas as pd
@@ -780,6 +782,29 @@ class TestSharedFrameCache(tornado.testing.AsyncHTTPTestCase):
             finally:
                 os.unlink(fa.name)
                 os.unlink(fb.name)
+
+    def test_switch_to_lazy_frees_the_eager_frame(self):
+        """Switching a session to mode=lazy drops its hold on the cached
+        frame, so the session must stop pinning it too: ``df`` and
+        ``dataflow`` (whose ``raw_df`` is the same frame) are cleared and the
+        frame is garbage once no one else holds it."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                self._load("lazy-sw", f.name, "polars")
+                session = self.sessions.get("lazy-sw")
+                frame_ref = weakref.ref(session.df)
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "lazy-sw", "path": f.name, "mode": "lazy"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200, resp.body)
+                self.assertEqual(len(self.sessions.frames), 0)
+                self.assertIsNone(session.df)
+                self.assertIsNone(session.dataflow)
+                gc.collect()
+                self.assertIsNone(frame_ref())
+            finally:
+                os.unlink(f.name)
 
 
 def test_frame_cache_failed_load_keeps_previous_hold():
