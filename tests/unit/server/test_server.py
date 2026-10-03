@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sys
@@ -706,6 +707,46 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                 overlay = json.loads(await ws.read_message())
                 self.assertEqual(overlay["type"], "initial_state")
                 self.assertEqual(overlay.get("reply_seq"), 3)
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_state_change_seq_answered_for_no_op_change(self):
+        """#998: a ``buckaroo_state_change`` with a ``state_seq`` is always
+        answered, even when it changes no dataflow field. The client drops
+        a reply older than its latest seq, so when a dataflow change (seq 1)
+        is followed at once by a ``show_commands`` toggle (seq 2) the seq-1
+        reply is dropped as stale. Without a reply for seq 2 the new
+        df_display_args / df_data_dict never reach the client. The reply
+        carries the change's own ``buckaroo_state`` so the toggle isn't undone."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-state-seq-noop"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws.read_message()
+
+                base = {"post_processing": "", "cleaning_method": "",
+                    "quick_command_args": {"search": ["Al"]}, "df_display": "main",
+                    "show_commands": False, "sampled": False, "search_string": ""}
+                ws.write_message(json.dumps({"type": "buckaroo_state_change",
+                    "state_seq": 1, "new_state": base}))
+                ws.write_message(json.dumps({"type": "buckaroo_state_change",
+                    "state_seq": 2, "new_state": {**base, "show_commands": True}}))
+
+                first = json.loads(await ws.read_message())
+                second = json.loads(await asyncio.wait_for(ws.read_message(), timeout=5))
+                self.assertEqual(first.get("reply_seq"), 1)
+                self.assertEqual(second["type"], "initial_state")
+                self.assertEqual(second.get("reply_seq"), 2)
+                self.assertTrue(second["buckaroo_state"]["show_commands"])
+                self.assertEqual(second["df_display_args"], first["df_display_args"])
                 ws.close()
             finally:
                 os.unlink(f.name)
