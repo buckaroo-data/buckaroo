@@ -142,12 +142,19 @@ def _pl_vc_to_pd(ser: pl.Series) -> pd.Series:
     The value tie-break makes ``mode`` / ``most_freq`` deterministic; polars'
     own order among tied counts depends on the plan.
     """
-    vc = ser.drop_nulls().value_counts()
+    non_null = ser.drop_nulls()
     try:
-        vc = vc.sort(['count', ser.name], descending=[True, False])
+        # Run-length encode the sorted values: runs come out in value order, so
+        # a stable count sort breaks ties by value without a second sort key
+        # (a two-key polars sort of the value_counts frame is ~2x slower).
+        runs = non_null.sort().rle().struct.unnest()
+        counts = runs['len'].to_numpy().astype(np.int64, copy=False)
+        values = runs['value'].to_numpy()
+        order = np.argsort(-counts, kind='stable')
+        return pd.Series(counts[order], index=values[order])
     except Exception:
         # dtypes polars can't order (nested, object): count order only
-        vc = vc.sort('count', descending=True)
+        vc = non_null.value_counts(sort=True)
     # Cast count to int64 to match the previous .to_list() path's effective
     # dtype. Keeps `categorical_dict`'s `full_long_tail - unique_count`
     # subtraction signed (counts come back as uint32, which underflows on 0-N).
