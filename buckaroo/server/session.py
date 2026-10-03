@@ -28,8 +28,8 @@ class SessionState:
     rw_to_orig: dict = field(default_factory=dict)
     # Buckaroo mode fields
     mode: str = "viewer"  # "viewer", "buckaroo", or "lazy"
-    backend: str = "pandas"  # "pandas" | "xorq"; meaningful when mode="buckaroo"
-    dataflow: Any = None  # ServerDataflow when backend="pandas"
+    backend: str = "pandas"  # "pandas" | "polars" | "xorq"; meaningful when mode="buckaroo"
+    dataflow: Any = None  # ServerDataflow / PolarsServerDataflow when backend="pandas" / "polars"
     xorq_dataflow: Any = None  # XorqServerDataflow when backend="xorq"
     expr: Any = None  # ibis/xorq expression when backend="xorq"
     build_dir: Optional[str] = None  # xorq build dir, stored for /reload_expr
@@ -38,10 +38,12 @@ class SessionState:
     # expr; stored so a re-POST that omits cache_dir keeps it and one that
     # changes it reloads.
     cache_dir: Optional[str] = None
-    project_root: Optional[str] = None  # project root for klass discovery
+    # Project root for klass discovery, from /load_expr or /load (#994).
+    project_root: Optional[str] = None
     # The /load_expr dataflow config (cache_storage_path, column_config_overrides,
-    # extra_grid_config, init_sd, skip_stat_columns), replayed by /reload_expr so
-    # a reload keeps stat caching and column config (#957).
+    # extra_grid_config, init_sd, skip_stat_columns) or the /load one
+    # (column_config_overrides, extra_grid_config, init_sd), replayed by
+    # /reload_expr so a reload keeps stat caching and column config (#957).
     dataflow_kwargs: dict = field(default_factory=dict)
     # Companion telemetry sink (#943): a fire-and-forget POST callable, built
     # once from the /load_expr payload's telemetry_url on the IOLoop (where
