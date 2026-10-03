@@ -5,6 +5,7 @@ import tempfile
 from unittest import mock
 
 import pandas as pd
+import polars as pl
 import pytest
 import tornado.httpclient
 import tornado.testing
@@ -209,6 +210,29 @@ class TestLoad(tornado.testing.AsyncHTTPTestCase):
                 session = self._app.settings["sessions"].get("plain-1")
                 dvc = session.df_display_args["main"]["df_viewer_config"]
                 self.assertEqual(dvc.get("extra_grid_config"), {})
+            finally:
+                os.unlink(f.name)
+
+    def test_load_polars_backend_keeps_every_row(self):
+        """#992: POST /load with backend=polars on a file with more than
+        1M rows must page the whole frame. ``PolarsServerSampling.pre_limit``
+        replaced the dataflow's raw frame with a shuffled 1M-row sample, so
+        ``rows`` said 1200000 while ``df_meta`` reported 1000000 filtered."""
+        n = 1_200_000
+        with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as f:
+            pl.DataFrame({"row": range(n)}).write_parquet(f.name)
+            try:
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "pl-992", "path": f.name, "mode": "buckaroo",
+                        "backend": "polars"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+                body = json.loads(resp.body)
+                self.assertEqual(body["rows"], n)
+
+                session = self._app.settings["sessions"].get("pl-992")
+                self.assertEqual(session.df_meta["total_rows"], n)
+                self.assertEqual(session.df_meta["filtered_rows"], n)
             finally:
                 os.unlink(f.name)
 

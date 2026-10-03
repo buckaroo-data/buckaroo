@@ -11,6 +11,7 @@ review:
   either backend).
 """
 import json
+from io import BytesIO
 import os
 import tempfile
 
@@ -89,3 +90,18 @@ def test_load_file_polars_ndjson_still_works():
 def test_load_file_polars_unsupported_extension():
     with pytest.raises(ValueError, match="Unsupported file format"):
         load_file_polars("/tmp/foo.xyz")
+
+
+def test_dataflow_keeps_every_row_in_file_order():
+    """#992: the frame the grid pages through must be the whole input, in
+    its original order. ``PolarsServerSampling.pre_limit`` fed
+    ``pre_stats_sample`` → ``df.sample(1_000_000)`` in as the dataflow's
+    raw frame, so a 1.2M-row load paged a shuffled 1M-row sample."""
+    n = 1_200_000
+    dataflow = create_polars_dataflow(pl.DataFrame({"row": range(n)}))
+    _unused, processed_df, _sd = dataflow.widget_args_tuple
+    assert len(processed_df) == n, f"expected {n} rows, got {len(processed_df)}"
+    msg, parquet_bytes = handle_infinite_request_buckaroo_polars(dataflow, _payload(0, 100))
+    assert msg["length"] == n
+    window = pl.read_parquet(BytesIO(parquet_bytes))
+    assert window["a"].to_list() == list(range(100))
