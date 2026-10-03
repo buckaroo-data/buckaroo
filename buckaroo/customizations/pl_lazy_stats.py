@@ -10,12 +10,17 @@ with the result as ``initial_stats``. The @stat functions here derive the
 remaining keys from those scalars instead of from a raw series, so the
 styling classes see the same keys as the eager path.
 
+Above ``LAZY_STATS_SAMPLE_ROWS`` rows the stats are computed over a sample
+of the scan (see :func:`collect_lazy_stats`), because exact distinct counts,
+value counts and quantiles are not bounded-memory even when streamed.
+
 Keys that need a full ``value_counts`` per column are not produced:
 ``value_counts`` itself and ``memory_usage``. ``most_freq``..``5th_freq``,
 ``mode`` and the categorical histogram come from a top-N ``value_counts``
-inside the same select; ``distinct_count`` and ``unique_count`` are exact.
+inside the same select; ``distinct_count`` and ``unique_count`` are exact
+over the rows the stats ran over.
 """
-from typing import Any, Dict, List, Tuple, TypedDict, get_type_hints
+from typing import Any, Dict, List, Optional, Tuple, TypedDict, get_type_hints
 
 import numpy as np
 import polars as pl
@@ -26,6 +31,11 @@ from buckaroo.customizations.histogram import numeric_histogram
 from buckaroo.customizations.pd_stats_v2 import _type, ComputedSummaryResult
 from buckaroo.customizations.pl_stats_v2 import pl_dtype_typing, PlTypingResult
 
+# Rows the exact-cost stats (distinct and unique counts, value counts,
+# median, tails, histogram) run over. Matches PolarsServerSampling.pre_limit.
+LAZY_STATS_SAMPLE_ROWS = 1_000_000
+# slices the sample is taken as
+SAMPLE_BLOCKS = 10
 # how many of the most frequent values the select carries per column; the
 # summary pinned rows show five, the categorical histogram seven
 TOP_N = 7
@@ -34,6 +44,11 @@ TOP_N = 7
 _UNCOUNTABLE = (pl.Object,)
 # the count field of value_counts, named so it can't collide with a column
 _VC_COUNT = "__count"
+
+
+def lazy_row_count(lf: pl.LazyFrame) -> int:
+    # parquet answers this from file metadata; csv and ndjson scan the file
+    return int(lf.select(pl.len()).collect().item())
 
 
 def _alias(i: int, stat_name: str) -> str:
@@ -112,17 +127,47 @@ def _column_seed(name: str, dt: pl.DataType, vals: Dict[str, Any]) -> Dict[str, 
     return seed
 
 
-def collect_lazy_stats(lf: pl.LazyFrame, engine: str = "streaming") -> Dict[str, Dict[str, Any]]:
-    """``{column_name: initial_stats}`` for every column, from one collect."""
-    schema = lf.collect_schema()
-    exprs = lazy_stat_exprs(schema)
-    if not exprs:
-        return {}
-    row = lf.select(exprs).collect(engine=engine).row(0, named=True)
+def _sample_frame(lf: pl.LazyFrame, n_rows: int, sample_rows: int) -> pl.LazyFrame:
+    """About ``sample_rows`` rows as ``SAMPLE_BLOCKS`` slices spread evenly
+    over the scan, first and last rows included. Each slice is collected on
+    its own, so a parquet scan reads only the row groups it needs and the
+    memory held is the sample, however long the scan is. (A strided filter
+    or one concat of slices makes polars read the whole file.)"""
+    per = max(1, sample_rows // SAMPLE_BLOCKS)
+    last_start = n_rows - per
+    blocks = [lf.slice(i * last_start // (SAMPLE_BLOCKS - 1), per).collect(engine="streaming")
+        for i in range(SAMPLE_BLOCKS)]
+    return pl.concat(blocks).lazy()
+
+
+def _split_by_position(row: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
     by_position: Dict[int, Dict[str, Any]] = {}
     for key, val in row.items():
         pos, stat_name = key.split(":", 1)
         by_position.setdefault(int(pos), {})[stat_name] = val
+    return by_position
+
+
+def collect_lazy_stats(lf: pl.LazyFrame, engine: str = "streaming", n_rows: Optional[int] = None,
+        sample_rows: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
+    """``{column_name: initial_stats}`` for every column.
+
+    Exact distinct counts, value counts and quantiles hold a table's worth
+    of state however the select is collected, and polars' streaming parquet
+    reader reads ahead by an amount that grows with the file. So past
+    ``sample_rows`` rows (``LAZY_STATS_SAMPLE_ROWS`` by default) the select
+    runs over a sample of that many rows (:func:`_sample_frame`), the same
+    cap the eager server path applies with ``pre_limit``. A scan at or under
+    the cap is not sampled. When it is, every stat, ``length``, ``min`` and
+    ``max`` included, describes the sample.
+    """
+    schema = lf.collect_schema()
+    if not schema:
+        return {}
+    cap = LAZY_STATS_SAMPLE_ROWS if sample_rows is None else sample_rows
+    total = lazy_row_count(lf) if n_rows is None else n_rows
+    source = _sample_frame(lf, total, cap) if total > cap else lf
+    by_position = _split_by_position(source.select(lazy_stat_exprs(schema)).collect(engine=engine).row(0, named=True))
     return {name: _column_seed(name, dt, by_position[i]) for i, (name, dt) in enumerate(schema.items())}
 
 

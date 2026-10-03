@@ -32,8 +32,9 @@ from buckaroo.dataflow.dataflow import CustomizableDataflow
 from buckaroo.dataflow.styling_core import InitSD
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
 from buckaroo.customizations.pl_autocleaning_conf import NoCleaningConfPl
+from buckaroo.customizations import pl_lazy_stats
 from buckaroo.customizations.pl_lazy_stats import (
-    LAZY_SEED_KEYS, PL_ANALYSIS_LAZY, LazyStatPipeline, collect_lazy_stats)
+    LAZY_SEED_KEYS, PL_ANALYSIS_LAZY, LazyStatPipeline, collect_lazy_stats, lazy_row_count)
 from buckaroo.customizations.styling import DefaultSummaryStatsStyling
 from buckaroo.df_util import to_chars
 from buckaroo.pluggable_analysis_framework.col_analysis import SDType
@@ -72,11 +73,6 @@ class PolarsServerDataflow(CustomizableDataflow[pl.DataFrame]):
         return pd_to_obj(self.sampling_klass.serialize_sample(df.to_pandas()))
 
 
-def lazy_row_count(lf: pl.LazyFrame) -> int:
-    # parquet answers this from file metadata; csv and ndjson scan the file
-    return int(lf.select(pl.len()).collect().item())
-
-
 class PolarsLazySampling(PLSampling):
     """No pre-stats sample and no main serial: the stats are one select
     over the scan and the grid is paged by the infinite handler."""
@@ -97,7 +93,8 @@ class PolarsLazySampling(PLSampling):
 class PlLazyDfStatsV2:
     """Summary-stats executor for a LazyFrame (#993).
 
-    Everything that needs the data is one lazy select over the scan
+    Everything that needs the data is one lazy select over the scan, or
+    over a sample of it past ``LAZY_STATS_SAMPLE_ROWS`` rows
     (``collect_lazy_stats``), collected with the streaming engine. Its
     scalars seed ``StatPipeline.process_column`` as ``initial_stats``,
     so the derived @stat functions and the structural styling classes
@@ -181,8 +178,10 @@ class PolarsLazyServerDataflow(CustomizableDataflow[Any]):
             self.df_meta = {'columns': 0, 'filtered_rows': 0, 'rows_shown': 0, 'total_rows': 0}
             return
         rows = self._row_count(self.processed_df)
+        total = self._row_count(self.orig_df)
         self.df_meta = {'columns': len(self.processed_df.collect_schema()), 'filtered_rows': rows,
-            'rows_shown': rows, 'total_rows': self._row_count(self.orig_df), 'stats_omitted': LAZY_STATS_OMITTED}
+            'rows_shown': rows, 'total_rows': total, 'stats_omitted': LAZY_STATS_OMITTED,
+            'stats_sampled': total > pl_lazy_stats.LAZY_STATS_SAMPLE_ROWS}
 
 
 def load_file_polars(path: str) -> pl.DataFrame:
@@ -299,13 +298,28 @@ def _lazy_window(processed_df: pl.LazyFrame, merged_sd, payload_args: dict, sear
     if sort:
         ascending = payload_args.get("sort_direction") == "asc"
         converted_sort_column = merged_sd[sort]["orig_col_name"]
-        # row index before the sort, so it carries the original position as
-        # the eager path does; polars turns sort + slice into a top-k
-        window = filtered.with_row_index().sort(converted_sort_column, descending=not ascending).slice(start,
-            end - start)
-    else:
-        window = filtered.slice(start, end - start).with_row_index(offset=start)
-    return n_rows, window.collect()
+        return n_rows, _sorted_window(filtered, converted_sort_column, not ascending, start, end)
+    window = filtered.slice(start, end - start).with_row_index(offset=start)
+    return n_rows, window.collect(engine="streaming")
+
+
+def _sorted_window(filtered: pl.LazyFrame, sort_col: str, descending: bool, start: int, end: int) -> pl.DataFrame:
+    """Rows ``start:end`` of ``filtered`` sorted by ``sort_col``, each with
+    its row index in ``filtered`` (as the eager path does).
+
+    polars does not turn sort + slice into a bounded top-k, and sorting the
+    whole frame holds every column. So the sort runs over the row index and
+    the sort column alone, then a second streamed pass picks the window's
+    rows by index. Peak memory follows the sort column and the index rather
+    than the whole table; it is not constant, because polars' streaming
+    reader still reads ahead in proportion to the scan."""
+    idx = "index"
+    keyed = filtered.with_row_index(idx)
+    order = keyed.select(idx, sort_col).sort(sort_col, descending=descending).slice(start, end - start).select(
+        idx).collect(engine="streaming")
+    rows = keyed.filter(pl.col(idx).is_in(order[idx].implode())).collect(engine="streaming")
+    # a left join keeps the left (sorted) order
+    return order.join(rows, on=idx, how="left", maintain_order="left")
 
 
 def handle_infinite_request_buckaroo_polars(
