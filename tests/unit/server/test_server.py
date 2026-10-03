@@ -699,7 +699,7 @@ def _write_polars_project(root):
     with open(os.path.join(root, "post_processing", "head_two.py"), "w") as f:
         f.write("ENGINE = 'polars'\ndef process(df):\n    return df.head(2)\n")
     with open(os.path.join(root, "display", "my_display.py"), "w") as f:
-        f.write("class MyDisplay(ColAnalysis):\n    df_display_name = 'my_display'\n")
+        f.write("class MyDisplay(DefaultMainStyling):\n    df_display_name = 'my_display'\n")
 
 
 class TestLoadPolarsProjectRoot(tornado.testing.AsyncHTTPTestCase):
@@ -741,6 +741,17 @@ class TestLoadPolarsProjectRoot(tornado.testing.AsyncHTTPTestCase):
         self.assertNotIn("ibis_count", name_stats)
         self.assertIn("head_two", session.buckaroo_options["post_processing"])
         self.assertIn("my_display", session.df_display_args)
+
+    def test_load_polars_without_project_root_keeps_builtins_only(self):
+        body = json.loads(self._load_body("pl-no-pr"))
+        del body["project_root"]
+        resp = self.fetch("/load", method="POST", body=json.dumps(body),
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.code, 200)
+        session = self._app.settings["sessions"].get("pl-no-pr")
+        self.assertIsNone(session.project_root)
+        self.assertNotIn("row_count", session.dataflow.summary_sd["a"])
+        self.assertEqual(session.buckaroo_options["post_processing"], [""])
 
     @tornado.testing.gen_test
     async def test_polars_post_processor_selectable_over_ws(self):

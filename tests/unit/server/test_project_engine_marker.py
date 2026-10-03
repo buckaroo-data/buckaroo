@@ -31,8 +31,22 @@ import pytest
 pl = pytest.importorskip("polars")
 
 from buckaroo.pluggable_analysis_framework.stat_func import RawSeries, XorqColumn  # noqa: E402
-from buckaroo.server.project_loading import (  # noqa: E402
-    load_project_post_processing_klasses, load_project_stat_klasses)
+
+
+def load_project_stat_klasses(*args, **kwargs):
+    # Imported per call so that a missing buckaroo.server.project_loading
+    # fails each test as an ImportError instead of aborting collection of
+    # the whole unit suite.
+    from buckaroo.server import project_loading
+
+    return project_loading.load_project_stat_klasses(*args, **kwargs)
+
+
+def load_project_post_processing_klasses(*args, **kwargs):
+    from buckaroo.server import project_loading
+
+    return project_loading.load_project_post_processing_klasses(*args, **kwargs)
+
 
 XORQ_STAT = "def compute(col):\n    return col.count()\n"
 POLARS_STAT = (
@@ -112,8 +126,9 @@ def test_polars_stat_runs_in_the_polars_stats_pipeline(tmp_path: Path):
     df = pl.DataFrame({"name": ["x", "y", "z"], "age": [1, 2, 3]})
     stats = PlDfStatsV2(df, list(PL_ANALYSIS_V2) + klasses)
     assert stats.errs == {}
-    assert stats.sdf["name"]["n_rows"] == 3
-    assert stats.sdf["age"]["n_rows"] == 3
+    # sdf is keyed by the rewritten column names (a, b, ...).
+    assert stats.sdf["a"]["n_rows"] == 3
+    assert stats.sdf["b"]["n_rows"] == 3
 
 
 def test_polars_stat_sees_polars_module(tmp_path: Path):
