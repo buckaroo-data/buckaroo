@@ -35,9 +35,11 @@ from buckaroo.serialization_utils import pd_to_obj, make_infinite_resp
 
 class PolarsServerSampling(PLSampling):
     """Server-mode polars sampling. Inherits ``PLSampling``'s widget
-    defaults but caps pre-stats work at ``pre_limit`` so a multi-million-row
-    /load doesn't OOM the stats pipeline."""
-    pre_limit = 1_000_000
+    defaults, including ``pre_limit = False``: ``pre_stats_sample`` is
+    what the dataflow pages through, so a cap there would replace the
+    frame with a shuffled sample (#992). Stats on large frames are
+    already sampled by ``PlDfStatsV2.get_operating_df``."""
+    pre_limit = False
     serialize_limit = -1  # infinite mode — no per-page sample cap
 
 
