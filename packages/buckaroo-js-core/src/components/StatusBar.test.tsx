@@ -106,10 +106,6 @@ describe("StatusBar in-flight indicator (#813)", () => {
  * has no server-side row path, so its default stays on quick_command_args.
  */
 describe("StatusBar live search dispatch (#998)", () => {
-    // The prop doesn't exist yet on main; spread it loosely so the file
-    // type-checks while the test is red.
-    const rowsMode = { liveSearchMode: "rows" } as Record<string, unknown>;
-
     const searchColDef = () =>
         mockGridProps.current.columnDefs.find((c: { field?: string }) => c.field === "search");
 
@@ -130,7 +126,7 @@ describe("StatusBar live search dispatch (#998)", () => {
                 buckarooState={state}
                 setBuckarooState={setBuckarooState}
                 buckarooOptions={buckarooOptions}
-                {...rowsMode}
+                liveSearchMode="rows"
             />
         );
         act(() => {
@@ -144,16 +140,36 @@ describe("StatusBar live search dispatch (#998)", () => {
     });
 
     it("rows mode: the search cell shows buckaroo_state.search_string (overlay round-trip, #854)", () => {
-        const state = { ...buckarooState, search_string: "alle" } as BuckarooState;
+        const state: BuckarooState = { ...buckarooState, search_string: "alle" };
         render(
             <StatusBar
                 dfMeta={dfMeta}
                 buckarooState={state}
                 setBuckarooState={() => {}}
                 buckarooOptions={buckarooOptions}
-                {...rowsMode}
+                liveSearchMode="rows"
             />
         );
         expect(mockGridProps.current.rowData[0].search).toBe("alle");
+    });
+
+    it("default (widget) mode still sets quick_command_args.search", () => {
+        // The Jupyter widget has no row-only path: search goes through
+        // quick_command_args to Python, as before.
+        const setBuckarooState = jest.fn();
+        render(
+            <StatusBar
+                dfMeta={dfMeta}
+                buckarooState={buckarooState}
+                setBuckarooState={setBuckarooState}
+                buckarooOptions={buckarooOptions}
+            />
+        );
+        act(() => {
+            searchColDef().onCellValueChanged({ oldValue: "", newValue: "alle" });
+        });
+        const next = resolveDispatched(setBuckarooState, buckarooState);
+        expect(next.quick_command_args).toEqual({ search: ["alle"] });
+        expect(next.search_string).toBeUndefined();
     });
 });

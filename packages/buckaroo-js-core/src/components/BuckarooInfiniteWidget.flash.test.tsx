@@ -673,9 +673,6 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
  * effect refetches, without remounting the grid.
  */
 describe("BuckarooInfiniteWidget — rows-first live search (#998)", () => {
-  // Not a prop on main yet; spread loosely so the file type-checks red.
-  const rowsMode = { liveSearchMode: "rows" } as Record<string, unknown>;
-
   const baseProps = (src: KeyAwareSmartRowCache) => ({
     df_data_dict: { summary_stats: [] },
     df_display_args: baseDisplayArgs,
@@ -693,7 +690,7 @@ describe("BuckarooInfiniteWidget — rows-first live search (#998)", () => {
     const src = mkSrc();
     const props = baseProps(src);
     const { rerender } = render(
-      <BuckarooInfiniteWidget {...props} buckaroo_state={initialState} {...rowsMode} />,
+      <BuckarooInfiniteWidget {...props} buckaroo_state={initialState} liveSearchMode="rows" />,
     );
     expect(getSpyCalls().mountCount).toBe(1);
     const sigBefore = JSON.stringify(dfvCalls[dfvCalls.length - 1].outside_df_params);
@@ -702,8 +699,8 @@ describe("BuckarooInfiniteWidget — rows-first live search (#998)", () => {
     rerender(
       <BuckarooInfiniteWidget
         {...props}
-        buckaroo_state={{ ...initialState, search_string: "alle" } as BuckarooState}
-        {...rowsMode}
+        buckaroo_state={{ ...initialState, search_string: "alle" }}
+        liveSearchMode="rows"
       />,
     );
     expect(getSpyCalls().mountCount).toBe(1);
@@ -720,8 +717,8 @@ describe("BuckarooInfiniteWidget — rows-first live search (#998)", () => {
     render(
       <BuckarooInfiniteWidget
         {...baseProps(src)}
-        buckaroo_state={{ ...initialState, search_string: "alle" } as BuckarooState}
-        {...rowsMode}
+        buckaroo_state={{ ...initialState, search_string: "alle" }}
+        liveSearchMode="rows"
       />,
     );
     // The AG-Grid spy calls getRows once per datasource.

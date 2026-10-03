@@ -5,7 +5,7 @@ import { ColumnsEditor } from "./ColumnsEditor";
 
 import { DFData } from "./DFViewerParts/DFWhole";
 import { StatusBar } from "./StatusBar";
-import { BuckarooState } from "./WidgetTypes";
+import { BuckarooState, LiveSearchMode } from "./WidgetTypes";
 import { BuckarooOptions } from "./WidgetTypes";
 import { DFMeta } from "./WidgetTypes";
 import { CommandConfigT } from "./CommandUtils";
@@ -144,6 +144,7 @@ export function BuckarooInfiniteWidget({
         src,
         dataframe_id,
         autoHeight,
+        liveSearchMode,
     }: {
         df_meta: DFMeta;
         df_data_dict: Record<string, DFData>;
@@ -178,10 +179,23 @@ export function BuckarooInfiniteWidget({
          *  false → domLayout "normal" (fills parent container).
          *  undefined → server value wins. */
         autoHeight?: boolean;
+        /** Where the search box sends its term (#998). "dataflow" (default)
+         *  is quick_command_args.search, which Python reruns the dataflow
+         *  for. Server entry points pass "rows": the term goes out as
+         *  buckaroo_state.search_string, which only filters row fetches, so
+         *  the summary stats stay the unfiltered frame's and the status
+         *  bar's filtered count is taken from the row response instead. */
+        liveSearchMode?: LiveSearchMode;
     }) {
         // we only want to create KeyAwareSmartRowCache once, it caches sourceName too
         // so having it live between relaods is key
         //const [respError, setRespError] = useState<string | undefined>(undefined);
+
+        // Rows-mode filtered count (#998): the length the last row response
+        // reported, tagged with the outside_df_params signature of the request
+        // it answered, so a reply for an older search term can't be shown
+        // against the current one.
+        const [liveRowCount, setLiveRowCount] = useState<{ sig: string; count: number } | null>(null);
 
     const mainDs = useMemo(() => {
             // getDs(src) returns a closure that pulls rows from `src` (the
@@ -192,8 +206,26 @@ export function BuckarooInfiniteWidget({
             // invariant under those state changes; refresh is driven by
             // effectiveDataframeId (remount) and outsideDFSig (purge).
             bkLog("mainDs useMemo recomputed");
-            return getDs(src);
-        }, [src]);
+            const ds = getDs(src);
+            if (liveSearchMode !== "rows") {
+                return ds;
+            }
+            // Same datasource, with the success callback observed so the
+            // status bar can show the filtered count the server reported.
+            const getRows = (params: IGetRowsParams) => {
+                const sig = JSON.stringify(params.context?.outside_df_params);
+                ds.getRows({
+                    ...params,
+                    successCallback: (rows, lastRow) => {
+                        if (typeof lastRow === "number" && lastRow >= 0) {
+                            setLiveRowCount({ sig, count: lastRow });
+                        }
+                        params.successCallback(rows, lastRow);
+                    },
+                });
+            };
+            return { ...ds, getRows };
+        }, [src, liveSearchMode]);
       const [activeCol, setActiveCol] = useState<[string, string]>(["a", "stoptime"]);
 
         // Reset activeCol on dataframe_id change. The DFViewerInfinite key below
@@ -240,17 +272,34 @@ export function BuckarooInfiniteWidget({
         // Used to denote "this dataframe has been transformed" — eventually
         // spliced back into request args from scrolling. dataframe_id
         // participates so SmartRowCache sourceName picks up an explicit
-        // "different dataframe" event.
+        // "different dataframe" event. search_string (server rows-mode
+        // search, #998) participates for the same reason as
+        // quick_command_args: each term is a different row set, so it needs
+        // its own sourceName and a purge, but not a remount.
         const outsideDFParams = useMemo(
             () => {
                 bkLog("outsideDFParams useMemo recomputed", {
                     quick_command_args: buckaroo_state.quick_command_args,
+                    search_string: buckaroo_state.search_string,
                     df_display: buckaroo_state.df_display,
                 });
-                return [remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id];
+                return [remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id, buckaroo_state.search_string];
             },
-            [remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id],
+            [remountOperations, buckaroo_state.post_processing, buckaroo_state.cleaning_method, buckaroo_state.quick_command_args, buckaroo_state.df_display, dataframe_id, buckaroo_state.search_string],
         );
+
+        // In rows mode the server's df_meta.filtered_rows is the unfiltered
+        // count (the dataflow never saw the term), so the status bar shows the
+        // row response's length when it answered the current outside params.
+        const statusDfMeta = useMemo(() => {
+            if (liveSearchMode !== "rows" || liveRowCount === null) {
+                return df_meta;
+            }
+            if (liveRowCount.sig !== JSON.stringify(outsideDFParams)) {
+                return df_meta;
+            }
+            return { ...df_meta, filtered_rows: liveRowCount.count };
+        }, [df_meta, liveSearchMode, liveRowCount, outsideDFParams]);
 
         // Effective remount key. Bundles dataframe_id with the
         // row-content-changing state fields so any of them triggers a full
@@ -327,13 +376,14 @@ export function BuckarooInfiniteWidget({
                     }}
                 >
                     <StatusBar
-                        dfMeta={df_meta}
+                        dfMeta={statusDfMeta}
                         buckarooState={buckaroo_state}
                         setBuckarooState={wrappedOnBuckarooState}
                         buckarooOptions={buckaroo_options}
                         themeConfig={cDisp.df_viewer_config?.component_config?.theme}
                         inFlight={inFlight}
                         componentConfig={effectiveDisplayArgs['main']?.df_viewer_config?.component_config as Record<string, unknown> | undefined}
+                        liveSearchMode={liveSearchMode}
                     />
                     <DFViewerInfinite
                         key={effectiveDataframeId}

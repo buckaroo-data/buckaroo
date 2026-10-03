@@ -23,7 +23,17 @@ export interface BuckarooState {
     post_processing: string | false;
     df_display: string; //at least one dataframe must always be displayed
     show_commands: string | false;
+    // Server mode only (#838/#998): the per-client live search term. The
+    // server filters row fetches on it and answers with a highlight-only
+    // initial_state for this client; it never changes the dataflow.
+    search_string?: string;
 }
+
+// Where the search box sends its term (#998). "dataflow" is the Jupyter
+// widget path: quick_command_args.search, which Python reruns the dataflow
+// for. "rows" is the server path: buckaroo_state.search_string, which only
+// filters row fetches and leaves the summary stats as the unfiltered frame's.
+export type LiveSearchMode = "dataflow" | "rows";
 
 export type BKeys = "sampled" | "cleaning_method" | "post_processing" | "df_display";
 

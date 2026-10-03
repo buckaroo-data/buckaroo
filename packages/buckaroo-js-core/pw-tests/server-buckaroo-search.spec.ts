@@ -82,4 +82,53 @@ test.describe('Buckaroo mode: search filtering', () => {
     expect(filteredBodyText).not.toContain('Bob');
     expect(filteredBodyText).not.toContain('Charlie');
   });
+
+  test('live typing sends search_string, not quick_command_args.search (#998)', async ({ page, request }) => {
+    // Server mode runs search on the per-client row-only path: the term
+    // goes out as buckaroo_state.search_string, the dataflow fields stay as
+    // they are, the server answers with one overlay initial_state plus the
+    // filtered rows, and the status bar's filtered count follows the rows.
+    const session = `search-rows-${Date.now()}`;
+    await loadBuckarooSession(request, session, csvPath);
+
+    const sent: any[] = [];
+    const received: any[] = [];
+    page.on('websocket', (ws) => {
+      ws.on('framesent', (f) => { if (typeof f.payload === 'string') sent.push(JSON.parse(f.payload)); });
+      ws.on('framereceived', (f) => {
+        if (typeof f.payload !== 'string') return;
+        try { received.push(JSON.parse(f.payload)); } catch { /* binary-ish text frame */ }
+      });
+    });
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForDataGrid(page);
+    const sentBefore = sent.length;
+    const receivedBefore = received.length;
+
+    // No Enter: the 300 ms debounce fires after the last key.
+    const searchInput = page.locator('.FakeSearchEditor input[type="text"]');
+    await searchInput.click();
+    await searchInput.pressSequentially('Alice', { delay: 50 });
+    await page.waitForTimeout(3000);
+
+    const stateChanges = sent.slice(sentBefore).filter((m) => m.type === 'buckaroo_state_change');
+    expect(stateChanges.length).toBe(1);
+    expect(stateChanges[0].new_state.search_string).toBe('Alice');
+    expect(stateChanges[0].new_state.quick_command_args).toEqual({});
+
+    const initialStates = received.slice(receivedBefore).filter((m) => m.type === 'initial_state');
+    expect(initialStates.length).toBe(1);
+    expect(initialStates[0].buckaroo_state.search_string).toBe('Alice');
+
+    const rowResps = received.slice(receivedBefore).filter((m) => m.type === 'infinite_resp');
+    expect(rowResps.length).toBeGreaterThan(0);
+    expect(rowResps[rowResps.length - 1].length).toBe(1);
+
+    const bodyText = await page.locator('.df-viewer').textContent();
+    expect(bodyText).toContain('Alice');
+    expect(bodyText).not.toContain('Bob');
+    await expect(page.locator('.status-bar [col-id="filtered_rows"]').last()).toHaveText('1');
+    await expect(searchInput).toHaveValue('Alice');
+  });
 });

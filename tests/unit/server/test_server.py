@@ -492,6 +492,60 @@ class TestWebSocket(tornado.testing.AsyncHTTPTestCase):
                 os.unlink(f.name)
 
     @tornado.testing.gen_test
+    async def test_search_string_is_row_only_no_dataflow_rerun(self):
+        """#998: the server-mode search box sends ``search_string`` and
+        leaves the dataflow fields alone, so a keystroke costs one
+        overlay ``initial_state`` to this client plus a row fetch. The
+        dataflow must not rerun: ``quick_command_args`` and the summary
+        stats snapshot stay what they were, and the rows come back
+        filtered."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                sid = "ws-search-rows-only"
+                await _async_fetch(self.get_http_port(), "/load",
+                    method="POST",
+                    body=json.dumps({"session": sid, "path": f.name, "mode": "buckaroo"}))
+                session = self._app.settings["sessions"].get(sid)
+                dataflow = session.dataflow
+                qca_before = dataflow.quick_command_args
+                stats_before = session.df_data_dict
+
+                ws = await tornado.websocket.websocket_connect(
+                    f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+                await ws.read_message()  # initial_state on connect
+
+                ws.write_message(json.dumps({
+                    "type": "buckaroo_state_change",
+                    "new_state": {
+                        "post_processing": "", "cleaning_method": "",
+                        "quick_command_args": {}, "df_display": "main",
+                        "show_commands": False, "sampled": False,
+                        "search_string": "Alice"}}))
+                overlay = json.loads(await ws.read_message())
+                self.assertEqual(overlay["type"], "initial_state")
+                self.assertEqual(overlay["buckaroo_state"].get("search_string"), "Alice")
+
+                ws.write_message(json.dumps({
+                    "type": "infinite_request",
+                    "payload_args": {"start": 0, "end": 5,
+                        "sourceName": "search:Alice", "origEnd": 5}}))
+                # The next message is the row reply, not a second
+                # initial_state: the overlay was the only one.
+                resp = json.loads(await ws.read_message())
+                self.assertEqual(resp["type"], "infinite_resp")
+                self.assertEqual(resp["length"], 1)
+                await ws.read_message()  # binary frame
+
+                self.assertIs(dataflow.quick_command_args, qca_before,
+                    "search_string must not touch the dataflow's quick_command_args")
+                self.assertIs(session.df_data_dict, stats_before,
+                    "search_string must not recompute the session's stats snapshot")
+                ws.close()
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
     async def test_search_string_resets_on_load_reuse(self):
         """Codex P1 (#839): session.search_string must be cleared when
         /load replaces data on an existing buckaroo-mode session — else

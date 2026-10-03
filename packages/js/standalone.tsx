@@ -227,6 +227,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
                 on_buckaroo_state={onBuckarooState}
                 buckaroo_options={buckarooOptions}
                 src={src}
+                liveSearchMode="rows"
             />
         </div>
     );
