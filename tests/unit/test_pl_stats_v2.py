@@ -432,3 +432,35 @@ class TestPlFullPipeline:
             assert actual == expected_displayer, (
                 f"{ser.dtype}: expected {expected_displayer!r}, got {actual!r}"
             )
+
+
+# ============================================================================
+# Tests: PlDfStatsV2 — no sample, deterministic value_counts / mode (#999)
+# ============================================================================
+
+class TestPlDfStatsV2:
+    def test_large_frame_reports_full_length(self):
+        """60k rows x 20 cols is over FAST_SUMMARY_WHEN_GREATER cells; the stats
+        used to run on a 50,000-row sample and report length 50000."""
+        from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+        n = 60_000
+        df = pl.DataFrame({f'c{i}': (np.arange(n) + i) % 7 for i in range(20)})
+        stats = PlDfStatsV2(df, PL_ANALYSIS_V2)
+        assert stats.errs == {}
+        assert stats.sdf['a']['length'] == n
+        assert stats.sdf['a']['distinct_count'] == 7
+        assert stats.sdf['a']['null_count'] == 0
+
+    def test_value_counts_and_mode_break_ties_by_value(self):
+        """value_counts is ordered by count desc then value asc, and mode is its
+        first entry, so tied values don't come out in plan-dependent order."""
+        from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+        df = pl.DataFrame({'x': [2, 1, 2, 1, 3, None], 's': ['b', 'a', 'b', 'a', 'c', None]})
+        stats = PlDfStatsV2(df, PL_ANALYSIS_V2)
+        assert stats.errs == {}
+        assert list(stats.sdf['a']['value_counts'].index) == [1, 2, 3]
+        assert stats.sdf['a']['value_counts'].to_list() == [2, 2, 1]
+        assert stats.sdf['a']['mode'] == 1
+        assert stats.sdf['a']['most_freq'] == 1
+        assert list(stats.sdf['b']['value_counts'].index) == ['a', 'b', 'c']
+        assert stats.sdf['b']['mode'] == 'a'
