@@ -122,7 +122,10 @@ def pl_distinct_stats(ser: RawSeries) -> PlDistinctResult:
     empty_count = 0
     if _pl_is_string_like(ser.dtype):
         empty_count = int((non_null.cast(pl.String) == '').sum())
-    return {'distinct_count': int(non_null.n_unique()), 'empty_count': empty_count}
+    # n_unique is not implemented for Object; value_counts is, and it is what the
+    # distinct count came from before the pre-pass.
+    distinct_count = len(non_null.value_counts()) if ser.dtype == pl.Object else non_null.n_unique()
+    return {'distinct_count': int(distinct_count), 'empty_count': empty_count}
 
 
 PlValueCountsResult = TypedDict('PlValueCountsResult', {'value_counts': pd.Series, 'mode': Any})
