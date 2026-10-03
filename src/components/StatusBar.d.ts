@@ -1,11 +1,11 @@
 import { default as React } from '../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
-import { DFMeta, BuckarooOptions, BuckarooState } from './WidgetTypes';
+import { DFMeta, BuckarooOptions, BuckarooState, LiveSearchMode } from './WidgetTypes';
 import { CustomCellEditorProps } from 'ag-grid-react';
 import { ThemeConfig } from './DFViewerParts/gridUtils';
 export type setColumFunc = (newCol: string) => void;
 export declare const fakeSearchCell: (_params: any) => import("react/jsx-runtime").JSX.Element;
 export declare const SearchEditor: React.MemoExoticComponent<({ value, onValueChange, stopEditing }: CustomCellEditorProps) => import("react/jsx-runtime").JSX.Element>;
-export declare function StatusBar({ dfMeta, buckarooState, setBuckarooState, buckarooOptions, heightOverride, themeConfig, inFlight, componentConfig, }: {
+export declare function StatusBar({ dfMeta, buckarooState, setBuckarooState, buckarooOptions, heightOverride, themeConfig, inFlight, componentConfig, liveSearchMode, }: {
     dfMeta: DFMeta;
     buckarooState: BuckarooState;
     setBuckarooState: React.Dispatch<React.SetStateAction<BuckarooState>>;
@@ -19,4 +19,9 @@ export declare function StatusBar({ dfMeta, buckarooState, setBuckarooState, buc
      *  Python's ComponentConfig TypedDict; cell renderers read them via
      *  params.context.componentConfig. */
     componentConfig?: Record<string, unknown>;
+    /** Where the search box sends its term (#998). Defaults to "dataflow"
+     *  (quick_command_args.search, the Jupyter widget path). Server entry
+     *  points pass "rows" so a keystroke sets buckaroo_state.search_string,
+     *  the per-client row-only path, and never reruns the dataflow. */
+    liveSearchMode?: LiveSearchMode;
 }): import("react/jsx-runtime").JSX.Element;
