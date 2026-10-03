@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from .col_analysis import AObjs, ColAnalysis
+from .polars_stat_pipeline import PolarsStatPipeline
 from .stat_pipeline import StatPipeline, errors_to_errdict
 from .utils import FAST_SUMMARY_WHEN_GREATER
 from .safe_summary_df import output_full_reproduce
@@ -81,22 +82,22 @@ class DfStatsV2:
 
 
 class PlDfStatsV2:
-    """Polars summary-stats executor. Uses StatPipeline with @stat polars functions."""
+    """Polars summary-stats executor: ``PolarsStatPipeline`` over the whole frame.
+
+    No sampling (#999): the batch select handles big frames, and a stat that
+    doesn't scale carries ``max_rows``. ``gated_keys`` lists the keys that
+    gate left ``NOT_COMPUTED`` on this frame.
+    """
 
     @classmethod
     def verify_analysis_objects(cls, objs):
-        StatPipeline(objs)
-
-    def get_operating_df(self, df):
-        rows, cols = len(df), len(df.columns)
-        if rows * cols > FAST_SUMMARY_WHEN_GREATER:
-            return df.sample(n=min(50_000, rows), seed=42)
-        return df
+        PolarsStatPipeline(objs, unit_test=False)
 
     def __init__(self, df, col_analysis_objs, operating_df_name=None, debug=False, skip_columns=None):
-        self.df = self.get_operating_df(df)
-        self.ap = StatPipeline(col_analysis_objs, unit_test=False)
+        self.df = df
+        self.ap = PolarsStatPipeline(col_analysis_objs, unit_test=False)
         self.sdf, errors = self.ap.process_df(self.df, debug, skip_columns=skip_columns)
+        self.gated_keys = self.ap.gated_keys
         self.errs = errors_to_errdict(errors)
         self.stat_errors = []
         if self.errs:
@@ -106,6 +107,7 @@ class PlDfStatsV2:
         """Add a new analysis class interactively."""
         passed, errors = self.ap.add_stat(a_obj)
         self.sdf, self.stat_errors = self.ap.process_df(self.df, debug=True)
+        self.gated_keys = self.ap.gated_keys
         self.errs = errors_to_errdict(self.stat_errors)
         if not passed:
             print("Unit tests failed")
