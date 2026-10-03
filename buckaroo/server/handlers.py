@@ -206,7 +206,7 @@ class LoadHandler(tornado.web.RequestHandler):
 
     def _handle_browser_window(self, session_id: str) -> str:
         """Handle browser window management."""
-        if not self.application.settings.get("open_browser", True):
+        if not self.application.settings.get("open_browser", False):
             return "disabled"
 
         port = self.application.settings["port"]
@@ -480,7 +480,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
             # warm pull's span is silently dropped (#944).
             existing.tele_sink = tele_sink
             existing._perf_first_payload_seen = False
-            if no_browser or not self.application.settings.get("open_browser", True):
+            if no_browser or not self.application.settings.get("open_browser", False):
                 browser_action = "skipped"
             else:
                 port = self.application.settings["port"]
@@ -631,7 +631,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 except Exception:
                     session.ws_clients.discard(client)
 
-        if no_browser or not self.application.settings.get("open_browser", True):
+        if no_browser or not self.application.settings.get("open_browser", False):
             browser_action = "skipped"
         else:
             port = self.application.settings["port"]
@@ -780,7 +780,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
                     session.ws_clients.discard(client)
 
         # Browser window
-        if no_browser or not self.application.settings.get("open_browser", True):
+        if no_browser or not self.application.settings.get("open_browser", False):
             browser_action = "skipped"
         else:
             port = self.application.settings.get("port", 8888)
