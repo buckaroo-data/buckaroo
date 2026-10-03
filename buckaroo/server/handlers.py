@@ -169,6 +169,12 @@ class LoadHandler(tornado.web.RequestHandler):
 
     def _load_lazy_polars(self, session, path: str, ldf, metadata: dict):
         """Set up lazy polars session state."""
+        # The lazy path holds no eager frame (the caller already released the
+        # session's frame-cache hold), so drop the references that would keep
+        # a prior /load frame alive: ``df`` and the dataflow whose ``raw_df``
+        # is that frame (#993).
+        session.df = None
+        session.dataflow = None
         display_state, orig_to_rw, rw_to_orig = get_display_state_lazy(ldf)
         display_state["df_meta"]["total_rows"] = metadata["rows"]
 
