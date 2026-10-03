@@ -309,19 +309,10 @@ class LoadHandler(tornado.web.RequestHandler):
         extra_grid_config = body.get("extra_grid_config")
         init_sd = body.get("init_sd")
 
-        sessions = self.application.settings["sessions"]
-        session = sessions.get_or_create(session_id, path)
-        session.mode = mode
-        # Loading via /load is pandas or polars — clear any xorq state left
-        # by a prior /load_expr on the same session so WS dispatch routes
-        # to the new dataflow rather than a stale xorq one.
-        session.backend = backend
-        session.xorq_dataflow = None
-        session.expr = None
-        session.prompt = prompt
-        if component_config:
-            session.component_config = component_config
-
+        # Load and validate before touching the session: a rejected re-POST
+        # (404, 400 invalid_file, 400 invalid_row_order_column) must leave
+        # the previous load's mode, backend and dataflow in place, or the WS
+        # dispatch no longer matches the dataflow.
         # Load data in appropriate mode
         if backend == "polars" and mode == "buckaroo":
             file_obj, metadata = self._load_polars_with_error_handling(path)
@@ -342,6 +333,19 @@ class LoadHandler(tornado.web.RequestHandler):
                 self.write({"error_code": "invalid_row_order_column",
                     "message": f"row_order_column {row_order_column!r} is not a column of {path}"})
                 return
+
+        sessions = self.application.settings["sessions"]
+        session = sessions.get_or_create(session_id, path)
+        session.mode = mode
+        # Loading via /load is pandas or polars — clear any xorq state left
+        # by a prior /load_expr on the same session so WS dispatch routes
+        # to the new dataflow rather than a stale xorq one.
+        session.backend = backend
+        session.xorq_dataflow = None
+        session.expr = None
+        session.prompt = prompt
+        if component_config:
+            session.component_config = component_config
         session.row_order_column = row_order_column
 
         if mode == "lazy":
