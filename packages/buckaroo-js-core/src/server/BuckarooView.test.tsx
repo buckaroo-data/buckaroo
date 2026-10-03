@@ -14,8 +14,12 @@ import type { IModel } from "./IModel";
 // wiring, not AG-Grid. The widget components instantiate AgGridReact which
 // is fragile under jsdom; the stub keeps the test focused on the model
 // contract.
+const widgetProps: any[] = [];
 jest.mock("../components/BuckarooWidgetInfinite", () => ({
-    BuckarooInfiniteWidget: () => <div data-testid="buckaroo-widget-stub" />,
+    BuckarooInfiniteWidget: (props: any) => {
+        widgetProps.push(props);
+        return <div data-testid="buckaroo-widget-stub" />;
+    },
     DFViewerInfiniteDS: () => <div data-testid="viewer-widget-stub" />,
     getKeySmartRowCache: jest.fn(() => ({ __stub: "row-cache" })),
 }));
@@ -38,7 +42,10 @@ function makeFakeModel(): { model: IModel; events: Map<string, Set<Function>>; s
     return { model, events, sent };
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+    widgetProps.length = 0;
+    cleanup();
+});
 
 describe("BuckarooView (injectable IModel — #759)", () => {
     it("renders the viewer widget when given a fake IModel + initialState — no WebSocket needed", async () => {
@@ -100,5 +107,29 @@ describe("BuckarooView (injectable IModel — #759)", () => {
         });
 
         expect(onMetadata).toHaveBeenCalledWith({ path: "/data/sales.parquet", rows: 42 }, "tell me about sales");
+    });
+});
+
+describe("BuckarooView live search mode (#998)", () => {
+    it("tells BuckarooInfiniteWidget to run live search on the server's row-only path", async () => {
+        // The server treats quick_command_args as a dataflow change (rerun +
+        // stats + broadcast per keystroke) and has a per-client row-only path
+        // keyed on buckaroo_state.search_string (#838). The server entry point
+        // is where that choice is made; the Jupyter widget keeps its default.
+        const { model } = makeFakeModel();
+        const initialState = {
+            df_meta: { total_rows: 1, columns: 1, filtered_rows: 1, rows_shown: 1 },
+            df_data_dict: {},
+            df_display_args: { main: { df_viewer_config: { pinned_rows: [], left_col_configs: [], column_config: [] }, summary_stats_key: "all_stats" } },
+            buckaroo_state: { sampled: false, cleaning_method: "", quick_command_args: {}, post_processing: "", df_display: "main", show_commands: false, search_string: "" },
+            buckaroo_options: { sampled: [], cleaning_method: [""], post_processing: [""], df_display: ["main"], show_commands: ["0", "1"] },
+        };
+
+        await act(async () => {
+            render(<BuckarooView model={model} initialState={initialState} mode="buckaroo" />);
+        });
+
+        expect(widgetProps.length).toBeGreaterThan(0);
+        expect(widgetProps[widgetProps.length - 1].liveSearchMode).toBe("rows");
     });
 });

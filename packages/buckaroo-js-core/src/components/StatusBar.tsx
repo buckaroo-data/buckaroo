@@ -6,7 +6,7 @@ import { ColDef, GridApi, GridOptions } from "ag-grid-community";
 import { basicIntFormatter } from "./DFViewerParts/Displayer";
 import { DFMeta } from "./WidgetTypes";
 import { BuckarooOptions } from "./WidgetTypes";
-import { BuckarooState, BKeys } from "./WidgetTypes";
+import { BuckarooState, BKeys, LiveSearchMode } from "./WidgetTypes";
 import { CustomCellEditorProps } from 'ag-grid-react';
 import { getThemeForScheme, resolveColorScheme, resolveThemeColors } from "./DFViewerParts/gridUtils";
 import type { ThemeConfig } from "./DFViewerParts/gridUtils";
@@ -316,6 +316,7 @@ export function StatusBar({
     themeConfig,
     inFlight,
     componentConfig,
+    liveSearchMode,
 }: {
     dfMeta: DFMeta;
     buckarooState: BuckarooState;
@@ -334,6 +335,11 @@ export function StatusBar({
      *  Python's ComponentConfig TypedDict; cell renderers read them via
      *  params.context.componentConfig. */
     componentConfig?: Record<string, unknown>;
+    /** Where the search box sends its term (#998). Defaults to "dataflow"
+     *  (quick_command_args.search, the Jupyter widget path). Server entry
+     *  points pass "rows" so a keystroke sets buckaroo_state.search_string,
+     *  the per-client row-only path, and never reruns the dataflow. */
+    liveSearchMode?: LiveSearchMode;
 }) {
     if (false) {
 	console.log("heightOverride", heightOverride);
@@ -379,6 +385,13 @@ export function StatusBar({
     const handleSearchCellChange = useCallback((params: { oldValue: any; newValue: any }) => {
         const { oldValue, newValue } = params;
         if (oldValue !== newValue && newValue !== null) {
+            if (liveSearchMode === "rows") {
+                // Functional updater: the dataflow fields must go out exactly
+                // as they are, or the server reruns the dataflow for them.
+                bkSearchLog(`search term set → buckarooState.search_string  oldValue="${oldValue ?? ""}"  newValue="${newValue}"`);
+                setBuckarooState((prev) => ({ ...prev, search_string: newValue }));
+                return;
+            }
             bkSearchLog(`search term set → buckarooState.quick_command_args.search  oldValue="${oldValue ?? ""}"  newValue="${newValue}"`);
             const newState = {
                 ...buckarooState,
@@ -387,7 +400,7 @@ export function StatusBar({
 
             setBuckarooState(newState);
         }
-    }, []);
+    }, [liveSearchMode]);
 
     const columnDefs: ColDef[] = [
         {
@@ -457,7 +470,9 @@ export function StatusBar({
     ];
 
     const searchArg = buckarooState.quick_command_args?.search;
-    const searchStr = searchArg && searchArg.length === 1 ? searchArg[0] : "";
+    const searchStr = liveSearchMode === "rows"
+        ? (buckarooState.search_string ?? "")
+        : (searchArg && searchArg.length === 1 ? searchArg[0] : "");
 
     const rowData = [
         {

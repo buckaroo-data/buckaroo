@@ -296,6 +296,7 @@ export function BuckarooView({
                     on_buckaroo_state={onBuckarooState}
                     buckaroo_options={buckarooOptions}
                     src={src}
+                    liveSearchMode="rows"
                 />
             ) : (
                 <DFViewerInfiniteDS
