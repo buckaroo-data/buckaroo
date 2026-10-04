@@ -2,9 +2,11 @@
 
 Everything here is pure Python: the policy is a function of numbers, the
 probes read a schema or a parquet footer, and nothing needs a server. The last
-sections (rows-first p33) test how the session carries the result and how
-``df_meta.stats`` reports it, still without a server; the HTTP and WebSocket
-side is in test_load_expr.py.
+sections (rows-first p33 and p36a) test how the session carries the result and how
+``df_meta.stats`` reports it, and how a ``stats_request`` is judged against it (the
+ceiling, ``requestable``, ``force``, the cost pause, the policy a forced tier
+raises it to, and the demand scan), still without a server; the HTTP and
+WebSocket side is in test_load_expr.py.
 
 The thresholds are the provisional values proposed by the phase-0
 measurements (p31b). The boundary tables run on the module defaults, so a
@@ -27,6 +29,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from buckaroo.jlisp.lisp_utils import s as lisp_sym
+from buckaroo.jlisp.lisp_utils import sQ
 from buckaroo.server import session as session_mod
 from buckaroo.server import stats_wire
 
@@ -895,3 +899,375 @@ class TestScalarTierServing:
         session = _session(sp, "scalar", "inline", resolve=False)
         assert (session.stats_status, session.stats_policy) == ("not_computed", None)
         assert stats_wire.serves_scalar_tier(session, _client(ONDEMAND_CAPS)) is False
+
+
+# ---------------------------------------------------------------------------
+# Limits, override, cost guard and the demand scan (rows-first p36a)
+# ---------------------------------------------------------------------------
+
+# The frame a request resolves a client's column names against: price, qty and
+# category are the columns a client calls a, b and c.
+FRAME = pd.DataFrame({"price": [12.5, 18.9, 7.4, 22.1, 1e9], "qty": [1, 2, 1, 3, 2], "category": list("abaca")})
+PAIRS = [("price", "a"), ("qty", "b"), ("category", "c")]
+SEARCH_OP = [sQ("search"), lisp_sym("df"), "col", "a"]
+CLEANING_OP = [lisp_sym("dropcol"), lisp_sym("df"), "col"]
+
+
+def _with_frame(session, operations=()):
+    """Give ``session`` the dataflow a request is answered against, as far as a
+    refusal or a state test needs it: a frame to read column names from and the
+    operations that say whether it is filtered. No unit can run on it."""
+    session.backend = "xorq"
+    session.xorq_dataflow = SimpleNamespace(operations=list(operations), processed_df=FRAME)
+    return session
+
+
+def _limited(sp, monkeypatch, stats_tier="auto", limits=None, operations=()):
+    """A deferred session that resolved ``limits``, with the same thresholds in
+    the environment, where a request reads them again for its own check."""
+    for name, value in (limits or {}).items():
+        monkeypatch.setenv(f"BUCKAROO_STATS_{name.upper()}", str(value))
+    return _with_frame(_session(sp, stats_tier, "deferred", limits), operations)
+
+
+def _request(session, client, **fields):
+    return stats_wire.handle_stats_request(
+        session, {"type": "stats_request", "stats_gen": session.stats_gen, "scope": "raw", **fields}, client)
+
+
+def _refusal(session, tier, reason):
+    return {"stats_gen": session.stats_gen, "scope": "raw", "tier": tier, "final": True, "remaining": 0,
+        "status": "not_computed", "reason": reason}
+
+
+def _refusal_fields(reply):
+    return {key: reply[key] for key in ("stats_gen", "scope", "tier", "final", "remaining", "status", "reason")}
+
+
+# (host tier, limits, the request fields, the tier the reply says was asked for).
+# The five-by-three table is 15 cells: a ceiling_full_rows of 3 refuses full for
+# it, and a ceiling_scalar_cells of 10 refuses scalar for the whole table.
+OVER_THE_CEILING = [
+    ("auto", {**SCHEMA_BY_SIZE, "ceiling_full_rows": 3}, {"tier": "full", "force": True}, "full"),
+    ("auto", {**SCHEMA_BY_SIZE, "ceiling_full_rows": 3}, {"tier": "full"}, "full"),
+    ("full", FULL_OVER_CEILING, {"tier": "full", "force": True}, "full"),
+    ("schema", SCALAR_OVER_CEILING, {"tier": "scalar", "force": True}, "scalar"),
+    ("schema", SCALAR_OVER_CEILING, {"tier": "full", "force": True}, "full"),
+    # Named columns are checked at their own cell count: all three are 15 cells.
+    ("scalar", SCALAR_OVER_CEILING, {"tier": "scalar", "columns": ["a", "b", "c"]}, "scalar")]
+
+
+class TestRequestsOverTheCeiling:
+    """A request for a tier the ceiling refuses is answered ``stats_update
+    {final: true, status: "not_computed", reason: "ceiling"}`` and runs nothing,
+    whoever asks and whether or not it is forced."""
+
+    @pytest.mark.parametrize("stats_tier, limits, fields, tier", OVER_THE_CEILING)
+    def test_a_request_over_the_ceiling_is_refused_and_runs_nothing(self, sp, monkeypatch, stats_tier, limits, fields,
+            tier):
+        session = _limited(sp, monkeypatch, stats_tier, limits)
+        held = (session.stats_status, session.stats_reason, dict(session.stat_runs))
+        reply = _request(session, _client(ONDEMAND_CAPS), incremental=True, **fields)
+        assert reply["type"] == "stats_update", reply
+        assert _refusal_fields(reply) == _refusal(session, tier, "ceiling")
+        assert "payload" not in reply and "df_display_args" not in reply
+        assert isinstance(reply["elapsed_ms"], (int, float)) and reply["elapsed_ms"] >= 0
+        assert (session.stats_status, session.stats_reason, session.stat_runs) == held
+        assert session.stats_override is None
+
+    def test_the_refusal_does_not_depend_on_the_request_being_incremental(self, sp, monkeypatch):
+        session = _limited(sp, monkeypatch, "full", FULL_OVER_CEILING)
+        reply = _request(session, _client(ONDEMAND_CAPS), tier="full", force=True)
+        assert _refusal_fields(reply) == _refusal(session, "full", "ceiling")
+
+
+class TestMalformedTierRequests:
+    @pytest.mark.parametrize("fields", [
+        {"tier": "schema"}, {"tier": "medium"}, {"tier": 3}, {"tier": ["full"]}, {"force": "yes"}, {"force": 1},
+        {"tier": "scalar", "columns": "a"}, {"tier": "scalar", "columns": ["zz"]},
+        {"tier": "scalar", "columns": [1, None]}, {"tier": "scalar", "columns": []},
+        {"tier": "scalar", "columns": {"a": 1}}])
+    def test_a_field_the_server_cannot_read_is_a_bad_request(self, sp, monkeypatch, fields):
+        session = _limited(sp, monkeypatch, "auto", SCHEMA_BY_SIZE)
+        reply = _request(session, _client(ONDEMAND_CAPS), **fields)
+        assert (reply["type"], reply["reason"], reply["current_gen"]) == ("stats_aborted", "bad_request",
+            session.stats_gen)
+        assert session.stat_runs == {} and session.stats_status == "not_computed"
+
+
+class TestRequestableTiers:
+    """``requestable`` and the target are enforced by the server: a tier outside
+    them is not run, whatever the client believes."""
+
+    @pytest.mark.parametrize("stats_tier, limits, fields", [
+        ("auto", {}, {"tier": "scalar"}),
+        ("auto", {}, {"tier": "scalar", "force": True}),
+        ("auto", SCALAR_BY_SIZE, {"tier": "full"}),
+        ("auto", SCHEMA_BY_SIZE, {"tier": "scalar"}),
+        ("auto", SCHEMA_BY_SIZE, {"tier": "full"}),
+        ("auto", SCHEMA_BY_SIZE, {}),
+        ("auto", SCHEMA_BY_SIZE, {"force": False})])
+    def test_a_tier_that_is_not_the_target_or_above_it_with_force_is_not_requestable(self, sp, monkeypatch, stats_tier,
+            limits, fields):
+        """Below the target, or above it without ``force``, or a schema target that
+        nothing is requested for on its own."""
+        session = _limited(sp, monkeypatch, stats_tier, limits)
+        reply = _request(session, _client(ONDEMAND_CAPS), incremental=True, **fields)
+        assert (reply["type"], reply["reason"]) == ("stats_aborted", "not_requestable"), reply
+        assert session.stat_runs == {} and session.stats_override is None
+
+
+class TestCostPausedStatus:
+    @pytest.mark.parametrize("stats_tier, delivery, policy, expected", [
+        ("auto", "deferred", {"tier_target": "full", "reason": None}, ("not_computed", "cost")),
+        ("auto", "deferred", {"tier_target": "scalar", "reason": "size"}, ("not_computed", "cost")),
+        ("auto", "deferred", {"tier_target": "schema", "reason": "size"}, ("not_computed", "cost")),
+        ("schema", "deferred", {"tier_target": "schema", "reason": "host"}, ("not_computed", "cost")),
+        # No policy, no pause: a dataflow built with its stats inline has no run to hold.
+        ("full", "inline", None, ("complete", None)),
+        ("schema", "deferred", None, ("not_computed", "host"))])
+    def test_a_paused_session_starts_its_generation_not_computed_for_cost(self, stats_tier, delivery, policy, expected):
+        assert session_mod.initial_stats_status(stats_tier, delivery, policy, cost_paused=True) == expected
+
+    def test_an_unpaused_session_is_as_before(self):
+        assert session_mod.initial_stats_status("auto", "deferred", {"tier_target": "full", "reason": None},
+            cost_paused=False) == ("pending", None)
+        assert session_mod.initial_stats_status("auto", "deferred", {"tier_target": "scalar", "reason": "size"}) == ("not_computed", "size")
+
+    def test_a_policy_target_of_full_is_pending_whatever_the_delivery(self):
+        """A policy exists only for a dataflow built at the schema tier, so a full
+        target has its stats still to run, as a forced request makes it for a
+        session the host named below full."""
+        assert session_mod.initial_stats_status("schema", "inline", {"tier_target": "full", "reason": None}) == ("pending", None)
+
+    @pytest.mark.parametrize("stats_tier, limits, expected", [
+        ("auto", {}, {"status": "not_computed", "tier": "schema", "gen": 2, "reason": "cost", "tier_target": "full",
+            "requestable": [], "estimate": ESTIMATE}),
+        ("auto", SCALAR_BY_SIZE, {"status": "not_computed", "tier": "schema", "gen": 2, "reason": "cost",
+            "tier_target": "scalar", "estimate": ESTIMATE})])
+    def test_the_pause_survives_a_new_generation_and_is_reported(self, sp, stats_tier, limits, expected):
+        session = _session(sp, stats_tier, "deferred", limits)
+        session.cost_paused = True
+        session_mod.begin_stats_generation(session)
+        assert session_mod.stats_meta(session) == expected
+        assert (session.stats_status, session.stats_reason) == ("not_computed", "cost")
+
+    def test_clearing_the_pause_restores_the_status_the_policy_gives(self, sp):
+        session = _session(sp, "auto", "deferred", SCALAR_BY_SIZE)
+        session.cost_paused = True
+        session_mod.begin_stats_generation(session)
+        assert (session.stats_status, session.stats_reason) == ("not_computed", "cost")
+        session.cost_paused = False
+        session_mod.begin_stats_generation(session)
+        assert (session.stats_status, session.stats_reason) == ("not_computed", "size")
+
+    @pytest.mark.parametrize("stats_tier, limits, tier", [("auto", {}, "full"), ("auto", SCALAR_BY_SIZE, "scalar"),
+        ("scalar", {}, "scalar")])
+    def test_a_paused_session_refuses_a_request_that_is_not_forced(self, sp, monkeypatch, stats_tier, limits, tier):
+        session = _limited(sp, monkeypatch, stats_tier, limits)
+        session.cost_paused = True
+        session_mod.begin_stats_generation(session)
+        reply = _request(session, _client(ONDEMAND_CAPS), incremental=True)
+        assert reply["type"] == "stats_update", reply
+        assert _refusal_fields(reply) == _refusal(session, tier, "cost")
+        assert "payload" not in reply and isinstance(reply["elapsed_ms"], (int, float))
+        assert session.stat_runs == {}
+
+    def test_a_paused_session_refuses_a_named_columns_request_too(self, sp, monkeypatch):
+        """A demand request is automatic, so it is held by the pause like any other."""
+        session = _limited(sp, monkeypatch, "auto", SCHEMA_BY_SIZE)
+        session.cost_paused = True
+        session_mod.begin_stats_generation(session)
+        reply = _request(session, _client(ONDEMAND_CAPS), tier="scalar", columns=["a"])
+        assert _refusal_fields(reply) == _refusal(session, "scalar", "cost")
+        assert session.stat_runs == {}
+
+    def test_a_paused_schema_target_still_has_nothing_to_request(self, sp, monkeypatch):
+        """Not requestable comes before the pause: a Continue would ask for nothing, and a force with no tier
+        must not clear a pause that holds back the demand requests."""
+        session = _limited(sp, monkeypatch, "auto", SCHEMA_BY_SIZE)
+        session.cost_paused = True
+        session_mod.begin_stats_generation(session)
+        for fields in ({}, {"force": True}):
+            reply = _request(session, _client(ONDEMAND_CAPS), **fields)
+            assert (reply["type"], reply["reason"]) == ("stats_aborted", "not_requestable"), fields
+        assert session.cost_paused is True
+        assert (session.stats_status, session.stats_reason) == ("not_computed", "cost")
+
+    def test_the_ceiling_is_answered_before_the_pause(self, sp, monkeypatch):
+        """Continuing would not help a request the ceiling refuses."""
+        session = _limited(sp, monkeypatch, "full", FULL_OVER_CEILING)
+        session.cost_paused = True
+        session_mod.begin_stats_generation(session)
+        reply = _request(session, _client(ONDEMAND_CAPS), tier="full", force=True)
+        assert _refusal_fields(reply)["reason"] == "ceiling"
+        reply = _request(session, _client(ONDEMAND_CAPS), tier="full")
+        assert _refusal_fields(reply)["reason"] == "ceiling"
+
+
+class TestEffectiveStatsPolicy:
+    """The policy in force for the session's state: the one resolved at load,
+    raised to the tier a forced request asked for while the state is unfiltered
+    (or the force was made in this generation)."""
+
+    def test_with_no_override_it_is_the_policy_resolved_at_load(self, sp):
+        session = _session(sp, "auto", "deferred", SCHEMA_BY_SIZE)
+        assert session_mod.effective_stats_policy(session) is session.stats_policy
+
+    def test_a_session_with_no_policy_has_none(self, sp):
+        assert session_mod.effective_stats_policy(_session(sp, "full", "inline", resolve=False)) is None
+
+    @pytest.mark.parametrize("override, expected", [
+        ("full", {"tier_target": "full", "auto_request": True, "requestable": [], "reason": None}),
+        ("scalar", {"tier_target": "scalar", "auto_request": True, "requestable": ["full"], "reason": "size"})])
+    def test_a_forced_tier_raises_the_target_and_works_out_the_rest(self, sp, override, expected):
+        session = _with_frame(_session(sp, "auto", "deferred", SCHEMA_BY_SIZE))
+        session.stats_override, session.stats_override_gen = override, session.stats_gen
+        policy = session_mod.effective_stats_policy(session)
+        assert {key: policy[key] for key in expected} == expected
+        assert policy["estimate"] == ESTIMATE
+        assert (session.stats_policy["tier_target"], session.stats_policy["auto_request"]) == ("schema", False), (
+            "the policy resolved at load is not changed")
+
+    @pytest.mark.parametrize("override", ["scalar", "full"])
+    def test_an_override_never_lowers_the_target(self, sp, override):
+        session = _with_frame(_session(sp, "auto", "deferred"))
+        assert session.stats_policy["tier_target"] == "full"
+        session.stats_override, session.stats_override_gen = override, session.stats_gen
+        assert session_mod.effective_stats_policy(session)["tier_target"] == "full"
+
+    def test_the_ceiling_still_holds_for_the_override(self, sp, monkeypatch):
+        session = _limited(sp, monkeypatch, "auto", {**SCHEMA_BY_SIZE, "ceiling_full_rows": 3})
+        session.stats_override, session.stats_override_gen = "full", session.stats_gen
+        policy = session_mod.effective_stats_policy(session)
+        assert (policy["tier_target"], policy["requestable"]) == ("scalar", [])
+
+    def test_the_override_does_not_reach_a_later_filtered_generation(self, sp):
+        session = _with_frame(_session(sp, "auto", "deferred", SCHEMA_BY_SIZE))
+        session.stats_override, session.stats_override_gen = "full", session.stats_gen
+        assert session_mod.effective_stats_policy(session)["tier_target"] == "full"
+        _with_frame(session, [SEARCH_OP])
+        session_mod.begin_stats_generation(session)
+        assert session_mod.effective_stats_policy(session) is session.stats_policy
+        assert (session.stats_status, session.stats_reason) == ("not_computed", "size")
+
+    def test_the_override_reaches_a_later_unfiltered_generation(self, sp):
+        session = _with_frame(_session(sp, "auto", "deferred", SCHEMA_BY_SIZE))
+        session.stats_override, session.stats_override_gen = "full", session.stats_gen
+        _with_frame(session, [CLEANING_OP])
+        session_mod.begin_stats_generation(session)
+        assert session_mod.effective_stats_policy(session)["tier_target"] == "full"
+        assert (session.stats_status, session.stats_reason) == ("pending", None)
+
+    def test_a_force_made_in_a_filtered_generation_applies_to_that_generation(self, sp):
+        session = _with_frame(_session(sp, "auto", "deferred", SCHEMA_BY_SIZE), [SEARCH_OP])
+        session.stats_override, session.stats_override_gen = "full", session.stats_gen
+        assert session_mod.effective_stats_policy(session)["tier_target"] == "full"
+        session_mod.begin_stats_generation(session)
+        assert session_mod.effective_stats_policy(session)["tier_target"] == "schema"
+        # Back to an unfiltered state, the override applies again.
+        _with_frame(session, [])
+        session_mod.begin_stats_generation(session)
+        assert session_mod.effective_stats_policy(session)["tier_target"] == "full"
+
+    def test_a_host_named_schema_session_headed_for_full_is_pending_even_with_inline_delivery(self, sp):
+        session = _with_frame(_session(sp, "schema", "inline"))
+        assert (session.stats_status, session.stats_reason) == ("not_computed", "host")
+        session.stats_override, session.stats_override_gen = "full", session.stats_gen
+        session_mod.begin_stats_generation(session)
+        assert (session.stats_status, session.stats_reason) == ("pending", None)
+
+    def test_df_meta_stats_reports_the_effective_policy(self, sp):
+        session = _with_frame(_session(sp, "auto", "deferred", SCHEMA_BY_SIZE))
+        session.stats_override, session.stats_override_gen = "full", session.stats_gen
+        session_mod.begin_stats_generation(session)
+        assert session_mod.stats_meta(session) == {"status": "pending", "tier": "schema", "gen": 2,
+            "tier_target": "full", "requestable": [], "estimate": ESTIMATE}
+        scalar = _with_frame(_session(sp, "auto", "deferred", SCHEMA_BY_SIZE))
+        scalar.stats_override, scalar.stats_override_gen = "scalar", scalar.stats_gen
+        assert session_mod.stats_meta(scalar) == {"status": "not_computed", "tier": "schema", "gen": 1,
+            "reason": "size", "tier_target": "scalar", "estimate": ESTIMATE}
+
+    def test_a_scalar_override_makes_scalar_the_tier_a_request_with_no_tier_is_served(self, sp):
+        session = _with_frame(_session(sp, "auto", "deferred", SCHEMA_BY_SIZE))
+        assert stats_wire.serves_scalar_tier(session, _client(ONDEMAND_CAPS)) is False
+        session.stats_override, session.stats_override_gen = "scalar", session.stats_gen
+        assert stats_wire.serves_scalar_tier(session, _client(ONDEMAND_CAPS)) is True
+
+    def test_resetting_the_controls_clears_the_override_and_the_pause(self, sp):
+        session = _with_frame(_session(sp, "auto", "deferred", SCHEMA_BY_SIZE))
+        session.stats_override, session.stats_override_gen, session.cost_paused = "full", 4, True
+        session_mod.reset_stats_controls(session)
+        assert (session.stats_override, session.stats_override_gen, session.cost_paused) == (None, 0, False)
+
+
+class TestDemandColumns:
+    """``demand_columns``: the columns a built display config needs min and max
+    for now, read from the config alone (no data query)."""
+
+    @staticmethod
+    def _display(*column_configs, summary=()):
+        return {"main": {"df_viewer_config": {"column_config": list(column_configs)}},
+            "summary": {"df_viewer_config": {"column_config": list(summary)}}}
+
+    @staticmethod
+    def _rule(val_column="a", color_rule="color_map", **extra):
+        rule = {"color_rule": color_rule, "map_name": "DIVERGING_RED_WHITE_BLUE", **extra}
+        if val_column is not None:
+            rule["val_column"] = val_column
+        return {"col_name": "x", "color_map_config": rule}
+
+    def test_a_color_map_rule_names_the_column_it_reads(self, sp):
+        assert sp.demand_columns(self._display(self._rule("a")), PAIRS) == ["a"]
+
+    def test_a_val_column_that_is_an_original_name_is_mapped_to_the_key_the_stats_use(self, sp):
+        """A klass writes the short alias or a name it read from the sd; the stats are keyed by the rewritten name."""
+        assert sp.demand_columns(self._display(self._rule("price"), self._rule("category")), PAIRS) == ["a", "c"]
+
+    def test_a_rewritten_name_wins_over_an_original_name_that_looks_like_one(self, sp):
+        pairs = [("b", "a"), ("a", "b")]
+        assert sp.demand_columns(self._display(self._rule("a")), pairs) == ["a"]
+
+    @pytest.mark.parametrize("rule", [
+        {"color_rule": "color_categorical", "map_name": "BLUE_TO_YELLOW", "val_column": "a"},
+        {"color_rule": "color_categorical", "map_name": "BLUE_TO_YELLOW"},
+        {"color_rule": "color_from_column", "val_column": "a"},
+        {"color_rule": "color_not_null", "conditional_color": "red", "exist_column": "a"},
+        {"color_rule": "color_static", "color": "red"},
+        # The client reads nothing for a color_map with no val_column.
+        {"color_rule": "color_map", "map_name": "BLUE_TO_YELLOW"}])
+    def test_only_a_numeric_color_map_rule_creates_demand(self, sp, rule):
+        assert sp.demand_columns(self._display({"col_name": "x", "color_map_config": rule}), PAIRS) == []
+
+    def test_a_tooltip_val_column_creates_no_demand(self, sp):
+        config = {"col_name": "x", "tooltip_config": {"tooltip_type": "simple", "val_column": "a"}}
+        assert sp.demand_columns(self._display(config), PAIRS) == []
+
+    def test_a_val_column_that_is_not_a_column_of_the_table_is_dropped(self, sp):
+        assert sp.demand_columns(self._display(self._rule("zz"), self._rule("a")), PAIRS) == ["a"]
+
+    def test_the_columns_come_once_each_in_the_frame_s_order(self, sp):
+        display = self._display(self._rule("c"), self._rule("a"), self._rule("c"), self._rule("price"))
+        assert sp.demand_columns(display, PAIRS) == ["a", "c"]
+
+    def test_every_display_is_scanned(self, sp):
+        display = self._display(self._rule("a"), summary=[self._rule("b")])
+        assert sp.demand_columns(display, PAIRS) == ["a", "b"]
+
+    @pytest.mark.parametrize("display", [None, {}, {"main": None}, {"main": {}}, {"main": {"df_viewer_config": None}},
+        {"main": {"df_viewer_config": {"column_config": None}}},
+        {"main": {"df_viewer_config": {"column_config": ["x", None, {"color_map_config": None},
+            {"color_map_config": "a"}, {"color_map_config": {"color_rule": "color_map", "val_column": 3}},
+            {"color_map_config": {"color_rule": "color_map", "val_column": ["a"]}},
+            {"color_map_config": {"color_rule": "color_map", "val_column": {"a": 1}}}]}}}])
+    def test_a_config_that_is_not_the_usual_shape_yields_nothing_and_does_not_raise(self, sp, display):
+        assert sp.demand_columns(display, PAIRS) == []
+
+    def test_the_config_is_not_changed(self, sp):
+        display = self._display(self._rule("price"))
+        before = json.dumps(display, sort_keys=True)
+        sp.demand_columns(display, PAIRS)
+        assert json.dumps(display, sort_keys=True) == before
+
+    def test_no_columns_no_demand(self, sp):
+        assert sp.demand_columns(self._display(self._rule("a")), []) == []

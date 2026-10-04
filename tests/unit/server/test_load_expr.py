@@ -3435,6 +3435,718 @@ class TestScalarTierRequests:
         assert any("stat unit failed" in record.getMessage() for record in caplog.records)
 
 
+# ---------------------------------------------------------------------------
+# Limits, override, cost guard and the demand scan (rows-first p36a)
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _slow_stat_queries(delay):
+    """Every query ``XorqStatPipeline`` sends while the block runs takes
+    ``delay`` seconds longer, as a slow source would make it."""
+    original = XorqStatPipeline._execute
+
+    def slow(pipeline, query):
+        time.sleep(delay)
+        return original(pipeline, query)
+
+    with patch.object(XorqStatPipeline, "_execute", slow):
+        yield
+
+
+class _LimitsWire(tornado.testing.AsyncHTTPTestCase):
+    """What the p36a wire tests share: a ``/load_expr`` session over the
+    five-row table (deferred unless a test says otherwise) and clients that
+    advertise both capability bits. A request is judged against the thresholds
+    again, so a test that sets them holds them in the environment for the whole
+    block (``_stats_limits``), not only around the load."""
+
+    DISPLAY_FILES: dict = {}
+
+    def get_app(self):
+        return make_app()
+
+    def setUp(self):
+        super().setUp()
+        self.builds_root = tempfile.mkdtemp()
+        self.project_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.builds_root, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, self.project_root, ignore_errors=True)
+        pp_dir = os.path.join(self.project_root, "post_processing")
+        os.makedirs(pp_dir)
+        with open(os.path.join(pp_dir, "first_three.py"), "w") as f:
+            f.write("def process(expr):\n    return expr.limit(3)\n")
+        if self.DISPLAY_FILES:
+            display_dir = os.path.join(self.project_root, "display")
+            os.makedirs(display_dir)
+            for name, source in self.DISPLAY_FILES.items():
+                with open(os.path.join(display_dir, name), "w") as f:
+                    f.write(source)
+        self.build_path = _build_stats_wire_dir(self.builds_root)
+        self.clients = []
+
+    def tearDown(self):
+        for ws in self.clients:
+            ws.close()
+        super().tearDown()
+
+    def _session(self, sid):
+        return self._app.settings["sessions"].get(sid)
+
+    def _patch(self, target, name, value):
+        patcher = patch.object(target, name, value, create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _one_unit_per_request(self):
+        self._patch(stats_wire, "STATS_BUDGET_S", 0)
+
+    def _cost_budget(self, seconds):
+        self._patch(stats_wire, "STATS_COST_BUDGET_S", seconds)
+
+    async def _load(self, sid, **body):
+        resp = await _post(self.get_http_port(), "/load_expr", {"session": sid, "build_dir": self.build_path,
+            "project_root": self.project_root, "stats_delivery": "deferred", **body})
+        self.assertEqual(resp.code, 200, resp.body)
+
+    async def _reload(self, sid, **body):
+        resp = await _post(self.get_http_port(), f"/reload_expr/{sid}", body)
+        self.assertEqual(resp.code, 200, resp.body)
+
+    async def _connect(self, sid, caps=_ONDEMAND):
+        suffix = f"?caps={caps}" if caps else ""
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/{sid}{suffix}")
+        self.clients.append(ws)
+        return ws, await _read_json(ws)
+
+    def _stats(self, frame):
+        stats = frame["df_meta"].get("stats")
+        self.assertIsNotNone(stats, "initial_state carries no df_meta.stats")
+        return stats
+
+    async def _inline_frame(self, sid):
+        """The complete message an inline session of the same build sends."""
+        await self._load(sid, stats_delivery="inline")
+        return (await self._connect(sid, caps=None))[1]
+
+    async def _state(self, ws, **changes):
+        """A state change from ``ws``, and the frame it broadcasts."""
+        ws.write_message(_state_change(**changes))
+        return await _read_json(ws)
+
+    async def _ask(self, ws, gen, **fields):
+        """The reply to an incremental ``stats_request``."""
+        ws.write_message(_stats_request(gen, incremental=True, **fields))
+        return await _read_json(ws)
+
+    async def _ask_to_the_end(self, ws, gen, limit=12, **fields):
+        """Incremental requests, the same each time, until a reply is final."""
+        replies = []
+        for _ in range(limit):
+            replies.append(await self._ask(ws, gen, **fields))
+            if replies[-1]["type"] != "stats_update" or replies[-1]["final"]:
+                break
+        return replies
+
+
+# (host tier, limits, request fields): a request the ceiling refuses, whoever
+# sends it. The table is 15 cells; a ceiling_full_rows of 3 refuses full for it
+# and a ceiling_scalar_cells of 10 refuses scalar for the whole table.
+_OVER_THE_CEILING = {
+    "full over a ceiling on full": ("auto", {**_SCHEMA_BY_SIZE, "ceiling_full_rows": 3},
+        {"tier": "full", "force": True}),
+    "full, not forced": ("auto", {**_SCHEMA_BY_SIZE, "ceiling_full_rows": 3}, {"tier": "full"}),
+    "full, the tier the host asked for": ("full", {"ceiling_full_rows": 3}, {"tier": "full", "force": True}),
+    "scalar over the ceiling on scalar": ("schema", {"ceiling_scalar_cells": 10}, {"tier": "scalar", "force": True}),
+    "full over the ceiling on scalar": ("schema", {"ceiling_scalar_cells": 10}, {"tier": "full", "force": True}),
+    "every column of the table": ("schema", {"ceiling_scalar_cells": 10},
+        {"tier": "scalar", "columns": ["a", "b", "c"]})}
+
+
+class TestForcedRequestsWire(_LimitsWire):
+    """``stats_request`` with ``tier`` and ``force`` (rows-first p36a): the
+    ceiling, ``requestable`` and the session override, from a client that
+    advertised both bits."""
+
+    @tornado.testing.gen_test
+    async def test_a_request_over_the_ceiling_runs_no_unit(self):
+        for index, (name, (tier, limits, fields)) in enumerate(_OVER_THE_CEILING.items()):
+            with _stats_limits(**limits):
+                sid = f"fo-over-{index}"
+                await self._load(sid, stats_tier=tier)
+                session = self._session(sid)
+                ws, first = await self._connect(sid)
+                gen = self._stats(first)["gen"]
+                held = (session.stats_status, session.stats_reason)
+                with _count_stat_queries() as queries:
+                    reply = await self._ask(ws, gen, **fields)
+                self.assertEqual(queries, [], name)
+                self.assertEqual({key: reply.get(key) for key in ("type", "final", "status", "reason", "remaining")},
+                    {"type": "stats_update", "final": True, "status": "not_computed", "reason": "ceiling",
+                     "remaining": 0}, name)
+                self.assertEqual((reply["stats_gen"], reply["scope"]), (gen, "raw"), name)
+                self.assertNotIn("payload", reply, name)
+                self.assertEqual((session.stats_status, session.stats_reason, session.stat_runs, session.stats_override),
+                    (*held, {}, None), name)
+
+    @tornado.testing.gen_test
+    async def test_a_forced_scalar_request_under_the_ceiling_runs_and_raises_the_target(self):
+        with _stats_limits(**_SCHEMA_BY_SIZE):
+            await self._load("fo-scalar", stats_tier="auto")
+            session = self._session("fo-scalar")
+            ws, first = await self._connect("fo-scalar")
+            gen = self._stats(first)["gen"]
+            self.assertEqual((self._stats(first)["tier_target"], self._stats(first)["requestable"]), (
+                "schema", ["scalar", "full"]))
+            with _count_stat_queries() as queries:
+                update = await self._ask(ws, gen, tier="scalar", force=True)
+            self.assertEqual((update["type"], update["tier"], update["final"], update["remaining"]),
+                ("stats_update", "scalar", True, 0), update)
+            self.assertEqual(set(_rows_by_stat(update["payload"])), _SCALAR_WIRE_ONLY)
+            self.assertEqual([type(q.op()).__name__ for q in queries], ["Aggregate"])
+            self.assertEqual((update["status"], update["reason"]), ("not_computed", "size"),
+                "the final reply says the session still has no complete stats")
+            self.assertIsInstance(update["elapsed_ms"], (int, float))
+            self.assertEqual(session.stats_override, "scalar")
+            self.assertEqual((session.stats_status, session.stats_reason, session.stats_policy["tier_target"]),
+                ("not_computed", "size", "schema"))
+            # A client that connects later is told the target the override set.
+            _, later = await self._connect("fo-scalar")
+            self.assertEqual(self._stats(later), {"status": "not_computed", "tier": "schema", "gen": gen,
+                "reason": "size", "tier_target": "scalar", "estimate": _WIRE_ESTIMATE})
+
+    @tornado.testing.gen_test
+    async def test_a_forced_full_request_runs_every_unit_and_completes_the_session(self):
+        self._one_unit_per_request()
+        inline = await self._inline_frame("fo-full-inline")
+        with _stats_limits(**_SCHEMA_BY_SIZE):
+            await self._load("fo-full", stats_tier="auto")
+            session = self._session("fo-full")
+            ws, first = await self._connect("fo-full")
+            gen = self._stats(first)["gen"]
+            self.assertEqual(self._stats(first)["status"], "not_computed")
+
+            opening = await self._ask(ws, gen, tier="full", force=True)
+            # Run for real: the session is now headed for full, and says so.
+            _, mid = await self._connect("fo-full")
+            self.assertEqual({key: self._stats(mid).get(key) for key in ("status", "tier_target", "requestable")},
+                {"status": "pending", "tier_target": "full", "requestable": []})
+            rest = await self._ask_to_the_end(ws, gen, tier="full", force=True)
+        replies = [opening, *rest]
+        self.assertEqual([r["type"] for r in replies], ["stats_update"] * 4)
+        self.assertEqual([(r["tier"], r["final"], r["remaining"]) for r in replies],
+            [("full", False, 3), ("full", False, 2), ("full", False, 1), ("full", True, 0)])
+        final = replies[-1]
+        self.assertNotIn("status", final, "a final reply that completes the session says nothing more")
+        self.assertTrue(_FULL_ONLY_WIRE <= set(_rows_by_stat(final["payload"])))
+        self.assertIn("df_display_args", final, "the config the complete stats give is not the one the client holds")
+        self.assertEqual((session.stats_status, session.stats_override), ("complete", "full"))
+        _, legacy = await self._connect("fo-full", caps=None)
+        self.assertEqual(_comparable(legacy), _comparable(inline))
+
+    @tornado.testing.gen_test
+    async def test_a_request_above_the_target_without_force_is_not_requestable(self):
+        with _stats_limits(**_SCHEMA_BY_SIZE):
+            await self._load("fo-noforce", stats_tier="auto")
+            session = self._session("fo-noforce")
+            ws, first = await self._connect("fo-noforce")
+            gen = self._stats(first)["gen"]
+            for fields in ({"tier": "scalar"}, {"tier": "full"}, {"tier": "full", "force": False}):
+                with _count_stat_queries() as queries:
+                    aborted = await self._ask(ws, gen, **fields)
+                self.assertEqual((aborted["type"], aborted["reason"]), ("stats_aborted", "not_requestable"), fields)
+                self.assertEqual(queries, [], fields)
+            self.assertEqual((session.stats_override, session.stat_runs), (None, {}))
+
+    @tornado.testing.gen_test
+    async def test_a_request_below_the_target_is_not_requestable(self):
+        await self._load("fo-below", stats_tier="auto")
+        ws, first = await self._connect("fo-below")
+        self.assertEqual(self._stats(first)["tier_target"], "full")
+        aborted = await self._ask(ws, self._stats(first)["gen"], tier="scalar", force=True)
+        self.assertEqual((aborted["type"], aborted["reason"]), ("stats_aborted", "not_requestable"))
+
+    @tornado.testing.gen_test
+    async def test_the_override_survives_a_dataflow_field_change_for_the_unfiltered_scope_only(self):
+        with _stats_limits(**_SCHEMA_BY_SIZE):
+            await self._load("fo-survive", stats_tier="auto")
+            ws, first = await self._connect("fo-survive")
+            gen = self._stats(first)["gen"]
+            # No force yet: a field change leaves the session where the policy put it.
+            plain = self._stats(await self._state(ws, post_processing="first_three"))
+            self.assertEqual((plain["status"], plain["reason"], plain["tier_target"], plain["gen"]),
+                ("not_computed", "size", "schema", gen + 1))
+            gen += 1
+            replies = await self._ask_to_the_end(ws, gen, tier="full", force=True)
+            self.assertEqual((replies[-1]["type"], replies[-1].get("final")), ("stats_update", True))
+
+            with _count_stat_queries() as queries:
+                unfiltered = self._stats(await self._state(ws, post_processing=""))
+            self.assertEqual((unfiltered["status"], unfiltered["tier_target"], unfiltered["gen"]),
+                ("pending", "full", gen + 1))
+            self.assertNotIn("reason", unfiltered)
+            self.assertEqual(queries, [], "the new state is the schema tier again, and runs no stat query")
+            gen += 1
+
+            filtered = self._stats(await self._state(ws, quick_command_args={"search": ["a"]}))
+            self.assertEqual((filtered["status"], filtered["reason"], filtered["tier_target"], filtered["gen"]),
+                ("not_computed", "size", "schema", gen + 1), "a search is the filtered scope: the policy alone")
+            gen += 1
+
+            cleared = self._stats(await self._state(ws))
+            self.assertEqual((cleared["status"], cleared["tier_target"], cleared["gen"]), ("pending", "full", gen + 1))
+
+    @tornado.testing.gen_test
+    async def test_a_force_in_a_filtered_state_is_served_for_that_state_and_waits_for_an_unfiltered_one(self):
+        with _stats_limits(**_SCHEMA_BY_SIZE):
+            await self._load("fo-filtered", stats_tier="auto")
+            session = self._session("fo-filtered")
+            ws, _first = await self._connect("fo-filtered")
+            searched = self._stats(await self._state(ws, quick_command_args={"search": ["a"]}))
+            self.assertEqual(searched["status"], "not_computed")
+
+            replies = await self._ask_to_the_end(ws, searched["gen"], tier="full", force=True)
+            self.assertEqual((replies[-1]["type"], replies[-1].get("final")), ("stats_update", True), replies[-1])
+            self.assertEqual(session.stats_status, "complete")
+
+            cleared = self._stats(await self._state(ws))
+            self.assertEqual((cleared["status"], cleared["tier_target"]), ("pending", "full"))
+
+    @tornado.testing.gen_test
+    async def test_a_reload_keeps_the_override_unless_it_names_a_tier(self):
+        with _stats_limits(**_SCHEMA_BY_SIZE):
+            await self._load("fo-reload", stats_tier="auto")
+            session = self._session("fo-reload")
+            ws, first = await self._connect("fo-reload")
+            await self._ask_to_the_end(ws, self._stats(first)["gen"], tier="full", force=True)
+            self.assertEqual(session.stats_override, "full")
+
+            await self._reload("fo-reload")
+            kept = self._stats(await _read_json(ws))
+            self.assertEqual((kept["status"], kept["tier_target"]), ("pending", "full"))
+            self.assertEqual(session.stats_override, "full")
+
+            await self._reload("fo-reload", stats_tier="auto")
+            reset = self._stats(await _read_json(ws))
+            self.assertEqual((reset["status"], reset["reason"], reset["tier_target"]),
+                ("not_computed", "size", "schema"))
+            self.assertIsNone(session.stats_override)
+
+    @tornado.testing.gen_test
+    async def test_a_new_expression_forgets_the_override_and_a_rebuild_of_the_same_one_keeps_it(self):
+        with _stats_limits(**_SCHEMA_BY_SIZE):
+            await self._load("fo-new", stats_tier="auto")
+            session = self._session("fo-new")
+            ws, first = await self._connect("fo-new")
+            await self._ask_to_the_end(ws, self._stats(first)["gen"], tier="full", force=True)
+            self.assertEqual(session.stats_override, "full")
+
+            resp = await _post(self.get_http_port(), "/load_expr", {"session": "fo-new", "build_dir": self.build_path,
+                "stats_delivery": "deferred", "force_reload": True})
+            self.assertEqual(resp.code, 200, resp.body)
+            self.assertEqual(session.stats_override, "full", "the same expression, rebuilt, is the same dataset")
+
+            other_root = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, other_root, ignore_errors=True)
+            resp = await _post(self.get_http_port(), "/load_expr", {"session": "fo-new",
+                "build_dir": _build_stats_wire_dir(other_root), "stats_delivery": "deferred"})
+            self.assertEqual(resp.code, 200, resp.body)
+            self.assertIsNone(session.stats_override)
+            self.assertEqual((session.stats_status, session.stats_reason), ("not_computed", "size"))
+
+    @tornado.testing.gen_test
+    async def test_load_and_load_compare_forget_the_override_and_the_pause(self):
+        """They swap the session to a dataset with no policy, so what was set under the old one must not wait
+        for the next /load_expr."""
+        paths = []
+        try:
+            for index in range(3):
+                fd, path = tempfile.mkstemp(suffix=".csv")
+                os.close(fd)
+                pd.DataFrame({"id": [1, 2], "v": [10 * (index + 1), 20]}).to_csv(path, index=False)
+                paths.append(path)
+            for sid, route, body in (
+                    ("fo-load", "/load", {"path": paths[0], "mode": "buckaroo"}),
+                    ("fo-compare", "/load_compare", {"path1": paths[1], "path2": paths[2], "join_columns": ["id"]})):
+                await self._load(sid, stats_tier="auto")
+                session = self._session(sid)
+                session.stats_override, session.stats_override_gen, session.cost_paused = "full", session.stats_gen, True
+                resp = await _post(self.get_http_port(), route, {"session": sid, **body})
+                self.assertEqual(resp.code, 200, resp.body)
+                self.assertEqual((session.stats_override, session.stats_override_gen, session.cost_paused),
+                    (None, 0, False), route)
+                self.assertEqual((session.stats_policy, session.stats_status), (None, "complete"), route)
+        finally:
+            for path in paths:
+                os.unlink(path)
+
+    @tornado.testing.gen_test
+    async def test_every_stats_update_carries_elapsed_ms_and_it_is_the_time_the_request_took(self):
+        self._one_unit_per_request()
+        self._cost_budget(3600)
+        with _stats_limits(**{**_SCHEMA_BY_SIZE, "ceiling_scalar_cells": 10}):
+            await self._load("fo-elapsed", stats_tier="auto")
+            ws, first = await self._connect("fo-elapsed")
+            gen = self._stats(first)["gen"]
+            with _slow_stat_queries(0.05):
+                scoped = await self._ask(ws, gen, tier="scalar", columns=["a"])
+            refused = await self._ask(ws, gen, tier="full", force=True)
+        for name, reply in (("scoped", scoped), ("refused", refused)):
+            self.assertEqual(reply["type"], "stats_update", name)
+            self.assertIsInstance(reply["elapsed_ms"], (int, float), name)
+        self.assertGreaterEqual(scoped["elapsed_ms"], 50, "the request ran a query that took 50 ms")
+        self.assertLess(refused["elapsed_ms"], 50, "a refusal runs nothing")
+
+
+class TestCostGuardWire(_LimitsWire):
+    """The cost guard (rows-first p36a): an automatic unit over the budget
+    pauses the session, held on the session, until a ``force`` request."""
+
+    async def _paused_session(self, sid):
+        """A deferred session whose first unit ran slow, one unit per request."""
+        self._one_unit_per_request()
+        self._cost_budget(0.02)
+        await self._load(sid)
+        ws, first = await self._connect(sid)
+        gen = self._stats(first)["gen"]
+        self.assertEqual(self._stats(first)["status"], "pending")
+        with _slow_stat_queries(0.06):
+            update = await self._ask(ws, gen)
+        self.assertEqual((update["type"], update["final"], update["remaining"]), ("stats_update", False, 3), update)
+        return ws, gen
+
+    @tornado.testing.gen_test
+    async def test_an_automatic_unit_over_the_budget_pauses_the_session(self):
+        ws, gen = await self._paused_session("cg-pause")
+        session = self._session("cg-pause")
+        self.assertTrue(session.cost_paused)
+        self.assertEqual((session.stats_status, session.stats_reason), ("not_computed", "cost"))
+        with _count_stat_queries() as queries:
+            refused = await self._ask(ws, gen)
+        self.assertEqual(queries, [], "the next request runs nothing")
+        self.assertEqual({key: refused.get(key) for key in ("type", "final", "status", "reason", "tier", "remaining")},
+            {"type": "stats_update", "final": True, "status": "not_computed", "reason": "cost", "tier": "full",
+             "remaining": 0})
+        self.assertNotIn("payload", refused)
+        self.assertIsInstance(refused["elapsed_ms"], (int, float))
+        self.assertEqual(len(session.stat_runs[(gen, "raw")].ran), 1, "the unit that ran stays run")
+
+    @tornado.testing.gen_test
+    async def test_a_unit_under_the_budget_does_not_pause_the_session(self):
+        self._one_unit_per_request()
+        self._cost_budget(3600)
+        await self._load("cg-fast")
+        ws, first = await self._connect("cg-fast")
+        with _slow_stat_queries(0.03):
+            replies = await self._ask_to_the_end(ws, self._stats(first)["gen"])
+        self.assertEqual([r["final"] for r in replies], [False, False, False, True])
+        session = self._session("cg-fast")
+        self.assertEqual((session.cost_paused, session.stats_status), (False, "complete"))
+
+    @tornado.testing.gen_test
+    async def test_a_forced_unit_over_the_budget_does_not_pause_the_session(self):
+        self._one_unit_per_request()
+        self._cost_budget(0.02)
+        with _stats_limits(**_SCHEMA_BY_SIZE):
+            await self._load("cg-forced", stats_tier="auto")
+            ws, first = await self._connect("cg-forced")
+            gen = self._stats(first)["gen"]
+            with _slow_stat_queries(0.06):
+                opening = await self._ask(ws, gen, tier="full", force=True)
+            session = self._session("cg-forced")
+            self.assertEqual((opening["final"], opening["remaining"]), (False, 3))
+            # Looked at here: a later forced request would clear a pause this one had set.
+            self.assertEqual((session.cost_paused, session.stats_status), (False, "pending"))
+            with _slow_stat_queries(0.06):
+                rest = await self._ask_to_the_end(ws, gen, tier="full", force=True)
+        self.assertEqual([r["final"] for r in rest], [False, False, True])
+        self.assertFalse(session.cost_paused)
+
+    @tornado.testing.gen_test
+    async def test_a_request_that_finishes_the_run_does_not_pause_the_session(self):
+        """Nothing is left to hold back, and the session is complete."""
+        self._patch(stats_wire, "STATS_BUDGET_S", 3600)
+        self._cost_budget(0.02)
+        await self._load("cg-done")
+        ws, first = await self._connect("cg-done")
+        with _slow_stat_queries(0.03):
+            reply = await self._ask(ws, self._stats(first)["gen"])
+        self.assertEqual((reply["type"], reply["final"]), ("stats_update", True))
+        session = self._session("cg-done")
+        self.assertEqual((session.cost_paused, session.stats_status), (False, "complete"))
+
+    @tornado.testing.gen_test
+    async def test_the_pause_survives_a_generation_bump_a_reconnect_and_a_reload(self):
+        ws, gen = await self._paused_session("cg-survive")
+        session = self._session("cg-survive")
+
+        changed = self._stats(await self._state(ws, post_processing="first_three"))
+        self.assertEqual((changed["status"], changed["reason"], changed["gen"], changed["tier_target"]),
+            ("not_computed", "cost", gen + 1, "full"))
+        self.assertTrue(session.cost_paused)
+
+        _, again = await self._connect("cg-survive")
+        held = session_mod.stats_with_defaults(again["df_meta"])
+        self.assertEqual((held["status"], held["reason"], held["tier_target"]), ("not_computed", "cost", "full"),
+            "an explicit full reports no policy, but a paused one says which tier a forced request continues")
+
+        await self._reload("cg-survive")
+        reloaded = self._stats(await _read_json(ws))
+        self.assertEqual((reloaded["status"], reloaded["reason"], reloaded["gen"]), ("not_computed", "cost", gen + 2))
+        refused = await self._ask(ws, gen + 2)
+        self.assertEqual((refused["type"], refused["reason"]), ("stats_update", "cost"))
+
+        await self._reload("cg-survive", stats_tier="auto")
+        reset = self._stats(await _read_json(ws))
+        self.assertEqual((reset["status"], reset["gen"]), ("pending", gen + 3))
+        self.assertFalse(session.cost_paused)
+
+    @tornado.testing.gen_test
+    async def test_a_new_expression_forgets_the_pause(self):
+        _ws, _gen = await self._paused_session("cg-new")
+        session = self._session("cg-new")
+        other_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, other_root, ignore_errors=True)
+        resp = await _post(self.get_http_port(), "/load_expr", {"session": "cg-new",
+            "build_dir": _build_stats_wire_dir(other_root), "stats_delivery": "deferred"})
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual((session.cost_paused, session.stats_status), (False, "pending"))
+
+    @tornado.testing.gen_test
+    async def test_force_clears_the_pause_and_the_run_goes_on_where_it_stopped(self):
+        ws, gen = await self._paused_session("cg-resume")
+        session = self._session("cg-resume")
+        run = session.stat_runs[(gen, "raw")]
+        first_unit = list(run.ran)
+
+        reply = await self._ask(ws, gen, force=True)
+        self.assertEqual((reply["type"], reply["tier"], reply["final"]), ("stats_update", "full", False), reply)
+        self.assertFalse(session.cost_paused)
+        self.assertEqual((session.stats_status, session.stats_reason), ("pending", None))
+        self.assertEqual((run.ran[:1], len(run.ran)), (first_unit, 2), "the unit that ran is not run again")
+
+        # Back to automatic requests, with a budget no unit exceeds.
+        self._cost_budget(3600)
+        rest = await self._ask_to_the_end(ws, gen)
+        self.assertEqual((rest[-1]["type"], rest[-1]["final"]), ("stats_update", True))
+        self.assertEqual((session.stats_status, session.cost_paused), ("complete", False))
+
+    @tornado.testing.gen_test
+    async def test_a_request_with_no_policy_is_never_paused(self):
+        """An inline session has no policy, so its ondemand client's requests are answered as before."""
+        self._cost_budget(0.0)
+        await self._load("cg-inline", stats_delivery="inline")
+        ws, frame = await self._connect("cg-inline")
+        self.assertNotIn("stats", frame["df_meta"])
+        with _slow_stat_queries(0.03):
+            reply = await self._ask(ws, self._session("cg-inline").stats_gen, tier="full", force=True)
+        self.assertEqual((reply["type"], reply["final"], reply["remaining"]), ("stats_update", True, 0))
+        self.assertTrue(_FULL_ONLY_WIRE <= set(_rows_by_stat(reply["payload"])))
+        self.assertFalse(self._session("cg-inline").cost_paused)
+
+
+class TestCostGuardUnits:
+    """The guard on the scalar tier: a chunk of the batch is a unit, and the
+    first one over the budget pauses the run's session."""
+
+    def test_a_scalar_chunk_over_the_budget_pauses_the_session_and_force_resumes_it(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(stats_wire, "STATS_BUDGET_S", 0)
+        monkeypatch.setattr(stats_wire, "STATS_COST_BUDGET_S", 0.02, raising=False)
+        # 24 cells at 12 rows is two columns per chunk: three batch units.
+        session, client = TestScalarTierRequests._session(tmp_path, stat_chunk_cells=24), _ondemand_client()
+        request = TestScalarTierRequests._request
+        with _slow_stat_queries(0.05):
+            opening = request(session, client, incremental=True)
+        assert (opening["type"], opening["tier"], opening["final"], opening["remaining"]) == (
+            "stats_update", "scalar", False, 2), opening
+        assert session.cost_paused is True
+        assert (session.stats_status, session.stats_reason) == ("not_computed", "cost")
+
+        with _count_stat_queries() as queries:
+            refused = request(session, client, incremental=True)
+        assert queries == []
+        assert (refused["type"], refused["status"], refused["reason"], refused["tier"]) == (
+            "stats_update", "not_computed", "cost", "scalar")
+
+        forced = request(session, client, incremental=True, tier="scalar", force=True)
+        assert (forced["type"], forced["tier"], forced["final"], forced["remaining"]) == ("stats_update", "scalar",
+            False, 1)
+        assert session.cost_paused is False
+        assert (session.stats_status, session.stats_reason) == ("not_computed", "size")
+        last = request(session, client, incremental=True)
+        assert (last["final"], last["remaining"]) == (True, 0)
+        assert (last["status"], last["reason"]) == ("not_computed", "size")
+
+
+# A diff-styling klass as the live diff route has one: the numeric colour rule
+# is not in the overrides (the route strips it), and the klass adds it at style
+# time with the short alias of the delta column as its val_column.
+_DELTA_STYLING = '''
+class DeltaStyling(DefaultMainStyling):
+    df_display_name = "main"
+
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        base_config = super().style_column(col, column_metadata)
+        if column_metadata.get("orig_col_name") == "price":
+            base_config["color_map_config"] = {"color_rule": "color_map", "map_name": "DIVERGING_RED_WHITE_BLUE",
+                "val_column": str(col)}
+        return base_config
+'''
+
+# What remains in the overrides once the live route has stripped the numeric rules.
+_CATEGORICAL_OVERRIDE = {"category": {"color_map_config": {"color_rule": "color_categorical",
+    "map_name": "BLUE_TO_YELLOW"}}}
+
+# A promoted entry keeps its numeric rule in the overrides, with the delta column
+# named as the original column name the host knows.
+_NUMERIC_OVERRIDE = {"qty": {"color_map_config": {"color_rule": "color_map", "map_name": "BLUE_TO_YELLOW",
+    "val_column": "price"}}}
+
+
+class TestDemandScanWire(_LimitsWire):
+    """The demand scan and the scoped requests it becomes (rows-first p36a):
+    the columns a built config's ``color_map`` rules need, found with no data
+    query at load and computed on request, for those columns only."""
+
+    DISPLAY_FILES = {"delta_styling.py": _DELTA_STYLING}
+
+    @tornado.testing.gen_test
+    async def test_the_scan_finds_the_delta_column_a_klass_adds_at_style_time(self):
+        with _count_stat_queries() as queries:
+            await self._load("dm-klass", stats_tier="schema", column_config_overrides=_CATEGORICAL_OVERRIDE)
+        self.assertEqual(queries, [], "the scan reads the built config and sends no data query")
+        session = self._session("dm-klass")
+        self.assertEqual(session.stats_policy["demand_columns"], ["a"])
+        ws, ondemand = await self._connect("dm-klass")
+        self.assertEqual(self._stats(ondemand)["demand_columns"], ["a"])
+        self.assertEqual(self._stats(ondemand)["auto_request"], False)
+        _, update_only = await self._connect("dm-klass", caps="stats_update")
+        self.assertNotIn("demand_columns", self._stats(update_only))
+
+    @tornado.testing.gen_test
+    async def test_a_numeric_rule_in_the_overrides_is_scanned_too(self):
+        await self._load("dm-override", stats_tier="schema", project_root=None,
+            column_config_overrides=_NUMERIC_OVERRIDE)
+        _, frame = await self._connect("dm-override")
+        self.assertEqual(self._stats(frame)["demand_columns"], ["a"],
+            "the host's name for the column is the stats' key")
+
+    @tornado.testing.gen_test
+    async def test_the_demand_follows_a_state_change_and_a_reload(self):
+        await self._load("dm-follow", stats_tier="schema", column_config_overrides=_CATEGORICAL_OVERRIDE)
+        ws, first = await self._connect("dm-follow")
+        changed = self._stats(await self._state(ws, post_processing="first_three"))
+        self.assertEqual(changed["demand_columns"], ["a"])
+        await self._reload("dm-follow")
+        self.assertEqual(self._stats(await _read_json(ws))["demand_columns"], ["a"])
+
+    @tornado.testing.gen_test
+    async def test_a_demand_request_runs_the_scalar_units_of_the_named_columns_only(self):
+        await self._load("dm-run", stats_tier="schema", column_config_overrides=_CATEGORICAL_OVERRIDE)
+        session = self._session("dm-run")
+        ws, first = await self._connect("dm-run")
+        stats = self._stats(first)
+        held = (session.df_data_dict, session.df_display_args, session.df_meta)
+
+        with _count_stat_queries() as queries:
+            reply = await self._ask(ws, stats["gen"], tier="scalar", columns=stats["demand_columns"])
+
+        self.assertEqual((reply["type"], reply["tier"], reply["final"], reply["remaining"]), ("stats_update", "scalar",
+            True, 0), reply)
+        self.assertEqual((reply["status"], reply["reason"]), ("not_computed", "host"))
+        rows = _rows_by_stat(reply["payload"])
+        self.assertEqual(set(rows), _SCALAR_WIRE_ONLY)
+        self.assertEqual({c for row in rows.values() for c in row} - {"index", "level_0"}, {"a"})
+        self.assertEqual(len(rows["histogram_bins"]["a"]), 11, "what the colour map reads")
+        self.assertEqual([type(q.op()).__name__ for q in queries], ["Aggregate"])
+        self.assertEqual({name.split("|")[0] for name in queries[0].op().metrics} - {"__total_length__"}, {"price"})
+        self.assertEqual(list(session.stat_runs), [(stats["gen"], "raw", "scalar", ("price",))])
+        self.assertTrue(all(a is b for a, b in zip(held, (session.df_data_dict, session.df_display_args,
+            session.df_meta))), "nothing is assigned")
+        self.assertEqual((session.stats_status, session.stats_reason), ("not_computed", "host"))
+
+        # Another client asking for the same columns reads the run's fragments.
+        other, other_first = await self._connect("dm-run")
+        with _count_stat_queries() as queries:
+            replay = await self._ask(other, self._stats(other_first)["gen"], tier="scalar", columns=["a"])
+        self.assertEqual(queries, [])
+        self.assertEqual(_as_json(_rows_by_stat(replay["payload"])), _as_json(rows))
+
+    @tornado.testing.gen_test
+    async def test_a_named_columns_request_is_not_forced_and_needs_no_requestable_tier(self):
+        """A demand request is automatic. The whole table's tier above a schema target needs a force."""
+        with _stats_limits(**{**_SCHEMA_BY_SIZE, "ceiling_full_rows": 3}):
+            await self._load("dm-auto", stats_tier="auto", column_config_overrides=_CATEGORICAL_OVERRIDE)
+            ws, first = await self._connect("dm-auto")
+            gen = self._stats(first)["gen"]
+            scoped = await self._ask(ws, gen, tier="scalar", columns=["b"])
+            self.assertEqual((scoped["type"], scoped["tier"], scoped["final"]), ("stats_update", "scalar", True),
+                scoped)
+            whole = await self._ask(ws, gen, tier="scalar")
+            self.assertEqual((whole["type"], whole["reason"]), ("stats_aborted", "not_requestable"))
+
+    @tornado.testing.gen_test
+    async def test_the_ceiling_judges_a_named_columns_request_by_its_own_cells(self):
+        """The table is 15 cells and the ceiling on scalar is 10: two columns fit, three do not."""
+        with _stats_limits(ceiling_scalar_cells=10):
+            await self._load("dm-cells", stats_tier="schema")
+            ws, first = await self._connect("dm-cells")
+            gen = self._stats(first)["gen"]
+            self.assertEqual(self._stats(first)["requestable"], [])
+            fits = await self._ask(ws, gen, tier="scalar", columns=["a", "b"])
+            self.assertEqual((fits["type"], fits["final"]), ("stats_update", True), fits)
+            self.assertEqual({c for row in _rows_by_stat(fits["payload"]).values() for c in row} - {"index", "level_0"},
+                {"a", "b"})
+            over = await self._ask(ws, gen, tier="scalar", columns=["a", "b", "c"])
+            self.assertEqual((over["type"], over["reason"]), ("stats_update", "ceiling"))
+
+    @tornado.testing.gen_test
+    async def test_a_named_columns_request_at_the_full_tier_runs_those_columns_units_and_assigns_nothing(self):
+        self._one_unit_per_request()
+        await self._load("dm-full", stats_tier="schema")
+        session = self._session("dm-full")
+        ws, first = await self._connect("dm-full")
+        gen = self._stats(first)["gen"]
+        replies = await self._ask_to_the_end(ws, gen, tier="full", columns=["b"])
+        self.assertEqual([(r["type"], r["tier"], r["final"], r["remaining"]) for r in replies],
+            [("stats_update", "full", False, 1), ("stats_update", "full", True, 0)])
+        self.assertEqual((replies[-1]["status"], replies[-1]["reason"]), ("not_computed", "host"))
+        merged = _merge_stat_payloads(r["payload"] for r in replies)
+        self.assertTrue(_FULL_ONLY_WIRE <= set(merged))
+        self.assertEqual({c for row in merged.values() for c in row}, {"b"})
+        self.assertEqual(list(session.stat_runs), [(gen, "raw", "full", ("qty",))])
+        self.assertEqual((session.stats_status, session.xorq_dataflow.stats_tier), ("not_computed", "schema"))
+
+    @tornado.testing.gen_test
+    async def test_two_requests_for_the_same_columns_in_any_order_share_a_run(self):
+        await self._load("dm-share", stats_tier="schema")
+        session = self._session("dm-share")
+        ws, first = await self._connect("dm-share")
+        gen = self._stats(first)["gen"]
+        await self._ask(ws, gen, tier="scalar", columns=["b", "a", "a"])
+        with _count_stat_queries() as queries:
+            await self._ask(ws, gen, tier="scalar", columns=["a", "b"])
+        self.assertEqual(queries, [])
+        self.assertEqual(list(session.stat_runs), [(gen, "raw", "scalar", ("price", "qty"))])
+
+class TestTierFieldsAndOlderClients(_LimitsWire):
+    """``tier``, ``force`` and a ``columns`` that scopes the run belong to a
+    client that advertised ``stats_ondemand``; every other client is served as
+    before."""
+
+    @tornado.testing.gen_test
+    async def test_force_from_a_client_without_both_bits_records_no_override(self):
+        with _stats_limits(**_SCHEMA_BY_SIZE):
+            await self._load("sk-no-override", stats_tier="auto")
+            ws, first = await self._connect("sk-no-override", caps="stats_update")
+            ws.write_message(_stats_request(self._stats(first)["gen"], tier="full", force=True))
+            reply = await _read_json(ws)
+        self.assertEqual((reply["type"], reply["final"]), ("stats_update", True))
+        session = self._session("sk-no-override")
+        self.assertEqual((session.stats_override, session.cost_paused), (None, False))
+
 class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
     def get_app(self):
         return make_app()
