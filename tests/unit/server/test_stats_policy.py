@@ -139,6 +139,29 @@ class TestResolveStatsPolicy:
         with pytest.raises((TypeError, ValueError)):
             _resolve(sp, lim, "xorq", "parquet", rows, cols)
 
+    def test_numpy_integer_bytes_are_echoed_as_plain_ints(self, sp, lim):
+        """df.memory_usage(deep=True).sum() is a np.int64, and the result has
+        to survive json.dumps."""
+        out = _resolve(sp, lim, "xorq", "parquet", 12_400_000, 43, bytes=np.int64(987_654_321))
+        assert type(out["estimate"]["bytes"]) is int
+        assert json.loads(json.dumps(out)) == out
+
+    @pytest.mark.parametrize("bad", [-1, "lots", 1.5, object()])
+    def test_bad_bytes_are_rejected(self, sp, lim, bad):
+        with pytest.raises((TypeError, ValueError)):
+            _resolve(sp, lim, "xorq", "parquet", 12_400_000, 43, bytes=bad)
+
+    def test_a_host_tier_in_the_bytes_slot_is_rejected(self, sp):
+        """bytes sits before host_tier, so a positional slip must not be taken
+        for a byte count."""
+        with pytest.raises((TypeError, ValueError)):
+            sp.resolve_stats_policy("xorq", "csv", 12_000_000, 43, "full")
+
+    @pytest.mark.parametrize("bad", [None, 5, b"csv"])
+    def test_bad_source_kind_is_rejected(self, sp, lim, bad):
+        with pytest.raises(TypeError):
+            _resolve(sp, lim, "xorq", bad, 1_000, 3)
+
     def test_unknown_host_tier_is_rejected(self, sp, lim):
         with pytest.raises(ValueError):
             _resolve(sp, lim, "xorq", "parquet", 1_000, 3, "everything")
