@@ -1,4 +1,3 @@
-import copy
 import json
 import logging
 import os
@@ -12,7 +11,7 @@ from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy)
 from buckaroo.server.session import begin_stats_generation, dataflow_stats_tier
 from buckaroo.server.stat_run import StatCursor
-from buckaroo.server.stats_wire import (broadcast_state, build_state_message_for, handle_stats_request, parse_caps, refresh_session_snapshot)
+from buckaroo.server.stats_wire import (broadcast_state, build_state_message_for, handle_stats_request, highlighted_display_args, parse_caps, refresh_session_snapshot)
 
 
 def _handle_infinite_request_xorq(xorq_dataflow, payload_args, search_string=""):
@@ -48,6 +47,10 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # This client's position in the session's StatRun fragment list (the
         # run itself is shared); it ends with the connection.
         self.stats_cursor = StatCursor()
+        # Digest of the df_display_args a stats-free frame last sent this
+        # client, kept so the final stats_update can say whether the rebuilt
+        # config differs (stats_wire.build_state_message_for sets it).
+        self.display_args_hash = None
         sessions = self.application.settings["sessions"]
         sessions.add_ws_client(session_id, self)
 
@@ -75,7 +78,9 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
     def _handle_stats_request(self, msg):
         """Answer a client's ``stats_request`` with a ``stats_update`` or a
         ``stats_aborted``. Synchronous, like ``infinite_request``: the request
-        runs the whole stats computation in this call (see ``stats_wire``).
+        runs its units in this call, a time-boxed few for an incremental one and
+        every unit left for the others (see ``stats_wire``), so a waiting
+        ``infinite_request`` is served between requests.
 
         This branch is its own async context, so the session's telemetry sink
         is bound here for the ``stats.request`` span and the stats spans under
@@ -83,7 +88,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
         with perf_log.telemetry_context(self.session_id, session.tele_sink if session else None):
-            reply = handle_stats_request(session, msg)
+            reply = handle_stats_request(session, msg, self)
         self.write_message(json.dumps(reply))
 
     def _handle_buckaroo_state_change(self, new_state):
@@ -189,17 +194,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # #854 — without it the JS clears the search box on every
         # keystroke).
         msg = build_state_message_for(session, self)
-        overlay = copy.deepcopy(session.df_display_args)
-        for dva in overlay.values():
-            dvc = (dva or {}).get("df_viewer_config") or {}
-            for col in dvc.get("column_config", []) or []:
-                disp = col.get("displayer_args")
-                if not isinstance(disp, dict) or disp.get("displayer") != "string":
-                    continue
-                if term:
-                    disp["highlight_phrase"] = [term]
-                else:
-                    disp.pop("highlight_phrase", None)
+        overlay = highlighted_display_args(session.df_display_args, term)
 
         msg["df_display_args"] = overlay
         try:

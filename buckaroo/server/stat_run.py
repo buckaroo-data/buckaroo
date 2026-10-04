@@ -15,6 +15,7 @@ import time
 from typing import Any, List, Optional, Sequence, Tuple
 
 from buckaroo.df_util import old_col_new_col
+from buckaroo.pluggable_analysis_framework.stat_pipeline import errors_to_errdict
 from buckaroo.pluggable_analysis_framework.stat_units import Fragment, StatUnit, resolve_names, rewrite_sd
 
 _run_ids = itertools.count(1)
@@ -27,7 +28,8 @@ class StatRun:
     ``status`` is ``pending`` until the last unit has run, then ``complete``;
     ``error`` once a unit raised, and the run is not retried. A stat that fails
     inside a unit is not that: it is an entry in ``acc.errors`` and the unit
-    still finishes.
+    still finishes. ``elapsed_s`` is the time the units have taken, summed over
+    every request that ran one.
     """
 
     def __init__(self, stats_gen: int, scope: str, stats: Any):
@@ -42,6 +44,7 @@ class StatRun:
         self.status = "pending" if self.units else "complete"
         self.error: Optional[Exception] = None
         self.created_at = time.time()
+        self.elapsed_s = 0.0
         self._frame_columns: Optional[List[Tuple[Any, str]]] = None
 
     @property
@@ -81,11 +84,14 @@ class StatRun:
         if unit is None:
             self.status = "complete"
             return None
+        started = time.perf_counter()
         try:
             fragment = self.stats.run(unit, self.acc)
         except Exception as exc:
             self.status, self.error = "error", exc
             raise
+        finally:
+            self.elapsed_s += time.perf_counter() - started
         self.ran.append(unit.id)
         self.fragments.append(fragment)
         if self.remaining == 0:
@@ -96,6 +102,11 @@ class StatRun:
         """The run's stats as the summary dict the dataflow carries, keyed by
         rewritten column name: what ``summary_sd`` holds after a whole run."""
         return rewrite_sd(self.acc.sd(), self.acc.state.data)
+
+    def errs(self) -> dict:
+        """The stats that failed inside a unit, as the ``{(col, stat): (error,
+        None)}`` dict the dataflow's ``errs`` holds."""
+        return errors_to_errdict(self.acc.errors)
 
 
 class StatCursor:

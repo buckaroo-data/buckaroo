@@ -565,21 +565,31 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     @observe('summary_sd', 'processed_result', 'clean_sd_key', 'filt_sd_key')
     @exception_protect('merged_sd-protector')
     def _merged_sd(self, change):
-        # Bare keys come from the raw scope's SD (computed on
-        # sampled_df). ``cleaned_*`` keys are layered on top from the
-        # clean scope's SD when cleaning is active; ``filtered_*`` keys
-        # are layered on top from the filt scope's SD when a search
-        # filter is active. Scope SDs are read from the keyed cache
-        # (#783) — the cache observer ``_populate_sd_cache`` is what
-        # computes and stores them; this observer just assembles the
-        # wire shape #777's `?key` JS consumes.
-        #
         # clean_sd_key and filt_sd_key are in the observed set so this
         # fires after ``_populate_sd_cache`` has updated the pointers
         # (which it always does, even on a pure cache hit) — guarantees
-        # the cache lookups below see the right keys for the current
-        # state.
+        # the cache lookups in ``_assemble_merged_sd`` see the right keys
+        # for the current state.
+        self.merged_sd = self._assemble_merged_sd()
 
+    def _assemble_merged_sd(self, running_sd: Optional[SDType] = None) -> SDType:
+        """The wire ``merged_sd`` for the current state.
+
+        Bare keys come from the raw scope's SD (computed on
+        sampled_df). ``cleaned_*`` keys are layered on top from the
+        clean scope's SD when cleaning is active; ``filtered_*`` keys
+        are layered on top from the filt scope's SD when a search
+        filter is active. Scope SDs are read from the keyed cache
+        (#783) — the cache observer ``_populate_sd_cache`` is what
+        computes and stores them; this only assembles the wire shape
+        #777's `?key` JS consumes.
+
+        ``running_sd`` is an SD still being computed for the filt scope's
+        frame (a ``StatRun``'s accumulated results). It stands in for every
+        scope whose chain is the filt chain, which are the scopes the cache
+        holds one entry for, so a caller can assemble the wire shape of
+        stats that are not in the cache yet.
+        """
         # Resolve scope SDs. Falls back to summary_sd / cleaned_sd
         # for pre-cache-population states (initial startup, the brief
         # window before _populate_sd_cache has fired).
@@ -594,9 +604,17 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         if filt_sd is None:
             filt_sd = self.summary_sd or {}
 
-        self.merged_sd = assemble_merged_sd(
+        chains = split_chain_by_scope(self.operations)
+        if running_sd is not None:
+            if chains['raw'] == chains['filt']:
+                raw_sd = running_sd
+            if chains['clean'] == chains['filt']:
+                clean_sd = running_sd
+            filt_sd = running_sd
+
+        return assemble_merged_sd(
             self.init_sd, self.cleaned_sd, raw_sd, self.processed_sd, self.processed_df,
-            split_chain_by_scope(self.operations), clean_sd=clean_sd, filt_sd=filt_sd)
+            chains, clean_sd=clean_sd, filt_sd=filt_sd)
 
     def _compute_scope_df(self, scope: str):
         """Return the df that scope's SD should be computed against.

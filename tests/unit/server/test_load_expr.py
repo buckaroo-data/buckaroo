@@ -1452,7 +1452,7 @@ def _merge_stat_payloads(payloads):
         for stat, row in _rows_by_stat(payload).items():
             cells = merged.setdefault(stat, {})
             for column, value in row.items():
-                if column == "index" or (value is None and cells.get(column) is not None):
+                if column in ("index", "level_0") or (value is None and cells.get(column) is not None):
                     continue
                 cells[column] = value
     return merged
@@ -2142,7 +2142,8 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         run = self._session("sw-hint").stat_runs[(gen, "raw")]
         self.assertEqual(run.ran, ["batch", "histogram:category"],
             "the batch every histogram reads goes first, then the unit of the column named, c being category")
-        columns = {name for row in _rows_by_stat(reply["payload"]).values() for name in row if name != "index"}
+        columns = {name for row in _rows_by_stat(reply["payload"]).values() for name in row
+            if name not in ("index", "level_0")}
         self.assertEqual(columns, {"c"})
 
     @tornado.testing.gen_test
@@ -2453,8 +2454,8 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
             ws.write_message(_stats_request(gen, incremental=True))
             self.assertEqual((await _read_json(ws))["reason"], "error")
         self.assertEqual(queries, [], "a failed generation is not retried by every request")
-        _, legacy = await self._connect("sw-unit-fail")
-        self.assertEqual(list(_rows_by_stat(legacy["df_data_dict"]["all_stats"])), ["dtype"])
+        self.assertEqual(list(_rows_by_stat(session.df_data_dict["all_stats"])), ["dtype"],
+            "the snapshot keeps the schema tier")
 
         ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
         self._assert_pending(await _read_json(ws), gen + 1)
@@ -2474,6 +2475,54 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         self._budget(0)
         self.assertFalse((await self._pull_stats(ws, gen, limit=1))[0]["final"],
             "the session still serves a good request")
+
+    @tornado.testing.gen_test
+    async def test_an_incremental_request_for_a_state_with_cached_stats_runs_no_unit(self):
+        await self._load("sw-inc-cached", stats_delivery="deferred")
+        ws, first = await self._connect("sw-inc-cached", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        self._budget(0)
+        self.assertEqual(len(await self._pull_stats(ws, gen)), 4)
+        ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
+        self._assert_pending(await _read_json(ws), gen + 1)
+        self.assertEqual(len(await self._pull_stats(ws, gen + 1)), 4)
+
+        ws.write_message(_state_change(quick_command_args={}))
+        self._assert_pending(await _read_json(ws), gen + 2)
+        with _count_stat_queries() as queries:
+            replies = await self._pull_stats(ws, gen + 2)
+        self.assertEqual([(r["final"], r["remaining"]) for r in replies], [(True, 0)])
+        self.assertEqual(queries, [], "the first state's stats are in summary_stats_cache")
+        self.assertEqual(self._session("sw-inc-cached").stat_runs, {})
+
+    @tornado.testing.gen_test
+    async def test_an_incremental_request_that_cannot_plan_units_takes_the_whole_run_path(self):
+        """A post-processor that fails leaves an error frame, which the xorq
+        stats class cannot plan units for. The request is still answered, as the
+        whole run is."""
+        with open(os.path.join(self.project_root, "post_processing", "boom.py"), "w") as f:
+            f.write("def process(expr):\n    raise ValueError('boom')\n")
+        await self._load("sw-no-plan", stats_delivery="deferred")
+        ws, first = await self._connect("sw-no-plan", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        ws.write_message(_state_change(post_processing="boom"))
+        pushed = await _read_json(ws)
+        self.assertEqual((self._stats(pushed)["status"], self._stats(pushed)["gen"]), ("pending", gen + 1))
+        self._budget(0)
+        with self.assertLogs("buckaroo.server.stats_wire", level="WARNING") as logs:
+            replies = await self._pull_stats(ws, gen + 1, limit=3)
+        self.assertIn("stat units not planned", logs.output[0])
+        self.assertEqual([(r["type"], r["final"]) for r in replies], [("stats_update", True)])
+        self.assertEqual(self._session("sw-no-plan").stats_status, "complete")
+
+    @tornado.testing.gen_test
+    async def test_a_columns_hint_that_is_not_a_list_of_names_is_only_a_hint(self):
+        await self._load("sw-junk-hint", stats_delivery="deferred")
+        ws, first = await self._connect("sw-junk-hint", caps="stats_update")
+        self._budget(0)
+        replies = await self._pull_stats(ws, self._stats(first)["gen"], columns=[["c"], 5, None, "c"])
+        self.assertEqual([r["type"] for r in replies], ["stats_update"] * 4)
+        self.assertEqual(self._session("sw-junk-hint").stat_runs, {})
 
 
 def _wide_parquet_expr(tmp_path, name="wide"):

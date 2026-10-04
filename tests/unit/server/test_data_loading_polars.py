@@ -719,6 +719,12 @@ def _costed_run(backend, clock, cost, costs=None, gen=4):
     return run, dataflow
 
 
+def _without_memory_usage(sd):
+    """``sd`` without the ``memory_usage`` stats, which pandas reads off the
+    index and so depend on what ran on the frame before."""
+    return {col: {k: v for k, v in stats.items() if not k.endswith("memory_usage")} for col, stats in sd.items()}
+
+
 def _stat_rows(payload):
     """The decoded ``all_stats`` rows of a payload, keyed by stat name."""
     return {row["index"]: row for row in resolve_summary_stats_payload(payload)}
@@ -780,9 +786,9 @@ class TestRunUnits:
         """The grid knows only a, b, c: "c" is the third column, category."""
         clock = _FakeClock()
         run, _dataflow = _costed_run(backend, clock, cost=1.0)
-        stats_wire.run_units(run, 0, prefer=["c", "a"], clock=clock)
-        stats_wire.run_units(run, 0, prefer=["c", "a"], clock=clock)
-        assert run.ran == ["column:category", "column:price"]
+        stats_wire.run_units(run, 0, prefer=["c"], clock=clock)
+        stats_wire.run_units(run, 0, prefer=["b"], clock=clock)
+        assert run.ran == ["column:category", "column:qty"]
 
     def test_a_unit_that_raises_fails_the_run_and_the_error_propagates(self, backend):
         clock = _FakeClock()
@@ -841,7 +847,7 @@ class TestPartialPayload:
         run, _dataflow = _stat_run(backend)
         fragment = run.run_next(prefer=("category",))
         payload = stats_wire.partial_payload(_dataflow, run, [fragment])
-        columns = {name for row in _stat_rows(payload).values() for name in row if name != "index"}
+        columns = {name for row in _stat_rows(payload).values() for name in row if name not in ("index", "level_0")}
         assert columns == {"c"}, "category is the third column, rewritten to c"
 
     def test_a_search_filter_keys_the_run_s_stats_as_filtered(self, backend):
@@ -851,7 +857,8 @@ class TestPartialPayload:
         dataflow = _three_scope_dataflow(backend, _UNTIED_DATA)
         run = StatRun(4, "raw", dataflow.build_stats(dataflow.processed_df, run=False))
         stats_wire.run_units(run, None)
-        assert _as_json(dataflow._assemble_merged_sd(run.raw_sd())) == _as_json(dataflow.merged_sd)
+        assert _as_json(_without_memory_usage(dataflow._assemble_merged_sd(run.raw_sd()))) == _as_json(
+            _without_memory_usage(dataflow.merged_sd))
 
     def test_init_sd_overrides_win_over_the_run_s_stats_as_in_merged_sd(self, backend):
         dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA),

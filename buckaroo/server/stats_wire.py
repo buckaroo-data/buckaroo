@@ -1,4 +1,4 @@
-"""Server side of the stats wire protocol (rows-first s3).
+"""Server side of the stats wire protocol (rows-first s3 and s5).
 
 A deferred session (``stats_delivery="deferred"``) publishes its dataflow at the
 schema tier and leaves the rest of the stats to later. Two kinds of client
@@ -17,21 +17,32 @@ Every send site goes through ``build_state_message_for`` (or ``broadcast_state``
 which calls it per client), because the session holds one shared snapshot and
 the client is known only to the handler that owns the connection.
 
-The request here is the whole run: one synchronous call that computes the full
-stats and applies the final assignment (``assign_full_stats``,
-``refresh_session_snapshot``). Resumable units generalize it later.
+A ``stats_request`` takes one of two shapes. Without ``incremental`` it is the
+whole run: one synchronous call that runs every unit still to run, applies the
+final assignment and answers with the complete ``all_stats``. With
+``incremental: true`` it runs the units of the session's ``StatRun`` for about
+``STATS_BUDGET_S`` (at least one, so a cold unit is the only one of its
+request) and answers with the fragments this client has not seen. The request
+that runs the last unit applies the final assignment (``complete_stats``): the
+full-tier cache entry, ``summary_sd``, the session snapshot and the status,
+in one step. A client that follows the run reads the same list through its own
+cursor, so work is done once whoever asks.
 """
+import copy
+import hashlib
 import json
 import logging
 import time
 import traceback
-from typing import Any, Optional
+from typing import Any, Callable, Dict, Optional, Sequence
 
 from buckaroo.dataflow.sd_cache import split_chain_by_scope
+from buckaroo.df_util import old_col_new_col
 from buckaroo.pluggable_analysis_framework import perf_log
+from buckaroo.pluggable_analysis_framework.stat_units import Fragment
 from buckaroo.server.data_loading import get_buckaroo_display_state
 from buckaroo.server.session import SessionState, build_state_message
-from buckaroo.server.stat_run import StatRun
+from buckaroo.server.stat_run import StatCursor, StatRun
 
 log = logging.getLogger("buckaroo.server.stats_wire")
 
@@ -46,6 +57,13 @@ STATS_UPDATE_CAP = "stats_update"
 # dataflow-field change (``quick_command_args.search``), which bumps the
 # generation.
 STATS_SCOPES = ("raw",)
+
+# The time an incremental ``stats_request`` may spend running units, in
+# seconds. A request always runs one unit and stops starting new ones once this
+# is spent, so a snapshot-cache hit (milliseconds) shares its request with the
+# others and a query is alone in its own. It cannot cut a unit short: the
+# longest unit is what a waiting ``infinite_request`` stalls behind.
+STATS_BUDGET_S = 0.075
 
 
 def parse_caps(raw: str) -> frozenset:
@@ -102,11 +120,88 @@ def start_stat_run(session: SessionState, scope: str = "raw") -> Optional[StatRu
     return run
 
 
-def assign_full_stats(dataflow: Any) -> None:
-    """Take a schema-tier dataflow to the full tier: compute the current
-    state's full stats (or find them in ``summary_stats_cache``, where an
-    earlier visit to the same state left them), write them under the full-tier
-    key, then assign ``summary_sd``. Assigning runs the cascade, which fills the
+def display_args_hash(display_args: Any) -> str:
+    """A digest of a ``df_display_args`` value, equal for equal content whatever
+    the key order. JSON, because that is how the value reaches a client, and it
+    reads a NaN the same each time."""
+    return hashlib.sha1(json.dumps(display_args, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def highlighted_display_args(display_args: dict, term: str) -> dict:
+    """A copy of ``df_display_args`` with ``term`` set as the highlight phrase
+    of every string column's displayer, or with the highlight removed when the
+    term is empty (#851). A copy, so the shared session snapshot is never
+    changed."""
+    overlay = copy.deepcopy(display_args)
+    for dva in overlay.values():
+        dvc = (dva or {}).get("df_viewer_config") or {}
+        for col in dvc.get("column_config", []) or []:
+            disp = col.get("displayer_args")
+            if not isinstance(disp, dict) or disp.get("displayer") != "string":
+                continue
+            if term:
+                disp["highlight_phrase"] = [term]
+            else:
+                disp.pop("highlight_phrase", None)
+    return overlay
+
+
+def run_units(run: StatRun, budget_s: Optional[float], prefer: Sequence[str] = (),
+        clock: Callable[[], float] = time.perf_counter, session_id: Optional[str] = None) -> int:
+    """Run units of ``run`` for one request, and return how many.
+
+    At least one runs while the run is pending. Another starts only while the
+    time spent is under ``budget_s``, so units that cost milliseconds (their
+    queries are snapshot-cache hits) run together and one that is a query ends
+    its request. ``budget_s=None`` runs every unit still to run. ``prefer`` are
+    column names as a client writes them (the rewritten ``a, b, c``), whose
+    units go first. A unit that raises fails the run and the exception
+    propagates. Each unit is a ``stats.unit`` span."""
+    started = clock()
+    ran = 0
+    while run.status == "pending":
+        if ran and budget_s is not None and clock() - started >= budget_s:
+            break
+        unit = run.next_unit(prefer, "rewritten")
+        if unit is None:
+            run.run_next()  # no unit is left: this marks the run complete
+            break
+        with perf_log.perf_span("stats.unit", session=session_id, stats_gen=run.stats_gen, unit=unit.id,
+            phase=unit.phase, cost=unit.cost, columns=len(unit.columns)):
+            run.run_next(prefer, "rewritten")
+        ran += 1
+    return ran
+
+
+def partial_payload(dataflow: Any, run: StatRun, fragments: Sequence[Fragment]) -> Any:
+    """The ``all_stats`` payload (an inline wide ``DFEnvelope``) of the columns
+    ``fragments`` cover: their stats so far, assembled as ``merged_sd`` is, so
+    ``init_sd``, a processing step's sd and the ``cleaned_*`` and ``filtered_*``
+    layers apply as they will in the complete state. A client merges it into
+    its ``all_stats`` key by key, so a stat sent again with a later fragment
+    only replaces itself."""
+    rewritten = dict(old_col_new_col(run.acc.state.data))
+    touched = {rewritten[col] for fragment in fragments for col in fragment if col in rewritten}
+    merged = dataflow._assemble_merged_sd(run.raw_sd())
+    return dataflow._sd_to_jsondf({col: stats for col, stats in merged.items() if col in touched})
+
+
+def _full_stats_key(dataflow: Any) -> Any:
+    """The ``summary_stats_cache`` key of the current state's full-tier sd."""
+    return dataflow._scope_cache_key(split_chain_by_scope(dataflow.operations)["filt"], tier="full")
+
+
+def _cached_full_sd(dataflow: Any) -> Any:
+    """The full-tier sd of the current state if an earlier visit to it left one."""
+    return dataflow.summary_stats_cache.get(_full_stats_key(dataflow))
+
+
+def assign_full_stats(dataflow: Any, computed: Optional[tuple] = None) -> None:
+    """Take a schema-tier dataflow to the full tier: use the current state's
+    full stats (found in ``summary_stats_cache``, where an earlier visit to the
+    same state left them, or ``computed``, the ``(sd, errs)`` of a finished
+    ``StatRun``, or computed here whole), write them under the full-tier key,
+    then assign ``summary_sd``. Assigning runs the cascade, which fills the
     other scopes' entries it still lacks and rebuilds ``merged_sd``,
     ``df_data_dict`` and ``df_display_args``.
 
@@ -115,14 +210,13 @@ def assign_full_stats(dataflow: Any) -> None:
     plain attribute, flipped before the compute so ``_get_summary_sd`` runs the
     full pipeline, and put back if anything raises."""
     tier = dataflow.stats_tier
-    filt_chain = split_chain_by_scope(dataflow.operations)["filt"]
-    key = dataflow._scope_cache_key(filt_chain, tier="full")
+    key = _full_stats_key(dataflow)
     dataflow.stats_tier = "full"
     try:
         sd = dataflow.summary_stats_cache.get(key)
         errs = {}
         if sd is None:
-            sd, errs = dataflow._get_summary_sd(dataflow.processed_df)
+            sd, errs = computed if computed is not None else dataflow._get_summary_sd(dataflow.processed_df)
             dataflow.summary_stats_cache = {**dataflow.summary_stats_cache, key: sd}
         dataflow.summary_sd = sd
         dataflow.errs = errs
@@ -131,12 +225,48 @@ def assign_full_stats(dataflow: Any) -> None:
         raise
 
 
+def _run_summary(dataflow: Any, run: StatRun) -> tuple:
+    """The ``(sd, errs)`` of a finished run, as ``_get_summary_sd`` returns them
+    (it raises on a failed stat in debug mode, and so does this)."""
+    errs = run.errs()
+    if errs and dataflow.debug:
+        raise Exception("Error executing analysis")
+    return run.raw_sd(), errs
+
+
+def _run_span_attrs(run: StatRun) -> dict:
+    """What the completion span says about a run that spanned requests: the
+    units it took and their summed time, and for a backend with a snapshot
+    cache (xorq) the outcome ``firstpull.summary_stats`` carries for a whole
+    run (#943)."""
+    attrs: Dict[str, Any] = {"units": len(run.units), "run_secs": round(run.elapsed_s, 4)}
+    cache_run_stats = getattr(run.stats, "cache_run_stats", None)
+    if cache_run_stats is not None:
+        cs = cache_run_stats()
+        attrs.update(cache_status=cs["status"], cache_hits=cs["hits"], cache_misses=cs["misses"],
+            cache_secs=attrs["run_secs"], cache_snapshots=cs["snapshots"], cache_bytes=cs["bytes"],
+            cache_write_errors=cs["write_errors"])
+    return attrs
+
+
+def _fail_stats(session: SessionState) -> None:
+    """A stats run failed: that is the session's state for this generation, so
+    no request retries it and the next generation starts clean."""
+    session.stats_status, session.stats_reason = "error", "stats_failed"
+    session.stat_runs.clear()
+
+
 def complete_stats(session: SessionState) -> bool:
-    """Run the stats a pending session is missing, in one synchronous call, and
-    publish them: the final assignment (``assign_full_stats``), then the session
-    snapshot refreshed and the status set to ``complete`` in the same step, so
-    ``all_stats`` and ``df_meta.stats`` cannot disagree. Returns whether the
-    session is complete.
+    """Run the stats a pending session is missing and publish them: the final
+    assignment (``assign_full_stats``), then the session snapshot refreshed and
+    the status set to ``complete`` in the same step, so ``all_stats`` and
+    ``df_meta.stats`` cannot disagree. Returns whether the session is complete.
+
+    When the generation has a ``StatRun``, its remaining units run (none if it
+    is finished) and its results are what is assigned, so a unit that a client
+    already ran is not run again. With no run the whole computation is one
+    ``_get_summary_sd`` call, which runs the same units in the same order. The
+    run is freed with the assignment.
 
     A failure is the session's state for this generation (``error``, reason
     ``stats_failed``) and is not retried by the next request; the next
@@ -146,18 +276,26 @@ def complete_stats(session: SessionState) -> bool:
     dataflow = session_dataflow(session)
     if session.stats_status != "pending" or dataflow is None:
         return False
+    run_key = (session.stats_gen, "raw")
     with (
         perf_log.telemetry_context(session.session_id, session.tele_sink),
-        perf_log.perf_span("firstpull.stats_total", session=session.session_id, stats_gen=session.stats_gen),
+        perf_log.perf_span("firstpull.stats_total", session=session.session_id, stats_gen=session.stats_gen) as span,
     ):
         try:
-            assign_full_stats(dataflow)
+            run = session.stat_runs.get(run_key)
+            if run is not None and _cached_full_sd(dataflow) is None:
+                run_units(run, None, session_id=session.session_id)
+                span.set_attr(**_run_span_attrs(run))
+                assign_full_stats(dataflow, computed=_run_summary(dataflow, run))
+            else:
+                assign_full_stats(dataflow)
             refresh_session_snapshot(session, dataflow)
         except Exception:
             log.error("stats run failed session=%s stats_gen=%s: %s", session.session_id, session.stats_gen,
                 traceback.format_exc())
-            session.stats_status, session.stats_reason = "error", "stats_failed"
+            _fail_stats(session)
             return False
+    session.stat_runs.pop(run_key, None)
     session.stats_status, session.stats_reason = "complete", None
     return True
 
@@ -169,10 +307,17 @@ def build_state_message_for(session: SessionState, client: Any, metadata: Option
     session gets its missing stats run first, so its message is complete; a
     capable client gets the session snapshot as it is (stats-free while the
     session is pending) and pulls the rest. The search term is the recipient's
-    own (#851)."""
+    own (#851).
+
+    A capable client is also told apart from the display config it holds: the
+    digest of the one a pending frame carried is kept on it, so the final
+    ``stats_update`` can say whether the config it would send differs."""
     if (session.stats_delivery == "deferred" and session.stats_status == "pending"
             and not client_has_cap(client, STATS_UPDATE_CAP)):
         complete_stats(session)
+    if client_has_cap(client, STATS_UPDATE_CAP):
+        client.display_args_hash = (display_args_hash(session.df_display_args)
+            if session.stats_status == "pending" else None)
     return build_state_message(session, metadata=metadata, search_string=getattr(client, "search_string", ""))
 
 
@@ -204,7 +349,80 @@ def _aborted(stats_gen: Any, scope: Any, reason: str, session: Optional[SessionS
     return msg
 
 
-def _answer_stats_request(session: Optional[SessionState], stats_gen: Any, scope: Any, started: float) -> dict:
+def _elapsed_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 1)
+
+
+def _plan_run(session: SessionState) -> Optional[StatRun]:
+    """The session's ``StatRun`` for the current generation, or ``None`` when it
+    cannot be planned (there is no frame, or the dataflow's stats class cannot
+    plan the one it has: a post-processor that failed leaves an error frame).
+    The whole-run path then decides what the stats are."""
+    try:
+        return start_stat_run(session)
+    except Exception:
+        log.warning("stat units not planned session=%s stats_gen=%s: %s", session.session_id, session.stats_gen,
+            traceback.format_exc())
+        return None
+
+
+def _serve_units(session: SessionState, client: Any, prefer: Sequence[str], stats_gen: Any, scope: Any,
+        started: float, info: dict) -> Optional[dict]:
+    """The reply to an incremental request on a pending session, when the
+    answer is the fragments this client has not seen: a partial ``stats_update``
+    (``final`` false), or ``stats_aborted`` when a unit failed. ``None`` when
+    the request is not answered that way: the stats are cached or cannot be
+    planned (the whole-run path takes them), or the run is now finished and the
+    caller publishes it.
+
+    A client that is behind the run is caught up and no unit runs for it, so
+    work is done once and a client that asks late reads it all from its own
+    cursor."""
+    dataflow = session_dataflow(session)
+    if _cached_full_sd(dataflow) is not None:
+        return None
+    run = _plan_run(session)
+    if run is None:
+        return None
+    cursor = getattr(client, "stats_cursor", None) or StatCursor()
+    if cursor.caught_up(run):
+        try:
+            info["units"] = run_units(run, STATS_BUDGET_S, prefer, session_id=session.session_id)
+        except Exception:
+            log.error("stat unit failed session=%s stats_gen=%s: %s", session.session_id, session.stats_gen,
+                traceback.format_exc())
+            _fail_stats(session)
+            return _aborted(stats_gen, scope, "error", session)
+    fragments = cursor.take(run)
+    if run.status != "pending":
+        return None
+    return {"type": "stats_update", "stats_gen": stats_gen, "scope": scope, "tier": session.stats_tier,
+        "final": False, "remaining": run.remaining, "payload": partial_payload(dataflow, run, fragments),
+        "elapsed_ms": _elapsed_ms(started)}
+
+
+def _rebuilt_display_args(session: SessionState, client: Any) -> Optional[dict]:
+    """The session's display config, when it differs from the one this client
+    holds: the stats-derived parts of a config (a float column's ``minWidth``)
+    change when the stats arrive. The client's own highlight is kept on it,
+    since the config replaces the one that carries it. ``None`` when the client
+    holds the current config, or there is no record of one to compare with."""
+    held = getattr(client, "display_args_hash", None)
+    if held is None:
+        return None
+    client.display_args_hash = None
+    if display_args_hash(session.df_display_args) == held:
+        return None
+    term = getattr(client, "search_string", "")
+    return highlighted_display_args(session.df_display_args, term) if term else session.df_display_args
+
+
+def _answer_stats_request(session: Optional[SessionState], msg: dict, client: Any, started: float,
+        info: dict) -> dict:
+    stats_gen, scope = msg.get("stats_gen"), msg.get("scope", "raw")
+    columns = msg.get("columns")
+    prefer = [c for c in columns if isinstance(c, str)] if isinstance(columns, list) else []
+    incremental = msg.get("incremental")
     dataflow = session_dataflow(session)
     if session is None or dataflow is None:
         return _aborted(stats_gen, scope, "no_data")
@@ -212,22 +430,47 @@ def _answer_stats_request(session: Optional[SessionState], stats_gen: Any, scope
         return _aborted(stats_gen, scope, "stale", session)
     if scope not in STATS_SCOPES:
         return _aborted(stats_gen, scope, "unsupported_scope", session)
+    if incremental is not None and not isinstance(incremental, bool):
+        return _aborted(stats_gen, scope, "bad_request", session)
     if session.stats_status == "not_computed":
         return _aborted(stats_gen, scope, "not_requestable", session)
-    if session.stats_status == "error" or (session.stats_status == "pending" and not complete_stats(session)):
+    if session.stats_status == "pending" and incremental:
+        reply = _serve_units(session, client, prefer, stats_gen, scope, started, info)
+        if reply is not None:
+            return reply
+    if session.stats_status == "pending":
+        complete_stats(session)
+    if session.stats_status != "complete":
         return _aborted(stats_gen, scope, "error", session)
     # Complete: from here the answer is the dataflow's own all_stats, with no
     # query, whether this request ran the stats or an earlier one did.
-    return {"type": "stats_update", "stats_gen": stats_gen, "scope": scope, "tier": dataflow.stats_tier,
-        "final": True, "payload": session.df_data_dict["all_stats"],
-        "elapsed_ms": round((time.perf_counter() - started) * 1000, 1)}
+    reply = {"type": "stats_update", "stats_gen": stats_gen, "scope": scope, "tier": dataflow.stats_tier,
+        "final": True, "remaining": 0, "payload": session.df_data_dict["all_stats"],
+        "elapsed_ms": _elapsed_ms(started)}
+    display_args = _rebuilt_display_args(session, client)
+    if display_args is not None:
+        reply["df_display_args"] = display_args
+    return reply
 
 
-def handle_stats_request(session: Optional[SessionState], msg: dict) -> dict:
-    """Answer a ``stats_request {stats_gen, scope, columns?}``: a
-    ``stats_update`` carrying the complete ``all_stats`` as an inline wide
-    ``DFEnvelope`` (self-contained, so binary pairing stays single-slot), or a
-    ``stats_aborted``. ``columns`` is a hint a whole-run request ignores.
+def handle_stats_request(session: Optional[SessionState], msg: dict, client: Any = None) -> dict:
+    """Answer a ``stats_request {stats_gen, scope, columns?, incremental?}``: a
+    ``stats_update`` or a ``stats_aborted``. ``client`` is the handler that
+    received it, which holds the connection's cursor into the run and the
+    display config it was last sent.
+
+    Without ``incremental`` the request is the whole run: every unit still to
+    run, then a ``stats_update`` that is ``final`` and carries the complete
+    ``all_stats`` as an inline wide ``DFEnvelope`` (self-contained, so binary
+    pairing stays single-slot). With ``incremental: true`` it is a time-boxed
+    step (see ``_serve_units``): a ``stats_update`` with ``final`` false
+    carries the stats of the columns this client has not seen, ``remaining``
+    counts the units left, and the reply that follows the last unit is the
+    ``final`` one, with the complete ``all_stats`` and, when the stats changed
+    it, the rebuilt ``df_display_args``. ``columns`` are the grid's column
+    names (``a, b, c``), a hint for which units go first, and a whole-run
+    request ignores it. A malformed request is ``stats_aborted`` with reason
+    ``bad_request``, and is not run as a whole run.
 
     The ``stats.request`` span records the request and its ``outcome``
     (``update`` or the abort reason), which is where updates sent, requests
@@ -235,16 +478,19 @@ def handle_stats_request(session: Optional[SessionState], msg: dict) -> dict:
     telemetry sink around this call."""
     stats_gen, scope, columns = msg.get("stats_gen"), msg.get("scope", "raw"), msg.get("columns")
     started = time.perf_counter()
+    info: dict = {}
     with perf_log.perf_span("stats.request", session=session.session_id if session else None, stats_gen=stats_gen,
         scope=scope, columns=len(columns) if isinstance(columns, list) else None) as span:
         try:
-            reply = _answer_stats_request(session, stats_gen, scope, started)
+            reply = _answer_stats_request(session, msg, client, started, info)
         except Exception:
             log.error("stats_request error session=%s: %s", session.session_id if session else None,
                 traceback.format_exc())
             reply = _aborted(stats_gen, scope, "error", session)
         if reply["type"] == "stats_update":
-            span.set_attr(outcome="update", tier=reply["tier"])
+            span.set_attr(outcome="update", tier=reply["tier"], final=reply["final"], remaining=reply["remaining"])
         else:
             span.set_attr(outcome=reply["reason"])
+        if "units" in info:
+            span.set_attr(units=info["units"])
     return reply
