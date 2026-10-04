@@ -25,6 +25,9 @@ from xorq.common.utils.graph_utils import replace_nodes, walk_nodes  # noqa: E40
 from xorq.common.utils.provenance_utils import read_parquet_provenance  # noqa: E402
 from xorq.expr.relations import CachedNode  # noqa: E402
 
+from buckaroo.dataflow.sd_cache import split_chain_by_scope  # noqa: E402
+from buckaroo.jlisp.lisp_utils import s as lisp_sym  # noqa: E402
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: E402
 from buckaroo.server import telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
 
@@ -908,6 +911,435 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
                 "load_expr_build_dir minted a new backend on the second call")
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
+
+
+def _stats_tier_expr():
+    """A 5-row table whose float column has a 1e9 maximum, so its estimated
+    column width depends on the min and max that only full stats supply."""
+    return xo.memtable({
+        "price": [12.5, 18.9, 7.4, 22.1, 1e9],
+        "qty": [1, 2, 1, 3, 2],
+        "category": ["a", "b", "a", "c", "b"]})
+
+
+def _build_dataflow(expr=None, **kwargs):
+    return xorq_loading.XorqServerDataflow(
+        _stats_tier_expr() if expr is None else expr, skip_main_serial=True, **kwargs)
+
+
+def _three_scope_dataflow(expr=None, **kwargs):
+    """A dataflow with a user op (clean scope) and a search (filt scope) active,
+    so raw, clean and filt each hold their own summary-stats cache entry."""
+    dataflow = _build_dataflow(expr, **kwargs)
+    dataflow.operations = [[lisp_sym("fillna"), {"symbol": "df"}, "qty", 0]]
+    dataflow.quick_command_args = {"search": ["a"]}
+    return dataflow
+
+
+def _spy_data_queries(monkeypatch):
+    """Record the outermost op of every materialisation (``execute`` and
+    ``to_pyarrow``), and every stat query XorqStatPipeline sends."""
+    from xorq.vendor.ibis.expr.types.core import Expr
+
+    from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
+    ops, stat_queries = [], []
+    original_execute, original_to_pyarrow = Expr.execute, Expr.to_pyarrow
+    original_stat_execute = XorqStatPipeline._execute
+
+    def spy_execute(self, *args, **kwargs):
+        ops.append(type(self.op()).__name__)
+        return original_execute(self, *args, **kwargs)
+
+    def spy_to_pyarrow(self, *args, **kwargs):
+        ops.append(type(self.op()).__name__)
+        return original_to_pyarrow(self, *args, **kwargs)
+
+    def spy_stat_execute(self, query):
+        stat_queries.append(type(query.op()).__name__)
+        return original_stat_execute(self, query)
+
+    monkeypatch.setattr(Expr, "execute", spy_execute)
+    monkeypatch.setattr(Expr, "to_pyarrow", spy_to_pyarrow)
+    monkeypatch.setattr(XorqStatPipeline, "_execute", spy_stat_execute)
+    return ops, stat_queries
+
+
+def _without_min_width(column_config):
+    return [{**cc, "ag_grid_specs": {k: v for k, v in cc["ag_grid_specs"].items() if k != "minWidth"}}
+        for cc in column_config]
+
+
+def _as_json(sd):
+    """Comparable form of an sd: json equates NaN with NaN where == would not."""
+    return json.dumps(sd, sort_keys=True, default=str)
+
+
+class _NoopPostProcessing(ColAnalysis):
+    provides_defaults = {}
+    post_processing_method = "noop_post"
+
+    @classmethod
+    def post_process_df(cls, expr):
+        return [expr, {}]
+
+
+class TestStatsTierSchema:
+    """``XorqServerDataflow(..., stats_tier="schema")`` (rows-first s1): the
+    dataflow publishes identity and typing for every column, with no data query
+    beyond the cached row count."""
+
+    def test_matches_full_stats_display_state(self):
+        expr = _stats_tier_expr()
+        full = _build_dataflow(expr)
+        schema = _build_dataflow(expr, stats_tier="schema")
+        assert schema.df_display_args.keys() == full.df_display_args.keys()
+        for name, full_arg in full.df_display_args.items():
+            schema_arg = schema.df_display_args[name]
+            assert schema_arg["data_key"] == full_arg["data_key"]
+            assert schema_arg["summary_stats_key"] == full_arg["summary_stats_key"]
+            full_cfg, schema_cfg = full_arg["df_viewer_config"], schema_arg["df_viewer_config"]
+            assert schema_cfg["pinned_rows"] == full_cfg["pinned_rows"]
+            assert (_without_min_width(schema_cfg["column_config"])
+                == _without_min_width(full_cfg["column_config"]))
+
+    def test_min_width_is_the_stats_derived_difference(self):
+        expr = _stats_tier_expr()
+        widths = {}
+        for tier in ("full", "schema"):
+            cfg = _build_dataflow(expr, stats_tier=tier).df_display_args["main"]["df_viewer_config"]
+            widths[tier] = {cc["header_name"]: cc["ag_grid_specs"]["minWidth"]
+                for cc in cfg["column_config"]}
+        # price's 1e9 maximum widens it under full stats; without min and max
+        # the estimate falls back to a one-digit value.
+        assert widths["schema"]["price"] < widths["full"]["price"]
+
+    def test_schema_sd_is_the_schema_keys_of_the_full_sd(self):
+        expr = _stats_tier_expr()
+        full_sd = _build_dataflow(expr).merged_sd
+        schema_sd = _build_dataflow(expr, stats_tier="schema").merged_sd
+        assert schema_sd.keys() == full_sd.keys()
+        for col, stats in schema_sd.items():
+            assert {"orig_col_name", "rewritten_col_name", "dtype", "_type", "is_numeric",
+                "is_integer", "is_float", "is_bool", "is_datetime", "is_string",
+                "length"} <= stats.keys()
+            assert "mean" not in stats and "histogram" not in stats
+            assert stats == {k: full_sd[col][k] for k in stats}
+
+    def test_issues_no_data_query_besides_the_cached_count(self, monkeypatch):
+        ops, stat_queries = _spy_data_queries(monkeypatch)
+        dataflow = _build_dataflow(stats_tier="schema")
+        dataflow.quick_command_args = {"search": ["a"]}
+        dataflow.add_analysis(_NoopPostProcessing)
+        assert stat_queries == []
+        assert ops and set(ops) == {"CountStar"}
+
+    def test_the_spy_sees_stat_queries_at_the_full_tier(self, monkeypatch):
+        ops, stat_queries = _spy_data_queries(monkeypatch)
+        _build_dataflow()
+        assert stat_queries, "the spy would not notice a stat query"
+        assert set(ops) - {"CountStar"}
+
+    def test_init_sd_hints_and_overrides_still_apply(self):
+        dataflow = _build_dataflow(
+            stats_tier="schema",
+            init_sd={"qty": {"displayer_args": {"displayer": "string", "max_length": 200}}},
+            column_config_overrides={
+                "category": {"displayer_args": {"displayer": "string", "max_length": 5000}}})
+        cfg = dataflow.df_display_args["main"]["df_viewer_config"]["column_config"]
+        by_header = {cc["header_name"]: cc for cc in cfg}
+        assert by_header["qty"]["displayer_args"]["max_length"] == 200
+        assert by_header["category"]["displayer_args"]["max_length"] == 5000
+
+    def test_sorted_infinite_request_works(self):
+        dataflow = _build_dataflow(stats_tier="schema")
+        qty = next(k for k, v in dataflow.merged_sd.items() if v["orig_col_name"] == "qty")
+        resp, parquet = xorq_loading.handle_infinite_request_xorq(
+            dataflow, {"start": 0, "end": 5, "sourceName": "default",
+                "sort": qty, "sort_direction": "desc"})
+        assert "error_info" not in resp
+        assert resp["length"] == 5
+        assert pq.read_table(io.BytesIO(parquet)).column(qty).to_pylist() == [3, 2, 2, 1, 1]
+
+    def test_pending_state_writes_no_full_tier_cache_key(self):
+        dataflow = _three_scope_dataflow(stats_tier="schema")
+        chains = split_chain_by_scope(dataflow.operations)
+        full_keys = {dataflow._scope_cache_key(chain, tier="full") for chain in chains.values()}
+        assert len(full_keys) == 3, "raw, clean and filt must each have their own key"
+        assert dataflow.summary_stats_cache
+        assert not full_keys & dataflow.summary_stats_cache.keys()
+
+    def test_later_full_assignment_reaches_merged_sd_for_all_scopes(self):
+        expr = _stats_tier_expr()
+        full = _three_scope_dataflow(expr)
+        dataflow = _three_scope_dataflow(expr, stats_tier="schema")
+        assert "mean" not in dataflow.merged_sd["a"]
+        assert {"mean", "cleaned_mean", "filtered_mean"} <= full.merged_sd["a"].keys()
+
+        dataflow.stats_tier = "full"
+        dataflow.summary_sd = full.summary_sd
+
+        assert _as_json(dataflow.merged_sd) == _as_json(full.merged_sd)
+
+    def test_a_summary_sd_from_another_tier_is_not_cached_under_the_new_tier(self):
+        """An sd computed at the schema tier must not become the full tier's
+        entry because the tier flipped before the next cascade: a present key
+        is a hit, so it would never be repaired."""
+        dataflow = _three_scope_dataflow(stats_tier="schema")
+        stale = {col: {**stats, "stale": True} for col, stats in dataflow.summary_sd.items()}
+
+        dataflow.stats_tier = "full"
+        dataflow.summary_sd = stale
+
+        filt_sd = dataflow.summary_stats_cache[dataflow.filt_sd_key]
+        assert "mean" in filt_sd["a"] and "stale" not in filt_sd["a"]
+        assert "filtered_mean" in dataflow.merged_sd["a"]
+
+    def test_full_scope_sds_cached_first_are_used_without_a_stat_query(self, monkeypatch):
+        expr = _stats_tier_expr()
+        full = _three_scope_dataflow(expr)
+        dataflow = _three_scope_dataflow(expr, stats_tier="schema")
+        cache = dict(dataflow.summary_stats_cache)
+        for scope, chain in split_chain_by_scope(dataflow.operations).items():
+            cache[dataflow._scope_cache_key(chain, tier="full")] = full.summary_stats_cache[
+                getattr(full, f"{scope}_sd_key")]
+        dataflow.summary_stats_cache = cache
+        _ops, stat_queries = _spy_data_queries(monkeypatch)
+
+        dataflow.stats_tier = "full"
+        dataflow.summary_sd = full.summary_sd
+
+        assert stat_queries == []
+        assert _as_json(dataflow.merged_sd) == _as_json(full.merged_sd)
+
+
+class TestLoadExprStatsPolicy(tornado.testing.AsyncHTTPTestCase):
+    """``stats_tier`` and ``stats_delivery`` on POST /load_expr and
+    /reload_expr (rows-first s1). The pair is stored beside dataflow_kwargs,
+    replayed by /reload_expr, and kept out of the has_config tuple."""
+
+    def get_app(self):
+        return make_app()
+
+    def _session(self, sid):
+        return self._app.settings["sessions"].get(sid)
+
+    @tornado.testing.gen_test
+    async def test_defaults_are_full_and_inline(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "sp-default", "build_dir": build_path})
+            self.assertEqual(resp.code, 200)
+            session = self._session("sp-default")
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "full")
+            self.assertIn("mean", session.xorq_dataflow.merged_sd["a"])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_schema_tier_builds_a_schema_dataflow(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "sp-schema", "build_dir": build_path, "stats_tier": "schema"})
+            self.assertEqual(resp.code, 200)
+            self.assertEqual(json.loads(resp.body)["rows"], 10)
+            session = self._session("sp-schema")
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("schema", "inline"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "schema")
+            self.assertNotIn("mean", session.xorq_dataflow.merged_sd["a"])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_deferred_delivery_publishes_a_schema_dataflow_and_serves_rows(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "sp-deferred", "build_dir": build_path, "stats_delivery": "deferred"})
+            self.assertEqual(resp.code, 200)
+            session = self._session("sp-deferred")
+            # The session still targets full stats; the dataflow is built at
+            # the schema tier until a later phase delivers them.
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "deferred"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "schema")
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/sp-deferred")
+            initial = json.loads(await ws.read_message())
+            self.assertEqual(initial["type"], "initial_state")
+            self.assertEqual(initial["df_meta"]["total_rows"], 10)
+            ws.write_message(json.dumps({"type": "infinite_request",
+                "payload_args": {"start": 0, "end": 10, "sourceName": "default", "origEnd": 10}}))
+            rows = json.loads(await ws.read_message())
+            self.assertEqual(rows["length"], 10)
+            self.assertNotIn("error_info", rows)
+            table = pq.read_table(io.BytesIO(await ws.read_message()))
+            self.assertEqual(table.num_rows, 10)
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_deferred_delivery_runs_no_stat_query(self):
+        from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
+        builds_root = tempfile.mkdtemp()
+        stat_queries = []
+        original = XorqStatPipeline._execute
+
+        def spy(pipeline, query):
+            stat_queries.append(query)
+            return original(pipeline, query)
+
+        try:
+            build_path = _build_expr_dir(builds_root)
+            with patch.object(XorqStatPipeline, "_execute", spy):
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": "sp-deferred-q", "build_dir": build_path,
+                     "stats_delivery": "deferred"})
+            self.assertEqual(resp.code, 200)
+            self.assertEqual(stat_queries, [])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_invalid_values_are_a_400(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            for field, code in (("stats_tier", "invalid_stats_tier"),
+                    ("stats_delivery", "invalid_stats_delivery")):
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": "sp-bad", "build_dir": build_path, field: "sometimes"})
+                self.assertEqual(resp.code, 400)
+                self.assertEqual(json.loads(resp.body)["error_code"], code)
+            self.assertIsNone(self._session("sp-bad"))
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_warm_repost_with_an_unchanged_pair_short_circuits(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            body = {"session": "sp-warm", "build_dir": build_path,
+                "stats_tier": "schema", "stats_delivery": "deferred"}
+            self.assertEqual((await _post(self.get_http_port(), "/load_expr", body)).code, 200)
+            with patch.object(xorq_loading, "load_expr_build_dir",
+                side_effect=AssertionError("an unchanged pair must take the warm exit")):
+                same = await _post(self.get_http_port(), "/load_expr", body)
+                omitted = await _post(self.get_http_port(), "/load_expr",
+                    {"session": "sp-warm", "build_dir": build_path})
+            self.assertEqual(same.code, 200)
+            self.assertEqual(omitted.code, 200, "omitting the pair keeps the session's")
+            session = self._session("sp-warm")
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("schema", "deferred"))
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_the_default_pair_sent_on_every_post_does_not_defeat_the_warm_exit(self):
+        """has_config tests truthiness, so a host that always sends the pair
+        would rebuild on every POST if the fields were in it (#944)."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            body = {"session": "sp-warm-default", "build_dir": build_path,
+                "stats_tier": "full", "stats_delivery": "inline"}
+            self.assertEqual((await _post(self.get_http_port(), "/load_expr", body)).code, 200)
+            with patch.object(xorq_loading, "load_expr_build_dir",
+                side_effect=AssertionError("the warm exit must not see the pair as config")):
+                resp = await _post(self.get_http_port(), "/load_expr", body)
+            self.assertEqual(resp.code, 200)
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_warm_repost_with_a_changed_pair_rebuilds(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "sp-changed"
+            original = xorq_loading.load_expr_build_dir
+            calls = []
+
+            def counting_loader(bd, **kwargs):
+                calls.append(bd)
+                return original(bd, **kwargs)
+
+            with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path})
+                self.assertEqual(len(calls), 1)
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path, "stats_delivery": "deferred"})
+                self.assertEqual(resp.code, 200)
+                self.assertEqual(len(calls), 2, "a changed delivery must rebuild")
+                self.assertEqual(self._session(sid).xorq_dataflow.stats_tier, "schema")
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path,
+                     "stats_tier": "schema", "stats_delivery": "deferred"})
+                self.assertEqual(len(calls), 3, "a changed tier must rebuild")
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path,
+                     "stats_tier": "full", "stats_delivery": "inline"})
+                self.assertEqual(len(calls), 4, "returning to the defaults must rebuild")
+            session = self._session(sid)
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "full")
+            self.assertIn("mean", session.xorq_dataflow.merged_sd["a"])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_replays_the_stored_pair(self):
+        builds_root = tempfile.mkdtemp()
+        project_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "sp-reload"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path, "project_root": project_root,
+                 "stats_delivery": "deferred"})
+            before = self._session(sid).xorq_dataflow
+            resp = await _post(self.get_http_port(), f"/reload_expr/{sid}", {})
+            self.assertEqual(resp.code, 200)
+            session = self._session(sid)
+            self.assertIsNot(session.xorq_dataflow, before)
+            self.assertEqual(session.xorq_dataflow.stats_tier, "schema")
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "deferred"))
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(project_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_accepts_a_new_pair_and_stores_it(self):
+        builds_root = tempfile.mkdtemp()
+        project_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "sp-reload-new"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path, "project_root": project_root,
+                 "stats_delivery": "deferred"})
+            resp = await _post(self.get_http_port(), f"/reload_expr/{sid}",
+                {"stats_delivery": "inline"})
+            self.assertEqual(resp.code, 200)
+            session = self._session(sid)
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "full")
+            bad = await _post(self.get_http_port(), f"/reload_expr/{sid}",
+                {"stats_tier": "sometimes"})
+            self.assertEqual(bad.code, 400)
+            self.assertEqual(json.loads(bad.body)["error_code"], "invalid_stats_tier")
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(project_root, ignore_errors=True)
 
 
 class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
