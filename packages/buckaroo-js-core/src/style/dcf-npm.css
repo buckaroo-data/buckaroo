@@ -436,10 +436,15 @@ div.dependent-tabs ul.tabs li.active {
     .bk-status-inflight-dot { animation: none; opacity: 1; }
 }
 /* Summary stats status in the status bar (rows-first c4). One line in a
- * fixed-width column, whatever the status, so a status change moves nothing. */
+ * fixed-width column, whatever the status, so a status change moves nothing.
+ * The status bar's row is about 20px high, so the control has to fit inside it
+ * with room to spare: a button that overflows the row makes the browser scroll
+ * the grid to reveal it, and the grid's scrollbar overlay then covers the
+ * button and takes its clicks. */
 .bk-stats-status {
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    height: 100%;
     gap: 6px;
     max-width: 100%;
     font-size: 12px;
@@ -449,7 +454,7 @@ div.dependent-tabs ul.tabs li.active {
 }
 .bk-stats-status button {
     font-size: 11px;
-    line-height: 16px;
+    line-height: 12px;
     padding: 0 6px;
     cursor: pointer;
 }
@@ -482,6 +487,14 @@ div.dependent-tabs ul.tabs li.active {
 }
 .status-bar .ag-center-cols-viewport {
     min-height: unset !important;
+}
+/* The status bar is a single row, so the grid's overlay scrollbar (positioned
+ * over the last 16px of the grid, and not drawn) covers most of it. It sits
+ * above the cells while the grid is scrolling and takes the clicks meant for
+ * the control. The strip still scrolls with the wheel or a trackpad, and a
+ * scrollbar the browser draws in its own space (not an overlay) is left alone. */
+.status-bar .ag-body-horizontal-scroll.ag-scrollbar-invisible {
+    pointer-events: none;
 }
 
 .status-bar .ag-root-wrapper {
