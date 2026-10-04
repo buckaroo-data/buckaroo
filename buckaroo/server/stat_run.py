@@ -9,6 +9,12 @@ generation changes (``begin_stats_generation``).
 The fragment list is append-only and shared. A ``StatCursor`` is one client's
 position in it, held by that client's WebSocket handler, so work is done once
 and every client reads all of it at its own pace.
+
+Only the full run over every column is the session's stats: its results are the
+final assignment. A run at another tier (``scalar``) or over a column group
+behaves like a filtered run: its fragments go to the clients that ask and
+nothing is assigned. ``stat_run_key`` keeps the full run's key as it was and
+gives every other run a key of its own, so the two never meet.
 """
 import itertools
 import time
@@ -16,14 +22,27 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 from buckaroo.df_util import old_col_new_col
 from buckaroo.pluggable_analysis_framework.stat_pipeline import errors_to_errdict
-from buckaroo.pluggable_analysis_framework.stat_units import Fragment, StatUnit, resolve_names, rewrite_sd
+from buckaroo.pluggable_analysis_framework.stat_units import Fragment, StatState, StatUnit, resolve_names, rewrite_sd
 
 _run_ids = itertools.count(1)
 
 
+def stat_run_key(stats_gen: int, scope: str, tier: str = "full", columns: Optional[Sequence[Any]] = None) -> tuple:
+    """The key a session keeps a run under. The full run over every column is
+    ``(stats_gen, scope)``, as it has always been. A run at another tier or over
+    a column group is ``(stats_gen, scope, tier, columns)`` (``columns`` a tuple,
+    or ``None`` for every column), so it never takes the full run's place."""
+    group = None if columns is None else tuple(columns)
+    if tier == "full" and group is None:
+        return (stats_gen, scope)
+    return (stats_gen, scope, tier, group)
+
+
 class StatRun:
     """``stats`` is a stats class (``DfStatsV2`` and its siblings) built with
-    ``run=False``: the run plans it once and runs its units through it.
+    ``run=False``: the run plans it once and runs its units through it. ``state``
+    is what the run describes, the stats class's own unless a tier or a column
+    group says otherwise (see ``StatState``).
 
     ``status`` is ``pending`` until the last unit has run, then ``complete``;
     ``error`` once a unit raised, and the run is not retried. A stat that fails
@@ -32,13 +51,14 @@ class StatRun:
     every request that ran one.
     """
 
-    def __init__(self, stats_gen: int, scope: str, stats: Any):
+    def __init__(self, stats_gen: int, scope: str, stats: Any, state: Optional[StatState] = None):
         self.id = next(_run_ids)
         self.stats_gen = stats_gen
         self.scope = scope
         self.stats = stats
-        self.units: List[StatUnit] = stats.plan(stats.state)
-        self.acc = stats.new_accumulator(stats.state)
+        self.state: StatState = stats.state if state is None else state
+        self.units: List[StatUnit] = stats.plan(self.state)
+        self.acc = stats.new_accumulator(self.state)
         self.fragments: List[Fragment] = []
         self.ran: List[str] = []
         self.status = "pending" if self.units else "complete"
@@ -48,8 +68,19 @@ class StatRun:
         self._frame_columns: Optional[List[Tuple[Any, str]]] = None
 
     @property
-    def key(self) -> Tuple[int, str]:
-        return (self.stats_gen, self.scope)
+    def tier(self) -> str:
+        return self.state.tier
+
+    @property
+    def assigns(self) -> bool:
+        """Whether the run's results are the session's stats: the full tier over
+        every column. Any other run is a fragment source for clients and is
+        never assigned or cached as complete."""
+        return self.state.tier == "full" and self.state.columns is None
+
+    @property
+    def key(self) -> tuple:
+        return stat_run_key(self.stats_gen, self.scope, self.state.tier, self.state.columns)
 
     @property
     def remaining(self) -> int:

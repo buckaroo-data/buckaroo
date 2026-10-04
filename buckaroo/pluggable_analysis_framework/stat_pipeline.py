@@ -288,7 +288,10 @@ class StatPipeline(UnitPipeline):
     def plan(self, state: StatState) -> List[StatUnit]:
         """One unit per column that is not skipped, in column order (or the
         order ``state.priority`` asks for). A column's stats read only its own
-        column, so no unit waits for another. Nothing is computed."""
+        column, so no unit waits for another. Nothing is computed. These
+        pipelines have only the full tier."""
+        if state.tier != "full":
+            raise ValueError(f"the pandas and polars pipelines have only the full tier, not {state.tier!r}")
         if len(state.data) == 0:
             return []
         pairs = columns_in_scope(state)

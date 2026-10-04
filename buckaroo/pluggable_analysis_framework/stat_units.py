@@ -42,6 +42,11 @@ class StatUnit:
     cost: str = "column"
 
 
+# The tiers a stat run is planned at: ``full`` is every stat, and ``scalar`` the
+# scalar class of them (the xorq pipeline says which, ``SCALAR_OMITTED_KEYS``).
+# The ``schema`` tier is the dataflow's own and runs no units.
+UNIT_TIERS = ("scalar", "full")
+
 # How a caller writes the column names it hands in (``StatState.columns`` and
 # ``priority``, and ``StatRun``'s ``prefer``): ``original`` names only,
 # ``rewritten`` (``a, b, c``) names only, or ``any``.
@@ -87,7 +92,8 @@ class StatState:
     are written in ``namespace`` (see ``resolve_names``): a client that only
     knows the rewritten ``a, b, c`` names says ``rewritten``. ``rows`` is the
     row count when the caller already has it, which the xorq column-chunk split
-    needs and which is never queried for.
+    needs and which is never queried for. ``tier`` is the tier the run is at
+    (see ``UNIT_TIERS``); a pipeline that has only the full tier refuses another.
     """
     data: Any
     skip_columns: frozenset = frozenset()
@@ -95,9 +101,12 @@ class StatState:
     priority: Tuple[Any, ...] = ()
     rows: Optional[int] = None
     namespace: str = "any"
+    tier: str = "full"
 
     def __post_init__(self) -> None:
         check_namespace(self.namespace)
+        if self.tier not in UNIT_TIERS:
+            raise ValueError(f"tier must be one of {UNIT_TIERS}, not {self.tier!r}")
 
 
 def columns_in_scope(state: StatState) -> List[Tuple[Any, str]]:

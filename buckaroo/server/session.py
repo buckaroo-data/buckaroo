@@ -40,9 +40,10 @@ def dataflow_stats_tier(stats_tier: str, stats_delivery: str) -> str:
     """The tier a session's dataflow is constructed at. Only a session whose
     stats run inline and whose host named no lower tier builds at the full tier;
     a deferred one starts at the schema tier whatever tier it is headed for, and
-    so does one headed for ``scalar`` (no scalar-tier units exist yet) or
-    ``schema``. ``auto`` is resolved against a schema-tier dataflow, which an
-    inline session never has, so inline ``auto`` is ``full``."""
+    so does one headed for ``scalar`` (its stats are fragments of a scalar
+    ``StatRun``, never assigned to the dataflow) or ``schema``. ``auto`` is
+    resolved against a schema-tier dataflow, which an inline session never has,
+    so inline ``auto`` is ``full``."""
     if stats_delivery == "deferred" or stats_tier in ("scalar", "schema"):
         return "schema"
     return "full"
@@ -51,9 +52,10 @@ def dataflow_stats_tier(stats_tier: str, stats_delivery: str) -> str:
 # What ``df_meta.stats.status`` says about a session's stats for its current
 # ``stats_gen``: ``complete`` (the stats of the tier the session is headed for
 # are in the snapshot), ``pending`` (a deferred session that has not produced
-# them yet), ``not_computed`` (the session is headed for the schema tier, so
-# none will arrive) and ``error`` (the run failed; sticky until the next
-# generation).
+# them yet), ``not_computed`` (the snapshot has no stats, and none will be
+# assigned to it: the session is headed for the schema tier, or for ``scalar``,
+# whose stats reach a client that asks as ``stats_update`` fragments) and
+# ``error`` (the run failed; sticky until the next generation).
 STATS_STATUSES = ("complete", "pending", "not_computed", "error")
 
 

@@ -13,6 +13,10 @@ Two-phase execution, each phase a kind of resumable unit (see ``stat_units``):
      typed-DAG executor with results written into the per-column
      accumulator. One ``histogram:<col>`` unit per column.
 
+At the scalar tier (``StatState.tier``) a run is the batch alone, without the
+aggregates that cost more than a pass over a column (``approx_median``, and
+the ``approx_nunique`` behind ``distinct_count``) and with no histogram query.
+
 Errors are captured into ``StatError`` via the standard Ok/Err mechanism;
 nothing is silently swallowed. Construction validates the DAG up front and
 raises ``DAGConfigError`` on bad configurations.
@@ -26,7 +30,7 @@ import logging
 import os
 import time
 from contextlib import nullcontext
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -111,14 +115,17 @@ class XorqAccumulator(StatAccumulator):
     """``StatAccumulator`` for a xorq run. ``working`` holds each column's
     Ok/Err accumulator, which the units read and write; ``emitted`` the keys of
     it already returned in a fragment, so each stat is returned and any error in
-    it reported once; ``phases`` caches how each dtype's stats split (see
-    ``XorqStatPipeline._column_phases``). ``sd()`` is every column's stats so
-    far in accumulator order, a failed stat as None."""
+    it reported once; ``phases`` caches how each tier and dtype's stats split
+    (see ``XorqStatPipeline._column_phases``). ``withheld`` are keys the tier
+    does not report: they are in ``working`` (as the unknown ``None`` that
+    ``histogram_bins`` reads) but in no fragment and not in ``sd()``. ``sd()``
+    is every column's stats so far in accumulator order, a failed stat as None."""
 
     def __init__(self, state: StatState, columns: Sequence[Any] = (), rewritten: Optional[Dict[Any, str]] = None,
-            skipped: Sequence[Any] = ()):
+            skipped: Sequence[Any] = (), withheld: Iterable[str] = ()):
         super().__init__(state, columns, rewritten)
         self.skipped: Tuple[Any, ...] = tuple(skipped)
+        self.withheld: frozenset = frozenset(withheld)
         self.working: Dict[Any, Dict[str, StatResult]] = {}
         self.emitted: Dict[Any, set] = {}
         self.phases: Dict[Any, Any] = {}
@@ -126,7 +133,7 @@ class XorqAccumulator(StatAccumulator):
 
     def sd(self) -> Dict[Any, Dict[str, Any]]:
         return {col: {key: (result.value if isinstance(result, Ok) else None if isinstance(result, Err) else result)
-            for key, result in self.working[col].items()} for col in self.order}
+            for key, result in self.working[col].items() if key not in self.withheld} for col in self.order}
 
 
 class XorqStatPipeline(UnitPipeline):
@@ -146,6 +153,9 @@ class XorqStatPipeline(UnitPipeline):
     aggregate per chunk of columns holding about that many cells, when the
     caller gives the row count and the source is a plain parquet scan
     (``chunk_refusal``).
+
+    ``StatState.tier`` is ``full`` (every stat) or ``scalar``: the batch alone,
+    in the same chunks, without the stats in ``SCALAR_OMITTED_KEYS``.
     """
 
     # Keys that the pipeline pre-populates per column. Listed as external
@@ -156,6 +166,15 @@ class XorqStatPipeline(UnitPipeline):
     EXTERNAL_KEYS = frozenset(
         {"orig_col_name", "rewritten_col_name", "dtype", "length", "min", "max",
          "distinct_count"})
+
+    # What the scalar tier does not report. ``median`` (approx_median) and
+    # ``distinct_count`` (approx_nunique) are the batch aggregates it leaves
+    # out, ``distinct_per`` is the ratio of the second and ``histogram`` is the
+    # per-column query. ``histogram_bins`` is still produced, from ``min`` and
+    # ``max`` with ``distinct_count`` unknown, so a low-cardinality integer
+    # column gets bins that the full tier then replaces with none. A stat that
+    # reads an omitted key other than ``distinct_count`` is left out with it.
+    SCALAR_OMITTED_KEYS = frozenset({"median", "distinct_count", "distinct_per", "histogram"})
 
     def __init__(self, stat_funcs: list, backend: Any = None, unit_test: bool = True,
                  cache_storage=None, chunk_cells: Optional[int] = None):
@@ -426,13 +445,24 @@ class XorqStatPipeline(UnitPipeline):
         per_chunk = max(1, self.chunk_cells // max(state.rows, 1))
         return [columns[i:i + per_chunk] for i in range(0, len(columns), per_chunk)] or [columns]
 
-    def _column_phases(self, cache: Dict[Any, Any], dtype) -> Tuple[List[StatFunc], List[StatFunc], Dict[str, StatFunc]]:
+    def _scalar_omits(self, sf: StatFunc) -> bool:
+        """Whether the scalar tier leaves ``sf`` out: it provides a key the
+        tier does not report."""
+        return any(sk.name in self.SCALAR_OMITTED_KEYS for sk in sf.provides)
+
+    def _column_phases(self, cache: Dict[Any, Any], dtype,
+            tier: str = "full") -> Tuple[List[StatFunc], List[StatFunc], Dict[str, StatFunc]]:
         """A column's stat funcs split into those that need no further query
         once the batch has run (``pure``) and those that run one or read the
         result of one that does (``query``), each in dependency order, plus the
-        stat key -> func map errors are reported against."""
-        if dtype not in cache:
-            col_funcs = build_column_dag(self.all_stat_funcs, dtype, external_keys=self.EXTERNAL_KEYS)
+        stat key -> func map errors are reported against. At the scalar tier the
+        funcs that provide a key in ``SCALAR_OMITTED_KEYS`` are left out, and
+        so are those that read a key only they provide (``distinct_count`` is
+        external, so what reads it stays)."""
+        if (tier, dtype) not in cache:
+            funcs = self.all_stat_funcs if tier == "full" else [
+                sf for sf in self.all_stat_funcs if not self._scalar_omits(sf)]
+            col_funcs = build_column_dag(funcs, dtype, external_keys=self.EXTERNAL_KEYS)
             pure: List[StatFunc] = []
             query: List[StatFunc] = []
             query_keys: set = set()
@@ -443,15 +473,16 @@ class XorqStatPipeline(UnitPipeline):
                 else:
                     pure.append(sf)
             key_to_func = {sk.name: sf for sf in col_funcs for sk in sf.provides}
-            cache[dtype] = (pure, query, key_to_func)
-        return cache[dtype]
+            cache[(tier, dtype)] = (pure, query, key_to_func)
+        return cache[(tier, dtype)]
 
     def plan(self, state: StatState) -> List[StatUnit]:
         """The scalar batch first, then one histogram GROUP BY per column that
         has one, columns named in ``state.priority`` first. The batch is cut
         into chunks only as ``_batch_chunks`` allows, and every chunk precedes
-        every histogram, since a histogram reads what its chunk computes.
-        Skipped columns get no unit. Nothing is computed: no query is sent."""
+        every histogram, since a histogram reads what its chunk computes. The
+        scalar tier has the batch units alone. Skipped columns get no unit.
+        Nothing is computed: no query is sent."""
         table = state.data
         pairs = columns_in_scope(state)
         if not pairs:
@@ -468,7 +499,7 @@ class XorqStatPipeline(UnitPipeline):
             units.append(StatUnit(id=unit_id, columns=tuple(chunk), phase="batch", cost="scan"))
             batch_of.update({col: unit_id for col in chunk})
         phases: Dict[Any, Any] = {}
-        for col in active:
+        for col in active if state.tier == "full" else ():
             if self._column_phases(phases, schema[col])[1]:
                 units.append(StatUnit(id=f"histogram:{col}", columns=(col,), phase="histogram",
                     after=(batch_of[col],), cost="query"))
@@ -479,7 +510,9 @@ class XorqStatPipeline(UnitPipeline):
         counters: the snapshot-cache hit/miss counts and the perf recorder.
 
         Pre-populate every column accumulator with the externally-provided
-        keys. ``length`` is filled in by the batch query. ``min`` / ``max``
+        keys (the scalar tier withholds the ones it does not report, so
+        ``distinct_count`` stays the unknown ``None`` and is never returned).
+        ``length`` is filled in by the batch query. ``min`` / ``max``
         start as None so dependents (histogram) don't cascade-exclude on
         non-numeric columns; ``min`` / ``max`` overwrite for numeric cols.
         ``distinct_count`` likewise starts as None so float columns (where the
@@ -492,7 +525,8 @@ class XorqStatPipeline(UnitPipeline):
         schema = state.data.schema()
         pairs = columns_in_scope(state)
         acc = XorqAccumulator(state, columns=[orig for orig, _rewritten in pairs], rewritten=dict(pairs),
-            skipped=[orig for orig, _rewritten in pairs if orig in state.skip_columns])
+            skipped=[orig for orig, _rewritten in pairs if orig in state.skip_columns],
+            withheld=self.SCALAR_OMITTED_KEYS if state.tier == "scalar" else ())
         for col in acc.order:
             acc.working[col] = {"orig_col_name": Ok(col), "rewritten_col_name": Ok(col), "dtype": Ok(str(schema[col])),
                 "length": Ok(0), "min": Ok(None), "max": Ok(None), "distinct_count": Ok(None)}
@@ -507,6 +541,8 @@ class XorqStatPipeline(UnitPipeline):
         assert isinstance(acc, XorqAccumulator)
         if unit.phase == "batch":
             return self._run_batch(unit, acc)
+        if acc.state.tier == "scalar":
+            raise ValueError(f"the scalar tier runs no {unit.phase} unit ({unit.id})")
         return self._run_histogram(unit, acc)
 
     def _run_funcs(self, funcs: List[StatFunc], col: Any, acc: "XorqAccumulator") -> None:
@@ -525,10 +561,12 @@ class XorqStatPipeline(UnitPipeline):
                 self._perf.record("xorq/per-column", col, sf.name, time.perf_counter() - t0)
 
     def _emit(self, acc: "XorqAccumulator", col: Any, key_to_func: Dict[str, StatFunc]) -> Dict[str, Any]:
-        """The stats of ``col`` that no earlier unit has returned, as plain
-        values (a failed stat as None), recorded on ``acc`` with their errors."""
+        """The stats of ``col`` that no earlier unit has returned and the tier
+        reports, as plain values (a failed stat as None), recorded on ``acc``
+        with their errors."""
         working = acc.working[col]
-        fresh = {key: result for key, result in working.items() if key not in acc.emitted[col]}
+        fresh = {key: result for key, result in working.items()
+            if key not in acc.emitted[col] and key not in acc.withheld}
         plain, errors = resolve_accumulator(fresh, col, key_to_func)
         acc.emitted[col].update(fresh)
         acc.record({col: plain}, errors)
@@ -537,6 +575,7 @@ class XorqStatPipeline(UnitPipeline):
     def _run_batch(self, unit: StatUnit, acc: "XorqAccumulator") -> Fragment:
         table = acc.state.data
         schema = acc.schema
+        tier = acc.state.tier
         columns = list(unit.columns)
         # ``length`` is a table-level scalar (same value for every column),
         # so it goes in once as ``__total_length__`` rather than as N
@@ -544,7 +583,7 @@ class XorqStatPipeline(UnitPipeline):
         TOTAL_LENGTH_KEY = "__total_length__"
         batch_items: List[Tuple[str, StatFunc, Any]] = []
         for sf in self.ordered_stat_funcs:
-            if not _is_batch_func(sf):
+            if not _is_batch_func(sf) or (tier == "scalar" and self._scalar_omits(sf)):
                 continue
             xorq_col_param = next(r.name for r in sf.requires if r.type is XorqColumn)
             for col in columns:
@@ -603,7 +642,7 @@ class XorqStatPipeline(UnitPipeline):
         # histogram_bins (and with it color_map) needs no histogram query.
         fragment: Fragment = {}
         for col in columns:
-            pure, _query, key_to_func = self._column_phases(acc.phases, schema[col])
+            pure, _query, key_to_func = self._column_phases(acc.phases, schema[col], tier)
             self._run_funcs(pure, col, acc)
             fragment[col] = self._emit(acc, col, key_to_func)
         return fragment

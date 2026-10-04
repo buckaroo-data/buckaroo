@@ -24,6 +24,15 @@ session. A tier the host named below ``full`` (``scalar``, ``schema``) is its
 choice and reaches every client as ``not_computed``. ``stats_to_pull`` decides,
 per client, whether a session has stats left to compute.
 
+A target of ``scalar`` (``serves_scalar_tier``) can be pulled by the client that
+advertised both bits: its ``stats_request`` runs the units of a scalar ``StatRun``
+and is answered with ``stats_update`` messages whose tier is ``scalar``. Nothing
+is assigned. The run's fragments go to the clients that ask, as a filtered run's
+would, and the dataflow, the session snapshot, ``summary_stats_cache`` and the
+status stay as they were, so the scalar stats are never served as the complete
+ones. Only the full run over every column reaches the final assignment
+(``StatRun.assigns``).
+
 Every send site goes through ``build_state_message_for`` (or ``broadcast_state``,
 which calls it per client), because the session holds one shared snapshot and
 the client is known only to the handler that owns the connection.
@@ -40,6 +49,7 @@ in one step. A client that follows the run reads the same list through its own
 cursor, so work is done once whoever asks.
 """
 import copy
+import dataclasses
 import hashlib
 import json
 import logging
@@ -53,7 +63,7 @@ from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.pluggable_analysis_framework.stat_units import Fragment
 from buckaroo.server.data_loading import get_buckaroo_display_state
 from buckaroo.server.session import SessionState, build_state_message, stats_deferred_by_policy
-from buckaroo.server.stat_run import StatCursor, StatRun
+from buckaroo.server.stat_run import StatCursor, StatRun, stat_run_key
 from buckaroo.server.stats_policy import resolve_stats_policy
 
 log = logging.getLogger("buckaroo.server.stats_wire")
@@ -109,6 +119,17 @@ def stats_to_pull(session: SessionState, client: Any) -> bool:
     return session.stats_status == "pending" or (stats_deferred_by_policy(session) and not client_has_ondemand(client))
 
 
+def serves_scalar_tier(session: SessionState, client: Any) -> bool:
+    """Whether a ``stats_request`` from ``client`` is answered with the scalar
+    tier: the client advertised both bits, so it takes tiers, and the session has
+    nothing computed (``not_computed``) and a policy target of ``scalar``,
+    whether the size rule, the host or the ceiling put it there. Any other client
+    of such a session is served as ``stats_to_pull`` says."""
+    policy = session.stats_policy
+    return (client_has_ondemand(client) and session.stats_status == "not_computed" and policy is not None
+        and policy["tier_target"] == "scalar")
+
+
 def resolve_session_policy(stats_tier: str, dataflow_tier: str, rows: int, cols: int) -> Optional[dict]:
     """The policy for a session the handler has just built: ``stats_tier`` is the
     host's request, ``dataflow_tier`` the tier its dataflow was built at, and
@@ -145,20 +166,25 @@ def refresh_session_snapshot(session: SessionState, dataflow: Any) -> None:
                 dvc["component_config"] = {**dvc.get("component_config", {}), **session.component_config}
 
 
-def start_stat_run(session: SessionState, scope: str = "raw") -> Optional[StatRun]:
-    """The ``StatRun`` of the session's current generation for ``scope``: the one
-    it holds, or a new one planned from the dataflow and stored on the session.
-    Planning sends no query. The run analyzes the frame ``assign_full_stats``
-    does, so running every unit gives the stats that call computes whole.
-    ``None`` when there is no dataflow to plan from or the scope is not one a
-    request can name."""
+def start_stat_run(session: SessionState, scope: str = "raw", tier: str = "full",
+        columns: Optional[Sequence[Any]] = None) -> Optional[StatRun]:
+    """The ``StatRun`` of the session's current generation for ``scope``, ``tier``
+    and column group: the one it holds, or a new one planned from the dataflow
+    and stored on the session under ``stat_run_key``. Planning sends no query.
+    The run analyzes the frame ``assign_full_stats`` does, so running every unit
+    of the full run gives the stats that call computes whole. A run at another
+    tier, or over a column group (``columns``, original names), is never
+    assigned (``StatRun.assigns``). ``None`` when there is no dataflow to plan
+    from or the scope is not one a request can name."""
     dataflow = session_dataflow(session)
     if dataflow is None or dataflow.processed_df is None or scope not in STATS_SCOPES:
         return None
-    key = (session.stats_gen, scope)
+    key = stat_run_key(session.stats_gen, scope, tier, columns)
     run = session.stat_runs.get(key)
     if run is None:
-        run = StatRun(session.stats_gen, scope, dataflow.build_stats(dataflow.processed_df, run=False))
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        state = dataclasses.replace(stats.state, tier=tier, columns=None if columns is None else tuple(columns))
+        run = StatRun(session.stats_gen, scope, stats, state)
         session.stat_runs[key] = run
     return run
 
@@ -270,7 +296,12 @@ def assign_full_stats(dataflow: Any, computed: Optional[tuple] = None) -> None:
 
 def _run_summary(dataflow: Any, run: StatRun) -> tuple:
     """The ``(sd, errs)`` of a finished run, as ``_get_summary_sd`` returns them
-    (it raises on a failed stat in debug mode, and so does this)."""
+    (it raises on a failed stat in debug mode, and so does this). Only a run that
+    assigns has them: a scalar or column-scoped run is a part of the stats, and
+    caching it as the whole would serve it as complete."""
+    if not run.assigns:
+        raise ValueError(f"a {run.tier} run over {'every column' if run.state.columns is None else 'some columns'} "
+            "is not the session's stats and cannot be assigned")
     errs = run.errs()
     if errs and dataflow.debug:
         raise Exception("Error executing analysis")
@@ -401,13 +432,14 @@ def _elapsed_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
 
 
-def _plan_run(session: SessionState) -> Optional[StatRun]:
-    """The session's ``StatRun`` for the current generation, or ``None`` when it
-    cannot be planned (there is no frame, or the dataflow's stats class cannot
-    plan the one it has: a post-processor that failed leaves an error frame).
-    The whole-run path then decides what the stats are."""
+def _plan_run(session: SessionState, tier: str = "full") -> Optional[StatRun]:
+    """The session's ``StatRun`` at ``tier`` for the current generation, or
+    ``None`` when it cannot be planned (there is no frame, or the dataflow's
+    stats class cannot plan the one it has: a post-processor that failed leaves
+    an error frame). For the full tier the whole-run path then decides what the
+    stats are."""
     try:
-        return start_stat_run(session)
+        return start_stat_run(session, tier=tier)
     except Exception:
         log.warning("stat units not planned session=%s stats_gen=%s: %s", session.session_id, session.stats_gen,
             traceback.format_exc())
@@ -449,6 +481,37 @@ def _serve_units(session: SessionState, client: Any, prefer: Sequence[str], stat
         "elapsed_ms": _elapsed_ms(started)}
 
 
+def _serve_scalar(session: SessionState, client: Any, prefer: Sequence[str], incremental: bool, stats_gen: Any,
+        scope: Any, started: float, info: dict) -> dict:
+    """The reply to a ``stats_request`` on a session whose target is ``scalar``:
+    a ``stats_update`` with ``tier: "scalar"`` holding the fragments this client
+    has not seen, ``final`` once the run is done. An incremental request runs
+    units for the time budget, as the full run's does; any other runs every unit
+    still to run.
+
+    Nothing is assigned. The run stays on the session for the generation, so a
+    client that asks later is caught up from the fragments with no unit run, and
+    the status, the snapshot and the caches are as they were. A unit that raises
+    aborts the request and the run (it is not retried) but not the session, whose
+    full tier is still open."""
+    run = _plan_run(session, "scalar")
+    if run is None or run.status == "error":
+        return _aborted(stats_gen, scope, "error", session)
+    cursor = getattr(client, "stats_cursor", None) or StatCursor()
+    if cursor.caught_up(run):
+        try:
+            info["units"] = run_units(run, STATS_BUDGET_S if incremental else None, prefer,
+                session_id=session.session_id)
+        except Exception:
+            log.error("scalar stat unit failed session=%s stats_gen=%s: %s", session.session_id, session.stats_gen,
+                traceback.format_exc())
+            return _aborted(stats_gen, scope, "error", session)
+    fragments = cursor.take(run)
+    return {"type": "stats_update", "stats_gen": stats_gen, "scope": scope, "tier": run.tier,
+        "final": run.status != "pending", "remaining": run.remaining,
+        "payload": partial_payload(session_dataflow(session), run, fragments), "elapsed_ms": _elapsed_ms(started)}
+
+
 def _rebuilt_display_args(session: SessionState, client: Any) -> Optional[dict]:
     """The session's display config, when it differs from the one this client
     holds: the stats-derived parts of a config (a float column's ``minWidth``)
@@ -480,6 +543,8 @@ def _answer_stats_request(session: Optional[SessionState], msg: dict, client: An
         return _aborted(stats_gen, scope, "unsupported_scope", session)
     if incremental is not None and not isinstance(incremental, bool):
         return _aborted(stats_gen, scope, "bad_request", session)
+    if serves_scalar_tier(session, client):
+        return _serve_scalar(session, client, prefer, bool(incremental), stats_gen, scope, started, info)
     to_pull = stats_to_pull(session, client)
     if session.stats_status == "not_computed" and not to_pull:
         return _aborted(stats_gen, scope, "not_requestable", session)
@@ -519,7 +584,9 @@ def handle_stats_request(session: Optional[SessionState], msg: dict, client: Any
     it, the rebuilt ``df_display_args``. ``columns`` are the grid's column
     names (``a, b, c``), a hint for which units go first, and a whole-run
     request ignores it. A malformed request is ``stats_aborted`` with reason
-    ``bad_request``, and is not run as a whole run.
+    ``bad_request``, and is not run as a whole run. On a session whose target is
+    ``scalar`` an ondemand client's request is answered as ``_serve_scalar``
+    says: ``stats_update`` messages with ``tier: "scalar"`` and nothing assigned.
 
     The ``stats.request`` span records the request and its ``outcome``
     (``update`` or the abort reason), which is where updates sent, requests

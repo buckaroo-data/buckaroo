@@ -3294,6 +3294,26 @@ class TestScalarTierWire(tornado.testing.AsyncHTTPTestCase):
             "the run is over the filtered state")
 
     @tornado.testing.gen_test
+    async def test_the_clients_that_cannot_take_a_scalar_target_are_served_as_before(self):
+        await self._load("st-host", stats_tier="scalar", stats_delivery="deferred")
+        ws, update = await self._connect("st-host", caps="stats_update")
+        ws.write_message(_stats_request(self._stats(update)["gen"], incremental=True))
+        self.assertEqual((await _read_json(ws))["reason"], "not_requestable")
+
+        await self._scalar_target("st-skew")
+        ws, pending = await self._connect("st-skew", caps="stats_update")
+        self.assertEqual(self._stats(pending)["status"], "pending")
+        reply = await self._pull(ws, self._stats(pending)["gen"])
+        self.assertEqual((reply["type"], reply["tier"]), ("stats_update", "full"))
+
+    @tornado.testing.gen_test
+    async def test_a_schema_target_still_refuses_the_request(self):
+        await self._load("st-schema", limits=_SCHEMA_BY_SIZE, stats_tier="auto", stats_delivery="deferred")
+        ws, first = await self._connect("st-schema", caps=_ONDEMAND)
+        aborted = await self._pull(ws, self._stats(first)["gen"])
+        self.assertEqual((aborted["type"], aborted["reason"]), ("stats_aborted", "not_requestable"))
+
+    @tornado.testing.gen_test
     async def test_a_scalar_run_and_a_column_scoped_run_are_stored_apart_from_the_full_run(self):
         await self._load("st-keys", stats_delivery="deferred")
         session = self._session("st-keys")
@@ -3381,8 +3401,13 @@ class TestScalarTierRequests:
         assert [{c for row in _rows_by_stat(r["payload"]).values() for c in row} - {"index", "level_0"}
             for r in replies] == [{"a", "b"}, {"c", "d"}, {"e", "f"}]
         whole = self._request(self._session(tmp_path), _ondemand_client())
-        assert _as_json(_merge_stat_payloads(r["payload"] for r in replies)) == _as_json(
-            _merge_stat_payloads([whole["payload"]]))
+
+        def held(payloads):
+            """What a client holds, less the empty cells: a chunk with no column that has a stat sends no row for it."""
+            return {stat: {col: value for col, value in cells.items() if value is not None}
+                for stat, cells in _merge_stat_payloads(payloads).items()}
+
+        assert _as_json(held(r["payload"] for r in replies)) == _as_json(held([whole["payload"]]))
 
     def test_a_request_after_the_last_chunk_replays_nothing_and_runs_nothing(self, tmp_path, monkeypatch):
         monkeypatch.setattr(stats_wire, "STATS_BUDGET_S", 0)
