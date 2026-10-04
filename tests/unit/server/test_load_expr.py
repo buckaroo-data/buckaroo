@@ -2646,6 +2646,16 @@ class TestStatsPolicyWire(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual((resp.code, json.loads(resp.body)["error_code"]), (400, "invalid_stats_tier"))
 
     @tornado.testing.gen_test
+    async def test_a_tier_named_below_full_builds_a_schema_dataflow_with_inline_delivery(self):
+        """No scalar-tier units exist yet, so a scalar target is built and held at
+        the schema tier."""
+        await self._load("pw-scalar-inline", stats_tier="scalar")
+        session = self._session("pw-scalar-inline")
+        self.assertEqual((session.xorq_dataflow.stats_tier, session.stats_status, session.stats_reason),
+            ("schema", "not_computed", "host"))
+        self.assertEqual(session.stats_policy["tier_target"], "scalar")
+
+    @tornado.testing.gen_test
     async def test_the_default_tier_stays_full(self):
         await self._load("pw-default", stats_delivery="deferred")
         session = self._session("pw-default")
@@ -2824,6 +2834,9 @@ class TestStatsPolicyWire(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual((update["type"], update["final"], update["tier"]), ("stats_update", True, "full"))
         self.assertIn("histogram_bins", _rows_by_stat(update["payload"]))
         self.assertEqual(self._session("pw-skew-update").stats_status, "complete")
+        # The pending frame it was sent is what the final reply is compared with:
+        # the float column's minWidth changes with the stats, so the config follows.
+        self.assertIn("df_display_args", update)
 
     @tornado.testing.gen_test
     async def test_stats_update_only_pulls_units_for_a_policy_session(self):
@@ -2841,6 +2854,7 @@ class TestStatsPolicyWire(tornado.testing.AsyncHTTPTestCase):
                 break
         self.assertEqual([r["type"] for r in replies], ["stats_update"] * 4)
         self.assertEqual([r["final"] for r in replies], [False, False, False, True])
+        self.assertEqual({r["tier"] for r in replies}, {"full"}, "the units are full-tier whatever the host asked")
         self.assertEqual(self._session("pw-skew-units").stats_status, "complete")
 
     @tornado.testing.gen_test
