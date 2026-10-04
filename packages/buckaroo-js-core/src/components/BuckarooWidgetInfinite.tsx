@@ -233,8 +233,13 @@ export function BuckarooInfiniteWidget({
 
         // A view that lists stats (the summary view, whose rows are not the
         // data's) has nothing to show while the stats are not computed. It shows
-        // why instead, with the control that asks for them.
-        const statsEmptyState = df_meta.stats?.status === "not_computed" && cDisp.data_key !== "main";
+        // why instead, with the control that asks for them. A run for some
+        // columns leaves the session not computed with those columns' stats in
+        // all_stats (computed_columns names them), and the grid lists those.
+        const statsEmptyState =
+            df_meta.stats?.status === "not_computed" &&
+            cDisp.data_key !== "main" &&
+            (df_meta.stats.computed_columns?.length ?? 0) === 0;
         const statsColumns = useMemo<StatsColumnOption[]>(
             () =>
                 (cDisp.df_viewer_config?.column_config ?? []).map((cc) => ({

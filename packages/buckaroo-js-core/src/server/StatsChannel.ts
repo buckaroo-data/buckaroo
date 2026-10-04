@@ -11,7 +11,10 @@
  * A final `stats_update` may also carry `status` and `reason` (rows-first c5):
  * `{final: true, status: "not_computed", reason: "ceiling"}`, with no payload,
  * answers a request the server refused, and the session is left in that state.
- * Without a `status` a final update completes the session.
+ * Without a `status` a final update completes the session. A run for some
+ * columns ends the same way, with a payload, and the columns its replies filled
+ * go in `df_meta.stats.computed_columns`, which the summary view reads to show
+ * what the run computed.
  *
  * `payload` is an inline wide DFEnvelope holding `all_stats`. `stats_gen` is the
  * server's counter for the state the stats describe; it rides on every
@@ -141,17 +144,42 @@ const genOf = (meta: DFMeta | undefined): number | undefined => {
     return typeof gen === "number" ? gen : undefined;
 };
 
+/** The columns of `rows` that hold a value in some stat row. The wide pivot
+ *  fills a stat a column did not carry in a message with null, so a null says
+ *  nothing about the column. */
+function columnsWithValues(rows: DFData): string[] {
+    const columns = new Set<string>();
+    for (const row of rows) {
+        for (const [column, value] of Object.entries(row)) {
+            if (column !== "index" && column !== "level_0" && value != null) columns.add(column);
+        }
+    }
+    return Array.from(columns);
+}
+
+/** `stats` with `columns` added to its `computed_columns`, or `stats` itself
+ *  when there is nothing to add. */
+function withComputedColumns(stats: DFMetaStats, columns: string[]): DFMetaStats {
+    const all = Array.from(new Set([...(stats.computed_columns ?? []), ...columns]));
+    return all.length === 0 ? stats : { ...stats, computed_columns: all };
+}
+
 /**
  * `df_meta.stats` after a final update. With no status it is complete at the
  * update's tier, and the policy fields, which only describe what is left to
  * ask for, go. With a status (a refusal, or a run for some columns only) the
  * session keeps its stats and takes the status and the reason, if the update
  * names one; the update's tier is what was asked for, not what was reached.
+ * `filled` lists the columns the run's replies merged, and a session left not
+ * computed adds them to `computed_columns`.
  */
-function finalStats(stats: DFMetaStats, msg: StatsUpdateMessage): DFMetaStats {
+function finalStats(stats: DFMetaStats, msg: StatsUpdateMessage, filled: string[]): DFMetaStats {
     const status = msg.status ?? "complete";
     if (status === "complete") return { status, tier: msg.tier ?? stats.tier, gen: stats.gen };
-    return { ...stats, status, ...(msg.reason === undefined ? {} : { reason: msg.reason }) };
+    return withComputedColumns(
+        { ...stats, status, ...(msg.reason === undefined ? {} : { reason: msg.reason }) },
+        filled,
+    );
 }
 
 /** What the channel needs of a model. */
@@ -161,6 +189,15 @@ export class StatsChannel {
     // Updates are applied one at a time: each reads the dict the previous one
     // wrote, so a later update cannot overwrite an earlier one's merge.
     private applying: Promise<void> = Promise.resolve();
+
+    // The columns the replies of the run in progress filled, which its final
+    // reply puts in df_meta.stats.computed_columns when it leaves the session
+    // not computed. They are for one gen and for the df_data_dict this channel
+    // last wrote: a new gen, or a frame that replaced the dict, took what the
+    // run had merged, so the columns start over.
+    private filled = new Set<string>();
+    private filledGen: number | undefined;
+    private filledDict: unknown;
 
     constructor(private model: StatsModel) {}
 
@@ -215,9 +252,11 @@ export class StatsChannel {
                 // start over from the new one.
                 if (dict !== this.model.get("df_data_dict") || msg.stats_gen !== this.expectedGen) continue;
                 this.model.set("df_data_dict", { ...dict, all_stats: mergeStatRows(base, update) });
+                this.noteFilled(msg.stats_gen, dict, update);
             }
             if (msg.final) {
-                this.replaceStats((stats) => finalStats(stats, msg));
+                const filled = this.takeFilled(msg.stats_gen);
+                this.replaceStats((stats) => finalStats(stats, msg, filled));
             }
             return;
         }
@@ -229,11 +268,35 @@ export class StatsChannel {
         // new gen; taking `current_gen` without that frame would merge stats
         // for a state the client has not seen into the one it shows.
         if (msg.stats_gen !== this.expectedGen) return;
+        const filled = this.takeFilled(msg.stats_gen);
         if (msg.reason === "error") {
             this.replaceStats((stats) => ({ ...stats, status: "error", reason: "stats_failed" }));
         } else if (msg.reason === "not_requestable") {
-            this.replaceStats((stats) => ({ ...stats, status: "not_computed" }));
+            this.replaceStats((stats) => withComputedColumns({ ...stats, status: "not_computed" }, filled));
         }
+    }
+
+    /** Note the columns `update` filled in the dict this channel has just
+     *  written over `before`. */
+    private noteFilled(gen: number, before: unknown, update: DFData): void {
+        if (this.filledGen !== gen || (this.filledDict !== undefined && this.filledDict !== before)) {
+            this.filled = new Set();
+        }
+        this.filledGen = gen;
+        for (const column of columnsWithValues(update)) this.filled.add(column);
+        this.filledDict = this.model.get("df_data_dict");
+    }
+
+    /** The columns the run's replies filled, as of the reply that ends it:
+     *  none when the gen or the dict has changed since. The next run starts
+     *  from nothing. */
+    private takeFilled(gen: number | undefined): string[] {
+        const current = this.filledGen === gen && this.filledDict === this.model.get("df_data_dict");
+        const columns = current ? Array.from(this.filled) : [];
+        this.filled = new Set();
+        this.filledGen = undefined;
+        this.filledDict = undefined;
+        return columns;
     }
 
     /** Replace `df_meta.stats` in a new `df_meta`, the reference that c0a's
