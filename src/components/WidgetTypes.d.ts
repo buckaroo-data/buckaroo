@@ -26,12 +26,30 @@ export interface DFMeta {
     stats?: DFMetaStats;
 }
 export declare const getStatsStatus: (meta: DFMeta | undefined) => StatsStatus;
-export declare const statsRequestable: (_stats: DFMetaStats | undefined) => string[];
-export declare const statsAutoRequest: (_stats: DFMetaStats | undefined) => boolean;
-export declare const nextRequestTier: (_stats: DFMetaStats | undefined) => StatsTier | undefined;
-export declare const canRequestStats: (_stats: DFMetaStats | undefined) => boolean;
-export declare const demandTier: (_stats: DFMetaStats | undefined) => StatsTier | undefined;
-export declare const statsOverCeiling: (_stats: DFMetaStats | undefined) => boolean;
+export declare const statsRequestable: (stats: DFMetaStats | undefined) => string[];
+export declare const statsAutoRequest: (stats: DFMetaStats | undefined) => boolean;
+/**
+ * The tier a request for more stats should ask for: the smallest tier in
+ * `requestable` above the one reached, so scalar goes before full. Names that
+ * are not tiers are ignored. Undefined when there is nothing left to ask for.
+ */
+export declare const nextRequestTier: (stats: DFMetaStats | undefined) => StatsTier | undefined;
+/**
+ * Whether the server's ceiling keeps the stats from being computed. It says so
+ * with reason "ceiling" when the ceiling cut a request down. When the server
+ * sized the session at the ceiling itself the reason is "size" and there is
+ * nothing above it to ask for, which comes to the same thing for the user.
+ */
+export declare const statsOverCeiling: (stats: DFMetaStats | undefined) => boolean;
+/** Whether the "Compute summary stats" control applies: the stats are not
+ *  computed, the server's ceiling did not refuse them, and a tier is left. */
+export declare const canRequestStats: (stats: DFMetaStats | undefined) => boolean;
+/**
+ * The tier of a request for the columns styling needs stats for (`demand_columns`):
+ * the smallest tier from scalar up that the policy allows, the target included,
+ * since scalar is where min and max come from. Undefined when it allows none.
+ */
+export declare const demandTier: (stats: DFMetaStats | undefined) => StatsTier | undefined;
 export interface BuckarooOptions {
     sampled: string[];
     cleaning_method: string[];

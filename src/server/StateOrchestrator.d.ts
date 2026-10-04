@@ -20,20 +20,47 @@ export interface StatsRequestOptions {
     force?: boolean;
     /** The tier asked for. */
     tier?: string;
-    /** The columns the request is for. */
+    /** The columns the request is for. A forced request names the columns it
+     *  is for or none, so the grid's columns are not added to it. A request
+     *  that is not forced carries them as a hint when it names none. */
     columns?: string[];
 }
-/** The model key that records a forced run, for the scheduler to continue. */
-export declare const FORCED_RUN_KEY = "stats_forced";
-export declare function forceStats(_model: Pick<IModel, "get" | "set" | "send">, _opts?: {
-    columns?: string[];
-}): boolean;
 /**
  * Send a time-boxed `stats_request` for the stats_gen of the state the model
- * shows, with the columns the grid shows as the hint when they are known.
- * Returns false, and sends nothing, when its df_meta carries no stats.gen.
+ * shows. The scheduler's requests carry the columns the grid shows as the hint,
+ * when they are known; a request that names its columns carries those instead,
+ * and a forced one carries only those. Returns false, and sends nothing, when
+ * the model's df_meta carries no stats.gen.
  */
 export declare function requestStats(model: Pick<IModel, "get" | "send">, opts?: StatsRequestOptions): boolean;
+/** The model key that records a run the user started, for the scheduler to
+ *  continue. */
+export declare const FORCED_RUN_KEY = "stats_forced";
+/** What forceStats records under FORCED_RUN_KEY. */
+export interface ForcedRun {
+    gen: number;
+    tier: string;
+    columns?: string[];
+}
+/**
+ * The "Compute summary stats" control: ask for stats the server did not plan to
+ * compute, `stats_request {force: true, tier}`. The tier is the smallest the
+ * server allows above the one reached (scalar before full), and `opts.columns`
+ * is the per-column form. Sends nothing, and returns false, when no tier is
+ * left to ask for or df_meta carries no stats.gen.
+ *
+ * The stats are marked pending in a new df_meta. The server sends no frame to a
+ * capable client, so without this the loading text and the placeholder rows
+ * would wait for the first reply, and the control would stay on screen to be
+ * clicked again. A final reply, a refusal or a frame from the server puts the
+ * status it names in place of it.
+ *
+ * The run is recorded on the model, where a scheduler started on it picks it up
+ * and answers each reply that is not final with the same request.
+ */
+export declare function forceStats(model: Pick<IModel, "get" | "set" | "send">, opts?: {
+    columns?: string[];
+}): boolean;
 export interface OrchestratorOptions {
     model: StatsModel;
     /** Lower bound on the delay before asking for a new state's stats. Default 200 ms. */
@@ -57,7 +84,10 @@ export declare class StateOrchestrator {
     private readonly initialRequestMs;
     private readonly firstPaintTimeoutMs;
     private started;
-    private gen;
+    private run;
+    private runKey;
+    private basis;
+    private doneKey;
     private inFlight;
     private delayMs;
     private began;
@@ -69,6 +99,7 @@ export declare class StateOrchestrator {
     private seenMeta;
     private seenDict;
     private seenState;
+    private seenForced;
     constructor(opts: OrchestratorOptions);
     /** Start watching the model, and adopt the state it already holds. */
     start(): void;
@@ -85,6 +116,10 @@ export declare class StateOrchestrator {
     private readonly onState;
     private readonly onMessage;
     private sync;
+    private desiredRun;
+    private adoptForced;
+    private syncForced;
+    private basisChanged;
     private begin;
     private standDown;
     private markPainted;

@@ -1,15 +1,20 @@
 import { DFData, DFDataOrPayload } from '../components/DFViewerParts/DFWhole';
 import { StatsStatus } from '../components/WidgetTypes';
 import { IModel } from './IModel';
-/** The capability this client advertises, as one value of `?caps=` on the
+/** A capability this client advertises, as one value of `?caps=` on the
  *  WebSocket URL: it merges `stats_update` messages. The server records it per
  *  connection when the socket opens, since it sends the first message before
  *  the client can say anything. */
 export declare const STATS_UPDATE_CAP = "stats_update";
-/** `wsUrl` with `caps=stats_update` added: a new query on a bare URL, a new
- *  parameter after an existing query, or a comma-joined value when the host
- *  already passes `caps`. The fragment stays last and other parameters are
- *  left as the host wrote them. */
+/** The second capability: this client can show a session whose stats are not
+ *  computed, with the reason, and send tiered requests (see forceStats). A
+ *  server applies its stats policy only to a client that has it. */
+export declare const STATS_ONDEMAND_CAP = "stats_ondemand";
+/** `wsUrl` with `caps=stats_update,stats_ondemand` added: a new query on a bare
+ *  URL, a new parameter after an existing query, or a comma-joined value when
+ *  the host already passes `caps`, to which only the capabilities it lacks are
+ *  added. The fragment stays last and other parameters are left as the host
+ *  wrote them. */
 export declare function withStatsCapability(wsUrl: string): string;
 export interface StatsUpdateMessage {
     type: "stats_update";

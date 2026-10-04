@@ -10,6 +10,11 @@ export declare const SearchEditor: React.MemoExoticComponent<({ value, onValueCh
  * loading while they are pending, a control to ask for them while they are not
  * computed, the reason when they failed. The cell always renders one line in a
  * fixed-width column, so changing status moves nothing.
+ *
+ * A session that is not computed offers the control unless the server's ceiling
+ * refused the stats or nothing is left to ask for. The control's label reads
+ * Continue when a run was paused on cost. It calls the host's callback with no
+ * arguments; the host asks for the tier df_meta.stats allows (see forceStats).
  */
 export declare const StatsStatusCell: (params: {
     value?: DFMetaStats;
