@@ -11,10 +11,15 @@
  *
  * The buttons switch the status. The "partial" button is "pending" with the
  * stats of one column in, as a partial stats_update leaves them. The button in
- * the status bar sends `stats_request {force: true, incremental: true}` through
- * a fake model, which logs what it was asked to send and answers
+ * the status bar sends `stats_request {force: true, incremental: true, tier}`
+ * through a fake model, which logs what it was asked to send and answers
  * `visible_columns` with the columns the grid reports. Used by
  * stats-scheduler-states.spec.ts.
+ *
+ * The NotComputed story (rows-first c5) is a session the server's policy left
+ * without stats: typed columns over schema-tier stats, a main and a summary
+ * view, and the policy in df_meta.stats. The buttons switch the view and the
+ * reason the stats were not computed; the controls send through `forceStats`.
  */
 import type { Meta, StoryObj } from "@storybook/react";
 import React, { useMemo, useState } from "react";
@@ -27,7 +32,7 @@ import { BuckarooOptions, BuckarooState, DFMeta, StatsStatus } from "../componen
 import { CommandConfigT } from "../components/CommandUtils";
 import { Operation } from "../components/OperationUtils";
 import { baseOperationResults } from "../components/DependentTabs";
-import { requestStats } from "../server/StateOrchestrator";
+import { forceStats } from "../server/StateOrchestrator";
 
 const STATUSES: StatsStatus[] = ["pending", "not_computed", "error", "complete"];
 const GEN = 7;
@@ -112,6 +117,7 @@ const StatsSchedulerStatesInner: React.FC = () => {
   const model = useMemo(
     () => ({
       get: (key: string) => (key === "df_meta" ? df_meta : key === "visible_columns" ? visibleColumns : undefined),
+      set: () => {},
       send: (msg: unknown) => setSent((log) => [...log, msg]),
     }),
     [df_meta, visibleColumns],
@@ -179,7 +185,7 @@ const StatsSchedulerStatesInner: React.FC = () => {
           on_buckaroo_state={setBuckarooState}
           buckaroo_options={buckarooOptions}
           src={src}
-          on_compute_stats={() => requestStats(model, { force: true })}
+          on_compute_stats={(opts) => forceStats(model, opts)}
           on_visible_columns={setVisibleColumns}
         />
       </div>
@@ -200,3 +206,164 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Primary: Story = {};
+
+
+// ---- NotComputed: a session whose stats the server's policy did not compute ----
+
+type Reason = "size" | "ceiling" | "cost";
+const REASONS: Record<Reason, { reason: string; requestable: string[] }> = {
+  size: { reason: "size", requestable: ["scalar", "full"] },
+  ceiling: { reason: "ceiling", requestable: [] },
+  cost: { reason: "cost", requestable: ["full"] },
+};
+
+const typedData: DFData = [
+  { index: 0, a: 1, b: "x", c: 1.5 },
+  { index: 1, a: 2, b: "y", c: 2.25 },
+  { index: 2, a: 3, b: "z", c: 3 },
+];
+
+// What the schema tier sends: dtype and identity keys, nothing computed.
+const schemaStats: DFData = [
+  { index: "dtype", a: "int64", b: "object", c: "float64" },
+  { index: "length", a: 3, b: 3, c: 3 },
+];
+
+const typedColumns: DFViewerConfig["column_config"] = [
+  { col_name: "a", header_name: "a", displayer_args: { displayer: "float", min_fraction_digits: 0, max_fraction_digits: 0 } },
+  { col_name: "b", header_name: "b", displayer_args: { displayer: "string", max_length: 35 } },
+  { col_name: "c", header_name: "c", displayer_args: { displayer: "float", min_fraction_digits: 3, max_fraction_digits: 3 } },
+];
+const indexColumn: DFViewerConfig["left_col_configs"] = [
+  { col_name: "index", header_name: "index", displayer_args: { displayer: "obj" } },
+];
+// dtype is in the schema stats; histogram is not, and no value is coming.
+const typedPinned: DFViewerConfig["pinned_rows"] = [
+  { primary_key_val: "dtype", displayer_args: { displayer: "obj" } },
+  { primary_key_val: "histogram", displayer_args: { displayer: "histogram" } },
+];
+
+const notComputedDisplayArgs: Record<string, IDisplayArgs> = {
+  main: {
+    data_key: "main",
+    df_viewer_config: { column_config: typedColumns, left_col_configs: indexColumn, pinned_rows: typedPinned },
+    summary_stats_key: "all_stats",
+  },
+  summary: {
+    data_key: "empty",
+    df_viewer_config: {
+      column_config: typedColumns,
+      left_col_configs: indexColumn,
+      pinned_rows: [{ primary_key_val: "dtype", displayer_args: { displayer: "obj" } }],
+    },
+    summary_stats_key: "all_stats",
+  },
+};
+
+const notComputedOptions: BuckarooOptions = { ...buckarooOptions, df_display: ["main", "summary"] };
+
+const NotComputedInner: React.FC = () => {
+  const [reason, setReason] = useState<Reason>("size");
+  const [sent, setSent] = useState<unknown[]>([]);
+  const [buckarooState, setBuckarooState] = useState<BuckarooState>({
+    sampled: false,
+    cleaning_method: false,
+    quick_command_args: {},
+    post_processing: false,
+    df_display: "main",
+    show_commands: false,
+  });
+  const [operations, setOperations] = useState<Operation[]>([]);
+
+  const df_meta = useMemo(
+    () =>
+      ({
+        total_rows: typedData.length,
+        columns: 3,
+        filtered_rows: typedData.length,
+        rows_shown: typedData.length,
+        stats: {
+          status: "not_computed",
+          tier: "schema",
+          gen: GEN,
+          reason: REASONS[reason].reason,
+          tier_target: "schema",
+          estimate: { rows: 12_400_000, cols: 3 },
+          auto_request: false,
+          requestable: REASONS[reason].requestable,
+        },
+      }) as DFMeta,
+    [reason],
+  );
+
+  // The model the controls send through: it answers get("df_meta") from the
+  // story's state and logs what it is asked to send.
+  const model = useMemo(
+    () => ({
+      get: (key: string) => (key === "df_meta" ? df_meta : undefined),
+      set: () => {},
+      send: (msg: unknown) => setSent((log) => [...log, msg]),
+    }),
+    [df_meta],
+  );
+
+  const src = useMemo(() => {
+    const cache = new KeyAwareSmartRowCache((pa) => {
+      const resp: PayloadResponse = {
+        key: pa,
+        data: typedData.slice(pa.start, Math.min(pa.end, typedData.length)),
+        length: typedData.length,
+      };
+      setTimeout(() => cache.addPayloadResponse(resp), 10);
+    });
+    return cache;
+  }, []);
+
+  const df_data_dict = useMemo(
+    () => ({ main: [] as DFData, all_stats: schemaStats, empty: [] as DFData }),
+    [],
+  );
+
+  const setView = (view: string) => setBuckarooState((state) => ({ ...state, df_display: view }));
+
+  return (
+    <div style={{ width: 900 }}>
+      <div style={{ padding: "8px 12px", marginBottom: 8 }}>
+        {["main", "summary"].map((view) => (
+          <button key={view} data-testid={`view-${view}`} onClick={() => setView(view)} style={{ marginRight: 8 }}>
+            {view}
+          </button>
+        ))}
+        {(Object.keys(REASONS) as Reason[]).map((r) => (
+          <button key={r} data-testid={`policy-${r}`} onClick={() => setReason(r)} style={{ marginRight: 8 }}>
+            {r}
+          </button>
+        ))}
+        <span style={{ fontFamily: "monospace", fontSize: 12 }}>reason = {reason}</span>
+      </div>
+      <div style={{ height: 400 }} data-testid="widget-host">
+        <BuckarooInfiniteWidget
+          df_meta={df_meta}
+          df_data_dict={df_data_dict}
+          df_display_args={notComputedDisplayArgs}
+          operations={operations}
+          on_operations={setOperations}
+          operation_results={baseOperationResults}
+          command_config={commandConfig}
+          buckaroo_state={buckarooState}
+          on_buckaroo_state={setBuckarooState}
+          buckaroo_options={notComputedOptions}
+          src={src}
+          on_compute_stats={(opts) => forceStats(model, opts)}
+        />
+      </div>
+      <pre data-testid="sent-log" style={{ fontSize: 12 }}>
+        {JSON.stringify(sent)}
+      </pre>
+    </div>
+  );
+};
+
+export const NotComputed: Story = {
+  render: () => <NotComputedInner />,
+};

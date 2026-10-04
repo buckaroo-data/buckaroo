@@ -485,12 +485,14 @@ test.describe('WebSocket data flow', () => {
     expect(await getCellText(page, COL.name, 0)).toBe('Alice');
   });
 
-  test('standalone page advertises stats_update on its WebSocket URL', async ({ page, request }) => {
+  test('standalone page advertises stats_update and stats_ondemand on its WebSocket URL', async ({ page, request }) => {
     const session = `ws-caps-${Date.now()}`;
     await loadSession(request, session, csvPath);
 
     // The server reads capabilities from ?caps= at open, before the client
     // sends anything, so the page has to put them on the URL it connects to.
+    // stats_ondemand (rows-first c5) says the page can show a session whose
+    // stats are not computed and send tiered requests.
     const socketUrls: string[] = [];
     page.on('websocket', (socket) => socketUrls.push(socket.url()));
     await page.goto(`${BASE}/s/${session}`);
@@ -498,7 +500,7 @@ test.describe('WebSocket data flow', () => {
 
     const wsUrls = socketUrls.filter((u) => u.includes(`/ws/${session}`));
     expect(wsUrls).toHaveLength(1);
-    expect(new URL(wsUrls[0]).searchParams.get('caps')).toBe('stats_update');
+    expect(new URL(wsUrls[0]).searchParams.get('caps')).toBe('stats_update,stats_ondemand');
   });
 
   // Rows-first c4: the standalone page's scheduler. No session the server can
@@ -616,8 +618,10 @@ test.describe('WebSocket data flow', () => {
     expect(requests).toEqual([]);
 
     await page.getByRole('button', { name: 'Compute summary stats' }).click();
+    // A server that names no requestable tier can be asked for full; the
+    // whole-table request names no columns (rows-first c5).
     await expect.poll(() => requests).toEqual([
-      { type: 'stats_request', stats_gen: 4, scope: 'raw', incremental: true, force: true, columns: ['a', 'b', 'c'] },
+      { type: 'stats_request', stats_gen: 4, scope: 'raw', incremental: true, force: true, tier: 'full' },
     ]);
   });
 
@@ -629,6 +633,7 @@ test.describe('WebSocket data flow', () => {
     page: Page,
     session: string,
     onRequest: (msg: any, send: (m: object) => void, h: { realStats: unknown; firstFrame: any }) => void,
+    firstStats: object = { status: 'pending', tier: 'schema', gen: 1 },
   ) {
     const h = { requests: [] as any[], realStats: undefined as unknown, firstFrame: undefined as any };
     await page.routeWebSocket(new RegExp(`/ws/${session}`), (ws) => {
@@ -639,7 +644,7 @@ test.describe('WebSocket data flow', () => {
           if (msg.type === 'initial_state' && h.realStats === undefined) {
             h.realStats = msg.df_data_dict.all_stats;
             msg.df_data_dict.all_stats = [];
-            msg.df_meta = { ...msg.df_meta, stats: { status: 'pending', tier: 'schema', gen: 1 } };
+            msg.df_meta = { ...msg.df_meta, stats: firstStats };
             h.firstFrame = msg;
             ws.send(JSON.stringify(msg));
             return;
@@ -786,6 +791,82 @@ test.describe('WebSocket data flow', () => {
     // Two requests for gen 1, then one for gen 2, and none for gen 1 after the change.
     expect(h.requests.map((r) => r.stats_gen)).toEqual([1, 1, 2]);
     expect(h.requests[2]).toMatchObject({ incremental: true, columns: ['a', 'b', 'c'] });
+  });
+
+  // Rows-first c5: a session the server's policy left without stats. The first
+  // frame carries the policy fields a capable client is sent, and the harness
+  // answers the page's requests as a server that serves tiers would.
+  const policyStats = (over: object = {}) => ({
+    status: 'not_computed', tier: 'schema', gen: 4, reason: 'size', tier_target: 'schema',
+    estimate: { rows: 12_400_000, cols: 3 }, auto_request: false, requestable: ['scalar', 'full'], ...over,
+  });
+
+  test('a policy session: the page asks for nothing, the summary view says why, and the control asks for the basic tier', async ({ page, request }) => {
+    const session = `ws-policy-${Date.now()}`;
+    await loadBuckarooSession(request, session);
+    const h = await routeStatsRequests(page, session, () => {}, policyStats());
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'not_computed');
+    // Nothing is asked for on its own: auto_request is false and no column needs stats.
+    await page.waitForTimeout(2500);
+    expect(h.requests).toEqual([]);
+
+    // The summary view has no stats to list: it says why, with the control.
+    await page.locator('.status-bar select').first().selectOption('summary');
+    const empty = page.getByTestId('stats-empty-state');
+    await expect(empty).toBeVisible();
+    await expect(empty).toContainText('12.4M rows x 3 columns');
+    await empty.getByRole('button', { name: 'Compute basic stats' }).click();
+    await expect.poll(() => h.requests).toEqual([
+      { type: 'stats_request', stats_gen: 4, scope: 'raw', incremental: true, force: true, tier: 'scalar' },
+    ]);
+  });
+
+  test('a policy session: a request over the ceiling is answered with the ceiling message, and the page offers nothing more', async ({ page, request }) => {
+    const session = `ws-ceiling-${Date.now()}`;
+    await loadBuckarooSession(request, session);
+    const h = await routeStatsRequests(page, session, (msg, send) => {
+      send({ type: 'stats_update', stats_gen: msg.stats_gen, scope: 'raw', tier: 'full', final: true, status: 'not_computed', reason: 'ceiling' });
+    }, policyStats());
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+    await page.getByRole('button', { name: 'Compute summary stats' }).click();
+
+    await expect(page.getByTestId('stats-status')).toContainText('Summary stats unavailable');
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-reason', 'ceiling');
+    await expect(page.getByRole('button', { name: 'Compute summary stats' })).toHaveCount(0);
+    await page.locator('.status-bar select').first().selectOption('summary');
+    await expect(page.getByTestId('stats-empty-state')).toContainText('over the size limit');
+    await expect(page.getByTestId('stats-empty-state').getByRole('button')).toHaveCount(0);
+    await page.waitForTimeout(500);
+    expect(h.requests).toHaveLength(1);
+  });
+
+  test('a policy session: a forced run is asked for again after each partial reply and ends with the final one', async ({ page, request }) => {
+    const session = `ws-forced-${Date.now()}`;
+    await loadBuckarooSession(request, session);
+    const h = await routeStatsRequests(page, session, (msg, send, harness) => {
+      if (harness.requests.length < 3) {
+        send({ ...partialUpdate(msg.stats_gen, 3 - harness.requests.length), tier: 'scalar' });
+      } else {
+        send({
+          type: 'stats_update', stats_gen: msg.stats_gen, scope: 'raw', tier: 'scalar', final: true, remaining: 0,
+          payload: harness.realStats, elapsed_ms: 1,
+        });
+      }
+    }, policyStats());
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+    await page.getByRole('button', { name: 'Compute summary stats' }).click();
+
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'complete', { timeout: 10_000 });
+    const forced = { type: 'stats_request', stats_gen: 4, scope: 'raw', incremental: true, force: true, tier: 'scalar' };
+    expect(h.requests).toEqual([forced, forced, forced]);
+    await expect(page.locator('.ag-floating-top [col-id="b"]').first()).not.toHaveText('', { timeout: 10_000 });
   });
 
   test('a session that does not report df_meta.stats never gets a stats_request', async ({ page, request }) => {

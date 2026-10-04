@@ -92,26 +92,41 @@ function makeModel(gen: number | null = 3, allStats: any = schemaStats()) {
     return { ws, model, events };
 }
 
+// The capabilities a client advertises on the WebSocket URL. stats_update
+// means it merges stats_update messages; stats_ondemand (rows-first c5) means it
+// can show a session whose stats are not computed and send tiered requests, so
+// the server may apply its stats policy to it.
 describe("withStatsCapability", () => {
-    it("adds ?caps=stats_update to a bare URL", () => {
-        expect(withStatsCapability("ws://localhost:8700/ws/sales")).toBe("ws://localhost:8700/ws/sales?caps=stats_update");
+    it("adds ?caps=stats_update,stats_ondemand to a bare URL", () => {
+        expect(withStatsCapability("ws://localhost:8700/ws/sales")).toBe(
+            "ws://localhost:8700/ws/sales?caps=stats_update,stats_ondemand",
+        );
     });
 
     it("appends to an existing query string", () => {
-        expect(withStatsCapability("ws://h/ws/s?token=abc")).toBe("ws://h/ws/s?token=abc&caps=stats_update");
+        expect(withStatsCapability("ws://h/ws/s?token=abc")).toBe("ws://h/ws/s?token=abc&caps=stats_update,stats_ondemand");
     });
 
     it("extends an existing caps value", () => {
-        expect(withStatsCapability("ws://h/ws/s?caps=other")).toBe("ws://h/ws/s?caps=other,stats_update");
+        expect(withStatsCapability("ws://h/ws/s?caps=other")).toBe("ws://h/ws/s?caps=other,stats_update,stats_ondemand");
     });
 
-    it("leaves a URL that already advertises the capability alone", () => {
-        expect(withStatsCapability("ws://h/ws/s?caps=stats_update")).toBe("ws://h/ws/s?caps=stats_update");
-        expect(withStatsCapability("ws://h/ws/s?caps=a,stats_update")).toBe("ws://h/ws/s?caps=a,stats_update");
+    it("leaves a URL that already advertises both capabilities alone", () => {
+        expect(withStatsCapability("ws://h/ws/s?caps=stats_update,stats_ondemand")).toBe(
+            "ws://h/ws/s?caps=stats_update,stats_ondemand",
+        );
+        expect(withStatsCapability("ws://h/ws/s?caps=a,stats_ondemand,stats_update")).toBe(
+            "ws://h/ws/s?caps=a,stats_ondemand,stats_update",
+        );
+    });
+
+    it("adds only the capability a host's caps value lacks", () => {
+        expect(withStatsCapability("ws://h/ws/s?caps=stats_update")).toBe("ws://h/ws/s?caps=stats_update,stats_ondemand");
+        expect(withStatsCapability("ws://h/ws/s?caps=stats_ondemand")).toBe("ws://h/ws/s?caps=stats_ondemand,stats_update");
     });
 
     it("keeps the fragment last", () => {
-        expect(withStatsCapability("ws://h/ws/s#frag")).toBe("ws://h/ws/s?caps=stats_update#frag");
+        expect(withStatsCapability("ws://h/ws/s#frag")).toBe("ws://h/ws/s?caps=stats_update,stats_ondemand#frag");
     });
 });
 
@@ -267,6 +282,76 @@ describe("stats_update and df_meta.stats", () => {
         expect(model.get("df_data_dict").all_stats).toHaveLength(3);
         expect(model.get("df_meta").stats.status).toBe("pending");
         expect(events.filter((e) => e.event === "change:df_meta")).toHaveLength(0);
+    });
+});
+
+// A reply that did not run, or ran for some columns only, names the status the
+// session is left in (rows-first c5). The server answers a request over its
+// ceiling with `stats_update {final: true, status: "not_computed", reason:
+// "ceiling"}` and no payload.
+describe("a final stats_update with a status", () => {
+    const policyStats = {
+        status: "not_computed",
+        tier: "schema",
+        gen: 3,
+        reason: "size",
+        tier_target: "schema",
+        estimate: { rows: 12_400_000, cols: 44 },
+        auto_request: false,
+        requestable: ["scalar", "full"],
+    };
+    const makePolicyModel = () => {
+        const ws = new FakeSocket();
+        const model = new WebSocketModel(ws as unknown as WebSocket, {
+            df_meta: metaFor(policyStats),
+            df_data_dict: { all_stats: schemaStats() },
+        });
+        const events: string[] = [];
+        for (const key of ["df_data_dict", "df_meta"]) model.on(`change:${key}`, () => events.push(key));
+        return { ws, model, events };
+    };
+
+    it("not_computed with reason ceiling ends in the ceiling message: the reason changes, the policy fields stay", async () => {
+        const { ws, model, events } = makePolicyModel();
+        // The reply names the tier that was asked for; the session stays at the
+        // tier it had reached.
+        ws.deliver({ type: "stats_update", stats_gen: 3, scope: "raw", tier: "full", final: true, status: "not_computed", reason: "ceiling" });
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, reason: "ceiling" });
+        // No payload: the stats the client has are left as they were.
+        expect(events).toEqual(["df_meta"]);
+        expect(model.get("df_data_dict").all_stats).toEqual(schemaStats());
+    });
+
+    it("takes the reply's status and reason whatever they are", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver({ type: "stats_update", stats_gen: 3, scope: "raw", final: true, status: "not_computed", reason: "cost" });
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, reason: "cost" });
+    });
+
+    it("merges a payload it carries, and leaves the session not computed (a reply for some columns only)", async () => {
+        const { ws, model, events } = makePolicyModel();
+        ws.deliver(update(3, [row("min", { a: 1 }), row("max", { a: 9 })], { tier: "scalar", status: "not_computed" }));
+        await settle();
+        expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "length", "min", "max"]);
+        expect(model.get("df_meta").stats).toEqual(policyStats);
+        expect(events).toEqual(["df_data_dict", "df_meta"]);
+    });
+
+    it("a final update with no status still completes the session and drops the policy fields", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver(update(3, [row("mean", { a: 2 })]));
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({ status: "complete", tier: "full", gen: 3 });
+    });
+
+    it("is ignored for a gen the client has left", async () => {
+        const { ws, model, events } = makePolicyModel();
+        ws.deliver({ type: "stats_update", stats_gen: 2, scope: "raw", final: true, status: "not_computed", reason: "ceiling" });
+        await settle();
+        expect(model.get("df_meta").stats.reason).toBe("size");
+        expect(events).toEqual([]);
     });
 });
 

@@ -19,7 +19,7 @@
  */
 import { decodeDFData } from "../components/DFViewerParts/resolveDFData";
 import { DFData, DFDataOrPayload } from "../components/DFViewerParts/DFWhole";
-import { DFMeta, DFMetaStats } from "../components/WidgetTypes";
+import { DFMeta, DFMetaStats, StatsStatus } from "../components/WidgetTypes";
 import { IModel } from "./IModel";
 
 /** The capability this client advertises, as one value of `?caps=` on the
@@ -68,6 +68,10 @@ export interface StatsUpdateMessage {
     scope?: string;
     tier?: string;
     final?: boolean;
+    // A final reply that did not run, or ran for some columns only, says where
+    // the stats stand. Absent means "complete".
+    status?: StatsStatus;
+    reason?: string;
     payload?: DFDataOrPayload;
     elapsed_ms?: number;
 }

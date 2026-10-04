@@ -74,6 +74,18 @@ export interface StatsRequestOptions {
     /** Ask for stats the server did not plan to compute. The "Compute summary
      *  stats" control sends this. */
     force?: boolean;
+    /** The tier asked for. */
+    tier?: string;
+    /** The columns the request is for. */
+    columns?: string[];
+}
+
+/** The model key that records a forced run, for the scheduler to continue. */
+export const FORCED_RUN_KEY = "stats_forced";
+
+// Stub: the real function comes with the fix.
+export function forceStats(_model: Pick<IModel, "get" | "set" | "send">, _opts: { columns?: string[] } = {}): boolean {
+    return false;
 }
 
 /**

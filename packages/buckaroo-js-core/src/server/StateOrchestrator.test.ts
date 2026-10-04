@@ -11,7 +11,7 @@
  * one (set a key, emit its change event). The last block builds a real
  * WebSocketModel from a fake socket.
  */
-import { StateOrchestrator, StatsModel, requestStats, touchesDataflow } from "./StateOrchestrator";
+import { StateOrchestrator, StatsModel, forceStats, requestStats, touchesDataflow } from "./StateOrchestrator";
 import { WebSocketModel } from "./WebSocketModel";
 
 class FakeModel implements StatsModel {
@@ -485,6 +485,297 @@ describe("a state change", () => {
     });
 });
 
+// A session whose stats the server did not plan to compute says so in
+// df_meta.stats (rows-first c5): the tier it is headed for, whether to ask for
+// it on its own (`auto_request`, absent means true) and the columns whose
+// styling needs stats now (`demand_columns`). With auto_request false the
+// scheduler asks for those columns and nothing else.
+const policy = (over: Record<string, any> = {}) => ({
+    status: "not_computed",
+    tier: "schema",
+    gen: 3,
+    reason: "size",
+    tier_target: "schema",
+    estimate: { rows: 12_400_000, cols: 44 },
+    auto_request: false,
+    requestable: ["scalar", "full"],
+    ...over,
+});
+
+describe("auto_request false: only the demand columns are asked for (rows-first c5)", () => {
+    // The request for demand columns: scoped to them, at the tier that carries
+    // min and max, and not forced (it is the scheduler's, not the user's).
+    const demand = (gen: number, columns: string[], tier = "scalar") => request(gen, { columns, tier });
+    const sendFirst = async (model: FakeModel) => {
+        const orchestrator = start(model);
+        rowsArrived(model);
+        await tick();
+        return orchestrator;
+    };
+
+    it.each(["pending", "not_computed"])("asks for nothing when the status is %s and no column needs stats", async (status) => {
+        const model = makeModel(policy({ status }));
+        await sendFirst(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+
+    it.each(["pending", "not_computed"])("asks for nothing when demand_columns is empty (status %s)", async (status) => {
+        const model = makeModel(policy({ status, demand_columns: [] }));
+        await sendFirst(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+
+    it.each(["pending", "not_computed"])("sends one scoped request for the demand columns (status %s)", async (status) => {
+        const model = makeModel(policy({ status, demand_columns: ["a", "c"] }));
+        model.state.visible_columns = ["a", "b"];
+        await sendFirst(model);
+        // The visible columns are not what it asks for, and nothing is forced.
+        expect(model.sent).toEqual([demand(3, ["a", "c"])]);
+        expect(model.sent[0]).not.toHaveProperty("force");
+    });
+
+    it("goes out after the first rows, not before, and once however many row responses follow", async () => {
+        const model = makeModel(policy({ demand_columns: ["a"] }));
+        start(model);
+        await tick(100);
+        expect(model.sent).toEqual([]);
+        rowsArrived(model);
+        rowsArrived(model);
+        await tick();
+        rowsArrived(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([demand(3, ["a"])]);
+    });
+
+    it("asks for the next step of the demand for each reply that is not final, and stops at the final one", async () => {
+        const model = makeModel(policy({ demand_columns: ["a", "c"] }));
+        await sendFirst(model);
+        expect(model.sent).toHaveLength(1);
+
+        // A partial reply is a new df_data_dict under the same df_meta.
+        model.set("df_data_dict", dict([statRow("min")]));
+        await tick();
+        expect(model.sent).toEqual([demand(3, ["a", "c"]), demand(3, ["a", "c"])]);
+
+        // The final reply says the session is still not computed (it ran for some
+        // columns only), in a new df_meta.
+        model.set("df_data_dict", dict([statRow("min"), statRow("max")]));
+        model.set("df_meta", meta(policy({ demand_columns: ["a", "c"] })));
+        await tick(10_000);
+        expect(model.sent).toHaveLength(2);
+    });
+
+    it("does not ask again for the same demand after a refusal or a reply that carried no stats", async () => {
+        const model = makeModel(policy({ demand_columns: ["a"] }));
+        await sendFirst(model);
+        // stats_aborted not_requestable and a ceiling reply both replace df_meta only.
+        model.set("df_meta", meta(policy({ demand_columns: ["a"], reason: "ceiling" })));
+        await tick(10_000);
+        expect(model.sent).toEqual([demand(3, ["a"])]);
+    });
+
+    it("asks for the next gen's demand after a state change", async () => {
+        const model = makeModel(policy({ demand_columns: ["a"] }));
+        await sendFirst(model);
+        model.set("df_meta", meta(policy({ demand_columns: ["a"] })));
+        await tick();
+
+        model.set("buckaroo_state", bState({ post_processing: "log_scale" }));
+        model.frame({ df_meta: meta(policy({ gen: 4, demand_columns: ["b"] })), df_data_dict: dict() });
+        await tick();
+        rowsArrived(model);
+        await tick(DEBOUNCE);
+        expect(model.sent).toEqual([demand(3, ["a"]), demand(4, ["b"])]);
+    });
+
+    it("asks for a changed list of demand columns on the same gen", async () => {
+        const model = makeModel(policy({ demand_columns: ["a"] }));
+        await sendFirst(model);
+        model.set("df_meta", meta(policy({ demand_columns: ["a"] })));
+        await tick();
+
+        model.set("df_meta", meta(policy({ demand_columns: ["a", "d"] })));
+        await tick();
+        rowsArrived(model);
+        await tick(DEBOUNCE);
+        expect(model.sent).toEqual([demand(3, ["a"]), demand(3, ["a", "d"])]);
+    });
+
+    it("asks at the tier the policy allows: full when scalar is not requestable", async () => {
+        const model = makeModel(policy({ demand_columns: ["a"], requestable: ["full"] }));
+        await sendFirst(model);
+        expect(model.sent).toEqual([demand(3, ["a"], "full")]);
+    });
+
+    it("asks for nothing when the policy allows no tier above schema (a ceiling)", async () => {
+        const model = makeModel(policy({ demand_columns: ["a"], requestable: [], reason: "ceiling" }));
+        await sendFirst(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+
+    it("a pending session with auto_request false is not run whole", async () => {
+        const model = makeModel(policy({ status: "pending", demand_columns: ["a"] }));
+        await sendFirst(model);
+        expect(model.sent).toEqual([demand(3, ["a"])]);
+    });
+
+    it("leaves a session that does auto-request alone: demand_columns do not change its whole run", async () => {
+        for (const over of [{ auto_request: true }, { auto_request: undefined }]) {
+            const model = makeModel({ status: "pending", tier: "schema", gen: 3, demand_columns: ["a"], ...over });
+            model.state.visible_columns = ["b"];
+            await sendFirst(model);
+            expect(model.sent).toEqual([request(3, { columns: ["b"] })]);
+        }
+    });
+
+    it("does not ask when the policy says not computed and auto_request is true (nothing is served yet)", async () => {
+        const model = makeModel(policy({ auto_request: true, demand_columns: ["a"] }));
+        await sendFirst(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+});
+
+describe("forceStats: the control's request (rows-first c5)", () => {
+    const notComputed = (over: Record<string, any> = {}) => policy({ gen: 5, ...over });
+
+    it("asks for the smallest tier the policy allows: scalar before full", () => {
+        const model = makeModel(notComputed());
+        expect(forceStats(model)).toBe(true);
+        expect(model.sent).toEqual([request(5, { force: true, tier: "scalar" })]);
+    });
+
+    it("asks for full when the server leaves requestable out (its default)", () => {
+        const model = makeModel({ status: "not_computed", tier: "schema", gen: 5, reason: "host" });
+        expect(forceStats(model)).toBe(true);
+        expect(model.sent).toEqual([request(5, { force: true, tier: "full" })]);
+    });
+
+    it("asks for the tier above the one reached once scalar is in", () => {
+        const model = makeModel(notComputed({ tier: "scalar" }));
+        expect(forceStats(model)).toBe(true);
+        expect(model.sent).toEqual([request(5, { force: true, tier: "full" })]);
+    });
+
+    it("asks for scalar alone when only scalar is requestable", () => {
+        const model = makeModel(notComputed({ requestable: ["scalar"] }));
+        expect(forceStats(model)).toBe(true);
+        expect(model.sent).toEqual([request(5, { force: true, tier: "scalar" })]);
+    });
+
+    it("sends nothing when no tier is left to ask for", () => {
+        const model = makeModel(notComputed({ requestable: [], reason: "ceiling" }));
+        expect(forceStats(model)).toBe(false);
+        expect(model.sent).toEqual([]);
+    });
+
+    it("sends nothing when df_meta carries no stats.gen", () => {
+        const model = makeModel();
+        expect(forceStats(model)).toBe(false);
+        expect(model.sent).toEqual([]);
+    });
+
+    it("names no columns for the whole table, whatever the grid shows", () => {
+        const model = makeModel(notComputed());
+        model.state.visible_columns = ["a", "b"];
+        forceStats(model);
+        expect(model.sent[0]).not.toHaveProperty("columns");
+    });
+
+    it("has a per-column form: the columns it is given, with the same force and tier", () => {
+        const model = makeModel(notComputed());
+        model.state.visible_columns = ["a", "b"];
+        expect(forceStats(model, { columns: ["c"] })).toBe(true);
+        expect(model.sent).toEqual([request(5, { force: true, tier: "scalar", columns: ["c"] })]);
+    });
+});
+
+describe("a forced run is continued by the scheduler (rows-first c5)", () => {
+    const notComputed = (over: Record<string, any> = {}) => policy({ gen: 5, ...over });
+    const forced = (extra: Record<string, any> = {}) => request(5, { force: true, tier: "scalar", ...extra });
+    const startForced = async (opts?: { columns?: string[] }, stats = notComputed()) => {
+        const model = makeModel(stats);
+        start(model);
+        forceStats(model, opts);
+        await tick();
+        return model;
+    };
+
+    it("asks again, with the same force, tier and columns, for each reply that is not final", async () => {
+        const model = await startForced({ columns: ["c"] });
+        expect(model.sent).toEqual([forced({ columns: ["c"] })]);
+
+        // No reply yet: nothing more goes out, however long the server takes.
+        await tick(10_000);
+        expect(model.sent).toHaveLength(1);
+
+        model.set("df_data_dict", dict([statRow("min")]));
+        await tick();
+        expect(model.sent).toEqual([forced({ columns: ["c"] }), forced({ columns: ["c"] })]);
+        model.set("df_data_dict", dict([statRow("min"), statRow("max")]));
+        await tick();
+        expect(model.sent).toHaveLength(3);
+    });
+
+    it("sends the whole-table form again as the whole-table form", async () => {
+        const model = await startForced();
+        model.state.visible_columns = ["a"];
+        model.set("df_data_dict", dict([statRow("min")]));
+        await tick();
+        expect(model.sent).toEqual([forced(), forced()]);
+    });
+
+    it("stops at a final reply, which replaces df_meta", async () => {
+        const model = await startForced();
+        model.set("df_data_dict", dict([statRow("min")]));
+        await tick();
+        expect(model.sent).toHaveLength(2);
+
+        model.set("df_data_dict", dict([statRow("min"), statRow("max")]));
+        model.set("df_meta", meta({ status: "complete", tier: "scalar", gen: 5 }));
+        await tick(10_000);
+        expect(model.sent).toHaveLength(2);
+    });
+
+    it("stops at a ceiling reply or a refusal, which change df_meta and nothing else", async () => {
+        const model = await startForced();
+        model.set("df_meta", meta(notComputed({ reason: "ceiling" })));
+        await tick(10_000);
+        expect(model.sent).toEqual([forced()]);
+    });
+
+    it("drops the run when the gen moves on, and does not continue a late reply", async () => {
+        const model = await startForced();
+        model.frame({ df_meta: meta(notComputed({ gen: 6 })), df_data_dict: dict() });
+        await tick();
+        // A reply for the old run arrives after the new frame.
+        model.set("df_data_dict", dict([statRow("min")]));
+        await tick(10_000);
+        expect(model.sent).toEqual([forced()]);
+    });
+
+    it("is not started for a run recorded against a gen that is not on screen", async () => {
+        const model = makeModel(notComputed());
+        start(model);
+        model.set("stats_forced", { gen: 9, tier: "scalar" });
+        await tick();
+        model.set("df_data_dict", dict([statRow("min")]));
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+
+    it("does nothing for a model nobody started a scheduler on", async () => {
+        const model = makeModel(notComputed());
+        forceStats(model);
+        model.set("df_data_dict", dict([statRow("min")]));
+        await tick(10_000);
+        expect(model.sent).toEqual([forced()]);
+    });
+});
+
 describe("requestStats", () => {
     it("sends a stats_request for the gen the model shows", () => {
         const model = makeModel(pending(7));
@@ -498,11 +789,37 @@ describe("requestStats", () => {
         expect(model.sent).toEqual([request(7, { force: true })]);
     });
 
-    it("carries the columns the grid shows, for a forced request too", () => {
+    // Plan 3 s3.4: the control sends {stats_gen, scope, tier, force}, with a
+    // `columns` form per column. On a forced request `columns` names the
+    // columns the request is for, so the grid's visible columns (an ordering
+    // hint on the scheduler's requests) are not added to it (rows-first c5).
+    it("adds no columns hint to a forced request, however many columns the grid shows", () => {
         const model = makeModel({ status: "not_computed", tier: "schema", gen: 7 });
         model.state.visible_columns = ["a", "b"];
         expect(requestStats(model, { force: true })).toBe(true);
-        expect(model.sent).toEqual([request(7, { force: true, columns: ["a", "b"] })]);
+        expect(model.sent).toEqual([request(7, { force: true })]);
+        expect(model.sent[0]).not.toHaveProperty("columns");
+    });
+
+    it("carries the tier it is asked for", () => {
+        const model = makeModel({ status: "not_computed", tier: "schema", gen: 7 });
+        expect(requestStats(model, { force: true, tier: "scalar" })).toBe(true);
+        expect(model.sent).toEqual([request(7, { force: true, tier: "scalar" })]);
+    });
+
+    it("names the columns it is given, in place of the visible-columns hint", () => {
+        const model = makeModel({ status: "not_computed", tier: "schema", gen: 7 });
+        model.state.visible_columns = ["a", "b"];
+        expect(requestStats(model, { force: true, tier: "scalar", columns: ["c"] })).toBe(true);
+        expect(requestStats(model, { columns: ["d"] })).toBe(true);
+        expect(model.sent).toEqual([request(7, { force: true, tier: "scalar", columns: ["c"] }), request(7, { columns: ["d"] })]);
+    });
+
+    it("sends no tier and no columns the caller did not name, and no hint for an empty list", () => {
+        const model = makeModel(pending(7));
+        expect(requestStats(model, { columns: [] })).toBe(true);
+        expect(model.sent).toEqual([request(7)]);
+        expect(model.sent[0]).not.toHaveProperty("tier");
     });
 
     it("sends nothing when df_meta carries no stats.gen", () => {
@@ -726,5 +1043,59 @@ describe("wired into WebSocketModel", () => {
         rowsFromServer(ws);
         await tick(10_000);
         expect(ws.sent).toEqual([]);
+    });
+
+    // Rows-first c5: a not computed session, the control, and the replies.
+    describe("a session whose stats are not computed", () => {
+        const forcedRequest = (extra: Record<string, any> = {}) => request(3, { force: true, tier: "scalar", ...extra });
+
+        it("sends nothing on its own, and the control's forced run goes tier by tier to its final reply", async () => {
+            const { ws, model } = makeSocketModel(policy({ gen: 3 }));
+            rowsFromServer(ws);
+            await tick(10_000);
+            expect(ws.sent).toEqual([]);
+
+            expect(forceStats(model)).toBe(true);
+            expect(ws.sent).toEqual([forcedRequest()]);
+
+            ws.deliver({ ...update(3, "min", false, 2), tier: "scalar" });
+            await tick();
+            expect(ws.sent).toEqual([forcedRequest(), forcedRequest()]);
+            // Still not computed until the final reply says otherwise.
+            expect(model.get("df_meta").stats.status).toBe("not_computed");
+
+            ws.deliver({ ...update(3, "max", true, 0), tier: "scalar" });
+            await tick(10_000);
+            expect(ws.sent).toHaveLength(2);
+            expect(model.get("df_meta").stats).toEqual({ status: "complete", tier: "scalar", gen: 3 });
+            expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "min", "max"]);
+        });
+
+        it("a request over the ceiling ends in the ceiling message, and nothing more is sent", async () => {
+            const { ws, model } = makeSocketModel(policy({ gen: 3 }));
+            forceStats(model);
+            ws.deliver({ type: "stats_update", stats_gen: 3, scope: "raw", tier: "full", final: true, status: "not_computed", reason: "ceiling" });
+            await tick(10_000);
+            expect(ws.sent).toEqual([forcedRequest()]);
+            expect(model.get("df_meta").stats).toMatchObject({ status: "not_computed", reason: "ceiling", gen: 3 });
+        });
+
+        it("asks for the demand columns after the first rows and nothing else", async () => {
+            const { ws, model } = makeSocketModel(policy({ gen: 3, demand_columns: ["a"] }));
+            model.set("visible_columns", ["a", "b"]);
+            await tick(100);
+            expect(ws.sent).toEqual([]);
+
+            rowsFromServer(ws);
+            await tick();
+            expect(ws.sent).toEqual([request(3, { columns: ["a"], tier: "scalar" })]);
+
+            // The reply carries stats for those columns and leaves the session not computed.
+            ws.deliver({ ...update(3, "min", true, 0), tier: "scalar", status: "not_computed" });
+            await tick(10_000);
+            expect(ws.sent).toHaveLength(1);
+            expect(model.get("df_meta").stats.status).toBe("not_computed");
+            expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "min"]);
+        });
     });
 });

@@ -44,7 +44,7 @@ const bState: BuckarooState = {
     show_commands: false,
 };
 
-const renderBar = (dfMeta: DFMeta, onComputeStats?: () => void) =>
+const renderBar = (dfMeta: DFMeta, onComputeStats?: (opts?: { columns?: string[] }) => void) =>
     render(
         <StatusBar
             dfMeta={dfMeta}
@@ -98,7 +98,7 @@ describe("StatusBar stats column", () => {
 });
 
 describe("StatsStatusCell", () => {
-    const cell = (value: DFMetaStats | undefined, onComputeStats?: () => void) =>
+    const cell = (value: DFMetaStats | undefined, onComputeStats?: (opts?: { columns?: string[] }) => void) =>
         render(<StatsStatusCell value={value} context={{ onComputeStats }} />);
 
     it("pending: says the stats are being computed", () => {
@@ -148,5 +148,76 @@ describe("StatsStatusCell", () => {
     it("renders nothing without stats", () => {
         const { container } = cell(undefined);
         expect(container).toBeEmptyDOMElement();
+    });
+});
+
+// The server's policy fields say why the stats were not computed and what may
+// still be asked for (rows-first c5).
+describe("StatsStatusCell, not computed by policy (rows-first c5)", () => {
+    const policy = (over: Partial<DFMetaStats> = {}): DFMetaStats => ({
+        status: "not_computed",
+        tier: "schema",
+        gen: 1,
+        reason: "size",
+        tier_target: "schema",
+        estimate: { rows: 12_400_000, cols: 44 },
+        auto_request: false,
+        requestable: ["scalar", "full"],
+        ...over,
+    });
+    const cell = (value: DFMetaStats | undefined, onComputeStats?: (opts?: { columns?: string[] }) => void) =>
+        render(<StatsStatusCell value={value} context={{ onComputeStats }} />);
+
+    it("size: offers the control, and says how large the table is in its title", () => {
+        const onComputeStats = jest.fn();
+        cell(policy(), onComputeStats);
+        const root = screen.getByTestId("stats-status");
+        expect(root).toHaveAttribute("data-stats-status", "not_computed");
+        expect(root).toHaveAttribute("data-stats-reason", "size");
+
+        const button = screen.getByRole("button", { name: "Compute summary stats" });
+        expect(button).toHaveAttribute("title", expect.stringContaining("12.4M rows"));
+        fireEvent.click(button);
+        // The whole table, with no arguments: the wiring picks the tier from df_meta.
+        expect(onComputeStats).toHaveBeenCalledTimes(1);
+        expect(onComputeStats).toHaveBeenCalledWith();
+    });
+
+    it("host: offers the control", () => {
+        cell(policy({ reason: "host" }), jest.fn());
+        expect(screen.getByRole("button", { name: "Compute summary stats" })).toBeInTheDocument();
+    });
+
+    it("cost: the control reads Continue, since the run was paused", () => {
+        const onComputeStats = jest.fn();
+        cell(policy({ reason: "cost" }), onComputeStats);
+        expect(screen.queryByRole("button", { name: "Compute summary stats" })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Continue computing stats" }));
+        expect(onComputeStats).toHaveBeenCalledTimes(1);
+    });
+
+    it("ceiling: a message and no control, even with a handler and a requestable list", () => {
+        cell(policy({ reason: "ceiling" }), jest.fn());
+        expect(screen.queryByRole("button")).not.toBeInTheDocument();
+        const root = screen.getByTestId("stats-status");
+        expect(root).toHaveAttribute("data-stats-reason", "ceiling");
+        expect(root).toHaveTextContent("Summary stats unavailable");
+        expect(root).toHaveAttribute("title", expect.stringContaining("size limit"));
+    });
+
+    it("nothing requestable: the label only", () => {
+        cell(policy({ requestable: [] }), jest.fn());
+        expect(screen.queryByRole("button")).not.toBeInTheDocument();
+        expect(screen.getByTestId("stats-status")).toHaveTextContent("Summary stats not computed");
+    });
+
+    it("an older server's not_computed (no policy fields) still offers the control", () => {
+        cell({ status: "not_computed", tier: "schema", gen: 1, reason: "host" }, jest.fn());
+        expect(screen.getByRole("button", { name: "Compute summary stats" })).toBeInTheDocument();
+    });
+
+    it("keeps the label for the other statuses whatever the reason says", () => {
+        cell({ status: "complete", tier: "full", gen: 1, reason: "ceiling" } as DFMetaStats, jest.fn());
+        expect(screen.getByTestId("stats-status")).toHaveTextContent("Summary stats ready");
     });
 });

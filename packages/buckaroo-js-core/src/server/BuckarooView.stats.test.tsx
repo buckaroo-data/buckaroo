@@ -3,9 +3,10 @@
  *
  * While df_meta.stats says the stats are not computed, the status bar offers a
  * control that asks the server for them. BuckarooView hands the widget the
- * callback, and the callback sends `stats_request {force: true}` through
- * whatever IModel the host gave it. The grid reports the columns it shows, and
- * BuckarooView keeps them on the model, where the request reads its hint.
+ * callback, and the callback sends `stats_request {force: true, tier}` through
+ * whatever IModel the host gave it, with the tier taken from df_meta.stats
+ * (rows-first c5). The grid reports the columns it shows, and BuckarooView
+ * keeps them on the model, where the scheduler's requests read their hint.
  */
 import { render, cleanup, act } from "@testing-library/react";
 import { BuckarooView } from "./BuckarooView";
@@ -65,11 +66,48 @@ describe("BuckarooView on_compute_stats (rows-first c4)", () => {
         expect(typeof props().on_compute_stats).toBe("function");
 
         props().on_compute_stats();
-        // A time-boxed step, like the scheduler's (rows-first c4b).
-        expect(sent).toEqual([{ type: "stats_request", stats_gen: 9, scope: "raw", incremental: true, force: true }]);
+        // A time-boxed step, like the scheduler's (rows-first c4b), for the one
+        // tier a server that names none can be asked for (rows-first c5).
+        expect(sent).toEqual([
+            { type: "stats_request", stats_gen: 9, scope: "raw", incremental: true, force: true, tier: "full" },
+        ]);
     });
 
-    it("records the columns the grid shows on the model, and the control's request carries them as its hint", async () => {
+    it("takes the tier from df_meta.stats.requestable: scalar before full", async () => {
+        const { sent, props } = await mountBuckaroo({
+            df_meta: metaWith({ status: "not_computed", tier: "schema", gen: 9, requestable: ["scalar", "full"] }),
+            df_data_dict: {},
+            df_display_args: displayArgs,
+        });
+        props().on_compute_stats();
+        expect(sent).toEqual([
+            { type: "stats_request", stats_gen: 9, scope: "raw", incremental: true, force: true, tier: "scalar" },
+        ]);
+    });
+
+    it("hands the per-column form's columns on to the request", async () => {
+        const { sent, props } = await mountBuckaroo({
+            df_meta: metaWith({ status: "not_computed", tier: "schema", gen: 9, requestable: ["scalar", "full"] }),
+            df_data_dict: {},
+            df_display_args: displayArgs,
+        });
+        props().on_compute_stats({ columns: ["b"] });
+        expect(sent).toEqual([
+            { type: "stats_request", stats_gen: 9, scope: "raw", incremental: true, force: true, tier: "scalar", columns: ["b"] },
+        ]);
+    });
+
+    it("sends nothing when the server left no tier to ask for", async () => {
+        const { sent, props } = await mountBuckaroo({
+            df_meta: metaWith({ status: "not_computed", tier: "schema", gen: 9, reason: "ceiling", requestable: [] }),
+            df_data_dict: {},
+            df_display_args: displayArgs,
+        });
+        props().on_compute_stats();
+        expect(sent).toEqual([]);
+    });
+
+    it("records the columns the grid shows on the model, and the whole-table control does not send them", async () => {
         const { model, sent, props } = await mountBuckaroo({
             df_meta: metaWith({ status: "not_computed", tier: "schema", gen: 9 }),
             df_data_dict: {},
@@ -80,8 +118,9 @@ describe("BuckarooView on_compute_stats (rows-first c4)", () => {
         props().on_visible_columns(["a", "b"]);
         expect(model.get("visible_columns")).toEqual(["a", "b"]);
         props().on_compute_stats();
+        // On a forced request `columns` names what it is for, so the hint stays off.
         expect(sent).toEqual([
-            { type: "stats_request", stats_gen: 9, scope: "raw", incremental: true, force: true, columns: ["a", "b"] },
+            { type: "stats_request", stats_gen: 9, scope: "raw", incremental: true, force: true, tier: "full" },
         ]);
     });
 

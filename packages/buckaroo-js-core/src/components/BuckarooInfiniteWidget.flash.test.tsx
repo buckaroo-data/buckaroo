@@ -7,7 +7,7 @@
  * Tests assert CURRENT behavior on main (Option A in docs/rerender-test-plan.md).
  * Tests tagged "[captures current flash]" are tracking pain, not validating it.
  */
-import { render, act, waitFor } from "@testing-library/react";
+import { render, act, waitFor, screen, fireEvent } from "@testing-library/react";
 import { BuckarooInfiniteWidget } from "./BuckarooWidgetInfinite";
 import { KeyAwareSmartRowCache } from "./DFViewerParts/SmartRowCache";
 import { getSpyCalls, resetSpy, setMockColumnState } from "../test-utils/agGridSpy";
@@ -925,5 +925,116 @@ describe("BuckarooInfiniteWidget on_visible_columns (rows-first c4b)", () => {
     expect(typeof gridProps.onVirtualColumnsChanged).toBe("function");
     gridProps.onVirtualColumnsChanged({});
     await waitFor(() => expect(onVisible).toHaveBeenCalledWith(["a"]));
+  });
+});
+
+// Rows-first c5: a session whose stats are not computed has nothing for the
+// summary view to list. It shows why, with the control that asks for the stats,
+// in place of the grid; the main view keeps its grid.
+describe("BuckarooInfiniteWidget summary view, stats not computed (rows-first c5)", () => {
+  const notComputed = (over: Record<string, unknown> = {}): DFMeta =>
+    ({
+      ...baseDfMeta,
+      stats: {
+        status: "not_computed",
+        tier: "schema",
+        gen: 1,
+        reason: "size",
+        tier_target: "schema",
+        estimate: { rows: 12_400_000, cols: 2 },
+        auto_request: false,
+        requestable: ["scalar", "full"],
+        ...over,
+      },
+    }) as DFMeta;
+
+  const widgetProps = (over: Record<string, unknown> = {}) => ({
+    df_data_dict: { summary_stats: [] as any[] },
+    df_display_args: baseDisplayArgs,
+    df_meta: notComputed(),
+    operations: [],
+    on_operations: jest.fn(),
+    operation_results: {} as any,
+    command_config: { argspecs: {}, defaultArgs: {} },
+    buckaroo_state: { ...initialState, df_display: "summary" },
+    on_buckaroo_state: jest.fn(),
+    buckaroo_options: baseOptions,
+    src: mkSrc(),
+    ...over,
+  });
+
+  it("shows the empty state with the compute control in place of the grid", () => {
+    const onComputeStats = jest.fn();
+    render(<BuckarooInfiniteWidget {...widgetProps({ on_compute_stats: onComputeStats })} />);
+    expect(screen.getByTestId("stats-empty-state")).toHaveTextContent("not computed");
+    expect(getSpyCalls().mountCount).toBe(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compute basic stats" }));
+    expect(onComputeStats).toHaveBeenCalledTimes(1);
+    expect(onComputeStats).toHaveBeenCalledWith();
+  });
+
+  it("offers a per-column form over the columns the view has, naming the column by the grid's own name", () => {
+    const onComputeStats = jest.fn();
+    render(<BuckarooInfiniteWidget {...widgetProps({ on_compute_stats: onComputeStats })} />);
+    const picker = screen.getByRole("combobox", { name: "Columns to compute" });
+    fireEvent.change(picker, { target: { value: "a" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute basic stats" }));
+    expect(onComputeStats).toHaveBeenLastCalledWith({ columns: ["a"] });
+  });
+
+  it("ceiling: the message and no control", () => {
+    render(
+      <BuckarooInfiniteWidget
+        {...widgetProps({ df_meta: notComputed({ reason: "ceiling", requestable: [] }), on_compute_stats: jest.fn() })}
+      />,
+    );
+    expect(screen.getByTestId("stats-empty-state")).toHaveTextContent("over the size limit");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(getSpyCalls().mountCount).toBe(0);
+  });
+
+  it("without a callback from the host it is the message alone", () => {
+    render(<BuckarooInfiniteWidget {...widgetProps()} />);
+    expect(screen.getByTestId("stats-empty-state")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("the main view keeps its grid and shows no empty state", () => {
+    render(
+      <BuckarooInfiniteWidget
+        {...widgetProps({ buckaroo_state: initialState, on_compute_stats: jest.fn() })}
+      />,
+    );
+    expect(screen.queryByTestId("stats-empty-state")).not.toBeInTheDocument();
+    expect(getSpyCalls().mountCount).toBe(1);
+  });
+
+  it.each(["pending", "error", "complete"])("a %s session keeps the summary view's grid", (status) => {
+    render(<BuckarooInfiniteWidget {...widgetProps({ df_meta: notComputed({ status }) })} />);
+    expect(screen.queryByTestId("stats-empty-state")).not.toBeInTheDocument();
+    expect(getSpyCalls().mountCount).toBe(1);
+  });
+
+  it("a session that reports no df_meta.stats keeps the summary view's grid, as before", () => {
+    render(<BuckarooInfiniteWidget {...widgetProps({ df_meta: baseDfMeta })} />);
+    expect(screen.queryByTestId("stats-empty-state")).not.toBeInTheDocument();
+    expect(getSpyCalls().mountCount).toBe(1);
+  });
+
+  it("gives the grid back when the stats arrive", () => {
+    const props = widgetProps();
+    const { rerender } = render(<BuckarooInfiniteWidget {...props} />);
+    expect(screen.getByTestId("stats-empty-state")).toBeInTheDocument();
+
+    rerender(
+      <BuckarooInfiniteWidget
+        {...props}
+        df_meta={{ ...baseDfMeta, stats: { status: "complete", tier: "full", gen: 1 } } as DFMeta}
+        df_data_dict={{ summary_stats: [{ index: "dtype", a: "int64" }] }}
+      />,
+    );
+    expect(screen.queryByTestId("stats-empty-state")).not.toBeInTheDocument();
+    expect(getSpyCalls().mountCount).toBe(1);
   });
 });

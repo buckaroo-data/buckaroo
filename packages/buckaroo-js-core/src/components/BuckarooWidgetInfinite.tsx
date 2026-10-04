@@ -152,7 +152,7 @@ export function BuckarooInfiniteWidget({
         df_display_args: Record<string, IDisplayArgs>;
         /** Sends a forced stats_request. Server entry points pass it; the Jupyter
          *  widget does not, and then the status bar offers no control. */
-        on_compute_stats?: () => void;
+        on_compute_stats?: (opts?: { columns?: string[] }) => void;
         /** Called with the data columns the grid shows, now and whenever they change. */
         on_visible_columns?: (columns: string[]) => void;
         operations: Operation[];

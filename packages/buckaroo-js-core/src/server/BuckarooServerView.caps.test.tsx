@@ -4,7 +4,8 @@
  * The server records a client's capabilities from `?caps=` on the WebSocket
  * URL, because it sends the first message before the client says anything. A
  * client that merges `stats_update` must put it there, whatever URL the host
- * passes in.
+ * passes in. So must one that can show a session whose stats are not computed
+ * and send tiered requests, which is `stats_ondemand` (rows-first c5).
  */
 import { render, cleanup, waitFor } from "@testing-library/react";
 import { BuckarooServerView } from "./BuckarooServerView";
@@ -68,17 +69,17 @@ afterEach(() => {
     cleanup();
 });
 
-describe("BuckarooServerView advertises stats_update", () => {
-    it("opens the socket with ?caps=stats_update", async () => {
+describe("BuckarooServerView advertises stats_update and stats_ondemand", () => {
+    it("opens the socket with ?caps=stats_update,stats_ondemand", async () => {
         render(<BuckarooServerView wsUrl="ws://x/ws/s" />);
         await waitFor(() => expect(capturedViewProps.length).toBeGreaterThan(0));
         expect(FakeWebSocket.instances).toHaveLength(1);
-        expect(FakeWebSocket.instances[0].url).toBe("ws://x/ws/s?caps=stats_update");
+        expect(FakeWebSocket.instances[0].url).toBe("ws://x/ws/s?caps=stats_update,stats_ondemand");
     });
 
     it("keeps the query string the host passed", async () => {
         render(<BuckarooServerView wsUrl="ws://x/ws/s?token=abc" />);
         await waitFor(() => expect(capturedViewProps.length).toBeGreaterThan(0));
-        expect(FakeWebSocket.instances[0].url).toBe("ws://x/ws/s?token=abc&caps=stats_update");
+        expect(FakeWebSocket.instances[0].url).toBe("ws://x/ws/s?token=abc&caps=stats_update,stats_ondemand");
     });
 });

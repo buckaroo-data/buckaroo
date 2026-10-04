@@ -313,7 +313,7 @@ export const SearchEditor =  memo(({ value, onValueChange, stopEditing }: Custom
  * computed, the reason when they failed. The cell always renders one line in a
  * fixed-width column, so changing status moves nothing.
  */
-export const StatsStatusCell = function (params: { value?: DFMetaStats; context?: { onComputeStats?: () => void } }) {
+export const StatsStatusCell = function (params: { value?: DFMetaStats; context?: { onComputeStats?: (opts?: { columns?: string[] }) => void } }) {
     const stats = params.value;
     if (stats === undefined) return null;
     const onComputeStats = params.context?.onComputeStats;
@@ -380,7 +380,7 @@ export function StatusBar({
     componentConfig?: Record<string, unknown>;
     /** Sends a forced stats_request. The stats column shows it as a button while
      *  df_meta.stats.status is "not_computed"; without it there is no button. */
-    onComputeStats?: () => void;
+    onComputeStats?: (opts?: { columns?: string[] }) => void;
 }) {
     if (false) {
 	console.log("heightOverride", heightOverride);
