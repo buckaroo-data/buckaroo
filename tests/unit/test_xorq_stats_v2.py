@@ -876,3 +876,60 @@ class TestSnapshotCacheRun:
         for col in plain:
             for key in ("length", "min", "max", "mean", "null_count", "distinct_count"):
                 assert cold[col].get(key) == plain[col].get(key), (col, key)
+
+
+class _RecordingCache:
+    """Wraps a snapshot cache and records the key of every query the pipeline
+    asks it about."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.storage = inner.storage
+        self.keys = []
+
+    def calc_key(self, query):
+        key = self.inner.calc_key(query)
+        self.keys.append(key)
+        return key
+
+
+class TestHistogramCacheKeys:
+    """The snapshot-cache key of each per-column histogram query, which warm
+    loads in another process depend on. The expected keys come from queries
+    built here in the shape ``histogram`` documents, not from the pipeline, so
+    a change to how the pipeline builds or schedules them is caught."""
+
+    @staticmethod
+    def _scan(tmp_path):
+        df = pd.DataFrame({
+            "num": [float(i) for i in range(12)], "word": list("aabbccddeeff"), "flag": [True, False] * 6})
+        path = tmp_path / "keys.parquet"
+        df.to_parquet(path)
+        return df, xo.deferred_read_parquet(str(path))
+
+    @staticmethod
+    def _numeric_histogram_query(expr, col, lo, hi):
+        bucket = ((expr[col].cast("float64") - lo) / (hi - lo) * 10).cast("int64").clip(lower=0, upper=9)
+        return (expr.mutate(__bucket=bucket).group_by("__bucket").aggregate(__count=lambda t: t.count())
+            .order_by("__bucket"))
+
+    @staticmethod
+    def _categorical_histogram_query(expr, col):
+        return (expr.group_by(col).aggregate(__count=lambda t: t.count()).order_by(xo.desc("__count")).limit(10))
+
+    def test_each_histogram_query_keeps_its_snapshot_key(self, tmp_path):
+        df, table = self._scan(tmp_path)
+        cache = xo.ParquetSnapshotCache.from_kwargs(source=xo.connect(), base_path=str(tmp_path / "cache"))
+        recorder = _RecordingCache(cache)
+
+        XorqStatPipeline(XORQ_STATS_V2, unit_test=False, cache_storage=recorder).process_table(table)
+
+        expected = {
+            "num": cache.calc_key(self._numeric_histogram_query(table, "num", float(df.num.min()), float(df.num.max()))),
+            "word": cache.calc_key(self._categorical_histogram_query(table, "word")),
+            "flag": cache.calc_key(self._categorical_histogram_query(table, "flag"))}
+        for col, key in expected.items():
+            assert key in recorder.keys, f"the {col} histogram query is no longer keyed as it was"
+        # The batch aggregate and one histogram query per column, nothing else.
+        assert len(recorder.keys) == 1 + len(expected)
+        assert len(set(recorder.keys)) == len(recorder.keys)

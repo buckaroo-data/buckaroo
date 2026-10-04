@@ -736,3 +736,70 @@ class TestIntegration:
             assert col_stats['length'] == 4
             assert isinstance(col_stats['distinct_per'], float)
             assert col_stats['distinct_per'] > 0
+
+
+# ============================================================================
+# Characterization: process_df is process_column run over each column
+# ============================================================================
+
+def _mixed_frames():
+    """The same mixed-dtype columns as a pandas and a polars frame. Every column
+    has a different count for each of its values: polars does not keep the order
+    of equal counts, so ties would make two runs differ."""
+    pl = pytest.importorskip("polars")
+    data = {
+        'ints': [3, 1, 2, 3, 3, 1],
+        'floats': [0.5, 0.5, 0.5, 2.5, 2.5, None],
+        'words': ['x', 'y', 'x', 'z', 'x', 'y'],
+        'flags': [True, False, True, True, False, True]}
+    return {'pandas': pd.DataFrame(data), 'polars': pl.DataFrame(data)}
+
+
+def _stat_lists():
+    from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
+    from buckaroo.customizations.pl_stats_v2 import PL_ANALYSIS_V2
+    return {'pandas': PD_ANALYSIS_V2, 'polars': PL_ANALYSIS_V2}
+
+
+class TestProcessDfCharacterization:
+    """What ``process_df`` returns, written as the ``process_column`` loop it is
+    today, so a refactor of it into resumable units can be checked against
+    something that does not go through the units."""
+
+    @staticmethod
+    def _by_hand(pipeline, df, skip=()):
+        from buckaroo.df_util import old_col_new_col
+        expected = {}
+        for orig, rewritten in old_col_new_col(df):
+            if orig in skip:
+                expected[rewritten] = {'orig_col_name': orig, 'rewritten_col_name': rewritten}
+                continue
+            ser = df[orig]
+            stats, _errors = pipeline.process_column(column_name=rewritten, column_dtype=ser.dtype, raw_series=ser,
+                sampled_series=ser, raw_dataframe=df,
+                initial_stats={'orig_col_name': orig, 'rewritten_col_name': rewritten})
+            expected[rewritten] = stats
+        return expected
+
+    @pytest.mark.parametrize('backend', ['pandas', 'polars'])
+    @pytest.mark.parametrize('skip', [(), ('floats',)])
+    def test_process_df_equals_the_column_loop(self, backend, skip):
+        df = _mixed_frames()[backend]
+        pipeline = StatPipeline(_stat_lists()[backend], unit_test=False)
+        result, errors = pipeline.process_df(df, skip_columns=set(skip))
+        expected = self._by_hand(pipeline, df, skip)
+        assert errors == []
+        assert list(result) == list(expected), "columns must keep the frame's order"
+        for col in expected:
+            assert repr(result[col]) == repr(expected[col]), col
+
+    def test_errors_are_collected_per_column(self):
+        @stat()
+        def fails_on_words(ser: RawSeries) -> int:
+            if isinstance(ser.iloc[0], str):
+                raise ValueError('words')
+            return 0
+
+        pipeline = StatPipeline([length, fails_on_words], unit_test=False)
+        _result, errors = pipeline.process_df(_mixed_frames()['pandas'])
+        assert [(e.column, e.stat_key) for e in errors] == [('c', 'fails_on_words')]
