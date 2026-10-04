@@ -4,7 +4,10 @@ Everything here is pure Python: the policy is a function of numbers, the
 probes read a schema or a parquet footer, and nothing needs a server. The last
 sections (rows-first p33) test how the session carries the result and how
 ``df_meta.stats`` reports it, still without a server; the HTTP and WebSocket
-side is in test_load_expr.py.
+side is in test_load_expr.py. The last section (rows-first p37) tests the
+guards for huge sources: the sort and search thresholds, the flags a session
+reports, the refusal of a sorted window, and the pass that turns sorting off in a
+display config.
 
 The thresholds are the provisional values proposed by the phase-0
 measurements (p31b). The boundary tables run on the module defaults, so a
@@ -859,3 +862,345 @@ class TestCapabilities:
     def test_a_tier_the_host_named_has_nothing_to_pull(self, sp, caps):
         assert stats_wire.stats_to_pull(_session(sp, "schema", "deferred"), _client(caps)) is False
         assert stats_wire.stats_to_pull(_session(sp, "scalar", "deferred"), _client(caps)) is False
+
+
+# ---------------------------------------------------------------------------
+# Guards for huge sources (rows-first p37)
+# ---------------------------------------------------------------------------
+
+GUARD_ENV_FIELDS = {"BUCKAROO_SORT_DISABLE_ROWS": "sort_disable_rows",
+    "BUCKAROO_SEARCH_DISABLE_ROWS": "search_disable_rows"}
+# The provisional defaults, written out so a change to a module constant has to
+# change a test too. Search has no default threshold: the server never refuses a
+# search (plan 3 question 7), so the flag is only ever turned off by a host.
+GUARD_DEFAULTS = {"sort_disable_rows": 25_000_000, "search_disable_rows": None}
+ENABLED = {"sort": "enabled", "search": "enabled"}
+
+
+@pytest.fixture(autouse=True)
+def clean_guard_env(monkeypatch):
+    """A developer's own sort and search thresholds must not leak in."""
+    for name in GUARD_ENV_FIELDS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def _guard_api(sp, name):
+    api = getattr(sp, name, None)
+    assert api is not None, f"buckaroo.server.stats_policy.{name} does not exist"
+    return api
+
+
+def _guards(sp, backend, rows, cols=10, source_kind="parquet", **limits):
+    """``resolve_source_guards`` on the module defaults, or on the limits given."""
+    resolve = _guard_api(sp, "resolve_source_guards")
+    if limits:
+        return resolve(backend, source_kind, rows, cols, limits=_guard_api(sp, "GuardLimits")(**limits))
+    return resolve(backend, source_kind, rows, cols)
+
+
+class TestGuardLimits:
+    def test_the_defaults_are_the_provisional_values(self, sp):
+        assert dataclasses.asdict(_guard_api(sp, "GuardLimits")()) == GUARD_DEFAULTS
+        assert getattr(sp, "DEFAULT_SORT_DISABLE_ROWS", None) == GUARD_DEFAULTS["sort_disable_rows"]
+        assert getattr(sp, "DEFAULT_SEARCH_DISABLE_ROWS", "missing") is None
+
+    def test_from_env_with_a_clean_environment_is_the_default_set(self, sp):
+        assert dataclasses.asdict(_guard_api(sp, "GuardLimits").from_env()) == GUARD_DEFAULTS
+
+    @pytest.mark.parametrize("name, field", GUARD_ENV_FIELDS.items())
+    def test_each_variable_overrides_its_field(self, sp, monkeypatch, name, field):
+        monkeypatch.setenv(name, "12345")
+        assert getattr(_guard_api(sp, "GuardLimits").from_env(), field) == 12345
+
+    def test_underscored_integers_are_accepted(self, sp, monkeypatch):
+        monkeypatch.setenv("BUCKAROO_SORT_DISABLE_ROWS", "2_000_000")
+        assert _guard_api(sp, "GuardLimits").from_env().sort_disable_rows == 2_000_000
+
+    @pytest.mark.parametrize("name, field", GUARD_ENV_FIELDS.items())
+    @pytest.mark.parametrize("bad", ["lots", "-5", "1.5"])
+    def test_invalid_value_falls_back_to_the_default_and_warns(self, sp, monkeypatch, caplog, name, field, bad):
+        monkeypatch.setenv(name, bad)
+        with caplog.at_level(logging.WARNING):
+            limits = _guard_api(sp, "GuardLimits").from_env()
+        assert getattr(limits, field) == GUARD_DEFAULTS[field]
+        assert name in caplog.text
+
+    def test_empty_value_means_unset(self, sp, monkeypatch):
+        monkeypatch.setenv("BUCKAROO_SORT_DISABLE_ROWS", "")
+        assert _guard_api(sp, "GuardLimits").from_env().sort_disable_rows == GUARD_DEFAULTS["sort_disable_rows"]
+
+
+# (backend, rows, limits) -> (sort, search). 10.8M x 43 is parking_2017; the
+# 42.3M, 54.1M and 78.0M entries are the three tallyman loads over 70 s.
+SOURCE_GUARD_TABLE = [
+    ("xorq", 0, {}, ("enabled", "enabled")),
+    ("xorq", 52_814, {}, ("enabled", "enabled")),
+    ("xorq", 10_800_000, {}, ("enabled", "enabled")),
+    ("xorq", 24_999_999, {}, ("enabled", "enabled")),
+    ("xorq", 25_000_000, {}, ("enabled", "enabled")),
+    ("xorq", 25_000_001, {}, ("disabled", "enabled")),
+    ("xorq", 42_300_000, {}, ("disabled", "enabled")),
+    ("xorq", 54_100_000, {}, ("disabled", "enabled")),
+    ("xorq", 78_000_000, {}, ("disabled", "enabled")),
+    ("xorq", 10**12, {}, ("disabled", "enabled")),
+    # Eager backends keep both: their windows come from a bounded frame.
+    ("pandas", 78_000_000, {}, ("enabled", "enabled")),
+    ("polars", 78_000_000, {}, ("enabled", "enabled")),
+    ("polars", 78_000_000, {"sort_disable_rows": 1, "search_disable_rows": 1}, ("enabled", "enabled")),
+    # The sort threshold: equal, one above, and none at all.
+    ("xorq", 1000, {"sort_disable_rows": 1000}, ("enabled", "enabled")),
+    ("xorq", 1001, {"sort_disable_rows": 1000}, ("disabled", "enabled")),
+    ("xorq", 10**12, {"sort_disable_rows": None}, ("enabled", "enabled")),
+    # The search threshold is its own number.
+    ("xorq", 1000, {"search_disable_rows": 1000}, ("enabled", "enabled")),
+    ("xorq", 1001, {"search_disable_rows": 1000}, ("enabled", "disabled")),
+    ("xorq", 1001, {"sort_disable_rows": 5000, "search_disable_rows": 1000}, ("enabled", "disabled")),
+    ("xorq", 5001, {"sort_disable_rows": 5000, "search_disable_rows": 1000}, ("disabled", "disabled")),
+]
+
+
+def _source_guard_id(case):
+    backend, rows, limits, _expected = case
+    return f"{backend}-{rows}-{'-'.join(f'{k}={v}' for k, v in limits.items()) or 'defaults'}"
+
+
+class TestResolveSourceGuards:
+    @pytest.mark.parametrize("backend, rows, limits, expected", SOURCE_GUARD_TABLE,
+        ids=[_source_guard_id(case) for case in SOURCE_GUARD_TABLE])
+    def test_the_table(self, sp, backend, rows, limits, expected):
+        assert _guards(sp, backend, rows, **limits) == dict(zip(("sort", "search"), expected))
+
+    def test_the_result_has_exactly_the_two_flags(self, sp):
+        assert set(_guards(sp, "xorq", 5)) == {"sort", "search"}
+
+    def test_the_column_count_does_not_move_a_row_threshold(self, sp):
+        assert _guards(sp, "xorq", 25_000_000, cols=1) == _guards(sp, "xorq", 25_000_000, cols=500) == ENABLED
+
+    def test_the_guards_ignore_the_stats_thresholds(self, sp, monkeypatch):
+        """A ceiling that refuses full stats for the entry leaves its sort alone."""
+        monkeypatch.setenv("BUCKAROO_STATS_FULL_AUTO_ROWS", "1")
+        monkeypatch.setenv("BUCKAROO_STATS_CEILING_FULL_ROWS", "1")
+        monkeypatch.setenv("BUCKAROO_STATS_CEILING_SCALAR_CELLS", "1")
+        assert _guards(sp, "xorq", 5_000) == ENABLED
+
+    def test_the_environment_is_read_on_each_call(self, sp):
+        resolve = _guard_api(sp, "resolve_source_guards")
+        assert resolve("xorq", "parquet", 5_000, 10) == ENABLED
+        with pytest.MonkeyPatch.context() as env:
+            env.setenv("BUCKAROO_SORT_DISABLE_ROWS", "1000")
+            assert resolve("xorq", "parquet", 5_000, 10)["sort"] == "disabled"
+        assert resolve("xorq", "parquet", 5_000, 10) == ENABLED
+
+    def test_the_environment_sets_the_search_flag(self, sp, monkeypatch):
+        monkeypatch.setenv("BUCKAROO_SEARCH_DISABLE_ROWS", "1000")
+        assert _guard_api(sp, "resolve_source_guards")("xorq", "parquet", 5_000, 10) == {"sort": "enabled",
+            "search": "disabled"}
+
+    @pytest.mark.parametrize("rows, cols, error", [(-1, 3, ValueError), (5, -1, ValueError), (1.5, 3, TypeError),
+        ("5", 3, TypeError), (5, None, TypeError)])
+    def test_a_bad_count_is_refused_as_the_stats_policy_refuses_it(self, sp, rows, cols, error):
+        with pytest.raises(error):
+            _guard_api(sp, "resolve_source_guards")("xorq", "parquet", rows, cols)
+
+    def test_a_source_kind_that_is_not_a_string_is_refused(self, sp):
+        with pytest.raises(TypeError):
+            _guard_api(sp, "resolve_source_guards")("xorq", None, 5, 3)
+
+
+def _guarded(sort="enabled", search="enabled"):
+    """A buckaroo-mode session whose load resolved these guard flags."""
+    session = session_mod.SessionState(session_id="s", path="p")
+    session.mode = "buckaroo"
+    session.df_meta = {"total_rows": 5}
+    session.source_guards = {"sort": sort, "search": search}
+    return session
+
+
+class TestGuardFlagsInDfMeta:
+    """``df_meta.sort`` and ``df_meta.search``: sent when a session has turned
+    one off, left out when it is on, which is what a client assumes."""
+
+    def test_a_session_with_no_guards_by_default(self):
+        assert getattr(session_mod.SessionState(session_id="s", path="p"), "source_guards", "missing") is None
+
+    def test_the_documented_defaults(self):
+        assert getattr(session_mod, "SOURCE_GUARD_DEFAULTS", None) == ENABLED
+
+    def test_a_disabled_sort_is_reported(self):
+        assert session_mod.build_state_message(_guarded(sort="disabled"))["df_meta"] == {"total_rows": 5,
+            "sort": "disabled"}
+
+    def test_a_disabled_search_is_reported(self):
+        assert session_mod.build_state_message(_guarded(search="disabled"))["df_meta"] == {"total_rows": 5,
+            "search": "disabled"}
+
+    def test_both_flags_are_reported_when_both_are_off(self):
+        assert session_mod.build_state_message(_guarded("disabled", "disabled"))["df_meta"] == {"total_rows": 5,
+            "sort": "disabled", "search": "disabled"}
+
+    @pytest.mark.parametrize("ondemand", [True, False])
+    def test_every_client_is_told(self, ondemand):
+        """The server refuses the sort whoever asks, so no capability gates the flag."""
+        message = session_mod.build_state_message(_guarded(sort="disabled"), ondemand=ondemand)
+        assert message["df_meta"]["sort"] == "disabled"
+
+    def test_the_flags_ride_with_the_stats_status(self, sp):
+        session = _session(sp, "auto", "deferred", SCALAR_BY_SIZE)
+        session.source_guards = {"sort": "disabled", "search": "enabled"}
+        df_meta = session_mod.build_state_message(session)["df_meta"]
+        assert df_meta == {"total_rows": 5, "sort": "disabled", "stats": session_mod.stats_meta(session)}
+
+    def test_a_client_reads_what_is_left_out_as_enabled(self):
+        read = getattr(session_mod, "guards_with_defaults", None)
+        assert read is not None, "session.guards_with_defaults does not exist"
+        assert read({"total_rows": 5}) == ENABLED
+        assert read({}) == ENABLED
+        assert read(None) == ENABLED
+        assert read({"sort": "disabled"}) == {"sort": "disabled", "search": "enabled"}
+        assert read({"search": "disabled", "sort": "enabled"}) == {"sort": "enabled", "search": "disabled"}
+
+
+class TestSortRefusal:
+    """``sort_refusal``: the ``infinite_resp`` a sorted window gets when the
+    session's sort is off, and nothing for any other request."""
+
+    WINDOW = {"start": 0, "end": 5, "sourceName": "default", "origEnd": 5}
+
+    @staticmethod
+    def _refusal(session, payload):
+        refuse = getattr(session_mod, "sort_refusal", None)
+        assert refuse is not None, "session.sort_refusal does not exist"
+        return refuse(session, payload)
+
+    def test_a_sorted_window_is_refused_with_a_code(self):
+        payload = {**self.WINDOW, "sort": "a", "sort_direction": "asc"}
+        refusal = self._refusal(_guarded(sort="disabled"), payload)
+        assert refusal is not None
+        assert (refusal["type"], refusal["key"], refusal["length"]) == ("infinite_resp", payload, 0)
+        assert refusal["error_code"] == "sort_disabled"
+        assert isinstance(refusal["error_info"], str) and refusal["error_info"]
+        assert "payload" not in refusal, "no rows travel with a refusal"
+
+    @pytest.mark.parametrize("payload", [{}, {"sort": None}, {"sort": ""}, {"sort_direction": "asc"}])
+    def test_a_window_with_no_sort_is_served(self, payload):
+        assert self._refusal(_guarded(sort="disabled"), {**self.WINDOW, **payload}) is None
+
+    def test_a_session_with_the_sort_on_serves_a_sorted_window(self):
+        assert self._refusal(_guarded(), {**self.WINDOW, "sort": "a"}) is None
+        assert self._refusal(_guarded(search="disabled"), {**self.WINDOW, "sort": "a"}) is None
+
+    def test_a_session_that_resolved_no_guards_serves_a_sorted_window(self):
+        session = session_mod.SessionState(session_id="s", path="p")
+        assert self._refusal(session, {**self.WINDOW, "sort": "a"}) is None
+
+    @pytest.mark.parametrize("payload", [None, "sort", ["sort"], 5])
+    def test_a_payload_that_is_not_a_dict_is_not_refused(self, payload):
+        assert self._refusal(_guarded(sort="disabled"), payload) is None
+
+
+class TestResolveSessionGuards:
+    """``stats_wire.resolve_session_guards``: what a load handler resolves, and
+    for which sessions."""
+
+    @staticmethod
+    def _resolve(*args):
+        resolve = getattr(stats_wire, "resolve_session_guards", None)
+        assert resolve is not None, "stats_wire.resolve_session_guards does not exist"
+        return resolve(*args)
+
+    def test_a_schema_dataflow_resolves_against_the_count_it_has(self, monkeypatch):
+        monkeypatch.setenv("BUCKAROO_SORT_DISABLE_ROWS", "3")
+        assert self._resolve("schema", 5, 3) == {"sort": "disabled", "search": "enabled"}
+        assert self._resolve("schema", 3, 3) == ENABLED
+
+    def test_a_dataflow_that_ran_its_stats_has_no_guards(self, monkeypatch):
+        """Only a session a host opened with a stats policy is guarded. One built
+        the way it always was, with its stats inline, stays as it was."""
+        monkeypatch.setenv("BUCKAROO_SORT_DISABLE_ROWS", "3")
+        assert self._resolve("full", 5, 3) is None
+        assert self._resolve("full", 5_000_000_000, 40) is None
+
+    def test_the_defaults_guard_a_session_of_the_size_the_stats_ceiling_refuses(self):
+        assert self._resolve("schema", 78_000_000, 44)["sort"] == "disabled"
+        assert self._resolve("schema", 10_800_000, 43) == ENABLED
+
+    def test_the_thresholds_are_read_on_each_call(self, monkeypatch):
+        assert self._resolve("schema", 5, 3) == ENABLED
+        monkeypatch.setenv("BUCKAROO_SORT_DISABLE_ROWS", "3")
+        assert self._resolve("schema", 5, 3)["sort"] == "disabled"
+
+
+def _grid_display(main_columns, left=(), summary_columns=()):
+    """A ``df_display_args`` as the dataflow builds it: ``main`` is the display
+    the infinite grid serves from the server, ``summary`` is a client-side grid."""
+    def display(data_key, columns, left_columns):
+        return {"data_key": data_key, "summary_stats_key": "all_stats",
+            "df_viewer_config": {"pinned_rows": [], "column_config": list(columns),
+                "left_col_configs": list(left_columns), "extra_grid_config": {}, "component_config": {}}}
+    return {"main": display("main", main_columns, left), "summary": display("empty", summary_columns, ())}
+
+
+class TestDisableSorting:
+    """``disable_sorting``: the final pass that turns sorting off for every column
+    of a display served by ``infinite_request``, after the klasses and the
+    overrides have had their say."""
+
+    @staticmethod
+    def _disable(sp, display):
+        return _guard_api(sp, "disable_sorting")(display)
+
+    @staticmethod
+    def _columns(display, key="main"):
+        config = display[key]["df_viewer_config"]
+        return config["column_config"] + config["left_col_configs"]
+
+    def test_every_column_of_the_infinite_display_stops_sorting(self, sp):
+        display = _grid_display(
+            [{"col_name": "a", "header_name": "price"},
+             {"col_name": "b", "header_name": "qty", "ag_grid_specs": {"minWidth": 90}},
+             {"col_name": "c", "header_name": "category", "ag_grid_specs": {"sortable": True}},
+             {"col_path": ("x", "y"), "field": "d", "ag_grid_specs": {"sortable": True, "minWidth": 70}}],
+            left=[{"col_name": "index", "header_name": "index"}])
+        out = self._disable(sp, display)
+        assert [c["ag_grid_specs"]["sortable"] for c in self._columns(out)] == [False] * 5
+
+    def test_the_other_column_specs_are_kept(self, sp):
+        out = self._disable(sp, _grid_display([{"col_name": "b", "ag_grid_specs": {"minWidth": 90, "sortable": True}}]))
+        assert out["main"]["df_viewer_config"]["column_config"][0]["ag_grid_specs"] == {"minWidth": 90,
+            "sortable": False}
+
+    def test_a_display_the_client_sorts_itself_is_left_alone(self, sp):
+        summary = [{"col_name": "a", "header_name": "price", "ag_grid_specs": {"sortable": True}}, {"col_name": "b"}]
+        display = _grid_display([{"col_name": "a"}], summary_columns=summary)
+        out = self._disable(sp, display)
+        assert out["summary"] == display["summary"]
+
+    def test_the_rest_of_the_display_is_unchanged(self, sp):
+        display = _grid_display([{"col_name": "a", "displayer_args": {"displayer": "obj"}}])
+        out = self._disable(sp, display)
+        main, held = out["main"], display["main"]
+        assert (main["data_key"], main["summary_stats_key"]) == (held["data_key"], held["summary_stats_key"])
+        for key in ("pinned_rows", "extra_grid_config", "component_config"):
+            assert main["df_viewer_config"][key] == held["df_viewer_config"][key]
+        assert main["df_viewer_config"]["column_config"][0]["displayer_args"] == {"displayer": "obj"}
+
+    def test_the_display_given_is_not_changed(self, sp):
+        display = _grid_display([{"col_name": "a", "ag_grid_specs": {"sortable": True}}, {"col_name": "b"}],
+            left=[{"col_name": "index"}])
+        before = json.dumps(display, sort_keys=True)
+        out = self._disable(sp, display)
+        assert json.dumps(display, sort_keys=True) == before
+        assert out is not display
+
+    @pytest.mark.parametrize("display", [{}, {"main": None}, {"main": {}}, {"main": {"data_key": "main"}},
+        {"main": {"data_key": "main", "df_viewer_config": None}},
+        {"main": {"data_key": "main", "df_viewer_config": {"column_config": None}}},
+        {"main": {"data_key": "main", "df_viewer_config": {"column_config": []}}}])
+    def test_a_display_that_is_not_the_usual_shape_does_not_raise(self, sp, display):
+        assert isinstance(self._disable(sp, display), dict)
+
+    def test_a_display_with_no_left_columns_is_handled(self, sp):
+        display = _grid_display([{"col_name": "a"}])
+        del display["main"]["df_viewer_config"]["left_col_configs"]
+        out = self._disable(sp, display)
+        assert out["main"]["df_viewer_config"]["column_config"][0]["ag_grid_specs"]["sortable"] is False
