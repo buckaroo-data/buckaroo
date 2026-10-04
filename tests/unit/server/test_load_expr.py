@@ -2079,6 +2079,54 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         self.assertIn("firstpull.stats_total", [r["name"] for r in captured])
 
     @tornado.testing.gen_test
+    async def test_returning_to_a_completed_state_is_answered_from_the_cache(self):
+        await self._load("sw-revisit", stats_delivery="deferred")
+        ws, first = await self._connect("sw-revisit", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        ws.write_message(_stats_request(gen))
+        original = await _read_json(ws)
+        ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
+        self._assert_pending(await _read_json(ws), gen + 1)
+        ws.write_message(_stats_request(gen + 1))
+        self.assertEqual((await _read_json(ws))["type"], "stats_update")
+
+        ws.write_message(_state_change(quick_command_args={}))
+        self._assert_pending(await _read_json(ws), gen + 2)
+        with _count_stat_queries() as queries:
+            ws.write_message(_stats_request(gen + 2))
+            again = await _read_json(ws)
+        self.assertEqual(queries, [], "the first state's stats are in summary_stats_cache")
+        self.assertEqual(_rows_by_stat(again["payload"]), _rows_by_stat(original["payload"]))
+
+    @tornado.testing.gen_test
+    async def test_completing_the_stats_keeps_component_config(self):
+        await self._load("sw-theme", stats_delivery="deferred", component_config={"className": "sw-themed"})
+        ws, first = await self._connect("sw-theme", caps="stats_update")
+        ws.write_message(_stats_request(self._stats(first)["gen"]))
+        self.assertEqual((await _read_json(ws))["type"], "stats_update")
+        _, late = await self._connect("sw-theme", caps="stats_update")
+        dvc = late["df_display_args"]["main"]["df_viewer_config"]
+        self.assertEqual(dvc["component_config"]["className"], "sw-themed")
+
+    @tornado.testing.gen_test
+    async def test_a_warm_load_expr_keeps_the_generation(self):
+        await self._load("sw-warm", stats_delivery="deferred")
+        _, first = await self._connect("sw-warm", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        await self._load("sw-warm", stats_delivery="deferred")
+        _, again = await self._connect("sw-warm", caps="stats_update")
+        self.assertEqual(self._stats(again)["gen"], gen, "a warm exit rebuilds nothing, so the generation stands")
+
+    @tornado.testing.gen_test
+    async def test_a_stats_request_with_no_data_loaded_is_aborted(self):
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/sw-no-data?caps=stats_update")
+        self.clients.append(ws)
+        ws.write_message(_stats_request(1))
+        aborted = await _read_json(ws)
+        self.assertEqual((aborted["type"], aborted["reason"]), ("stats_aborted", "no_data"))
+
+    @tornado.testing.gen_test
     async def test_inline_sessions_send_no_df_meta_stats(self):
         """Default behaviour: a session with the default policy sends the
         message it always has, and a client reads the absence as complete."""
