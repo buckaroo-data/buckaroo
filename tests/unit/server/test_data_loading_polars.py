@@ -526,6 +526,19 @@ def _stat_run(backend, gen=4):
     return StatRun(gen, "raw", dataflow.build_stats(dataflow.processed_df, run=False)), dataflow
 
 
+# Original names that are also rewritten names of other columns: the rewritten
+# names are c -> a, b -> b, a -> c.
+_PERMUTED_DATA = {
+    "c": [12.5, 12.5, 12.5, 18.9, 18.9, 1e9],
+    "b": [1, 1, 1, 2, 2, 3],
+    "a": ["a", "a", "a", "b", "b", "c"]}
+
+
+def _permuted_stat_run(backend, gen=4):
+    dataflow = _build_dataflow(backend, _frame(backend, _PERMUTED_DATA))
+    return StatRun(gen, "raw", dataflow.build_stats(dataflow.processed_df, run=False)), dataflow
+
+
 class TestStatRun:
     """The run a session holds for one generation and scope: the planned
     units, the fragments they produced in the order they finished, and the
@@ -555,6 +568,34 @@ class TestStatRun:
         assert run.next_unit().columns == ("price",)
         assert run.next_unit(prefer=("c",)).columns == ("category",), "a rewritten name works too"
         assert run.next_unit(prefer=("nothing",)).columns == ("price",)
+
+    def test_prefer_reads_a_name_that_is_an_original_name_as_that_column(self, backend):
+        """"a" is the original name of the last column and the rewritten name
+        of the first. Read once, as the original name, it picks the last."""
+        run, _dataflow = _permuted_stat_run(backend)
+        assert [u.columns for u in run.units] == [("c",), ("b",), ("a",)]
+        assert run.next_unit(prefer=("a",)).columns == ("a",)
+        assert run.next_unit(prefer=("b",)).columns == ("b",)
+        assert run.next_unit(prefer=("c",)).columns == ("c",)
+
+    def test_prefer_in_the_rewritten_namespace_reads_a_client_s_names(self, backend):
+        """A client knows only the rewritten names: its "c" is the column
+        whose original name is "a"."""
+        run, _dataflow = _permuted_stat_run(backend)
+        assert run.next_unit(prefer=("c",), namespace="rewritten").columns == ("a",)
+        assert run.next_unit(prefer=("a",), namespace="rewritten").columns == ("c",)
+        assert run.next_unit(prefer=("zzz",), namespace="rewritten").columns == ("c",)
+
+    def test_run_next_runs_the_unit_prefer_picks_in_its_namespace(self, backend):
+        run, _dataflow = _permuted_stat_run(backend)
+        assert list(run.run_next(prefer=("c",), namespace="rewritten")) == ["a"]
+        assert list(run.run_next(prefer=("c",))) == ["c"]
+        assert run.ran == ["column:a", "column:c"]
+
+    def test_prefer_with_an_unknown_namespace_is_an_error(self, backend):
+        run, _dataflow = _permuted_stat_run(backend)
+        with pytest.raises(ValueError, match="namespace"):
+            run.next_unit(prefer=("c",), namespace="both")
 
     def test_the_run_is_complete_when_no_unit_is_left(self, backend):
         run, _dataflow = _stat_run(backend)

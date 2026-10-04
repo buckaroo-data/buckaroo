@@ -907,3 +907,65 @@ class TestStatUnits:
         assert len(fragments) == len(df.columns)
         assert repr(rewrite_sd(merge_fragments(fragments), df)) == repr(expected)
         assert errors == [] and acc.errors == []
+
+    # A name can be an original column name and, at the same time, the
+    # rewritten name of another column. ``permuted`` has that: its rewritten
+    # names are c -> a, b -> b, a -> c.
+    @staticmethod
+    def _permuted():
+        return pd.DataFrame({'c': [1, 2, 3, 1], 'b': ['x', 'y', 'x', 'x'], 'a': [0.5, 1.5, None, 2.5]})
+
+    @pytest.mark.parametrize('columns, expected', [
+        (('c',), ['c']),
+        (('a',), ['a']),
+        (('a', 'c'), ['c', 'a']),
+        (('b',), ['b']),
+    ])
+    def test_a_name_that_is_an_original_name_picks_that_column_only(self, columns, expected):
+        """'c' is the original name of one column and the rewritten name of
+        another. Read once, as the original name, it asks for one column."""
+        state = StatState(self._permuted(), columns=columns)
+        assert [u.columns[0] for u in self._pipeline().plan(state)] == expected
+
+    def test_a_rewritten_name_that_is_no_original_name_still_picks_its_column(self):
+        df = self._permuted().rename(columns={'b': 'word'})
+        state = StatState(df, columns=('b',))
+        assert [u.columns for u in self._pipeline().plan(state)] == [('word',)]
+
+    @pytest.mark.parametrize('columns, expected', [
+        (('c',), ['a']),
+        (('a',), ['c']),
+        (('b',), ['b']),
+        (('a', 'c'), ['c', 'a']),
+    ])
+    def test_the_rewritten_namespace_reads_every_name_as_a_rewritten_name(self, columns, expected):
+        state = StatState(self._permuted(), columns=columns, namespace='rewritten')
+        pipeline = self._pipeline()
+        assert [u.columns[0] for u in pipeline.plan(state)] == expected
+        acc, fragments = self._run_units(pipeline, state)
+        assert list(acc.sd()) == expected and [list(f) for f in fragments] == [[c] for c in expected]
+
+    def test_the_original_namespace_ignores_a_rewritten_name(self):
+        df = self._permuted().rename(columns={'b': 'word'})
+        state = StatState(df, columns=('b', 'c'), namespace='original')
+        assert [u.columns for u in self._pipeline().plan(state)] == [('c',)]
+
+    def test_a_group_outside_the_frame_is_empty(self):
+        assert self._pipeline().plan(StatState(self._permuted(), columns=('zzz',))) == []
+
+    def test_priority_reads_a_name_that_is_an_original_name_as_that_column(self):
+        state = StatState(self._permuted(), priority=('a',))
+        assert [u.columns[0] for u in self._pipeline().plan(state)] == ['a', 'c', 'b']
+
+    @pytest.mark.parametrize('namespace, priority, expected', [
+        ('original', ('a',), ['a', 'c', 'b']),
+        ('rewritten', ('c',), ['a', 'c', 'b']),
+        ('rewritten', ('a',), ['c', 'b', 'a']),
+    ])
+    def test_priority_reads_each_name_once_in_its_namespace(self, namespace, priority, expected):
+        state = StatState(self._permuted(), priority=priority, namespace=namespace)
+        assert [u.columns[0] for u in self._pipeline().plan(state)] == expected
+
+    def test_an_unknown_namespace_is_an_error(self):
+        with pytest.raises(ValueError, match='namespace'):
+            self._pipeline().plan(StatState(self._permuted(), columns=('c',), namespace='both'))

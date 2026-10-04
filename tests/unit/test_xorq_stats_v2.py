@@ -1083,6 +1083,40 @@ class TestStatUnits:
         full, _errors = pipeline.process_table(_make_table())
         assert _stable(acc.sd()) == _stable({c: full[c] for c in ("ints", "strs")})
 
+    @staticmethod
+    def _permuted_table():
+        """'c' is the original name of one column and the rewritten name of
+        another: the rewritten names are c -> a, b -> b, a -> c."""
+        return xo.memtable(pd.DataFrame({"c": [1, 2, 3, 4, 5, 6, 7], "b": [7, 6, 5, 4, 3, 2, 1],
+            "a": [1, 3, 5, 7, 9, 11, 13]}))
+
+    @pytest.mark.parametrize("columns, expected", [(("c",), ["c"]), (("a",), ["a"]), (("a", "c"), ["c", "a"])])
+    def test_a_group_name_that_is_an_original_name_picks_that_column_only(self, columns, expected):
+        state = StatState(self._permuted_table(), columns=columns)
+        units = XorqStatPipeline(XORQ_STATS_V2, unit_test=False).plan(state)
+        assert [u.id for u in units] == ["batch", *(f"histogram:{c}" for c in expected)]
+        assert units[0].columns == tuple(expected)
+
+    @pytest.mark.parametrize("columns, namespace, expected", [
+        (("c",), "rewritten", ["a"]),
+        (("a",), "rewritten", ["c"]),
+        (("c",), "original", ["c"]),
+    ])
+    def test_a_group_reads_each_name_in_its_namespace(self, columns, namespace, expected):
+        state = StatState(self._permuted_table(), columns=columns, namespace=namespace)
+        units = XorqStatPipeline(XORQ_STATS_V2, unit_test=False).plan(state)
+        assert [u.id for u in units] == ["batch", *(f"histogram:{c}" for c in expected)]
+        assert units[0].columns == tuple(expected)
+
+    def test_priority_reads_a_name_that_is_an_original_name_as_that_column(self):
+        units = XorqStatPipeline(XORQ_STATS_V2, unit_test=False).plan(StatState(self._permuted_table(), priority=("a",)))
+        assert [u.id for u in units] == ["batch", "histogram:a", "histogram:c", "histogram:b"]
+
+    def test_priority_reads_each_name_in_the_rewritten_namespace(self):
+        state = StatState(self._permuted_table(), priority=("c",), namespace="rewritten")
+        units = XorqStatPipeline(XORQ_STATS_V2, unit_test=False).plan(state)
+        assert [u.id for u in units] == ["batch", "histogram:a", "histogram:c", "histogram:b"]
+
 
 # ============================================================
 # Splitting the batch by column chunk (rows-first s4)
