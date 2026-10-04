@@ -569,6 +569,53 @@ test.describe('WebSocket data flow', () => {
     expect(order.indexOf('infinite_resp')).toBeLessThan(order.indexOf('stats_request'));
   });
 
+  test('a session whose stats are not computed: the page asks for nothing until the Compute summary stats button is clicked', async ({ page, request }) => {
+    const session = `ws-notcomputed-${Date.now()}`;
+    await loadBuckarooSession(request, session);
+
+    const requests: any[] = [];
+    await page.routeWebSocket(new RegExp(`/ws/${session}`), (ws) => {
+      const server = ws.connectToServer();
+      let firstFrame = true;
+      server.onMessage((message) => {
+        if (typeof message === 'string') {
+          const msg = JSON.parse(message);
+          if (msg.type === 'initial_state' && firstFrame) {
+            firstFrame = false;
+            msg.df_data_dict.all_stats = [];
+            msg.df_meta = { ...msg.df_meta, stats: { status: 'not_computed', tier: 'schema', gen: 4, reason: 'host' } };
+            ws.send(JSON.stringify(msg));
+            return;
+          }
+        }
+        ws.send(message);
+      });
+      ws.onMessage((message) => {
+        if (typeof message === 'string') {
+          const msg = JSON.parse(message);
+          if (msg.type === 'stats_request') {
+            requests.push(msg);
+            return;
+          }
+        }
+        server.send(message);
+      });
+    });
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'not_computed');
+    // The pinned rows are omitted, not left as placeholders.
+    await expect(page.locator('.ag-floating-top .ag-row')).toHaveCount(0);
+
+    // Nothing is asked for on its own, however long the page waits.
+    await page.waitForTimeout(2500);
+    expect(requests).toEqual([]);
+
+    await page.getByRole('button', { name: 'Compute summary stats' }).click();
+    await expect.poll(() => requests).toEqual([{ type: 'stats_request', stats_gen: 4, scope: 'raw', force: true }]);
+  });
+
   test('a session that does not report df_meta.stats never gets a stats_request', async ({ page, request }) => {
     const session = `ws-nosched-${Date.now()}`;
     await loadBuckarooSession(request, session);

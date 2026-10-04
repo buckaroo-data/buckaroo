@@ -115,7 +115,9 @@ describe("StatsStatusCell", () => {
         expect(screen.getByTestId("stats-status")).toHaveAttribute("data-stats-status", "not_computed");
 
         fireEvent.click(screen.getByRole("button", { name: "Compute summary stats" }));
+        // Called with no arguments, not with the click event.
         expect(onComputeStats).toHaveBeenCalledTimes(1);
+        expect(onComputeStats).toHaveBeenCalledWith();
     });
 
     it("not_computed: with no handler there is no button, only the label", () => {

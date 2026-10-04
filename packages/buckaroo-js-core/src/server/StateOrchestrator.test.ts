@@ -134,7 +134,7 @@ describe("the first request", () => {
         await tick(FIRST_PAINT_TIMEOUT - 1);
         expect(model.sent).toEqual([]);
 
-        await tick(1);
+        await tick(2);
         expect(model.sent).toEqual([request(3)]);
     });
 
@@ -240,9 +240,12 @@ describe("a state change", () => {
         return { model, orchestrator };
     };
 
-    // The server answers a dataflow change with a frame for the next stats_gen.
-    const nextFrame = (model: FakeModel, gen: number) => {
+    // The server answers a dataflow change with a frame for the next stats_gen,
+    // then the grid's refetch brings rows. They are separate messages, so the
+    // scheduler has read the frame by the time the rows arrive.
+    const nextFrame = async (model: FakeModel, gen: number) => {
         model.frame({ df_meta: meta(pending(gen)), df_data_dict: dict() });
+        await tick();
         rowsArrived(model);
     };
 
@@ -256,7 +259,7 @@ describe("a state change", () => {
         // The reply to the old request lands. It is not followed by another.
         model.set("df_data_dict", dict([statRow("mean")]));
         await tick(10);
-        nextFrame(model, 4);
+        await nextFrame(model, 4);
 
         await tick(DEBOUNCE - 1);
         expect(model.sent).toEqual([request(3)]);
@@ -270,6 +273,7 @@ describe("a state change", () => {
         const { model } = await pendingAt(3);
         // The frame for the next gen carries its dict before its df_meta.
         model.frame({ df_data_dict: dict(), df_meta: meta(pending(4)) });
+        await tick();
         rowsArrived(model);
         await tick(10_000);
         expect(model.sent).toEqual([request(3), request(4)]);
@@ -281,7 +285,7 @@ describe("a state change", () => {
         ["quick_command_args", { quick_command_args: { search: ["x"] } }],
     ])("a %s change cancels a request that is waiting out its delay", async (_field, change) => {
         const { model } = await pendingAt(3);
-        nextFrame(model, 4);
+        await nextFrame(model, 4);
         await tick(300);
 
         model.set("buckaroo_state", bState(change));
@@ -289,7 +293,7 @@ describe("a state change", () => {
         // 600 ms in: the request that was due at 500 ms never went out.
         expect(model.sent).toEqual([request(3)]);
 
-        nextFrame(model, 5);
+        await nextFrame(model, 5);
         await tick(DEBOUNCE - 1);
         expect(model.sent).toEqual([request(3)]);
         await tick(1);
@@ -303,7 +307,7 @@ describe("a state change", () => {
         ["sampled", { sampled: "sample" }],
     ])("a %s-only change is skipped", async (_label, change) => {
         const { model } = await pendingAt(3);
-        nextFrame(model, 4);
+        await nextFrame(model, 4);
         await tick(300);
 
         model.set("buckaroo_state", bState(change));
@@ -329,6 +333,37 @@ describe("a state change", () => {
         expect(model.sent).toEqual([request(3), request(3)]);
     });
 
+    it("waits out the delay for a state change made after the earlier stats completed", async () => {
+        const { model } = await pendingAt(3);
+        await tick(250); // a request that took as long as the default assumes, so the delay is DEBOUNCE
+        model.set("df_data_dict", dict([statRow("mean")]));
+        model.set("df_meta", meta(complete(3))); // the final reply
+        await tick();
+
+        // The first state asked at once; this one is a change to it.
+        model.set("buckaroo_state", bState({ post_processing: "log_scale" }));
+        await nextFrame(model, 4);
+        await tick(DEBOUNCE - 1);
+        expect(model.sent).toEqual([request(3)]);
+        await tick(1);
+        expect(model.sent).toEqual([request(3), request(4)]);
+    });
+
+    it("waits out the delay for the first state change of a model that started with its stats complete", async () => {
+        const model = makeModel(complete(3));
+        start(model);
+        rowsArrived(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+
+        model.set("buckaroo_state", bState({ quick_command_args: { search: ["a"] } }));
+        await nextFrame(model, 4);
+        await tick(DEBOUNCE - 1);
+        expect(model.sent).toEqual([]);
+        await tick(1);
+        expect(model.sent).toEqual([request(4)]);
+    });
+
     it("asks again for the same state when the server never answers the change with a frame", async () => {
         const { model } = await pendingAt(3);
         model.set("buckaroo_state", bState({ post_processing: "log_scale" }));
@@ -348,12 +383,29 @@ describe("a state change", () => {
         expect(orchestrator.computeDebounce()).toBe(800);
 
         model.set("buckaroo_state", bState({ post_processing: "log_scale" }));
-        nextFrame(model, 4);
+        await nextFrame(model, 4);
         await tick(799);
         expect(model.sent).toHaveLength(2);
         await tick(1);
         expect(model.sent).toHaveLength(3);
         expect(model.sent[2]).toEqual(request(4));
+    });
+
+    it("measures a request once: later events do not stretch the delay", async () => {
+        const model = makeModel(pending(3));
+        const orchestrator = start(model, { minDebounceMs: 100, maxDebounceMs: 20_000 });
+        rowsArrived(model);
+        await tick(400);
+        model.set("df_data_dict", dict([statRow("mean")]));
+        model.set("df_meta", meta(complete(3))); // the final reply
+        await tick();
+        expect(orchestrator.computeDebounce()).toBe(800);
+
+        // A full frame for the finished state, long afterwards.
+        await tick(10_000);
+        model.frame({ df_meta: meta(complete(3)), df_data_dict: dict() });
+        await tick();
+        expect(orchestrator.computeDebounce()).toBe(800);
     });
 
     it.each([
@@ -511,6 +563,7 @@ describe("wired into WebSocketModel", () => {
         expect(ws.sent).toEqual([request(3)]);
 
         ws.deliver({ type: "initial_state", df_meta: meta(pending(4)), df_data_dict: dict() });
+        await tick();
         rowsFromServer(ws);
         await tick(DEBOUNCE);
         expect(ws.sent).toEqual([request(3), request(4)]);

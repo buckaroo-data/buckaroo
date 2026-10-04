@@ -15,6 +15,7 @@
  */
 import type { Meta, StoryObj } from "@storybook/react";
 import React, { useMemo, useState } from "react";
+import "../style/dcf-npm.css";
 import { BuckarooInfiniteWidget } from "../components/BuckarooWidgetInfinite";
 import { DFData, DFViewerConfig } from "../components/DFViewerParts/DFWhole";
 import { IDisplayArgs } from "../components/DFViewerParts/gridUtils";
