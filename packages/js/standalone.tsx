@@ -252,6 +252,12 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
         model.save_changes();
     }, [model]);
 
+    // The status bar's Compute summary stats button, shown while the server
+    // reports the stats as not computed.
+    const onComputeStats = React.useCallback(() => {
+        srt.requestStats(model, { force: true });
+    }, [model]);
+
     if (!dfDisplayArgs || !dfDisplayArgs["main"]) {
         return <div style={{ padding: 20, fontFamily: "sans-serif" }}>
             Waiting for data...
@@ -272,6 +278,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
                 on_buckaroo_state={onBuckarooState}
                 buckaroo_options={buckarooOptions}
                 src={src}
+                on_compute_stats={onComputeStats}
             />
         </div>
     );

@@ -14,9 +14,11 @@
  *   Server sends a JSON text frame (infinite_resp), then a binary frame (Parquet).
  *   This class pairs them and emits "msg:custom" with (msg, [DataView]).
  *
- * stats_update and stats_aborted frames go to `stats` (see StatsChannel).
+ * stats_update and stats_aborted frames go to `stats` (see StatsChannel), and
+ * `scheduler` asks for the stats a session defers (see StateOrchestrator).
  */
 import { StatsChannel } from "./StatsChannel";
+import { StateOrchestrator } from "./StateOrchestrator";
 
 export class WebSocketModel {
     private ws: WebSocket;
@@ -25,11 +27,13 @@ export class WebSocketModel {
     private state: Record<string, any>;
     private pendingChanges: Set<string> = new Set();
     readonly stats: StatsChannel;
+    readonly scheduler: StateOrchestrator;
 
     constructor(ws: WebSocket, initialState: Record<string, any>) {
         this.state = { ...initialState };
         this.ws = ws;
         this.stats = new StatsChannel(this);
+        this.scheduler = new StateOrchestrator({ model: this });
 
         this.ws.onmessage = (event: MessageEvent) => {
             if (typeof event.data === "string") {
@@ -67,6 +71,9 @@ export class WebSocketModel {
                 }
             }
         };
+
+        // Idle unless df_meta.stats says pending, which no default session does.
+        this.scheduler.start();
     }
 
     send(msg: any): void {

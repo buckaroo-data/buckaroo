@@ -435,6 +435,24 @@ div.dependent-tabs ul.tabs li.active {
 @media (prefers-reduced-motion: reduce) {
     .bk-status-inflight-dot { animation: none; opacity: 1; }
 }
+/* Summary stats status in the status bar (rows-first c4). One line in a
+ * fixed-width column, whatever the status, so a status change moves nothing. */
+.bk-stats-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.bk-stats-status button {
+    font-size: 11px;
+    line-height: 16px;
+    padding: 0 6px;
+    cursor: pointer;
+}
 .status-bar .ag-center-cols-viewport {
     min-height: unset !important;
 }

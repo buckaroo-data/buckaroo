@@ -108,9 +108,9 @@ const pendingStatRenderer: CellRendererSelectorResult = { component: PendingStat
 
 // `statsStatus` is df_meta.stats.status. A required key with no value is, by
 // status:
-//   "pending"       a placeholder row, which holds the pinned area's height
-//   "not_computed"  omitted, since no value is coming
-//   anything else   undefined, as it was before df_meta.stats existed
+//   "pending"                a placeholder row, which holds the pinned area's height
+//   "not_computed", "error"  omitted, since no value is coming
+//   anything else            undefined, as it was before df_meta.stats existed
 export function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[], statsStatus?: StatsStatus) {
     const result: (DFData[number] | undefined)[] = [];
     for (const cfg of prc) {
@@ -118,7 +118,7 @@ export function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[], statsStat
         const key = stripOptionalPinnedKey(raw);
         const found = _.find(sdf, { index: key });
         if (found === undefined) {
-            if (isOptionalPinnedKey(raw) || statsStatus === "not_computed") {
+            if (isOptionalPinnedKey(raw) || statsStatus === "not_computed" || statsStatus === "error") {
                 continue;
             }
             if (statsStatus === "pending") {

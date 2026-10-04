@@ -307,9 +307,47 @@ export const SearchEditor =  memo(({ value, onValueChange, stopEditing }: Custom
     );
 });
 
-/** Renders df_meta.stats in the status bar (rows-first c4). Stub. */
-export const StatsStatusCell = function (_params: { value?: DFMetaStats; context?: { onComputeStats?: () => void } }) {
-    return null;
+/**
+ * Where the summary stats stand, as the server reports it in df_meta.stats:
+ * loading while they are pending, a control to ask for them while they are not
+ * computed, the reason when they failed. The cell always renders one line in a
+ * fixed-width column, so changing status moves nothing.
+ */
+export const StatsStatusCell = function (params: { value?: DFMetaStats; context?: { onComputeStats?: () => void } }) {
+    const stats = params.value;
+    if (stats === undefined) return null;
+    const onComputeStats = params.context?.onComputeStats;
+    const cell = (content: React.ReactNode, extra: React.HTMLAttributes<HTMLSpanElement> = {}) => (
+        <span className="bk-stats-status" data-testid="stats-status" data-stats-status={stats.status} {...extra}>
+            {content}
+        </span>
+    );
+    switch (stats.status) {
+        case "pending":
+            return cell(
+                <>
+                    <span className="bk-status-inflight-dot" aria-hidden="true" />
+                    <span>Computing summary stats…</span>
+                </>,
+                { role: "status", "aria-live": "polite" },
+            );
+        case "not_computed":
+            return onComputeStats ? (
+                cell(
+                    <button type="button" title="Summary stats are not computed" onClick={() => onComputeStats()}>
+                        Compute summary stats
+                    </button>,
+                )
+            ) : (
+                cell("Summary stats not computed")
+            );
+        case "error": {
+            const text = stats.reason ? `Stats error: ${stats.reason}` : "Stats error";
+            return cell(text, { title: text });
+        }
+        default:
+            return cell("Summary stats ready");
+    }
 };
 
 export function StatusBar({
@@ -321,6 +359,7 @@ export function StatusBar({
     themeConfig,
     inFlight,
     componentConfig,
+    onComputeStats,
 }: {
     dfMeta: DFMeta;
     buckarooState: BuckarooState;
@@ -339,7 +378,8 @@ export function StatusBar({
      *  Python's ComponentConfig TypedDict; cell renderers read them via
      *  params.context.componentConfig. */
     componentConfig?: Record<string, unknown>;
-    /** Sends a forced stats_request; shown as a control while the stats are not computed. */
+    /** Sends a forced stats_request. The stats column shows it as a button while
+     *  df_meta.stats.status is "not_computed"; without it there is no button. */
     onComputeStats?: () => void;
 }) {
     if (false) {
@@ -415,6 +455,18 @@ export function StatusBar({
             width: 120,
             cellRenderer: dfDisplayCell,
         },
+        // Only for a session whose server reports df_meta.stats; a fixed width, so
+        // the status changing never moves the other columns.
+        ...(dfMeta.stats === undefined
+            ? []
+            : [{
+                field: "stats",
+                headerName: "stats",
+                headerTooltip: "Summary stats status",
+                width: 200,
+                cellDataType: false,
+                cellRenderer: StatsStatusCell,
+            }]),
         /*
     {
       field: 'auto_clean',
@@ -478,7 +530,8 @@ export function StatusBar({
             filtered_rows: basicIntFormatter.format(dfMeta.filtered_rows),
             post_processing: buckarooState.post_processing,
             show_commands: buckarooState.show_commands || "0",
-            search: searchStr
+            search: searchStr,
+            ...(dfMeta.stats === undefined ? {} : { stats: dfMeta.stats }),
         },
     ];
 
@@ -550,6 +603,7 @@ export function StatusBar({
                         setBuckarooState,
                         buckarooOptions,
                         componentConfig,
+                        onComputeStats,
                     }}
                 ></AgGridReact>
             </div>

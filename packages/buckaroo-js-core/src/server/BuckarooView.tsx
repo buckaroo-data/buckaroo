@@ -10,6 +10,7 @@ import { IDisplayArgs } from "../components/DFViewerParts/gridUtils";
 import { stampLayoutType, isFitContentLayout } from "../components/DFViewerParts/displayArgsUtils";
 import { IModel } from "./IModel";
 import { makeLatestDictDecoder, RawDFDataDict } from "./latestDictDecoder";
+import { requestStats } from "./StateOrchestrator";
 
 export type BuckarooServerMode = "viewer" | "buckaroo";
 
@@ -284,6 +285,12 @@ export function BuckarooView({
         model.save_changes();
     }, [model]);
 
+    // The status bar's Compute summary stats button, shown while the server
+    // reports the stats as not computed.
+    const onComputeStats = React.useCallback(() => {
+        requestStats(model, { force: true });
+    }, [model]);
+
     // gridUtils honors component_config.layoutType. Stamp it per entry so the
     // prop wins when provided. autoHeight=undefined → server value left intact.
     const effectiveDisplayArgs = React.useMemo(
@@ -322,6 +329,7 @@ export function BuckarooView({
                     on_buckaroo_state={onBuckarooState}
                     buckaroo_options={buckarooOptions}
                     src={src}
+                    on_compute_stats={onComputeStats}
                 />
             ) : (
                 <DFViewerInfiniteDS

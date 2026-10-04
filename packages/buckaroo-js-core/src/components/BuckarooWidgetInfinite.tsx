@@ -134,6 +134,7 @@ export function BuckarooInfiniteWidget({
         df_data_dict,
         df_display_args,
         df_meta,
+        on_compute_stats,
         operations,
         on_operations,
         operation_results,
@@ -348,6 +349,7 @@ export function BuckarooInfiniteWidget({
                         themeConfig={cDisp.df_viewer_config?.component_config?.theme}
                         inFlight={inFlight}
                         componentConfig={effectiveDisplayArgs['main']?.df_viewer_config?.component_config as Record<string, unknown> | undefined}
+                        onComputeStats={on_compute_stats}
                     />
                     <DFViewerInfinite
                         key={effectiveDataframeId}
