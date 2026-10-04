@@ -33,6 +33,11 @@ export interface DFMetaStats {
     // Stat keys left out of the run, and keys computed from a sample.
     omitted_keys?: string[];
     approx_keys?: string[];
+    // Unlike the fields above, the server never sends this one. StatsChannel
+    // sets it when a run ends with the session still not computed (a request
+    // for some columns, or for the demand columns): the grid's own names of
+    // the columns whose stats the run merged into all_stats.
+    computed_columns?: string[];
 }
 
 export interface DFMeta {

@@ -14,6 +14,7 @@ import { getSpyCalls, resetSpy, setMockColumnState } from "../test-utils/agGridS
 import { BuckarooState, BuckarooOptions, DFMeta } from "./WidgetTypes";
 import { DFViewerConfig } from "./DFViewerParts/DFWhole";
 import { IDisplayArgs } from "./DFViewerParts/gridUtils";
+import { StatsChannel } from "../server/StatsChannel";
 
 jest.mock("ag-grid-react", () =>
   require("../test-utils/agGridSpy").agGridReactMockFactory(),
@@ -1036,5 +1037,81 @@ describe("BuckarooInfiniteWidget summary view, stats not computed (rows-first c5
     );
     expect(screen.queryByTestId("stats-empty-state")).not.toBeInTheDocument();
     expect(getSpyCalls().mountCount).toBe(1);
+  });
+
+  // A run for some columns (the per-column form, or the demand columns) ends
+  // with the session still not computed, and the stats it merged are in
+  // all_stats. The summary view lists them instead of the empty state.
+  describe("after a run that computed some columns", () => {
+    const ranArgs: Record<string, IDisplayArgs> = {
+      ...baseDisplayArgs,
+      summary: {
+        data_key: "empty",
+        df_viewer_config: {
+          ...baseConfig,
+          pinned_rows: [{ primary_key_val: "min", displayer_args: { displayer: "obj" } }],
+        },
+        summary_stats_key: "all_stats",
+      },
+    };
+    const ranProps = (meta: DFMeta, allStats: any[]) =>
+      widgetProps({ df_display_args: ranArgs, df_meta: meta, df_data_dict: { empty: [], all_stats: allStats } });
+    const lastPinnedRows = (): any[] => {
+      const sets = getSpyCalls().setGridOption.filter(([k]) => k === "pinnedTopRowData");
+      return sets[sets.length - 1][1] as any[];
+    };
+    const minRows = [
+      { index: "dtype", a: "int64" },
+      { index: "min", a: 1 },
+    ];
+
+    it("shows the grid, with the stats the run merged, in place of the empty state", () => {
+      render(<BuckarooInfiniteWidget {...ranProps(notComputed({ computed_columns: ["a"] }), minRows)} />);
+      expect(screen.queryByTestId("stats-empty-state")).not.toBeInTheDocument();
+      expect(getSpyCalls().mountCount).toBe(1);
+      expect(lastPinnedRows()).toEqual([minRows[1]]);
+    });
+
+    it("an empty list of columns keeps the empty state", () => {
+      render(<BuckarooInfiniteWidget {...ranProps(notComputed({ computed_columns: [] }), minRows)} />);
+      expect(screen.getByTestId("stats-empty-state")).toBeInTheDocument();
+      expect(getSpyCalls().mountCount).toBe(0);
+    });
+
+    it("gives the empty state back when a new gen's frame drops the columns", () => {
+      const props = ranProps(notComputed({ computed_columns: ["a"] }), minRows);
+      const { rerender } = render(<BuckarooInfiniteWidget {...props} />);
+      expect(screen.queryByTestId("stats-empty-state")).not.toBeInTheDocument();
+
+      rerender(<BuckarooInfiniteWidget {...props} df_meta={notComputed({ gen: 2 })} df_data_dict={{ empty: [], all_stats: [minRows[0]] }} />);
+      expect(screen.getByTestId("stats-empty-state")).toBeInTheDocument();
+    });
+
+    it("shows the grid for the session a scoped reply leaves, as StatsChannel records it", async () => {
+      const state: Record<string, any> = {
+        df_meta: notComputed(),
+        df_data_dict: { empty: [], all_stats: [minRows[0]] },
+      };
+      const channel = new StatsChannel({ get: (key) => state[key], set: (key, value) => { state[key] = value; } });
+      const before = state.df_meta;
+      const reply = {
+        type: "stats_update",
+        stats_gen: 1,
+        scope: "raw",
+        tier: "scalar",
+        final: true,
+        status: "not_computed",
+        payload: { format: "json", layout: "wide", data: [{ index: "min", level_0: "min", a: 1 }] },
+      };
+      channel.handle(reply);
+      await waitFor(() => expect(state.df_meta).not.toBe(before));
+      expect(state.df_meta.stats.status).toBe("not_computed");
+
+      render(<BuckarooInfiniteWidget {...ranProps(state.df_meta, state.df_data_dict.all_stats)} />);
+      expect(screen.queryByTestId("stats-empty-state")).not.toBeInTheDocument();
+      expect(getSpyCalls().mountCount).toBe(1);
+      expect(lastPinnedRows().map((r) => r.index)).toEqual(["min"]);
+      expect(lastPinnedRows()[0].a).toBe(1);
+    });
   });
 });

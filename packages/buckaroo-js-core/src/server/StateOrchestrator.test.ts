@@ -1158,7 +1158,8 @@ describe("wired into WebSocketModel", () => {
             ws.deliver({ ...update(3, "min", true, 0), tier: "scalar", status: "not_computed" });
             await tick(10_000);
             expect(ws.sent).toHaveLength(1);
-            expect(model.get("df_meta").stats).toEqual(policy({ gen: 3 }));
+            // The session is not computed again, and says which column the run filled.
+            expect(model.get("df_meta").stats).toEqual({ ...policy({ gen: 3 }), computed_columns: ["a"] });
 
             expect(forceStats(model)).toBe(true);
             expect(ws.sent).toEqual([forcedRequest({ columns: ["a"] }), forcedRequest()]);
@@ -1181,6 +1182,18 @@ describe("wired into WebSocketModel", () => {
             expect(ws.sent).toHaveLength(1);
             expect(model.get("df_meta").stats.status).toBe("not_computed");
             expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "min"]);
+        });
+
+        it("a demand run's final reply names the columns it filled", async () => {
+            const { ws, model } = makeSocketModel(policy({ gen: 3, demand_columns: ["a"] }));
+            rowsFromServer(ws);
+            await tick();
+            ws.deliver({ ...update(3, "min", true, 0), tier: "scalar", status: "not_computed" });
+            await tick(10_000);
+            expect(model.get("df_meta").stats).toEqual({
+                ...policy({ gen: 3, demand_columns: ["a"] }),
+                computed_columns: ["a"],
+            });
         });
     });
 });

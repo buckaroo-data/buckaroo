@@ -330,13 +330,93 @@ describe("a final stats_update with a status", () => {
         expect(model.get("df_meta").stats).toEqual({ ...policyStats, reason: "cost" });
     });
 
-    it("merges a payload it carries, and leaves the session not computed (a reply for some columns only)", async () => {
+    it("merges a payload it carries, and leaves the session not computed, naming the columns it filled (a reply for some columns only)", async () => {
         const { ws, model, events } = makePolicyModel();
         ws.deliver(update(3, [row("min", { a: 1 }), row("max", { a: 9 })], { tier: "scalar", status: "not_computed" }));
         await settle();
         expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "length", "min", "max"]);
-        expect(model.get("df_meta").stats).toEqual(policyStats);
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, computed_columns: ["a"] });
         expect(events).toEqual(["df_data_dict", "df_meta"]);
+    });
+
+    it("counts a column only where a cell has a value: a null fills nothing", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver(update(3, [row("min", { a: 1, b: null })], { tier: "scalar", status: "not_computed" }));
+        await settle();
+        expect(model.get("df_meta").stats.computed_columns).toEqual(["a"]);
+    });
+
+    it("names the columns every reply of a run filled, and a reply that is not final leaves df_meta alone", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver(update(3, [row("min", { a: 1, b: null })], { tier: "scalar", final: false }));
+        await settle();
+        expect(model.get("df_meta").stats).toEqual(policyStats);
+
+        ws.deliver(update(3, [row("max", { b: 9, a: null })], { tier: "scalar", status: "not_computed" }));
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, computed_columns: ["a", "b"] });
+    });
+
+    it("a final reply with no payload names the columns the run's earlier replies filled", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver(update(3, [row("min", { a: 1 })], { tier: "scalar", final: false }));
+        await settle();
+        ws.deliver({ type: "stats_update", stats_gen: 3, scope: "raw", tier: "scalar", final: true, status: "not_computed" });
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, computed_columns: ["a"] });
+    });
+
+    it("keeps the columns of an earlier run when a later one ends not computed", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver(update(3, [row("min", { a: 1 })], { tier: "scalar", status: "not_computed" }));
+        await settle();
+        ws.deliver(update(3, [row("min", { b: 2 })], { tier: "scalar", status: "not_computed" }));
+        await settle();
+        expect(model.get("df_meta").stats.computed_columns).toEqual(["a", "b"]);
+    });
+
+    it("a new gen starts over: the replies for the gen the client left are not counted", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver(update(3, [row("min", { a: 1 })], { tier: "scalar", final: false }));
+        await settle();
+        ws.deliver({
+            type: "initial_state",
+            df_meta: metaFor({ ...policyStats, gen: 4 }),
+            df_data_dict: { all_stats: schemaStats() },
+        });
+        ws.deliver(update(4, [row("min", { b: 2 })], { tier: "scalar", status: "not_computed" }));
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, gen: 4, computed_columns: ["b"] });
+    });
+
+    it("a frame that replaced the stats under the same gen takes the earlier replies' columns with it", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver(update(3, [row("min", { a: 1 })], { tier: "scalar", final: false }));
+        await settle();
+        ws.deliver({
+            type: "initial_state",
+            df_meta: metaFor(policyStats),
+            df_data_dict: { all_stats: schemaStats() },
+        });
+        ws.deliver(update(3, [row("min", { b: 2 })], { tier: "scalar", status: "not_computed" }));
+        await settle();
+        expect(model.get("df_meta").stats.computed_columns).toEqual(["b"]);
+    });
+
+    it("a refusal after replies that filled columns names them too", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver(update(3, [row("min", { a: 1 })], { tier: "scalar", final: false }));
+        await settle();
+        ws.deliver({ type: "stats_aborted", stats_gen: 3, current_gen: 3, scope: "raw", reason: "not_requestable" });
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, computed_columns: ["a"] });
+    });
+
+    it("an error does not name columns: the session is not a not computed one", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver(update(3, [row("min", { a: 1 })], { tier: "scalar", final: false }));
+        await settle();
+        ws.deliver({ type: "stats_aborted", stats_gen: 3, current_gen: 3, scope: "raw", reason: "error" });
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, status: "error", reason: "stats_failed" });
     });
 
     it("a final update with no status still completes the session and drops the policy fields", async () => {
