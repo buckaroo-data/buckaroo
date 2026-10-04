@@ -3254,6 +3254,46 @@ class TestScalarTierWire(tornado.testing.AsyncHTTPTestCase):
         self.assertTrue(_FULL_ONLY_WIRE <= set(_rows_by_stat(update["payload"])))
 
     @tornado.testing.gen_test
+    async def test_a_scalar_request_emits_the_request_and_unit_spans_with_the_scalar_tier(self):
+        captured: list = []
+        with patch.object(telemetry, "make_http_sink", lambda url, **kw: captured.append):
+            await self._load("st-span", limits=_SCALAR_BY_SIZE, stats_tier="auto", stats_delivery="deferred",
+                telemetry_url="http://companion.invalid/internal/telemetry")
+            ws, first = await self._connect("st-span", caps=_ONDEMAND)
+            gen = self._stats(first)["gen"]
+            await self._pull_update(ws, gen)
+
+        (request,) = [r for r in captured if r["name"] == "stats.request"]
+        (unit,) = [r for r in captured if r["name"] == "stats.unit"]
+        self.assertEqual((request["attrs"]["tier"], request["attrs"]["outcome"], request["attrs"]["final"]),
+            ("scalar", "update", True))
+        self.assertEqual((request["attrs"]["stats_gen"], request["attrs"]["units"]), (gen, 1))
+        self.assertEqual((unit["attrs"]["unit"], unit["attrs"]["phase"], unit["attrs"]["cost"]),
+            ("batch", "batch", "scan"))
+        self.assertNotIn("firstpull.stats_total", [r["name"] for r in captured], "nothing is completed")
+
+    @tornado.testing.gen_test
+    async def test_a_dataflow_field_change_starts_a_new_scalar_run_over_the_new_state(self):
+        sid = "st-change"
+        await self._scalar_target(sid)
+        session = self._session(sid)
+        ws, first = await self._connect(sid, caps=_ONDEMAND)
+        gen = self._stats(first)["gen"]
+        await self._pull_update(ws, gen)
+        self.assertEqual(session.stat_runs[(gen, "raw", "scalar", None)].acc.sd()["qty"]["length"], 5)
+
+        ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
+        changed = await _read_json(ws)
+        self.assertEqual((self._stats(changed)["status"], self._stats(changed)["gen"]), ("not_computed", gen + 1))
+        self.assertEqual(session.stat_runs, {}, "the run of the old generation is dropped")
+        stale = await self._pull(ws, gen)
+        self.assertEqual((stale["type"], stale["reason"]), ("stats_aborted", "stale"))
+        after = await self._pull_update(ws, gen + 1)
+        self.assertEqual((after["stats_gen"], after["tier"]), (gen + 1, "scalar"))
+        self.assertEqual(session.stat_runs[(gen + 1, "raw", "scalar", None)].acc.sd()["qty"]["length"], 2,
+            "the run is over the filtered state")
+
+    @tornado.testing.gen_test
     async def test_a_scalar_run_and_a_column_scoped_run_are_stored_apart_from_the_full_run(self):
         await self._load("st-keys", stats_delivery="deferred")
         session = self._session("st-keys")

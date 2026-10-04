@@ -1382,3 +1382,26 @@ class TestScalarTier:
         histogram = StatUnit("histogram:ints", ("ints",), "histogram", after=("batch",), cost="query")
         with pytest.raises(ValueError, match="scalar"):
             pipeline.run(histogram, acc)
+
+    def test_a_stat_that_reads_an_omitted_key_is_left_out_with_it(self):
+        @stat()
+        def double_median(median: float) -> float:
+            return median * 2
+
+        pipeline = XorqStatPipeline([*XORQ_STATS_V2, double_median], unit_test=False)
+        acc, run = _run_units(pipeline, StatState(_make_table(), tier="scalar"))
+        assert not any("double_median" in stats for _unit, fragment in run for stats in fragment.values())
+        assert acc.errors == [], "a stat with an input the tier does not have is not run, so it is no error"
+        full = _union(_run_units(pipeline, StatState(_make_table())))
+        assert full["ints"]["double_median"] == 2 * full["ints"]["median"]
+
+    def test_a_stat_that_reads_distinct_count_runs_on_the_unknown(self):
+        @stat()
+        def cardinality_unknown(distinct_count: int) -> bool:
+            return distinct_count is None
+
+        pipeline = XorqStatPipeline([*XORQ_STATS_V2, cardinality_unknown], unit_test=False)
+        scalar = _union(_run_units(pipeline, StatState(_make_table(), tier="scalar")))
+        full = _union(_run_units(pipeline, StatState(_make_table())))
+        assert (scalar["ints"]["cardinality_unknown"], full["ints"]["cardinality_unknown"]) == (True, False)
+        assert "distinct_count" not in scalar["ints"]
