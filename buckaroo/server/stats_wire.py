@@ -653,16 +653,21 @@ def _apply_force(session: SessionState, client: Any, asked: TierRequest) -> None
     """What a ``force`` request does to the session before it runs: clear the
     cost pause, and for a whole-table tier above the target, record the override
     so the target (and the status) follow it for this and later unfiltered
-    generations. The client that forced a ``full`` run holds the schema-tier
-    display config, so its digest is kept for the final reply to compare."""
+    generations. The client that forced a whole-table ``full`` run, whether it
+    raised the target or continued a paused run to it, holds the schema-tier
+    display config its ``not_computed`` frame carried (a frame that is not
+    ``pending`` records no digest), so its digest is kept for the final reply to
+    compare."""
     if not asked.force:
         return
     session.cost_paused = False
     target = effective_stats_policy(session)["tier_target"]
-    if asked.columns is None and asked.tier is not None and TIERS.index(asked.tier) > TIERS.index(target):
-        session.stats_override, session.stats_override_gen = asked.tier, session.stats_gen
-        if asked.tier == "full" and getattr(client, "display_args_hash", None) is None:
-            client.display_args_hash = display_args_hash(session.df_display_args)
+    tier = asked.tier or target
+    whole_table = asked.columns is None
+    if whole_table and TIERS.index(tier) > TIERS.index(target):
+        session.stats_override, session.stats_override_gen = tier, session.stats_gen
+    if whole_table and tier == "full" and getattr(client, "display_args_hash", None) is None:
+        client.display_args_hash = display_args_hash(session.df_display_args)
     restore_stats_status(session)
 
 
