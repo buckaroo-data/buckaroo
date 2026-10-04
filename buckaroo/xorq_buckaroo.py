@@ -27,7 +27,7 @@ from traitlets import Unicode
 from .buckaroo_widget import BuckarooInfiniteWidget, BuckarooWidget
 from .customizations.styling import DefaultMainStyling, DefaultSummaryStatsStyling
 from .customizations.xorq_autoclean_conf import NoCleaningConfXorq
-from .customizations.xorq_stats_v2 import XORQ_STATS_V2
+from .customizations.xorq_stats_v2 import XORQ_STATS_V2, schema_stats
 from .dataflow.autocleaning import PandasAutocleaning
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import Sampling
@@ -220,6 +220,8 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
                     'orig_col_name': orig_col,
                     'rewritten_col_name': rewritten_col}
             return empty, {}
+        if self.stats_tier == "schema":
+            return self._get_schema_sd(processed_df), {}
         cache_storage = getattr(self, 'cache_storage', None)
         chain = self._scope_chain(scope)
         scope_id = self._stat_scope_id(chain) if cache_storage is not None else None
@@ -265,6 +267,21 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
             col_meta['rewritten_col_name'] = rewritten_col
             rewritten[rewritten_col] = col_meta
         return rewritten, errs
+
+    def _get_schema_sd(self, processed_df: "XorqExpr | pd.DataFrame") -> dict:
+        """Identity, dtype, typing flags and row count for every column of an
+        expression, with no query beyond ``_expr_count`` (cached per
+        expression). Carries the same values full stats give those keys, so
+        styling that reads only them renders the same. ``_get_summary_sd``
+        handles a pandas frame before it gets here."""
+        expr = cast("XorqExpr", processed_df)
+        schema = expr.schema()
+        length = _expr_count(expr)
+        return {
+            rewritten_col: {
+                'orig_col_name': orig_col, 'rewritten_col_name': rewritten_col,
+                **schema_stats(str(schema[str(orig_col)])), 'length': length}
+            for orig_col, rewritten_col in old_col_new_col(expr)}
 
 
 _XORQ_ANALYSIS_KLASSES = list(XORQ_STATS_V2) + [DefaultSummaryStatsStyling, DefaultMainStyling]
