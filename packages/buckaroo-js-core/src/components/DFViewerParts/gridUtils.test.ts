@@ -15,7 +15,8 @@ import {
 import * as _ from "lodash-es";
 import { DFData, DFViewerConfig, NormalColumnConfig, MultiIndexColumnConfig, PinnedRowConfig, ColumnConfig, FormatterArgs } from "./DFWhole";
 import { getFormatter, getFloatFormatter, getCompactNumberFormatter, formatDuration, formatIsoDuration, getDurationFormatter } from './Displayer';
-import { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
+import { CellClassParams, ColDef, ICellRendererParams, ITooltipParams, ValueFormatterParams } from 'ag-grid-community';
+import { getSimpleTooltip } from './SeriesSummaryTooltip';
 
 describe("testing utility functions in gridUtils ", () => {
   // mostly sanity checks to help develop gridUtils
@@ -732,6 +733,70 @@ describe("testing multi index organiztion  ", () => {
     expect(children.length).toBe(2);
 
   });
+});
 
-  
+// Rows-first c0a: while summary stats are pending or not computed, pinned
+// cells have no value, and color_map has no histogram bins to read.
+describe("pinned cells without stats values (rows-first c0a)", () => {
+  it("the simple tooltip returns nothing for a valueless pinned cell instead of throwing", () => {
+    const tooltip = getSimpleTooltip("a");
+    // A pinned row with no value for the column: only the row label exists.
+    expect(() => tooltip({ data: { index: "dtype" } } as ITooltipParams)).not.toThrow();
+    expect(tooltip({ data: { index: "dtype" } } as ITooltipParams)).toBeUndefined();
+    // A null cell and a row that has not loaded (data undefined) are also valueless.
+    expect(() => tooltip({ data: { index: "mean", a: null } } as ITooltipParams)).not.toThrow();
+    expect(() => tooltip({ data: undefined } as unknown as ITooltipParams)).not.toThrow();
+  });
+
+  it("the simple tooltip still renders a cell that has a value", () => {
+    const tooltip = getSimpleTooltip("a");
+    const el = tooltip({ data: { index: 0, a: 5 } } as ITooltipParams);
+    expect(el).toBeDefined();
+    expect((el as any).props.children).toBe("5");
+  });
+
+  describe("color_map without histogram bins", () => {
+    const config: DFViewerConfig = {
+      pinned_rows: [],
+      left_col_configs: [],
+      column_config: [
+        {
+          col_name: "a",
+          header_name: "a",
+          displayer_args: { displayer: "obj" },
+          color_map_config: { color_rule: "color_map", map_name: "BLUE_TO_YELLOW", val_column: "a" },
+        },
+      ],
+    };
+    const cellStyleFor = (context: any, value: any = 3) => {
+      const colDef = dfToAgrid(config)[0] as ColDef;
+      const cellStyle = colDef.cellStyle as (p: CellClassParams) => Record<string, string>;
+      return cellStyle({ context, data: { index: 0, a: value }, value, node: { rowPinned: undefined } } as unknown as CellClassParams);
+    };
+
+    let logSpy: jest.SpyInstance;
+    beforeEach(() => { logSpy = jest.spyOn(console, "log").mockImplementation(() => {}); });
+    afterEach(() => { logSpy.mockRestore(); });
+
+    it("returns the neutral style without logging when the stats column has no entry", () => {
+      expect(cellStyleFor({ histogram_stats: {} })).toEqual({ backgroundColor: "inherit" });
+      expect(logSpy).not.toHaveBeenCalled();
+    });
+
+    it("returns the neutral style without logging when the entry has no histogram_bins", () => {
+      expect(cellStyleFor({ histogram_stats: { a: { histogram_log_bins: [1, 2] } } })).toEqual({ backgroundColor: "inherit" });
+      expect(logSpy).not.toHaveBeenCalled();
+    });
+
+    it("returns the neutral style without logging when the context carries no histogram_stats", () => {
+      expect(cellStyleFor({})).toEqual({ backgroundColor: "inherit" });
+      expect(logSpy).not.toHaveBeenCalled();
+    });
+
+    it("colors the cell once bins exist", () => {
+      const style = cellStyleFor({ histogram_stats: { a: { histogram_bins: [1, 2, 3, 4, 5] } } });
+      expect(style.backgroundColor).not.toBe("inherit");
+      expect(style.backgroundColor).toBeDefined();
+    });
+  });
 });

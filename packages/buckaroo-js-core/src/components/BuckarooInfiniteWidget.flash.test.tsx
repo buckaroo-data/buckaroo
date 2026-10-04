@@ -7,7 +7,7 @@
  * Tests assert CURRENT behavior on main (Option A in docs/rerender-test-plan.md).
  * Tests tagged "[captures current flash]" are tracking pain, not validating it.
  */
-import { render } from "@testing-library/react";
+import { render, act } from "@testing-library/react";
 import { BuckarooInfiniteWidget } from "./BuckarooWidgetInfinite";
 import { KeyAwareSmartRowCache } from "./DFViewerParts/SmartRowCache";
 import { getSpyCalls, resetSpy, setMockColumnState } from "../test-utils/agGridSpy";
@@ -21,8 +21,14 @@ jest.mock("ag-grid-react", () =>
 jest.mock("./useColorScheme", () => ({ useColorScheme: () => "light" }));
 
 // StatusBar also instantiates AgGridReact; stub it so the spy only counts the data grid.
+// The stub records its props so the in-flight tests can read inFlight and drive
+// setBuckarooState the way the real status bar does.
+let mockStatusBarProps: any = null;
 jest.mock("./StatusBar", () => ({
-  StatusBar: () => <div data-testid="status-bar-stub" />,
+  StatusBar: (props: any) => {
+    mockStatusBarProps = props;
+    return <div data-testid="status-bar-stub" data-inflight={String(!!props.inFlight)} />;
+  },
 }));
 
 // DFViewerInfinite-prop capture for identity-stability assertion.
@@ -653,6 +659,205 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
       expect(applyCallsOnReturn.length).toBeGreaterThanOrEqual(1);
       const last = applyCallsOnReturn[applyCallsOnReturn.length - 1];
       expect(last.state).toEqual(mainSavedState);
+    });
+  });
+});
+
+// Rows-first c0a: the grid has to behave while summary stats are pending, not
+// computed, or arrive after the first paint. df_meta.stats.status drives it;
+// absent df_meta.stats means "complete", as servers without the field send.
+describe("BuckarooInfiniteWidget — stats not yet available (rows-first c0a)", () => {
+  const withStats = (status: string): DFMeta => ({ ...baseDfMeta, stats: { status } } as DFMeta);
+
+  const pinnedConfig: DFViewerConfig = {
+    ...baseConfig,
+    pinned_rows: [
+      { primary_key_val: "dtype", displayer_args: { displayer: "obj" } },
+      { primary_key_val: "histogram", displayer_args: { displayer: "obj" } },
+    ],
+  };
+  const pinnedDisplayArgs: Record<string, IDisplayArgs> = {
+    main: { data_key: "main", df_viewer_config: pinnedConfig, summary_stats_key: "summary_stats" },
+  };
+
+  const widgetProps = (over: Record<string, unknown> = {}) => ({
+    df_data_dict: { summary_stats: [] as any[] },
+    df_display_args: pinnedDisplayArgs,
+    df_meta: baseDfMeta,
+    operations: [],
+    on_operations: jest.fn(),
+    operation_results: {} as any,
+    command_config: { argspecs: {}, defaultArgs: {} },
+    buckaroo_state: initialState,
+    on_buckaroo_state: jest.fn(),
+    buckaroo_options: baseOptions,
+    src: mkSrc(),
+    ...over,
+  });
+
+  const lastPinnedRows = (): any[] => {
+    const sets = getSpyCalls().setGridOption.filter(([k]) => k === "pinnedTopRowData");
+    return sets[sets.length - 1][1] as any[];
+  };
+  const pinnedRowIds = (rows: any[]): string[] => {
+    const { gridOptions, context } = getSpyCalls().lastProps;
+    return rows.map((data) => gridOptions.getRowId({ data, level: 0, rowPinned: "top", context }));
+  };
+
+  describe("pinned rows with no value", () => {
+    it("pending: shows one placeholder per valueless key, each with its own row id", () => {
+      render(<BuckarooInfiniteWidget {...widgetProps({ df_meta: withStats("pending") })} />);
+      const rows = lastPinnedRows();
+      // Each placeholder keeps its key as the row label, so the pinned area
+      // holds its height and the rows are told apart.
+      expect(rows.map((r) => r?.index)).toEqual(["dtype", "histogram"]);
+      expect(new Set(pinnedRowIds(rows)).size).toBe(2);
+    });
+
+    it("pending: a key that has a value renders it and only the other key gets a placeholder", () => {
+      const stats = [{ index: "dtype", a: "int64" }];
+      render(
+        <BuckarooInfiniteWidget
+          {...widgetProps({ df_meta: withStats("pending"), df_data_dict: { summary_stats: stats } })}
+        />,
+      );
+      const rows = lastPinnedRows();
+      expect(rows[0]).toEqual(stats[0]);
+      expect(rows[1]?.index).toBe("histogram");
+      expect(new Set(pinnedRowIds(rows)).size).toBe(2);
+    });
+
+    it("pending: placeholders turn into the real rows when stats arrive", () => {
+      const props = widgetProps({ df_meta: withStats("pending") });
+      const { rerender } = render(<BuckarooInfiniteWidget {...props} />);
+      const stats = [
+        { index: "dtype", a: "int64" },
+        { index: "histogram", a: [{ name: "1-5", population: 100 }] },
+      ];
+      rerender(
+        <BuckarooInfiniteWidget
+          {...props}
+          df_meta={withStats("complete")}
+          df_data_dict={{ summary_stats: stats }}
+        />,
+      );
+      expect(lastPinnedRows()).toEqual(stats);
+    });
+
+    it("not_computed: omits the valueless keys", () => {
+      render(<BuckarooInfiniteWidget {...widgetProps({ df_meta: withStats("not_computed") })} />);
+      expect(lastPinnedRows()).toEqual([]);
+    });
+
+    it("not_computed: keeps a key that has a value", () => {
+      const stats = [{ index: "dtype", a: "int64" }];
+      render(
+        <BuckarooInfiniteWidget
+          {...widgetProps({ df_meta: withStats("not_computed"), df_data_dict: { summary_stats: stats } })}
+        />,
+      );
+      expect(lastPinnedRows()).toEqual(stats);
+    });
+
+    it("no df_meta.stats (an older server) behaves as complete: valueless keys stay undefined rows", () => {
+      const stats = [{ index: "dtype", a: "int64" }];
+      render(<BuckarooInfiniteWidget {...widgetProps({ df_data_dict: { summary_stats: stats } })} />);
+      const rows = lastPinnedRows();
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toEqual(stats[0]);
+      expect(rows[1]).toEqual({});
+    });
+  });
+
+  describe("color_map columns", () => {
+    const colorConfig: DFViewerConfig = {
+      pinned_rows: [],
+      left_col_configs: [],
+      column_config: [
+        { col_name: "a", header_name: "a", displayer_args: { displayer: "obj" },
+          color_map_config: { color_rule: "color_map", map_name: "BLUE_TO_YELLOW", val_column: "a" } },
+        { col_name: "b", header_name: "b", displayer_args: { displayer: "obj" } },
+      ],
+    };
+    const colorDisplayArgs: Record<string, IDisplayArgs> = {
+      main: { data_key: "main", df_viewer_config: colorConfig, summary_stats_key: "summary_stats" },
+    };
+    const colorProps = (stats: any[]) =>
+      widgetProps({ df_display_args: colorDisplayArgs, df_data_dict: { summary_stats: stats } });
+    const forcedRefreshes = () => getSpyCalls().refreshCells.filter((p: any) => p.force === true);
+
+    it("restyles the color-mapped columns when histogram bins arrive after the first render", () => {
+      const props = colorProps([{ index: "dtype", a: "int64", b: "int64" }]);
+      const { rerender } = render(<BuckarooInfiniteWidget {...props} />);
+      expect(forcedRefreshes()).toHaveLength(0);
+
+      rerender(
+        <BuckarooInfiniteWidget
+          {...props}
+          df_data_dict={{ summary_stats: [{ index: "histogram_bins", a: [1, 2, 3, 4, 5], b: [1, 2] }] }}
+        />,
+      );
+      const refreshes = forcedRefreshes();
+      expect(refreshes).toHaveLength(1);
+      expect(refreshes[0].columns).toEqual(["a"]);
+    });
+
+    it("does not refresh when the new stats leave the bins unchanged", () => {
+      const props = colorProps([{ index: "histogram_bins", a: [1, 2, 3, 4, 5] }]);
+      const { rerender } = render(<BuckarooInfiniteWidget {...props} />);
+      rerender(
+        <BuckarooInfiniteWidget
+          {...props}
+          df_data_dict={{ summary_stats: [{ index: "histogram_bins", a: [1, 2, 3, 4, 5] }, { index: "dtype", a: "int64" }] }}
+        />,
+      );
+      expect(forcedRefreshes()).toHaveLength(0);
+    });
+  });
+
+  describe("in-flight indicator", () => {
+    const inFlightAttr = () => document.querySelector('[data-testid="status-bar-stub"]')!.getAttribute("data-inflight");
+    const dispatchSearch = () =>
+      act(() => {
+        mockStatusBarProps.setBuckarooState({ ...initialState, quick_command_args: { search: ["x"] } });
+      });
+    const props = (meta: DFMeta, dict: Record<string, any[]>) => widgetProps({ df_meta: meta, df_data_dict: dict });
+
+    it("a df_data_dict update alone does not clear it when the server reports df_meta.stats", () => {
+      const meta = withStats("pending");
+      const first = props(meta, { summary_stats: [] });
+      const { rerender } = render(<BuckarooInfiniteWidget {...first} />);
+      dispatchSearch();
+      expect(inFlightAttr()).toBe("true");
+
+      // A stats-only update: a new df_data_dict, the same df_meta.
+      rerender(<BuckarooInfiniteWidget {...first} df_data_dict={{ summary_stats: [{ index: "dtype", a: "int64" }] }} />);
+      expect(inFlightAttr()).toBe("true");
+    });
+
+    it("clears when a frame with a new df_meta and df_data_dict arrives", () => {
+      const first = props(withStats("pending"), { summary_stats: [] });
+      const { rerender } = render(<BuckarooInfiniteWidget {...first} />);
+      dispatchSearch();
+
+      rerender(
+        <BuckarooInfiniteWidget
+          {...first}
+          df_meta={withStats("pending")}
+          df_data_dict={{ summary_stats: [{ index: "dtype", a: "int64" }] }}
+        />,
+      );
+      expect(inFlightAttr()).toBe("false");
+    });
+
+    it("without df_meta.stats a new df_data_dict still clears it, as before", () => {
+      const first = props(baseDfMeta, { summary_stats: [] });
+      const { rerender } = render(<BuckarooInfiniteWidget {...first} />);
+      dispatchSearch();
+      expect(inFlightAttr()).toBe("true");
+
+      rerender(<BuckarooInfiniteWidget {...first} df_data_dict={{ summary_stats: [{ index: "dtype", a: "int64" }] }} />);
+      expect(inFlightAttr()).toBe("false");
     });
   });
 });
