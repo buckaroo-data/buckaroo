@@ -1,14 +1,17 @@
 """Xorq-backed stat pipeline for the v2 framework.
 
-Two-phase execution:
+Two-phase execution, each phase a kind of resumable unit (see ``stat_units``):
   1. Batch aggregate — every @stat with an XorqColumn parameter contributes
      one ibis scalar expression. All such expressions across all columns
      are folded into a single ``table.aggregate(...)`` query and executed
-     once.
-  2. Per-column post-batch — computed stats (deps only on other stats) and
-     XorqExpr-param stats (e.g. histograms that need their own query)
-     run through the standard typed-DAG executor with results written into
-     the per-column accumulator.
+     once. This is the ``batch`` unit, and it also computes the stats that
+     are pure functions of its results (``histogram_bins``, ``nan_per``...).
+     Behind a host's opt-in the batch can be cut into one aggregate per chunk
+     of columns (``chunk_cells``), for a plain parquet scan only.
+  2. Per-column post-batch — XorqExpr-param stats (e.g. histograms that need
+     their own query), and any stat reading one, run through the standard
+     typed-DAG executor with results written into the per-column
+     accumulator. One ``histogram:<col>`` unit per column.
 
 Errors are captured into ``StatError`` via the standard Ok/Err mechanism;
 nothing is silently swallowed. Construction validates the DAG up front and
@@ -23,7 +26,7 @@ import logging
 import os
 import time
 from contextlib import nullcontext
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -33,6 +36,8 @@ from .safe_summary_df import output_full_reproduce
 from .stat_func import XorqColumn, XorqExpr, XorqExecute, RAW_MARKER_TYPES, StatFunc
 from .stat_pipeline import _execute_stat_func, _normalize_inputs, errors_to_errdict
 from .stat_result import Err, Ok, StatError, StatResult, resolve_accumulator
+from .stat_units import (Fragment, StatAccumulator, StatState, StatUnit, UnitPipeline, UnitStats, columns_in_scope,
+    prioritized)
 from .typed_dag import build_column_dag, build_typed_dag
 from .utils import PERVERSE_DF
 
@@ -41,10 +46,12 @@ __all__ = ["XorqStatPipeline", "XorqDfStatsV2", "XorqColumn", "XorqExpr", "XorqE
 
 try:
     import xorq.api as xo
+    from xorq.expr.relations import Read
+    from xorq.vendor.ibis.expr import operations as ops
 
     HAS_XORQ = True
 except ImportError:
-    xo = None
+    xo = Read = ops = None
     HAS_XORQ = False
 
 log = logging.getLogger(__name__)
@@ -100,7 +107,29 @@ def _is_batch_func(sf: StatFunc) -> bool:
     return True
 
 
-class XorqStatPipeline:
+class XorqAccumulator(StatAccumulator):
+    """``StatAccumulator`` for a xorq run. ``working`` holds each column's
+    Ok/Err accumulator, which the units read and write; ``emitted`` the keys of
+    it already returned in a fragment, so each stat is returned and any error in
+    it reported once; ``phases`` caches how each dtype's stats split (see
+    ``XorqStatPipeline._column_phases``). ``sd()`` is every column's stats so
+    far in accumulator order, a failed stat as None."""
+
+    def __init__(self, state: StatState, columns: Sequence[Any] = (), rewritten: Optional[Dict[Any, str]] = None,
+            skipped: Sequence[Any] = ()):
+        super().__init__(state, columns, rewritten)
+        self.skipped: Tuple[Any, ...] = tuple(skipped)
+        self.working: Dict[Any, Dict[str, StatResult]] = {}
+        self.emitted: Dict[Any, set] = {}
+        self.phases: Dict[Any, Any] = {}
+        self.schema: Any = None
+
+    def sd(self) -> Dict[Any, Dict[str, Any]]:
+        return {col: {key: (result.value if isinstance(result, Ok) else None if isinstance(result, Err) else result)
+            for key, result in self.working[col].items()} for col in self.order}
+
+
+class XorqStatPipeline(UnitPipeline):
     """v2 stat pipeline for ``ibis.Table`` inputs.
 
     Accepts the same kinds of inputs as ``StatPipeline``:
@@ -110,7 +139,13 @@ class XorqStatPipeline:
       - ``ColAnalysis`` subclasses (via v1 adapter)
 
     Use ``process_table(table)`` to run the pipeline; returns
-    ``(SDType, List[StatError])``.
+    ``(SDType, List[StatError])``. ``plan(state)``, ``new_accumulator(state)``
+    and ``run(unit, acc)`` are the same run one unit at a time.
+
+    ``chunk_cells`` (off when ``None``) cuts the batch aggregate into one
+    aggregate per chunk of columns holding about that many cells, when the
+    caller gives the row count and the source is a plain parquet scan
+    (``chunk_refusal``).
     """
 
     # Keys that the pipeline pre-populates per column. Listed as external
@@ -123,7 +158,7 @@ class XorqStatPipeline:
          "distinct_count"})
 
     def __init__(self, stat_funcs: list, backend: Any = None, unit_test: bool = True,
-                 cache_storage=None):
+                 cache_storage=None, chunk_cells: Optional[int] = None):
         if not HAS_XORQ:
             raise ImportError(
                 "xorq is required for XorqStatPipeline. "
@@ -138,12 +173,13 @@ class XorqStatPipeline:
         self._original_inputs = list(stat_funcs)
         self.backend = backend
         self.cache_storage = cache_storage
+        self.chunk_cells = chunk_cells
 
-        # Per-run snapshot-cache counters, (re)initialised in process_table.
+        # Per-run snapshot-cache counters, (re)initialised in new_accumulator.
         # Set here so the attribute always exists (e.g. for the unit_test()
         # run kicked off below, which disables the cache).
         self._cache_stats = _new_cache_run_stats()
-        # Per-run perf recorder, (re)initialised in process_table when the
+        # Per-run perf recorder, (re)initialised in new_accumulator when the
         # BUCKAROO_PERF toggle is on; None otherwise.
         self._perf = None
         # Set during the unit_test() DAG self-check so its PERVERSE_DF run
@@ -324,19 +360,21 @@ class XorqStatPipeline:
             return nullcontext()
         return perf_log.perf_span(label, **fields)
 
-    def process_table(self, table, skip_columns=None) -> Tuple[SDType, List[StatError]]:
+    def process_table(self, table, skip_columns=None, rows=None) -> Tuple[SDType, List[StatError]]:
         # Each per-column query runs directly against ``table`` (the source
         # expression). When a snapshot cache is set, queries are keyed against
         # that source so the content-addressed key is stable across processes;
         # ``_execute_cached`` serves a hit from the snapshot parquet or executes
-        # and writes one on a miss.
-        self._cache_stats = _new_cache_run_stats()
-        self._perf = (perf_log.PerfRecorder()
-                      if perf_log.enabled() and not self._suppress_perf_summary else None)
+        # and writes one on a miss. ``rows`` is the row count when the caller
+        # has it; only the column-chunk split reads it.
+        state = StatState(table, frozenset(skip_columns or ()), rows=rows)
+        acc = self.new_accumulator(state)
         _t0 = time.perf_counter()
         with self._span("stat.xorq.total") as span:
             try:
-                return self._process_table_impl(table, skip_columns=skip_columns)
+                for _unit, _fragment in self.iter_units(state, acc):
+                    pass
+                return acc.sd(), acc.errors
             finally:
                 self._cache_stats["secs"] = round(time.perf_counter() - _t0, 4)
                 self._log_cache_stats(span)
@@ -347,27 +385,159 @@ class XorqStatPipeline:
                         f"misses={self._cache_stats['misses']}")
                     self._perf.summary()
 
-    def _process_table_impl(self, table, skip_columns=None) -> Tuple[SDType, List[StatError]]:
+    @staticmethod
+    def chunk_refusal(table) -> Optional[str]:
+        """Why ``table`` may not have its batch split by column chunk, or
+        ``None`` when it may.
+
+        Each chunk is its own aggregate over the source. On a parquet scan a
+        chunk reads only its columns, so the chunks cost about what one batch
+        does (0.90-1.16x at 10-12M rows) and each needs less memory. On
+        anything else a chunk runs the plan again: a join or an aggregate
+        executes in full per chunk, and a CSV read reparses the file (2.1-2.2x).
+        So the split is allowed for a parquet ``Read``, or a projection of
+        plain columns of one, and refused for everything else, including an
+        expression this does not recognise. A refusal can only keep the single
+        batch; it never turns the split on.
+        """
+        op = table.op()
+        if isinstance(op, ops.Project):
+            if not all(isinstance(value, ops.Field) for value in op.values.values()):
+                return "it computes columns instead of reading them"
+            op = op.parent
+        if not isinstance(op, Read):
+            return f"not a parquet scan ({type(op).__name__})"
+        if op.method_name != "read_parquet":
+            return f"not a parquet scan ({op.method_name})"
+        return None
+
+    def _batch_chunks(self, state: StatState, columns: List[Any]) -> List[List[Any]]:
+        """``columns`` cut into the chunks the batch runs in: one, unless the
+        split is on, the row count is known and the source allows it."""
+        if not self.chunk_cells:
+            return [columns]
+        if state.rows is None:
+            log.debug("xorq stat column chunking needs the row count; running one batch")
+            return [columns]
+        refusal = self.chunk_refusal(state.data)
+        if refusal is not None:
+            log.info("xorq stat column chunking refused: %s", refusal)
+            return [columns]
+        per_chunk = max(1, self.chunk_cells // max(state.rows, 1))
+        return [columns[i:i + per_chunk] for i in range(0, len(columns), per_chunk)] or [columns]
+
+    def _column_phases(self, cache: Dict[Any, Any], dtype) -> Tuple[List[StatFunc], List[StatFunc], Dict[str, StatFunc]]:
+        """A column's stat funcs split into those that need no further query
+        once the batch has run (``pure``) and those that run one or read the
+        result of one that does (``query``), each in dependency order, plus the
+        stat key -> func map errors are reported against."""
+        if dtype not in cache:
+            col_funcs = build_column_dag(self.all_stat_funcs, dtype, external_keys=self.EXTERNAL_KEYS)
+            pure: List[StatFunc] = []
+            query: List[StatFunc] = []
+            query_keys: set = set()
+            for sf in col_funcs:
+                if any(r.type in (XorqExpr, XorqExecute) or r.name in query_keys for r in sf.requires):
+                    query.append(sf)
+                    query_keys.update(sk.name for sk in sf.provides)
+                else:
+                    pure.append(sf)
+            key_to_func = {sk.name: sf for sf in col_funcs for sk in sf.provides}
+            cache[dtype] = (pure, query, key_to_func)
+        return cache[dtype]
+
+    def plan(self, state: StatState) -> List[StatUnit]:
+        """The scalar batch first, then one histogram GROUP BY per column that
+        has one, columns named in ``state.priority`` first. The batch is cut
+        into chunks only as ``_batch_chunks`` allows, and every chunk precedes
+        every histogram, since a histogram reads what its chunk computes.
+        Skipped columns get no unit. Nothing is computed: no query is sent."""
+        table = state.data
+        pairs = columns_in_scope(state)
+        if not pairs:
+            return []
         schema = table.schema()
-        columns = list(table.columns)
-        # Columns whose stats are supplied externally (via init_sd) keep their
-        # structural metadata (name/dtype/length) but get no stat expressions
-        # built — so the column's data is never scanned.
-        skip = set(skip_columns or ())
+        # xorq has always matched skip_columns on the column's own name only.
+        skip = {orig for orig, _rewritten in pairs if orig in state.skip_columns}
+        active = [orig for orig, _rewritten in prioritized([p for p in pairs if p[0] not in skip], state.priority)]
+        chunks = self._batch_chunks(state, active)
+        units: List[StatUnit] = []
+        batch_of: Dict[Any, str] = {}
+        for i, chunk in enumerate(chunks):
+            unit_id = "batch" if len(chunks) == 1 else f"batch:{i}"
+            units.append(StatUnit(id=unit_id, columns=tuple(chunk), phase="batch", cost="scan"))
+            batch_of.update({col: unit_id for col in chunk})
+        phases: Dict[Any, Any] = {}
+        for col in active:
+            if self._column_phases(phases, schema[col])[1]:
+                units.append(StatUnit(id=f"histogram:{col}", columns=(col,), phase="histogram",
+                    after=(batch_of[col],), cost="query"))
+        return units
 
-        # Pre-populate every column accumulator with the externally-provided
-        # keys. ``length`` is filled in by the batch query below. ``min`` /
-        # ``max`` start as None so dependents (histogram) don't cascade-
-        # exclude on non-numeric columns; ``min`` / ``max`` overwrite for
-        # numeric cols. ``distinct_count`` likewise starts as None so float
-        # columns (where the stat is column_filtered out) keep their
-        # dependents (histogram, histogram_bins, distinct_per) runnable.
-        accumulators: Dict[str, Dict[str, StatResult]] = {}
-        for col in columns:
-            accumulators[col] = {"orig_col_name": Ok(col), "rewritten_col_name": Ok(col), "dtype": Ok(str(schema[col])),
+    def new_accumulator(self, state: StatState) -> "XorqAccumulator":
+        """The accumulator for a run of ``state``, and the start of the run's
+        counters: the snapshot-cache hit/miss counts and the perf recorder.
+
+        Pre-populate every column accumulator with the externally-provided
+        keys. ``length`` is filled in by the batch query. ``min`` / ``max``
+        start as None so dependents (histogram) don't cascade-exclude on
+        non-numeric columns; ``min`` / ``max`` overwrite for numeric cols.
+        ``distinct_count`` likewise starts as None so float columns (where the
+        stat is column_filtered out) keep their dependents (histogram,
+        histogram_bins, distinct_per) runnable. A skipped column keeps these
+        (its stats are supplied via init_sd and its data is never scanned)."""
+        self._cache_stats = _new_cache_run_stats()
+        self._perf = (perf_log.PerfRecorder()
+                      if perf_log.enabled() and not self._suppress_perf_summary else None)
+        schema = state.data.schema()
+        pairs = columns_in_scope(state)
+        acc = XorqAccumulator(state, columns=[orig for orig, _rewritten in pairs], rewritten=dict(pairs),
+            skipped=[orig for orig, _rewritten in pairs if orig in state.skip_columns])
+        for col in acc.order:
+            acc.working[col] = {"orig_col_name": Ok(col), "rewritten_col_name": Ok(col), "dtype": Ok(str(schema[col])),
                 "length": Ok(0), "min": Ok(None), "max": Ok(None), "distinct_count": Ok(None)}
+            acc.emitted[col] = set()
+        acc.schema = schema
+        return acc
 
-        # ---- Phase 1: batch aggregate ----------------------------------
+    def run(self, unit: StatUnit, acc: StatAccumulator) -> Fragment:
+        """Run one unit and return the stats it produced, ``{col: {stat: value}}``
+        for its columns. A stat that fails is recorded on ``acc.errors`` once
+        and the run goes on."""
+        assert isinstance(acc, XorqAccumulator)
+        if unit.phase == "batch":
+            return self._run_batch(unit, acc)
+        return self._run_histogram(unit, acc)
+
+    def _run_funcs(self, funcs: List[StatFunc], col: Any, acc: "XorqAccumulator") -> None:
+        """Run ``funcs`` (in dependency order) for one column against its
+        accumulator, skipping stats whose results are already there (typically
+        the batch-phase stats)."""
+        col_accum = acc.working[col]
+        for sf in funcs:
+            if sf.provides and all(sk.name in col_accum for sk in sf.provides):
+                continue
+            if self._perf is not None:
+                t0 = time.perf_counter()
+            _execute_stat_func(sf, col_accum, col, raw_series=None, sampled_series=None, raw_dataframe=None,
+                xorq_expr=acc.state.data, xorq_execute=self._execute)
+            if self._perf is not None:
+                self._perf.record("xorq/per-column", col, sf.name, time.perf_counter() - t0)
+
+    def _emit(self, acc: "XorqAccumulator", col: Any, key_to_func: Dict[str, StatFunc]) -> Dict[str, Any]:
+        """The stats of ``col`` that no earlier unit has returned, as plain
+        values (a failed stat as None), recorded on ``acc`` with their errors."""
+        working = acc.working[col]
+        fresh = {key: result for key, result in working.items() if key not in acc.emitted[col]}
+        plain, errors = resolve_accumulator(fresh, col, key_to_func)
+        acc.emitted[col].update(fresh)
+        acc.record({col: plain}, errors)
+        return plain
+
+    def _run_batch(self, unit: StatUnit, acc: "XorqAccumulator") -> Fragment:
+        table = acc.state.data
+        schema = acc.schema
+        columns = list(unit.columns)
         # ``length`` is a table-level scalar (same value for every column),
         # so it goes in once as ``__total_length__`` rather than as N
         # per-column expressions.
@@ -378,8 +548,6 @@ class XorqStatPipeline:
                 continue
             xorq_col_param = next(r.name for r in sf.requires if r.type is XorqColumn)
             for col in columns:
-                if col in skip:
-                    continue
                 col_dtype = schema[col]
                 if sf.column_filter is not None and not sf.column_filter(col_dtype):
                     continue
@@ -387,7 +555,7 @@ class XorqStatPipeline:
                     expr = sf.func(**{xorq_col_param: table[col]})
                 except Exception as e:
                     for sk in sf.provides:
-                        accumulators[col][sk.name] = Err(error=e, stat_func_name=sf.name, column_name=col,
+                        acc.working[col][sk.name] = Err(error=e, stat_func_name=sf.name, column_name=col,
                             inputs={"col": col})
                     continue
                 if expr is None:
@@ -397,7 +565,7 @@ class XorqStatPipeline:
                     expr = expr.name(f"{col}|{stat_name}")
                 except Exception as e:
                     for sk in sf.provides:
-                        accumulators[col][sk.name] = Err(error=e, stat_func_name=sf.name, column_name=col,
+                        acc.working[col][sk.name] = Err(error=e, stat_func_name=sf.name, column_name=col,
                             inputs={"col": col})
                     continue
                 batch_items.append((col, sf, expr))
@@ -413,54 +581,40 @@ class XorqStatPipeline:
             # length stays at the prepopulated 0 so consumers still see something.
             for col, sf, _ in batch_items:
                 for sk in sf.provides:
-                    accumulators[col][sk.name] = Err(error=e, stat_func_name=sf.name, column_name=col, inputs={})
+                    acc.working[col][sk.name] = Err(error=e, stat_func_name=sf.name, column_name=col, inputs={})
         else:
             total_length = _to_python_scalar(result_df[TOTAL_LENGTH_KEY].iloc[0])
             if total_length is None:
                 total_length = 0
-            for col in columns:
-                accumulators[col]["length"] = Ok(total_length)
+            # A skipped column has no unit but has always been given the length.
+            for col in [*columns, *acc.skipped]:
+                acc.working[col]["length"] = Ok(total_length)
             for col, sf, _ in batch_items:
                 stat_name = sf.provides[0].name
                 col_stat = f"{col}|{stat_name}"
                 if col_stat in result_df.columns:
                     raw_val = result_df[col_stat].iloc[0]
-                    accumulators[col][stat_name] = Ok(_to_python_scalar(raw_val))
+                    acc.working[col][stat_name] = Ok(_to_python_scalar(raw_val))
                 else:
-                    accumulators[col][stat_name] = Err(error=KeyError(
+                    acc.working[col][stat_name] = Err(error=KeyError(
                         f"missing aggregate column {col_stat!r} in result"), stat_func_name=sf.name, column_name=col, inputs={})
 
-        # ---- Phase 2: per-column post-batch ----------------------------
-        all_errors: List[StatError] = []
-        summary: SDType = {}
-
+        # The stats that are pure functions of the ones just computed, so that
+        # histogram_bins (and with it color_map) needs no histogram query.
+        fragment: Fragment = {}
         for col in columns:
-            col_accum = accumulators[col]
-            col_dtype = schema[col]
-            col_funcs = build_column_dag(self.all_stat_funcs, col_dtype, external_keys=self.EXTERNAL_KEYS)
+            pure, _query, key_to_func = self._column_phases(acc.phases, schema[col])
+            self._run_funcs(pure, col, acc)
+            fragment[col] = self._emit(acc, col, key_to_func)
+        return fragment
 
-            for sf in col_funcs if col not in skip else []:
-                # Skip stats whose results are already in the accumulator
-                # (typically the batch-phase stats).
-                if sf.provides and all(sk.name in col_accum for sk in sf.provides):
-                    continue
-                if self._perf is not None:
-                    t0 = time.perf_counter()
-                _execute_stat_func(sf, col_accum, col, raw_series=None, sampled_series=None, raw_dataframe=None,
-                    xorq_expr=table, xorq_execute=self._execute)
-                if self._perf is not None:
-                    self._perf.record("xorq/per-column", col, sf.name, time.perf_counter() - t0)
-
-            col_key_to_func: Dict[str, StatFunc] = {}
-            for sf in col_funcs:
-                for sk in sf.provides:
-                    col_key_to_func[sk.name] = sf
-
-            plain, errors = resolve_accumulator(col_accum, col, col_key_to_func)
-            summary[col] = plain
-            all_errors.extend(errors)
-
-        return summary, all_errors
+    def _run_histogram(self, unit: StatUnit, acc: "XorqAccumulator") -> Fragment:
+        fragment: Fragment = {}
+        for col in unit.columns:
+            _pure, query, key_to_func = self._column_phases(acc.phases, acc.schema[col])
+            self._run_funcs(query, col, acc)
+            fragment[col] = self._emit(acc, col, key_to_func)
+        return fragment
 
     def add_stat(self, stat_func_or_class) -> Tuple[bool, List[StatError]]:
         """Add a stat function or ColAnalysis class interactively.
@@ -501,7 +655,7 @@ class XorqStatPipeline:
 
         return True, []
 
-class XorqDfStatsV2:
+class XorqDfStatsV2(UnitStats):
     """Stats wrapper for xorq table inputs.
 
     Mirrors the ``DfStatsV2`` / ``PlDfStatsV2`` surface (``.sdf``, ``.errs``,
@@ -516,7 +670,9 @@ class XorqDfStatsV2:
     Stats execute through ``XorqStatPipeline`` — a single batched
     ``table.aggregate(...)`` query plus per-column histogram queries —
     pushing computation to the backend instead of materialising the
-    entire table.
+    entire table. ``run=False`` builds the wrapper without running anything,
+    for a caller that drives ``plan`` / ``run`` itself. ``chunk_cells`` and
+    ``rows`` are the column-chunk split's size and the row count it needs.
     """
 
     @classmethod
@@ -526,21 +682,26 @@ class XorqDfStatsV2:
         XorqStatPipeline(objs, unit_test=False)
 
     def __init__(self, table, col_analysis_objs, operating_df_name=None, debug=False,
-                 cache_storage=None, skip_columns=None):
+                 cache_storage=None, skip_columns=None, chunk_cells=None, rows=None, run=True):
         self.table = table
         # Skip the unit_test PERVERSE_DF run on each widget construction —
         # it doubles the SQL query count (issue #709). The DAG-validation
         # cost is already paid by verify_analysis_objects on first set up
         # and by the test suite. Mirrors PlDfStatsV2.
         self.ap = XorqStatPipeline(col_analysis_objs, unit_test=False,
-            cache_storage=cache_storage)
+            cache_storage=cache_storage, chunk_cells=chunk_cells)
         self.operating_df_name = operating_df_name
         self.debug = debug
-        self.sdf, errors = self.ap.process_table(self.table, skip_columns=skip_columns)
-        self.errs = errors_to_errdict(errors)
+        self.rows = rows
+        self.state = StatState(table, frozenset(skip_columns or ()), rows=rows)
+        self.sdf: SDType = {}
+        self.errs = {}
         self.stat_errors = []
-        if self.errs:
-            output_full_reproduce(self.errs, self.sdf, operating_df_name)
+        if run:
+            self.sdf, errors = self.ap.process_table(self.table, skip_columns=skip_columns, rows=rows)
+            self.errs = errors_to_errdict(errors)
+            if self.errs:
+                output_full_reproduce(self.errs, self.sdf, operating_df_name)
 
     def cache_run_stats(self) -> dict:
         """The summary-stat cache outcome of the last pipeline run (#943) —
@@ -556,7 +717,7 @@ class XorqDfStatsV2:
         so DataFlow.add_analysis works against a xorq-backed stats wrapper.
         """
         passed, errors = self.ap.add_stat(a_obj)
-        self.sdf, self.stat_errors = self.ap.process_table(self.table)
+        self.sdf, self.stat_errors = self.ap.process_table(self.table, rows=self.rows)
         self.errs = errors_to_errdict(self.stat_errors)
         if not passed:
             print("DAG validation failed")

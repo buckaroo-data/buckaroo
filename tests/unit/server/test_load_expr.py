@@ -1,5 +1,6 @@
 """End-to-end tests for POST /load_expr — server load path for
 XorqBuckarooInfiniteWidget over a xorq/ibis expression."""
+import dataclasses
 import datetime
 import io
 import json
@@ -29,13 +30,16 @@ from xorq.common.utils.graph_utils import replace_nodes, walk_nodes  # noqa: E40
 from xorq.common.utils.provenance_utils import read_parquet_provenance  # noqa: E402
 from xorq.expr.relations import CachedNode  # noqa: E402
 
+from buckaroo.dataflow.dataflow import assemble_merged_sd  # noqa: E402
 from buckaroo.dataflow.sd_cache import split_chain_by_scope  # noqa: E402
 from buckaroo.jlisp.lisp_utils import s as lisp_sym  # noqa: E402
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: E402
+from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments  # noqa: E402
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline  # noqa: E402
 from buckaroo.serialization_utils import resolve_summary_stats_payload  # noqa: E402
 from buckaroo.server import telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
+from buckaroo.server.stats_wire import start_stat_run  # noqa: E402
 from buckaroo.server.websocket_handler import DataStreamHandler  # noqa: E402
 from tests.unit.dataflow.scoped_summary_stats_test import (  # noqa: E402
     _OverridingPostProcessing, _scope_inputs, _scope_sds_by_units)
@@ -1917,7 +1921,6 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test
     async def test_a_stat_run_is_started_on_the_session_for_the_current_generation(self):
-        from buckaroo.server.stats_wire import start_stat_run
         await self._load("sw-run", stats_delivery="deferred")
         session = self._session("sw-run")
         self.assertEqual(session.stat_runs, {})
@@ -1934,7 +1937,6 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test
     async def test_a_run_ends_with_the_summary_sd_an_inline_session_computes(self):
-        from buckaroo.server.stats_wire import start_stat_run
         await self._load("sw-run-sd", stats_delivery="deferred")
         session = self._session("sw-run-sd")
         run = start_stat_run(session)
@@ -1946,7 +1948,6 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test
     async def test_a_dataflow_field_change_drops_the_run_and_a_search_term_change_keeps_it(self):
-        from buckaroo.server.stats_wire import start_stat_run
         await self._load("sw-drop", stats_delivery="deferred")
         ws, _first = await self._connect("sw-drop", caps="stats_update")
         session = self._session("sw-drop")
@@ -1966,7 +1967,6 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test
     async def test_reload_expr_drops_the_run(self):
-        from buckaroo.server.stats_wire import start_stat_run
         await self._load("sw-drop-reload", stats_delivery="deferred")
         session = self._session("sw-drop-reload")
         start_stat_run(session)
@@ -1976,8 +1976,6 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test
     async def test_each_connection_keeps_its_own_cursor_into_the_run(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments
-        from buckaroo.server.stats_wire import start_stat_run
         await self._load("sw-cursor", stats_delivery="deferred")
         await self._connect("sw-cursor", caps="stats_update")
         await self._connect("sw-cursor", caps="stats_update")
@@ -2052,7 +2050,6 @@ class TestStatUnits:
         assert units[0] == "batch" and "histogram:price" in units
 
     def test_units_assembled_equal_merged_sd_with_init_sd_cleaning_and_overrides(self):
-        from buckaroo.dataflow.dataflow import assemble_merged_sd
         dataflow = _three_scope_dataflow(init_sd={
             "price": {"displayer_args": {"displayer": "string", "max_length": 99}, "init_only": 1}},
             column_config_overrides={"category": {"displayer_args": {"displayer": "string", "max_length": 5000}}})
@@ -2071,7 +2068,6 @@ class TestStatUnits:
         assert _as_json(assembled) == _as_json(dataflow.merged_sd)
 
     def test_a_column_group_request_returns_only_those_columns(self):
-        import dataclasses
         dataflow = _build_dataflow()
         stats = dataflow.build_stats(dataflow.processed_df, run=False)
         for names in (("qty", "category"), ("b", "c")):  # original or rewritten names

@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
+from buckaroo.pluggable_analysis_framework.stat_units import StatState
 from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
 
 
@@ -73,7 +74,6 @@ def _run_units(pipe, state):
 
 
 def test_pandas_skipped_column_gets_no_unit():
-    from buckaroo.pluggable_analysis_framework.stat_units import StatState
     df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6], "c": [7, 8, 9]})
     pipe = StatPipeline(PD_ANALYSIS_V2, unit_test=False)
     state = StatState(df, skip_columns=frozenset({"b"}))
@@ -88,7 +88,6 @@ def test_pandas_skipped_column_gets_no_unit():
 def test_polars_skipped_column_gets_no_unit():
     pl = pytest.importorskip("polars")
     from buckaroo.customizations.pl_stats_v2 import PL_ANALYSIS_V2
-    from buckaroo.pluggable_analysis_framework.stat_units import StatState
     df = pl.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6], "c": [7, 8, 9]})
     pipe = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
     state = StatState(df, skip_columns=frozenset({"b"}))
@@ -100,7 +99,6 @@ def test_polars_skipped_column_gets_no_unit():
 def test_xorq_skipped_column_gets_no_unit(tmp_path):
     xo = pytest.importorskip("xorq.api")
     from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
-    from buckaroo.pluggable_analysis_framework.stat_units import StatState
     from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2
 
     p = tmp_path / "t.parquet"

@@ -14,6 +14,7 @@ from buckaroo.pluggable_analysis_framework.stat_result import (Ok, Err, Upstream
 from buckaroo.pluggable_analysis_framework.typed_dag import (build_typed_dag, build_column_dag, DAGConfigError)
 from buckaroo.pluggable_analysis_framework.column_filters import (is_numeric, is_string, is_temporal, is_boolean, any_of, not_)
 from buckaroo.pluggable_analysis_framework.stat_pipeline import (StatPipeline, _normalize_inputs, errors_to_errdict)
+from buckaroo.pluggable_analysis_framework.stat_units import StatState, merge_fragments, rewrite_sd
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 
@@ -831,7 +832,6 @@ class TestStatUnits:
         return acc, fragments
 
     def test_plan_is_one_unit_per_column_in_column_order(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         units = self._pipeline().plan(StatState(self._df()))
         assert [u.columns for u in units] == [('amount',), ('word',), ('score',)]
         assert len({u.id for u in units}) == 3
@@ -839,7 +839,6 @@ class TestStatUnits:
         assert all(u.after == () for u in units), "no column's stats read another column's"
 
     def test_plan_and_a_new_accumulator_compute_nothing(self, monkeypatch):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         calls = []
         monkeypatch.setattr(StatPipeline, 'process_column', lambda self, *a, **k: calls.append(a))
         pipeline, state = self._pipeline(), StatState(self._df())
@@ -848,7 +847,6 @@ class TestStatUnits:
         assert calls == []
 
     def test_run_returns_the_fragment_of_its_unit_keyed_by_original_name(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         pipeline, state = self._pipeline(), StatState(self._df())
         acc = pipeline.new_accumulator(state)
         fragment = pipeline.run(pipeline.plan(state)[1], acc)
@@ -859,7 +857,6 @@ class TestStatUnits:
         assert list(acc.sd()) == ['word'], "a column with no unit run yet has no entry"
 
     def test_the_union_of_fragments_is_what_process_df_returns(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState, merge_fragments, rewrite_sd
         df, pipeline = self._df(), self._pipeline()
         acc, fragments = self._run_units(pipeline, StatState(df))
         expected, errors = pipeline.process_df(df)
@@ -868,7 +865,6 @@ class TestStatUnits:
         assert [(e.column, e.stat_key) for e in acc.errors] == [(e.column, e.stat_key) for e in errors]
 
     def test_an_error_in_a_unit_is_recorded_on_the_accumulator(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
 
         @stat()
         def fails_on_words(ser: RawSeries) -> int:
@@ -885,7 +881,6 @@ class TestStatUnits:
     def test_a_column_group_returns_only_those_columns(self, names):
         """A group is named by original or rewritten name, since the client
         only knows the rewritten ones."""
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         pipeline = self._pipeline()
         state = StatState(self._df(), columns=names)
         assert [u.columns for u in pipeline.plan(state)] == [('word',)]
@@ -895,19 +890,16 @@ class TestStatUnits:
 
     @pytest.mark.parametrize('names', [('score',), ('c',)])
     def test_priority_columns_are_planned_first(self, names):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         units = self._pipeline().plan(StatState(self._df(), priority=names))
         assert [u.columns[0] for u in units] == ['score', 'amount', 'word']
 
     def test_an_empty_frame_has_no_units(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         pipeline, state = self._pipeline(), StatState(pd.DataFrame({'x': pd.Series([], dtype='int64')}))
         assert pipeline.plan(state) == []
         assert pipeline.new_accumulator(state).sd() == {}
 
     @pytest.mark.parametrize('backend', ['pandas', 'polars'])
     def test_real_stats_run_unit_by_unit_equal_process_df(self, backend):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState, merge_fragments, rewrite_sd
         df = _mixed_frames()[backend]
         pipeline = StatPipeline(_stat_lists()[backend], unit_test=False)
         acc, fragments = self._run_units(pipeline, StatState(df))

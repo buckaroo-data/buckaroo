@@ -28,6 +28,7 @@ from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
 from buckaroo.dataflow.sd_cache import split_chain_by_scope
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.pluggable_analysis_framework.stat_func import stat
+from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments, rewrite_sd
 
 
 _AddOrigResult = TypedDict('_AddOrigResult', {'cleaning_ops': Any, 'add_orig': Any})
@@ -341,7 +342,6 @@ def _run_units(stats):
 def _scope_sds_by_units(dataflow):
     """Each scope's summary dict, built from the fragments of its planned units
     where the dataflow built it by running the stats class whole."""
-    from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments, rewrite_sd
     sds = {}
     for scope in ("raw", "clean", "filt"):
         scope_df = dataflow.processed_df if scope == "filt" else dataflow._compute_scope_df(scope)

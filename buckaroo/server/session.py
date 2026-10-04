@@ -90,6 +90,11 @@ class SessionState:
     stats_gen: int = 0
     stats_status: str = "complete"
     stats_reason: Optional[str] = None
+    # The ``StatRun``s (stat_run.py) of the current generation, keyed by
+    # ``(stats_gen, scope)``: the planned units, the fragments they have
+    # produced and the accumulator they read. Dropped whenever the generation
+    # changes, since a run describes one state of the dataflow.
+    stat_runs: dict = field(default_factory=dict)
     # Companion telemetry sink (#943): a fire-and-forget POST callable, built
     # once from the /load_expr payload's telemetry_url on the IOLoop (where
     # make_http_sink captures AsyncHTTPClient/IOLoop.current()). Stored here so
@@ -130,10 +135,12 @@ this field is the runtime escape hatch."""
 def begin_stats_generation(session: "SessionState") -> None:
     """Start a new stats generation: the session's dataflow state has changed,
     so stats for the previous one no longer describe it. The status restarts
-    from the session's policy pair."""
+    from the session's policy pair, and the stat runs of the old generation are
+    dropped."""
     session.stats_gen += 1
     session.stats_status, session.stats_reason = initial_stats_status(
         session.stats_tier, session.stats_delivery)
+    session.stat_runs.clear()
 
 
 def stats_meta(session: "SessionState") -> Optional[dict]:

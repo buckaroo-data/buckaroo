@@ -36,9 +36,11 @@ from buckaroo.dataflow.sd_cache import split_chain_by_scope
 from buckaroo.jlisp.lisp_utils import s as lisp_sym
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
+from buckaroo.pluggable_analysis_framework.stat_units import StatAccumulator, StatState, StatUnit, merge_fragments
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 from buckaroo.server.data_loading import ServerDataflow, handle_infinite_request_buckaroo
 from buckaroo.server.data_loading_polars import (PolarsServerDataflow, create_polars_dataflow, handle_infinite_request_buckaroo_polars, load_file_polars)
+from buckaroo.server.stat_run import StatCursor, StatRun
 from buckaroo.styling_helpers import float_, obj_
 from tests.unit.dataflow.scoped_summary_stats_test import (_OverridingPostProcessing, _run_units, _scope_inputs, _scope_sds_by_units)
 
@@ -448,24 +450,31 @@ class TestStatUnits:
         assert stats.sdf == {} and stats.errs == {}
 
     def test_the_default_run_goes_through_the_units(self, backend, monkeypatch):
-        """Every stat the constructor computes comes from a unit, so the
-        inline path and a caller running units one at a time cannot differ."""
-        unit_columns, column_calls = [], []
+        """Every column the constructor computes is computed inside a unit, so
+        the inline path and a caller running units one at a time cannot
+        differ. (The DAG self-check runs ``PERVERSE_DF`` through the same
+        units, which has no part of the loaded data in it.)"""
+        depth, inside, outside, unit_columns = [0], [], [], []
         original_run, original_column = StatPipeline.run, StatPipeline.process_column
 
         def spy_run(self, unit, acc):
-            unit_columns.append(unit.columns)
-            return original_run(self, unit, acc)
+            depth[0] += 1
+            if list(acc.state.data.columns) != list(PERVERSE_DF.columns):
+                unit_columns.append(unit.columns)
+            try:
+                return original_run(self, unit, acc)
+            finally:
+                depth[0] -= 1
 
         def spy_column(self, *args, **kwargs):
-            column_calls.append(args or kwargs)
+            (inside if depth[0] else outside).append(kwargs.get("column_name"))
             return original_column(self, *args, **kwargs)
 
         monkeypatch.setattr(StatPipeline, "run", spy_run)
         monkeypatch.setattr(StatPipeline, "process_column", spy_column)
         _three_scope_dataflow(backend)
         assert {c for cols in unit_columns for c in cols} == {"price", "qty", "category"}
-        assert len(unit_columns) == len(column_calls), "a column's stats ran outside a unit"
+        assert inside and outside == [], "a column's stats ran outside a unit"
 
     def test_units_assembled_equal_merged_sd_with_init_sd_cleaning_and_overrides(self, backend):
         """The fragments of each scope's units, assembled by
@@ -513,7 +522,6 @@ class TestStatUnits:
 
 
 def _stat_run(backend, gen=4):
-    from buckaroo.server.stat_run import StatRun
     dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
     return StatRun(gen, "raw", dataflow.build_stats(dataflow.processed_df, run=False)), dataflow
 
@@ -557,7 +565,6 @@ class TestStatRun:
         assert len(run.fragments) == 3, "asking again runs nothing"
 
     def test_the_accumulator_holds_what_the_fragments_hold(self, backend):
-        from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments
         run, _dataflow = _stat_run(backend)
         while run.run_next() is not None:
             pass
@@ -570,8 +577,6 @@ class TestStatRun:
         assert _as_json(run.raw_sd()) == _as_json(dataflow.summary_sd)
 
     def test_cursors_read_one_list_each_at_its_own_pace(self, backend):
-        from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments
-        from buckaroo.server.stat_run import StatCursor
         run, _dataflow = _stat_run(backend)
         a, b = StatCursor(), StatCursor()
         run.run_next()
@@ -587,7 +592,6 @@ class TestStatRun:
         assert len(set(run.ran)) == 3, "no unit ran twice"
 
     def test_a_cursor_starts_again_on_another_run(self, backend):
-        from buckaroo.server.stat_run import StatCursor
         first, _dataflow = _stat_run(backend, gen=1)
         second, _dataflow = _stat_run(backend, gen=2)
         first.run_next()
@@ -611,8 +615,6 @@ class TestStatRun:
             if isinstance(value, (threading.Thread, threading.Timer)) or inspect.isroutine(value)]
 
     def test_a_unit_that_raises_fails_the_run(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatAccumulator, StatState, StatUnit
-        from buckaroo.server.stat_run import StatRun
 
         class _FailingStats:
             state = StatState(data=None)

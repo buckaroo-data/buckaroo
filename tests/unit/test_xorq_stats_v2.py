@@ -19,6 +19,7 @@ from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (  # noqa: 
     XorqStatPipeline,
     XorqColumn)
 from buckaroo.pluggable_analysis_framework.stat_func import stat  # noqa: E402
+from buckaroo.pluggable_analysis_framework.stat_units import StatState, merge_fragments  # noqa: E402
 from buckaroo.customizations.xorq_stats_v2 import (  # noqa: E402
     XORQ_STATS_V2)
 
@@ -944,7 +945,9 @@ _STATS_LOGGER = "buckaroo.pluggable_analysis_framework.xorq_stat_pipeline"
 
 def _stable(sd):
     """An sd as comparable JSON. Equal counts come back from a GROUP BY in no
-    fixed order, so the histogram lists are sorted."""
+    fixed order, so the histogram lists are sorted, and the partial sums of a
+    parallel aggregate add in an order that changes the last digit of a float,
+    so floats are compared to nine significant digits."""
     import json
 
     def norm(value, key=None):
@@ -953,6 +956,8 @@ def _stable(sd):
         if isinstance(value, list):
             items = [norm(v) for v in value]
             return sorted(items, key=lambda item: json.dumps(item, sort_keys=True)) if key == "histogram" else items
+        if isinstance(value, float):
+            return float(f"{value:.9g}")
         return value
 
     return json.dumps(norm(sd), sort_keys=True, default=str)
@@ -991,7 +996,6 @@ class TestStatUnits:
     _ALL = ("ints", "floats", "strs", "bools")
 
     def test_the_scalar_batch_is_first_then_one_histogram_unit_per_column(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         units = XorqStatPipeline(XORQ_STATS_V2, unit_test=False).plan(StatState(_make_table()))
         assert [u.id for u in units] == ["batch", *(f"histogram:{c}" for c in self._ALL)]
         assert units[0].columns == self._ALL
@@ -1004,13 +1008,11 @@ class TestStatUnits:
     def test_visible_columns_get_their_histogram_units_first(self, visible):
         """Visible columns are named by original or rewritten name. The batch
         stays first, since every histogram reads what it computes."""
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         units = XorqStatPipeline(XORQ_STATS_V2, unit_test=False).plan(StatState(_make_table(), priority=visible))
         assert [u.id for u in units] == [
             "batch", "histogram:strs", "histogram:bools", "histogram:ints", "histogram:floats"]
 
     def test_plan_and_a_new_accumulator_issue_no_query(self, monkeypatch):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         spy = _QuerySpy(monkeypatch)
         pipeline, state = XorqStatPipeline(XORQ_STATS_V2, unit_test=False), StatState(_make_table())
         pipeline.plan(state)
@@ -1018,7 +1020,6 @@ class TestStatUnits:
         assert spy.queries == []
 
     def test_the_batch_is_one_query_and_each_histogram_unit_one_more(self, monkeypatch):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         spy = _QuerySpy(monkeypatch)
         pipeline = XorqStatPipeline(XORQ_STATS_V2, unit_test=False)
         state = StatState(_make_table())
@@ -1032,7 +1033,6 @@ class TestStatUnits:
     def test_the_batch_fragment_has_the_scalar_stats_and_the_bins_but_no_histogram(self):
         """``histogram_bins`` is a pure function of five scalars, so it comes
         with the batch and ``color_map`` needs no histogram query."""
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         _acc, run = _run_units(XorqStatPipeline(XORQ_STATS_V2, unit_test=False), StatState(_make_table()))
         batch_unit, batch = run[0]
         assert set(batch) == set(self._ALL)
@@ -1043,14 +1043,12 @@ class TestStatUnits:
         assert "mean" not in batch["strs"]
 
     def test_a_histogram_fragment_holds_the_histogram_of_its_column_only(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         _acc, run = _run_units(XorqStatPipeline(XORQ_STATS_V2, unit_test=False), StatState(_make_table()))
         for unit, fragment in run[1:]:
             assert list(fragment) == list(unit.columns)
             assert set(fragment[unit.columns[0]]) == {"histogram"}
 
     def test_the_union_of_fragments_is_process_table(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState, merge_fragments
         table = _make_table_with_nulls()
         pipeline = XorqStatPipeline(XORQ_STATS_V2, unit_test=False)
         acc, run = _run_units(pipeline, StatState(table))
@@ -1060,7 +1058,6 @@ class TestStatUnits:
         assert errors == [] and acc.errors == []
 
     def test_a_failing_stat_is_recorded_once_and_the_run_goes_on(self):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
 
         @stat()
         def will_fail(col: XorqColumn) -> int:
@@ -1075,7 +1072,6 @@ class TestStatUnits:
 
     @pytest.mark.parametrize("names", [("ints", "strs"), ("a", "c")])
     def test_a_column_group_returns_only_those_columns(self, names, monkeypatch):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         spy = _QuerySpy(monkeypatch)
         pipeline = XorqStatPipeline(XORQ_STATS_V2, unit_test=False)
         state = StatState(_make_table(), columns=names)
@@ -1126,13 +1122,11 @@ class TestColumnChunkSplit:
     chunk of a join, an aggregate or a CSV read runs the whole plan again."""
 
     def test_the_batch_is_not_split_by_default(self, tmp_path):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         units = XorqStatPipeline(XORQ_STATS_V2, unit_test=False).plan(
             StatState(_six_column_scan(tmp_path), rows=_SIX_ROWS))
         assert [u.id for u in _batch_units(units)] == ["batch"]
 
     def test_chunks_are_sized_by_cells(self, tmp_path):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         table = _six_column_scan(tmp_path)
         # 36 cells at 12 rows is three columns per chunk, 24 is two, and a
         # chunk always holds at least one column.
@@ -1144,12 +1138,10 @@ class TestColumnChunkSplit:
             "batch:0", "batch:1"]
 
     def test_a_chunk_that_fits_every_column_is_the_single_batch(self, tmp_path):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         units = _chunked(10_000).plan(StatState(_six_column_scan(tmp_path), rows=_SIX_ROWS))
         assert [u.id for u in _batch_units(units)] == ["batch"]
 
     def test_batches_come_first_and_each_histogram_follows_its_chunk(self, tmp_path):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         units = _chunked(36).plan(StatState(_six_column_scan(tmp_path), rows=_SIX_ROWS))
         assert [u.phase for u in units] == ["batch"] * 2 + ["histogram"] * 6
         chunk_of = {c: u.id for u in units[:2] for c in u.columns}
@@ -1157,19 +1149,16 @@ class TestColumnChunkSplit:
             assert unit.after == (chunk_of[unit.columns[0]],)
 
     def test_visible_columns_fill_the_first_chunk(self, tmp_path):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         units = _chunked(36).plan(StatState(_six_column_scan(tmp_path), rows=_SIX_ROWS, priority=("flag", "n2")))
         assert _batch_units(units)[0].columns == ("flag", "n2", "n0")
         assert [u.columns[0] for u in units if u.phase == "histogram"][:2] == ["flag", "n2"]
 
     def test_an_unknown_row_count_keeps_the_single_batch(self, tmp_path):
         """Cells need the row count, and asking for it is a query."""
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         units = _chunked(36).plan(StatState(_six_column_scan(tmp_path)))
         assert [u.id for u in _batch_units(units)] == ["batch"]
 
     def test_the_split_equals_the_single_batch(self, tmp_path, monkeypatch):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         table = _six_column_scan(tmp_path)
         single, errors = XorqStatPipeline(XORQ_STATS_V2, unit_test=False).process_table(table)
         spy = _QuerySpy(monkeypatch)
@@ -1234,7 +1223,6 @@ class TestColumnChunkSplit:
     @pytest.mark.parametrize("kind", ["join", "aggregate", "diff", "csv", "filter", "derived column", "cached",
         "memtable", "backend table"])
     def test_the_split_is_refused_for_anything_but_a_plain_parquet_scan(self, kind, tmp_path, monkeypatch, caplog):
-        from buckaroo.pluggable_analysis_framework.stat_units import StatState
         table = self._sources(tmp_path)[kind]
         assert XorqStatPipeline.chunk_refusal(table), kind
 

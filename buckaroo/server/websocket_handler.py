@@ -11,6 +11,7 @@ import tornado.websocket
 from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy)
 from buckaroo.server.session import begin_stats_generation, dataflow_stats_tier
+from buckaroo.server.stat_run import StatCursor
 from buckaroo.server.stats_wire import (broadcast_state, build_state_message_for, handle_stats_request, parse_caps, refresh_session_snapshot)
 
 
@@ -44,6 +45,9 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # client can say anything, and the other send sites push one shared
         # snapshot (stats_wire.build_state_message_for reads it per client).
         self.caps = parse_caps(self.get_query_argument("caps", ""))
+        # This client's position in the session's StatRun fragment list (the
+        # run itself is shared); it ends with the connection.
+        self.stats_cursor = StatCursor()
         sessions = self.application.settings["sessions"]
         sessions.add_ws_client(session_id, self)
 

@@ -31,6 +31,7 @@ from buckaroo.dataflow.sd_cache import split_chain_by_scope
 from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import get_buckaroo_display_state
 from buckaroo.server.session import SessionState, build_state_message
+from buckaroo.server.stat_run import StatRun
 
 log = logging.getLogger("buckaroo.server.stats_wire")
 
@@ -81,6 +82,24 @@ def refresh_session_snapshot(session: SessionState, dataflow: Any) -> None:
             dvc = session.df_display_args[key].get("df_viewer_config")
             if dvc is not None:
                 dvc["component_config"] = {**dvc.get("component_config", {}), **session.component_config}
+
+
+def start_stat_run(session: SessionState, scope: str = "raw") -> Optional[StatRun]:
+    """The ``StatRun`` of the session's current generation for ``scope``: the one
+    it holds, or a new one planned from the dataflow and stored on the session.
+    Planning sends no query. The run analyzes the frame ``assign_full_stats``
+    does, so running every unit gives the stats that call computes whole.
+    ``None`` when there is no dataflow to plan from or the scope is not one a
+    request can name."""
+    dataflow = session_dataflow(session)
+    if dataflow is None or dataflow.processed_df is None or scope not in STATS_SCOPES:
+        return None
+    key = (session.stats_gen, scope)
+    run = session.stat_runs.get(key)
+    if run is None:
+        run = StatRun(session.stats_gen, scope, dataflow.build_stats(dataflow.processed_df, run=False))
+        session.stat_runs[key] = run
+    return run
 
 
 def assign_full_stats(dataflow: Any) -> None:

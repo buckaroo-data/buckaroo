@@ -11,6 +11,7 @@ from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, ErrD
 from ..serialization_utils import pd_to_obj, sd_to_parquet_b64, project_sd
 from buckaroo.pluggable_analysis_framework.utils import (filter_analysis)
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
+from buckaroo.pluggable_analysis_framework.stat_units import Fragment, StatAccumulator, StatState, StatUnit
 from .autocleaning import SentinelAutocleaning
 from .dataflow_extras import (exception_protect, Sampling)
 from .styling_core import (
@@ -139,15 +140,22 @@ class DfStats(Protocol):
     ``DfStatsV2`` (pandas), ``PlDfStatsV2`` (polars) and ``XorqDfStatsV2``
     share this surface but no base class. The frame argument is ``Any``
     because each executor accepts only its own backend's frame type.
+
+    ``run=False`` builds one without computing anything, for a caller that runs
+    ``plan(state)`` and ``run(unit, acc)`` itself (see ``stat_units``).
     """
     sdf: TAny
     errs: TAny
     ap: TAny
+    state: StatState
     def __init__(self, df: TAny, col_analysis_objs: TAny, /, operating_df_name: TAny = ...,
-                 debug: bool = ..., skip_columns: TAny = ...) -> None: ...
+                 debug: bool = ..., skip_columns: TAny = ..., run: bool = ...) -> None: ...
     @classmethod
     def verify_analysis_objects(cls, col_analysis_objs: TAny, /) -> None: ...
     def add_analysis(self, a_obj: TAny, /) -> None: ...
+    def plan(self, state: Optional[StatState] = ...) -> List[StatUnit]: ...
+    def new_accumulator(self, state: Optional[StatState] = ...) -> StatAccumulator: ...
+    def run(self, unit: StatUnit, acc: StatAccumulator) -> Fragment: ...
 
 
 class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
@@ -756,16 +764,25 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
 
 
     ### start summary stats block
+    def build_stats(self, processed_df: DataFrameT, run: bool = True) -> DfStats:
+        """The stats executor for ``processed_df``, built the one way every
+        summary-stats run builds it. With ``run=False`` it computes nothing yet
+        and the caller drives its ``plan`` and ``run``."""
+        # ``run`` is passed only when it is False, so a DFStatsClass written
+        # before it existed still builds on the default path.
+        extra = {} if run else {'run': False}
+        return self.DFStatsClass(
+            processed_df,
+            self.analysis_klasses,
+            self.df_name, debug=self.debug,
+            skip_columns=getattr(self, 'skip_stat_columns', None), **extra)
+
     #TAny closer to some error type
     @override
     def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, ErrDict]:
         if self.stats_tier == "schema":
             return self._get_schema_sd(processed_df), {}
-        stats = self.DFStatsClass(
-            processed_df,
-            self.analysis_klasses,
-            self.df_name, debug=self.debug,
-            skip_columns=getattr(self, 'skip_stat_columns', None))
+        stats = self.build_stats(processed_df)
         sdf = stats.sdf
         if stats.errs:
             if self.debug:

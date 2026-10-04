@@ -64,6 +64,11 @@ class XorqServerDataflow(XorqDataflow):
     and project-authored post-processing classes discovered under
     ``<project_root>/post_processing/*.py``; the built-in xorq stats are
     kept first so collisions resolve to the built-in.
+
+    ``stat_chunk_cells`` is the host's request (off when ``None``) to run the
+    stats batch aggregate in chunks of about that many cells instead of one
+    query; the stats pipeline still refuses it for any source that is not a
+    plain parquet scan (``XorqStatPipeline.chunk_refusal``).
     """
 
     sampling_klass = XorqInfiniteSampling
@@ -72,13 +77,14 @@ class XorqServerDataflow(XorqDataflow):
     DFStatsClass = XorqDfStatsV2
     analysis_klasses = _XORQ_ANALYSIS_KLASSES
 
-    def __init__(self, expr, *args, extra_klasses=None, cache_storage_path=None, **kwargs):
+    def __init__(self, expr, *args, extra_klasses=None, cache_storage_path=None, stat_chunk_cells=None, **kwargs):
         if extra_klasses:
             # Per-instance override — class-level _XORQ_ANALYSIS_KLASSES is
             # left untouched so other sessions / direct widget usage don't
             # inherit one project's stats.
             self.analysis_klasses = list(_XORQ_ANALYSIS_KLASSES) + list(extra_klasses)
         self.cache_storage = _make_cache_storage(cache_storage_path)
+        self.stat_chunk_cells = stat_chunk_cells
         super().__init__(expr, *args, **kwargs)
 
 
