@@ -188,9 +188,9 @@ class TestResolveStatsPolicy:
         assert out["estimate"] == {"rows": 12_400_000, "cols": 43, "bytes": 987_654_321}
 
     def test_numpy_integer_counts_are_accepted(self, sp, lim):
-        out = _resolve(sp, lim, "xorq", "parquet", np.int64(11_000_000), np.int64(43))
+        out = _resolve(sp, lim, "xorq", "parquet", np.int64(13_000_000), np.int64(43))
         assert out["tier_target"] == "scalar"
-        assert out["estimate"] == {"rows": 11_000_000, "cols": 43}
+        assert out["estimate"] == {"rows": 13_000_000, "cols": 43}
 
     @pytest.mark.parametrize("rows, cols", [(-1, 3), (3, -1), (None, 3), (3, None), (1.5, 3)])
     def test_bad_counts_are_rejected(self, sp, lim, rows, cols):
@@ -273,7 +273,7 @@ class TestCeiling:
     def test_reload_re_resolves_against_the_new_row_count(self, sp, lim):
         """/reload_expr keeps the stored host tier and re-resolves. An entry
         that fit under the ceiling and then grew past it loses full."""
-        before = _resolve(sp, lim, "xorq", "parquet", 40_000_000, 44, "full")
+        before = _resolve(sp, lim, "xorq", "parquet", 20_000_000, 44, "full")
         assert before["tier_target"] == "full"
         after = _resolve(sp, lim, "xorq", "parquet", 78_000_000, 44, "full")
         assert after["tier_target"] == "scalar"
@@ -371,6 +371,25 @@ class TestCeiling:
         assert out["reason"] == "ceiling"
 
 
+    @pytest.mark.parametrize("rows, cols",
+        [(12_000_001, 43), (10_000_001, 52), (11_000_000, 91), (20_000_000, 50), (20_000_001, 50), (22_727_273, 44),
+         (25_000_000, 40), (25_000_000, 41), (25_000_001, 10), (50_000_000, 81), (100_000_000, 40),
+         (100_000_001, 40)])
+    def test_requestable_matches_a_force_at_the_row_and_cell_boundaries(self, sp, lim, rows, cols):
+        """With the cell bounds, the tiers a result offers are still exactly
+        the ones a force request is granted."""
+        out = _resolve(sp, lim, "xorq", "parquet", rows, cols)
+        for tier in ("scalar", "full"):
+            if TIER_RANK[tier] <= TIER_RANK[out["tier_target"]]:
+                continue
+            forced = _resolve(sp, lim, "xorq", "parquet", rows, cols, tier)
+            if tier in out["requestable"]:
+                assert forced["tier_target"] == tier
+            else:
+                assert forced["tier_target"] != tier
+                assert forced["reason"] == "ceiling"
+
+
 class TestLimitsFromEnv:
     def test_defaults_when_the_environment_is_empty(self, sp):
         assert sp.StatsLimits.from_env() == sp.StatsLimits()
@@ -395,7 +414,7 @@ class TestLimitsFromEnv:
 
     def test_empty_value_means_unset(self, sp, monkeypatch):
         monkeypatch.setenv("BUCKAROO_STATS_CEILING_SCALAR_CELLS", "")
-        assert sp.StatsLimits.from_env().ceiling_scalar_cells is None
+        assert sp.StatsLimits.from_env().ceiling_scalar_cells == sp.StatsLimits().ceiling_scalar_cells
 
     def test_resolve_reads_the_environment_when_no_limits_are_passed(self, sp, monkeypatch):
         monkeypatch.setenv("BUCKAROO_STATS_CEILING_FULL_ROWS", "1000")
@@ -417,6 +436,13 @@ class TestLimitsFromEnv:
         monkeypatch.setenv("BUCKAROO_STATS_CEILING_FULL_CELLS", "1000")
         out = sp.resolve_stats_policy(*args, host_tier="full")
         assert out["tier_target"] == "scalar"
+        assert out["reason"] == "ceiling"
+
+    def test_the_scalar_ceiling_comes_from_the_environment(self, sp, monkeypatch):
+        args = ("xorq", "parquet", 5_000, 10)
+        monkeypatch.setenv("BUCKAROO_STATS_CEILING_SCALAR_CELLS", "1000")
+        out = sp.resolve_stats_policy(*args, host_tier="scalar")
+        assert out["tier_target"] == "schema"
         assert out["reason"] == "ceiling"
 
     def test_the_environment_is_read_on_each_call(self, sp, monkeypatch):

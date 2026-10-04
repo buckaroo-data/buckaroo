@@ -23,26 +23,31 @@ so the cost does not grow with the file.
 :func:`route_polars_entry` is the separate size rule for polars: an entry
 above R rows belongs on xorq's ``/load_expr``, not eager ``/load``.
 
-The thresholds are PROVISIONAL. They are proposals taken from repo constants
-and a few tallyman telemetry entries, and calibration measurements are
-expected to replace them. They live in the ``DEFAULT_*`` constants below, and each has an
-environment override that is read on every call, not at import. A value that
-is not a non-negative integer is ignored with a warning.
+The thresholds are PROVISIONAL. They are the values the phase-0 measurements
+proposed (one Apple M4 Pro, 115 tallyman telemetry loads, xorq stats on
+parquet and CSV slices, eager polars RSS), and they rest on gaps: the
+telemetry has nothing between 11.8M and 42.3M rows, nothing was measured on
+the xorq side above 12M rows, and the scalar ceiling is an extrapolation.
+They live in the ``DEFAULT_*`` constants below, each with the measurement it
+comes from, and each has an environment override that is read on every call,
+not at import. A value that is not a non-negative integer is ignored with a
+warning.
 
-* ``BUCKAROO_STATS_FULL_AUTO_ROWS`` (10,000,000 rows): ``full`` is chosen
-  automatically up to this many rows.
-* ``BUCKAROO_STATS_SCALAR_AUTO_CELLS`` (500,000,000 cells): above the full
-  threshold, ``scalar`` is chosen automatically up to this many cells
-  (rows x columns), from the 0.40-0.54 s scalar batch on 464M cells. Above it
-  the entry stays at ``schema``.
-* ``BUCKAROO_STATS_CEILING_FULL_ROWS`` (50,000,000 rows): hard ceiling on
-  ``full``. It has to refuse the 78M-row entry whose stats took 215 s; the
-  number itself has no other evidence behind it.
-* ``BUCKAROO_STATS_CEILING_SCALAR_CELLS`` (unset, no ceiling): hard ceiling
-  on ``scalar``, in cells. Above it only ``schema`` is allowed.
-* ``BUCKAROO_POLARS_ROUTE_ROWS`` (10,000,000 rows): R for
+* ``BUCKAROO_STATS_FULL_AUTO_ROWS`` (12,000,000 rows) and
+  ``BUCKAROO_STATS_FULL_AUTO_CELLS`` (520,000,000 cells): ``full`` is chosen
+  automatically while both hold.
+* ``BUCKAROO_STATS_SCALAR_AUTO_CELLS`` (1,000,000,000 cells): otherwise
+  ``scalar`` is chosen automatically up to this many cells (rows x columns).
+  Above it the entry stays at ``schema``.
+* ``BUCKAROO_STATS_CEILING_FULL_ROWS`` (25,000,000 rows) and
+  ``BUCKAROO_STATS_CEILING_FULL_CELLS`` (1,000,000,000 cells): hard ceiling
+  on ``full``, refused above either bound, including for a forced request.
+* ``BUCKAROO_STATS_CEILING_SCALAR_CELLS`` (4,000,000,000 cells): hard ceiling
+  on ``scalar``, in cells. Above it only ``schema`` is allowed. This number
+  is an extrapolation with no measurement behind it.
+* ``BUCKAROO_POLARS_ROUTE_ROWS`` (8,000,000 rows): R for
   :func:`route_polars_entry`. A memory threshold, set apart from the stats
-  ones.
+  ones, and sized for ``pre_limit`` False (see the constant below).
 """
 from __future__ import annotations
 
@@ -56,17 +61,41 @@ import pyarrow.parquet as pq
 
 log = logging.getLogger("buckaroo.server.stats_policy")
 
-# Provisional values; see the module docstring.
-DEFAULT_FULL_AUTO_ROWS: int = 10_000_000
-DEFAULT_SCALAR_AUTO_CELLS: int = 500_000_000
-DEFAULT_CEILING_FULL_ROWS: int = 50_000_000
-DEFAULT_CEILING_SCALAR_CELLS: int | None = None
-DEFAULT_POLARS_ROUTE_ROWS: int = 10_000_000
+# Provisional values from the phase-0 measurements; see the module docstring.
+# 105 of 115 telemetry loads are at or below 12M rows (stats p90 4.4 s). Every
+# load above it is one of three CSV unions (42.3M, 54.1M, 78.0M rows) at 75,
+# 114 and 215 s.
+DEFAULT_FULL_AUTO_ROWS: int = 12_000_000
+# Parquet 12M x 43 (516M cells) full stats took 2.9 s over 8 repetitions. The
+# bound only bites on an entry wider than 43 columns at 12M rows.
+DEFAULT_FULL_AUTO_CELLS: int = 520_000_000
+# The scalar class costs 1.1-1.3 ms per Mcell on a parquet scan and 3-6 ms on a
+# CSV union. At the worst telemetry batch rates (30-48 ms per Mcell, scalar
+# being 0.44-0.71 of the batch) that is about 20-34 s at 1.0B cells.
+DEFAULT_SCALAR_AUTO_CELLS: int = 1_000_000_000
+# The ceiling on full separates the slowest in-limit load (11.8M rows, 22 s)
+# from the fastest one above it (42.3M rows, 75 s). 25M rows and 1.0B cells are
+# near the geometric midpoint of that gap (22M rows, 1.0B cells), and it is a
+# gap in the telemetry, so the true limit could sit anywhere inside it.
+DEFAULT_CEILING_FULL_ROWS: int = 25_000_000
+DEFAULT_CEILING_FULL_CELLS: int = 1_000_000_000
+# An extrapolation with no measurement behind it. The only evidence above 1.8B
+# cells is the 3.36B-cell entry whose batch took 162.5 s, and scalar was not
+# measured there. ``None`` means no ceiling.
+DEFAULT_CEILING_SCALAR_CELLS: int | None = 4_000_000_000
+# Eager polars RSS is 0.28 GB + 0.543 GB per Mrow, and with ``pre_limit`` False
+# a sorted window peaks at 0.23 + 1.62 GB per Mrow (3.0x the frame). With a
+# 32 GB budget, four files resident and one window in flight, 8M rows is 27 GB
+# and 10M is 33.5 GB. That figure assumes ``pre_limit`` False; main's 1M
+# ``pre_limit`` windows do not copy the frame and the resident-only bound would
+# be about 14M rows.
+DEFAULT_POLARS_ROUTE_ROWS: int = 8_000_000
 
 # Environment variable -> StatsLimits field.
 _ENV_FIELDS = {"BUCKAROO_STATS_FULL_AUTO_ROWS": "full_auto_rows",
     "BUCKAROO_STATS_SCALAR_AUTO_CELLS": "scalar_auto_cells", "BUCKAROO_STATS_CEILING_FULL_ROWS": "ceiling_full_rows",
-    "BUCKAROO_STATS_CEILING_SCALAR_CELLS": "ceiling_scalar_cells", "BUCKAROO_POLARS_ROUTE_ROWS": "polars_route_rows"}
+    "BUCKAROO_STATS_CEILING_SCALAR_CELLS": "ceiling_scalar_cells", "BUCKAROO_POLARS_ROUTE_ROWS": "polars_route_rows",
+    "BUCKAROO_STATS_FULL_AUTO_CELLS": "full_auto_cells", "BUCKAROO_STATS_CEILING_FULL_CELLS": "ceiling_full_cells"}
 
 # Lowest to highest.
 TIERS = ("schema", "scalar", "full")
@@ -99,6 +128,9 @@ class StatsLimits:
     ceiling_full_rows: int = DEFAULT_CEILING_FULL_ROWS
     ceiling_scalar_cells: int | None = DEFAULT_CEILING_SCALAR_CELLS
     polars_route_rows: int = DEFAULT_POLARS_ROUTE_ROWS
+    # Added after the first five fields, so a positional construction keeps its meaning.
+    full_auto_cells: int = DEFAULT_FULL_AUTO_CELLS
+    ceiling_full_cells: int = DEFAULT_CEILING_FULL_CELLS
 
     @classmethod
     def from_env(cls) -> StatsLimits:
@@ -123,7 +155,7 @@ def _count(name: str, value: Any) -> int:
 
 def _size_tier(rows: int, cells: int, limits: StatsLimits) -> str:
     """The tier the server picks on its own for an entry of this size."""
-    if rows <= limits.full_auto_rows:
+    if rows <= limits.full_auto_rows and cells <= limits.full_auto_cells:
         return "full"
     if cells <= limits.scalar_auto_cells:
         return "scalar"
@@ -134,7 +166,9 @@ def _ceiling_tier(rows: int, cells: int, limits: StatsLimits) -> str:
     """The highest tier any caller may reach for an entry of this size."""
     if limits.ceiling_scalar_cells is not None and cells > limits.ceiling_scalar_cells:
         return "schema"
-    return "full" if rows <= limits.ceiling_full_rows else "scalar"
+    if rows <= limits.ceiling_full_rows and cells <= limits.ceiling_full_cells:
+        return "full"
+    return "scalar"
 
 
 def resolve_stats_policy(backend: str, source_kind: str, rows: int, cols: int, bytes: int | None = None,
@@ -212,11 +246,15 @@ def resolve_stats_policy(backend: str, source_kind: str, rows: int, cols: int, b
 def route_polars_entry(rows: int, cols: int, limits: StatsLimits | None = None) -> str:
     """``"xorq"`` for a polars entry above R rows, ``"eager"`` otherwise.
 
-    Eager polars holds about 6.7 GB at 10.8M rows and cannot hold the 78M-row
+    Eager polars holds about 6.8 GB at 12M rows and cannot hold the 78M-row
     entry, so a host sends entries above R to ``/load_expr`` instead of
-    ``/load`` with ``backend="polars"``. R is ``limits.polars_route_rows``.
-    ``cols`` is accepted so the rule can become a cell budget without a
-    signature change; only ``rows`` decides today.
+    ``/load`` with ``backend="polars"``. R is ``limits.polars_route_rows``,
+    8M rows by default. That figure assumes ``PolarsServerSampling.pre_limit``
+    is False, so a sorted window copies the frame (3.0x its size at the peak);
+    with the 1M ``pre_limit`` on main windows do not copy it and the same
+    memory budget would allow about 14M rows. ``cols`` is accepted so the rule
+    can become a cell budget without a signature change; only ``rows`` decides
+    today.
     """
     rows = _count("rows", rows)
     _count("cols", cols)
