@@ -2050,6 +2050,16 @@ class TestStatsPolicyWire(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual((resp.code, json.loads(resp.body)["error_code"]), (400, "invalid_stats_tier"))
 
     @tornado.testing.gen_test
+    async def test_a_tier_named_below_full_builds_a_schema_dataflow_with_inline_delivery(self):
+        """No scalar-tier units exist yet, so a scalar target is built and held at
+        the schema tier."""
+        await self._load("pw-scalar-inline", stats_tier="scalar")
+        session = self._session("pw-scalar-inline")
+        self.assertEqual((session.xorq_dataflow.stats_tier, session.stats_status, session.stats_reason),
+            ("schema", "not_computed", "host"))
+        self.assertEqual(session.stats_policy["tier_target"], "scalar")
+
+    @tornado.testing.gen_test
     async def test_the_default_tier_stays_full(self):
         await self._load("pw-default", stats_delivery="deferred")
         session = self._session("pw-default")
