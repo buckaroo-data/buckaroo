@@ -2319,6 +2319,9 @@ class TestStatsPolicyWire(tornado.testing.AsyncHTTPTestCase):
                 self.assertEqual(_as_json(before["df_meta"]), _as_json(after["df_meta"]), (delivery, caps))
                 self.assertEqual(_comparable(before), _comparable(after), (delivery, caps))
                 self.assertEqual(list(before), list(after))
+                if delivery == "deferred" and caps:
+                    stats = self._stats(after)
+                    self.assertEqual(stats, {"status": "pending", "tier": "schema", "gen": stats["gen"]}, caps)
         self.assertEqual(self._session("pw-same-deferred-b").stats_policy["tier_target"], "full")
         self.assertIsNone(self._session("pw-same-inline-b").stats_policy)
 

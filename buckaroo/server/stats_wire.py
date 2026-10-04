@@ -13,6 +13,17 @@ reach them:
   missing stats synchronously before it builds a message for one, which is
   today's cost, paid on the loop.
 
+A session also carries the policy resolved at load (``stats_policy.py``). A
+target the server chose below ``full`` (a size rule, or the ceiling on a host
+that asked for ``auto`` or ``full``) is applied only for a client that
+advertised ``?caps=stats_update,stats_ondemand``: it gets the schema tier,
+``df_meta.stats.status == "not_computed"`` and the policy fields. A client with
+``stats_update`` only is told the session is ``pending`` and pulls the stats as
+above, and one with no caps gets them synchronously, as for any deferred
+session. A tier the host named below ``full`` (``scalar``, ``schema``) is its
+choice and reaches every client as ``not_computed``. ``stats_to_pull`` decides,
+per client, whether a session has stats left to compute.
+
 Every send site goes through ``build_state_message_for`` (or ``broadcast_state``,
 which calls it per client), because the session holds one shared snapshot and
 the client is known only to the handler that owns the connection.
@@ -30,7 +41,8 @@ from typing import Any, Callable, Optional
 from buckaroo.dataflow.sd_cache import split_chain_by_scope
 from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import get_buckaroo_display_state
-from buckaroo.server.session import SessionState, build_state_message
+from buckaroo.server.session import SessionState, build_state_message, stats_deferred_by_policy
+from buckaroo.server.stats_policy import resolve_stats_policy
 
 log = logging.getLogger("buckaroo.server.stats_wire")
 
@@ -39,6 +51,11 @@ log = logging.getLogger("buckaroo.server.stats_wire")
 # connection is the only place it can be recorded, because ``open()`` sends the
 # first message before the client has said anything.
 STATS_UPDATE_CAP = "stats_update"
+
+# The second capability bit: the client also renders ``not_computed``, honours
+# ``auto_request`` and sends ``tier`` and ``force`` on ``stats_request``. It counts
+# only together with ``stats_update``, which it builds on.
+STATS_ONDEMAND_CAP = "stats_ondemand"
 
 # The scopes a ``stats_request`` can name. ``raw`` is the unfiltered table of
 # the session's current generation; filtered stats exist only through a
@@ -56,6 +73,32 @@ def client_has_cap(client: Any, cap: str) -> bool:
     """Whether a WebSocket handler recorded ``cap`` at open. Anything else with
     no ``caps`` (a test double, a future non-WebSocket client) has none."""
     return cap in getattr(client, "caps", ())
+
+
+def client_has_ondemand(client: Any) -> bool:
+    """Whether a WebSocket handler advertised ``stats_update`` and
+    ``stats_ondemand``, so a session the server put below ``full`` is applied
+    for it as such."""
+    return client_has_cap(client, STATS_UPDATE_CAP) and client_has_cap(client, STATS_ONDEMAND_CAP)
+
+
+def stats_to_pull(session: SessionState, client: Any) -> bool:
+    """Whether the session has stats left to compute from this client's side: it
+    is ``pending``, or the server put it below ``full`` and the client cannot
+    take that (``stats_deferred_by_policy``). A client with ``stats_update``
+    pulls them with ``stats_request``, one with no caps gets them at connect."""
+    return session.stats_status == "pending" or (stats_deferred_by_policy(session) and not client_has_ondemand(client))
+
+
+def resolve_session_policy(stats_tier: str, dataflow_tier: str, rows: int, cols: int) -> Optional[dict]:
+    """The policy for a session the handler has just built: ``stats_tier`` is the
+    host's request, ``dataflow_tier`` the tier its dataflow was built at, and
+    ``rows`` and ``cols`` the size load already took (the cached count, so no
+    query runs). ``None`` when the dataflow ran its stats in the constructor
+    (``full``): there is nothing left to defer or refuse."""
+    if dataflow_tier != "schema":
+        return None
+    return resolve_stats_policy("xorq", "xorq_build", rows, cols, host_tier=stats_tier)
 
 
 def session_dataflow(session: Optional[SessionState]) -> Any:
@@ -113,7 +156,8 @@ def assign_full_stats(dataflow: Any) -> None:
 
 
 def complete_stats(session: SessionState) -> bool:
-    """Run the stats a pending session is missing, in one synchronous call, and
+    """Run the stats a pending session is missing (or one the server put below
+    ``full``, for a client that cannot take that), in one synchronous call, and
     publish them: the final assignment (``assign_full_stats``), then the session
     snapshot refreshed and the status set to ``complete`` in the same step, so
     ``all_stats`` and ``df_meta.stats`` cannot disagree. Returns whether the
@@ -125,7 +169,7 @@ def complete_stats(session: SessionState) -> bool:
     if session.stats_status == "complete":
         return True
     dataflow = session_dataflow(session)
-    if session.stats_status != "pending" or dataflow is None:
+    if not (session.stats_status == "pending" or stats_deferred_by_policy(session)) or dataflow is None:
         return False
     with (
         perf_log.telemetry_context(session.session_id, session.tele_sink),
@@ -147,17 +191,20 @@ def build_state_message_for(session: SessionState, client: Any, metadata: Option
                             reply_seq: Optional[int] = None) -> dict:
     """The ``initial_state`` message for one client.
 
-    A client without the ``stats_update`` capability on a pending deferred
-    session gets its missing stats run first, so its message is complete; a
-    capable client gets the session snapshot as it is (stats-free while the
-    session is pending) and pulls the rest. The search term is the recipient's
-    own (#851), and ``reply_seq`` is passed through to ``build_state_message``
-    (#998)."""
-    if (session.stats_delivery == "deferred" and session.stats_status == "pending"
+    A client without the ``stats_update`` capability on a deferred session that
+    has stats to compute for it (``stats_to_pull``) gets them run first, so its
+    message is complete; a capable client gets the session snapshot as it is
+    (stats-free while the stats are to be pulled) and pulls the rest. A client
+    that also advertised ``stats_ondemand`` is told the session as the server
+    resolved it (``not_computed`` with the policy fields); the others are told
+    ``pending`` where the server chose a target below ``full``. The search term
+    is the recipient's own (#851), and ``reply_seq`` is passed through to
+    ``build_state_message`` (#998)."""
+    if (session.stats_delivery == "deferred" and stats_to_pull(session, client)
             and not client_has_cap(client, STATS_UPDATE_CAP)):
         complete_stats(session)
     return build_state_message(session, metadata=metadata, search_string=getattr(client, "search_string", ""),
-        reply_seq=reply_seq)
+        reply_seq=reply_seq, ondemand=client_has_ondemand(client))
 
 
 def broadcast_state(session: SessionState, metadata: Optional[dict] = None, reset_search: bool = False,
@@ -199,7 +246,8 @@ def _aborted(stats_gen: Any, scope: Any, reason: str, session: Optional[SessionS
     return msg
 
 
-def _answer_stats_request(session: Optional[SessionState], stats_gen: Any, scope: Any, started: float) -> dict:
+def _answer_stats_request(session: Optional[SessionState], stats_gen: Any, scope: Any, client: Any,
+        started: float) -> dict:
     dataflow = session_dataflow(session)
     if session is None or dataflow is None:
         return _aborted(stats_gen, scope, "no_data")
@@ -207,9 +255,12 @@ def _answer_stats_request(session: Optional[SessionState], stats_gen: Any, scope
         return _aborted(stats_gen, scope, "stale", session)
     if scope not in STATS_SCOPES:
         return _aborted(stats_gen, scope, "unsupported_scope", session)
-    if session.stats_status == "not_computed":
+    to_pull = stats_to_pull(session, client)
+    if session.stats_status == "not_computed" and not to_pull:
         return _aborted(stats_gen, scope, "not_requestable", session)
-    if session.stats_status == "error" or (session.stats_status == "pending" and not complete_stats(session)):
+    if to_pull:
+        complete_stats(session)
+    if session.stats_status != "complete":
         return _aborted(stats_gen, scope, "error", session)
     # Complete: from here the answer is the dataflow's own all_stats, with no
     # query, whether this request ran the stats or an earlier one did.
@@ -218,7 +269,7 @@ def _answer_stats_request(session: Optional[SessionState], stats_gen: Any, scope
         "elapsed_ms": round((time.perf_counter() - started) * 1000, 1)}
 
 
-def handle_stats_request(session: Optional[SessionState], msg: dict) -> dict:
+def handle_stats_request(session: Optional[SessionState], msg: dict, client: Any = None) -> dict:
     """Answer a ``stats_request {stats_gen, scope, columns?}``: a
     ``stats_update`` carrying the complete ``all_stats`` as an inline wide
     ``DFEnvelope`` (self-contained, so binary pairing stays single-slot), or a
@@ -227,13 +278,15 @@ def handle_stats_request(session: Optional[SessionState], msg: dict) -> dict:
     The ``stats.request`` span records the request and its ``outcome``
     (``update`` or the abort reason), which is where updates sent, requests
     dropped as stale and errors are counted. The caller binds the session's
-    telemetry sink around this call."""
+    telemetry sink around this call. ``client`` is the handler that sent the
+    request: whether the session has stats to pull depends on its caps
+    (``stats_to_pull``)."""
     stats_gen, scope, columns = msg.get("stats_gen"), msg.get("scope", "raw"), msg.get("columns")
     started = time.perf_counter()
     with perf_log.perf_span("stats.request", session=session.session_id if session else None, stats_gen=stats_gen,
         scope=scope, columns=len(columns) if isinstance(columns, list) else None) as span:
         try:
-            reply = _answer_stats_request(session, stats_gen, scope, started)
+            reply = _answer_stats_request(session, stats_gen, scope, client, started)
         except Exception:
             log.error("stats_request error session=%s: %s", session.session_id if session else None,
                 traceback.format_exc())

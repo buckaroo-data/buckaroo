@@ -14,10 +14,9 @@ from buckaroo.server.data_loading import (load_file, get_metadata, get_display_s
 from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
-from buckaroo.dataflow.dataflow import STATS_TIERS
 from buckaroo.server.session import (
-    STATS_DELIVERIES, begin_stats_generation, dataflow_stats_tier)
-from buckaroo.server.stats_wire import broadcast_state, refresh_session_snapshot
+    STATS_DELIVERIES, STATS_TIER_REQUESTS, begin_stats_generation, dataflow_stats_tier)
+from buckaroo.server.stats_wire import broadcast_state, refresh_session_snapshot, resolve_session_policy
 from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
@@ -383,9 +382,11 @@ class LoadHandler(tornado.web.RequestHandler):
                         **component_config,
                     }
 
-        # /load builds no deferred stats, whatever policy a prior /load_expr on
-        # this session left behind, and the generation moves on with the data.
-        session.stats_tier, session.stats_delivery = "full", "inline"
+        # /load serves the eager backends, whose stats cost does not grow with
+        # the file, so they resolve to full: it reads no stats_tier and builds
+        # no deferred stats, whatever policy a prior /load_expr on this session
+        # left behind, and the generation moves on with the data.
+        session.stats_tier, session.stats_delivery, session.stats_policy = "full", "inline", None
         begin_stats_generation(session)
 
         # Notify connected clients and open browser
@@ -398,7 +399,8 @@ class LoadHandler(tornado.web.RequestHandler):
 
 
 def _stats_policy_from_body(body: dict, current_tier: str, current_delivery: str):
-    """Read ``stats_tier`` and ``stats_delivery`` from a request body.
+    """Read ``stats_tier`` (``auto``, ``full``, ``scalar`` or ``schema``) and
+    ``stats_delivery`` from a request body.
 
     A field the body omits (or sends as null) keeps the current value (the
     session's, or the default for a new session), as ``cache_dir`` does. Returns
@@ -407,9 +409,9 @@ def _stats_policy_from_body(body: dict, current_tier: str, current_delivery: str
     stats_tier = body.get("stats_tier")
     if stats_tier is None:
         stats_tier = current_tier
-    if stats_tier not in STATS_TIERS:
+    if stats_tier not in STATS_TIER_REQUESTS:
         return None, None, {"error_code": "invalid_stats_tier",
-            "message": f"stats_tier must be one of {list(STATS_TIERS)}, got {stats_tier!r}"}
+            "message": f"stats_tier must be one of {list(STATS_TIER_REQUESTS)}, got {stats_tier!r}"}
     stats_delivery = body.get("stats_delivery")
     if stats_delivery is None:
         stats_delivery = current_delivery
@@ -569,6 +571,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
             "skip_stat_columns": body.get("skip_stat_columns")}
 
         project_root = body.get("project_root")
+        dataflow_tier = dataflow_stats_tier(stats_tier, stats_delivery)
 
         try:
             with telemetry.firstpull_load(session_id, tele_sink, "load_expr", build_dir=build_dir):
@@ -591,8 +594,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 with perf_log.perf_span("firstpull.dataflow_construct", session=session_id):
                     xorq_dataflow = xorq_loading.XorqServerDataflow(
                         expr, skip_main_serial=True, extra_klasses=extra_klasses,
-                        stats_tier=dataflow_stats_tier(stats_tier, stats_delivery),
-                        **dataflow_kwargs)
+                        stats_tier=dataflow_tier, **dataflow_kwargs)
                 # Spanning metadata too leaves only the small klass-load step
                 # unmeasured inside the outer firstpull.load_expr total.
                 with perf_log.perf_span("firstpull.metadata", session=session_id):
@@ -608,6 +610,12 @@ class LoadExprHandler(tornado.web.RequestHandler):
             self.write(resp)
             return
 
+        # The dataflow and the count exist: this is where the size policy is
+        # resolved. A dataflow built at the schema tier has run no stat query, so
+        # the policy can still keep it there; one that ran its stats in the
+        # constructor has nothing left to resolve (None).
+        stats_policy = resolve_session_policy(stats_tier, dataflow_tier, metadata["rows"], len(metadata["columns"]))
+
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, build_dir)
         session.mode = "buckaroo"
@@ -619,6 +627,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.dataflow_kwargs = dataflow_kwargs
         session.stats_tier = stats_tier
         session.stats_delivery = stats_delivery
+        session.stats_policy = stats_policy
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
         # session so WS dispatch can no longer reach a stale dataflow.
@@ -807,7 +816,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         session.mode = "viewer"
         telemetry.arm_session(session, tele_sink)
         # A viewer session has no dataflow and so no deferred stats.
-        session.stats_tier, session.stats_delivery = "full", "inline"
+        session.stats_tier, session.stats_delivery, session.stats_policy = "full", "inline", None
         begin_stats_generation(session)
 
         # Push to WebSocket clients. Reset per-client live search (#851).
@@ -843,7 +852,7 @@ class ReloadExprHandler(tornado.web.RequestHandler):
 
     The session's stored ``stats_tier`` / ``stats_delivery`` are replayed too.
     The body is optional; a pair in it replaces the stored one (and is stored)
-    when the reload succeeds.
+    when the reload succeeds. The stats policy is resolved again for the pair.
 
     Returns 404 when the session does not exist, 400 when it is not a xorq
     session, has no project_root recorded or carries an invalid stats policy,
@@ -900,10 +909,14 @@ class ReloadExprHandler(tornado.web.RequestHandler):
                 xorq_loading.load_project_stat_klasses(session.project_root)
                 + xorq_loading.load_project_post_processing_klasses(session.project_root)
                 + xorq_loading.load_project_display_klasses(session.project_root))
+            dataflow_tier = dataflow_stats_tier(stats_tier, stats_delivery)
             xorq_dataflow = xorq_loading.XorqServerDataflow(
                 session.expr, skip_main_serial=True, extra_klasses=extra_klasses,
-                stats_tier=dataflow_stats_tier(stats_tier, stats_delivery),
-                **session.dataflow_kwargs)
+                stats_tier=dataflow_tier, **session.dataflow_kwargs)
+            # Resolved again, with the count the load took: the expression is
+            # reused, so there is no new one to take.
+            stats_policy = resolve_session_policy(stats_tier, dataflow_tier, session.metadata["rows"],
+                len(session.metadata["columns"]))
         except Exception:
             tb = traceback.format_exc()
             log.error("reload_expr error session=%s: %s", session_id, tb)
@@ -931,6 +944,7 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         session.xorq_dataflow = xorq_dataflow
         session.stats_tier = stats_tier
         session.stats_delivery = stats_delivery
+        session.stats_policy = stats_policy
         refresh_session_snapshot(session, xorq_dataflow)
         begin_stats_generation(session)
 

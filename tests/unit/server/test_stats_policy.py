@@ -765,6 +765,17 @@ class TestStatsMeta:
         assert session_mod.stats_meta(session, ondemand=False) == {"status": "not_computed", "tier": "schema",
             "gen": 1, "reason": reason}
 
+    @pytest.mark.parametrize("ondemand", [True, False])
+    def test_an_explicit_full_within_the_ceiling_reports_no_policy(self, sp, ondemand):
+        """The message is the one sent before the policy existed, though the
+        policy is resolved and recorded."""
+        session = _session(sp, "full", "deferred")
+        assert session.stats_policy["tier_target"] == "full"
+        assert session_mod.stats_meta(session, ondemand=ondemand) == {"status": "pending", "tier": "schema", "gen": 1}
+        inline = _session(sp, "full", "inline", resolve=False)
+        assert session_mod.stats_meta(inline, ondemand=ondemand) is None
+        assert session_mod.build_state_message(inline, ondemand=ondemand)["df_meta"] == {"total_rows": 5}
+
     @pytest.mark.parametrize("stats_tier, limits",
         [("auto", {}), ("auto", SCALAR_BY_SIZE), ("full", FULL_OVER_CEILING)])
     def test_a_completed_session_reports_no_policy(self, sp, stats_tier, limits):
@@ -794,11 +805,6 @@ class TestStatsMeta:
     def test_every_reason_the_server_sends_is_a_documented_one(self):
         for *_, expected in POLICY_FRAMES:
             assert expected.get("reason", "size") in session_mod.STATS_REASONS
-
-    def test_the_policy_is_what_the_pure_function_resolved(self, sp):
-        session = _session(sp, "auto", "deferred", SCHEMA_BY_SIZE)
-        assert session.stats_policy == sp.resolve_stats_policy("xorq", "xorq_build", 5, 3,
-            limits=sp.StatsLimits(**SCHEMA_BY_SIZE))
 
 
 class TestPolicyForTheSession:

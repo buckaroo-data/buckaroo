@@ -83,7 +83,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
         with perf_log.telemetry_context(self.session_id, session.tele_sink if session else None):
-            reply = handle_stats_request(session, msg)
+            reply = handle_stats_request(session, msg, self)
         self.write_message(json.dumps(reply))
 
     def _handle_buckaroo_state_change(self, new_state, state_seq=None):
