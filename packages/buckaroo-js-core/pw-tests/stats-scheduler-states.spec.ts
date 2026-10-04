@@ -192,8 +192,19 @@ test("the summary view shows the empty state, and its control asks for the basic
   await expect.poll(() => sentLog(page)).toEqual([
     { type: "stats_request", stats_gen: 7, scope: "raw", incremental: true, force: true, tier: "scalar" },
   ]);
+  // The stats are marked pending, so the empty state and the control give way to
+  // the loading text and the grid, and a second click is not possible.
+  await expect(page.getByTestId("stats-status")).toHaveAttribute("data-stats-status", "pending");
+  await expect(page.getByTestId("stats-status")).toContainText("Computing summary stats");
+  await expect(page.getByTestId("stats-empty-state")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /compute|continue/i })).toHaveCount(0);
+  await expect(page.locator(".df-viewer")).toHaveCount(1);
 
-  // One column: the same request, naming the column by the grid's own name.
+  // The session as the server described it again: the empty state and its
+  // per-column form. One column: the same request, naming the column by the
+  // grid's own name.
+  await page.getByTestId("policy-size").click();
+  await expect(empty).toBeVisible();
   await empty.getByRole("combobox", { name: "Columns to compute" }).selectOption("b");
   await empty.getByRole("button", { name: "Compute basic stats" }).click();
   await expect.poll(async () => (await sentLog(page)).length).toBe(2);
@@ -205,6 +216,18 @@ test("the summary view shows the empty state, and its control asks for the basic
   await page.getByTestId("view-main").click();
   await expect(page.getByTestId("stats-empty-state")).toHaveCount(0);
   await waitForCells(page);
+});
+
+test("the status bar's control asks for the tier too, and the control is gone while the stats are pending", async ({ page }) => {
+  await page.goto(NOT_COMPUTED_URL);
+  await waitForCells(page);
+
+  await page.getByRole("button", { name: "Compute summary stats" }).click();
+  await expect.poll(() => sentLog(page)).toEqual([
+    { type: "stats_request", stats_gen: 7, scope: "raw", incremental: true, force: true, tier: "scalar" },
+  ]);
+  await expect(page.getByTestId("stats-status")).toHaveAttribute("data-stats-status", "pending");
+  await expect(page.getByRole("button", { name: "Compute summary stats" })).toHaveCount(0);
 });
 
 test("over the ceiling the summary view says so and offers no control, and the status bar offers none either", async ({ page }) => {
@@ -232,4 +255,5 @@ test("a paused run offers Continue, which asks for the tier that is left", async
   await expect.poll(() => sentLog(page)).toEqual([
     { type: "stats_request", stats_gen: 7, scope: "raw", incremental: true, force: true, tier: "full" },
   ]);
+  await expect(page.getByTestId("stats-status")).toHaveAttribute("data-stats-status", "pending");
 });

@@ -19,7 +19,9 @@
  * The NotComputed story (rows-first c5) is a session the server's policy left
  * without stats: typed columns over schema-tier stats, a main and a summary
  * view, and the policy in df_meta.stats. The buttons switch the view and the
- * reason the stats were not computed; the controls send through `forceStats`.
+ * reason the stats were not computed (which also puts the session back as the
+ * server described it). The controls send through `forceStats`, which marks the
+ * stats pending on the model, as it does for a real session.
  */
 import type { Meta, StoryObj } from "@storybook/react";
 import React, { useMemo, useState } from "react";
@@ -275,7 +277,11 @@ const NotComputedInner: React.FC = () => {
   });
   const [operations, setOperations] = useState<Operation[]>([]);
 
-  const df_meta = useMemo(
+  // What the server said for the reason picked, and what the page made of it
+  // since: forceStats marks the stats pending on the model, as a real session
+  // does, and the story shows that.
+  const [override, setOverride] = useState<DFMeta | undefined>(undefined);
+  const serverMeta = useMemo(
     () =>
       ({
         total_rows: typedData.length,
@@ -295,13 +301,16 @@ const NotComputedInner: React.FC = () => {
       }) as DFMeta,
     [reason],
   );
+  const df_meta = override ?? serverMeta;
 
   // The model the controls send through: it answers get("df_meta") from the
-  // story's state and logs what it is asked to send.
+  // story's state, keeps what is set on it and logs what it is asked to send.
   const model = useMemo(
     () => ({
       get: (key: string) => (key === "df_meta" ? df_meta : undefined),
-      set: () => {},
+      set: (key: string, value: unknown) => {
+        if (key === "df_meta") setOverride(value as DFMeta);
+      },
       send: (msg: unknown) => setSent((log) => [...log, msg]),
     }),
     [df_meta],
@@ -335,7 +344,15 @@ const NotComputedInner: React.FC = () => {
           </button>
         ))}
         {(Object.keys(REASONS) as Reason[]).map((r) => (
-          <button key={r} data-testid={`policy-${r}`} onClick={() => setReason(r)} style={{ marginRight: 8 }}>
+          <button
+            key={r}
+            data-testid={`policy-${r}`}
+            onClick={() => {
+              setReason(r);
+              setOverride(undefined);
+            }}
+            style={{ marginRight: 8 }}
+          >
             {r}
           </button>
         ))}

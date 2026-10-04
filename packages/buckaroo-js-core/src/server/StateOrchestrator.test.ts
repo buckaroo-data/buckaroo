@@ -574,6 +574,26 @@ describe("auto_request false: only the demand columns are asked for (rows-first 
         model.set("df_meta", meta(policy({ demand_columns: ["a"], reason: "ceiling" })));
         await tick(10_000);
         expect(model.sent).toEqual([demand(3, ["a"])]);
+
+        // A full frame for the same state (a search highlight) does not restart it.
+        model.frame({ df_meta: meta(policy({ demand_columns: ["a"], reason: "ceiling" })), df_data_dict: dict() });
+        await tick();
+        rowsArrived(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([demand(3, ["a"])]);
+    });
+
+    it("a full frame for the same state does not end it: the reply to the request in flight is still answered", async () => {
+        const model = makeModel(policy({ demand_columns: ["a", "c"] }));
+        await sendFirst(model);
+        // A search highlight comes back as a full frame with the same stats.
+        model.frame({ df_meta: meta(policy({ demand_columns: ["a", "c"] })), df_data_dict: dict([statRow("dtype")]) });
+        await tick(10_000);
+        expect(model.sent).toEqual([demand(3, ["a", "c"])]);
+
+        model.set("df_data_dict", dict([statRow("dtype"), statRow("min")]));
+        await tick();
+        expect(model.sent).toEqual([demand(3, ["a", "c"]), demand(3, ["a", "c"])]);
     });
 
     it("asks for the next gen's demand after a state change", async () => {
@@ -668,8 +688,24 @@ describe("forceStats: the control's request (rows-first c5)", () => {
 
     it("sends nothing when no tier is left to ask for", () => {
         const model = makeModel(notComputed({ requestable: [], reason: "ceiling" }));
+        const before = model.get("df_meta");
         expect(forceStats(model)).toBe(false);
         expect(model.sent).toEqual([]);
+        expect(model.get("df_meta")).toBe(before);
+    });
+
+    // The server cannot push a frame to a capable client, so the control marks
+    // the stats pending itself: the loading text and the placeholder rows show
+    // at once, and the control is gone, so a second click cannot start a second
+    // chain of requests.
+    it("marks the stats pending in a new df_meta, keeping the rest of it, so the control gives way to the loading state", () => {
+        const model = makeModel(notComputed());
+        const before = model.get("df_meta");
+        expect(forceStats(model)).toBe(true);
+        const after = model.get("df_meta");
+        expect(after).not.toBe(before);
+        expect(after.stats).toEqual({ ...notComputed(), status: "pending" });
+        expect(after.total_rows).toBe(before.total_rows);
     });
 
     it("sends nothing when df_meta carries no stats.gen", () => {
@@ -765,6 +801,25 @@ describe("a forced run is continued by the scheduler (rows-first c5)", () => {
         model.set("df_data_dict", dict([statRow("min")]));
         await tick(10_000);
         expect(model.sent).toEqual([]);
+    });
+
+    it("does not continue a run recorded before the scheduler started", async () => {
+        const model = makeModel(notComputed());
+        model.state.stats_forced = { gen: 5, tier: "scalar" };
+        start(model);
+        model.set("df_data_dict", dict([statRow("min")]));
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+
+    it("a full frame for the same gen ends the run: the model shows what the server says, and a late reply is not continued", async () => {
+        const model = await startForced();
+        // The server's own view of the session is still not computed.
+        model.frame({ df_meta: meta(notComputed()), df_data_dict: dict([statRow("dtype")]) });
+        await tick(10_000);
+        model.set("df_data_dict", dict([statRow("dtype"), statRow("min")]));
+        await tick(10_000);
+        expect(model.sent).toEqual([forced()]);
     });
 
     it("does nothing for a model nobody started a scheduler on", async () => {
@@ -1058,11 +1113,14 @@ describe("wired into WebSocketModel", () => {
             expect(forceStats(model)).toBe(true);
             expect(ws.sent).toEqual([forcedRequest()]);
 
+            // The control marked the stats pending, and they stay pending until the
+            // final reply says otherwise.
+            expect(model.get("df_meta").stats.status).toBe("pending");
+            const pendingMeta = model.get("df_meta");
             ws.deliver({ ...update(3, "min", false, 2), tier: "scalar" });
             await tick();
             expect(ws.sent).toEqual([forcedRequest(), forcedRequest()]);
-            // Still not computed until the final reply says otherwise.
-            expect(model.get("df_meta").stats.status).toBe("not_computed");
+            expect(model.get("df_meta")).toBe(pendingMeta);
 
             ws.deliver({ ...update(3, "max", true, 0), tier: "scalar" });
             await tick(10_000);
@@ -1078,6 +1136,31 @@ describe("wired into WebSocketModel", () => {
             await tick(10_000);
             expect(ws.sent).toEqual([forcedRequest()]);
             expect(model.get("df_meta").stats).toMatchObject({ status: "not_computed", reason: "ceiling", gen: 3 });
+        });
+
+        it("a request the server refuses with not_requestable returns the session to not computed and ends the run", async () => {
+            const { ws, model } = makeSocketModel(policy({ gen: 3 }));
+            forceStats(model);
+            expect(model.get("df_meta").stats.status).toBe("pending");
+            ws.deliver({ type: "stats_aborted", stats_gen: 3, current_gen: 3, scope: "raw", reason: "not_requestable" });
+            await tick(10_000);
+            expect(ws.sent).toEqual([forcedRequest()]);
+            expect(model.get("df_meta").stats).toEqual(policy({ gen: 3 }));
+        });
+
+        it("a run for some columns ends not computed, and the control can ask again", async () => {
+            const { ws, model } = makeSocketModel(policy({ gen: 3 }));
+            forceStats(model, { columns: ["a"] });
+            expect(ws.sent).toEqual([forcedRequest({ columns: ["a"] })]);
+
+            ws.deliver({ ...update(3, "min", true, 0), tier: "scalar", status: "not_computed" });
+            await tick(10_000);
+            expect(ws.sent).toHaveLength(1);
+            expect(model.get("df_meta").stats).toEqual(policy({ gen: 3 }));
+
+            expect(forceStats(model)).toBe(true);
+            expect(ws.sent).toEqual([forcedRequest({ columns: ["a"] }), forcedRequest()]);
+            expect(ws.sent[1]).not.toHaveProperty("columns");
         });
 
         it("asks for the demand columns after the first rows and nothing else", async () => {

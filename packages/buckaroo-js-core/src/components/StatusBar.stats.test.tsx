@@ -205,8 +205,14 @@ describe("StatsStatusCell, not computed by policy (rows-first c5)", () => {
         expect(root).toHaveAttribute("title", expect.stringContaining("size limit"));
     });
 
-    it("nothing requestable: the label only", () => {
+    it("nothing requestable for a size the server chose: it is at the ceiling, so the message and no control", () => {
         cell(policy({ requestable: [] }), jest.fn());
+        expect(screen.queryByRole("button")).not.toBeInTheDocument();
+        expect(screen.getByTestId("stats-status")).toHaveTextContent("Summary stats unavailable");
+    });
+
+    it("nothing requestable for a host's choice: the label only", () => {
+        cell(policy({ reason: "host", requestable: [] }), jest.fn());
         expect(screen.queryByRole("button")).not.toBeInTheDocument();
         expect(screen.getByTestId("stats-status")).toHaveTextContent("Summary stats not computed");
     });

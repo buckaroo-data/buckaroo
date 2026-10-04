@@ -95,6 +95,19 @@ describe("StatsEmptyState", () => {
         expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     });
 
+    it("a size the server chose with nothing left above it reads as over the limit, with no control", () => {
+        renderState(policy({ requestable: [] }), jest.fn());
+        const root = screen.getByTestId("stats-empty-state");
+        expect(root).toHaveTextContent("over the size limit");
+        expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    });
+
+    it("host with nothing requestable keeps its own message, with no control", () => {
+        renderState(policy({ reason: "host", requestable: [] }), jest.fn());
+        expect(screen.getByTestId("stats-empty-state")).toHaveTextContent("turned off");
+        expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    });
+
     it("ceiling: offers no control whatever requestable lists", () => {
         renderState(policy({ reason: "ceiling", requestable: ["scalar", "full"] }), jest.fn());
         expect(screen.queryByRole("button")).not.toBeInTheDocument();

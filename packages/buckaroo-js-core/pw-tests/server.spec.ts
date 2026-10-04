@@ -822,6 +822,11 @@ test.describe('WebSocket data flow', () => {
     await expect.poll(() => h.requests).toEqual([
       { type: 'stats_request', stats_gen: 4, scope: 'raw', incremental: true, force: true, tier: 'scalar' },
     ]);
+    // The page marks the stats pending itself, since the server sends no frame to
+    // a capable client: the empty state and the control give way to the loading text.
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'pending');
+    await expect(page.getByTestId('stats-empty-state')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /compute|continue/i })).toHaveCount(0);
   });
 
   test('a policy session: a request over the ceiling is answered with the ceiling message, and the page offers nothing more', async ({ page, request }) => {
@@ -845,28 +850,39 @@ test.describe('WebSocket data flow', () => {
     expect(h.requests).toHaveLength(1);
   });
 
-  test('a policy session: a forced run is asked for again after each partial reply and ends with the final one', async ({ page, request }) => {
+  test('a policy session: a forced run is asked for again after each partial reply, stays pending, and ends with the final one', async ({ page, request }) => {
     const session = `ws-forced-${Date.now()}`;
     await loadBuckarooSession(request, session);
+    let releaseFinal!: () => void;
+    const finalGate = new Promise<void>((resolve) => { releaseFinal = resolve; });
     const h = await routeStatsRequests(page, session, (msg, send, harness) => {
       if (harness.requests.length < 3) {
         send({ ...partialUpdate(msg.stats_gen, 3 - harness.requests.length), tier: 'scalar' });
-      } else {
-        send({
-          type: 'stats_update', stats_gen: msg.stats_gen, scope: 'raw', tier: 'scalar', final: true, remaining: 0,
-          payload: harness.realStats, elapsed_ms: 1,
-        });
+        return;
       }
+      void finalGate.then(() => send({
+        type: 'stats_update', stats_gen: msg.stats_gen, scope: 'raw', tier: 'scalar', final: true, remaining: 0,
+        payload: harness.realStats, elapsed_ms: 1,
+      }));
     }, policyStats());
 
     await page.goto(`${BASE}/s/${session}`);
     await waitForGrid(page);
     await page.getByRole('button', { name: 'Compute summary stats' }).click();
 
-    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'complete', { timeout: 10_000 });
+    // Two partial replies, two more requests, and the third waits for its reply.
+    await expect.poll(() => h.requests.length, { timeout: 10_000 }).toBe(3);
     const forced = { type: 'stats_request', stats_gen: 4, scope: 'raw', incremental: true, force: true, tier: 'scalar' };
     expect(h.requests).toEqual([forced, forced, forced]);
-    await expect(page.locator('.ag-floating-top [col-id="b"]').first()).not.toHaveText('', { timeout: 10_000 });
+    // The partial rows are in and the stats are pending, with no control.
+    await expect(page.locator('.ag-floating-top [col-id="b"]').first()).toHaveText('int64', { timeout: 10_000 });
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'pending');
+    await expect(page.getByRole('button', { name: 'Compute summary stats' })).toHaveCount(0);
+
+    releaseFinal();
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'complete', { timeout: 10_000 });
+    await page.waitForTimeout(500);
+    expect(h.requests).toHaveLength(3);
   });
 
   test('a session that does not report df_meta.stats never gets a stats_request', async ({ page, request }) => {

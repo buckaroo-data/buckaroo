@@ -54,6 +54,7 @@ export const statsAutoRequest = (_stats: DFMetaStats | undefined): boolean => fa
 export const nextRequestTier = (_stats: DFMetaStats | undefined): StatsTier | undefined => undefined;
 export const canRequestStats = (_stats: DFMetaStats | undefined): boolean => false;
 export const demandTier = (_stats: DFMetaStats | undefined): StatsTier | undefined => undefined;
+export const statsOverCeiling = (_stats: DFMetaStats | undefined): boolean => false;
 
 export interface BuckarooOptions {
     sampled: string[];

@@ -12,6 +12,7 @@ import {
     demandTier,
     nextRequestTier,
     statsAutoRequest,
+    statsOverCeiling,
     statsRequestable,
 } from "./WidgetTypes";
 
@@ -112,5 +113,43 @@ describe("demandTier", () => {
     it("is undefined when the policy allows nothing above schema", () => {
         expect(demandTier(stats({ tier_target: "schema", requestable: [] }))).toBeUndefined();
         expect(demandTier(undefined)).toBeUndefined();
+    });
+});
+
+// The server's ceiling keeps the stats from being computed. It says so with
+// reason "ceiling" when the ceiling cut a request down; when the server sized the
+// session at the ceiling itself, the reason is "size" and nothing is left to ask
+// for.
+describe("statsOverCeiling", () => {
+    it("is true for reason ceiling, whatever requestable lists", () => {
+        expect(statsOverCeiling(stats({ reason: "ceiling" }))).toBe(true);
+        expect(statsOverCeiling(stats({ reason: "ceiling", requestable: ["scalar", "full"] }))).toBe(true);
+    });
+
+    it("is true for a session the server sized with nothing left above it to ask for", () => {
+        expect(statsOverCeiling(stats({ reason: "size", requestable: [] }))).toBe(true);
+        expect(statsOverCeiling(stats({ reason: "size", tier: "scalar", requestable: ["scalar"] }))).toBe(true);
+    });
+
+    it("is false while a tier is left to ask for", () => {
+        expect(statsOverCeiling(stats({ reason: "size", requestable: ["scalar", "full"] }))).toBe(false);
+        expect(statsOverCeiling(stats({ reason: "size", tier: "scalar", requestable: ["scalar", "full"] }))).toBe(false);
+    });
+
+    it("is false when the server named no requestable (its default is full)", () => {
+        expect(statsOverCeiling(stats({ reason: "size" }))).toBe(false);
+    });
+
+    it("is false for the reasons that are not about size", () => {
+        expect(statsOverCeiling(stats({ reason: "host", requestable: [] }))).toBe(false);
+        expect(statsOverCeiling(stats({ reason: "cost", requestable: [] }))).toBe(false);
+    });
+
+    it.each(["pending", "complete", "error"] as const)("is false when the status is %s", (status) => {
+        expect(statsOverCeiling(stats({ status, reason: "ceiling" }))).toBe(false);
+    });
+
+    it("is false without stats", () => {
+        expect(statsOverCeiling(undefined)).toBe(false);
     });
 });
