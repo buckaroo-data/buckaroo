@@ -34,7 +34,8 @@ from buckaroo.jlisp.lisp_utils import s as lisp_sym  # noqa: E402
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: E402
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline  # noqa: E402
 from buckaroo.serialization_utils import resolve_summary_stats_payload  # noqa: E402
-from buckaroo.server import telemetry, xorq_loading  # noqa: E402
+from buckaroo.server import session as session_mod  # noqa: E402
+from buckaroo.server import stats_wire, telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
 from buckaroo.server.websocket_handler import DataStreamHandler  # noqa: E402
 
@@ -1927,6 +1928,389 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         _, frame = await self._connect("sw-inline", caps="stats_update")
         self.assertNotIn("stats", frame["df_meta"])
         self.assertIn("histogram_bins", _rows_by_stat(frame["df_data_dict"]["all_stats"]))
+
+
+# The table _build_stats_wire_dir builds: five rows, three columns.
+_WIRE_ESTIMATE = {"rows": 5, "cols": 3}
+_ONDEMAND = "stats_update,stats_ondemand"
+# Limits that put the table in the scalar or the schema tier by size.
+_SCALAR_BY_SIZE = {"full_auto_rows": 3, "scalar_auto_cells": 1_000}
+_SCHEMA_BY_SIZE = {"full_auto_rows": 3, "scalar_auto_cells": 10}
+
+
+@contextmanager
+def _stats_limits(**limits):
+    """Server stats thresholds for the block, as ``BUCKAROO_STATS_*``
+    environment overrides, which ``resolve_stats_policy`` reads on every call."""
+    env = {f"BUCKAROO_STATS_{name.upper()}": str(value) for name, value in limits.items()}
+    with patch.dict(os.environ, env):
+        yield
+
+
+# (host tier, limits, df_meta.stats an ondemand client sees, minus gen). The
+# five-by-three table is full by default; each set of limits moves it down.
+_POLICY_CASES = {
+    "auto, within every threshold": ("auto", {}, {"status": "pending", "tier": "schema", "tier_target": "full",
+        "requestable": [], "estimate": _WIRE_ESTIMATE}),
+    "auto, scalar by size": ("auto", {"full_auto_rows": 3}, {"status": "not_computed", "tier": "schema",
+        "reason": "size", "tier_target": "scalar", "estimate": _WIRE_ESTIMATE}),
+    "auto, schema by size": ("auto", {"full_auto_rows": 3, "scalar_auto_cells": 10}, {"status": "not_computed",
+        "tier": "schema", "reason": "size", "tier_target": "schema", "auto_request": False,
+        "requestable": ["scalar", "full"], "estimate": _WIRE_ESTIMATE}),
+    "full, over the ceiling": ("full", {"ceiling_full_rows": 3}, {"status": "not_computed", "tier": "schema",
+        "reason": "ceiling", "tier_target": "scalar", "requestable": [], "estimate": _WIRE_ESTIMATE}),
+    "scalar, named by the host": ("scalar", {}, {"status": "not_computed", "tier": "schema", "reason": "host",
+        "tier_target": "scalar", "estimate": _WIRE_ESTIMATE}),
+    "schema, named by the host": ("schema", {}, {"status": "not_computed", "tier": "schema", "reason": "host",
+        "tier_target": "schema", "auto_request": False, "requestable": ["scalar", "full"],
+        "estimate": _WIRE_ESTIMATE}),
+    "scalar, over the scalar ceiling": ("scalar", {"ceiling_scalar_cells": 10}, {"status": "not_computed",
+        "tier": "schema", "reason": "ceiling", "tier_target": "schema", "auto_request": False, "requestable": [],
+        "estimate": _WIRE_ESTIMATE}),
+}
+
+
+class TestStatsPolicyWire(tornado.testing.AsyncHTTPTestCase):
+    """The stats policy on a ``/load_expr`` session (rows-first p33):
+    ``stats_tier`` ``auto | full | scalar | schema`` stored with the pair, the
+    policy resolved after the schema-tier dataflow and the count exist, reported
+    in ``df_meta.stats`` and applied at WebSocket open for a client that
+    advertises ``stats_ondemand`` alone, with the version-skew cases."""
+
+    def get_app(self):
+        return make_app()
+
+    def setUp(self):
+        super().setUp()
+        self.builds_root = tempfile.mkdtemp()
+        self.project_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.builds_root, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, self.project_root, ignore_errors=True)
+        self.build_path = _build_stats_wire_dir(self.builds_root)
+        self.clients = []
+
+    def tearDown(self):
+        for ws in self.clients:
+            ws.close()
+        super().tearDown()
+
+    def _session(self, sid):
+        return self._app.settings["sessions"].get(sid)
+
+    async def _load(self, sid, limits=None, **body):
+        with _stats_limits(**(limits or {})):
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": self.build_path, "project_root": self.project_root, **body})
+        self.assertEqual(resp.code, 200, resp.body)
+
+    async def _reload(self, sid, limits=None, **body):
+        with _stats_limits(**(limits or {})):
+            resp = await _post(self.get_http_port(), f"/reload_expr/{sid}", body)
+        self.assertEqual(resp.code, 200, resp.body)
+
+    async def _connect(self, sid, caps=None):
+        suffix = f"?caps={caps}" if caps else ""
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/{sid}{suffix}")
+        self.clients.append(ws)
+        return ws, await _read_json(ws)
+
+    def _stats(self, frame):
+        stats = frame["df_meta"].get("stats")
+        self.assertIsNotNone(stats, "initial_state carries no df_meta.stats")
+        return stats
+
+    def _schema_rows(self, frame):
+        return list(_rows_by_stat(frame["df_data_dict"]["all_stats"]))
+
+    async def _inline_frame(self, sid):
+        """The complete message an inline session of the same build sends."""
+        await self._load(sid)
+        return (await self._connect(sid))[1]
+
+    def _assert_complete(self, frame, inline_frame):
+        stats = self._stats(frame)
+        self.assertEqual((stats["status"], stats["tier"]), ("complete", "full"))
+        self.assertIn("histogram_bins", _rows_by_stat(frame["df_data_dict"]["all_stats"]))
+        self.assertEqual(_comparable(frame), _comparable(inline_frame))
+
+    @tornado.testing.gen_test
+    async def test_every_stats_tier_value_is_accepted_and_stored(self):
+        for tier in ("auto", "full", "scalar", "schema"):
+            sid = f"pw-accept-{tier}"
+            await self._load(sid, stats_tier=tier, stats_delivery="deferred")
+            session = self._session(sid)
+            self.assertEqual((session.stats_tier, session.stats_delivery), (tier, "deferred"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "schema")
+            resp = await _post(self.get_http_port(), f"/reload_expr/{sid}", {"stats_tier": "auto"})
+            self.assertEqual(resp.code, 200, resp.body)
+            self.assertEqual(session.stats_tier, "auto")
+        resp = await _post(self.get_http_port(), "/load_expr",
+            {"session": "pw-bad", "build_dir": self.build_path, "stats_tier": "none"})
+        self.assertEqual((resp.code, json.loads(resp.body)["error_code"]), (400, "invalid_stats_tier"))
+
+    @tornado.testing.gen_test
+    async def test_the_default_tier_stays_full(self):
+        await self._load("pw-default", stats_delivery="deferred")
+        session = self._session("pw-default")
+        self.assertEqual(session.stats_tier, "full")
+        self.assertEqual(session.stats_policy["tier_target"], "full")
+
+    @tornado.testing.gen_test
+    async def test_an_inline_session_has_no_schema_dataflow_to_resolve_against(self):
+        """The constructor runs the stats of an inline session, so auto is full
+        there and the session sends the message it always has."""
+        with _count_stat_queries() as queries:
+            await self._load("pw-auto-inline", limits={"full_auto_rows": 1, "ceiling_full_rows": 1},
+                stats_tier="auto")
+        session = self._session("pw-auto-inline")
+        self.assertEqual((session.stats_tier, session.stats_delivery, session.stats_policy), ("auto", "inline", None))
+        self.assertEqual(session.xorq_dataflow.stats_tier, "full")
+        self.assertTrue(queries, "an inline session runs its stats in the constructor")
+        _, frame = await self._connect("pw-auto-inline", caps=_ONDEMAND)
+        self.assertNotIn("stats", frame["df_meta"])
+
+    @tornado.testing.gen_test
+    async def test_the_policy_resolves_once_the_schema_dataflow_and_the_count_exist(self):
+        events, calls = [], []
+        original_metadata = xorq_loading.get_xorq_metadata
+        original_resolve = stats_wire.resolve_stats_policy
+
+        def metadata(*args, **kwargs):
+            events.append("dataflow and count")
+            return original_metadata(*args, **kwargs)
+
+        def resolve(*args, **kwargs):
+            events.append("policy")
+            calls.append((args, kwargs))
+            return original_resolve(*args, **kwargs)
+
+        with (
+            patch.object(xorq_loading, "get_xorq_metadata", metadata),
+            patch.object(stats_wire, "resolve_stats_policy", resolve),
+            _count_stat_queries() as queries,
+        ):
+            await self._load("pw-order", stats_tier="auto", stats_delivery="deferred")
+        self.assertEqual(events, ["dataflow and count", "policy"])
+        (args, kwargs), = calls
+        self.assertEqual((args[0], args[2], args[3], kwargs["host_tier"]), ("xorq", 5, 3, "auto"))
+        self.assertEqual(queries, [], "resolving the policy runs no data stat query")
+
+    @tornado.testing.gen_test
+    async def test_the_resolved_policy_is_stored_on_the_session(self):
+        limits = {"full_auto_rows": 3, "scalar_auto_cells": 10}
+        await self._load("pw-store", limits=limits, stats_tier="auto", stats_delivery="deferred")
+        session = self._session("pw-store")
+        self.assertEqual(session.stats_policy, {"tier_target": "schema", "auto_request": False,
+            "requestable": ["scalar", "full"], "reason": "size", "estimate": _WIRE_ESTIMATE})
+        self.assertEqual((session.stats_status, session.stats_reason), ("not_computed", "size"))
+
+    @tornado.testing.gen_test
+    async def test_df_meta_stats_carries_the_policy_fields_for_an_ondemand_client(self):
+        for index, (name, (tier, limits, expected)) in enumerate(_POLICY_CASES.items()):
+            sid = f"pw-fields-{index}"
+            await self._load(sid, limits=limits, stats_tier=tier, stats_delivery="deferred")
+            _, frame = await self._connect(sid, caps=_ONDEMAND)
+            stats = self._stats(frame)
+            self.assertEqual(stats, {**expected, "gen": stats["gen"]}, name)
+            self.assertEqual(self._schema_rows(frame), ["dtype"], f"{name}: the first message is the schema tier")
+
+    @tornado.testing.gen_test
+    async def test_a_warm_repost_with_the_same_auto_tier_short_circuits(self):
+        body = {"session": "pw-warm", "build_dir": self.build_path, "stats_tier": "auto", "stats_delivery": "deferred"}
+        self.assertEqual((await _post(self.get_http_port(), "/load_expr", body)).code, 200)
+        with patch.object(xorq_loading, "load_expr_build_dir",
+            side_effect=AssertionError("an unchanged pair must take the warm exit")):
+            same = await _post(self.get_http_port(), "/load_expr", body)
+            omitted = await _post(self.get_http_port(), "/load_expr",
+                {"session": "pw-warm", "build_dir": self.build_path})
+        self.assertEqual((same.code, omitted.code), (200, 200))
+        session = self._session("pw-warm")
+        self.assertEqual((session.stats_tier, session.stats_delivery), ("auto", "deferred"))
+
+    @tornado.testing.gen_test
+    async def test_a_changed_tier_rebuilds_and_resolves_again(self):
+        sid = "pw-change"
+        await self._load(sid, stats_tier="auto", stats_delivery="deferred")
+        self.assertEqual(self._session(sid).stats_policy["tier_target"], "full")
+        calls = []
+        original = xorq_loading.load_expr_build_dir
+
+        def counting_loader(bd, **kwargs):
+            calls.append(bd)
+            return original(bd, **kwargs)
+
+        with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
+            await self._load(sid, stats_tier="scalar", stats_delivery="deferred")
+            self.assertEqual(len(calls), 1, "a changed tier must rebuild")
+            self.assertEqual(self._session(sid).stats_policy["tier_target"], "scalar")
+            await self._load(sid, stats_tier="scalar", stats_delivery="deferred")
+            self.assertEqual(len(calls), 1, "the same tier takes the warm exit")
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_resolves_the_policy_again(self):
+        sid = "pw-reload"
+        await self._load(sid, stats_tier="auto", stats_delivery="deferred")
+        ws, first = await self._connect(sid, caps=_ONDEMAND)
+        gen = self._stats(first)["gen"]
+        self.assertEqual(self._stats(first)["tier_target"], "full")
+
+        await self._reload(sid, limits={"full_auto_rows": 3})
+        pushed = self._stats(await _read_json(ws))
+        self.assertEqual((pushed["status"], pushed["reason"], pushed["tier_target"]),
+            ("not_computed", "size", "scalar"))
+        self.assertGreater(pushed["gen"], gen)
+        self.assertEqual(self._session(sid).stats_policy["tier_target"], "scalar")
+
+        await self._reload(sid, stats_tier="schema")
+        pushed = self._stats(await _read_json(ws))
+        self.assertEqual((pushed["reason"], pushed["tier_target"], pushed["auto_request"]), ("host", "schema", False))
+        self.assertEqual(self._session(sid).stats_tier, "schema")
+
+        await self._reload(sid, stats_tier="auto")
+        pushed = self._stats(await _read_json(ws))
+        self.assertEqual((pushed["status"], pushed["tier_target"]), ("pending", "full"))
+
+    @tornado.testing.gen_test
+    async def test_a_reload_that_omits_the_tier_keeps_the_session_s_and_resolves_it_against_the_stored_count(self):
+        """The expression is reused, so its count is the one the load took
+        (``session.metadata``), and the reload runs no second count."""
+        sid = "pw-reload-keep"
+        await self._load(sid, stats_tier="auto", stats_delivery="deferred")
+        session = self._session(sid)
+        session.metadata = {**session.metadata, "rows": 20_000_000}
+        await self._reload(sid)
+        self.assertEqual(session.stats_tier, "auto")
+        self.assertEqual((session.stats_policy["tier_target"], session.stats_policy["estimate"]),
+            ("scalar", {"rows": 20_000_000, "cols": 3}))
+
+    @tornado.testing.gen_test
+    async def test_the_policy_survives_a_dataflow_field_change(self):
+        await self._load("pw-keep", limits=_SCALAR_BY_SIZE, stats_tier="auto", stats_delivery="deferred")
+        ws, first = await self._connect("pw-keep", caps=_ONDEMAND)
+        gen = self._stats(first)["gen"]
+        ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
+        stats = self._stats(await _read_json(ws))
+        self.assertEqual((stats["status"], stats["reason"], stats["tier_target"], stats["gen"]),
+            ("not_computed", "size", "scalar", gen + 1))
+
+    # -- version skew -------------------------------------------------------
+
+    async def _policy_session(self, sid, **limits):
+        """A deferred ``auto`` session that resolved to the schema tier by size."""
+        await self._load(sid, limits=limits or _SCHEMA_BY_SIZE, stats_tier="auto", stats_delivery="deferred")
+
+    @tornado.testing.gen_test
+    async def test_no_caps_gets_a_complete_state_at_connect(self):
+        inline = await self._inline_frame("pw-skew-inline")
+        await self._policy_session("pw-skew-none")
+        _, legacy = await self._connect("pw-skew-none")
+        self._assert_complete(legacy, inline)
+        self.assertEqual(self._session("pw-skew-none").stats_status, "complete")
+
+    @tornado.testing.gen_test
+    async def test_stats_ondemand_without_stats_update_is_a_client_with_no_caps(self):
+        inline = await self._inline_frame("pw-skew-inline-2")
+        await self._policy_session("pw-skew-odonly")
+        _, frame = await self._connect("pw-skew-odonly", caps="stats_ondemand")
+        self._assert_complete(frame, inline)
+
+    @tornado.testing.gen_test
+    async def test_stats_update_only_is_served_as_a_session_headed_for_full(self):
+        await self._policy_session("pw-skew-update")
+        ws, first = await self._connect("pw-skew-update", caps="stats_update")
+        stats = self._stats(first)
+        self.assertEqual(stats, {"status": "pending", "tier": "schema", "gen": stats["gen"]})
+        self.assertEqual(self._schema_rows(first), ["dtype"])
+
+        ws.write_message(_stats_request(stats["gen"]))
+        update = await _read_json(ws)
+        self.assertEqual((update["type"], update["final"], update["tier"]), ("stats_update", True, "full"))
+        self.assertIn("histogram_bins", _rows_by_stat(update["payload"]))
+        self.assertEqual(self._session("pw-skew-update").stats_status, "complete")
+
+    @tornado.testing.gen_test
+    async def test_both_bits_get_the_schema_tier_not_computed_and_run_no_stat_query(self):
+        await self._policy_session("pw-skew-both")
+        with _count_stat_queries() as queries:
+            ws, first = await self._connect("pw-skew-both", caps=_ONDEMAND)
+        stats = self._stats(first)
+        self.assertEqual((stats["status"], stats["tier"], stats["reason"], stats["tier_target"]),
+            ("not_computed", "schema", "size", "schema"))
+        self.assertEqual((stats["auto_request"], stats["requestable"]), (False, ["scalar", "full"]))
+        self.assertEqual(self._schema_rows(first), ["dtype"])
+        self.assertEqual(queries, [])
+        # The server enforces it: nothing is requestable until the request path serves a tier.
+        ws.write_message(_stats_request(stats["gen"]))
+        aborted = await _read_json(ws)
+        self.assertEqual((aborted["type"], aborted["reason"]), ("stats_aborted", "not_requestable"))
+        self.assertEqual(self._session("pw-skew-both").stats_status, "not_computed")
+
+    @tornado.testing.gen_test
+    async def test_the_three_client_kinds_see_one_session_each_their_own_way(self):
+        inline = await self._inline_frame("pw-skew-inline-3")
+        await self._policy_session("pw-skew-mixed")
+        _, ondemand = await self._connect("pw-skew-mixed", caps=_ONDEMAND)
+        _, update = await self._connect("pw-skew-mixed", caps="stats_update")
+        self.assertEqual(self._stats(ondemand)["status"], "not_computed")
+        self.assertEqual(self._stats(update)["status"], "pending")
+        _, legacy = await self._connect("pw-skew-mixed")
+        self._assert_complete(legacy, inline)
+
+    @tornado.testing.gen_test
+    async def test_an_ondemand_client_is_sent_its_frame_before_a_legacy_client_completes_the_session(self):
+        await self._policy_session("pw-skew-order", **_SCALAR_BY_SIZE)
+        a, a_open = await self._connect("pw-skew-order", caps=_ONDEMAND)
+        gen = self._stats(a_open)["gen"]
+        b, b_open = await self._connect("pw-skew-order")
+        self.assertEqual(self._stats(b_open)["status"], "complete")
+
+        a.write_message(_state_change(quick_command_args={"search": ["a"]}))
+        a_frame, b_frame = await _read_json(a), await _read_json(b)
+        self.assertEqual((self._stats(a_frame)["status"], self._stats(a_frame)["gen"]), ("not_computed", gen + 1))
+        self.assertEqual((self._stats(b_frame)["status"], self._stats(b_frame)["gen"]), ("complete", gen + 1))
+
+    @tornado.testing.gen_test
+    async def test_a_tier_the_host_named_reaches_every_client_as_the_host_chose_it(self):
+        await self._load("pw-skew-host", stats_tier="scalar", stats_delivery="deferred")
+        _, legacy = await self._connect("pw-skew-host")
+        self.assertEqual(self._schema_rows(legacy), ["dtype"])
+        self.assertEqual(self._stats(legacy)["status"], "not_computed")
+        ws, update = await self._connect("pw-skew-host", caps="stats_update")
+        self.assertEqual(self._stats(update), {"status": "not_computed", "tier": "schema",
+            "gen": self._stats(update)["gen"], "reason": "host"})
+        ws.write_message(_stats_request(self._stats(update)["gen"]))
+        self.assertEqual((await _read_json(ws))["reason"], "not_requestable")
+        _, ondemand = await self._connect("pw-skew-host", caps=_ONDEMAND)
+        self.assertEqual(self._stats(ondemand)["tier_target"], "scalar")
+
+    @tornado.testing.gen_test
+    async def test_a_client_of_an_old_server_reads_a_frame_with_no_stats_as_complete(self):
+        """An old server sends no ``df_meta.stats`` and no policy field; a new
+        client falls back to the documented defaults and waits for nothing."""
+        await self._load("pw-old")
+        _, frame = await self._connect("pw-old", caps=_ONDEMAND)
+        stats = session_mod.stats_with_defaults(frame["df_meta"])
+        self.assertEqual((stats["status"], stats["tier"], stats["tier_target"]), ("complete", "full", "full"))
+        self.assertEqual((stats["auto_request"], stats["requestable"]), (True, ["full"]))
+        self.assertEqual(stats["demand_columns"], [])
+
+    @tornado.testing.gen_test
+    async def test_an_explicit_full_changes_no_frame(self):
+        """With ``stats_tier`` full the message is the one sent without the
+        field, and the policy is recorded but not reported."""
+        for delivery in ("inline", "deferred"):
+            await self._load(f"pw-same-{delivery}-a", stats_delivery=delivery)
+            await self._load(f"pw-same-{delivery}-b", stats_tier="full", stats_delivery=delivery)
+            # A client with no caps completes a deferred session, so it goes last.
+            for caps in ("stats_update", _ONDEMAND, None):
+                _, before = await self._connect(f"pw-same-{delivery}-a", caps=caps)
+                _, after = await self._connect(f"pw-same-{delivery}-b", caps=caps)
+                self.assertEqual(_as_json(before["df_meta"]), _as_json(after["df_meta"]), (delivery, caps))
+                self.assertEqual(_comparable(before), _comparable(after), (delivery, caps))
+                self.assertEqual(list(before), list(after))
+        self.assertEqual(self._session("pw-same-deferred-b").stats_policy["tier_target"], "full")
+        self.assertIsNone(self._session("pw-same-inline-b").stats_policy)
 
 
 class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):

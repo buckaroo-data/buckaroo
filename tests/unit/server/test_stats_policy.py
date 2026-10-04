@@ -1,8 +1,10 @@
 """Unit tests for ``buckaroo.server.stats_policy`` (rows-first p31, p31b).
 
 Everything here is pure Python: the policy is a function of numbers, the
-probes read a schema or a parquet footer, and nothing needs a server. The
-module is not wired into any handler, session or dataflow in this phase.
+probes read a schema or a parquet footer, and nothing needs a server. The last
+sections (rows-first p33) test how the session carries the result and how
+``df_meta.stats`` reports it, still without a server; the HTTP and WebSocket
+side is in test_load_expr.py.
 
 The thresholds are the provisional values proposed by the phase-0
 measurements (p31b). The boundary tables run on the module defaults, so a
@@ -16,6 +18,7 @@ import importlib.util
 import io
 import json
 import logging
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -23,6 +26,9 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+
+from buckaroo.server import session as session_mod
+from buckaroo.server import stats_wire
 
 ENV_FIELDS = {"BUCKAROO_STATS_FULL_AUTO_ROWS": "full_auto_rows", "BUCKAROO_STATS_FULL_AUTO_CELLS": "full_auto_cells",
     "BUCKAROO_STATS_SCALAR_AUTO_CELLS": "scalar_auto_cells", "BUCKAROO_STATS_CEILING_FULL_ROWS": "ceiling_full_rows",
@@ -603,3 +609,247 @@ class TestRoutePolarsEntry:
     def test_bad_counts_are_rejected(self, sp, lim, rows, cols):
         with pytest.raises((TypeError, ValueError)):
             sp.route_polars_entry(rows, cols, limits=lim)
+
+
+# ---------------------------------------------------------------------------
+# The policy on the session and the wire (rows-first p33)
+# ---------------------------------------------------------------------------
+
+# The table the wire tests load: five rows and three columns.
+ESTIMATE = {"rows": 5, "cols": 3}
+ONDEMAND_CAPS = frozenset({"stats_update", "stats_ondemand"})
+UPDATE_CAPS = frozenset({"stats_update"})
+LEGACY_CAPS = frozenset()
+
+# Limits that put a five-by-three table in each tier.
+SCALAR_BY_SIZE = dict(full_auto_rows=3, scalar_auto_cells=1_000)
+SCHEMA_BY_SIZE = dict(full_auto_rows=3, scalar_auto_cells=10)
+FULL_OVER_CEILING = dict(ceiling_full_rows=3)
+SCALAR_OVER_CEILING = dict(ceiling_scalar_cells=10)
+
+
+def _session(sp, stats_tier="auto", delivery="deferred", limits=None, resolve=True):
+    """A buckaroo-mode session after a load that resolved its policy and began
+    its first stats generation, the way ``/load_expr`` leaves one."""
+    session = session_mod.SessionState(session_id="s", path="p")
+    session.mode = "buckaroo"
+    session.df_meta = {"total_rows": 5}
+    session.stats_tier, session.stats_delivery = stats_tier, delivery
+    session.stats_policy = (
+        sp.resolve_stats_policy("xorq", "xorq_build", 5, 3, host_tier=stats_tier,
+            limits=sp.StatsLimits(**(limits or {})))
+        if resolve else None)
+    session_mod.begin_stats_generation(session)
+    return session
+
+
+def _client(caps):
+    return SimpleNamespace(caps=caps, search_string="")
+
+
+# (host tier, delivery, limits) -> what an ``stats_ondemand`` client is told.
+# A field equal to its documented default is left out, and ``tier_target`` and
+# ``estimate`` are always there once a policy is reported.
+POLICY_FRAMES = [
+    ("auto", "deferred", {}, {"status": "pending", "tier": "schema", "gen": 1, "tier_target": "full",
+        "requestable": [], "estimate": ESTIMATE}),
+    ("auto", "deferred", SCALAR_BY_SIZE, {"status": "not_computed", "tier": "schema", "gen": 1, "reason": "size",
+        "tier_target": "scalar", "estimate": ESTIMATE}),
+    ("auto", "deferred", SCHEMA_BY_SIZE, {"status": "not_computed", "tier": "schema", "gen": 1, "reason": "size",
+        "tier_target": "schema", "auto_request": False, "requestable": ["scalar", "full"], "estimate": ESTIMATE}),
+    ("full", "deferred", FULL_OVER_CEILING, {"status": "not_computed", "tier": "schema", "gen": 1,
+        "reason": "ceiling", "tier_target": "scalar", "requestable": [], "estimate": ESTIMATE}),
+    ("scalar", "deferred", {}, {"status": "not_computed", "tier": "schema", "gen": 1, "reason": "host",
+        "tier_target": "scalar", "estimate": ESTIMATE}),
+    ("schema", "deferred", {}, {"status": "not_computed", "tier": "schema", "gen": 1, "reason": "host",
+        "tier_target": "schema", "auto_request": False, "requestable": ["scalar", "full"], "estimate": ESTIMATE}),
+    ("scalar", "inline", SCALAR_OVER_CEILING, {"status": "not_computed", "tier": "schema", "gen": 1,
+        "reason": "ceiling", "tier_target": "schema", "auto_request": False, "requestable": [], "estimate": ESTIMATE}),
+    ("schema", "inline", {}, {"status": "not_computed", "tier": "schema", "gen": 1, "reason": "host",
+        "tier_target": "schema", "auto_request": False, "requestable": ["scalar", "full"], "estimate": ESTIMATE}),
+]
+
+
+class TestStatsFieldDefaults:
+    """What a client assumes for a ``df_meta.stats`` field the server leaves out."""
+
+    def test_a_frame_with_no_stats_is_complete(self):
+        """An old server sends no ``df_meta.stats``, and a new client reads it as complete."""
+        assert session_mod.stats_with_defaults({"total_rows": 3}) == {"status": "complete", "tier": "full",
+            "tier_target": "full", "gen": None, "reason": None, "auto_request": True, "requestable": ["full"],
+            "estimate": None, "omitted_keys": [], "approx_keys": [], "demand_columns": []}
+
+    def test_a_pending_frame_is_headed_for_full(self):
+        out = session_mod.stats_with_defaults({"stats": {"status": "pending", "tier": "schema", "gen": 3}})
+        assert (out["status"], out["tier"], out["tier_target"], out["gen"]) == ("pending", "schema", "full", 3)
+        assert (out["auto_request"], out["requestable"]) == (True, ["full"])
+
+    def test_a_not_computed_frame_without_a_target_targets_the_tier_it_has(self):
+        out = session_mod.stats_with_defaults({"stats": {"status": "not_computed", "tier": "schema", "gen": 2,
+            "reason": "host"}})
+        assert (out["tier_target"], out["reason"]) == ("schema", "host")
+
+    def test_fields_the_frame_carries_win(self):
+        stats = {"status": "not_computed", "tier": "schema", "gen": 2, "reason": "size", "tier_target": "scalar",
+            "auto_request": False, "requestable": ["scalar", "full"], "estimate": ESTIMATE, "omitted_keys": ["a"],
+            "approx_keys": ["b"], "demand_columns": ["c"]}
+        out = session_mod.stats_with_defaults({"stats": stats})
+        assert {key: out[key] for key in stats} == stats
+
+    def test_the_defaults_are_not_shared_between_calls(self):
+        first = session_mod.stats_with_defaults({})
+        first["requestable"].append("scalar")
+        first["omitted_keys"].append("x")
+        second = session_mod.stats_with_defaults({})
+        assert (second["requestable"], second["omitted_keys"]) == (["full"], [])
+
+    def test_the_documented_defaults(self):
+        assert session_mod.STATS_FIELD_DEFAULTS == {"auto_request": True, "requestable": ["full"], "omitted_keys": [],
+            "approx_keys": [], "demand_columns": []}
+        assert session_mod.STATS_TIER_REQUESTS == ("auto", "full", "scalar", "schema")
+        assert session_mod.STATS_REASONS == ("size", "host", "cost", "ceiling")
+
+
+class TestInitialStatsStatus:
+    @pytest.mark.parametrize("stats_tier, delivery, policy, expected", [
+        ("full", "inline", None, ("complete", None)),
+        ("full", "deferred", None, ("pending", None)),
+        ("schema", "inline", None, ("not_computed", "host")),
+        ("scalar", "deferred", None, ("not_computed", "host")),
+        # auto resolves against a schema-tier dataflow, which an inline session never has.
+        ("auto", "inline", None, ("complete", None)),
+        ("auto", "deferred", None, ("pending", None)),
+        ("auto", "deferred", {"tier_target": "full", "reason": None}, ("pending", None)),
+        ("auto", "deferred", {"tier_target": "scalar", "reason": "size"}, ("not_computed", "size")),
+        ("auto", "deferred", {"tier_target": "schema", "reason": "size"}, ("not_computed", "size")),
+        ("full", "deferred", {"tier_target": "scalar", "reason": "ceiling"}, ("not_computed", "ceiling")),
+        ("schema", "deferred", {"tier_target": "schema", "reason": "host"}, ("not_computed", "host")),
+        ("scalar", "inline", {"tier_target": "schema", "reason": "ceiling"}, ("not_computed", "ceiling"))])
+    def test_the_status_follows_the_pair_and_the_policy(self, stats_tier, delivery, policy, expected):
+        assert session_mod.initial_stats_status(stats_tier, delivery, policy) == expected
+
+    @pytest.mark.parametrize("stats_tier, delivery, expected", [
+        ("full", "inline", "full"), ("auto", "inline", "full"), ("full", "deferred", "schema"),
+        ("auto", "deferred", "schema"), ("scalar", "inline", "schema"), ("schema", "inline", "schema"),
+        ("scalar", "deferred", "schema")])
+    def test_the_dataflow_is_built_at_the_schema_tier_unless_stats_run_inline(self, stats_tier, delivery, expected):
+        """No scalar-tier units exist yet, so a scalar target builds at the schema tier."""
+        assert session_mod.dataflow_stats_tier(stats_tier, delivery) == expected
+
+
+class TestStatsMeta:
+    @pytest.mark.parametrize("stats_tier, delivery, limits, expected", POLICY_FRAMES)
+    def test_a_stats_ondemand_client_is_told_the_policy(self, sp, stats_tier, delivery, limits, expected):
+        session = _session(sp, stats_tier, delivery, limits)
+        assert session_mod.stats_meta(session) == expected
+        message = session_mod.build_state_message(session)
+        assert message["df_meta"] == {"total_rows": 5, "stats": expected}
+
+    @pytest.mark.parametrize("stats_tier, limits", [("auto", SCALAR_BY_SIZE), ("auto", SCHEMA_BY_SIZE),
+        ("full", FULL_OVER_CEILING)])
+    def test_a_client_without_stats_ondemand_is_told_the_stats_are_on_their_way(self, sp, stats_tier, limits):
+        """A target the server chose below full is applied only for a client that
+        can take it; the others are served as a deferred session headed for full."""
+        session = _session(sp, stats_tier, "deferred", limits)
+        pending = {"status": "pending", "tier": "schema", "gen": 1}
+        assert session_mod.stats_meta(session, ondemand=False) == pending
+        assert session_mod.build_state_message(session, ondemand=False)["df_meta"]["stats"] == pending
+
+    @pytest.mark.parametrize("stats_tier, delivery, limits, reason", [
+        ("scalar", "deferred", {}, "host"), ("schema", "deferred", {}, "host"), ("schema", "inline", {}, "host"),
+        ("scalar", "inline", SCALAR_OVER_CEILING, "ceiling")])
+    def test_a_tier_the_host_named_reaches_every_client(self, sp, stats_tier, delivery, limits, reason):
+        """The host chose it, so there is nothing for an older client to complete,
+        and it gets the status without the policy fields."""
+        session = _session(sp, stats_tier, delivery, limits)
+        assert session_mod.stats_meta(session, ondemand=False) == {"status": "not_computed", "tier": "schema",
+            "gen": 1, "reason": reason}
+
+    @pytest.mark.parametrize("stats_tier, limits",
+        [("auto", {}), ("auto", SCALAR_BY_SIZE), ("full", FULL_OVER_CEILING)])
+    def test_a_completed_session_reports_no_policy(self, sp, stats_tier, limits):
+        session = _session(sp, stats_tier, "deferred", limits)
+        session.stats_status, session.stats_reason = "complete", None
+        assert session_mod.stats_meta(session) == {"status": "complete", "tier": "full", "gen": 1}
+
+    def test_the_gen_follows_the_generation_and_the_status_restarts_from_the_policy(self, sp):
+        session = _session(sp, "auto", "deferred", SCALAR_BY_SIZE)
+        session.stats_status, session.stats_reason = "complete", None
+        session_mod.begin_stats_generation(session)
+        assert session_mod.stats_meta(session) == {"status": "not_computed", "tier": "schema", "gen": 2,
+            "reason": "size", "tier_target": "scalar", "estimate": ESTIMATE}
+
+    def test_omitted_approx_and_demand_keys_ride_along_when_there_are_some(self, sp):
+        session = _session(sp, "auto", "deferred", SCALAR_BY_SIZE)
+        assert not {"omitted_keys", "approx_keys", "demand_columns"} & set(session_mod.stats_meta(session))
+        session.stats_policy.update(omitted_keys=["value_counts"], approx_keys=["distinct_count"],
+            demand_columns=["a", "b"])
+        stats = session_mod.stats_meta(session)
+        assert (stats["omitted_keys"], stats["approx_keys"], stats["demand_columns"]) == (
+            ["value_counts"], ["distinct_count"], ["a", "b"])
+        # A client reads what is left out as empty.
+        session.stats_policy.update(omitted_keys=[], approx_keys=[], demand_columns=[])
+        assert not {"omitted_keys", "approx_keys", "demand_columns"} & set(session_mod.stats_meta(session))
+
+    def test_every_reason_the_server_sends_is_a_documented_one(self):
+        for *_, expected in POLICY_FRAMES:
+            assert expected.get("reason", "size") in session_mod.STATS_REASONS
+
+    def test_the_policy_is_what_the_pure_function_resolved(self, sp):
+        session = _session(sp, "auto", "deferred", SCHEMA_BY_SIZE)
+        assert session.stats_policy == sp.resolve_stats_policy("xorq", "xorq_build", 5, 3,
+            limits=sp.StatsLimits(**SCHEMA_BY_SIZE))
+
+
+class TestPolicyForTheSession:
+    """``resolve_session_policy``: what a load handler resolves, and when."""
+
+    @pytest.mark.parametrize("stats_tier", ["auto", "full", "scalar", "schema"])
+    def test_a_schema_dataflow_resolves_against_the_count_it_has(self, stats_tier):
+        out = stats_wire.resolve_session_policy(stats_tier, "schema", 5, 3)
+        assert out["estimate"] == ESTIMATE
+        assert out["tier_target"] == {"auto": "full", "full": "full", "scalar": "scalar", "schema": "schema"}[stats_tier]
+
+    def test_a_dataflow_that_ran_its_stats_has_nothing_to_resolve(self):
+        assert stats_wire.resolve_session_policy("full", "full", 5, 3) is None
+        assert stats_wire.resolve_session_policy("auto", "full", 5_000_000_000, 40) is None
+
+    def test_the_ceiling_clips_a_host_that_asks_for_full(self, sp):
+        out = stats_wire.resolve_session_policy("full", "schema", 78_000_000, 44)
+        assert (out["tier_target"], out["reason"]) == ("scalar", "ceiling")
+
+    def test_the_limits_are_read_on_each_call(self, monkeypatch):
+        assert stats_wire.resolve_session_policy("auto", "schema", 5, 3)["tier_target"] == "full"
+        monkeypatch.setenv("BUCKAROO_STATS_FULL_AUTO_ROWS", "3")
+        assert stats_wire.resolve_session_policy("auto", "schema", 5, 3)["tier_target"] == "scalar"
+
+
+class TestCapabilities:
+    def test_the_second_bit_is_named(self):
+        assert stats_wire.STATS_UPDATE_CAP == "stats_update"
+        assert stats_wire.STATS_ONDEMAND_CAP == "stats_ondemand"
+        assert stats_wire.parse_caps("stats_update,stats_ondemand") == ONDEMAND_CAPS
+
+    @pytest.mark.parametrize("caps, expected", [
+        (ONDEMAND_CAPS, True), (UPDATE_CAPS, False), (LEGACY_CAPS, False),
+        # The bit means the client also merges stats_update; alone it is not enough.
+        (frozenset({"stats_ondemand"}), False)])
+    def test_only_stats_update_with_stats_ondemand_counts_as_ondemand(self, caps, expected):
+        assert stats_wire.client_has_ondemand(_client(caps)) is expected
+
+    def test_a_client_with_no_caps_attribute_is_not_ondemand(self):
+        assert stats_wire.client_has_ondemand(SimpleNamespace()) is False
+
+    @pytest.mark.parametrize("caps, expected", [(ONDEMAND_CAPS, False), (UPDATE_CAPS, True), (LEGACY_CAPS, True)])
+    def test_a_policy_target_below_full_is_missing_stats_to_every_client_but_an_ondemand_one(self, sp, caps, expected):
+        session = _session(sp, "auto", "deferred", SCHEMA_BY_SIZE)
+        assert stats_wire.stats_to_pull(session, _client(caps)) is expected
+
+    @pytest.mark.parametrize("caps", [ONDEMAND_CAPS, UPDATE_CAPS, LEGACY_CAPS])
+    def test_a_pending_session_has_stats_to_pull_for_everyone(self, sp, caps):
+        assert stats_wire.stats_to_pull(_session(sp, "auto", "deferred"), _client(caps)) is True
+
+    @pytest.mark.parametrize("caps", [ONDEMAND_CAPS, UPDATE_CAPS, LEGACY_CAPS])
+    def test_a_tier_the_host_named_has_nothing_to_pull(self, sp, caps):
+        assert stats_wire.stats_to_pull(_session(sp, "schema", "deferred"), _client(caps)) is False
+        assert stats_wire.stats_to_pull(_session(sp, "scalar", "deferred"), _client(caps)) is False
