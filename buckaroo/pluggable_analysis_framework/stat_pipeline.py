@@ -293,7 +293,7 @@ class StatPipeline(UnitPipeline):
             return []
         pairs = columns_in_scope(state)
         skip = self._skipped(state, pairs)
-        active = prioritized([pair for pair in pairs if pair[0] not in skip], state.priority)
+        active = prioritized(state, [pair for pair in pairs if pair[0] not in skip])
         return [StatUnit(id=f"column:{orig}", columns=(orig,), phase="column") for orig, _rewritten in active]
 
     def new_accumulator(self, state: StatState) -> StatAccumulator:

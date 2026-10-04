@@ -42,21 +42,62 @@ class StatUnit:
     cost: str = "column"
 
 
+# How a caller writes the column names it hands in (``StatState.columns`` and
+# ``priority``, and ``StatRun``'s ``prefer``): ``original`` names only,
+# ``rewritten`` (``a, b, c``) names only, or ``any``.
+NAMESPACES = ("any", "original", "rewritten")
+
+
+def check_namespace(namespace: str) -> None:
+    if namespace not in NAMESPACES:
+        raise ValueError(f"namespace must be one of {NAMESPACES}, not {namespace!r}")
+
+
+def resolve_names(pairs: Sequence[Tuple[Any, str]], names: Iterable[Any], namespace: str = "any") -> List[Any]:
+    """The original names of the columns that ``names`` pick out of ``pairs``,
+    the ``(orig, rewritten)`` of every column of the frame, in the order given.
+    A name that matches no column is ignored.
+
+    Each name is read once, so it picks one column. In ``any``, a name that is
+    an original column name picks that column, and only a name that is not one
+    is read as a rewritten name. That makes ``any`` right for a caller that
+    writes original names. A caller that holds the rewritten names, as a client
+    does, must say ``rewritten``: when one of its names is also another column's
+    original name (a frame with columns ``c, b, a`` has a column named ``c``
+    and a column rewritten to ``c``), ``any`` would read it as the original.
+    """
+    check_namespace(namespace)
+    originals = {orig for orig, _rewritten in pairs}
+    by_rewritten = {rewritten: orig for orig, rewritten in pairs}
+    picked: List[Any] = []
+    for name in names:
+        if namespace != "rewritten" and name in originals:
+            picked.append(name)
+        elif namespace != "original" and name in by_rewritten:
+            picked.append(by_rewritten[name])
+    return picked
+
+
 @dataclass(frozen=True, eq=False)
 class StatState:
     """What a stat run describes: the frame or expression, and how to cut it.
 
     ``skip_columns`` get no unit. ``columns`` restricts the run to a group (a
     column-group request), and ``priority`` names columns to plan first. Both
-    take original or rewritten (``a, b, c``) names, since a client only knows
-    the rewritten ones. ``rows`` is the row count when the caller already has
-    it, which the xorq column-chunk split needs and which is never queried for.
+    are written in ``namespace`` (see ``resolve_names``): a client that only
+    knows the rewritten ``a, b, c`` names says ``rewritten``. ``rows`` is the
+    row count when the caller already has it, which the xorq column-chunk split
+    needs and which is never queried for.
     """
     data: Any
     skip_columns: frozenset = frozenset()
     columns: Optional[Tuple[Any, ...]] = None
     priority: Tuple[Any, ...] = ()
     rows: Optional[int] = None
+    namespace: str = "any"
+
+    def __post_init__(self) -> None:
+        check_namespace(self.namespace)
 
 
 def columns_in_scope(state: StatState) -> List[Tuple[Any, str]]:
@@ -66,22 +107,21 @@ def columns_in_scope(state: StatState) -> List[Tuple[Any, str]]:
     pairs = old_col_new_col(state.data)
     if state.columns is None:
         return list(pairs)
-    wanted = set(state.columns)
-    return [(orig, rewritten) for orig, rewritten in pairs if orig in wanted or rewritten in wanted]
+    wanted = set(resolve_names(pairs, state.columns, state.namespace))
+    return [pair for pair in pairs if pair[0] in wanted]
 
 
-def prioritized(pairs: Sequence[Tuple[Any, str]], priority: Sequence[Any]) -> List[Tuple[Any, str]]:
-    """``pairs`` with the columns named in ``priority`` first, in that order,
-    and the rest in their own order."""
+def prioritized(state: StatState, pairs: Sequence[Tuple[Any, str]]) -> List[Tuple[Any, str]]:
+    """``pairs`` with the columns named in ``state.priority`` first, in that
+    order, and the rest in their own order. The names are read against every
+    column of ``state.data``, not only ``pairs``, so a name picks the same
+    column whatever group is asked for."""
+    if not state.priority:
+        return list(pairs)
     rank: Dict[Any, int] = {}
-    for position, name in enumerate(priority):
-        rank.setdefault(name, position)
-
-    def key(pair: Tuple[Any, str]) -> int:
-        ranks = [rank[name] for name in pair if name in rank]
-        return min(ranks) if ranks else len(rank)
-
-    return sorted(pairs, key=key)
+    for position, orig in enumerate(resolve_names(old_col_new_col(state.data), state.priority, state.namespace)):
+        rank.setdefault(orig, position)
+    return sorted(pairs, key=lambda pair: rank.get(pair[0], len(rank)))
 
 
 class StatAccumulator:

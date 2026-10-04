@@ -459,7 +459,7 @@ class XorqStatPipeline(UnitPipeline):
         schema = table.schema()
         # xorq has always matched skip_columns on the column's own name only.
         skip = {orig for orig, _rewritten in pairs if orig in state.skip_columns}
-        active = [orig for orig, _rewritten in prioritized([p for p in pairs if p[0] not in skip], state.priority)]
+        active = [orig for orig, _rewritten in prioritized(state, [p for p in pairs if p[0] not in skip])]
         chunks = self._batch_chunks(state, active)
         units: List[StatUnit] = []
         batch_of: Dict[Any, str] = {}

@@ -14,7 +14,8 @@ import itertools
 import time
 from typing import Any, List, Optional, Sequence, Tuple
 
-from buckaroo.pluggable_analysis_framework.stat_units import Fragment, StatUnit, rewrite_sd
+from buckaroo.df_util import old_col_new_col
+from buckaroo.pluggable_analysis_framework.stat_units import Fragment, StatUnit, resolve_names, rewrite_sd
 
 _run_ids = itertools.count(1)
 
@@ -41,6 +42,7 @@ class StatRun:
         self.status = "pending" if self.units else "complete"
         self.error: Optional[Exception] = None
         self.created_at = time.time()
+        self._frame_columns: Optional[List[Tuple[Any, str]]] = None
 
     @property
     def key(self) -> Tuple[int, str]:
@@ -51,27 +53,31 @@ class StatRun:
         """The number of units not yet run."""
         return len(self.units) - len(self.ran)
 
-    def next_unit(self, prefer: Sequence[Any] = ()) -> Optional[StatUnit]:
+    def next_unit(self, prefer: Sequence[Any] = (), namespace: str = "any") -> Optional[StatUnit]:
         """The unit ``run_next`` would run: the first whose prerequisites have
-        run, or the first of those that covers a column named in ``prefer``
-        (by original or rewritten name), so the columns a client is looking at
-        come first. ``None`` when no unit is left."""
+        run, or the first of those that covers a column named in ``prefer``, so
+        the columns a client is looking at come first. The names are written in
+        ``namespace`` (see ``resolve_names``): a client that holds the rewritten
+        ``a, b, c`` names says ``rewritten``. ``None`` when no unit is left."""
         ran = set(self.ran)
         ready = [unit for unit in self.units if unit.id not in ran and all(a in ran for a in unit.after)]
         if prefer:
-            wanted = set(prefer)
+            if self._frame_columns is None:
+                self._frame_columns = old_col_new_col(self.acc.state.data)
+            wanted = set(resolve_names(self._frame_columns, prefer, namespace))
             for unit in ready:
-                if any(col in wanted or self.acc.rewritten.get(col) in wanted for col in unit.columns):
+                if any(col in wanted for col in unit.columns):
                     return unit
         return ready[0] if ready else None
 
-    def run_next(self, prefer: Sequence[Any] = ()) -> Optional[Fragment]:
+    def run_next(self, prefer: Sequence[Any] = (), namespace: str = "any") -> Optional[Fragment]:
         """Run one unit and return its fragment, which is also appended to
         ``fragments``. ``None`` when the run is complete or failed. A unit that
-        raises fails the run, and the exception propagates once."""
+        raises fails the run, and the exception propagates once. ``prefer`` and
+        ``namespace`` are as in ``next_unit``."""
         if self.status != "pending":
             return None
-        unit = self.next_unit(prefer)
+        unit = self.next_unit(prefer, namespace)
         if unit is None:
             self.status = "complete"
             return None
