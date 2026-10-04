@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,8 +38,9 @@ from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # no
 from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments  # noqa: E402
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline  # noqa: E402
 from buckaroo.serialization_utils import resolve_summary_stats_payload  # noqa: E402
-from buckaroo.server import telemetry, xorq_loading  # noqa: E402
+from buckaroo.server import stats_wire, telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
+from buckaroo.server.stat_run import StatRun  # noqa: E402
 from buckaroo.server.stats_wire import start_stat_run  # noqa: E402
 from buckaroo.server.websocket_handler import DataStreamHandler  # noqa: E402
 from tests.unit.dataflow.scoped_summary_stats_test import (  # noqa: E402
@@ -1440,6 +1442,43 @@ def _count_stat_queries():
         yield queries
 
 
+def _merge_stat_payloads(payloads):
+    """What a client holds after key-merging ``stats_update`` payloads into
+    ``all_stats``, as ``StatsChannel`` does: a cell a payload carries replaces
+    the held one, and a null (the wide pivot's fill for a stat a column did not
+    carry) never replaces a value."""
+    merged = {}
+    for payload in payloads:
+        for stat, row in _rows_by_stat(payload).items():
+            cells = merged.setdefault(stat, {})
+            for column, value in row.items():
+                if column == "index" or (value is None and cells.get(column) is not None):
+                    continue
+                cells[column] = value
+    return merged
+
+
+class _SlowStats:
+    """A stats class whose units run for real, each after ``delay`` seconds, as
+    a slow query would. ``fail_on`` names a unit that raises instead."""
+
+    def __init__(self, stats, delay=0.0, fail_on=None):
+        self._stats, self._delay, self._fail_on = stats, delay, fail_on
+        self.state = stats.state
+
+    def plan(self, state):
+        return self._stats.plan(state)
+
+    def new_accumulator(self, state):
+        return self._stats.new_accumulator(state)
+
+    def run(self, unit, acc):
+        time.sleep(self._delay)
+        if unit.id == self._fail_on:
+            raise RuntimeError(f"{unit.id} failed")
+        return self._stats.run(unit, acc)
+
+
 class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
     """``stats_request``, ``stats_update`` and ``stats_aborted`` on a deferred
     ``/load_expr`` session, the ``stats_gen`` counter and ``df_meta.stats``, and
@@ -1995,6 +2034,446 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
 
         self.assertEqual(merge_fragments(first + rest), merge_fragments(everything))
         self.assertEqual(len(set(run.ran)), len(run.units), "no unit ran twice")
+
+    def _budget(self, seconds):
+        """Set the time budget of an incremental request for the rest of the
+        test. Zero runs exactly one unit per request, whatever it costs."""
+        patcher = patch.object(stats_wire, "STATS_BUDGET_S", seconds, create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def _pull_stats(self, ws, gen, limit=12, **fields):
+        """Send incremental ``stats_request``s on ``ws`` until the final reply
+        (or an abort) and return every reply."""
+        replies = []
+        for _ in range(limit):
+            ws.write_message(_stats_request(gen, incremental=True, **fields))
+            reply = await _read_json(ws)
+            replies.append(reply)
+            if reply["type"] != "stats_update" or reply["final"]:
+                break
+        return replies
+
+    def _wrapped_run(self, sid, **kwargs):
+        """Give the session a StatRun for its current generation whose units run
+        for real but through ``_SlowStats``."""
+        session = self._session(sid)
+        dataflow = session.xorq_dataflow
+        run = StatRun(session.stats_gen, "raw",
+            _SlowStats(dataflow.build_stats(dataflow.processed_df, run=False), **kwargs))
+        session.stat_runs[run.key] = run
+        return run
+
+    async def _infinite_window(self, ws, end=5):
+        ws.write_message(json.dumps({"type": "infinite_request",
+            "payload_args": {"start": 0, "end": end, "sourceName": "default", "origEnd": end}}))
+        resp = await _read_json(ws)
+        pq.read_table(io.BytesIO(await ws.read_message()))
+        return resp
+
+    @tornado.testing.gen_test
+    async def test_incremental_requests_run_one_unit_each_and_end_with_the_complete_state(self):
+        inline = await self._inline_frame("sw-inc-inline")
+        await self._load("sw-inc", stats_delivery="deferred")
+        ws, first = await self._connect("sw-inc", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        self._budget(0)
+
+        with _count_stat_queries() as queries:
+            replies = await self._pull_stats(ws, gen)
+
+        self.assertEqual([r["type"] for r in replies], ["stats_update"] * 4)
+        self.assertEqual([r["final"] for r in replies], [False, False, False, True])
+        self.assertEqual([r["remaining"] for r in replies], [3, 2, 1, 0])
+        self.assertEqual(len(queries), 4, "one query for each unit, none repeated")
+        for reply in replies:
+            self.assertEqual((reply["stats_gen"], reply["scope"], reply["tier"]), (gen, "raw", "full"))
+            self.assertIsInstance(reply["elapsed_ms"], (int, float))
+        self.assertNotIn("histogram", _rows_by_stat(replies[0]["payload"]), "the scalar batch comes first")
+        self.assertIn("histogram", _rows_by_stat(replies[1]["payload"]))
+        self.assertEqual(_as_json(_merge_stat_payloads(r["payload"] for r in replies)),
+            _as_json(_merge_stat_payloads([inline["df_data_dict"]["all_stats"]])))
+
+    @tornado.testing.gen_test
+    async def test_the_last_unit_assigns_the_stats_and_frees_the_run(self):
+        await self._load("sw-assign", stats_delivery="deferred")
+        ws, first = await self._connect("sw-assign", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        session = self._session("sw-assign")
+        dataflow = session.xorq_dataflow
+        key = dataflow._scope_cache_key(split_chain_by_scope(dataflow.operations)["filt"], tier="full")
+        self._budget(0)
+
+        ws.write_message(_stats_request(gen, incremental=True))
+        await _read_json(ws)
+        self.assertEqual(len(session.stat_runs[(gen, "raw")].fragments), 1)
+        self.assertEqual((session.stats_status, dataflow.stats_tier), ("pending", "schema"))
+        self.assertNotIn(key, dataflow.summary_stats_cache, "a partial run writes nothing into the dataflow")
+
+        await self._pull_stats(ws, gen)
+        self.assertEqual(session.stat_runs, {}, "the accumulator is freed with the run")
+        self.assertEqual((session.stats_status, dataflow.stats_tier), ("complete", "full"))
+        self.assertIn(key, dataflow.summary_stats_cache)
+        self.assertIn("histogram_bins", _rows_by_stat(session.df_data_dict["all_stats"]),
+            "the session snapshot is refreshed in the same step")
+        self.assertEqual(_as_json(dataflow.summary_sd), _as_json(dataflow.summary_stats_cache[key]))
+
+    @tornado.testing.gen_test
+    async def test_a_long_budget_runs_every_unit_in_one_request(self):
+        await self._load("sw-warm-budget", stats_delivery="deferred")
+        ws, first = await self._connect("sw-warm-budget", caps="stats_update")
+        self._budget(3600)
+        with _count_stat_queries() as queries:
+            replies = await self._pull_stats(ws, self._stats(first)["gen"])
+        self.assertEqual(len(replies), 1)
+        self.assertEqual((replies[0]["final"], replies[0]["remaining"]), (True, 0))
+        self.assertEqual(len(queries), 4)
+
+    @tornado.testing.gen_test
+    async def test_the_columns_hint_orders_the_units_of_a_request(self):
+        await self._load("sw-hint", stats_delivery="deferred")
+        ws, first = await self._connect("sw-hint", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        self._budget(0)
+        ws.write_message(_stats_request(gen, incremental=True, columns=["c"]))
+        await _read_json(ws)
+        ws.write_message(_stats_request(gen, incremental=True, columns=["c"]))
+        reply = await _read_json(ws)
+        run = self._session("sw-hint").stat_runs[(gen, "raw")]
+        self.assertEqual(run.ran, ["batch", "histogram:category"],
+            "the batch every histogram reads goes first, then the unit of the column named, c being category")
+        columns = {name for row in _rows_by_stat(reply["payload"]).values() for name in row if name != "index"}
+        self.assertEqual(columns, {"c"})
+
+    @tornado.testing.gen_test
+    async def test_a_stale_gen_mid_run_gets_stats_aborted_and_the_next_generation_starts_over(self):
+        await self._load("sw-mid-stale", stats_delivery="deferred")
+        ws, first = await self._connect("sw-mid-stale", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        self._budget(0)
+        ws.write_message(_stats_request(gen, incremental=True))
+        self.assertFalse((await _read_json(ws))["final"])
+
+        ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
+        self._assert_pending(await _read_json(ws), gen + 1)
+        with _count_stat_queries() as queries:
+            ws.write_message(_stats_request(gen, incremental=True))
+            aborted = await _read_json(ws)
+        self.assertEqual((aborted["type"], aborted["reason"], aborted["current_gen"]),
+            ("stats_aborted", "stale", gen + 1))
+        self.assertEqual(queries, [], "a stale request runs no unit")
+
+        replies = await self._pull_stats(ws, gen + 1)
+        self.assertEqual([r["remaining"] for r in replies], [3, 2, 1, 0], "the new generation runs every unit again")
+
+    @tornado.testing.gen_test
+    async def test_client_b_opening_after_client_a_finished_gets_the_complete_all_stats(self):
+        inline = await self._inline_frame("sw-after-inline")
+        await self._load("sw-after", stats_delivery="deferred")
+        a, a_open = await self._connect("sw-after", caps="stats_update")
+        gen = self._stats(a_open)["gen"]
+        self._budget(0)
+        self.assertEqual(len(await self._pull_stats(a, gen)), 4)
+
+        with _count_stat_queries() as queries:
+            b, b_open = await self._connect("sw-after", caps="stats_update")
+        self._assert_complete(b_open, gen, inline)
+        self.assertEqual(queries, [], "the stats A's run produced are not computed again for B")
+
+        b.write_message(_stats_request(gen, incremental=True))
+        reply = await _read_json(b)
+        self.assertEqual((reply["type"], reply["final"], reply["remaining"]), ("stats_update", True, 0))
+        self.assertEqual(queries, [])
+
+    @tornado.testing.gen_test
+    async def test_two_interleaved_clients_each_end_with_full_stats_and_run_no_unit_twice(self):
+        inline = await self._inline_frame("sw-inter-inline")
+        await self._load("sw-inter", stats_delivery="deferred")
+        a, a_open = await self._connect("sw-inter", caps="stats_update")
+        b, _ = await self._connect("sw-inter", caps="stats_update")
+        gen = self._stats(a_open)["gen"]
+        self._budget(0)
+        received = {"a": [], "b": []}
+        ran = []
+
+        with _count_stat_queries() as queries:
+            for _ in range(4):
+                for name, ws in (("a", a), ("b", b)):
+                    ws.write_message(_stats_request(gen, incremental=True))
+                    received[name].append(await _read_json(ws))
+                    ran.append(len(queries))
+
+        self.assertEqual(ran, [1, 1, 2, 2, 3, 3, 4, 4],
+            "each unit ran once, for whichever client asked first, and the other was caught up without a query")
+        full = _as_json(_merge_stat_payloads([inline["df_data_dict"]["all_stats"]]))
+        for name in ("a", "b"):
+            replies = received[name]
+            self.assertTrue(all(r["type"] == "stats_update" for r in replies))
+            self.assertTrue(replies[-1]["final"])
+            self.assertEqual(_as_json(_merge_stat_payloads(r["payload"] for r in replies)), full, name)
+
+    @tornado.testing.gen_test
+    async def test_the_final_reply_carries_the_rebuilt_display_args_when_its_hash_differs(self):
+        await self._load("sw-dargs", stats_delivery="deferred")
+        a, a_open = await self._connect("sw-dargs", caps="stats_update")
+        b, _ = await self._connect("sw-dargs", caps="stats_update")
+        gen = self._stats(a_open)["gen"]
+        session = self._session("sw-dargs")
+        self._budget(0)
+
+        replies = await self._pull_stats(a, gen)
+        self.assertEqual(len(replies), 4)
+        for reply in replies[:-1]:
+            self.assertNotIn("df_display_args", reply)
+        rebuilt = replies[-1]["df_display_args"]
+        self.assertEqual(_as_json(rebuilt), _as_json(session.df_display_args))
+        self.assertNotEqual(_as_json(rebuilt), _as_json(a_open["df_display_args"]),
+            "full stats change the float column's minWidth")
+
+        # B asked for nothing while A ran, and still holds the schema tier's config.
+        b.write_message(_stats_request(gen, incremental=True))
+        late = await _read_json(b)
+        self.assertEqual((late["final"], late["remaining"]), (True, 0))
+        self.assertEqual(_as_json(late["df_display_args"]), _as_json(session.df_display_args))
+        b.write_message(_stats_request(gen, incremental=True))
+        self.assertNotIn("df_display_args", await _read_json(b), "B holds it now")
+
+    @tornado.testing.gen_test
+    async def test_the_final_reply_carries_no_display_args_when_they_did_not_change(self):
+        build = str(xo.build_expr(xo.memtable({"qty": [1, 2, 1, 3, 2], "category": ["a", "b", "a", "c", "b"]},
+            name="t2"), builds_dir=self.builds_root))
+        await self._load("sw-same-args", build_dir=build, stats_delivery="deferred")
+        ws, first = await self._connect("sw-same-args", caps="stats_update")
+        self._budget(0)
+        replies = await self._pull_stats(ws, self._stats(first)["gen"])
+        self.assertEqual(len(replies), 3, "the scalar batch and one histogram for each of two columns")
+        self.assertTrue(replies[-1]["final"])
+        self.assertNotIn("df_display_args", replies[-1], "int and string columns are styled the same at both tiers")
+
+    @tornado.testing.gen_test
+    async def test_the_final_display_args_keep_the_clients_search_highlight(self):
+        await self._load("sw-highlight", stats_delivery="deferred")
+        ws, first = await self._connect("sw-highlight", caps="stats_update")
+        ws.write_message(_state_change(search_string="ca"))
+        self._assert_pending(await _read_json(ws), self._stats(first)["gen"])
+        self._budget(0)
+        replies = await self._pull_stats(ws, self._stats(first)["gen"])
+        self.assertEqual(len(replies), 4)
+        columns = replies[-1]["df_display_args"]["main"]["df_viewer_config"]["column_config"]
+        self.assertTrue([cc for cc in columns if cc.get("displayer_args", {}).get("highlight_phrase") == ["ca"]],
+            "rebuilt config replaces the one with the highlight, so it must carry it")
+
+    @tornado.testing.gen_test
+    async def test_a_filtered_state_ends_as_complete_as_the_inline_session_s(self):
+        search = {"search": ["a"]}
+        inline = await self._inline_frame("sw-filt-inline", quick_command_args=search)
+        await self._load("sw-filt", stats_delivery="deferred")
+        ws, first = await self._connect("sw-filt", caps="stats_update")
+        ws.write_message(_state_change(quick_command_args=search))
+        gen = self._stats(await _read_json(ws))["gen"]
+        self._budget(0)
+        replies = await self._pull_stats(ws, gen)
+        self.assertEqual(len(replies), 4)
+        _, late = await self._connect("sw-filt", caps="stats_update")
+        self._assert_complete(late, gen, inline)
+
+    @tornado.testing.gen_test
+    async def test_a_legacy_client_connecting_mid_run_gets_a_complete_state_from_the_remaining_units(self):
+        inline = await self._inline_frame("sw-mid-inline")
+        await self._load("sw-mid", stats_delivery="deferred")
+        a, a_open = await self._connect("sw-mid", caps="stats_update")
+        gen = self._stats(a_open)["gen"]
+        self._budget(0)
+
+        with _count_stat_queries() as queries:
+            for _ in range(2):
+                a.write_message(_stats_request(gen, incremental=True))
+                self.assertFalse((await _read_json(a))["final"])
+            self.assertEqual(len(queries), 2)
+            _, legacy = await self._connect("sw-mid")
+            self.assertEqual(len(queries), 4, "the legacy client's frame ran the two units still to run")
+            a.write_message(_stats_request(gen, incremental=True))
+            reply = await _read_json(a)
+            self.assertEqual(len(queries), 4, "A is answered from the stats the legacy client's frame completed")
+        self._assert_complete(legacy, gen, inline)
+        self.assertEqual((reply["final"], reply["remaining"]), (True, 0))
+        self.assertEqual(_rows_by_stat(reply["payload"]), _rows_by_stat(inline["df_data_dict"]["all_stats"]))
+
+    @tornado.testing.gen_test
+    async def test_a_request_with_no_incremental_flag_finishes_a_run_that_has_progress(self):
+        inline = await self._inline_frame("sw-finish-inline")
+        await self._load("sw-finish", stats_delivery="deferred")
+        ws, first = await self._connect("sw-finish", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        self._budget(0)
+        with _count_stat_queries() as queries:
+            for _ in range(2):
+                ws.write_message(_stats_request(gen, incremental=True))
+                self.assertFalse((await _read_json(ws))["final"])
+            ws.write_message(_stats_request(gen))
+            update = await _read_json(ws)
+        self.assertEqual((update["type"], update["final"], update["remaining"]), ("stats_update", True, 0))
+        self.assertEqual(len(queries), 4, "the whole-run request ran the two units left, not all four")
+        self.assertEqual(_rows_by_stat(update["payload"]), _rows_by_stat(inline["df_data_dict"]["all_stats"]))
+
+    @tornado.testing.gen_test
+    async def test_a_concurrent_infinite_request_is_served_between_units_within_the_stall_bound(self):
+        await self._load("sw-stall", stats_delivery="deferred")
+        a, a_open = await self._connect("sw-stall", caps="stats_update")
+        b, _ = await self._connect("sw-stall", caps="stats_update")
+        gen = self._stats(a_open)["gen"]
+        self._wrapped_run("sw-stall", delay=0.04)
+
+        a.write_message(_stats_request(gen, incremental=True))
+        started = time.perf_counter()
+        rows = await self._infinite_window(b)
+        rows_latency = time.perf_counter() - started
+        first = await _read_json(a)
+
+        self.assertEqual((rows["type"], rows["length"]), ("infinite_resp", 5))
+        self.assertFalse(first["final"], "rows came back while the stats were still running")
+        self.assertEqual(self._session("sw-stall").stats_status, "pending")
+        replies = [first] + await self._pull_stats(a, gen)
+        self.assertTrue(replies[-1]["final"])
+        # Plan 1's proposed ceiling on the longest single request.
+        for reply in replies:
+            self.assertLess(reply["elapsed_ms"], 250)
+        self.assertLess(rows_latency, 0.25)
+
+    @tornado.testing.gen_test
+    async def test_the_first_initial_state_precedes_any_data_stat_query_and_rows_precede_the_stats(self):
+        with _count_stat_queries() as queries:
+            await self._load("sw-first", stats_delivery="deferred")
+            ws, first = await self._connect("sw-first", caps="stats_update")
+            gen = self._stats(first)["gen"]
+            self._assert_pending(first, gen)
+            self.assertEqual((await self._infinite_window(ws))["length"], 5)
+            self.assertEqual(queries, [], "the first initial_state and the first rows precede every data stat query")
+
+            self._budget(0)
+            ws.write_message(_stats_request(gen, incremental=True))
+            reply = await _read_json(ws)
+            self.assertEqual((reply["type"], reply["final"]), ("stats_update", False))
+            self.assertEqual(len(queries), 1)
+            self.assertEqual((await self._infinite_window(ws))["type"], "infinite_resp")
+            self.assertEqual(self._session("sw-first").stats_status, "pending", "rows are served before stats complete")
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_mid_run_bumps_the_generation_and_drops_the_run(self):
+        await self._load("sw-reload-run", stats_delivery="deferred")
+        ws, first = await self._connect("sw-reload-run", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        session = self._session("sw-reload-run")
+        self._budget(0)
+        ws.write_message(_stats_request(gen, incremental=True))
+        self.assertFalse((await _read_json(ws))["final"])
+        self.assertEqual(list(session.stat_runs), [(gen, "raw")])
+
+        resp = await _post(self.get_http_port(), "/reload_expr/sw-reload-run", {})
+        self.assertEqual(resp.code, 200, resp.body)
+        self._assert_pending(await _read_json(ws), gen + 1)
+        self.assertEqual(session.stat_runs, {})
+
+        with _count_stat_queries() as queries:
+            ws.write_message(_stats_request(gen, incremental=True))
+            aborted = await _read_json(ws)
+            self.assertEqual((aborted["reason"], aborted["current_gen"]), ("stale", gen + 1))
+            self.assertEqual(queries, [])
+            ws.write_message(_stats_request(gen + 1, incremental=True))
+            reply = await _read_json(ws)
+        self.assertEqual((reply["remaining"], len(queries)), (3, 1), "the new generation starts from its first unit")
+
+    @tornado.testing.gen_test
+    async def test_stats_unit_and_completion_spans_are_emitted_on_the_session_sink(self):
+        captured: list = []
+        with patch.object(telemetry, "make_http_sink", lambda url, **kw: captured.append):
+            await self._load("sw-spans", stats_delivery="deferred",
+                telemetry_url="http://companion.invalid/internal/telemetry")
+            ws, first = await self._connect("sw-spans", caps="stats_update")
+            gen = self._stats(first)["gen"]
+            self._budget(0)
+            self.assertEqual(len(await self._pull_stats(ws, gen)), 4)
+
+        units = [r for r in captured if r["name"] == "stats.unit"]
+        self.assertEqual([r["attrs"]["unit"] for r in units],
+            ["batch", "histogram:price", "histogram:qty", "histogram:category"])
+        for record in units:
+            self.assertEqual(record["trace"], "sw-spans")
+            self.assertEqual((record["attrs"]["session"], record["attrs"]["stats_gen"]), ("sw-spans", gen))
+        self.assertEqual([r["attrs"]["phase"] for r in units], ["batch", "histogram", "histogram", "histogram"])
+        totals = [r for r in captured if r["name"] == "firstpull.stats_total"]
+        self.assertEqual(len(totals), 1, "one completion span for the run, not one for each request")
+        self.assertEqual((totals[0]["attrs"]["stats_gen"], totals[0]["attrs"]["units"]), (gen, 4))
+        self.assertGreater(totals[0]["attrs"]["run_secs"], 0)
+        requests = [r for r in captured if r["name"] == "stats.request"]
+        self.assertEqual([r["attrs"]["outcome"] for r in requests], ["update"] * 4)
+        self.assertEqual([r["attrs"]["units"] for r in requests], [1, 1, 1, 1])
+
+    @tornado.testing.gen_test
+    async def test_the_completion_span_reports_the_snapshot_cache_outcome_of_the_units(self):
+        captured: list = []
+        cache_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_root, ignore_errors=True)
+        with patch.object(telemetry, "make_http_sink", lambda url, **kw: captured.append):
+            await self._load("sw-cache", stats_delivery="deferred", cache_storage_path=cache_root,
+                telemetry_url="http://companion.invalid/internal/telemetry")
+            ws, first = await self._connect("sw-cache", caps="stats_update")
+            gen = self._stats(first)["gen"]
+            self._budget(3600)
+            self.assertEqual(len(await self._pull_stats(ws, gen)), 1)
+            # A reload builds a new dataflow with an empty in-process cache, so the
+            # same state's units now read their snapshots.
+            resp = await _post(self.get_http_port(), "/reload_expr/sw-cache", {})
+            self.assertEqual(resp.code, 200, resp.body)
+            await _read_json(ws)
+            self.assertEqual(len(await self._pull_stats(ws, gen + 1)), 1)
+
+        cold, warm = [r["attrs"] for r in captured if r["name"] == "firstpull.stats_total"]
+        self.assertEqual((cold["cache_status"], cold["cache_hits"], cold["cache_misses"]), ("miss", 0, 4))
+        self.assertEqual((warm["cache_status"], warm["cache_hits"], warm["cache_misses"]), ("hit", 4, 0))
+
+    @tornado.testing.gen_test
+    async def test_a_unit_that_raises_fails_the_generation_until_the_next(self):
+        await self._load("sw-unit-fail", stats_delivery="deferred")
+        ws, first = await self._connect("sw-unit-fail", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        session = self._session("sw-unit-fail")
+        self._wrapped_run("sw-unit-fail", fail_on="histogram:price")
+        self._budget(0)
+
+        ws.write_message(_stats_request(gen, incremental=True))
+        self.assertFalse((await _read_json(ws))["final"])
+        ws.write_message(_stats_request(gen, incremental=True))
+        aborted = await _read_json(ws)
+        self.assertEqual((aborted["type"], aborted["stats_gen"], aborted["reason"]), ("stats_aborted", gen, "error"))
+        self.assertEqual((session.stats_status, session.stats_reason), ("error", "stats_failed"))
+        self.assertEqual(session.stat_runs, {})
+
+        with _count_stat_queries() as queries:
+            ws.write_message(_stats_request(gen, incremental=True))
+            self.assertEqual((await _read_json(ws))["reason"], "error")
+        self.assertEqual(queries, [], "a failed generation is not retried by every request")
+        _, legacy = await self._connect("sw-unit-fail")
+        self.assertEqual(list(_rows_by_stat(legacy["df_data_dict"]["all_stats"])), ["dtype"])
+
+        ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
+        self._assert_pending(await _read_json(ws), gen + 1)
+        self.assertEqual(len(await self._pull_stats(ws, gen + 1)), 4)
+
+    @tornado.testing.gen_test
+    async def test_a_non_boolean_incremental_flag_is_aborted_as_a_bad_request(self):
+        await self._load("sw-bad-flag", stats_delivery="deferred")
+        ws, first = await self._connect("sw-bad-flag", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        with _count_stat_queries() as queries:
+            ws.write_message(_stats_request(gen, incremental="yes"))
+            aborted = await _read_json(ws)
+        self.assertEqual((aborted["type"], aborted["reason"], aborted["stats_gen"]),
+            ("stats_aborted", "bad_request", gen))
+        self.assertEqual(queries, [], "a malformed request must not fall back to the whole run")
+        self._budget(0)
+        self.assertFalse((await self._pull_stats(ws, gen, limit=1))[0]["final"],
+            "the session still serves a good request")
 
 
 def _wide_parquet_expr(tmp_path, name="wide"):

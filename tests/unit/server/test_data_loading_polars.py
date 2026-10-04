@@ -34,10 +34,13 @@ from tornado.ioloop import IOLoop
 from buckaroo.dataflow.dataflow import assemble_merged_sd
 from buckaroo.dataflow.sd_cache import split_chain_by_scope
 from buckaroo.jlisp.lisp_utils import s as lisp_sym
+from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
 from buckaroo.pluggable_analysis_framework.stat_units import StatAccumulator, StatState, StatUnit, merge_fragments
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
+from buckaroo.serialization_utils import resolve_summary_stats_payload
+from buckaroo.server import stats_wire
 from buckaroo.server.data_loading import ServerDataflow, handle_infinite_request_buckaroo
 from buckaroo.server.data_loading_polars import (PolarsServerDataflow, create_polars_dataflow, handle_infinite_request_buckaroo_polars, load_file_polars)
 from buckaroo.server.stat_run import StatCursor, StatRun
@@ -678,3 +681,228 @@ class TestStatRun:
         assert run.status == "error" and isinstance(run.error, RuntimeError)
         assert run.run_next() is None, "a failed run is not retried"
         assert run.fragments == [{"x": {"v": 1}}]
+
+
+class _FakeClock:
+    """A clock a test moves by hand, so a budget can be spent without waiting."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+class _CostedStats:
+    """A stats class whose units run for real and cost what the test says on a
+    fake clock: ``cost`` is the default and ``costs`` maps a unit id to its own."""
+
+    def __init__(self, stats, clock, cost, costs=None):
+        self._stats, self._clock, self._cost, self._costs = stats, clock, cost, costs or {}
+        self.state = stats.state
+
+    def plan(self, state):
+        return self._stats.plan(state)
+
+    def new_accumulator(self, state):
+        return self._stats.new_accumulator(state)
+
+    def run(self, unit, acc):
+        fragment = self._stats.run(unit, acc)
+        self._clock.now += self._costs.get(unit.id, self._cost)
+        return fragment
+
+
+def _costed_run(backend, clock, cost, costs=None, gen=4):
+    run, dataflow = _stat_run(backend, gen)
+    run.stats = _CostedStats(run.stats, clock, cost, costs)
+    return run, dataflow
+
+
+def _stat_rows(payload):
+    """The decoded ``all_stats`` rows of a payload, keyed by stat name."""
+    return {row["index"]: row for row in resolve_summary_stats_payload(payload)}
+
+
+class TestRunUnits:
+    """Running a ``StatRun``'s units for one request (rows-first s5): as many as
+    fit in the request's time budget, and at least one."""
+
+    def test_units_that_cost_little_run_together_within_the_budget(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.01)
+        assert stats_wire.run_units(run, 0.075, clock=clock) == 3
+        assert run.status == "complete" and run.remaining == 0
+
+    def test_a_request_stops_once_the_budget_is_spent(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.04)
+        assert stats_wire.run_units(run, 0.075, clock=clock) == 2
+        assert run.status == "pending" and run.remaining == 1
+
+    def test_a_unit_that_costs_more_than_the_budget_is_the_only_one_of_its_request(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.2)
+        assert [stats_wire.run_units(run, 0.075, clock=clock) for _ in range(3)] == [1, 1, 1]
+        assert run.status == "complete"
+
+    def test_a_cold_unit_after_warm_ones_ends_the_request(self, backend):
+        """A snapshot-cache hit costs milliseconds and a miss is a query: the
+        units that hit run together, and the first miss is the last of its
+        request."""
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.005, costs={"column:category": 0.5})
+        assert stats_wire.run_units(run, 0.075, prefer=("c",), clock=clock) == 1
+        assert run.ran == ["column:category"]
+        assert stats_wire.run_units(run, 0.075, clock=clock) == 2
+        assert run.status == "complete"
+
+    def test_one_unit_runs_whatever_the_budget(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.0)
+        assert stats_wire.run_units(run, 0, clock=clock) == 1
+        assert run.remaining == 2
+
+    def test_no_budget_runs_every_unit(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=10.0)
+        assert stats_wire.run_units(run, None, clock=clock) == 3
+        assert run.status == "complete"
+
+    def test_a_complete_run_runs_nothing(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.0)
+        stats_wire.run_units(run, None, clock=clock)
+        assert stats_wire.run_units(run, 0.075, clock=clock) == 0
+        assert len(run.fragments) == 3
+
+    def test_the_columns_hint_is_read_in_the_client_s_rewritten_names(self, backend):
+        """The grid knows only a, b, c: "c" is the third column, category."""
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=1.0)
+        stats_wire.run_units(run, 0, prefer=["c", "a"], clock=clock)
+        stats_wire.run_units(run, 0, prefer=["c", "a"], clock=clock)
+        assert run.ran == ["column:category", "column:price"]
+
+    def test_a_unit_that_raises_fails_the_run_and_the_error_propagates(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.0)
+
+        def boom(unit, acc):
+            raise RuntimeError("unit failed")
+
+        run.stats.run = boom
+        with pytest.raises(RuntimeError, match="unit failed"):
+            stats_wire.run_units(run, 0.075, clock=clock)
+        assert run.status == "error"
+
+    def test_each_unit_is_a_stats_unit_span_on_the_bound_sink(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.0)
+        spans = []
+        with perf_log.telemetry_context("run-units", spans.append):
+            stats_wire.run_units(run, None, clock=clock, session_id="run-units")
+        units = [r for r in spans if r["name"] == "stats.unit"]
+        assert [r["attrs"]["unit"] for r in units] == run.ran
+        for record, unit in zip(units, run.units):
+            assert record["trace"] == "run-units"
+            attrs = record["attrs"]
+            assert (attrs["session"], attrs["stats_gen"]) == ("run-units", 4)
+            assert (attrs["phase"], attrs["cost"], attrs["columns"]) == (unit.phase, unit.cost, len(unit.columns))
+
+    def test_the_run_adds_up_the_time_its_units_took(self, backend):
+        run, _dataflow = _stat_run(backend)
+        assert run.elapsed_s == 0
+        run.run_next()
+        first = run.elapsed_s
+        assert first > 0
+        run.run_next()
+        assert run.elapsed_s > first
+
+    def test_a_clean_run_has_no_errors(self, backend):
+        run, _dataflow = _stat_run(backend)
+        stats_wire.run_units(run, None)
+        assert run.errs() == {}
+
+
+class TestPartialPayload:
+    """The ``all_stats`` payload of the fragments a client has not seen: the
+    stats of the state, assembled the way ``merged_sd`` is, for the columns
+    those fragments cover."""
+
+    def test_the_payload_of_every_fragment_is_the_dataflow_s_all_stats(self, backend):
+        run, dataflow = _stat_run(backend)
+        stats_wire.run_units(run, None)
+        payload = stats_wire.partial_payload(dataflow, run, run.fragments)
+        assert (payload["format"], payload["layout"]) == ("parquet_b64", "wide")
+        assert _stat_rows(payload) == _stat_rows(dataflow.df_data_dict["all_stats"])
+
+    def test_the_payload_holds_only_the_columns_the_fragments_cover(self, backend):
+        run, _dataflow = _stat_run(backend)
+        fragment = run.run_next(prefer=("category",))
+        payload = stats_wire.partial_payload(_dataflow, run, [fragment])
+        columns = {name for row in _stat_rows(payload).values() for name in row if name != "index"}
+        assert columns == {"c"}, "category is the third column, rewritten to c"
+
+    def test_a_search_filter_keys_the_run_s_stats_as_filtered(self, backend):
+        """With a search active the run analyzes the filtered frame, so its
+        stats are the ``filtered_*`` keys of ``merged_sd`` and the bare keys
+        stay the unfiltered scope's."""
+        dataflow = _three_scope_dataflow(backend, _UNTIED_DATA)
+        run = StatRun(4, "raw", dataflow.build_stats(dataflow.processed_df, run=False))
+        stats_wire.run_units(run, None)
+        assert _as_json(dataflow._assemble_merged_sd(run.raw_sd())) == _as_json(dataflow.merged_sd)
+
+    def test_init_sd_overrides_win_over_the_run_s_stats_as_in_merged_sd(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA),
+            init_sd={"qty": {"mean": 99.5, "from_init": 1}})
+        run = StatRun(4, "raw", dataflow.build_stats(dataflow.processed_df, run=False))
+        stats_wire.run_units(run, None)
+        assembled = dataflow._assemble_merged_sd(run.raw_sd())
+        assert _as_json(assembled) == _as_json(dataflow.merged_sd)
+        assert assembled["b"]["from_init"] == 1
+
+
+class TestAssembledMergedSd:
+    """``_assemble_merged_sd`` is the body of the ``merged_sd`` observer."""
+
+    def test_it_is_merged_sd_with_no_sd_standing_in(self, backend):
+        dataflow = _three_scope_dataflow(backend, _UNTIED_DATA)
+        assert _as_json(dataflow._assemble_merged_sd()) == _as_json(dataflow.merged_sd)
+
+    def test_a_running_sd_stands_in_for_the_scopes_that_share_the_filt_chain(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA), stats_tier="schema")
+        full = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        assembled = dataflow._assemble_merged_sd(full.summary_sd)
+        assert _as_json(assembled) == _as_json(full.merged_sd)
+        assert "mean" not in dataflow.merged_sd["a"], "the dataflow itself is still at the schema tier"
+
+
+class TestHighlightedDisplayArgs:
+    def test_the_term_is_set_on_string_columns_of_a_copy(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        original = json.dumps(dataflow.df_display_args, sort_keys=True, default=str)
+        highlighted = stats_wire.highlighted_display_args(dataflow.df_display_args, "ca")
+        assert json.dumps(dataflow.df_display_args, sort_keys=True, default=str) == original
+        phrases = [col["displayer_args"]["highlight_phrase"]
+            for col in highlighted["main"]["df_viewer_config"]["column_config"]
+            if col.get("displayer_args", {}).get("highlight_phrase")]
+        assert phrases == [["ca"]]
+
+    def test_an_empty_term_removes_the_highlight(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        highlighted = stats_wire.highlighted_display_args(dataflow.df_display_args, "ca")
+        cleared = stats_wire.highlighted_display_args(highlighted, "")
+        assert json.dumps(cleared, sort_keys=True, default=str) == json.dumps(
+            dataflow.df_display_args, sort_keys=True, default=str)
+
+
+class TestDisplayArgsHash:
+    def test_equal_content_hashes_equal_whatever_the_key_order(self):
+        assert stats_wire.display_args_hash({"a": 1, "b": [1, 2]}) == stats_wire.display_args_hash({"b": [1, 2], "a": 1})
+
+    def test_a_changed_value_changes_the_hash(self):
+        assert stats_wire.display_args_hash({"a": 1}) != stats_wire.display_args_hash({"a": 2})
+
+    def test_nan_hashes_equal_to_nan(self):
+        assert stats_wire.display_args_hash({"a": float("nan")}) == stats_wire.display_args_hash({"a": float("nan")})
