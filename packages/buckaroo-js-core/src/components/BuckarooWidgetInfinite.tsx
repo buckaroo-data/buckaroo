@@ -135,6 +135,7 @@ export function BuckarooInfiniteWidget({
         df_display_args,
         df_meta,
         on_compute_stats,
+        on_visible_columns,
         operations,
         on_operations,
         operation_results,
@@ -365,6 +366,7 @@ export function BuckarooInfiniteWidget({
                         view_name={buckaroo_state.df_display}
                         data_key={cDisp.data_key}
                         stats_status={getStatsStatus(df_meta)}
+                        on_visible_columns={on_visible_columns}
                     />
                 </div>
                 {buckaroo_state.show_commands ? (

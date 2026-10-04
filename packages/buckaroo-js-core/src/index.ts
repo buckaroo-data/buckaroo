@@ -20,7 +20,7 @@ import { BuckarooView } from './server/BuckarooView';
 import { WebSocketModel } from './server/WebSocketModel';
 import { makeLatestDictDecoder } from './server/latestDictDecoder';
 import { withStatsCapability } from './server/StatsChannel';
-import { StateOrchestrator, requestStats } from './server/StateOrchestrator';
+import { StateOrchestrator, requestStats, setVisibleColumns } from './server/StateOrchestrator';
 
 import { HistogramCell } from "./components/DFViewerParts/HistogramCell";
 import { InfiniteEx } from "./components/DFViewerParts/TableInfinite";
@@ -67,6 +67,7 @@ export default {
     withStatsCapability,
     StateOrchestrator,
     requestStats,
+    setVisibleColumns,
 };
 
 // Named exports for direct imports
@@ -100,6 +101,7 @@ export {
     withStatsCapability,
     StateOrchestrator,
     requestStats,
+    setVisibleColumns,
 };
 
 export type { IModel } from './server/IModel';

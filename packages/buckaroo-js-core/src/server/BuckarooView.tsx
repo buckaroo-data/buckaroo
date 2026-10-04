@@ -10,7 +10,7 @@ import { IDisplayArgs } from "../components/DFViewerParts/gridUtils";
 import { stampLayoutType, isFitContentLayout } from "../components/DFViewerParts/displayArgsUtils";
 import { IModel } from "./IModel";
 import { makeLatestDictDecoder, RawDFDataDict } from "./latestDictDecoder";
-import { requestStats } from "./StateOrchestrator";
+import { requestStats, setVisibleColumns } from "./StateOrchestrator";
 
 export type BuckarooServerMode = "viewer" | "buckaroo";
 
@@ -291,6 +291,12 @@ export function BuckarooView({
         requestStats(model, { force: true });
     }, [model]);
 
+    // The columns the grid shows, kept on the model for stats requests to carry
+    // as their hint.
+    const onVisibleColumns = React.useCallback((columns: string[]) => {
+        setVisibleColumns(model, columns);
+    }, [model]);
+
     // gridUtils honors component_config.layoutType. Stamp it per entry so the
     // prop wins when provided. autoHeight=undefined → server value left intact.
     const effectiveDisplayArgs = React.useMemo(
@@ -330,6 +336,7 @@ export function BuckarooView({
                     buckaroo_options={buckarooOptions}
                     src={src}
                     on_compute_stats={onComputeStats}
+                    on_visible_columns={onVisibleColumns}
                 />
             ) : (
                 <DFViewerInfiniteDS

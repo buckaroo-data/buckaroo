@@ -258,6 +258,12 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
         srt.requestStats(model, { force: true });
     }, [model]);
 
+    // The columns the grid shows, kept on the model for stats requests to carry
+    // as their hint.
+    const onVisibleColumns = React.useCallback((columns: string[]) => {
+        srt.setVisibleColumns(model, columns);
+    }, [model]);
+
     if (!dfDisplayArgs || !dfDisplayArgs["main"]) {
         return <div style={{ padding: 20, fontFamily: "sans-serif" }}>
             Waiting for data...
@@ -279,6 +285,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
                 buckaroo_options={buckarooOptions}
                 src={src}
                 on_compute_stats={onComputeStats}
+                on_visible_columns={onVisibleColumns}
             />
         </div>
     );

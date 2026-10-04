@@ -3,11 +3,21 @@
  *
  * A server that defers a session's summary stats sends a first frame whose
  * `df_meta.stats.status` is "pending", then waits to be asked. This scheduler
- * asks: it sends `stats_request {stats_gen, scope: "raw"}` once the first rows
- * have arrived, sends another for each reply that leaves the stats pending (a
- * `stats_update` that is not final), and stops when the status leaves
- * "pending". Nothing is requested unless `df_meta.stats` says pending, so a
- * session whose server reports no stats is never touched.
+ * asks: it sends `stats_request {stats_gen, scope: "raw", incremental: true}`
+ * once the first rows have arrived, sends another for each reply that leaves
+ * the stats pending (a `stats_update` that is not final), and stops when the
+ * status leaves "pending". Nothing is requested unless `df_meta.stats` says
+ * pending, so a session whose server reports no stats is never touched.
+ *
+ * Every request is a time-boxed step: the server runs units for a short
+ * budget (about 75 ms) and replies with a partial `stats_update`
+ * (`final: false`, the fragments that are new), which StatsChannel merges into
+ * `all_stats` without leaving "pending". Each such reply is answered with the
+ * next request, and the final reply, which carries the complete `all_stats`,
+ * ends the run. A request also names the columns the grid shows (`columns`, the
+ * grid's own column names), so the server runs the units that cover them first.
+ * A server that does not know either field ignores them, runs the whole run and
+ * answers with a final reply, which ends the run the same way.
  *
  * It watches the model and sends through it, so any IModel works:
  *
@@ -15,6 +25,10 @@
  *   change:df_data_dict    a reply merged into all_stats (StatsChannel's job)
  *   change:buckaroo_state  a state change made on this client
  *   msg:custom             an infinite_resp, the first rows
+ *
+ * The columns the grid shows are read from the model's `visible_columns` key
+ * when a request goes out (see setVisibleColumns). It is a client-side key: the
+ * server never sends it.
  *
  * The merge is not here. A reply reaches this class only as a change on the
  * model: a new df_data_dict under the same df_meta is a partial update, and a
@@ -47,6 +61,15 @@ export function touchesDataflow(prev: BuckarooState | undefined, next: BuckarooS
     return DATAFLOW_STATE_FIELDS.some((field) => JSON.stringify(prev[field]) !== JSON.stringify(next[field]));
 }
 
+/** The model key that holds the grid's column names currently on screen. */
+export const VISIBLE_COLUMNS_KEY = "visible_columns";
+
+/** Record the columns the grid shows, for the next `stats_request` to carry as
+ *  its `columns` hint. An empty list means none are known. */
+export function setVisibleColumns(model: Pick<IModel, "set">, columns: string[]): void {
+    model.set(VISIBLE_COLUMNS_KEY, columns);
+}
+
 export interface StatsRequestOptions {
     /** Ask for stats the server did not plan to compute. The "Compute summary
      *  stats" control sends this. */
@@ -54,13 +77,22 @@ export interface StatsRequestOptions {
 }
 
 /**
- * Send a `stats_request` for the stats_gen of the state the model shows.
+ * Send a time-boxed `stats_request` for the stats_gen of the state the model
+ * shows, with the columns the grid shows as the hint when they are known.
  * Returns false, and sends nothing, when its df_meta carries no stats.gen.
  */
 export function requestStats(model: Pick<IModel, "get" | "send">, opts: StatsRequestOptions = {}): boolean {
     const gen = (model.get("df_meta") as DFMeta | undefined)?.stats?.gen;
     if (typeof gen !== "number") return false;
-    model.send({ type: "stats_request", stats_gen: gen, scope: "raw", ...(opts.force ? { force: true } : {}) });
+    const columns = model.get(VISIBLE_COLUMNS_KEY) as string[] | undefined;
+    model.send({
+        type: "stats_request",
+        stats_gen: gen,
+        scope: "raw",
+        incremental: true,
+        ...(Array.isArray(columns) && columns.length > 0 ? { columns } : {}),
+        ...(opts.force ? { force: true } : {}),
+    });
     return true;
 }
 

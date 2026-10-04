@@ -4,6 +4,7 @@ import {
     useEffect,
     useRef,
 } from "react";
+import type { RefObject } from "react";
 import * as _ from "lodash-es";
 import { DFData, DFDataRow, DFViewerConfig, SDFT } from "./DFWhole";
 
@@ -156,6 +157,7 @@ export function DFViewerInfinite({
     view_name,
     data_key,
     stats_status,
+    on_visible_columns,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -193,6 +195,8 @@ export function DFViewerInfinite({
         //console.log("137renderStartTime");
         return Date.now();
     } , []);
+    // The element that holds the grid, where the columns in its viewport are read.
+    const hangerRef = useRef<HTMLDivElement>(null);
     const totalRows=5;
 
     const compConfig =  df_viewer_config?.component_config;
@@ -231,6 +235,7 @@ export function DFViewerInfinite({
         <div className={`df-viewer  ${hs.classMode} ${hs.inIframe}`}>
             {error_info ? <pre>{error_info}</pre> : null}
             <div style={themeStyle}
+                ref={hangerRef}
                 className={`theme-hanger ${divClass}`}>
                 <DFViewerInfiniteInner
                     data_wrapper={data_wrapper}
@@ -246,6 +251,8 @@ export function DFViewerInfinite({
                     view_name={view_name}
                     data_key={data_key}
                     stats_status={stats_status}
+                    on_visible_columns={on_visible_columns}
+                    grid_container={hangerRef}
                 />
             </div>
         </div>)
@@ -264,6 +271,8 @@ export function DFViewerInfiniteInner({
     view_name,
     data_key,
     stats_status,
+    on_visible_columns,
+    grid_container,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -281,6 +290,8 @@ export function DFViewerInfiniteInner({
     view_name?: string;
     data_key?: string;
     stats_status?: StatsStatus;
+    on_visible_columns?: (columns: string[]) => void;
+    grid_container?: RefObject<HTMLElement | null>;
 }) {
     /*
     const lastProps = useRef<any>(null);
@@ -432,6 +443,33 @@ export function DFViewerInfiniteInner({
             [data_wrapper, gridOptions, hs]);
         // Use grid API to set pinned rows imperatively, avoiding a full React prop update that can flash
         const gridRef = useRef<AgGridReact<any> | null>(null);
+        // Report the data columns in the grid's viewport (the index column is not
+        // one) when the grid is ready and whenever they change. They are read
+        // from the header cells the grid has rendered, since the grid's own
+        // column API (getAllDisplayedVirtualColumns) is not registered here and
+        // registering it would also switch on the column-state calls above. The
+        // cells follow the event by a frame, so the read waits for one. An
+        // unchanged list is not reported again, so a resize or a vertical
+        // scroll costs nothing.
+        const dataFields = useMemo(
+            () => new Set(df_viewer_config.column_config.map(getFieldVal)),
+            [df_viewer_config.column_config],
+        );
+        const lastVisibleRef = useRef<string | undefined>(undefined);
+        const reportVisibleColumns = useCallback(() => {
+            if (on_visible_columns === undefined) return;
+            window.requestAnimationFrame(() => {
+                const container = grid_container?.current;
+                if (!container) return;
+                const ids = Array.from(container.querySelectorAll(".ag-header-viewport .ag-header-cell[col-id]"))
+                    .map((cell) => cell.getAttribute("col-id") ?? "")
+                    .filter((id) => dataFields.has(id));
+                const sig = JSON.stringify(ids);
+                if (sig === lastVisibleRef.current) return;
+                lastVisibleRef.current = sig;
+                on_visible_columns(ids);
+            });
+        }, [on_visible_columns, dataFields, grid_container]);
         // Keep latest pinned rows in a ref so onGridReady can apply them once API is ready
         const topRowsRef = useRef<DFDataRow[] | null>(null);
         // Build a content signature based on visible fields and pinned values,
@@ -615,7 +653,9 @@ export function DFViewerInfiniteInner({
                             // Ensure pinned rows are applied once API is ready
                             params.api.setGridOption('pinnedTopRowData', topRowsRef.current || []);
                         } catch (_e) {}
+                        reportVisibleColumns();
                     }}
+                    onVirtualColumnsChanged={reportVisibleColumns}
                     context={{ outside_df_params, ...extra_context }}
                 ></AgGridReact>
         );
