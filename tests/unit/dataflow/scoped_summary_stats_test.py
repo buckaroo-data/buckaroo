@@ -26,6 +26,7 @@ from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2, PD_AUTOCLEAN_DEF
 from buckaroo.dataflow.autocleaning import (AutocleaningConfig, PandasAutocleaning)
 from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
 from buckaroo.dataflow.sd_cache import split_chain_by_scope
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.pluggable_analysis_framework.stat_func import stat
 
 
@@ -316,3 +317,35 @@ def test_assemble_merged_sd_does_not_mutate_its_inputs():
     # with an input would add keys to that input.
     assert key_sets() == before
     assert inputs['chains'] == chains_before
+
+
+class _OverridingPostProcessing(ColAnalysis):
+    """A post-processing method whose sd overrides a stat of qty (keyed by the
+    original column name) and adds one of its own."""
+    provides_defaults = {}
+    post_processing_method = "override_post"
+
+    @classmethod
+    def post_process_df(cls, df):
+        return [df, {"qty": {"mean": 99.5, "from_post": 1}}]
+
+
+def _run_units(stats):
+    """Run every unit of a stats object built with ``run=False``, one at a time.
+    Returns the accumulator and the fragments in the order they came back."""
+    state = stats.state
+    acc = stats.new_accumulator(state)
+    return acc, [stats.run(unit, acc) for unit in stats.plan(state)]
+
+
+def _scope_sds_by_units(dataflow):
+    """Each scope's summary dict, built from the fragments of its planned units
+    where the dataflow built it by running the stats class whole."""
+    from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments, rewrite_sd
+    sds = {}
+    for scope in ("raw", "clean", "filt"):
+        scope_df = dataflow.processed_df if scope == "filt" else dataflow._compute_scope_df(scope)
+        stats = dataflow.build_stats(scope_df, run=False)
+        _acc, fragments = _run_units(stats)
+        sds[scope] = rewrite_sd(merge_fragments(fragments), stats.state.data)
+    return sds

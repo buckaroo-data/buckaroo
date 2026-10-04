@@ -37,6 +37,8 @@ from buckaroo.serialization_utils import resolve_summary_stats_payload  # noqa: 
 from buckaroo.server import telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
 from buckaroo.server.websocket_handler import DataStreamHandler  # noqa: E402
+from tests.unit.dataflow.scoped_summary_stats_test import (  # noqa: E402
+    _OverridingPostProcessing, _scope_inputs, _scope_sds_by_units)
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
@@ -1911,6 +1913,208 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         _, frame = await self._connect("sw-inline", caps="stats_update")
         self.assertNotIn("stats", frame["df_meta"])
         self.assertIn("histogram_bins", _rows_by_stat(frame["df_data_dict"]["all_stats"]))
+
+
+    @tornado.testing.gen_test
+    async def test_a_stat_run_is_started_on_the_session_for_the_current_generation(self):
+        from buckaroo.server.stats_wire import start_stat_run
+        await self._load("sw-run", stats_delivery="deferred")
+        session = self._session("sw-run")
+        self.assertEqual(session.stat_runs, {})
+
+        with _count_stat_queries() as queries:
+            run = start_stat_run(session)
+            self.assertIs(start_stat_run(session), run, "one run per generation and scope")
+
+        self.assertEqual(queries, [], "planning a run runs no query")
+        self.assertEqual(run.key, (session.stats_gen, "raw"))
+        self.assertEqual(session.stat_runs, {run.key: run})
+        self.assertEqual(run.remaining, 4, "the scalar batch and one histogram unit for each of three columns")
+        self.assertEqual(run.units[0].id, "batch")
+
+    @tornado.testing.gen_test
+    async def test_a_run_ends_with_the_summary_sd_an_inline_session_computes(self):
+        from buckaroo.server.stats_wire import start_stat_run
+        await self._load("sw-run-sd", stats_delivery="deferred")
+        session = self._session("sw-run-sd")
+        run = start_stat_run(session)
+        while run.run_next() is not None:
+            pass
+        inline = xorq_loading.XorqServerDataflow(session.expr, skip_main_serial=True)
+        self.assertEqual(run.status, "complete")
+        self.assertEqual(_as_json(run.raw_sd()), _as_json(inline.summary_sd))
+
+    @tornado.testing.gen_test
+    async def test_a_dataflow_field_change_drops_the_run_and_a_search_term_change_keeps_it(self):
+        from buckaroo.server.stats_wire import start_stat_run
+        await self._load("sw-drop", stats_delivery="deferred")
+        ws, _first = await self._connect("sw-drop", caps="stats_update")
+        session = self._session("sw-drop")
+        run = start_stat_run(session)
+
+        ws.write_message(_state_change(search_string="alp"))
+        await _read_json(ws)  # this client's highlight overlay
+        self.assertEqual(session.stat_runs, {run.key: run}, "a typed search term touches no stats")
+
+        ws.write_message(_state_change(post_processing="first_three"))
+        await _read_json(ws)
+        self.assertEqual(session.stat_runs, {})
+        self.assertEqual(session.stats_gen, run.stats_gen + 1)
+        again = start_stat_run(session)
+        self.assertEqual(again.key, (run.stats_gen + 1, "raw"))
+        self.assertIsNot(again, run)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_drops_the_run(self):
+        from buckaroo.server.stats_wire import start_stat_run
+        await self._load("sw-drop-reload", stats_delivery="deferred")
+        session = self._session("sw-drop-reload")
+        start_stat_run(session)
+        resp = await _post(self.get_http_port(), "/reload_expr/sw-drop-reload", {})
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual(session.stat_runs, {})
+
+    @tornado.testing.gen_test
+    async def test_each_connection_keeps_its_own_cursor_into_the_run(self):
+        from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments
+        from buckaroo.server.stats_wire import start_stat_run
+        await self._load("sw-cursor", stats_delivery="deferred")
+        await self._connect("sw-cursor", caps="stats_update")
+        await self._connect("sw-cursor", caps="stats_update")
+        session = self._session("sw-cursor")
+        cursor_a, cursor_b = [handler.stats_cursor for handler in session.ws_clients]
+        self.assertIsNot(cursor_a, cursor_b)
+        self.assertEqual((cursor_a.position, cursor_b.position), (0, 0))
+
+        run = start_stat_run(session)
+        run.run_next()
+        run.run_next()
+        first = cursor_a.take(run)
+        self.assertEqual((len(first), cursor_b.position), (2, 0))
+        while run.run_next() is not None:
+            pass
+        rest, everything = cursor_a.take(run), cursor_b.take(run)
+
+        self.assertEqual(merge_fragments(first + rest), merge_fragments(everything))
+        self.assertEqual(len(set(run.ran)), len(run.units), "no unit ran twice")
+
+
+def _wide_parquet_expr(tmp_path, name="wide"):
+    """Twelve rows, six columns, read from parquet. Each string column has a
+    different count per value, so a GROUP BY over it returns one order."""
+    path = tmp_path / f"{name}.parquet"
+    pd.DataFrame({
+        "n0": [float(i) for i in range(12)], "n1": [i * 3 for i in range(12)],
+        "n2": [float(i % 7) + 0.5 for i in range(12)], "word": list("aaaaabbbbccd"),
+        "label": list("xxxxxyyyyzzw"), "flag": [True] * 7 + [False] * 5}).to_parquet(path)
+    return xo.deferred_read_parquet(str(path))
+
+
+def _batch_queries(queries):
+    return [q for q in queries if type(q.op()).__name__ == "Aggregate"]
+
+
+class TestStatUnits:
+    """Resumable units on the xorq server dataflow (rows-first s4): the
+    all-at-once constructor and a caller running ``plan``/``run`` one unit at a
+    time compute the same stats."""
+
+    def test_build_stats_without_running_issues_no_stat_query(self):
+        dataflow = _build_dataflow()
+        with _count_stat_queries() as queries:
+            stats = dataflow.build_stats(dataflow.processed_df, run=False)
+            stats.plan(stats.state)
+            stats.new_accumulator(stats.state)
+        assert queries == []
+        assert stats.sdf == {} and stats.errs == {}
+
+    def test_the_default_run_goes_through_the_units(self, monkeypatch):
+        """Every stat query of the constructor is issued from inside a unit."""
+        depth, inside, outside, units = [0], [], [], []
+        original_run, original_execute = XorqStatPipeline.run, XorqStatPipeline._execute
+
+        def spy_run(self, unit, acc):
+            depth[0] += 1
+            units.append(unit.id)
+            try:
+                return original_run(self, unit, acc)
+            finally:
+                depth[0] -= 1
+
+        def spy_execute(self, query):
+            (inside if depth[0] else outside).append(query)
+            return original_execute(self, query)
+
+        monkeypatch.setattr(XorqStatPipeline, "run", spy_run)
+        monkeypatch.setattr(XorqStatPipeline, "_execute", spy_execute)
+        _three_scope_dataflow()
+        assert inside and outside == []
+        assert units[0] == "batch" and "histogram:price" in units
+
+    def test_units_assembled_equal_merged_sd_with_init_sd_cleaning_and_overrides(self):
+        from buckaroo.dataflow.dataflow import assemble_merged_sd
+        dataflow = _three_scope_dataflow(init_sd={
+            "price": {"displayer_args": {"displayer": "string", "max_length": 99}, "init_only": 1}},
+            column_config_overrides={"category": {"displayer_args": {"displayer": "string", "max_length": 5000}}})
+        dataflow.add_analysis(_OverridingPostProcessing)
+        dataflow.post_processing_method = "override_post"
+        sd = dataflow.merged_sd
+        assert sd["a"]["init_only"] == 1 and sd["b"]["from_post"] == 1 and sd["b"]["mean"] == 99.5
+        assert "cleaned_length" in sd["a"] and "filtered_length" in sd["a"], "both layers must be active"
+
+        sds = _scope_sds_by_units(dataflow)
+        inputs = _scope_inputs(dataflow)
+        assembled = assemble_merged_sd(init_sd=inputs["init_sd"], cleaned_sd=inputs["cleaned_sd"], raw_sd=sds["raw"],
+            processed_sd=inputs["processed_sd"], processed_df=inputs["processed_df"], chains=inputs["chains"],
+            clean_sd=sds["clean"], filt_sd=sds["filt"])
+
+        assert _as_json(assembled) == _as_json(dataflow.merged_sd)
+
+    def test_a_column_group_request_returns_only_those_columns(self):
+        import dataclasses
+        dataflow = _build_dataflow()
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        for names in (("qty", "category"), ("b", "c")):  # original or rewritten names
+            state = dataclasses.replace(stats.state, columns=names)
+            acc = stats.new_accumulator(state)
+            fragments = [stats.run(unit, acc) for unit in stats.plan(state)]
+            assert [u.id for u in stats.plan(state)] == ["batch", "histogram:qty", "histogram:category"]
+            assert all(set(f) <= {"qty", "category"} for f in fragments)
+            assert list(acc.sd()) == ["qty", "category"]
+
+    def test_skip_stat_columns_get_no_unit(self):
+        dataflow = _build_dataflow(skip_stat_columns=["qty"], init_sd={"qty": {"_type": "float"}})
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        assert stats.state.skip_columns == {"qty"}
+        units = stats.plan(stats.state)
+        assert [u.id for u in units] == ["batch", "histogram:price", "histogram:category"]
+        assert all("qty" not in unit.columns for unit in units)
+
+    def test_the_batch_is_one_query_by_default(self, tmp_path):
+        expr = _wide_parquet_expr(tmp_path)
+        with _count_stat_queries() as queries:
+            xorq_loading.XorqServerDataflow(expr, skip_main_serial=True)
+        assert len(_batch_queries(queries)) == 1
+
+    def test_stat_chunk_cells_splits_the_batch_of_a_parquet_scan(self, tmp_path):
+        expr = _wide_parquet_expr(tmp_path)
+        whole = xorq_loading.XorqServerDataflow(expr, skip_main_serial=True)
+        with _count_stat_queries() as queries:
+            # 36 cells at 12 rows is three columns per chunk: two batch queries.
+            split = xorq_loading.XorqServerDataflow(expr, skip_main_serial=True, stat_chunk_cells=36)
+        assert len(_batch_queries(queries)) == 2
+        assert _as_json(split.merged_sd) == _as_json(whole.merged_sd)
+
+    def test_the_split_is_refused_for_a_join(self, tmp_path):
+        left = _wide_parquet_expr(tmp_path, "left")
+        pd.DataFrame({"n0": [float(i) for i in range(12)], "extra": list(range(12))}).to_parquet(
+            tmp_path / "right.parquet")
+        joined = left.join(xo.deferred_read_parquet(str(tmp_path / "right.parquet")), "n0")
+        with _count_stat_queries() as queries:
+            split = xorq_loading.XorqServerDataflow(joined, skip_main_serial=True, stat_chunk_cells=12)
+        assert len(_batch_queries(queries)) == 1, "each chunk of a join would run the whole join again"
+        whole = xorq_loading.XorqServerDataflow(joined, skip_main_serial=True)
+        assert _as_json(split.merged_sd) == _as_json(whole.merged_sd)
 
 
 class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):

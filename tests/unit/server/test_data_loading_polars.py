@@ -15,17 +15,21 @@ polars server dataflows side by side: ``stats_tier="schema"`` publishes
 the display state full stats give, without reading a value.
 """
 import base64
+import dataclasses
 import datetime
 import decimal
+import inspect
 import io
 import json
 import os
 import tempfile
+import threading
 
 import pandas as pd
 import polars as pl
 import pyarrow.parquet as pq
 import pytest
+from tornado.ioloop import IOLoop
 
 from buckaroo.dataflow.dataflow import assemble_merged_sd
 from buckaroo.dataflow.sd_cache import split_chain_by_scope
@@ -36,7 +40,7 @@ from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 from buckaroo.server.data_loading import ServerDataflow, handle_infinite_request_buckaroo
 from buckaroo.server.data_loading_polars import (PolarsServerDataflow, create_polars_dataflow, handle_infinite_request_buckaroo_polars, load_file_polars)
 from buckaroo.styling_helpers import float_, obj_
-from tests.unit.dataflow.scoped_summary_stats_test import _scope_inputs
+from tests.unit.dataflow.scoped_summary_stats_test import (_OverridingPostProcessing, _run_units, _scope_inputs, _scope_sds_by_units)
 
 
 def _payload(start=0, end=100):
@@ -424,3 +428,210 @@ def test_object_column_is_typed_as_a_string_at_the_schema_tier():
         types[tier] = {v["orig_col_name"]: v["_type"] for v in sd.values()}
     assert types["full"] == {"words": "string", "mixed": "obj"}
     assert types["schema"] == {"words": "string", "mixed": "string"}
+
+
+# ---------------------------------------------------------------------------
+# Resumable stat units on the pandas and polars server dataflows (rows-first s4)
+# ---------------------------------------------------------------------------
+
+
+class TestStatUnits:
+    """``plan`` and ``run`` on the stats class a dataflow builds, in place of
+    the all-at-once constructor."""
+
+    def test_build_stats_without_running_computes_nothing(self, backend, monkeypatch):
+        dataflow = _build_dataflow(backend)
+        frames = _spy_stat_pipeline(monkeypatch)
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        stats.plan(stats.state)
+        assert frames == []
+        assert stats.sdf == {} and stats.errs == {}
+
+    def test_the_default_run_goes_through_the_units(self, backend, monkeypatch):
+        """Every stat the constructor computes comes from a unit, so the
+        inline path and a caller running units one at a time cannot differ."""
+        unit_columns, column_calls = [], []
+        original_run, original_column = StatPipeline.run, StatPipeline.process_column
+
+        def spy_run(self, unit, acc):
+            unit_columns.append(unit.columns)
+            return original_run(self, unit, acc)
+
+        def spy_column(self, *args, **kwargs):
+            column_calls.append(args or kwargs)
+            return original_column(self, *args, **kwargs)
+
+        monkeypatch.setattr(StatPipeline, "run", spy_run)
+        monkeypatch.setattr(StatPipeline, "process_column", spy_column)
+        _three_scope_dataflow(backend)
+        assert {c for cols in unit_columns for c in cols} == {"price", "qty", "category"}
+        assert len(unit_columns) == len(column_calls), "a column's stats ran outside a unit"
+
+    def test_units_assembled_equal_merged_sd_with_init_sd_cleaning_and_overrides(self, backend):
+        """The fragments of each scope's units, assembled by
+        ``assemble_merged_sd`` with ``init_sd``, a cleaning op (pandas), a
+        search filter and a post-processing override, are the dataflow's own
+        ``merged_sd``. init_sd is keyed by the original name; price is "a"."""
+        dataflow = _three_scope_dataflow(backend, _UNTIED_DATA, init_sd={
+            "price": {"displayer_args": {"displayer": "string", "max_length": 99}, "init_only": 1}},
+            column_config_overrides={"category": {"displayer_args": {"displayer": "string", "max_length": 5000}}})
+        dataflow.add_analysis(_OverridingPostProcessing)
+        dataflow.post_processing_method = "override_post"
+        sd = dataflow.merged_sd
+        assert sd["a"]["init_only"] == 1 and sd["b"]["from_post"] == 1 and sd["b"]["mean"] == 99.5
+        assert "filtered_length" in sd["a"], "the filter layer must be active"
+        if backend == "pandas":
+            assert "cleaned_length" in sd["a"], "the cleaning layer must be active"
+
+        sds = _scope_sds_by_units(dataflow)
+        inputs = _scope_inputs(dataflow)
+        assembled = assemble_merged_sd(init_sd=inputs["init_sd"], cleaned_sd=inputs["cleaned_sd"], raw_sd=sds["raw"],
+            processed_sd=inputs["processed_sd"], processed_df=inputs["processed_df"], chains=inputs["chains"],
+            clean_sd=sds["clean"], filt_sd=sds["filt"])
+
+        assert _as_json(assembled) == _as_json(dataflow.merged_sd)
+
+    def test_a_column_group_request_returns_only_those_columns(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        for names in (("qty", "category"), ("b", "c")):  # original or rewritten names
+            state = dataclasses.replace(stats.state, columns=names)
+            acc = stats.new_accumulator(state)
+            fragments = [stats.run(unit, acc) for unit in stats.plan(state)]
+            assert [list(f) for f in fragments] == [["qty"], ["category"]]
+            assert list(acc.sd()) == ["qty", "category"]
+
+    def test_skip_stat_columns_get_no_unit(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA), skip_stat_columns=["qty"],
+            init_sd={"qty": {"_type": "float"}})
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        assert stats.state.skip_columns == {"qty"}
+        assert [u.columns for u in stats.plan(stats.state)] == [("price",), ("category",)]
+        acc, fragments = _run_units(stats)
+        assert all("qty" not in f for f in fragments)
+        assert set(acc.sd()) == {"price", "qty", "category"}
+
+
+def _stat_run(backend, gen=4):
+    from buckaroo.server.stat_run import StatRun
+    dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+    return StatRun(gen, "raw", dataflow.build_stats(dataflow.processed_df, run=False)), dataflow
+
+
+class TestStatRun:
+    """The run a session holds for one generation and scope: the planned
+    units, the fragments they produced in the order they finished, and the
+    accumulator the units read. It runs a unit only when asked."""
+
+    def test_a_run_is_keyed_by_generation_and_scope_and_plans_its_units(self, backend):
+        run, _dataflow = _stat_run(backend)
+        assert run.key == (4, "raw")
+        assert run.status == "pending" and run.remaining == 3
+        assert [u.columns for u in run.units] == [("price",), ("qty",), ("category",)]
+        assert run.fragments == [] and run.ran == []
+
+    def test_fragments_are_appended_in_completion_order(self, backend):
+        run, _dataflow = _stat_run(backend)
+        while True:
+            before = list(run.fragments)
+            fragment = run.run_next(prefer=("category",))
+            if fragment is None:
+                break
+            assert run.fragments[:-1] == before, "nothing already in the list changes"
+            assert run.fragments[-1] is fragment
+        assert [list(f) for f in run.fragments] == [["category"], ["price"], ["qty"]]
+        assert len(run.ran) == 3 and len(set(run.ran)) == 3
+
+    def test_prefer_runs_the_units_that_name_those_columns_first(self, backend):
+        run, _dataflow = _stat_run(backend)
+        assert run.next_unit().columns == ("price",)
+        assert run.next_unit(prefer=("c",)).columns == ("category",), "a rewritten name works too"
+        assert run.next_unit(prefer=("nothing",)).columns == ("price",)
+
+    def test_the_run_is_complete_when_no_unit_is_left(self, backend):
+        run, _dataflow = _stat_run(backend)
+        while run.run_next() is not None:
+            pass
+        assert (run.status, run.remaining) == ("complete", 0)
+        assert run.next_unit() is None and run.run_next() is None
+        assert len(run.fragments) == 3, "asking again runs nothing"
+
+    def test_the_accumulator_holds_what_the_fragments_hold(self, backend):
+        from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments
+        run, _dataflow = _stat_run(backend)
+        while run.run_next() is not None:
+            pass
+        assert merge_fragments(run.fragments) == run.acc.sd()
+
+    def test_raw_sd_is_the_full_stats_summary_sd(self, backend):
+        run, dataflow = _stat_run(backend)
+        while run.run_next() is not None:
+            pass
+        assert _as_json(run.raw_sd()) == _as_json(dataflow.summary_sd)
+
+    def test_cursors_read_one_list_each_at_its_own_pace(self, backend):
+        from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments
+        from buckaroo.server.stat_run import StatCursor
+        run, _dataflow = _stat_run(backend)
+        a, b = StatCursor(), StatCursor()
+        run.run_next()
+        run.run_next()
+        first_a = a.take(run)
+        assert len(first_a) == 2 and a.take(run) == [] and a.caught_up(run)
+        run.run_next()
+        assert not a.caught_up(run) and b.position == 0, "one cursor's reads move no other"
+        all_b = b.take(run)
+        rest_a = a.take(run)
+        assert (len(all_b), len(rest_a)) == (3, 1)
+        assert merge_fragments(first_a + rest_a) == merge_fragments(all_b)
+        assert len(set(run.ran)) == 3, "no unit ran twice"
+
+    def test_a_cursor_starts_again_on_another_run(self, backend):
+        from buckaroo.server.stat_run import StatCursor
+        first, _dataflow = _stat_run(backend, gen=1)
+        second, _dataflow = _stat_run(backend, gen=2)
+        first.run_next()
+        second.run_next()
+        second.run_next()
+        cursor = StatCursor()
+        assert len(cursor.take(first)) == 1
+        assert len(cursor.take(second)) == 2, "a position in one run means nothing in another"
+
+    def test_a_run_has_no_thread_timer_or_callback(self, backend, monkeypatch):
+        scheduled = []
+        monkeypatch.setattr(threading.Thread, "start", lambda self, *a, **k: scheduled.append("thread"))
+        for name in ("add_callback", "call_later", "call_at", "add_timeout"):
+            monkeypatch.setattr(IOLoop, name, lambda self, *a, _n=name, **k: scheduled.append(_n))
+        threads_before = threading.active_count()
+        run, _dataflow = _stat_run(backend)
+        while run.run_next() is not None:
+            pass
+        assert scheduled == [] and threading.active_count() == threads_before
+        assert not [name for name, value in vars(run).items()
+            if isinstance(value, (threading.Thread, threading.Timer)) or inspect.isroutine(value)]
+
+    def test_a_unit_that_raises_fails_the_run(self):
+        from buckaroo.pluggable_analysis_framework.stat_units import StatAccumulator, StatState, StatUnit
+        from buckaroo.server.stat_run import StatRun
+
+        class _FailingStats:
+            state = StatState(data=None)
+
+            def plan(self, state):
+                return [StatUnit("one", ("x",), "column"), StatUnit("two", ("y",), "column")]
+
+            def new_accumulator(self, state):
+                return StatAccumulator(state, columns=["x", "y"])
+
+            def run(self, unit, acc):
+                if unit.id == "two":
+                    raise RuntimeError("boom")
+                return {"x": {"v": 1}}
+
+        run = StatRun(1, "raw", _FailingStats())
+        run.run_next()
+        with pytest.raises(RuntimeError, match="boom"):
+            run.run_next()
+        assert run.status == "error" and isinstance(run.error, RuntimeError)
+        assert run.run_next() is None, "a failed run is not retried"
+        assert run.fragments == [{"x": {"v": 1}}]

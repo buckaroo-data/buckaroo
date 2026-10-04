@@ -803,3 +803,115 @@ class TestProcessDfCharacterization:
         pipeline = StatPipeline([length, fails_on_words], unit_test=False)
         _result, errors = pipeline.process_df(_mixed_frames()['pandas'])
         assert [(e.column, e.stat_key) for e in errors] == [('c', 'fails_on_words')]
+
+
+# ============================================================================
+# Resumable units: plan(state) and run(unit, acc) (rows-first s4)
+# ============================================================================
+
+class TestStatUnits:
+    """``plan(state)`` lists the units of a run, one per column, and
+    ``run(unit, acc)`` runs one and returns a ``{orig_col: {stat: value}}``
+    fragment. ``process_df`` is these two run over every unit, so a caller that
+    runs them one at a time gets what it would have got all at once."""
+
+    @staticmethod
+    def _df():
+        # Original names differ from the rewritten a, b, c.
+        return pd.DataFrame({'amount': [1, 2, 3, 1], 'word': ['x', 'y', 'x', 'x'], 'score': [0.5, 1.5, None, 2.5]})
+
+    @staticmethod
+    def _pipeline():
+        return StatPipeline([length, null_count, distinct_count, distinct_per, nan_per], unit_test=False)
+
+    @staticmethod
+    def _run_units(pipeline, state):
+        acc = pipeline.new_accumulator(state)
+        fragments = [pipeline.run(unit, acc) for unit in pipeline.plan(state)]
+        return acc, fragments
+
+    def test_plan_is_one_unit_per_column_in_column_order(self):
+        from buckaroo.pluggable_analysis_framework.stat_units import StatState
+        units = self._pipeline().plan(StatState(self._df()))
+        assert [u.columns for u in units] == [('amount',), ('word',), ('score',)]
+        assert len({u.id for u in units}) == 3
+        assert {u.phase for u in units} == {'column'}
+        assert all(u.after == () for u in units), "no column's stats read another column's"
+
+    def test_plan_and_a_new_accumulator_compute_nothing(self, monkeypatch):
+        from buckaroo.pluggable_analysis_framework.stat_units import StatState
+        calls = []
+        monkeypatch.setattr(StatPipeline, 'process_column', lambda self, *a, **k: calls.append(a))
+        pipeline, state = self._pipeline(), StatState(self._df())
+        pipeline.plan(state)
+        pipeline.new_accumulator(state)
+        assert calls == []
+
+    def test_run_returns_the_fragment_of_its_unit_keyed_by_original_name(self):
+        from buckaroo.pluggable_analysis_framework.stat_units import StatState
+        pipeline, state = self._pipeline(), StatState(self._df())
+        acc = pipeline.new_accumulator(state)
+        fragment = pipeline.run(pipeline.plan(state)[1], acc)
+        assert list(fragment) == ['word']
+        assert fragment['word']['length'] == 4
+        assert fragment['word']['distinct_count'] == 2
+        assert (fragment['word']['orig_col_name'], fragment['word']['rewritten_col_name']) == ('word', 'b')
+        assert list(acc.sd()) == ['word'], "a column with no unit run yet has no entry"
+
+    def test_the_union_of_fragments_is_what_process_df_returns(self):
+        from buckaroo.pluggable_analysis_framework.stat_units import StatState, merge_fragments, rewrite_sd
+        df, pipeline = self._df(), self._pipeline()
+        acc, fragments = self._run_units(pipeline, StatState(df))
+        expected, errors = pipeline.process_df(df)
+        assert rewrite_sd(merge_fragments(fragments), df) == expected
+        assert list(acc.sd()) == ['amount', 'word', 'score']
+        assert [(e.column, e.stat_key) for e in acc.errors] == [(e.column, e.stat_key) for e in errors]
+
+    def test_an_error_in_a_unit_is_recorded_on_the_accumulator(self):
+        from buckaroo.pluggable_analysis_framework.stat_units import StatState
+
+        @stat()
+        def fails_on_words(ser: RawSeries) -> int:
+            if isinstance(ser.iloc[0], str):
+                raise ValueError('words')
+            return 0
+
+        pipeline = StatPipeline([length, fails_on_words], unit_test=False)
+        acc, fragments = self._run_units(pipeline, StatState(self._df()))
+        assert [(e.column, e.stat_key) for e in acc.errors] == [('b', 'fails_on_words')]
+        assert fragments[1]['word']['fails_on_words'] is None
+
+    @pytest.mark.parametrize('names', [('word',), ('b',)])
+    def test_a_column_group_returns_only_those_columns(self, names):
+        """A group is named by original or rewritten name, since the client
+        only knows the rewritten ones."""
+        from buckaroo.pluggable_analysis_framework.stat_units import StatState
+        pipeline = self._pipeline()
+        state = StatState(self._df(), columns=names)
+        assert [u.columns for u in pipeline.plan(state)] == [('word',)]
+        acc, fragments = self._run_units(pipeline, state)
+        assert [list(f) for f in fragments] == [['word']]
+        assert list(acc.sd()) == ['word']
+
+    @pytest.mark.parametrize('names', [('score',), ('c',)])
+    def test_priority_columns_are_planned_first(self, names):
+        from buckaroo.pluggable_analysis_framework.stat_units import StatState
+        units = self._pipeline().plan(StatState(self._df(), priority=names))
+        assert [u.columns[0] for u in units] == ['score', 'amount', 'word']
+
+    def test_an_empty_frame_has_no_units(self):
+        from buckaroo.pluggable_analysis_framework.stat_units import StatState
+        pipeline, state = self._pipeline(), StatState(pd.DataFrame({'x': pd.Series([], dtype='int64')}))
+        assert pipeline.plan(state) == []
+        assert pipeline.new_accumulator(state).sd() == {}
+
+    @pytest.mark.parametrize('backend', ['pandas', 'polars'])
+    def test_real_stats_run_unit_by_unit_equal_process_df(self, backend):
+        from buckaroo.pluggable_analysis_framework.stat_units import StatState, merge_fragments, rewrite_sd
+        df = _mixed_frames()[backend]
+        pipeline = StatPipeline(_stat_lists()[backend], unit_test=False)
+        acc, fragments = self._run_units(pipeline, StatState(df))
+        expected, errors = pipeline.process_df(df)
+        assert len(fragments) == len(df.columns)
+        assert repr(rewrite_sd(merge_fragments(fragments), df)) == repr(expected)
+        assert errors == [] and acc.errors == []
