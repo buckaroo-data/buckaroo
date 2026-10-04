@@ -9,10 +9,11 @@ is gone — port it to @stat).
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from buckaroo.dataflow.df_types import DataFrameLike
 from buckaroo.df_util import old_col_new_col
 
 from . import perf_log
@@ -432,3 +433,31 @@ def errors_to_errdict(errors: List[StatError]) -> ErrDict:
         err_key = (se.column, se.stat_func.name if se.stat_func else "unknown")
         errs[err_key] = (se.error, None)
     return errs
+
+
+def schema_sd(df: DataFrameLike, column_typing: Callable[[Any], Dict[str, Any]],
+              skip_columns=None) -> SDType:
+    """The summary dict for ``df`` from its schema alone, with no stat run.
+
+    Shaped like ``StatPipeline.process_df``'s output: one entry per column,
+    keyed by the rewritten name, holding ``orig_col_name``,
+    ``rewritten_col_name``, ``length`` and whatever ``column_typing`` returns
+    for the column. ``column_typing`` is handed the column's series and may read
+    its dtype only; it is what keeps this from touching a value. As in
+    ``process_df``, a frame with no rows gives an empty dict and a column in
+    ``skip_columns`` gets only its two names, so its typing comes from
+    ``init_sd``.
+    """
+    length = len(df)
+    if length == 0:
+        return {}
+    skip = set(skip_columns or ())
+    summary: SDType = {}
+    for orig_col_name, rewritten_col_name in old_col_new_col(df):
+        col_stats: Dict[str, Any] = {
+            'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name}
+        if orig_col_name not in skip and rewritten_col_name not in skip:
+            col_stats.update(column_typing(df[orig_col_name]))
+            col_stats['length'] = length
+        summary[rewritten_col_name] = col_stats
+    return summary
