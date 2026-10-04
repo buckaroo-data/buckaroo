@@ -11,6 +11,17 @@ log = logging.getLogger("buckaroo.server.session")
 _DEFAULT_SESSION_TTL_S = 3600.0      # 1 hour idle before eviction
 _DEFAULT_EVICTION_INTERVAL_S = 300.0  # check every 5 minutes
 
+# How a session reaches its stats tier: ``inline`` computes them in the
+# dataflow constructor (today's behaviour); ``deferred`` builds the schema tier
+# first and leaves the rest to later requests.
+STATS_DELIVERIES = ("inline", "deferred")
+
+
+def dataflow_stats_tier(stats_tier: str, stats_delivery: str) -> str:
+    """The tier a session's dataflow is constructed at. A deferred session
+    starts at the schema tier whatever tier it is headed for."""
+    return "schema" if stats_delivery == "deferred" else stats_tier
+
 
 @dataclass
 class SessionState:
@@ -43,6 +54,13 @@ class SessionState:
     # extra_grid_config, init_sd, skip_stat_columns), replayed by /reload_expr so
     # a reload keeps stat caching and column config (#957).
     dataflow_kwargs: dict = field(default_factory=dict)
+    # The /load_expr stats policy. ``stats_tier`` is the tier the session is
+    # headed for (see dataflow.STATS_TIERS) and ``stats_delivery`` how it gets
+    # there (see STATS_DELIVERIES). Kept apart from dataflow_kwargs, which is
+    # splatted into the dataflow constructor, and replayed by /reload_expr. The
+    # tier the dataflow is built at follows from the pair (dataflow_stats_tier).
+    stats_tier: str = "full"
+    stats_delivery: str = "inline"
     # Companion telemetry sink (#943): a fire-and-forget POST callable, built
     # once from the /load_expr payload's telemetry_url on the IOLoop (where
     # make_http_sink captures AsyncHTTPClient/IOLoop.current()). Stored here so
