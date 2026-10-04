@@ -3,10 +3,12 @@ import { DFWhole, DisplayerArgs, ColumnConfig, DFViewerConfig, ComponentConfig, 
 import { CSSProperties, Dispatch, SetStateAction } from '../../../../node_modules/.pnpm/react@18.3.1/node_modules/react';
 import { CommandConfigT } from '../CommandUtils';
 import { KeyAwareSmartRowCache, PayloadArgs } from './SmartRowCache';
+import { StatsStatus } from '../WidgetTypes';
 export declare function getCellRendererorFormatter(dispArgs: DisplayerArgs): ColDef;
 export declare function isOptionalPinnedKey(key: string): boolean;
 export declare function stripOptionalPinnedKey(key: string): string;
-export declare function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]): (import('./DFWhole').DFDataRow | undefined)[];
+export declare const PENDING_STAT_ROW_KEY = "__stat_pending";
+export declare function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[], statsStatus?: StatsStatus): (import('./DFWhole').DFDataRow | undefined)[];
 export declare function extractSingleSeriesSummary(full_summary_stats_df: DFData, col_name: string): DFWhole;
 export declare const getFieldVal: (f: ColumnConfig) => string;
 export declare function baseColToColDef(f: ColumnConfig): ColDef;
