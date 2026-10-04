@@ -296,9 +296,11 @@ def test_default_tier_widget_change_sequence_and_merged_sd():
         'price': [12.5, 18.9, 7.4, 22.1, 14.0], 'qty': [1, 2, 1, 3, 2],
         'category': ['a', 'b', 'a', 'c', 'b']}))
     msd = bw.dataflow.merged_sd
-    assert {col: (sd['length'], sd['_type'], sd['dtype']) for col, sd in msd.items()} == {
-        'a': (5, 'float', 'float64'), 'b': (5, 'integer', 'int64'),
-        'c': (5, 'string', 'object')}
+    assert {col: (sd['length'], sd['_type']) for col, sd in msd.items()} == {
+        'a': (5, 'float'), 'b': (5, 'integer'), 'c': (5, 'string')}
+    # pandas 3 names the string dtype 'str' where pandas 2 says 'object'.
+    assert [msd[col]['dtype'] for col in 'ab'] == ['float64', 'int64']
+    assert msd['c']['dtype'] in ('object', 'str')
     assert msd['a']['mean'] == pytest.approx(14.98)
 
     seen = []
