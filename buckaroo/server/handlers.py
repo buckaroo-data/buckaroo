@@ -14,7 +14,10 @@ from buckaroo.server.data_loading import (load_file, get_metadata, get_display_s
 from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
-from buckaroo.server.session import build_state_message
+from buckaroo.dataflow.dataflow import STATS_TIERS
+from buckaroo.server.session import (
+    STATS_DELIVERIES, begin_stats_generation, dataflow_stats_tier)
+from buckaroo.server.stats_wire import broadcast_state, refresh_session_snapshot
 from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
@@ -192,17 +195,10 @@ class LoadHandler(tornado.web.RequestHandler):
         if not session.ws_clients:
             return
 
-        for client in list(session.ws_clients):
-            try:
-                # Reset per-client live search first (dataset changed),
-                # then build the msg so the injected ``buckaroo_state``
-                # mirrors the post-reset value.
-                client.search_string = ""
-                msg = build_state_message(session, metadata=metadata,
-                    search_string=client.search_string)
-                client.write_message(json.dumps(msg))
-            except Exception:
-                session.ws_clients.discard(client)
+        # Each client's search is reset first (dataset changed), then its
+        # message is built so the injected ``buckaroo_state`` mirrors the
+        # post-reset value.
+        broadcast_state(session, metadata=metadata, reset_search=True)
 
     def _handle_browser_window(self, session_id: str) -> str:
         """Handle browser window management."""
@@ -371,6 +367,11 @@ class LoadHandler(tornado.web.RequestHandler):
                         **component_config,
                     }
 
+        # /load builds no deferred stats, whatever policy a prior /load_expr on
+        # this session left behind, and the generation moves on with the data.
+        session.stats_tier, session.stats_delivery = "full", "inline"
+        begin_stats_generation(session)
+
         # Notify connected clients and open browser
         self._push_state_to_clients(session, metadata)
         browser_action = "skipped" if no_browser else self._handle_browser_window(session_id)
@@ -378,6 +379,28 @@ class LoadHandler(tornado.web.RequestHandler):
         log.info("load session=%s path=%s rows=%d browser=%s", session_id, path, metadata["rows"], browser_action)
 
         self.write({"session": session_id, "server_pid": os.getpid(), "browser_action": browser_action, **metadata})
+
+
+def _stats_policy_from_body(body: dict, current_tier: str, current_delivery: str):
+    """Read ``stats_tier`` and ``stats_delivery`` from a request body.
+
+    A field the body omits (or sends as null) keeps the current value (the
+    session's, or the default for a new session), as ``cache_dir`` does. Returns
+    ``(stats_tier, stats_delivery, None)``, or ``(None, None, error)`` with the
+    400 response body for an unknown value."""
+    stats_tier = body.get("stats_tier")
+    if stats_tier is None:
+        stats_tier = current_tier
+    if stats_tier not in STATS_TIERS:
+        return None, None, {"error_code": "invalid_stats_tier",
+            "message": f"stats_tier must be one of {list(STATS_TIERS)}, got {stats_tier!r}"}
+    stats_delivery = body.get("stats_delivery")
+    if stats_delivery is None:
+        stats_delivery = current_delivery
+    if stats_delivery not in STATS_DELIVERIES:
+        return None, None, {"error_code": "invalid_stats_delivery",
+            "message": f"stats_delivery must be one of {list(STATS_DELIVERIES)}, got {stats_delivery!r}"}
+    return stats_tier, stats_delivery, None
 
 
 class LoadExprHandler(tornado.web.RequestHandler):
@@ -438,7 +461,10 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # Config-bearing fields that change how the result is computed or
         # rendered. If the caller passes any of these on a warm POST we must
         # re-run the pipeline — returning cached metadata would silently
-        # ignore the new config.
+        # ignore the new config. stats_tier and stats_delivery are not in this
+        # tuple: it tests truthiness, and a host that sends the pair on every
+        # POST would never get the warm exit (#944). They are compared with the
+        # session's stored pair below instead.
         has_config = any(body.get(k) for k in (
             "component_config", "column_config_overrides", "extra_grid_config",
             "init_sd", "skip_stat_columns"))
@@ -468,11 +494,22 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # ~/.cache/xorq and recomputing the embedder's snapshots there.
         if cache_dir is None and existing is not None:
             cache_dir = existing.cache_dir
+        # The stats policy carries over the same way: a re-POST that omits it
+        # keeps the session's, and one that changes it rebuilds.
+        stats_tier, stats_delivery, policy_error = _stats_policy_from_body(
+            body,
+            existing.stats_tier if existing is not None else "full",
+            existing.stats_delivery if existing is not None else "inline")
+        if policy_error is not None:
+            self.set_status(400)
+            self.write(policy_error)
+            return
         # /load swaps a session to pandas without clearing build_dir, so the
         # backend is checked too — else its pandas metadata comes back here.
         if (not force_reload and not has_config and existing
                 and existing.backend == "xorq" and existing.build_dir == build_dir
-                and existing.cache_dir == cache_dir and existing.metadata):
+                and existing.cache_dir == cache_dir and existing.metadata
+                and (existing.stats_tier, existing.stats_delivery) == (stats_tier, stats_delivery)):
             # The pipeline is skipped, but the refreshed page still opens a new
             # WS and pulls a fresh time-to-first-rows. Re-arm first-pull telemetry
             # on the existing session — rebind this request's sink and reset the
@@ -553,6 +590,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 with perf_log.perf_span("firstpull.dataflow_construct", session=session_id):
                     xorq_dataflow = xorq_loading.XorqServerDataflow(
                         expr, skip_main_serial=True, extra_klasses=extra_klasses,
+                        stats_tier=dataflow_stats_tier(stats_tier, stats_delivery),
                         **dataflow_kwargs)
                 # Spanning metadata too leaves only the small klass-load step
                 # unmeasured inside the outer firstpull.load_expr total.
@@ -578,6 +616,8 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.cache_dir = cache_dir
         session.project_root = project_root
         session.dataflow_kwargs = dataflow_kwargs
+        session.stats_tier = stats_tier
+        session.stats_delivery = stats_delivery
         session.tele_sink = tele_sink
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
@@ -619,17 +659,13 @@ class LoadExprHandler(tornado.web.RequestHandler):
                         **dvc.get("component_config", {}),
                         **component_config}
 
-        if session.ws_clients:
-            for client in list(session.ws_clients):
-                try:
-                    # Reset per-client live search (#851): a term from
-                    # the prior expression would silently filter the new one.
-                    client.search_string = ""
-                    msg = build_state_message(session, metadata=metadata,
-                        search_string=client.search_string)
-                    client.write_message(json.dumps(msg))
-                except Exception:
-                    session.ws_clients.discard(client)
+        # A new expression is a new stats generation; a deferred session starts
+        # it pending.
+        begin_stats_generation(session)
+
+        # Reset per-client live search (#851): a term from the prior
+        # expression would silently filter the new one.
+        broadcast_state(session, metadata=metadata, reset_search=True)
 
         if no_browser or not self.application.settings.get("open_browser", False):
             browser_action = "skipped"
@@ -766,18 +802,12 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         session.df_data_dict = display_state["df_data_dict"]
         session.df_meta = display_state["df_meta"]
         session.mode = "viewer"
+        # A viewer session has no dataflow and so no deferred stats.
+        session.stats_tier, session.stats_delivery = "full", "inline"
+        begin_stats_generation(session)
 
-        # Push to WebSocket clients
-        if session.ws_clients:
-            for client in list(session.ws_clients):
-                try:
-                    # Reset per-client live search (#851).
-                    client.search_string = ""
-                    msg = build_state_message(session,
-                        search_string=client.search_string)
-                    client.write_message(json.dumps(msg))
-                except Exception:
-                    session.ws_clients.discard(client)
+        # Push to WebSocket clients. Reset per-client live search (#851).
+        broadcast_state(session, reset_search=True)
 
         # Browser window
         if no_browser or not self.application.settings.get("open_browser", False):
@@ -807,8 +837,22 @@ class ReloadExprHandler(tornado.web.RequestHandler):
     ``cache_storage_path`` store are cache hits, and column overrides,
     extra grid config, init_sd and skip_stat_columns survive the reload.
 
+    The session's stored ``stats_tier`` / ``stats_delivery`` are replayed too.
+    The body is optional; a pair in it replaces the stored one (and is stored)
+    when the reload succeeds.
+
     Returns 404 when the session does not exist, 400 when it is not a xorq
-    session or has no project_root recorded, 501 when xorq is not installed."""
+    session, has no project_root recorded or carries an invalid stats policy,
+    501 when xorq is not installed."""
+
+    def _optional_body(self) -> dict:
+        """The JSON object body, or ``{}`` when there is none or it is not an
+        object: the endpoint took no body before the stats policy fields."""
+        try:
+            body = json.loads(self.request.body)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return body if isinstance(body, dict) else {}
 
     async def post(self, session_id):
         sessions = self.application.settings["sessions"]
@@ -831,6 +875,13 @@ class ReloadExprHandler(tornado.web.RequestHandler):
                 "message": "Session has no project_root — pass project_root to /load_expr first"})
             return
 
+        stats_tier, stats_delivery, policy_error = _stats_policy_from_body(
+            self._optional_body(), session.stats_tier, session.stats_delivery)
+        if policy_error is not None:
+            self.set_status(400)
+            self.write(policy_error)
+            return
+
         try:
             from buckaroo.server import xorq_loading
         except ImportError:
@@ -847,6 +898,7 @@ class ReloadExprHandler(tornado.web.RequestHandler):
                 + xorq_loading.load_project_display_klasses(session.project_root))
             xorq_dataflow = xorq_loading.XorqServerDataflow(
                 session.expr, skip_main_serial=True, extra_klasses=extra_klasses,
+                stats_tier=dataflow_stats_tier(stats_tier, stats_delivery),
                 **session.dataflow_kwargs)
         except Exception:
             tb = traceback.format_exc()
@@ -872,29 +924,13 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         if bs.get("quick_command_args"):
             xorq_dataflow.quick_command_args = bs["quick_command_args"]
 
-        refreshed = get_buckaroo_display_state(xorq_dataflow)
         session.xorq_dataflow = xorq_dataflow
-        session.df_display_args = refreshed["df_display_args"]
-        session.df_data_dict = refreshed["df_data_dict"]
-        session.df_meta = refreshed["df_meta"]
-        session.buckaroo_options = refreshed["buckaroo_options"]
-        session.command_config = refreshed["command_config"]
+        session.stats_tier = stats_tier
+        session.stats_delivery = stats_delivery
+        refresh_session_snapshot(session, xorq_dataflow)
+        begin_stats_generation(session)
 
-        if session.component_config and session.df_display_args:
-            for key in session.df_display_args:
-                dvc = session.df_display_args[key].get("df_viewer_config")
-                if dvc is not None:
-                    dvc["component_config"] = {
-                        **dvc.get("component_config", {}),
-                        **session.component_config}
-
-        for client in list(session.ws_clients):
-            try:
-                msg = build_state_message(session,
-                    search_string=getattr(client, "search_string", ""))
-                client.write_message(json.dumps(msg))
-            except Exception:
-                session.ws_clients.discard(client)
+        broadcast_state(session)
 
         klass_count = len(extra_klasses)
         log.info("reload_expr session=%s project_root=%s klasses=%d",

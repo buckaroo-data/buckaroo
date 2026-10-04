@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
+from buckaroo.pluggable_analysis_framework.stat_units import StatState
 from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
 
 
@@ -59,6 +60,63 @@ def test_xorq_skip_columns_not_computed(tmp_path):
     assert "a" in sd and "b" in sd
     assert "mean" in sd["a"]
     assert "mean" not in sd["b"]
+
+
+# ---------------------------------------------------------------------------
+# Resumable units (rows-first s4): a skipped column gets no unit, so running
+# every unit never touches it, and it still ends up in the result.
+# ---------------------------------------------------------------------------
+
+
+def _run_units(pipe, state):
+    acc = pipe.new_accumulator(state)
+    return acc, [pipe.run(unit, acc) for unit in pipe.plan(state)]
+
+
+def test_pandas_skipped_column_gets_no_unit():
+    df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6], "c": [7, 8, 9]})
+    pipe = StatPipeline(PD_ANALYSIS_V2, unit_test=False)
+    state = StatState(df, skip_columns=frozenset({"b"}))
+    assert [u.columns for u in pipe.plan(state)] == [("a",), ("c",)]
+    acc, fragments = _run_units(pipe, state)
+    assert [list(f) for f in fragments] == [["a"], ["c"]]
+    assert list(acc.sd()) == ["a", "b", "c"], "the skipped column keeps its place in the result"
+    assert acc.sd()["b"] == {"orig_col_name": "b", "rewritten_col_name": "b"}
+    assert pipe.process_df(df, skip_columns={"b"})[0]["b"] == acc.sd()["b"]
+
+
+def test_polars_skipped_column_gets_no_unit():
+    pl = pytest.importorskip("polars")
+    from buckaroo.customizations.pl_stats_v2 import PL_ANALYSIS_V2
+    df = pl.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6], "c": [7, 8, 9]})
+    pipe = StatPipeline(PL_ANALYSIS_V2, unit_test=False)
+    state = StatState(df, skip_columns=frozenset({"b"}))
+    assert [u.columns for u in pipe.plan(state)] == [("a",), ("c",)]
+    acc, _fragments = _run_units(pipe, state)
+    assert set(acc.sd()["b"]) <= {"orig_col_name", "rewritten_col_name"}
+
+
+def test_xorq_skipped_column_gets_no_unit(tmp_path):
+    xo = pytest.importorskip("xorq.api")
+    from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
+    from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2
+
+    p = tmp_path / "t.parquet"
+    pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]}).to_parquet(p)
+    expr = xo.deferred_read_parquet(str(p))
+
+    pipe = XorqStatPipeline(XORQ_STATS_V2)
+    state = StatState(expr, skip_columns=frozenset({"b"}))
+    units = pipe.plan(state)
+    assert all("b" not in unit.columns for unit in units)
+    assert [u.id for u in units] == ["batch", "histogram:a"]
+    acc, fragments = _run_units(pipe, state)
+    assert all("b" not in fragment for fragment in fragments)
+    sd = acc.sd()
+    # The column keeps what the batch gives every column, and no stat of its own.
+    assert sd["b"]["length"] == 3 and sd["b"]["dtype"] == "int64"
+    assert "mean" not in sd["b"] and "histogram" not in sd["b"]
+    assert sd == pipe.process_table(expr, skip_columns={"b"})[0]
 
 
 # ---------------------------------------------------------------------------

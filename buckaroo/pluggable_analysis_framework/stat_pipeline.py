@@ -9,16 +9,18 @@ is gone — port it to @stat).
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
+from buckaroo.dataflow.df_types import DataFrameLike
 from buckaroo.df_util import old_col_new_col
 
 from . import perf_log
 from .col_analysis import ColAnalysis, ErrDict, SDType
 from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqExpr, XorqExecute, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
 from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator
+from .stat_units import Fragment, StatAccumulator, StatState, StatUnit, UnitPipeline, columns_in_scope, prioritized
 from .typed_dag import build_typed_dag, build_column_dag, DAGConfigError
 from .utils import PERVERSE_DF
 
@@ -172,7 +174,7 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
                     inputs=kwargs.copy())
 
 
-class StatPipeline:
+class StatPipeline(UnitPipeline):
     """Top-level orchestrator for the pluggable analysis framework.
 
     Accepts a mix of:
@@ -276,9 +278,56 @@ class StatPipeline:
 
         return resolve_accumulator(accumulator, column_name, col_key_to_func)
 
+    @staticmethod
+    def _skipped(state: StatState, pairs: Sequence[Tuple[Any, str]]) -> set:
+        """The columns of ``pairs`` named in ``state.skip_columns``, by original
+        or rewritten name."""
+        return {orig for orig, rewritten in pairs
+            if orig in state.skip_columns or rewritten in state.skip_columns}
+
+    def plan(self, state: StatState) -> List[StatUnit]:
+        """One unit per column that is not skipped, in column order (or the
+        order ``state.priority`` asks for). A column's stats read only its own
+        column, so no unit waits for another. Nothing is computed."""
+        if len(state.data) == 0:
+            return []
+        pairs = columns_in_scope(state)
+        skip = self._skipped(state, pairs)
+        active = prioritized(state, [pair for pair in pairs if pair[0] not in skip])
+        return [StatUnit(id=f"column:{orig}", columns=(orig,), phase="column") for orig, _rewritten in active]
+
+    def new_accumulator(self, state: StatState) -> StatAccumulator:
+        """The accumulator for a run of ``state``. A skipped column is entered
+        with its two names, as ``process_df`` always did, and a frame with no
+        rows has no entries at all."""
+        if self.record_timings:
+            self.timings = []
+        if len(state.data) == 0:
+            return StatAccumulator(state)
+        pairs = columns_in_scope(state)
+        acc = StatAccumulator(state, columns=[orig for orig, _rewritten in pairs], rewritten=dict(pairs))
+        for orig in self._skipped(state, pairs):
+            acc.results[orig] = {'orig_col_name': orig, 'rewritten_col_name': acc.rewritten[orig]}
+        return acc
+
+    def run(self, unit: StatUnit, acc: StatAccumulator) -> Fragment:
+        """Run one column's stats through the stat DAG and return them as
+        ``{orig_col: stats}``. The errors go on ``acc.errors``."""
+        df = acc.state.data
+        fragment: Fragment = {}
+        for orig_col_name in unit.columns:
+            rewritten_col_name = acc.rewritten[orig_col_name]
+            ser = df[orig_col_name]
+            col_result, col_errors = self.process_column(column_name=rewritten_col_name, column_dtype=ser.dtype,
+                raw_series=ser, sampled_series=ser, raw_dataframe=df,
+                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name})
+            fragment[orig_col_name] = col_result
+            acc.record({orig_col_name: col_result}, col_errors)
+        return fragment
+
     def process_df(self, df: pd.DataFrame, debug: bool = False,
                    skip_columns=None) -> Tuple[SDType, List[StatError]]:
-        """Process all columns of a DataFrame.
+        """Process all columns of a DataFrame: the planned units, run in order.
 
         ``skip_columns`` names columns whose summary stats are supplied
         externally (e.g. via ``init_sd`` — reused from a source dataframe in a
@@ -292,35 +341,15 @@ class StatPipeline:
         if len(df) == 0:
             return {}, []
 
-        if self.record_timings:
-            self.timings = []
-
-        skip = set(skip_columns or ())
-        summary: SDType = {}
-        all_errors: List[StatError] = []
-
-        for orig_col_name, rewritten_col_name in old_col_new_col(df):
-            if orig_col_name in skip or rewritten_col_name in skip:
-                # Provided externally — keep the column, skip computation.
-                summary[rewritten_col_name] = {
-                    'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name}
-                continue
-            ser = df[orig_col_name]
-            col_dtype = ser.dtype
-
-            col_result, col_errors = self.process_column(column_name=rewritten_col_name, column_dtype=col_dtype,
-                raw_series=ser, sampled_series=ser, raw_dataframe=df,
-                initial_stats={'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name})
-
-            summary[rewritten_col_name] = col_result
-            all_errors.extend(col_errors)
+        acc = self.run_all(StatState(df, frozenset(skip_columns or ())))
+        summary: SDType = {acc.rewritten[orig]: stats for orig, stats in acc.sd().items()}
 
         if self.record_timings and perf_log.enabled() and not self._suppress_perf_summary:
             rec = perf_log.PerfRecorder(label=f"stats rows={len(df)} cols={len(summary)}")
             rec.extend_timings("pandas/polars", self.timings)
             rec.summary()
 
-        return summary, all_errors
+        return summary, acc.errors
 
     def unit_test(self) -> Tuple[bool, List[StatError]]:
         """Test the pipeline against PERVERSE_DF."""
@@ -432,3 +461,31 @@ def errors_to_errdict(errors: List[StatError]) -> ErrDict:
         err_key = (se.column, se.stat_func.name if se.stat_func else "unknown")
         errs[err_key] = (se.error, None)
     return errs
+
+
+def schema_sd(df: DataFrameLike, column_typing: Callable[[Any], Dict[str, Any]],
+              skip_columns=None) -> SDType:
+    """The summary dict for ``df`` from its schema alone, with no stat run.
+
+    Shaped like ``StatPipeline.process_df``'s output: one entry per column,
+    keyed by the rewritten name, holding ``orig_col_name``,
+    ``rewritten_col_name``, ``length`` and whatever ``column_typing`` returns
+    for the column. ``column_typing`` is handed the column's series and may read
+    its dtype only; it is what keeps this from touching a value. As in
+    ``process_df``, a frame with no rows gives an empty dict and a column in
+    ``skip_columns`` gets only its two names, so its typing comes from
+    ``init_sd``.
+    """
+    length = len(df)
+    if length == 0:
+        return {}
+    skip = set(skip_columns or ())
+    summary: SDType = {}
+    for orig_col_name, rewritten_col_name in old_col_new_col(df):
+        col_stats: Dict[str, Any] = {
+            'orig_col_name': orig_col_name, 'rewritten_col_name': rewritten_col_name}
+        if orig_col_name not in skip and rewritten_col_name not in skip:
+            col_stats.update(column_typing(df[orig_col_name]))
+            col_stats['length'] = length
+        summary[rewritten_col_name] = col_stats
+    return summary

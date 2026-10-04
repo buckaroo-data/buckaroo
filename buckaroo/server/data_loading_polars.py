@@ -27,7 +27,9 @@ from buckaroo.dataflow.dataflow import CustomizableDataflow
 from buckaroo.dataflow.styling_core import InitSD
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
 from buckaroo.customizations.pl_autocleaning_conf import NoCleaningConfPl
+from buckaroo.customizations.pl_stats_v2 import pl_schema_stats
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
+from buckaroo.pluggable_analysis_framework.stat_pipeline import schema_sd
 from buckaroo.polars_buckaroo import (
     PLSampling, local_analysis_klasses, prepare_df_for_serialization)
 from buckaroo.serialization_utils import pd_to_obj, make_infinite_resp
@@ -58,6 +60,9 @@ class PolarsServerDataflow(CustomizableDataflow[pl.DataFrame]):
         if isinstance(df, pd.DataFrame):
             return pd_to_obj(self.sampling_klass.serialize_sample(df))
         return pd_to_obj(self.sampling_klass.serialize_sample(df.to_pandas()))
+
+    def _get_schema_sd(self, processed_df):
+        return schema_sd(processed_df, pl_schema_stats, skip_columns=self.skip_stat_columns)
 
 
 def load_file_polars(path: str) -> pl.DataFrame:

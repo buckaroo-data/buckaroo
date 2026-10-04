@@ -9,8 +9,10 @@ from urllib.parse import urlparse
 import tornado.websocket
 
 from buckaroo.pluggable_analysis_framework import perf_log
-from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
-from buckaroo.server.session import build_state_message
+from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy)
+from buckaroo.server.session import begin_stats_generation, dataflow_stats_tier
+from buckaroo.server.stat_run import StatCursor
+from buckaroo.server.stats_wire import (broadcast_state, build_state_message_for, handle_stats_request, parse_caps, refresh_session_snapshot)
 
 
 def _handle_infinite_request_xorq(xorq_dataflow, payload_args, search_string=""):
@@ -38,6 +40,14 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # highlight overlay below — never broadcast, never stored on the
         # session.
         self.search_string = ""
+        # Capabilities the client advertised on the URL (``?caps=a,b``). Recorded
+        # per connection because this method sends the first message before the
+        # client can say anything, and the other send sites push one shared
+        # snapshot (stats_wire.build_state_message_for reads it per client).
+        self.caps = parse_caps(self.get_query_argument("caps", ""))
+        # This client's position in the session's StatRun fragment list (the
+        # run itself is shared); it ends with the connection.
+        self.stats_cursor = StatCursor()
         sessions = self.application.settings["sessions"]
         sessions.add_ws_client(session_id, self)
 
@@ -45,7 +55,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # search_string="" — fresh connection, no per-client typing yet.
         session = sessions.get(session_id)
         if session and (session.df is not None or session.ldf is not None or session.xorq_dataflow is not None):
-            self.write_message(json.dumps(build_state_message(session, search_string=self.search_string)))
+            self.write_message(json.dumps(build_state_message_for(session, self)))
 
     def on_message(self, message):
         try:
@@ -59,6 +69,22 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             self._handle_infinite_request(msg.get("payload_args", {}))
         elif msg_type == "buckaroo_state_change":
             self._handle_buckaroo_state_change(msg.get("new_state") or {})
+        elif msg_type == "stats_request":
+            self._handle_stats_request(msg)
+
+    def _handle_stats_request(self, msg):
+        """Answer a client's ``stats_request`` with a ``stats_update`` or a
+        ``stats_aborted``. Synchronous, like ``infinite_request``: the request
+        runs the whole stats computation in this call (see ``stats_wire``).
+
+        This branch is its own async context, so the session's telemetry sink
+        is bound here for the ``stats.request`` span and the stats spans under
+        it."""
+        sessions = self.application.settings["sessions"]
+        session = sessions.get(self.session_id)
+        with perf_log.telemetry_context(self.session_id, session.tele_sink if session else None):
+            reply = handle_stats_request(session, msg)
+        self.write_message(json.dumps(reply))
 
     def _handle_buckaroo_state_change(self, new_state):
         sessions = self.application.settings["sessions"]
@@ -99,6 +125,12 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 log.debug("buckaroo_state_change no-op session=%s — skipping rebroadcast", self.session_id)
                 return
 
+            # A deferred session whose stats were completed is at the full tier;
+            # the change reruns the cascade at the schema tier again (13 ms
+            # against the full stats), and the stats follow as requests.
+            if session.stats_delivery == "deferred":
+                dataflow.stats_tier = dataflow_stats_tier(session.stats_tier, session.stats_delivery)
+
             # Propagate changes to the dataflow (mirrors BuckarooWidgetBase._buckaroo_state)
             if old_state.get("post_processing") != new_state.get("post_processing"):
                 dataflow.post_processing_method = new_state.get("post_processing", "")
@@ -108,39 +140,20 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 dataflow.quick_command_args = new_state.get("quick_command_args", {})
 
             # Re-extract state from the dataflow — same helper works for both
-            # ServerDataflow and XorqServerDataflow (verified by probe).
-            buckaroo_state = get_buckaroo_display_state(dataflow)
-            session.df_display_args = buckaroo_state["df_display_args"]
-            session.df_data_dict = buckaroo_state["df_data_dict"]
-            session.df_meta = buckaroo_state["df_meta"]
+            # ServerDataflow and XorqServerDataflow (verified by probe). The
+            # state the stats describe has changed, so the generation moves on.
+            refresh_session_snapshot(session, dataflow)
+            begin_stats_generation(session)
             # Strip search_string before snapshotting onto the session — it
             # belongs to this client only (#851), so a future client that
             # connects shouldn't inherit it via build_state_message.
             session.buckaroo_state = {k: v for k, v in new_state.items() if k != "search_string"}
-            session.buckaroo_options = buckaroo_state["buckaroo_options"]
-            session.command_config = buckaroo_state["command_config"]
-
-            # Re-apply component_config so theme settings survive state changes
-            if session.component_config and session.df_display_args:
-                for key in session.df_display_args:
-                    dvc = session.df_display_args[key].get("df_viewer_config")
-                    if dvc is not None:
-                        dvc["component_config"] = {
-                            **dvc.get("component_config", {}),
-                            **session.component_config,
-                        }
 
             # Broadcast updated state to all connected clients. Each
             # client gets its own search_string re-injected so a
             # dataflow rebuild from one tab doesn't silently clear the
             # search box on another (or on the typing client itself).
-            for client in list(session.ws_clients):
-                try:
-                    msg = build_state_message(session,
-                        search_string=getattr(client, "search_string", ""))
-                    client.write_message(json.dumps(msg))
-                except Exception:
-                    session.ws_clients.discard(client)
+            broadcast_state(session)
         except Exception:
             tb = traceback.format_exc()
             log.error("buckaroo_state_change error session=%s: %s", self.session_id, tb)
@@ -168,6 +181,14 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         if not session.df_display_args:
             return
         term = self.search_string
+        # Build the message first: for a client without the stats_update
+        # capability it completes the session's stats, which replaces
+        # session.df_display_args, and the overlay is a copy of that.
+        # Pass self.search_string so the overlay's buckaroo_state
+        # round-trips the typed term back to this client (Codex P1 on
+        # #854 — without it the JS clears the search box on every
+        # keystroke).
+        msg = build_state_message_for(session, self)
         overlay = copy.deepcopy(session.df_display_args)
         for dva in overlay.values():
             dvc = (dva or {}).get("df_viewer_config") or {}
@@ -180,11 +201,6 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 else:
                     disp.pop("highlight_phrase", None)
 
-        # Pass self.search_string so the overlay's buckaroo_state
-        # round-trips the typed term back to this client (Codex P1 on
-        # #854 — without it the JS clears the search box on every
-        # keystroke).
-        msg = build_state_message(session, search_string=self.search_string)
         msg["df_display_args"] = overlay
         try:
             self.write_message(json.dumps(msg))

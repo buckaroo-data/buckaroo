@@ -14,7 +14,7 @@ import logging
 import traceback
 import weakref
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import pandas as pd
 
@@ -27,13 +27,14 @@ from traitlets import Unicode
 from .buckaroo_widget import BuckarooInfiniteWidget, BuckarooWidget
 from .customizations.styling import DefaultMainStyling, DefaultSummaryStatsStyling
 from .customizations.xorq_autoclean_conf import NoCleaningConfXorq
-from .customizations.xorq_stats_v2 import XORQ_STATS_V2
+from .customizations.xorq_stats_v2 import XORQ_STATS_V2, schema_stats
 from .dataflow.autocleaning import PandasAutocleaning
-from .dataflow.dataflow import CustomizableDataflow
+from .dataflow.dataflow import CustomizableDataflow, DfStats
 from .dataflow.dataflow_extras import Sampling
 from .df_util import old_col_new_col
 from .pluggable_analysis_framework import perf_log
 from .pluggable_analysis_framework.col_analysis import ColAnalysis
+from .pluggable_analysis_framework.stat_units import rewrite_sd
 from .pluggable_analysis_framework.xorq_stat_pipeline import XorqDfStatsV2
 from .serialization_utils import pd_to_obj, to_parquet, send_infinite_resp
 
@@ -145,7 +146,13 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
     2. ``_get_summary_sd`` re-keys the summary dict from original column
        names (what ``XorqStatPipeline`` produces) to the rewritten
        ``a, b, c`` names that ``pd_to_obj`` and the styling layer expect.
+
+    ``stat_chunk_cells`` (off when ``None``) is a host's request to cut the
+    stats batch aggregate into chunks of that many cells; the stats pipeline
+    still refuses it for any source that is not a plain parquet scan.
     """
+
+    stat_chunk_cells: Optional[int] = None
 
     def populate_df_meta(self) -> None:
         if self.processed_df is None:
@@ -173,15 +180,10 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
                     'orig_col_name': orig_col,
                     'rewritten_col_name': rewritten_col}
             return empty, {}
-        cache_storage = getattr(self, 'cache_storage', None)
-        # The owning widget injects XorqDfStatsV2 as DFStatsClass (via its
-        # InnerDataFlow subclass); the cast exposes cache_run_stats() below.
-        stats_klass = cast("type[XorqDfStatsV2]", self.DFStatsClass)
+        if self.stats_tier == "schema":
+            return self._get_schema_sd(processed_df), {}
         with perf_log.perf_span("firstpull.summary_stats") as span:
-            stats = stats_klass(
-                processed_df, self.analysis_klasses, self.df_name,
-                debug=self.debug, cache_storage=cache_storage,
-                skip_columns=getattr(self, 'skip_stat_columns', None))
+            stats = cast("XorqDfStatsV2", self.build_stats(processed_df))
             # Attach the summary-stat cache signal (#944) to the span so a
             # telemetry consumer learns whether the stats were cached — the one
             # signal only the server observes (#943). Carries the write side too
@@ -205,13 +207,44 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
             errs = stats.errs
         else:
             errs = {}
-        rewritten = {}
-        for orig_col, rewritten_col in old_col_new_col(processed_df):
-            col_meta = dict(sdf.get(orig_col, {}))
-            col_meta['orig_col_name'] = orig_col
-            col_meta['rewritten_col_name'] = rewritten_col
-            rewritten[rewritten_col] = col_meta
-        return rewritten, errs
+        return rewrite_sd(sdf, processed_df), errs
+
+    def build_stats(self, processed_df: "XorqExpr | pd.DataFrame", run: bool = True) -> DfStats:
+        """The stats executor for an expression: as the base class builds it,
+        with the snapshot cache and the column-chunk split. The split needs the
+        row count, which is the cached count ``populate_df_meta`` already took,
+        and is looked up only when the split is on."""
+        # The owning widget injects XorqDfStatsV2 as DFStatsClass (via its
+        # InnerDataFlow subclass), whose constructor takes the extra keywords
+        # below, so it is typed as itself here and handed back as the protocol.
+        stats_klass = cast("type[XorqDfStatsV2]", self.DFStatsClass)
+        chunk_cells = self.stat_chunk_cells
+        return cast("DfStats", stats_klass(
+            processed_df, self.analysis_klasses, self.df_name,
+            debug=self.debug, cache_storage=getattr(self, 'cache_storage', None),
+            skip_columns=getattr(self, 'skip_stat_columns', None), chunk_cells=chunk_cells,
+            rows=_expr_count(processed_df) if chunk_cells else None, run=run))
+
+    def _get_schema_sd(self, processed_df: "XorqExpr | pd.DataFrame") -> dict:
+        """Identity, dtype, typing flags and row count for every column of an
+        expression, with no query beyond ``_expr_count`` (cached per
+        expression). Carries the same values full stats give those keys, so
+        styling that reads only them renders the same. A column in
+        ``skip_stat_columns`` gets only name, dtype and length, as at the full
+        tier, so its typing comes from ``init_sd``. ``_get_summary_sd`` handles
+        a pandas frame before it gets here."""
+        expr = cast("XorqExpr", processed_df)
+        schema = expr.schema()
+        length = _expr_count(expr)
+        skip = getattr(self, 'skip_stat_columns', None) or ()
+        sd: dict = {}
+        for orig_col, rewritten_col in old_col_new_col(expr):
+            dtype = str(schema[str(orig_col)])
+            typing = {'dtype': dtype} if orig_col in skip else schema_stats(dtype)
+            sd[rewritten_col] = {
+                'orig_col_name': orig_col, 'rewritten_col_name': rewritten_col,
+                **typing, 'length': length}
+        return sd
 
 
 _XORQ_ANALYSIS_KLASSES = list(XORQ_STATS_V2) + [DefaultSummaryStatsStyling, DefaultMainStyling]

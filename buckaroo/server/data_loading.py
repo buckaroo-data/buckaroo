@@ -12,10 +12,11 @@ from buckaroo.dataflow.dataflow import CustomizableDataflow
 from buckaroo.dataflow.dataflow_extras import Sampling
 from buckaroo.dataflow.autocleaning import PandasAutocleaning
 from buckaroo.dataflow.styling_core import InitSD, StylingAnalysis
-from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
+from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2, schema_stats
 from buckaroo.customizations.styling import DefaultSummaryStatsStyling, DefaultMainStyling
 from buckaroo.customizations.pd_autoclean_conf import CleaningConf, NoCleaningConf
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
+from buckaroo.pluggable_analysis_framework.stat_pipeline import schema_sd
 
 
 class ServerSampling(Sampling):
@@ -48,6 +49,9 @@ class ServerDataflow(CustomizableDataflow[pd.DataFrame]):
     def _df_to_obj(self, df):
         # No sampling — matches BuckarooInfiniteWidget._df_to_obj
         return pd_to_obj(df)
+
+    def _get_schema_sd(self, processed_df):
+        return schema_sd(processed_df, schema_stats, skip_columns=self.skip_stat_columns)
 
 
 def create_dataflow(df: pd.DataFrame, column_config_overrides=None, extra_grid_config=None,

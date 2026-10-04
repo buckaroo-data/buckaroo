@@ -1,17 +1,22 @@
 """End-to-end tests for POST /load_expr — server load path for
 XorqBuckarooInfiniteWidget over a xorq/ibis expression."""
+import dataclasses
+import datetime
 import io
 import json
 import os
 import shutil
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pyarrow.parquet as pq
 import pytest
+import tornado.gen
 import tornado.httpclient
 import tornado.testing
 import tornado.websocket
@@ -25,8 +30,19 @@ from xorq.common.utils.graph_utils import replace_nodes, walk_nodes  # noqa: E40
 from xorq.common.utils.provenance_utils import read_parquet_provenance  # noqa: E402
 from xorq.expr.relations import CachedNode  # noqa: E402
 
+from buckaroo.dataflow.dataflow import assemble_merged_sd  # noqa: E402
+from buckaroo.dataflow.sd_cache import split_chain_by_scope  # noqa: E402
+from buckaroo.jlisp.lisp_utils import s as lisp_sym  # noqa: E402
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: E402
+from buckaroo.pluggable_analysis_framework.stat_units import merge_fragments  # noqa: E402
+from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline  # noqa: E402
+from buckaroo.serialization_utils import resolve_summary_stats_payload  # noqa: E402
 from buckaroo.server import telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
+from buckaroo.server.stats_wire import start_stat_run  # noqa: E402
+from buckaroo.server.websocket_handler import DataStreamHandler  # noqa: E402
+from tests.unit.dataflow.scoped_summary_stats_test import (  # noqa: E402
+    _OverridingPostProcessing, _scope_inputs, _scope_sds_by_units)
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
@@ -908,6 +924,1193 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
                 "load_expr_build_dir minted a new backend on the second call")
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
+
+
+def _stats_tier_expr():
+    """A 5-row table whose float column has a 1e9 maximum, so its estimated
+    column width depends on the min and max that only full stats supply."""
+    return xo.memtable({
+        "price": [12.5, 18.9, 7.4, 22.1, 1e9],
+        "qty": [1, 2, 1, 3, 2],
+        "category": ["a", "b", "a", "c", "b"]})
+
+
+def _build_dataflow(expr=None, **kwargs):
+    return xorq_loading.XorqServerDataflow(
+        _stats_tier_expr() if expr is None else expr, skip_main_serial=True, **kwargs)
+
+
+def _three_scope_dataflow(expr=None, **kwargs):
+    """A dataflow with a user op (clean scope) and a search (filt scope) active,
+    so raw, clean and filt each hold their own summary-stats cache entry."""
+    dataflow = _build_dataflow(expr, **kwargs)
+    dataflow.operations = [[lisp_sym("fillna"), {"symbol": "df"}, "qty", 0]]
+    dataflow.quick_command_args = {"search": ["a"]}
+    return dataflow
+
+
+def _spy_data_queries(monkeypatch):
+    """Record the outermost op of every materialisation (``execute`` and
+    ``to_pyarrow``), and every stat query XorqStatPipeline sends."""
+    from xorq.vendor.ibis.expr.types.core import Expr
+
+    from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
+    ops, stat_queries = [], []
+    original_execute, original_to_pyarrow = Expr.execute, Expr.to_pyarrow
+    original_stat_execute = XorqStatPipeline._execute
+
+    def spy_execute(self, *args, **kwargs):
+        ops.append(type(self.op()).__name__)
+        return original_execute(self, *args, **kwargs)
+
+    def spy_to_pyarrow(self, *args, **kwargs):
+        ops.append(type(self.op()).__name__)
+        return original_to_pyarrow(self, *args, **kwargs)
+
+    def spy_stat_execute(self, query):
+        stat_queries.append(type(query.op()).__name__)
+        return original_stat_execute(self, query)
+
+    monkeypatch.setattr(Expr, "execute", spy_execute)
+    monkeypatch.setattr(Expr, "to_pyarrow", spy_to_pyarrow)
+    monkeypatch.setattr(XorqStatPipeline, "_execute", spy_stat_execute)
+    return ops, stat_queries
+
+
+def _without_min_width(column_config):
+    return [{**cc, "ag_grid_specs": {k: v for k, v in cc["ag_grid_specs"].items() if k != "minWidth"}}
+        for cc in column_config]
+
+
+def _as_json(sd):
+    """Comparable form of an sd: json equates NaN with NaN where == would not."""
+    return json.dumps(sd, sort_keys=True, default=str)
+
+
+class _NoopPostProcessing(ColAnalysis):
+    provides_defaults = {}
+    post_processing_method = "noop_post"
+
+    @classmethod
+    def post_process_df(cls, expr):
+        return [expr, {}]
+
+
+class TestStatsTierSchema:
+    """``XorqServerDataflow(..., stats_tier="schema")`` (rows-first s1): the
+    dataflow publishes identity and typing for every column, with no data query
+    beyond the cached row count."""
+
+    def test_matches_full_stats_display_state(self):
+        expr = _stats_tier_expr()
+        full = _build_dataflow(expr)
+        schema = _build_dataflow(expr, stats_tier="schema")
+        assert schema.df_display_args.keys() == full.df_display_args.keys()
+        for name, full_arg in full.df_display_args.items():
+            schema_arg = schema.df_display_args[name]
+            assert schema_arg["data_key"] == full_arg["data_key"]
+            assert schema_arg["summary_stats_key"] == full_arg["summary_stats_key"]
+            full_cfg, schema_cfg = full_arg["df_viewer_config"], schema_arg["df_viewer_config"]
+            assert schema_cfg["pinned_rows"] == full_cfg["pinned_rows"]
+            assert (_without_min_width(schema_cfg["column_config"])
+                == _without_min_width(full_cfg["column_config"]))
+
+    def test_min_width_is_the_stats_derived_difference(self):
+        expr = _stats_tier_expr()
+        widths = {}
+        for tier in ("full", "schema"):
+            cfg = _build_dataflow(expr, stats_tier=tier).df_display_args["main"]["df_viewer_config"]
+            widths[tier] = {cc["header_name"]: cc["ag_grid_specs"]["minWidth"]
+                for cc in cfg["column_config"]}
+        # price's 1e9 maximum widens it under full stats; without min and max
+        # the estimate falls back to a one-digit value.
+        assert widths["schema"]["price"] < widths["full"]["price"]
+
+    def test_schema_sd_is_the_schema_keys_of_the_full_sd(self):
+        expr = _stats_tier_expr()
+        full_sd = _build_dataflow(expr).merged_sd
+        schema_sd = _build_dataflow(expr, stats_tier="schema").merged_sd
+        assert schema_sd.keys() == full_sd.keys()
+        for col, stats in schema_sd.items():
+            assert {"orig_col_name", "rewritten_col_name", "dtype", "_type", "is_numeric",
+                "is_integer", "is_float", "is_bool", "is_datetime", "is_string",
+                "length"} <= stats.keys()
+            assert "mean" not in stats and "histogram" not in stats
+            assert stats == {k: full_sd[col][k] for k in stats}
+
+    def test_issues_no_data_query_besides_the_cached_count(self, monkeypatch):
+        ops, stat_queries = _spy_data_queries(monkeypatch)
+        dataflow = _build_dataflow(stats_tier="schema")
+        dataflow.quick_command_args = {"search": ["a"]}
+        dataflow.add_analysis(_NoopPostProcessing)
+        assert stat_queries == []
+        assert ops and set(ops) == {"CountStar"}
+
+    def test_the_spy_sees_stat_queries_at_the_full_tier(self, monkeypatch):
+        ops, stat_queries = _spy_data_queries(monkeypatch)
+        _build_dataflow()
+        assert stat_queries, "the spy would not notice a stat query"
+        assert set(ops) - {"CountStar"}
+
+    def test_init_sd_hints_and_overrides_still_apply(self):
+        dataflow = _build_dataflow(
+            stats_tier="schema",
+            init_sd={"qty": {"displayer_args": {"displayer": "string", "max_length": 200}}},
+            column_config_overrides={
+                "category": {"displayer_args": {"displayer": "string", "max_length": 5000}}})
+        cfg = dataflow.df_display_args["main"]["df_viewer_config"]["column_config"]
+        by_header = {cc["header_name"]: cc for cc in cfg}
+        assert by_header["qty"]["displayer_args"]["max_length"] == 200
+        assert by_header["category"]["displayer_args"]["max_length"] == 5000
+
+    def test_skipped_column_keeps_init_sd_typing(self):
+        """A column in ``skip_stat_columns`` gets only name, dtype and length
+        from the pipeline, so its ``_type`` comes from ``init_sd``. The schema
+        tier must not layer the schema-derived typing keys over it."""
+        expr = _stats_tier_expr()
+        kwargs = {
+            "init_sd": {"qty": {"_type": "float", "mean": 1.8, "min": 1, "max": 3}},
+            "skip_stat_columns": ["qty"]}
+        full = _build_dataflow(expr, **kwargs)
+        schema = _build_dataflow(expr, stats_tier="schema", **kwargs)
+
+        def merged(dataflow, orig_col):
+            return next(v for v in dataflow.merged_sd.values() if v["orig_col_name"] == orig_col)
+
+        assert merged(full, "qty")["_type"] == "float"
+        assert merged(schema, "qty")["_type"] == "float"
+        assert not {"is_numeric", "is_integer", "is_float"} & merged(schema, "qty").keys()
+        assert merged(schema, "price")["_type"] == "float"
+        assert merged(schema, "price")["is_float"] is True
+        full_cfg = full.df_display_args["main"]["df_viewer_config"]["column_config"]
+        schema_cfg = schema.df_display_args["main"]["df_viewer_config"]["column_config"]
+        assert _without_min_width(schema_cfg) == _without_min_width(full_cfg)
+
+    def test_sorted_infinite_request_works(self):
+        dataflow = _build_dataflow(stats_tier="schema")
+        qty = next(k for k, v in dataflow.merged_sd.items() if v["orig_col_name"] == "qty")
+        resp, parquet = xorq_loading.handle_infinite_request_xorq(
+            dataflow, {"start": 0, "end": 5, "sourceName": "default",
+                "sort": qty, "sort_direction": "desc"})
+        assert "error_info" not in resp
+        assert resp["length"] == 5
+        assert pq.read_table(io.BytesIO(parquet)).column(qty).to_pylist() == [3, 2, 2, 1, 1]
+
+    def test_pending_state_writes_no_full_tier_cache_key(self):
+        dataflow = _three_scope_dataflow(stats_tier="schema")
+        chains = split_chain_by_scope(dataflow.operations)
+        full_keys = {dataflow._scope_cache_key(chain, tier="full") for chain in chains.values()}
+        assert len(full_keys) == 3, "raw, clean and filt must each have their own key"
+        assert dataflow.summary_stats_cache
+        assert not full_keys & dataflow.summary_stats_cache.keys()
+
+    def test_later_full_assignment_reaches_merged_sd_for_all_scopes(self):
+        expr = _stats_tier_expr()
+        full = _three_scope_dataflow(expr)
+        dataflow = _three_scope_dataflow(expr, stats_tier="schema")
+        assert "mean" not in dataflow.merged_sd["a"]
+        assert {"mean", "cleaned_mean", "filtered_mean"} <= full.merged_sd["a"].keys()
+
+        dataflow.stats_tier = "full"
+        dataflow.summary_sd = full.summary_sd
+
+        assert _as_json(dataflow.merged_sd) == _as_json(full.merged_sd)
+
+    def test_a_summary_sd_from_another_tier_is_not_cached_under_the_new_tier(self):
+        """An sd computed at the schema tier must not become the full tier's
+        entry because the tier flipped before the next cascade: a present key
+        is a hit, so it would never be repaired."""
+        dataflow = _three_scope_dataflow(stats_tier="schema")
+        stale = {col: {**stats, "stale": True} for col, stats in dataflow.summary_sd.items()}
+
+        dataflow.stats_tier = "full"
+        dataflow.summary_sd = stale
+
+        filt_sd = dataflow.summary_stats_cache[dataflow.filt_sd_key]
+        assert "mean" in filt_sd["a"] and "stale" not in filt_sd["a"]
+        assert "filtered_mean" in dataflow.merged_sd["a"]
+
+    def test_full_scope_sds_cached_first_are_used_without_a_stat_query(self, monkeypatch):
+        expr = _stats_tier_expr()
+        full = _three_scope_dataflow(expr)
+        dataflow = _three_scope_dataflow(expr, stats_tier="schema")
+        cache = dict(dataflow.summary_stats_cache)
+        for scope, chain in split_chain_by_scope(dataflow.operations).items():
+            cache[dataflow._scope_cache_key(chain, tier="full")] = full.summary_stats_cache[
+                getattr(full, f"{scope}_sd_key")]
+        dataflow.summary_stats_cache = cache
+        _ops, stat_queries = _spy_data_queries(monkeypatch)
+
+        dataflow.stats_tier = "full"
+        dataflow.summary_sd = full.summary_sd
+
+        assert stat_queries == []
+        assert _as_json(dataflow.merged_sd) == _as_json(full.merged_sd)
+
+
+class TestLoadExprStatsPolicy(tornado.testing.AsyncHTTPTestCase):
+    """``stats_tier`` and ``stats_delivery`` on POST /load_expr and
+    /reload_expr (rows-first s1). The pair is stored beside dataflow_kwargs,
+    replayed by /reload_expr, and kept out of the has_config tuple."""
+
+    def get_app(self):
+        return make_app()
+
+    def _session(self, sid):
+        return self._app.settings["sessions"].get(sid)
+
+    @tornado.testing.gen_test
+    async def test_defaults_are_full_and_inline(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "sp-default", "build_dir": build_path})
+            self.assertEqual(resp.code, 200)
+            session = self._session("sp-default")
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "full")
+            self.assertIn("mean", session.xorq_dataflow.merged_sd["a"])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_schema_tier_builds_a_schema_dataflow(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "sp-schema", "build_dir": build_path, "stats_tier": "schema"})
+            self.assertEqual(resp.code, 200)
+            self.assertEqual(json.loads(resp.body)["rows"], 10)
+            session = self._session("sp-schema")
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("schema", "inline"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "schema")
+            self.assertNotIn("mean", session.xorq_dataflow.merged_sd["a"])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_deferred_delivery_publishes_a_schema_dataflow_and_serves_rows(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "sp-deferred", "build_dir": build_path, "stats_delivery": "deferred"})
+            self.assertEqual(resp.code, 200)
+            session = self._session("sp-deferred")
+            # The session still targets full stats; the dataflow is built at
+            # the schema tier until a later phase delivers them.
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "deferred"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "schema")
+
+            ws = await tornado.websocket.websocket_connect(
+                f"ws://localhost:{self.get_http_port()}/ws/sp-deferred")
+            initial = json.loads(await ws.read_message())
+            self.assertEqual(initial["type"], "initial_state")
+            self.assertEqual(initial["df_meta"]["total_rows"], 10)
+            ws.write_message(json.dumps({"type": "infinite_request",
+                "payload_args": {"start": 0, "end": 10, "sourceName": "default", "origEnd": 10}}))
+            rows = json.loads(await ws.read_message())
+            self.assertEqual(rows["length"], 10)
+            self.assertNotIn("error_info", rows)
+            table = pq.read_table(io.BytesIO(await ws.read_message()))
+            self.assertEqual(table.num_rows, 10)
+            ws.close()
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_deferred_delivery_runs_no_stat_query(self):
+        from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
+        builds_root = tempfile.mkdtemp()
+        stat_queries = []
+        original = XorqStatPipeline._execute
+
+        def spy(pipeline, query):
+            stat_queries.append(query)
+            return original(pipeline, query)
+
+        try:
+            build_path = _build_expr_dir(builds_root)
+            with patch.object(XorqStatPipeline, "_execute", spy):
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": "sp-deferred-q", "build_dir": build_path,
+                     "stats_delivery": "deferred"})
+            self.assertEqual(resp.code, 200)
+            self.assertEqual(stat_queries, [])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_invalid_values_are_a_400(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            for field, code in (("stats_tier", "invalid_stats_tier"),
+                    ("stats_delivery", "invalid_stats_delivery")):
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": "sp-bad", "build_dir": build_path, field: "sometimes"})
+                self.assertEqual(resp.code, 400)
+                self.assertEqual(json.loads(resp.body)["error_code"], code)
+            self.assertIsNone(self._session("sp-bad"))
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_warm_repost_with_an_unchanged_pair_short_circuits(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            body = {"session": "sp-warm", "build_dir": build_path,
+                "stats_tier": "schema", "stats_delivery": "deferred"}
+            self.assertEqual((await _post(self.get_http_port(), "/load_expr", body)).code, 200)
+            with patch.object(xorq_loading, "load_expr_build_dir",
+                side_effect=AssertionError("an unchanged pair must take the warm exit")):
+                same = await _post(self.get_http_port(), "/load_expr", body)
+                omitted = await _post(self.get_http_port(), "/load_expr",
+                    {"session": "sp-warm", "build_dir": build_path})
+            self.assertEqual(same.code, 200)
+            self.assertEqual(omitted.code, 200, "omitting the pair keeps the session's")
+            session = self._session("sp-warm")
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("schema", "deferred"))
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_the_default_pair_sent_on_every_post_does_not_defeat_the_warm_exit(self):
+        """has_config tests truthiness, so a host that always sends the pair
+        would rebuild on every POST if the fields were in it (#944)."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            body = {"session": "sp-warm-default", "build_dir": build_path,
+                "stats_tier": "full", "stats_delivery": "inline"}
+            self.assertEqual((await _post(self.get_http_port(), "/load_expr", body)).code, 200)
+            with patch.object(xorq_loading, "load_expr_build_dir",
+                side_effect=AssertionError("the warm exit must not see the pair as config")):
+                resp = await _post(self.get_http_port(), "/load_expr", body)
+            self.assertEqual(resp.code, 200)
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_warm_repost_with_a_changed_pair_rebuilds(self):
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "sp-changed"
+            original = xorq_loading.load_expr_build_dir
+            calls = []
+
+            def counting_loader(bd, **kwargs):
+                calls.append(bd)
+                return original(bd, **kwargs)
+
+            with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
+                await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path})
+                self.assertEqual(len(calls), 1)
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path, "stats_delivery": "deferred"})
+                self.assertEqual(resp.code, 200)
+                self.assertEqual(len(calls), 2, "a changed delivery must rebuild")
+                self.assertEqual(self._session(sid).xorq_dataflow.stats_tier, "schema")
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path,
+                     "stats_tier": "schema", "stats_delivery": "deferred"})
+                self.assertEqual(len(calls), 3, "a changed tier must rebuild")
+                resp = await _post(self.get_http_port(), "/load_expr",
+                    {"session": sid, "build_dir": build_path,
+                     "stats_tier": "full", "stats_delivery": "inline"})
+                self.assertEqual(len(calls), 4, "returning to the defaults must rebuild")
+            session = self._session(sid)
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "full")
+            self.assertIn("mean", session.xorq_dataflow.merged_sd["a"])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_replays_the_stored_pair(self):
+        builds_root = tempfile.mkdtemp()
+        project_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "sp-reload"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path, "project_root": project_root,
+                 "stats_delivery": "deferred"})
+            before = self._session(sid).xorq_dataflow
+            resp = await _post(self.get_http_port(), f"/reload_expr/{sid}", {})
+            self.assertEqual(resp.code, 200)
+            session = self._session(sid)
+            self.assertIsNot(session.xorq_dataflow, before)
+            self.assertEqual(session.xorq_dataflow.stats_tier, "schema")
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "deferred"))
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(project_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_accepts_a_new_pair_and_stores_it(self):
+        builds_root = tempfile.mkdtemp()
+        project_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "sp-reload-new"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path, "project_root": project_root,
+                 "stats_delivery": "deferred"})
+            resp = await _post(self.get_http_port(), f"/reload_expr/{sid}",
+                {"stats_delivery": "inline"})
+            self.assertEqual(resp.code, 200)
+            session = self._session(sid)
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "full")
+            bad = await _post(self.get_http_port(), f"/reload_expr/{sid}",
+                {"stats_tier": "sometimes"})
+            self.assertEqual(bad.code, 400)
+            self.assertEqual(json.loads(bad.body)["error_code"], "invalid_stats_tier")
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(project_root, ignore_errors=True)
+
+
+def _build_stats_wire_dir(builds_root):
+    """Build the ``_stats_tier_expr`` table to ``builds_root``. Its float column
+    has a 1e9 maximum, so full stats change that column's ``minWidth`` and a
+    message built from the schema tier differs from a complete one there."""
+    expr = xo.memtable({
+        "price": [12.5, 18.9, 7.4, 22.1, 1e9],
+        "qty": [1, 2, 1, 3, 2],
+        "category": ["a", "b", "a", "c", "b"]}, name="t")
+    return str(xo.build_expr(expr, builds_dir=builds_root))
+
+
+def _state_change(**changes):
+    new_state = {"post_processing": "", "cleaning_method": "", "quick_command_args": {},
+        "df_display": "main", "show_commands": False, "sampled": False, "search_string": ""}
+    return json.dumps({"type": "buckaroo_state_change", "new_state": {**new_state, **changes}})
+
+
+def _stats_request(stats_gen, **fields):
+    return json.dumps({"type": "stats_request", "stats_gen": stats_gen, "scope": "raw", **fields})
+
+
+async def _read_json(ws, timeout=3.0):
+    """The next frame on ``ws``, decoded. Raises AssertionError, not a hang,
+    when none arrives."""
+    try:
+        frame = await tornado.gen.with_timeout(
+            datetime.timedelta(seconds=timeout), ws.read_message())
+    except tornado.gen.TimeoutError:
+        raise AssertionError(f"no frame within {timeout}s") from None
+    assert frame is not None, "the connection closed"
+    return json.loads(frame)
+
+
+def _rows_by_stat(payload):
+    """The decoded ``all_stats`` rows of a payload, keyed by stat name."""
+    return {row["index"]: row for row in resolve_summary_stats_payload(payload)}
+
+
+def _comparable(frame):
+    """An ``initial_state`` frame as a JSON string, for comparing a legacy
+    client's frame with what an inline session sends: ``all_stats`` decoded
+    (its parquet bytes follow column order) and ``df_meta.stats`` dropped."""
+    frame = json.loads(json.dumps(frame))
+    frame["df_data_dict"]["all_stats"] = _rows_by_stat(frame["df_data_dict"]["all_stats"])
+    frame["df_meta"].pop("stats", None)
+    return _as_json(frame)
+
+
+@contextmanager
+def _count_stat_queries():
+    """Record every query ``XorqStatPipeline`` sends while the block runs."""
+    queries = []
+    original = XorqStatPipeline._execute
+
+    def spy(pipeline, query):
+        queries.append(query)
+        return original(pipeline, query)
+
+    with patch.object(XorqStatPipeline, "_execute", spy):
+        yield queries
+
+
+class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
+    """``stats_request``, ``stats_update`` and ``stats_aborted`` on a deferred
+    ``/load_expr`` session, the ``stats_gen`` counter and ``df_meta.stats``, and
+    the per-connection capability (``?caps=stats_update``) that keeps a client
+    without it on complete messages (rows-first s3)."""
+
+    def get_app(self):
+        return make_app()
+
+    def setUp(self):
+        super().setUp()
+        self.builds_root = tempfile.mkdtemp()
+        self.project_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.builds_root, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, self.project_root, ignore_errors=True)
+        pp_dir = os.path.join(self.project_root, "post_processing")
+        os.makedirs(pp_dir)
+        with open(os.path.join(pp_dir, "first_three.py"), "w") as f:
+            f.write("def process(expr):\n    return expr.limit(3)\n")
+        self.build_path = _build_stats_wire_dir(self.builds_root)
+        self.clients = []
+
+    def tearDown(self):
+        for ws in self.clients:
+            ws.close()
+        super().tearDown()
+
+    def _session(self, sid):
+        return self._app.settings["sessions"].get(sid)
+
+    async def _load(self, sid, **body):
+        resp = await _post(self.get_http_port(), "/load_expr",
+            {"session": sid, "build_dir": self.build_path, "project_root": self.project_root, **body})
+        self.assertEqual(resp.code, 200, resp.body)
+
+    async def _connect(self, sid, caps=None):
+        """Open a WebSocket, with ``caps`` as ``?caps=``. Returns it with its
+        first ``initial_state``."""
+        suffix = f"?caps={caps}" if caps else ""
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/{sid}{suffix}")
+        self.clients.append(ws)
+        return ws, await _read_json(ws)
+
+    def _stats(self, frame):
+        stats = frame["df_meta"].get("stats")
+        self.assertIsNotNone(stats, "initial_state carries no df_meta.stats")
+        return stats
+
+    async def _inline_frame(self, sid, **changes):
+        """What an inline session of the same build sends a client: the complete
+        message every complete message here must match. ``changes`` are sent as
+        a state change first, and the broadcast that follows is returned."""
+        await self._load(sid)
+        ws, frame = await self._connect(sid)
+        if changes:
+            ws.write_message(_state_change(**changes))
+            frame = await _read_json(ws)
+        return frame
+
+    def _assert_pending(self, frame, gen):
+        stats = self._stats(frame)
+        self.assertEqual((stats["status"], stats["tier"], stats["gen"]), ("pending", "schema", gen))
+        self.assertEqual(list(_rows_by_stat(frame["df_data_dict"]["all_stats"])), ["dtype"],
+            "a pending frame must carry the schema tier only")
+
+    def _assert_complete(self, frame, gen, inline_frame):
+        stats = self._stats(frame)
+        self.assertEqual((stats["status"], stats["tier"], stats["gen"]), ("complete", "full", gen))
+        self.assertIn("histogram_bins", _rows_by_stat(frame["df_data_dict"]["all_stats"]))
+        self.assertEqual(_comparable(frame), _comparable(inline_frame))
+
+    async def _pair(self, sid):
+        """A caps client, then a legacy client, on a deferred session. The
+        legacy client's connect completes the stats, so a later push is the
+        first thing to put the session back to pending."""
+        await self._load(sid, stats_delivery="deferred")
+        a, a_open = await self._connect(sid, caps="stats_update")
+        b, b_open = await self._connect(sid)
+        return a, a_open, b, b_open
+
+    @tornado.testing.gen_test
+    async def test_stats_request_returns_a_stats_update_that_completes_the_stats(self):
+        await self._load("sw-complete", stats_delivery="deferred")
+        inline = await self._inline_frame("sw-complete-inline")
+        ws, first = await self._connect("sw-complete", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        self._assert_pending(first, gen)
+        self.assertEqual(first["protocol_version"], 1)
+
+        ws.write_message(_stats_request(gen))
+        update = await _read_json(ws)
+
+        self.assertEqual(update["type"], "stats_update")
+        self.assertEqual(update["stats_gen"], gen)
+        self.assertEqual((update["scope"], update["tier"], update["final"]), ("raw", "full", True))
+        self.assertEqual((update["payload"]["format"], update["payload"]["layout"]),
+            ("parquet_b64", "wide"), "the payload must be inline, so binary pairing stays single-slot")
+        self.assertEqual(_rows_by_stat(update["payload"]),
+            _rows_by_stat(inline["df_data_dict"]["all_stats"]))
+        self.assertIsInstance(update["elapsed_ms"], (int, float))
+
+    @tornado.testing.gen_test
+    async def test_rows_are_served_before_and_after_the_stats_request(self):
+        await self._load("sw-rows", stats_delivery="deferred")
+        ws, first = await self._connect("sw-rows", caps="stats_update")
+        window = {"start": 0, "end": 5, "sourceName": "default", "origEnd": 5}
+        ws.write_message(json.dumps({"type": "infinite_request", "payload_args": window}))
+        self.assertEqual((await _read_json(ws))["length"], 5)
+        pq.read_table(io.BytesIO(await ws.read_message()))
+        ws.write_message(_stats_request(self._stats(first)["gen"]))
+        self.assertEqual((await _read_json(ws))["type"], "stats_update")
+        ws.write_message(json.dumps({"type": "infinite_request", "payload_args": window}))
+        self.assertEqual((await _read_json(ws))["type"], "infinite_resp",
+            "a stats_update must leave no stray binary frame in the stream")
+
+    @tornado.testing.gen_test
+    async def test_a_stale_stats_gen_gets_stats_aborted_and_runs_nothing(self):
+        await self._load("sw-stale", stats_delivery="deferred")
+        ws, first = await self._connect("sw-stale", caps="stats_update")
+        gen = self._stats(first)["gen"]
+
+        with _count_stat_queries() as queries:
+            ws.write_message(_stats_request(gen - 1))
+            aborted = await _read_json(ws)
+        self.assertEqual(aborted["type"], "stats_aborted")
+        self.assertEqual((aborted["stats_gen"], aborted["current_gen"], aborted["reason"]),
+            (gen - 1, gen, "stale"))
+        self.assertEqual(queries, [], "a stale request must run no stat query")
+
+        ws.write_message(_stats_request(gen))
+        self.assertEqual((await _read_json(ws))["type"], "stats_update",
+            "the stale request must not have consumed or failed the session's stats")
+
+    @tornado.testing.gen_test
+    async def test_an_unsupported_scope_gets_stats_aborted(self):
+        await self._load("sw-scope", stats_delivery="deferred")
+        ws, first = await self._connect("sw-scope", caps="stats_update")
+        ws.write_message(_stats_request(self._stats(first)["gen"], scope="filt"))
+        aborted = await _read_json(ws)
+        self.assertEqual((aborted["type"], aborted["reason"], aborted["scope"]),
+            ("stats_aborted", "unsupported_scope", "filt"))
+
+    @tornado.testing.gen_test
+    async def test_load_expr_and_reload_expr_bump_stats_gen(self):
+        await self._load("sw-gen", stats_delivery="deferred")
+        ws, first = await self._connect("sw-gen", caps="stats_update")
+        gen = self._stats(first)["gen"]
+
+        await self._load("sw-gen", stats_delivery="deferred", force_reload=True)
+        pushed = await _read_json(ws)
+        self.assertGreater(self._stats(pushed)["gen"], gen, "/load_expr must bump stats_gen")
+        gen = self._stats(pushed)["gen"]
+
+        resp = await _post(self.get_http_port(), "/reload_expr/sw-gen", {})
+        self.assertEqual(resp.code, 200, resp.body)
+        pushed = await _read_json(ws)
+        self.assertGreater(self._stats(pushed)["gen"], gen, "/reload_expr must bump stats_gen")
+
+    @tornado.testing.gen_test
+    async def test_df_meta_stats_survives_a_dataflow_field_change(self):
+        await self._load("sw-change", stats_delivery="deferred")
+        ws, first = await self._connect("sw-change", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        ws.write_message(_stats_request(gen))
+        self.assertEqual((await _read_json(ws))["type"], "stats_update")
+
+        with _count_stat_queries() as queries:
+            ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
+            changed = await _read_json(ws)
+        self._assert_pending(changed, gen + 1)
+        self.assertEqual(queries, [], "a dataflow-field change on a deferred session must run no stats")
+        # The dataflow rebuilt df_meta for the filtered state; its keys are still there.
+        self.assertEqual((changed["df_meta"]["total_rows"], changed["df_meta"]["filtered_rows"]), (5, 2))
+
+        ws.write_message(_stats_request(gen))
+        aborted = await _read_json(ws)
+        self.assertEqual((aborted["type"], aborted["current_gen"], aborted["reason"]),
+            ("stats_aborted", gen + 1, "stale"))
+        ws.write_message(_stats_request(gen + 1))
+        update = await _read_json(ws)
+        self.assertEqual((update["type"], update["stats_gen"], update["final"]),
+            ("stats_update", gen + 1, True))
+
+    @tornado.testing.gen_test
+    async def test_a_legacy_client_stays_complete_while_a_caps_client_gets_a_stats_free_frame(self):
+        sid = "sw-ab"
+        inline = await self._inline_frame("sw-ab-inline", post_processing="first_three")
+        await self._load(sid, stats_delivery="deferred")
+        a1, a1_open = await self._connect(sid, caps="other,stats_update")
+        a2, _ = await self._connect(sid, caps="stats_update")
+        # Connecting runs the missing stats for a legacy client, so the session
+        # is complete when B1 changes it.
+        b1, b1_open = await self._connect(sid, caps="unknown")
+        b2, _ = await self._connect(sid)
+        gen = self._stats(a1_open)["gen"]
+        self.assertEqual(self._stats(b1_open)["status"], "complete")
+
+        with _count_stat_queries() as queries:
+            b1.write_message(_state_change(post_processing="first_three"))
+            frames = {name: await _read_json(ws)
+                for name, ws in (("a1", a1), ("a2", a2), ("b1", b1), ("b2", b2))}
+            for name in ("a1", "a2"):
+                self._assert_pending(frames[name], gen + 1)
+            for name in ("b1", "b2"):
+                self._assert_complete(frames[name], gen + 1, inline)
+            ran = len(queries)
+            self.assertGreater(ran, 0, "B's frame must have run the stats it carries")
+
+            a1.write_message(_stats_request(gen + 1))
+            update = await _read_json(a1)
+            self.assertEqual((update["type"], update["stats_gen"]), ("stats_update", gen + 1))
+            self.assertEqual(_rows_by_stat(update["payload"]),
+                _rows_by_stat(frames["b1"]["df_data_dict"]["all_stats"]))
+            self.assertEqual(len(queries), ran,
+                "A's request must be answered from the stats B's frame computed")
+
+    @tornado.testing.gen_test
+    async def test_load_expr_push_keeps_a_legacy_client_complete(self):
+        sid = "sw-push-load-expr"
+        inline = await self._inline_frame("sw-push-load-expr-inline")
+        a, a_open, b, _ = await self._pair(sid)
+        gen = self._stats(a_open)["gen"]
+        await self._load(sid, stats_delivery="deferred", force_reload=True)
+        self._assert_pending(await _read_json(a), gen + 1)
+        self._assert_complete(await _read_json(b), gen + 1, inline)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_push_keeps_a_legacy_client_complete(self):
+        sid = "sw-push-reload"
+        inline = await self._inline_frame("sw-push-reload-inline")
+        a, a_open, b, _ = await self._pair(sid)
+        gen = self._stats(a_open)["gen"]
+        resp = await _post(self.get_http_port(), f"/reload_expr/{sid}", {})
+        self.assertEqual(resp.code, 200, resp.body)
+        self._assert_pending(await _read_json(a), gen + 1)
+        self._assert_complete(await _read_json(b), gen + 1, inline)
+
+    @tornado.testing.gen_test
+    async def test_load_push_leaves_both_clients_complete(self):
+        """/load swaps the session to pandas, which has no deferred stats: the
+        stored policy must not leave it looking pending."""
+        sid = "sw-push-load"
+        a, _, b, _ = await self._pair(sid)
+        csv_fd, csv_path = tempfile.mkstemp(suffix=".csv")
+        os.close(csv_fd)
+        try:
+            pd.DataFrame({"x": [1, 2, 3], "y": ["p", "q", "r"]}).to_csv(csv_path, index=False)
+            resp = await _post(self.get_http_port(), "/load",
+                {"session": sid, "path": csv_path, "mode": "buckaroo"})
+            self.assertEqual(resp.code, 200, resp.body)
+        finally:
+            os.unlink(csv_path)
+        frames = [await _read_json(a), await _read_json(b)]
+        for frame in frames:
+            self.assertNotIn("stats", frame["df_meta"])
+            self.assertIn("histogram_bins", _rows_by_stat(frame["df_data_dict"]["all_stats"]))
+        self.assertEqual(_comparable(frames[0]), _comparable(frames[1]))
+
+    @tornado.testing.gen_test
+    async def test_load_compare_push_leaves_both_clients_complete(self):
+        sid = "sw-push-compare"
+        a, _, b, _ = await self._pair(sid)
+        paths = []
+        try:
+            for frame in (pd.DataFrame({"id": [1, 2], "v": [10, 20]}),
+                    pd.DataFrame({"id": [1, 3], "v": [10, 30]})):
+                fd, path = tempfile.mkstemp(suffix=".csv")
+                os.close(fd)
+                frame.to_csv(path, index=False)
+                paths.append(path)
+            resp = await _post(self.get_http_port(), "/load_compare",
+                {"session": sid, "path1": paths[0], "path2": paths[1], "join_columns": ["id"]})
+            self.assertEqual(resp.code, 200, resp.body)
+        finally:
+            for path in paths:
+                os.unlink(path)
+        frames = [await _read_json(a), await _read_json(b)]
+        for frame in frames:
+            self.assertNotIn("stats", frame["df_meta"])
+        self.assertEqual(_comparable(frames[0]), _comparable(frames[1]))
+
+    @tornado.testing.gen_test
+    async def test_highlight_overlay_is_complete_for_a_legacy_client_and_stats_free_for_a_caps_client(self):
+        sid = "sw-overlay"
+        await self._load(sid, stats_delivery="deferred")
+        a, a_open = await self._connect(sid, caps="stats_update")
+        gen = self._stats(a_open)["gen"]
+
+        a.write_message(_state_change(search_string="ca"))
+        a_overlay = await _read_json(a)
+        self._assert_pending(a_overlay, gen)
+
+        b, _ = await self._connect(sid)
+        b.write_message(_state_change(search_string="ca"))
+        b_overlay = await _read_json(b)
+        self.assertEqual(self._stats(b_overlay)["status"], "complete")
+        self.assertIn("histogram_bins", _rows_by_stat(b_overlay["df_data_dict"]["all_stats"]))
+        # The overlay's display config is the complete one with the highlight on top.
+        session_args = self._session(sid).df_display_args["main"]["df_viewer_config"]["column_config"]
+        by_col = {cc["col_name"]: cc for cc in b_overlay["df_display_args"]["main"]["df_viewer_config"]["column_config"]}
+        for expected in session_args:
+            self.assertEqual(by_col[expected["col_name"]]["ag_grid_specs"], expected["ag_grid_specs"])
+        highlighted = [cc for cc in by_col.values()
+            if cc.get("displayer_args", {}).get("highlight_phrase") == ["ca"]]
+        self.assertTrue(highlighted, "the overlay must still carry the highlight")
+
+    @tornado.testing.gen_test
+    async def test_overlay_for_a_legacy_client_is_built_after_its_stats_are_completed(self):
+        """Completing the stats replaces the session's display config, so an
+        overlay that copied it first would send a legacy client the schema
+        tier's. Every send completes a session that has a legacy client
+        connected, so only a direct call reaches a pending session here."""
+        await self._load("sw-overlay-order", stats_delivery="deferred")
+        session = self._session("sw-overlay-order")
+        sent: list = []
+        legacy = SimpleNamespace(search_string="ca", caps=frozenset(), session_id="sw-overlay-order",
+            write_message=sent.append)
+        self.assertEqual(getattr(session, "stats_status", None), "pending")
+
+        DataStreamHandler._send_highlight_overlay(legacy, session)
+
+        self.assertEqual(session.stats_status, "complete")
+        overlay = json.loads(sent[0])["df_display_args"]["main"]["df_viewer_config"]["column_config"]
+        complete = session.df_display_args["main"]["df_viewer_config"]["column_config"]
+        self.assertEqual({cc["col_name"]: cc["ag_grid_specs"] for cc in overlay},
+            {cc["col_name"]: cc["ag_grid_specs"] for cc in complete})
+
+    @tornado.testing.gen_test
+    async def test_a_client_connecting_after_completion_gets_the_complete_state(self):
+        inline = await self._inline_frame("sw-late-inline")
+        await self._load("sw-late", stats_delivery="deferred")
+        a, a_open = await self._connect("sw-late", caps="stats_update")
+        gen = self._stats(a_open)["gen"]
+        a.write_message(_stats_request(gen))
+        self.assertEqual((await _read_json(a))["type"], "stats_update")
+
+        with _count_stat_queries() as queries:
+            _, late = await self._connect("sw-late", caps="stats_update")
+            _, legacy = await self._connect("sw-late")
+        self._assert_complete(late, gen, inline)
+        self._assert_complete(legacy, gen, inline)
+        self.assertEqual(queries, [], "stats computed once must not be computed again for a later client")
+
+    @tornado.testing.gen_test
+    async def test_a_legacy_client_connecting_to_a_pending_session_completes_it(self):
+        inline = await self._inline_frame("sw-open-inline")
+        await self._load("sw-open", stats_delivery="deferred")
+        _, legacy = await self._connect("sw-open")
+        self._assert_complete(legacy, self._stats(legacy)["gen"], inline)
+
+    @tornado.testing.gen_test
+    async def test_a_session_targeting_the_schema_tier_is_not_computed(self):
+        await self._load("sw-schema", stats_tier="schema", stats_delivery="deferred")
+        ws, first = await self._connect("sw-schema", caps="stats_update")
+        stats = self._stats(first)
+        self.assertEqual((stats["status"], stats["tier"], stats["reason"]), ("not_computed", "schema", "host"))
+        ws.write_message(_stats_request(stats["gen"]))
+        aborted = await _read_json(ws)
+        self.assertEqual((aborted["type"], aborted["reason"]), ("stats_aborted", "not_requestable"))
+        # Nothing is missing relative to the schema tier, so a legacy client
+        # gets the schema tier, as it does from an inline schema session.
+        _, legacy = await self._connect("sw-schema")
+        self.assertEqual(list(_rows_by_stat(legacy["df_data_dict"]["all_stats"])), ["dtype"])
+        await self._load("sw-schema-inline", stats_tier="schema")
+        _, inline_schema = await self._connect("sw-schema-inline")
+        self.assertEqual(self._stats(inline_schema)["status"], "not_computed")
+
+    @tornado.testing.gen_test
+    async def test_a_failed_stats_run_reports_error_until_the_next_generation(self):
+        await self._load("sw-error", stats_delivery="deferred")
+        ws, first = await self._connect("sw-error", caps="stats_update")
+        gen = self._stats(first)["gen"]
+
+        with patch.object(xorq_loading.XorqServerDataflow, "_get_summary_sd",
+            side_effect=RuntimeError("stats query failed")):
+            ws.write_message(_stats_request(gen))
+            aborted = await _read_json(ws)
+        self.assertEqual((aborted["type"], aborted["stats_gen"], aborted["reason"]), ("stats_aborted", gen, "error"))
+
+        # The failure is the session's state for this generation: a client that
+        # connects now is told so, and a legacy client still gets its frame.
+        _, caps_frame = await self._connect("sw-error", caps="stats_update")
+        stats = self._stats(caps_frame)
+        self.assertEqual((stats["status"], stats["tier"], stats["gen"]), ("error", "schema", gen))
+        self.assertIn("reason", stats)
+        _, legacy = await self._connect("sw-error")
+        self.assertEqual(legacy["type"], "initial_state")
+        self.assertEqual(list(_rows_by_stat(legacy["df_data_dict"]["all_stats"])), ["dtype"])
+
+        with _count_stat_queries() as queries:
+            ws.write_message(_stats_request(gen))
+            self.assertEqual((await _read_json(ws))["reason"], "error")
+        self.assertEqual(queries, [], "a failed generation must not be retried by every request")
+
+        ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
+        self._assert_pending(await _read_json(ws), gen + 1)
+        ws.write_message(_stats_request(gen + 1))
+        self.assertEqual((await _read_json(ws))["type"], "stats_update")
+
+    @tornado.testing.gen_test
+    async def test_stats_request_emits_a_stats_request_span(self):
+        captured: list = []
+        with patch.object(telemetry, "make_http_sink", lambda url, **kw: captured.append):
+            await self._load("sw-span", stats_delivery="deferred",
+                telemetry_url="http://companion.invalid/internal/telemetry")
+            ws, first = await self._connect("sw-span", caps="stats_update")
+            gen = self._stats(first)["gen"]
+            ws.write_message(_stats_request(gen - 1))
+            await _read_json(ws)
+            ws.write_message(_stats_request(gen, columns=["price"]))
+            await _read_json(ws)
+
+        stale, served = [r for r in captured if r["name"] == "stats.request"]
+        self.assertEqual(served["trace"], "sw-span")
+        self.assertEqual((served["attrs"]["stats_gen"], served["attrs"]["scope"], served["attrs"]["tier"]),
+            (gen, "raw", "full"))
+        self.assertEqual((served["attrs"]["outcome"], served["attrs"]["columns"]), ("update", 1))
+        self.assertEqual((stale["attrs"]["outcome"], stale["attrs"]["stats_gen"]), ("stale", gen - 1))
+        self.assertIn("firstpull.stats_total", [r["name"] for r in captured])
+
+    @tornado.testing.gen_test
+    async def test_returning_to_a_completed_state_is_answered_from_the_cache(self):
+        await self._load("sw-revisit", stats_delivery="deferred")
+        ws, first = await self._connect("sw-revisit", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        ws.write_message(_stats_request(gen))
+        original = await _read_json(ws)
+        ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
+        self._assert_pending(await _read_json(ws), gen + 1)
+        ws.write_message(_stats_request(gen + 1))
+        self.assertEqual((await _read_json(ws))["type"], "stats_update")
+
+        ws.write_message(_state_change(quick_command_args={}))
+        self._assert_pending(await _read_json(ws), gen + 2)
+        with _count_stat_queries() as queries:
+            ws.write_message(_stats_request(gen + 2))
+            again = await _read_json(ws)
+        self.assertEqual(queries, [], "the first state's stats are in summary_stats_cache")
+        self.assertEqual(_rows_by_stat(again["payload"]), _rows_by_stat(original["payload"]))
+
+    @tornado.testing.gen_test
+    async def test_completing_the_stats_keeps_component_config(self):
+        await self._load("sw-theme", stats_delivery="deferred", component_config={"className": "sw-themed"})
+        ws, first = await self._connect("sw-theme", caps="stats_update")
+        ws.write_message(_stats_request(self._stats(first)["gen"]))
+        self.assertEqual((await _read_json(ws))["type"], "stats_update")
+        _, late = await self._connect("sw-theme", caps="stats_update")
+        dvc = late["df_display_args"]["main"]["df_viewer_config"]
+        self.assertEqual(dvc["component_config"]["className"], "sw-themed")
+
+    @tornado.testing.gen_test
+    async def test_a_warm_load_expr_keeps_the_generation(self):
+        await self._load("sw-warm", stats_delivery="deferred")
+        _, first = await self._connect("sw-warm", caps="stats_update")
+        gen = self._stats(first)["gen"]
+        await self._load("sw-warm", stats_delivery="deferred")
+        _, again = await self._connect("sw-warm", caps="stats_update")
+        self.assertEqual(self._stats(again)["gen"], gen, "a warm exit rebuilds nothing, so the generation stands")
+
+    @tornado.testing.gen_test
+    async def test_a_stats_request_with_no_data_loaded_is_aborted(self):
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/sw-no-data?caps=stats_update")
+        self.clients.append(ws)
+        ws.write_message(_stats_request(1))
+        aborted = await _read_json(ws)
+        self.assertEqual((aborted["type"], aborted["reason"]), ("stats_aborted", "no_data"))
+
+    @tornado.testing.gen_test
+    async def test_inline_sessions_send_no_df_meta_stats(self):
+        """Default behaviour: a session with the default policy sends the
+        message it always has, and a client reads the absence as complete."""
+        await self._load("sw-inline")
+        _, frame = await self._connect("sw-inline", caps="stats_update")
+        self.assertNotIn("stats", frame["df_meta"])
+        self.assertIn("histogram_bins", _rows_by_stat(frame["df_data_dict"]["all_stats"]))
+
+
+    @tornado.testing.gen_test
+    async def test_a_stat_run_is_started_on_the_session_for_the_current_generation(self):
+        await self._load("sw-run", stats_delivery="deferred")
+        session = self._session("sw-run")
+        self.assertEqual(session.stat_runs, {})
+
+        with _count_stat_queries() as queries:
+            run = start_stat_run(session)
+            self.assertIs(start_stat_run(session), run, "one run per generation and scope")
+
+        self.assertEqual(queries, [], "planning a run runs no query")
+        self.assertEqual(run.key, (session.stats_gen, "raw"))
+        self.assertEqual(session.stat_runs, {run.key: run})
+        self.assertEqual(run.remaining, 4, "the scalar batch and one histogram unit for each of three columns")
+        self.assertEqual(run.units[0].id, "batch")
+
+    @tornado.testing.gen_test
+    async def test_a_run_ends_with_the_summary_sd_an_inline_session_computes(self):
+        await self._load("sw-run-sd", stats_delivery="deferred")
+        session = self._session("sw-run-sd")
+        run = start_stat_run(session)
+        while run.run_next() is not None:
+            pass
+        inline = xorq_loading.XorqServerDataflow(session.expr, skip_main_serial=True)
+        self.assertEqual(run.status, "complete")
+        self.assertEqual(_as_json(run.raw_sd()), _as_json(inline.summary_sd))
+
+    @tornado.testing.gen_test
+    async def test_a_dataflow_field_change_drops_the_run_and_a_search_term_change_keeps_it(self):
+        await self._load("sw-drop", stats_delivery="deferred")
+        ws, _first = await self._connect("sw-drop", caps="stats_update")
+        session = self._session("sw-drop")
+        run = start_stat_run(session)
+
+        ws.write_message(_state_change(search_string="alp"))
+        await _read_json(ws)  # this client's highlight overlay
+        self.assertEqual(session.stat_runs, {run.key: run}, "a typed search term touches no stats")
+
+        ws.write_message(_state_change(post_processing="first_three"))
+        await _read_json(ws)
+        self.assertEqual(session.stat_runs, {})
+        self.assertEqual(session.stats_gen, run.stats_gen + 1)
+        again = start_stat_run(session)
+        self.assertEqual(again.key, (run.stats_gen + 1, "raw"))
+        self.assertIsNot(again, run)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_drops_the_run(self):
+        await self._load("sw-drop-reload", stats_delivery="deferred")
+        session = self._session("sw-drop-reload")
+        start_stat_run(session)
+        resp = await _post(self.get_http_port(), "/reload_expr/sw-drop-reload", {})
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual(session.stat_runs, {})
+
+    @tornado.testing.gen_test
+    async def test_each_connection_keeps_its_own_cursor_into_the_run(self):
+        await self._load("sw-cursor", stats_delivery="deferred")
+        await self._connect("sw-cursor", caps="stats_update")
+        await self._connect("sw-cursor", caps="stats_update")
+        session = self._session("sw-cursor")
+        cursor_a, cursor_b = [handler.stats_cursor for handler in session.ws_clients]
+        self.assertIsNot(cursor_a, cursor_b)
+        self.assertEqual((cursor_a.position, cursor_b.position), (0, 0))
+
+        run = start_stat_run(session)
+        run.run_next()
+        run.run_next()
+        first = cursor_a.take(run)
+        self.assertEqual((len(first), cursor_b.position), (2, 0))
+        while run.run_next() is not None:
+            pass
+        rest, everything = cursor_a.take(run), cursor_b.take(run)
+
+        self.assertEqual(merge_fragments(first + rest), merge_fragments(everything))
+        self.assertEqual(len(set(run.ran)), len(run.units), "no unit ran twice")
+
+
+def _wide_parquet_expr(tmp_path, name="wide"):
+    """Twelve rows, six columns, read from parquet. Each string column has a
+    different count per value, so a GROUP BY over it returns one order."""
+    path = tmp_path / f"{name}.parquet"
+    pd.DataFrame({
+        "n0": [float(i) for i in range(12)], "n1": [i * 3 for i in range(12)],
+        "n2": [float(i % 7) + 0.5 for i in range(12)], "word": list("aaaaabbbbccd"),
+        "label": list("xxxxxyyyyzzw"), "flag": [True] * 7 + [False] * 5}).to_parquet(path)
+    return xo.deferred_read_parquet(str(path))
+
+
+def _batch_queries(queries):
+    return [q for q in queries if type(q.op()).__name__ == "Aggregate"]
+
+
+class TestStatUnits:
+    """Resumable units on the xorq server dataflow (rows-first s4): the
+    all-at-once constructor and a caller running ``plan``/``run`` one unit at a
+    time compute the same stats."""
+
+    def test_build_stats_without_running_issues_no_stat_query(self):
+        dataflow = _build_dataflow()
+        with _count_stat_queries() as queries:
+            stats = dataflow.build_stats(dataflow.processed_df, run=False)
+            stats.plan(stats.state)
+            stats.new_accumulator(stats.state)
+        assert queries == []
+        assert stats.sdf == {} and stats.errs == {}
+
+    def test_the_default_run_goes_through_the_units(self, monkeypatch):
+        """Every stat query of the constructor is issued from inside a unit."""
+        depth, inside, outside, units = [0], [], [], []
+        original_run, original_execute = XorqStatPipeline.run, XorqStatPipeline._execute
+
+        def spy_run(self, unit, acc):
+            depth[0] += 1
+            units.append(unit.id)
+            try:
+                return original_run(self, unit, acc)
+            finally:
+                depth[0] -= 1
+
+        def spy_execute(self, query):
+            (inside if depth[0] else outside).append(query)
+            return original_execute(self, query)
+
+        monkeypatch.setattr(XorqStatPipeline, "run", spy_run)
+        monkeypatch.setattr(XorqStatPipeline, "_execute", spy_execute)
+        _three_scope_dataflow()
+        assert inside and outside == []
+        assert units[0] == "batch" and "histogram:price" in units
+
+    def test_units_assembled_equal_merged_sd_with_init_sd_cleaning_and_overrides(self):
+        dataflow = _three_scope_dataflow(init_sd={
+            "price": {"displayer_args": {"displayer": "string", "max_length": 99}, "init_only": 1}},
+            column_config_overrides={"category": {"displayer_args": {"displayer": "string", "max_length": 5000}}})
+        dataflow.add_analysis(_OverridingPostProcessing)
+        dataflow.post_processing_method = "override_post"
+        sd = dataflow.merged_sd
+        assert sd["a"]["init_only"] == 1 and sd["b"]["from_post"] == 1 and sd["b"]["mean"] == 99.5
+        assert "cleaned_length" in sd["a"] and "filtered_length" in sd["a"], "both layers must be active"
+
+        sds = _scope_sds_by_units(dataflow)
+        inputs = _scope_inputs(dataflow)
+        assembled = assemble_merged_sd(init_sd=inputs["init_sd"], cleaned_sd=inputs["cleaned_sd"], raw_sd=sds["raw"],
+            processed_sd=inputs["processed_sd"], processed_df=inputs["processed_df"], chains=inputs["chains"],
+            clean_sd=sds["clean"], filt_sd=sds["filt"])
+
+        assert _as_json(assembled) == _as_json(dataflow.merged_sd)
+
+    def test_a_column_group_request_returns_only_those_columns(self):
+        dataflow = _build_dataflow()
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        for names in (("qty", "category"), ("b", "c")):  # original or rewritten names
+            state = dataclasses.replace(stats.state, columns=names)
+            acc = stats.new_accumulator(state)
+            fragments = [stats.run(unit, acc) for unit in stats.plan(state)]
+            assert [u.id for u in stats.plan(state)] == ["batch", "histogram:qty", "histogram:category"]
+            assert all(set(f) <= {"qty", "category"} for f in fragments)
+            assert list(acc.sd()) == ["qty", "category"]
+
+    def test_skip_stat_columns_get_no_unit(self):
+        dataflow = _build_dataflow(skip_stat_columns=["qty"], init_sd={"qty": {"_type": "float"}})
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        assert stats.state.skip_columns == {"qty"}
+        units = stats.plan(stats.state)
+        assert [u.id for u in units] == ["batch", "histogram:price", "histogram:category"]
+        assert all("qty" not in unit.columns for unit in units)
+
+    def test_the_batch_is_one_query_by_default(self, tmp_path):
+        expr = _wide_parquet_expr(tmp_path)
+        with _count_stat_queries() as queries:
+            xorq_loading.XorqServerDataflow(expr, skip_main_serial=True)
+        assert len(_batch_queries(queries)) == 1
+
+    def test_stat_chunk_cells_splits_the_batch_of_a_parquet_scan(self, tmp_path):
+        expr = _wide_parquet_expr(tmp_path)
+        whole = xorq_loading.XorqServerDataflow(expr, skip_main_serial=True)
+        with _count_stat_queries() as queries:
+            # 36 cells at 12 rows is three columns per chunk: two batch queries.
+            split = xorq_loading.XorqServerDataflow(expr, skip_main_serial=True, stat_chunk_cells=36)
+        assert len(_batch_queries(queries)) == 2
+        assert _as_json(split.merged_sd) == _as_json(whole.merged_sd)
+
+    def test_the_split_is_refused_for_a_join(self, tmp_path):
+        left = _wide_parquet_expr(tmp_path, "left")
+        pd.DataFrame({"n0": [float(i) for i in range(12)], "extra": list(range(12))}).to_parquet(
+            tmp_path / "right.parquet")
+        joined = left.join(xo.deferred_read_parquet(str(tmp_path / "right.parquet")), "n0")
+        with _count_stat_queries() as queries:
+            split = xorq_loading.XorqServerDataflow(joined, skip_main_serial=True, stat_chunk_cells=12)
+        assert len(_batch_queries(queries)) == 1, "each chunk of a join would run the whole join again"
+        whole = xorq_loading.XorqServerDataflow(joined, skip_main_serial=True)
+        assert _as_json(split.merged_sd) == _as_json(whole.merged_sd)
 
 
 class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):

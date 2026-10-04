@@ -11,6 +11,7 @@ from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, ErrD
 from ..serialization_utils import pd_to_obj, sd_to_parquet_b64, project_sd
 from buckaroo.pluggable_analysis_framework.utils import (filter_analysis)
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
+from buckaroo.pluggable_analysis_framework.stat_units import Fragment, StatAccumulator, StatState, StatUnit
 from .autocleaning import SentinelAutocleaning
 from .dataflow_extras import (exception_protect, Sampling)
 from .styling_core import (
@@ -26,6 +27,63 @@ from .styling_core import (
 from .abc_dataflow import ABCDataflow
 from .df_types import DataFrameT
 from .sd_cache import hash_chain, split_chain_by_scope
+
+# Content levels a dataflow can be built at. ``full`` runs the summary-stats
+# pipeline. ``schema`` publishes identity and typing keys derived from the
+# schema alone and runs no data query (backends opt in, see ``_get_schema_sd``).
+STATS_TIERS = ("full", "schema")
+
+
+def assemble_merged_sd(init_sd: InitSD, cleaned_sd: SDType, raw_sd: SDType, processed_sd: SDType,
+        processed_df: TAny, chains: TDict[str, List[TAny]],
+        clean_sd: Optional[SDType] = None, filt_sd: Optional[SDType] = None) -> SDType:
+    """Build the wire ``merged_sd`` from the pieces ``_merged_sd`` reads.
+
+    Bare keys come from the raw scope's sd (``raw_sd``, computed on
+    ``sampled_df``) merged under ``init_sd`` (keyed by original column name,
+    so rewritten here), ``cleaned_sd`` and ``processed_sd``. ``cleaned_*`` keys
+    are layered on top from ``clean_sd`` when cleaning is active, and
+    ``filtered_*`` keys from ``filt_sd`` when a search filter is active.
+
+    Pure: the inputs are not mutated, so a caller holding an accumulating
+    ``raw_sd`` can assemble it repeatedly without the traitlets cascade.
+    ``chains`` is ``split_chain_by_scope(operations)``.
+    """
+    if processed_df is None:
+        # on initial startup
+        return merge_sds(init_sd, cleaned_sd, raw_sd, processed_sd)
+
+    # Gate each prefixed layer on a chain-shape diff between scopes.
+    # ``cleaned_*`` fires when the clean chain has ops the raw chain
+    # doesn't (cleaning is on); ``filtered_*`` fires when the filt
+    # chain has ops the clean chain doesn't (at least one
+    # quick-command op is present, i.e. a search filter is on).
+    # Keying off ``filt_sd_key != raw_sd_key`` would also fire
+    # ``filtered_*`` for cleaning-only states, mislabelling cleaned
+    # stats as filtered.
+    cleaning_active = chains['clean'] != chains['raw']
+    filter_active = chains['filt'] != chains['clean']
+
+    #we do this to get rewrtten keys for init_sd
+    rewritten_init_sd = merge_sd_overrides({}, processed_df, init_sd)
+    intermediate_sd = merge_sds(rewritten_init_sd, cleaned_sd, raw_sd)
+    base = merge_sd_overrides(intermediate_sd, processed_df, processed_sd)
+
+    # Layer ``cleaned_*`` keys on top when cleaning is active.
+    if cleaning_active and clean_sd:
+        for col, stats in clean_sd.items():
+            col_dict = base.setdefault(col, {})
+            for stat_name, val in stats.items():
+                col_dict[f'cleaned_{stat_name}'] = val
+
+    # Layer ``filtered_*`` keys on top when a filter is active.
+    if filter_active and filt_sd:
+        for col, stats in filt_sd.items():
+            col_dict = base.setdefault(col, {})
+            for stat_name, val in stats.items():
+                col_dict[f'filtered_{stat_name}'] = val
+
+    return base
 
 
 class DfTrait(Any):
@@ -82,15 +140,22 @@ class DfStats(Protocol):
     ``DfStatsV2`` (pandas), ``PlDfStatsV2`` (polars) and ``XorqDfStatsV2``
     share this surface but no base class. The frame argument is ``Any``
     because each executor accepts only its own backend's frame type.
+
+    ``run=False`` builds one without computing anything, for a caller that runs
+    ``plan(state)`` and ``run(unit, acc)`` itself (see ``stat_units``).
     """
     sdf: TAny
     errs: TAny
     ap: TAny
+    state: StatState
     def __init__(self, df: TAny, col_analysis_objs: TAny, /, operating_df_name: TAny = ...,
-                 debug: bool = ..., skip_columns: TAny = ...) -> None: ...
+                 debug: bool = ..., skip_columns: TAny = ..., run: bool = ...) -> None: ...
     @classmethod
     def verify_analysis_objects(cls, col_analysis_objs: TAny, /) -> None: ...
     def add_analysis(self, a_obj: TAny, /) -> None: ...
+    def plan(self, state: Optional[StatState] = ...) -> List[StatUnit]: ...
+    def new_accumulator(self, state: Optional[StatState] = ...) -> StatAccumulator: ...
+    def run(self, unit: StatUnit, acc: StatAccumulator) -> Fragment: ...
 
 
 class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
@@ -161,6 +226,10 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
     # are id()-based cache keys and the dead "foo"/"bar" test branches below,
     # all of which treat None and [] alike).
     analysis_klasses: List[Type[ColAnalysis]] = []
+    # The content level the summary-stats cascade runs at (see STATS_TIERS).
+    # Instance-level on CustomizableDataflow; ``full`` here so the bare
+    # pipeline's dedupe key and cache keys can read it.
+    stats_tier: str = "full"
     summary_sd = Any()
     df_meta = Any()
 
@@ -312,7 +381,7 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
             ret_summary[col] = {}
         return ret_summary, {}
 
-    _summary_sd_cache_key = (None, None)
+    _summary_sd_cache_key = (None, None, None)
 
     @observe('processed_result', 'analysis_klasses')
     @exception_protect('summary_sd-protector')
@@ -322,7 +391,8 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
         # tuple wrapper, which makes this observer fire twice per widget
         # construction even when processed_df identity is unchanged.
         # Skip when neither the dataframe nor analysis_klasses has actually
-        # changed since the last run. See issue #709.
+        # changed since the last run. See issue #709. The tier is part of the
+        # key so a tier change reruns the summary even on the same frame.
         df = self.processed_df
         if df is None:
             # Nothing to summarize before the pipeline has produced a frame.
@@ -330,9 +400,9 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
             # narrows Optional[DataFrameT] -> DataFrameT for _get_summary_sd.
             return
         klasses = self.analysis_klasses
-        if (id(df), id(klasses)) == self._summary_sd_cache_key:
+        if (id(df), id(klasses), self.stats_tier) == self._summary_sd_cache_key:
             return
-        self._summary_sd_cache_key = (id(df), id(klasses))
+        self._summary_sd_cache_key = (id(df), id(klasses), self.stats_tier)
         result_summary_sd, errs  = self._get_summary_sd(df)
         self.summary_sd = result_summary_sd
         self.errs = errs
@@ -390,7 +460,11 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
                  pinned_rows:Union[Literal[None], PinnedRowConfig]=None, extra_grid_config=None,
                  component_config:Union[Literal[None], ComponentConfig]=None,
                  init_sd:Union[Literal[None], InitSD]=None, skip_main_serial=False,
-                 skip_stat_columns=None):
+                 skip_stat_columns=None, stats_tier:str="full"):
+        if stats_tier not in STATS_TIERS:
+            raise ValueError(f"stats_tier must be one of {STATS_TIERS}, got {stats_tier!r}")
+        # Set before super().__init__ — assigning raw_df runs the whole cascade.
+        self.stats_tier = stats_tier
         self.init_sd: InitSD
         if init_sd is None:
             self.init_sd = {}
@@ -520,43 +594,9 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         if filt_sd is None:
             filt_sd = self.summary_sd or {}
 
-        # Gate each prefixed layer on a chain-shape diff between scopes.
-        # ``cleaned_*`` fires when the clean chain has ops the raw chain
-        # doesn't (cleaning is on); ``filtered_*`` fires when the filt
-        # chain has ops the clean chain doesn't (at least one
-        # quick-command op is present, i.e. a search filter is on).
-        # Keying off ``filt_sd_key != raw_sd_key`` would also fire
-        # ``filtered_*`` for cleaning-only states, mislabelling cleaned
-        # stats as filtered.
-        chains = split_chain_by_scope(self.operations)
-        cleaning_active = chains['clean'] != chains['raw']
-        filter_active = chains['filt'] != chains['clean']
-
-        if self.processed_df is None:
-            #on initial startup
-            self.merged_sd = merge_sds(self.init_sd, self.cleaned_sd, raw_sd, self.processed_sd)
-            return
-
-        #we do this to get rewrtten keys for init_sd
-        rewritten_init_sd = merge_sd_overrides({}, self.processed_df, self.init_sd)
-        intermediate_sd = merge_sds(rewritten_init_sd, self.cleaned_sd, raw_sd)
-        base = merge_sd_overrides(intermediate_sd, self.processed_df, self.processed_sd)
-
-        # Layer ``cleaned_*`` keys on top when cleaning is active.
-        if cleaning_active and clean_sd:
-            for col, stats in clean_sd.items():
-                col_dict = base.setdefault(col, {})
-                for stat_name, val in stats.items():
-                    col_dict[f'cleaned_{stat_name}'] = val
-
-        # Layer ``filtered_*`` keys on top when a filter is active.
-        if filter_active and filt_sd:
-            for col, stats in filt_sd.items():
-                col_dict = base.setdefault(col, {})
-                for stat_name, val in stats.items():
-                    col_dict[f'filtered_{stat_name}'] = val
-
-        self.merged_sd = base
+        self.merged_sd = assemble_merged_sd(
+            self.init_sd, self.cleaned_sd, raw_sd, self.processed_sd, self.processed_df,
+            split_chain_by_scope(self.operations), clean_sd=clean_sd, filt_sd=filt_sd)
 
     def _compute_scope_df(self, scope: str):
         """Return the df that scope's SD should be computed against.
@@ -598,14 +638,14 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
             return base
         return pp_result[0] if pp_result else base
 
-    def _scope_cache_key(self, chain):
+    def _scope_cache_key(self, chain, tier=None):
         """Hash that identifies a scope's SD-input identity.
 
         Includes the op chain *and* an identifier for the source
         dataframe (``id(sampled_df)``) *and* the post-processing method
-        *and* the analysis-klasses identity — all four are inputs to
-        the scope's SD, and a cache hit must mean "same SD-producing
-        inputs" not just "same chain".
+        *and* the analysis-klasses identity *and* the stats tier — all
+        five are inputs to the scope's SD, and a cache hit must mean
+        "same SD-producing inputs" not just "same chain".
 
         - sampled_df identity addresses codex P1 on #783: a ``raw_df``
           swap with an unchanged chain must invalidate.
@@ -617,11 +657,18 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         - analysis_klasses identity addresses codex P2 on #783: a
           klass-list swap with an unchanged chain must invalidate so
           new stat klasses surface in ``merged_sd``.
+        - the tier keeps a schema-tier sd from being read as a full one:
+          without it, assigning full stats after a schema-tier
+          construction hits the schema entries and never reaches
+          ``merged_sd``. ``tier`` defaults to the dataflow's own, and is
+          explicit so a caller can address the full-tier entry while the
+          dataflow is still at the schema tier.
         """
         sampled_id = id(self.sampled_df) if self.sampled_df is not None else 0
         pp = self.post_processing_method or ''
         klasses_id = id(self.analysis_klasses)
-        return hash_chain(chain, extra=f"{sampled_id}|{pp}|{klasses_id}")
+        tier = tier or self.stats_tier
+        return hash_chain(chain, extra=f"{sampled_id}|{pp}|{klasses_id}|{tier}")
 
     @observe('summary_sd', 'operations', 'analysis_klasses')
     @exception_protect('sd-cache-protector')
@@ -653,9 +700,18 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         new_cache = dict(self.summary_stats_cache)
         cache_grew = False
 
-        # filt scope reuses the SD that _summary_sd just produced.
+        # filt scope reuses the SD that _summary_sd just produced, but only if
+        # it was produced for this frame, klass list and tier. An sd left over
+        # from another (a tier changed since it ran, or an assignment ahead of
+        # the cascade) would be stored under this key and never repaired, since
+        # a present key is a hit. Compute the scope's SD instead.
         if keys['filt'] not in new_cache:
-            new_cache[keys['filt']] = dict(self.summary_sd or {})
+            current = (id(self.processed_df), id(self.analysis_klasses), self.stats_tier)
+            if self._summary_sd_cache_key == current:
+                new_cache[keys['filt']] = dict(self.summary_sd or {})
+            else:
+                filt_sd, _errs = self._get_summary_sd(self.processed_df)
+                new_cache[keys['filt']] = filt_sd
             cache_grew = True
 
         # raw + clean: fresh compute, but only on cache miss.
@@ -708,14 +764,25 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
 
 
     ### start summary stats block
-    #TAny closer to some error type
-    @override
-    def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, ErrDict]:
-        stats = self.DFStatsClass(
+    def build_stats(self, processed_df: DataFrameT, run: bool = True) -> DfStats:
+        """The stats executor for ``processed_df``, built the one way every
+        summary-stats run builds it. With ``run=False`` it computes nothing yet
+        and the caller drives its ``plan`` and ``run``."""
+        # ``run`` is passed only when it is False, so a DFStatsClass written
+        # before it existed still builds on the default path.
+        extra = {} if run else {'run': False}
+        return self.DFStatsClass(
             processed_df,
             self.analysis_klasses,
             self.df_name, debug=self.debug,
-            skip_columns=getattr(self, 'skip_stat_columns', None))
+            skip_columns=getattr(self, 'skip_stat_columns', None), **extra)
+
+    #TAny closer to some error type
+    @override
+    def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, ErrDict]:
+        if self.stats_tier == "schema":
+            return self._get_schema_sd(processed_df), {}
+        stats = self.build_stats(processed_df)
         sdf = stats.sdf
         if stats.errs:
             if self.debug:
@@ -727,6 +794,16 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         else:
             return sdf, {}
 
+
+    def _get_schema_sd(self, processed_df: DataFrameT) -> SDType:
+        """Identity and typing keys for every column, from the schema alone.
+
+        ``orig_col_name``, ``rewritten_col_name``, ``dtype``, the ``is_*``
+        flags, ``_type`` and ``length``: the keys column styling needs to pick
+        displayers, with no data query beyond the row count. A backend opts in
+        to ``stats_tier="schema"`` by overriding this.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no schema stats tier")
 
     # ### end summary stats block        
 
@@ -745,35 +822,43 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     def _df_to_obj(self, df: DataFrameT) -> List[TDict[str, TAny]]:
         return pd_to_obj(self.sampling_klass.serialize_sample(df))
     
+    def _analysis_klasses_with(self, analysis_klass:Type[ColAnalysis]) -> List[Type[ColAnalysis]]:
+        """The klass list the stats pipelines' ``add_stat`` builds: a class of the
+        same name is replaced, anything else is appended."""
+        klasses = list(self.analysis_klasses)
+        if isinstance(analysis_klass, type):
+            klasses = [k for k in klasses
+                if not (isinstance(k, type) and k.__name__ == analysis_klass.__name__)]
+        klasses.append(analysis_klass)
+        return klasses
+
     def add_analysis(self, analysis_klass:Type[ColAnalysis]) -> None:
         """
         same as get_summary_sd, call whatever to set summary_sd and trigger further comps
         """
 
-        stats = self.DFStatsClass(
-            self.processed_df,
-            self.analysis_klasses,
-            self.df_name, debug=self.debug)
-        stats.add_analysis(analysis_klass)
-        
-        self.analysis_klasses = stats.ap.ordered_a_objs
+        if self.stats_tier == "full":
+            stats = self.DFStatsClass(
+                self.processed_df,
+                self.analysis_klasses,
+                self.df_name, debug=self.debug)
+            stats.add_analysis(analysis_klass)
+            self.analysis_klasses = stats.ap.ordered_a_objs
+        else:
+            # Building DFStatsClass here would run the stats this tier exists
+            # to skip (twice, since the constructor and add_analysis each
+            # process the frame), and it does not go through _get_summary_sd.
+            self.analysis_klasses = self._analysis_klasses_with(analysis_klass)
         self.DFStatsClass.verify_analysis_objects(self.analysis_klasses)
         self.setup_options_from_analysis()
         #force recomputation
         self._handle_widget_change({})
 
 
-    #final processing block
-    @observe('widget_args_tuple')
-    def _handle_widget_change(self, change):
-        """
-       put together df_dict for consumption by the frontend
-        """
-       # Tuple[TAny, pd.DataFrame, SDType]
-        _unused, processed_df, merged_sd = self.widget_args_tuple
-        if processed_df is None:
-            return
-
+    def _build_df_data_dict(self, processed_df, merged_sd):
+        """The ``df_data_dict`` trait value: the main rows, the ``all_stats``
+        payload and the empty placeholder. ``all_stats`` is the 5-11 ms part,
+        which is why it is built apart from ``_build_df_display_args``."""
         # df_data_dict is still hardcoded for now
         # eventually processed_df will be able to add or alter values of df_data_dict
         # correlation would be added, filtered would probably be altered
@@ -781,15 +866,15 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         # to expedite processing maybe future provided dfs from
         # postprcoessing could default to empty until that is
         # selected, optionally
-        if self.skip_main_serial:
-            self.df_data_dict = {'main': [],
-                'all_stats': self._sd_to_jsondf(merged_sd),
-                'empty': []}
-        else:
-            self.df_data_dict = {'main': self._df_to_obj(processed_df),
-                'all_stats': self._sd_to_jsondf(merged_sd),
-                'empty': []}
+        main = [] if self.skip_main_serial else self._df_to_obj(processed_df)
+        return {'main': main,
+            'all_stats': self._sd_to_jsondf(merged_sd),
+            'empty': []}
 
+    def _build_df_display_args(self, processed_df, merged_sd):
+        """The ``df_display_args`` trait value: each display's column_config,
+        pinned_rows and keys, with the overrides applied. Reads ``merged_sd``
+        but serializes none of it."""
         temp_display_args = {}
         for display_name, A_Klass in self.df_display_klasses.items():
             df_viewer_config = A_Klass.get_dfviewer_config(merged_sd, processed_df)
@@ -807,8 +892,21 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
             temp_display_args['main']['df_viewer_config']['extra_grid_config'] = self.extra_grid_config
         if self.component_config:
             temp_display_args['main']['df_viewer_config']['component_config'] = self.component_config
+        return temp_display_args
 
-        self.df_display_args = temp_display_args
+    #final processing block
+    @observe('widget_args_tuple')
+    def _handle_widget_change(self, change):
+        """
+       put together df_dict for consumption by the frontend
+        """
+       # Tuple[TAny, pd.DataFrame, SDType]
+        _unused, processed_df, merged_sd = self.widget_args_tuple
+        if processed_df is None:
+            return
+
+        self.df_data_dict = self._build_df_data_dict(processed_df, merged_sd)
+        self.df_display_args = self._build_df_display_args(processed_df, merged_sd)
    
 """
 
