@@ -16,7 +16,8 @@ from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.dataflow.dataflow import STATS_TIERS
 from buckaroo.server.session import (
-    DEFAULT_STATS_DELIVERY, DEFAULT_STATS_TIER, STATS_DELIVERIES, build_state_message, dataflow_stats_tier)
+    DEFAULT_STATS_DELIVERY, DEFAULT_STATS_TIER, STATS_DELIVERIES, begin_stats_generation, dataflow_stats_tier)
+from buckaroo.server.stats_wire import broadcast_state, refresh_session_snapshot
 from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
@@ -194,17 +195,10 @@ class LoadHandler(tornado.web.RequestHandler):
         if not session.ws_clients:
             return
 
-        for client in list(session.ws_clients):
-            try:
-                # Reset per-client live search first (dataset changed),
-                # then build the msg so the injected ``buckaroo_state``
-                # mirrors the post-reset value.
-                client.search_string = ""
-                msg = build_state_message(session, metadata=metadata,
-                    search_string=client.search_string)
-                client.write_message(json.dumps(msg))
-            except Exception:
-                session.ws_clients.discard(client)
+        # Each client's search is reset first (dataset changed), then its
+        # message is built so the injected ``buckaroo_state`` mirrors the
+        # post-reset value.
+        broadcast_state(session, metadata=metadata, reset_search=True)
 
     def _handle_browser_window(self, session_id: str) -> str:
         """Handle browser window management."""
@@ -390,6 +384,11 @@ class LoadHandler(tornado.web.RequestHandler):
                         **dvc.get("component_config", {}),
                         **component_config,
                     }
+
+        # /load builds no deferred stats, whatever policy a prior /load_expr on
+        # this session left behind, and the generation moves on with the data.
+        session.stats_tier, session.stats_delivery = "full", "inline"
+        begin_stats_generation(session)
 
         # Notify connected clients and open browser
         self._push_state_to_clients(session, metadata)
@@ -670,17 +669,13 @@ class LoadExprHandler(tornado.web.RequestHandler):
                         **dvc.get("component_config", {}),
                         **component_config}
 
-        if session.ws_clients:
-            for client in list(session.ws_clients):
-                try:
-                    # Reset per-client live search (#851): a term from
-                    # the prior expression would silently filter the new one.
-                    client.search_string = ""
-                    msg = build_state_message(session, metadata=metadata,
-                        search_string=client.search_string)
-                    client.write_message(json.dumps(msg))
-                except Exception:
-                    session.ws_clients.discard(client)
+        # A new expression is a new stats generation; a deferred session starts
+        # it pending.
+        begin_stats_generation(session)
+
+        # Reset per-client live search (#851): a term from the prior
+        # expression would silently filter the new one.
+        broadcast_state(session, metadata=metadata, reset_search=True)
 
         if no_browser or not self.application.settings.get("open_browser", False):
             browser_action = "skipped"
@@ -824,18 +819,12 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         session.df_meta = display_state["df_meta"]
         session.mode = "viewer"
         telemetry.arm_session(session, tele_sink)
+        # A viewer session has no dataflow and so no deferred stats.
+        session.stats_tier, session.stats_delivery = DEFAULT_STATS_TIER, DEFAULT_STATS_DELIVERY
+        begin_stats_generation(session)
 
-        # Push to WebSocket clients
-        if session.ws_clients:
-            for client in list(session.ws_clients):
-                try:
-                    # Reset per-client live search (#851).
-                    client.search_string = ""
-                    msg = build_state_message(session,
-                        search_string=client.search_string)
-                    client.write_message(json.dumps(msg))
-                except Exception:
-                    session.ws_clients.discard(client)
+        # Push to WebSocket clients. Reset per-client live search (#851).
+        broadcast_state(session, reset_search=True)
 
         # Browser window
         if no_browser or not self.application.settings.get("open_browser", False):
@@ -953,31 +942,13 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         if bs.get("quick_command_args"):
             xorq_dataflow.quick_command_args = bs["quick_command_args"]
 
-        refreshed = get_buckaroo_display_state(xorq_dataflow)
         session.xorq_dataflow = xorq_dataflow
         session.stats_tier = stats_tier
         session.stats_delivery = stats_delivery
-        session.df_display_args = refreshed["df_display_args"]
-        session.df_data_dict = refreshed["df_data_dict"]
-        session.df_meta = refreshed["df_meta"]
-        session.buckaroo_options = refreshed["buckaroo_options"]
-        session.command_config = refreshed["command_config"]
+        refresh_session_snapshot(session, xorq_dataflow)
+        begin_stats_generation(session)
 
-        if session.component_config and session.df_display_args:
-            for key in session.df_display_args:
-                dvc = session.df_display_args[key].get("df_viewer_config")
-                if dvc is not None:
-                    dvc["component_config"] = {
-                        **dvc.get("component_config", {}),
-                        **session.component_config}
-
-        for client in list(session.ws_clients):
-            try:
-                msg = build_state_message(session,
-                    search_string=getattr(client, "search_string", ""))
-                client.write_message(json.dumps(msg))
-            except Exception:
-                session.ws_clients.discard(client)
+        broadcast_state(session)
 
         klass_count = len(extra_klasses)
         log.info("reload_expr session=%s project_root=%s klasses=%d",
