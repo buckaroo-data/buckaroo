@@ -10,6 +10,11 @@ import { WebSocketModel } from "./WebSocketModel";
 import { withStatsCapability } from "./StatsChannel";
 import { decodeDFData } from "../components/DFViewerParts/resolveDFData";
 
+// A wide summary-stats envelope (parquet_b64, layout "wide") as the server
+// sends one; the decoder tests use the same fixture.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const wideFixture = require("../components/DFViewerParts/test-fixtures/summary_stats_parquet_b64.json");
+
 // The real decoder, except that an envelope carrying `hold` waits on `gate`,
 // so a test can deliver a frame while a decode is in flight.
 let gate: Promise<void> = Promise.resolve();
@@ -167,6 +172,38 @@ describe("stats_update merge", () => {
         expect(dict.empty).toEqual([]);
         expect(dict.main).toEqual([{ a: 1 }]);
         expect(dict.all_stats).toHaveLength(3);
+    });
+
+    it("merges a wide parquet_b64 payload as the server sends it", async () => {
+        const { ws, model } = makeModel(3, [row("orig_col_name", { a: "first" })]);
+        const decoded: any[] = await decodeDFData(wideFixture);
+        expect(decoded.length).toBeGreaterThan(1);
+        ws.deliver(update(3, [], { payload: wideFixture }));
+        await settle();
+        const stats = model.get("df_data_dict").all_stats;
+        expect(stats[0]).toEqual(row("orig_col_name", { a: "first" }));
+        for (const decodedRow of decoded) {
+            expect(stats).toContainEqual(decodedRow);
+        }
+    });
+
+    it("builds all_stats when the model holds no dict yet", async () => {
+        const ws = new FakeSocket();
+        const model = new WebSocketModel(ws as unknown as WebSocket, { df_meta: metaFor(pending(3)) });
+        ws.deliver(update(3, [row("mean", { a: 2 })]));
+        await settle();
+        expect(model.get("df_data_dict")).toEqual({ all_stats: [row("mean", { a: 2 })] });
+    });
+
+    it("adds all_stats to a dict that has none", async () => {
+        const ws = new FakeSocket();
+        const model = new WebSocketModel(ws as unknown as WebSocket, {
+            df_meta: metaFor(pending(3)),
+            df_data_dict: { main: [{ a: 1 }] },
+        });
+        ws.deliver(update(3, [row("mean", { a: 2 })]));
+        await settle();
+        expect(model.get("df_data_dict")).toEqual({ main: [{ a: 1 }], all_stats: [row("mean", { a: 2 })] });
     });
 
     it("applies updates that arrive back to back, in order", async () => {
