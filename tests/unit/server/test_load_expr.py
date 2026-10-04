@@ -1050,6 +1050,29 @@ class TestStatsTierSchema:
         assert by_header["qty"]["displayer_args"]["max_length"] == 200
         assert by_header["category"]["displayer_args"]["max_length"] == 5000
 
+    def test_skipped_column_keeps_init_sd_typing(self):
+        """A column in ``skip_stat_columns`` gets only name, dtype and length
+        from the pipeline, so its ``_type`` comes from ``init_sd``. The schema
+        tier must not layer the schema-derived typing keys over it."""
+        expr = _stats_tier_expr()
+        kwargs = {
+            "init_sd": {"qty": {"_type": "float", "mean": 1.8, "min": 1, "max": 3}},
+            "skip_stat_columns": ["qty"]}
+        full = _build_dataflow(expr, **kwargs)
+        schema = _build_dataflow(expr, stats_tier="schema", **kwargs)
+
+        def merged(dataflow, orig_col):
+            return next(v for v in dataflow.merged_sd.values() if v["orig_col_name"] == orig_col)
+
+        assert merged(full, "qty")["_type"] == "float"
+        assert merged(schema, "qty")["_type"] == "float"
+        assert not {"is_numeric", "is_integer", "is_float"} & merged(schema, "qty").keys()
+        assert merged(schema, "price")["_type"] == "float"
+        assert merged(schema, "price")["is_float"] is True
+        full_cfg = full.df_display_args["main"]["df_viewer_config"]["column_config"]
+        schema_cfg = schema.df_display_args["main"]["df_viewer_config"]["column_config"]
+        assert _without_min_width(schema_cfg) == _without_min_width(full_cfg)
+
     def test_sorted_infinite_request_works(self):
         dataflow = _build_dataflow(stats_tier="schema")
         qty = next(k for k, v in dataflow.merged_sd.items() if v["orig_col_name"] == "qty")
