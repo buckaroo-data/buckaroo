@@ -78,10 +78,11 @@ const update = (gen: number, rows: any[], extra: object = {}) => ({
     ...extra,
 });
 
-function makeModel(gen: number | undefined = 3, allStats: any = schemaStats()) {
+// `gen` null builds a model whose df_meta carries no stats, as an old server's does.
+function makeModel(gen: number | null = 3, allStats: any = schemaStats()) {
     const ws = new FakeSocket();
     const model = new WebSocketModel(ws as unknown as WebSocket, {
-        df_meta: metaFor(gen === undefined ? undefined : pending(gen)),
+        df_meta: metaFor(gen === null ? undefined : pending(gen)),
         df_data_dict: { all_stats: allStats },
     });
     const events: { event: string; value: any }[] = [];
@@ -102,6 +103,11 @@ describe("withStatsCapability", () => {
 
     it("extends an existing caps value", () => {
         expect(withStatsCapability("ws://h/ws/s?caps=other")).toBe("ws://h/ws/s?caps=other,stats_update");
+    });
+
+    it("leaves a URL that already advertises the capability alone", () => {
+        expect(withStatsCapability("ws://h/ws/s?caps=stats_update")).toBe("ws://h/ws/s?caps=stats_update");
+        expect(withStatsCapability("ws://h/ws/s?caps=a,stats_update")).toBe("ws://h/ws/s?caps=a,stats_update");
     });
 
     it("keeps the fragment last", () => {
@@ -274,6 +280,22 @@ describe("stats_gen", () => {
         expect(events.filter((e) => e.event === "change:df_data_dict")).toHaveLength(1);
     });
 
+    it("drops every stats_update when the server reported no stats", async () => {
+        const { ws, model, events } = makeModel(null);
+        ws.deliver(update(0, [row("mean", { a: 2 })]));
+        await settle();
+        expect(model.get("df_data_dict").all_stats).toHaveLength(2);
+        expect(events).toHaveLength(0);
+    });
+
+    it("clears the expectation when an initial_state carries no df_meta.stats", async () => {
+        const { ws, model } = makeModel(3);
+        ws.deliver(frame(undefined));
+        ws.deliver(update(3, [row("mean", { a: 2 })]));
+        await settle();
+        expect(model.get("df_data_dict").all_stats).toHaveLength(2);
+    });
+
     it("advances the expected gen on a broadcast initial_state with no reply_seq", async () => {
         const { ws, model } = makeModel(3);
         ws.deliver(frame(4));
@@ -335,5 +357,45 @@ describe("stats_aborted", () => {
         ws.deliver({ type: "stats_aborted", stats_gen: 3, current_gen: 3, scope: "raw", reason: "not_requestable" });
         await settle();
         expect(model.get("df_meta").stats.status).toBe("not_computed");
+    });
+
+    it("changes nothing for a stale reply, an unsupported scope or a session with no data", async () => {
+        const { ws, events } = makeModel(3);
+        for (const reason of ["stale", "unsupported_scope", "no_data"]) {
+            ws.deliver({ type: "stats_aborted", stats_gen: 3, current_gen: 4, scope: "raw", reason });
+        }
+        await settle();
+        expect(events).toHaveLength(0);
+    });
+
+    it("ignores a reply for a gen the client has left", async () => {
+        const { ws, model } = makeModel(3);
+        ws.deliver({ type: "stats_aborted", stats_gen: 2, current_gen: 3, scope: "raw", reason: "error" });
+        await settle();
+        expect(model.get("df_meta").stats.status).toBe("pending");
+    });
+});
+
+describe("other messages", () => {
+    it("ignores a type it does not know and keeps applying frames", async () => {
+        const { ws, model, events } = makeModel(3);
+        expect(() => ws.deliver({ type: "something_new", stats_gen: 3 })).not.toThrow();
+        ws.deliver({ type: "error", message: "boom" });
+        await settle();
+        expect(events).toHaveLength(0);
+        ws.deliver(frame(4, [row("dtype", { a: "int32" })]));
+        expect(model.get("df_data_dict").all_stats).toEqual([row("dtype", { a: "int32" })]);
+        expect(model.get("df_meta").stats).toEqual(pending(4));
+    });
+
+    it("still pairs an infinite_resp with the binary frame that follows it", () => {
+        const { ws, model } = makeModel(3);
+        const seen: [any, DataView[]][] = [];
+        model.on("msg:custom", (msg: any, buffers: DataView[]) => seen.push([msg, buffers]));
+        ws.deliver({ type: "infinite_resp", key: { start: 0, end: 5 }, length: 5 });
+        ws.onmessage?.({ data: new ArrayBuffer(8) } as MessageEvent);
+        expect(seen).toHaveLength(1);
+        expect(seen[0][0].type).toBe("infinite_resp");
+        expect(seen[0][1][0].byteLength).toBe(8);
     });
 });
