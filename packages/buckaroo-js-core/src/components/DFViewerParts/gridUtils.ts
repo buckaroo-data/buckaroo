@@ -38,6 +38,7 @@ import { getFormatterFromArgs, getCellRenderer, objFormatter, getFormatter } fro
 import { CSSProperties, Dispatch, SetStateAction } from "react";
 import { CommandConfigT } from "../CommandUtils";
 import { KeyAwareSmartRowCache, PayloadArgs } from "./SmartRowCache";
+import type { StatsStatus } from "../WidgetTypes";
 
 
 // for now colDef stuff with less than 3 implementantions should stay in this file
@@ -97,13 +98,33 @@ export function stripOptionalPinnedKey(key: string): string {
     return isOptionalPinnedKey(key) ? key.slice(1) : key;
 }
 
-export function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]) {
+// Marks a pinned row that stands in for stats that have not arrived. The row
+// carries its key as `index`, so it keeps its label and gets a row id of its
+// own, and the cell renderer selector leaves its value cells empty.
+export const PENDING_STAT_ROW_KEY = "__stat_pending";
+
+const PendingStatCell = () => null;
+const pendingStatRenderer: CellRendererSelectorResult = { component: PendingStatCell };
+
+// `statsStatus` is df_meta.stats.status. A required key with no value is, by
+// status:
+//   "pending"       a placeholder row, which holds the pinned area's height
+//   "not_computed"  omitted, since no value is coming
+//   anything else   undefined, as it was before df_meta.stats existed
+export function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[], statsStatus?: StatsStatus) {
     const result: (DFData[number] | undefined)[] = [];
     for (const cfg of prc) {
         const raw = cfg.primary_key_val;
-        const found = _.find(sdf, { index: stripOptionalPinnedKey(raw) });
-        if (found === undefined && isOptionalPinnedKey(raw)) {
-            continue;
+        const key = stripOptionalPinnedKey(raw);
+        const found = _.find(sdf, { index: key });
+        if (found === undefined) {
+            if (isOptionalPinnedKey(raw) || statsStatus === "not_computed") {
+                continue;
+            }
+            if (statsStatus === "pending") {
+                result.push({ index: key, [PENDING_STAT_ROW_KEY]: true });
+                continue;
+            }
         }
         result.push(found);
     }
@@ -339,6 +360,9 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[], column_c
             const pk = _.get(params.node.data, "index");
             if (pk === undefined) {
                 return anyRenderer; // default renderer
+            }
+            if (_.get(params.node.data, PENDING_STAT_ROW_KEY) === true && params.column?.getColId() !== "index") {
+                return pendingStatRenderer; // a stat that has not arrived: leave the cell empty
             }
             const maybePrc: PinnedRowConfig | undefined = _.find(
                 pinned_rows,

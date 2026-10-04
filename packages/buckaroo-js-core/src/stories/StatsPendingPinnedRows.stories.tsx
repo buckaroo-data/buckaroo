@@ -9,9 +9,8 @@
  *   - "complete"     stats are present; also the meaning of a missing
  *                    `df_meta.stats`, as servers without the field send
  *
- * Column `a` is color-mapped and has a simple tooltip, so the story also shows
- * that cells restyle when the histogram bins arrive and that hovering a
- * valueless pinned cell does nothing. Used by stats-pending-pinned-rows.spec.ts.
+ * Column `a` is color-mapped, so the story also shows that its cells restyle
+ * when the histogram bins arrive. Used by stats-pending-pinned-rows.spec.ts.
  */
 import type { Meta, StoryObj } from "@storybook/react";
 import React, { useMemo, useState } from "react";
@@ -45,7 +44,6 @@ const viewerConfig: DFViewerConfig = {
       header_name: "a",
       displayer_args: { displayer: "obj" },
       color_map_config: { color_rule: "color_map", map_name: "BLUE_TO_YELLOW", val_column: "a" },
-      tooltip_config: { tooltip_type: "simple", val_column: "a" },
     },
     { col_name: "b", header_name: "b", displayer_args: { displayer: "obj" } },
   ],

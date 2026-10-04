@@ -1,10 +1,28 @@
+// Where the summary stats stand, as the server reports it in df_meta.stats.
+// "pending": a stats_update is expected. "not_computed": none will be sent
+// unless the user asks. A missing df_meta.stats means "complete", which is
+// what servers that predate the field send.
+export type StatsStatus = "complete" | "pending" | "not_computed" | "error";
+
+export interface DFMetaStats {
+    status: StatsStatus;
+    tier?: string;
+    reason?: string;
+    gen?: number;
+}
+
 export interface DFMeta {
     // static,
     total_rows: number;
     columns: number;
     filtered_rows: number;
     rows_shown: number;
+    // Absent when the server predates the two-message protocol.
+    stats?: DFMetaStats;
 }
+
+export const getStatsStatus = (meta: DFMeta | undefined): StatsStatus =>
+    meta?.stats?.status ?? "complete";
 
 export interface BuckarooOptions {
     sampled: string[];

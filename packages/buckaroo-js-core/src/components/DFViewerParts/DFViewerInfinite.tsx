@@ -7,7 +7,8 @@ import {
 import * as _ from "lodash-es";
 import { DFData, DFDataRow, DFViewerConfig, SDFT } from "./DFWhole";
 
-import { getCellRendererSelector, dfToAgrid, extractPinnedRows, extractSDFT } from "./gridUtils";
+import { getCellRendererSelector, dfToAgrid, extractPinnedRows, extractSDFT, getFieldVal } from "./gridUtils";
+import type { StatsStatus } from "../WidgetTypes";
 
 import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
 import {
@@ -21,6 +22,7 @@ import {
     CellStyleModule,
     ColumnAutoSizeModule,
     PinnedRowModule,
+    RenderApiModule,
     RowSelectionModule,
     TooltipModule,
     TextFilterModule,
@@ -45,6 +47,9 @@ ModuleRegistry.registerModules([
     CellStyleModule,
     ColumnAutoSizeModule,
     PinnedRowModule,
+    // api.refreshCells lives here. Without it the call logs AG Grid error 200
+    // and does nothing.
+    RenderApiModule,
     RowSelectionModule,
     TooltipModule,
     TextFilterModule,
@@ -150,6 +155,7 @@ export function DFViewerInfinite({
     max_rows_in_configs,
     view_name,
     data_key,
+    stats_status,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -173,6 +179,10 @@ export function DFViewerInfinite({
     // a rowId, even though their `index` values overlap (row 0 in main is a
     // different record than row 0 in summary).
     data_key?: string;
+    // df_meta.stats.status. While "pending" a pinned key with no value shows a
+    // placeholder row; when "not_computed" it is omitted. Undefined behaves
+    // as "complete".
+    stats_status?: StatsStatus;
 }) {
     /*
     The idea is to do some pre-setup here for
@@ -233,6 +243,7 @@ export function DFViewerInfinite({
                     effectiveScheme={effectiveScheme}
                     view_name={view_name}
                     data_key={data_key}
+                    stats_status={stats_status}
                 />
             </div>
         </div>)
@@ -250,6 +261,7 @@ export function DFViewerInfiniteInner({
     effectiveScheme,
     view_name,
     data_key,
+    stats_status,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -266,6 +278,7 @@ export function DFViewerInfiniteInner({
     effectiveScheme?: 'light' | 'dark';
     view_name?: string;
     data_key?: string;
+    stats_status?: StatsStatus;
 }) {
     /*
     const lastProps = useRef<any>(null);
@@ -344,8 +357,8 @@ export function DFViewerInfiniteInner({
     // Always re-extract; upstream may mutate summary in-place without changing identity
     // Memoize to ensure it updates when summary_stats_data changes
     const topRowData = useMemo(
-        () => extractPinnedRows(summary_stats_data, pinned_rows ? pinned_rows : []) as DFDataRow[],
-        [summary_stats_data, pinned_rows]
+        () => extractPinnedRows(summary_stats_data, pinned_rows ? pinned_rows : [], stats_status) as DFDataRow[],
+        [summary_stats_data, pinned_rows, stats_status]
     );
     // Pinned rows are extracted and ready
 
@@ -442,6 +455,32 @@ export function DFViewerInfiniteInner({
                 // ignore until grid ready
             }
         }, [pinnedSig]);
+
+        // color_map reads histogram_bins from the grid context when a cell is
+        // painted, so cells that rendered before the bins arrived keep the
+        // neutral style. Repaint the color-mapped columns when their bins
+        // change after the first render. Bins that are already there at mount
+        // paint correctly, so the first run only records the signature.
+        const colorMapCols = useMemo(
+            () => df_viewer_config.column_config.flatMap((cc) =>
+                cc.color_map_config?.color_rule === "color_map"
+                    ? [{ field: getFieldVal(cc), statsCol: cc.color_map_config.val_column }]
+                    : []),
+            [df_viewer_config.column_config],
+        );
+        const colorMapSig = useMemo(() => {
+            if (colorMapCols.length === 0) return "";
+            const stats = extractSDFT(summary_stats_data);
+            return JSON.stringify(colorMapCols.map(
+                ({ field, statsCol }) => [field, statsCol === undefined ? undefined : stats[statsCol]?.histogram_bins]));
+        }, [colorMapCols, summary_stats_data]);
+        const colorMapSigRef = useRef(colorMapSig);
+        useEffect(() => {
+            if (colorMapSigRef.current === colorMapSig) return;
+            colorMapSigRef.current = colorMapSig;
+            if (colorMapCols.length === 0) return;
+            gridRef.current?.api?.refreshCells({ force: true, columns: colorMapCols.map((c) => c.field) });
+        }, [colorMapSig, colorMapCols]);
         
         // Force update rowData when Raw data changes
         const rawDataSig = useMemo(() => {

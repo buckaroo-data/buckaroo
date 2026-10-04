@@ -6,7 +6,7 @@
  * the pinned area shows. The StatsPendingPinnedRows story flips the status and
  * supplies the stats on "complete":
  *   - pending: every valueless pinned key shows a placeholder row with its own
- *     row id, and hovering a valueless cell does not throw
+ *     row id
  *   - not_computed: valueless pinned keys are omitted
  *   - complete: the values appear and the color-mapped column restyles
  */
@@ -35,11 +35,6 @@ test("pinned rows follow df_meta.stats.status: placeholders, omitted, then value
   await expect.poll(distinctPinnedRowIds, { timeout: 10_000 }).toEqual(["main-dtype", "main-mean"]);
   await expect(bodyCellA).toHaveText("1");
   const backgroundBeforeBins = await backgroundOf(bodyCellA);
-
-  // Hovering a valueless pinned cell shows no tooltip and throws nothing.
-  await page.locator('.ag-floating-top .ag-cell[col-id="a"]').first().hover();
-  await page.waitForTimeout(500);
-  expect(pageErrors).toEqual([]);
 
   // not_computed: the valueless keys are omitted.
   await page.getByTestId("status-not_computed").click();

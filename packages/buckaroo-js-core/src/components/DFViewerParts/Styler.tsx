@@ -64,13 +64,14 @@ export function colorMap(cmr: ColorMapRules) {
 
         const summarys = params.context?.histogram_stats;
         const statsCol = cmr.val_column; // || col_name;
+        // No bins is the normal state until the summary stats arrive, so
+        // fall back to the neutral style quietly; the grid repaints the
+        // column when they do.
         if (statsCol ===  undefined || summarys === undefined){
-            console.log("66 couldn't find stats_col")
             return baseReturn;
         } 
         const summary_stats_cell = summarys[statsCol];
         if (summary_stats_cell === undefined || summary_stats_cell.histogram_bins === undefined ) {
-            console.log("69 couldn't find summary_stats");
             return baseReturn
         }
         const histogram_edges = summary_stats_cell.histogram_bins;
