@@ -200,6 +200,18 @@ describe("testing utility functions in gridUtils ", () => {
       ]);
     });
 
+    it("omits a required key with no value when the stats status is error, and keeps one that has a value", () => {
+      // An error is final for the state on screen, so no value is coming for
+      // the keys that are missing (rows-first c4).
+      const data: DFData = [{ index: "row1", value: 1 }];
+      const pinnedConfig: PinnedRowConfig[] = [
+        { primary_key_val: "row1", displayer_args: { displayer: "obj" } },
+        { primary_key_val: "missing", displayer_args: { displayer: "obj" } }
+      ];
+      expect(extractPinnedRows(data, pinnedConfig, "error")).toStrictEqual([{ index: "row1", value: 1 }]);
+      expect(extractPinnedRows([], pinnedConfig, "error")).toStrictEqual([]);
+    });
+
     it("includes an optional `?`-prefixed pinned row when the unprefixed key exists in data", () => {
       const data: DFData = [
         { index: "histogram_bins", value: 1 },

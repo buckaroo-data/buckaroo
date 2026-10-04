@@ -1,188 +1,525 @@
-import { StateOrchestrator, WsLike } from "./StateOrchestrator";
+/**
+ * StateOrchestrator — the client scheduler for the stats wire (rows-first c4).
+ *
+ * A session the server defers stats for sends a stats-free first frame with
+ * df_meta.stats.status "pending". The scheduler asks for the stats once the
+ * first rows have arrived (`stats_request`), asks again for each reply that
+ * leaves the stats pending, and stands down when the state changes. The merge
+ * of the replies is StatsChannel's; the scheduler only watches the model.
+ *
+ * The scheduler tests drive a fake model the way WebSocketModel drives a real
+ * one (set a key, emit its change event). The last block builds a real
+ * WebSocketModel from a fake socket.
+ */
+import { StateOrchestrator, StatsModel, requestStats, touchesDataflow } from "./StateOrchestrator";
+import { WebSocketModel } from "./WebSocketModel";
 
-class FakeWs implements WsLike {
-    sent: string[] = [];
-    send(message: string): void {
-        this.sent.push(message);
+class FakeModel implements StatsModel {
+    sent: any[] = [];
+    private handlers = new Map<string, Set<Function>>();
+
+    constructor(public state: Record<string, any>) {}
+
+    get(key: string) {
+        return this.state[key];
     }
-    last(): Record<string, unknown> {
-        return JSON.parse(this.sent[this.sent.length - 1]);
+    set(key: string, value: any) {
+        this.state[key] = value;
+        this.emit(`change:${key}`, value);
     }
-    byType(type: string): Record<string, unknown>[] {
-        return this.sent
-            .map((s) => JSON.parse(s))
-            .filter((m) => m.type === type);
+    send(msg: any) {
+        this.sent.push(msg);
+    }
+    on(event: string, handler: (...args: any[]) => void) {
+        if (!this.handlers.has(event)) this.handlers.set(event, new Set());
+        this.handlers.get(event)!.add(handler);
+    }
+    off(event: string, handler: (...args: any[]) => void) {
+        this.handlers.get(event)?.delete(handler);
+    }
+    emit(event: string, ...args: any[]) {
+        for (const h of Array.from(this.handlers.get(event) ?? [])) h(...args);
+    }
+    listenerCount() {
+        return Array.from(this.handlers.values()).reduce((n, set) => n + set.size, 0);
+    }
+    /** A full frame: each key lands and fires its change event in turn, as
+     *  WebSocketModel's initial_state branch does. */
+    frame(msg: Record<string, any>) {
+        for (const [key, value] of Object.entries(msg)) this.set(key, value);
     }
 }
 
-describe("StateOrchestrator", () => {
-    let ws: FakeWs;
-    let orch: StateOrchestrator;
+const meta = (stats?: Record<string, any>) => ({
+    total_rows: 3, columns: 2, filtered_rows: 3, rows_shown: 3,
+    ...(stats === undefined ? {} : { stats }),
+});
+const pending = (gen: number) => ({ status: "pending", tier: "schema", gen });
+const complete = (gen: number) => ({ status: "complete", tier: "full", gen });
+const dict = (rows: any[] = []) => ({ all_stats: rows });
+const statRow = (stat: string) => ({ index: stat, level_0: stat, a: 1 });
+// Typed loosely: the server's buckaroo_state also carries keys (search_string)
+// that BuckarooState does not declare.
+const bState = (over: Record<string, any> = {}): any => ({
+    sampled: false, cleaning_method: false, quick_command_args: {}, post_processing: false,
+    df_display: "main", show_commands: false, ...over,
+});
 
-    beforeEach(() => {
-        jest.useFakeTimers();
-        ws = new FakeWs();
-        orch = new StateOrchestrator({ ws, minDebounceMs: 10, maxDebounceMs: 5000 });
+const request = (gen: number, extra: Record<string, any> = {}) => ({
+    type: "stats_request", stats_gen: gen, scope: "raw", ...extra,
+});
+
+const makeModel = (stats?: Record<string, any>) =>
+    new FakeModel({ df_meta: meta(stats), df_data_dict: dict(), buckaroo_state: bState() });
+
+/** The first rows reached the client: WebSocketModel emits msg:custom once it
+ *  has paired an infinite_resp with its parquet frame. */
+const rowsArrived = (model: FakeModel) =>
+    model.emit("msg:custom", { type: "infinite_resp", key: { start: 0, end: 3 }, length: 3 }, []);
+
+const start = (model: FakeModel, opts: Record<string, number> = {}) => {
+    const orchestrator = new StateOrchestrator({ model, ...opts });
+    orchestrator.start();
+    return orchestrator;
+};
+
+// With the defaults, a state change waits 2 x 250 ms before it asks again.
+const DEBOUNCE = 500;
+const FIRST_PAINT_TIMEOUT = 1500;
+
+// Runs due timers and every promise continuation they leave behind.
+const tick = (ms = 0) => jest.advanceTimersByTimeAsync(ms);
+
+beforeEach(() => {
+    jest.useFakeTimers();
+});
+
+afterEach(() => {
+    jest.useRealTimers();
+});
+
+describe("when nothing is pending", () => {
+    it("requests nothing for a session whose df_meta has no stats (every session today)", async () => {
+        const model = makeModel();
+        start(model);
+        rowsArrived(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
     });
 
-    afterEach(() => {
-        orch.dispose();
-        jest.useRealTimers();
+    it.each(["complete", "not_computed", "error"])("requests nothing when the status is %s", async (status) => {
+        const model = makeModel({ status, tier: "schema", gen: 3 });
+        start(model);
+        rowsArrived(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+});
+
+describe("the first request", () => {
+    it("goes out after the first infinite_resp, not before", async () => {
+        const model = makeModel(pending(3));
+        start(model);
+        await tick(100);
+        expect(model.sent).toEqual([]);
+
+        rowsArrived(model);
+        await tick();
+        expect(model.sent).toEqual([request(3)]);
     });
 
-    it("starts with token 0", () => {
-        expect(orch.currentToken).toBe(0);
+    it("goes out anyway when no rows come (an empty frame, the summary view)", async () => {
+        const model = makeModel(pending(3));
+        start(model);
+        await tick(FIRST_PAINT_TIMEOUT - 1);
+        expect(model.sent).toEqual([]);
+
+        await tick(1);
+        expect(model.sent).toEqual([request(3)]);
     });
 
-    it("onStateChange bumps token and ships state_change", () => {
-        orch.onStateChange({ search_string: "x" });
-        expect(orch.currentToken).toBe(1);
-        const msg = ws.last();
-        expect(msg.type).toBe("state_change");
-        expect(msg.state_token).toBe(1);
-        expect((msg.new_state as Record<string, unknown>).search_string).toBe("x");
+    it("carries no force flag", async () => {
+        const model = makeModel(pending(3));
+        start(model);
+        rowsArrived(model);
+        await tick();
+        expect(model.sent[0]).not.toHaveProperty("force");
     });
 
-    it("schedules compute_stat_group after the debounce", () => {
-        orch.onStateChange({ search_string: "PIZZA" });
-        // Only the immediate state_change has been sent so far.
-        expect(ws.byType("compute_stat_group")).toHaveLength(0);
+    it("is sent once, however many row responses follow", async () => {
+        const model = makeModel(pending(3));
+        start(model);
+        rowsArrived(model);
+        rowsArrived(model);
+        await tick();
+        rowsArrived(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([request(3)]);
+    });
+});
 
-        // Default baseline is 500ms × 2× = 1000ms; clamped to maxDebounceMs=5000.
-        jest.advanceTimersByTime(999);
-        expect(ws.byType("compute_stat_group")).toHaveLength(0);
+describe("one request per reply", () => {
+    const afterFirstRequest = async () => {
+        const model = makeModel(pending(3));
+        const orchestrator = start(model);
+        rowsArrived(model);
+        await tick();
+        return { model, orchestrator };
+    };
 
-        jest.advanceTimersByTime(1);
-        const reqs = ws.byType("compute_stat_group");
-        expect(reqs).toHaveLength(1);
-        expect(reqs[0].scope).toBe("filt");
-        expect(reqs[0].group).toBe("aggregate");
-        expect(reqs[0].state_token).toBe(1);
+    it("asks again for each reply that leaves the stats pending, and stops at the final one", async () => {
+        const { model } = await afterFirstRequest();
+        expect(model.sent).toEqual([request(3)]);
+
+        // No reply yet: nothing more goes out, however long the server takes.
+        await tick(10_000);
+        expect(model.sent).toEqual([request(3)]);
+
+        // A partial reply is a new df_data_dict under the same df_meta, which is
+        // what StatsChannel does for a stats_update that is not final.
+        model.set("df_data_dict", dict([statRow("mean")]));
+        await tick();
+        expect(model.sent).toEqual([request(3), request(3)]);
+        await tick(10_000);
+        expect(model.sent).toHaveLength(2);
+
+        model.set("df_data_dict", dict([statRow("mean"), statRow("std")]));
+        await tick();
+        expect(model.sent).toHaveLength(3);
+
+        // The final reply also sets df_meta.stats to complete.
+        model.set("df_data_dict", dict([statRow("mean"), statRow("std"), statRow("max")]));
+        model.set("df_meta", meta(complete(3)));
+        await tick(10_000);
+        expect(model.sent).toHaveLength(3);
     });
 
-    it("back-to-back state_changes cancel the previous debounce timer", () => {
-        orch.onStateChange({ search_string: "P" });
-        jest.advanceTimersByTime(500);
-        orch.onStateChange({ search_string: "PI" });
-        // The first timer would have fired at t=1000ms; the second
-        // resets it so at t=999ms from the SECOND call (= 1499 overall)
-        // no compute_stat_group has fired yet.
-        jest.advanceTimersByTime(998);
-        expect(ws.byType("compute_stat_group")).toHaveLength(0);
-
-        // The second timer fires.
-        jest.advanceTimersByTime(2);
-        const reqs = ws.byType("compute_stat_group");
-        expect(reqs).toHaveLength(1);
-        expect(reqs[0].state_token).toBe(2); // second state_change's token
+    it("reads a reply the same way whichever of the two events comes first", async () => {
+        const { model } = await afterFirstRequest();
+        model.set("df_meta", meta(complete(3)));
+        model.set("df_data_dict", dict([statRow("mean")]));
+        await tick(10_000);
+        expect(model.sent).toEqual([request(3)]);
     });
 
-    it("rapid typing produces just one aggregate request, with the latest token", () => {
-        // Simulate 5 keystrokes at 100ms intervals — typical typing cadence.
-        for (let i = 0; i < 5; i++) {
-            orch.onStateChange({ search_string: "P".repeat(i + 1) });
-            jest.advanceTimersByTime(100);
+    it.each([
+        ["df_meta then df_data_dict", ["df_meta", "df_data_dict"]],
+        ["df_data_dict then df_meta", ["df_data_dict", "df_meta"]],
+    ])("does not take a full frame for the same state as a reply (%s)", async (_label, order) => {
+        // A search term that changes only the highlight comes back as a full
+        // initial_state for the same stats_gen, with a new df_meta and a new dict.
+        const { model } = await afterFirstRequest();
+        const full: Record<string, any> = { df_meta: meta(pending(3)), df_data_dict: dict([statRow("dtype")]) };
+        model.frame(Object.fromEntries(order.map((k) => [k, full[k]])));
+        await tick(10_000);
+        expect(model.sent).toEqual([request(3)]);
+    });
+
+    it("stops when the server reports an error", async () => {
+        const { model } = await afterFirstRequest();
+        model.set("df_meta", meta({ status: "error", tier: "schema", gen: 3, reason: "stats_failed" }));
+        model.set("df_data_dict", dict([statRow("mean")]));
+        await tick(10_000);
+        expect(model.sent).toEqual([request(3)]);
+    });
+
+    it("stops when the server says the stats are not computed", async () => {
+        const { model } = await afterFirstRequest();
+        model.set("df_meta", meta({ status: "not_computed", tier: "schema", gen: 3 }));
+        await tick(10_000);
+        expect(model.sent).toEqual([request(3)]);
+    });
+});
+
+describe("a state change", () => {
+    const pendingAt = async (gen: number) => {
+        const model = makeModel(pending(gen));
+        const orchestrator = start(model);
+        rowsArrived(model);
+        await tick();
+        return { model, orchestrator };
+    };
+
+    // The server answers a dataflow change with a frame for the next stats_gen.
+    const nextFrame = (model: FakeModel, gen: number) => {
+        model.frame({ df_meta: meta(pending(gen)), df_data_dict: dict() });
+        rowsArrived(model);
+    };
+
+    it("stops the requests for the old state, then asks once for the new one", async () => {
+        const { model } = await pendingAt(3);
+        expect(model.sent).toEqual([request(3)]);
+
+        // The user changes a dataflow field while the request is out.
+        model.set("buckaroo_state", bState({ post_processing: "log_scale" }));
+        await tick(10);
+        // The reply to the old request lands. It is not followed by another.
+        model.set("df_data_dict", dict([statRow("mean")]));
+        await tick(10);
+        nextFrame(model, 4);
+
+        await tick(DEBOUNCE - 1);
+        expect(model.sent).toEqual([request(3)]);
+        await tick(1);
+        expect(model.sent).toEqual([request(3), request(4)]);
+        await tick(10_000);
+        expect(model.sent).toHaveLength(2);
+    });
+
+    it("reads a frame whose dict comes before its df_meta as the next state, not as a reply", async () => {
+        const { model } = await pendingAt(3);
+        // The frame for the next gen carries its dict before its df_meta.
+        model.frame({ df_data_dict: dict(), df_meta: meta(pending(4)) });
+        rowsArrived(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([request(3), request(4)]);
+    });
+
+    it.each([
+        ["post_processing", { post_processing: "log_scale" }],
+        ["cleaning_method", { cleaning_method: "aggressive" }],
+        ["quick_command_args", { quick_command_args: { search: ["x"] } }],
+    ])("a %s change cancels a request that is waiting out its delay", async (_field, change) => {
+        const { model } = await pendingAt(3);
+        nextFrame(model, 4);
+        await tick(300);
+
+        model.set("buckaroo_state", bState(change));
+        await tick(300);
+        // 600 ms in: the request that was due at 500 ms never went out.
+        expect(model.sent).toEqual([request(3)]);
+
+        nextFrame(model, 5);
+        await tick(DEBOUNCE - 1);
+        expect(model.sent).toEqual([request(3)]);
+        await tick(1);
+        expect(model.sent).toEqual([request(3), request(5)]);
+    });
+
+    it.each([
+        ["search_string (the #1015 path)", { search_string: "x" }],
+        ["df_display", { df_display: "summary" }],
+        ["show_commands", { show_commands: "1" }],
+        ["sampled", { sampled: "sample" }],
+    ])("a %s-only change is skipped", async (_label, change) => {
+        const { model } = await pendingAt(3);
+        nextFrame(model, 4);
+        await tick(300);
+
+        model.set("buckaroo_state", bState(change));
+        await tick(200);
+        // The request is still due at 500 ms, as if nothing had changed.
+        expect(model.sent).toEqual([request(3), request(4)]);
+    });
+
+    it("a search_string-only change does not interrupt a chain of replies", async () => {
+        const { model } = await pendingAt(3);
+        model.set("buckaroo_state", bState({ search_string: "x" }));
+        model.set("df_data_dict", dict([statRow("mean")]));
+        await tick();
+        expect(model.sent).toEqual([request(3), request(3)]);
+    });
+
+    it("a frame that repeats the same dataflow state is not a state change", async () => {
+        // Every full frame carries buckaroo_state back as the client sent it.
+        const { model } = await pendingAt(3);
+        model.set("buckaroo_state", bState());
+        model.set("df_data_dict", dict([statRow("mean")]));
+        await tick();
+        expect(model.sent).toEqual([request(3), request(3)]);
+    });
+
+    it("asks again for the same state when the server never answers the change with a frame", async () => {
+        const { model } = await pendingAt(3);
+        model.set("buckaroo_state", bState({ post_processing: "log_scale" }));
+        await tick(FIRST_PAINT_TIMEOUT + DEBOUNCE);
+        expect(model.sent).toEqual([request(3), request(3)]);
+    });
+
+    it("waits 2 x the last request's time, within the limits, before the next state's request", async () => {
+        const model = makeModel(pending(3));
+        const orchestrator = start(model, { minDebounceMs: 100, maxDebounceMs: 2000 });
+        expect(orchestrator.computeDebounce()).toBe(500);
+
+        rowsArrived(model);
+        await tick(400);
+        model.set("df_data_dict", dict([statRow("mean")])); // the reply, 400 ms after the request
+        await tick();
+        expect(orchestrator.computeDebounce()).toBe(800);
+
+        model.set("buckaroo_state", bState({ post_processing: "log_scale" }));
+        nextFrame(model, 4);
+        await tick(799);
+        expect(model.sent).toHaveLength(2);
+        await tick(1);
+        expect(model.sent).toHaveLength(3);
+        expect(model.sent[2]).toEqual(request(4));
+    });
+
+    it.each([
+        [10, 100],
+        [400, 800],
+        [5000, 2000],
+    ])("computeDebounce after a %i ms request is %i ms (floor 100, ceiling 2000)", async (elapsed, expected) => {
+        const model = makeModel(pending(3));
+        const orchestrator = start(model, { minDebounceMs: 100, maxDebounceMs: 2000 });
+        rowsArrived(model);
+        await tick(elapsed);
+        model.set("df_data_dict", dict([statRow("mean")]));
+        await tick();
+        expect(orchestrator.computeDebounce()).toBe(expected);
+    });
+});
+
+describe("requestStats", () => {
+    it("sends a stats_request for the gen the model shows", () => {
+        const model = makeModel(pending(7));
+        expect(requestStats(model)).toBe(true);
+        expect(model.sent).toEqual([request(7)]);
+    });
+
+    it("force sends force: true, which the Compute summary stats control uses", () => {
+        const model = makeModel({ status: "not_computed", tier: "schema", gen: 7 });
+        expect(requestStats(model, { force: true })).toBe(true);
+        expect(model.sent).toEqual([request(7, { force: true })]);
+    });
+
+    it("sends nothing when df_meta carries no stats.gen", () => {
+        const model = makeModel();
+        expect(requestStats(model)).toBe(false);
+        expect(requestStats(model, { force: true })).toBe(false);
+        expect(model.sent).toEqual([]);
+    });
+});
+
+describe("touchesDataflow", () => {
+    it("is true for each field the server reruns the dataflow for", () => {
+        expect(touchesDataflow(bState(), bState({ post_processing: "x" }))).toBe(true);
+        expect(touchesDataflow(bState(), bState({ cleaning_method: "x" }))).toBe(true);
+        expect(touchesDataflow(bState(), bState({ quick_command_args: { search: ["x"] } }))).toBe(true);
+    });
+
+    it("is false for the others, and for an equal quick_command_args that is a new object", () => {
+        expect(touchesDataflow(bState(), bState({ search_string: "x" }))).toBe(false);
+        expect(touchesDataflow(bState(), bState({ df_display: "summary" }))).toBe(false);
+        expect(touchesDataflow(bState({ quick_command_args: { search: ["x"] } }), bState({ quick_command_args: { search: ["x"] } }))).toBe(false);
+    });
+
+    it("is false when there is no earlier state to compare with", () => {
+        expect(touchesDataflow(undefined, bState({ post_processing: "x" }))).toBe(false);
+    });
+});
+
+describe("start and stop", () => {
+    it("stop removes every listener and cancels the pending request", async () => {
+        const model = makeModel(pending(3));
+        const orchestrator = start(model);
+        expect(model.listenerCount()).toBeGreaterThan(0);
+
+        rowsArrived(model);
+        orchestrator.stop();
+        expect(model.listenerCount()).toBe(0);
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+
+    it("start is idempotent: a second call adds no listeners", () => {
+        const model = makeModel(pending(3));
+        const orchestrator = start(model);
+        const listeners = model.listenerCount();
+        orchestrator.start();
+        expect(model.listenerCount()).toBe(listeners);
+    });
+
+    it("can start again after a stop", async () => {
+        const model = makeModel(pending(3));
+        const orchestrator = start(model);
+        orchestrator.stop();
+        orchestrator.start();
+        rowsArrived(model);
+        await tick();
+        expect(model.sent).toEqual([request(3)]);
+    });
+});
+
+// The scheduler is started by WebSocketModel, so a session reached through
+// BuckarooServerView or the standalone page gets it with no wiring of its own.
+describe("wired into WebSocketModel", () => {
+    class FakeSocket {
+        readyState = 1; // WebSocket.OPEN
+        onmessage: ((e: MessageEvent) => void) | null = null;
+        sent: any[] = [];
+        send(data: string) {
+            this.sent.push(JSON.parse(data));
         }
-        // Default debounce = 1000ms after the last keystroke. No aggregate yet.
-        expect(ws.byType("compute_stat_group")).toHaveLength(0);
+        deliver(msg: object) {
+            this.onmessage?.({ data: JSON.stringify(msg) } as MessageEvent);
+        }
+        deliverBinary() {
+            this.onmessage?.({ data: new ArrayBuffer(8) } as MessageEvent);
+        }
+    }
 
-        jest.advanceTimersByTime(1000);
-        const reqs = ws.byType("compute_stat_group");
-        // Exactly one aggregate request, with the 5th (final) token.
-        expect(reqs).toHaveLength(1);
-        expect(reqs[0].state_token).toBe(5);
+    const update = (gen: number, stat: string, final: boolean) => ({
+        type: "stats_update",
+        stats_gen: gen,
+        scope: "raw",
+        tier: "full",
+        final,
+        payload: { format: "json", layout: "wide", data: [{ index: stat, level_0: stat, a: 1 }] },
+        elapsed_ms: 5,
     });
 
-    it("onStatGroupResult with matching token updates the baseline", () => {
-        orch.onStateChange({ search_string: "x" });
-        const applied = orch.onStatGroupResult({
-            type: "stat_group_result",
-            state_token: 1,
-            scope: "filt",
-            group: "aggregate",
-            elapsed_ms: 7500,
+    const makeSocketModel = (stats?: Record<string, any>) => {
+        const ws = new FakeSocket();
+        const model = new WebSocketModel(ws as unknown as WebSocket, {
+            df_meta: meta(stats),
+            df_data_dict: { all_stats: [{ index: "dtype", level_0: "dtype", a: "int64" }] },
+            buckaroo_state: bState(),
         });
-        expect(applied).toBe(true);
+        return { ws, model };
+    };
+    const rowsFromServer = (ws: FakeSocket) => {
+        ws.deliver({ type: "infinite_resp", key: { start: 0, end: 3 }, length: 3 });
+        ws.deliverBinary();
+    };
 
-        // Next debounce is 2× 7500 = 15000ms, clamped to maxDebounceMs=5000.
-        expect(orch.computeDebounce("filt")).toBe(5000);
+    it("requests the stats after the first rows, once per reply, and stops at the final one", async () => {
+        const { ws, model } = makeSocketModel(pending(3));
+        await tick(100);
+        expect(ws.sent).toEqual([]);
+
+        rowsFromServer(ws);
+        await tick();
+        expect(ws.sent).toEqual([request(3)]);
+
+        ws.deliver(update(3, "mean", false));
+        await tick();
+        expect(ws.sent).toEqual([request(3), request(3)]);
+
+        ws.deliver(update(3, "std", true));
+        await tick(10_000);
+        expect(ws.sent).toHaveLength(2);
+        expect(model.get("df_meta").stats.status).toBe("complete");
+        expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "mean", "std"]);
     });
 
-    it("onStatGroupResult with stale token is silently dropped", () => {
-        orch.onStateChange({ search_string: "x" });
-        orch.onStateChange({ search_string: "xy" });
-        // Token is now 2.
-        const applied = orch.onStatGroupResult({
-            type: "stat_group_result",
-            state_token: 1, // stale
-            scope: "filt",
-            group: "aggregate",
-            elapsed_ms: 9999,
-        });
-        expect(applied).toBe(false);
-        // Baseline unchanged — debounce stays at the default.
-        expect(orch.computeDebounce("filt")).toBe(1000);
+    it("moves on to the next gen when a state change frame arrives", async () => {
+        const { ws } = makeSocketModel(pending(3));
+        rowsFromServer(ws);
+        await tick();
+        expect(ws.sent).toEqual([request(3)]);
+
+        ws.deliver({ type: "initial_state", df_meta: meta(pending(4)), df_data_dict: dict() });
+        rowsFromServer(ws);
+        await tick(DEBOUNCE);
+        expect(ws.sent).toEqual([request(3), request(4)]);
     });
 
-    it("computeDebounce respects minDebounceMs floor", () => {
-        const o = new StateOrchestrator({
-            ws: new FakeWs(),
-            minDebounceMs: 500,
-            maxDebounceMs: 3000,
-            multiplier: 2,
-        });
-        o.onStatGroupResult({
-            type: "stat_group_result",
-            state_token: 0,
-            scope: "filt",
-            group: "aggregate",
-            elapsed_ms: 10, // 2× 10 = 20, well under floor
-        });
-        expect(o.computeDebounce("filt")).toBe(500);
-    });
-
-    it("computeDebounce respects maxDebounceMs ceiling", () => {
-        const o = new StateOrchestrator({
-            ws: new FakeWs(),
-            minDebounceMs: 200,
-            maxDebounceMs: 3000,
-            multiplier: 2,
-        });
-        o.onStatGroupResult({
-            type: "stat_group_result",
-            state_token: 0,
-            scope: "filt",
-            group: "aggregate",
-            elapsed_ms: 6000, // 2× = 12000, hits ceiling
-        });
-        expect(o.computeDebounce("filt")).toBe(3000);
-    });
-
-    it("initialAggregateMs seeds the baseline before any observed compute", () => {
-        const o = new StateOrchestrator({
-            ws: new FakeWs(),
-            initialAggregateMs: { filt: 250 },
-            minDebounceMs: 10,
-            maxDebounceMs: 5000,
-            multiplier: 2,
-        });
-        expect(o.computeDebounce("filt")).toBe(500); // 2× 250
-        // Unrelated scope still uses fallback.
-        expect(o.computeDebounce("clean")).toBe(1000); // 2× 500 (default)
-    });
-
-    it("dispose cancels all pending aggregate timers", () => {
-        orch.onStateChange({ search_string: "x" });
-        orch.dispose();
-        jest.advanceTimersByTime(10_000);
-        expect(ws.byType("compute_stat_group")).toHaveLength(0);
-    });
-
-    it("scopesForAggregate parameter overrides default ['filt']", () => {
-        orch.onStateChange({ search_string: "x" }, { scopesForAggregate: ["filt", "clean"] });
-        jest.advanceTimersByTime(10_000);
-        const reqs = ws.byType("compute_stat_group");
-        const scopes = reqs.map((r) => r.scope).sort();
-        expect(scopes).toEqual(["clean", "filt"]);
+    it("sends nothing for a model whose df_meta has no stats", async () => {
+        const { ws } = makeSocketModel();
+        rowsFromServer(ws);
+        await tick(10_000);
+        expect(ws.sent).toEqual([]);
     });
 });

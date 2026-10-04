@@ -759,6 +759,21 @@ describe("BuckarooInfiniteWidget — stats not yet available (rows-first c0a)", 
       expect(lastPinnedRows()).toEqual(stats);
     });
 
+    it("error: omits the valueless keys, since no value is coming", () => {
+      render(<BuckarooInfiniteWidget {...widgetProps({ df_meta: withStats("error") })} />);
+      expect(lastPinnedRows()).toEqual([]);
+    });
+
+    it("error: keeps a key that has a value", () => {
+      const stats = [{ index: "dtype", a: "int64" }];
+      render(
+        <BuckarooInfiniteWidget
+          {...widgetProps({ df_meta: withStats("error"), df_data_dict: { summary_stats: stats } })}
+        />,
+      );
+      expect(lastPinnedRows()).toEqual(stats);
+    });
+
     it("no df_meta.stats (an older server) behaves as complete: valueless keys stay undefined rows", () => {
       const stats = [{ index: "dtype", a: "int64" }];
       render(<BuckarooInfiniteWidget {...widgetProps({ df_data_dict: { summary_stats: stats } })} />);
@@ -812,6 +827,23 @@ describe("BuckarooInfiniteWidget — stats not yet available (rows-first c0a)", 
         />,
       );
       expect(forcedRefreshes()).toHaveLength(0);
+    });
+  });
+
+  describe("compute summary stats control (rows-first c4)", () => {
+    it("forwards on_compute_stats to the status bar", () => {
+      const onComputeStats = jest.fn();
+      render(
+        <BuckarooInfiniteWidget
+          {...widgetProps({ df_meta: withStats("not_computed"), on_compute_stats: onComputeStats })}
+        />,
+      );
+      expect(mockStatusBarProps.onComputeStats).toBe(onComputeStats);
+    });
+
+    it("passes nothing on when the host gave no callback, so the status bar shows no control", () => {
+      render(<BuckarooInfiniteWidget {...widgetProps({ df_meta: withStats("not_computed") })} />);
+      expect(mockStatusBarProps.onComputeStats).toBeUndefined();
     });
   });
 

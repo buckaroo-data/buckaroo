@@ -148,6 +148,9 @@ export function BuckarooInfiniteWidget({
         df_meta: DFMeta;
         df_data_dict: Record<string, DFData>;
         df_display_args: Record<string, IDisplayArgs>;
+        /** Sends a forced stats_request. Server entry points pass it; the Jupyter
+         *  widget does not, and then the status bar offers no control. */
+        on_compute_stats?: () => void;
         operations: Operation[];
         on_operations: (ops: Operation[]) => void;
         operation_results: OperationResult;

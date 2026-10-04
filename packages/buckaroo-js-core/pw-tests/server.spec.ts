@@ -501,6 +501,95 @@ test.describe('WebSocket data flow', () => {
     expect(new URL(wsUrls[0]).searchParams.get('caps')).toBe('stats_update');
   });
 
+  // Rows-first c4: the standalone page's scheduler. No session the server can
+  // build here defers its stats (that needs a xorq expression), so these
+  // tests put the pending state on a real session's first frame and answer
+  // the page's stats_request themselves. Rows, config and the stats payload
+  // all come from the real server.
+  async function loadBuckarooSession(request: any, sessionId: string) {
+    const resp = await request.post(`${BASE}/load`, {
+      data: { session: sessionId, path: csvPath, mode: 'buckaroo' },
+    });
+    expect(resp.ok()).toBe(true);
+  }
+
+  test('a pending session: the page asks for stats after the first rows, merges the reply and shows them', async ({ page, request }) => {
+    const session = `ws-sched-${Date.now()}`;
+    await loadBuckarooSession(request, session);
+
+    const order: string[] = [];
+    const requests: any[] = [];
+    let realStats: unknown;
+    await page.routeWebSocket(new RegExp(`/ws/${session}`), (ws) => {
+      const server = ws.connectToServer();
+      server.onMessage((message) => {
+        if (typeof message !== 'string') {
+          ws.send(message);
+          return;
+        }
+        const msg = JSON.parse(message);
+        if (msg.type === 'infinite_resp') order.push('infinite_resp');
+        if (msg.type === 'initial_state' && realStats === undefined) {
+          // The first frame as a deferring server sends it: no stats yet.
+          realStats = msg.df_data_dict.all_stats;
+          msg.df_data_dict.all_stats = [];
+          msg.df_meta = { ...msg.df_meta, stats: { status: 'pending', tier: 'schema', gen: 1 } };
+          ws.send(JSON.stringify(msg));
+          return;
+        }
+        ws.send(message);
+      });
+      ws.onMessage((message) => {
+        if (typeof message === 'string') {
+          const msg = JSON.parse(message);
+          if (msg.type === 'stats_request') {
+            order.push('stats_request');
+            requests.push(msg);
+            ws.send(JSON.stringify({
+              type: 'stats_update', stats_gen: msg.stats_gen, scope: msg.scope, tier: 'full',
+              final: true, payload: realStats, elapsed_ms: 1,
+            }));
+            return;
+          }
+        }
+        server.send(message);
+      });
+    });
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+
+    // The stats arrive: the status bar says so and the pinned dtype row has its values.
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'complete', { timeout: 10_000 });
+    await expect(page.locator('.ag-floating-top [col-id="b"]').first()).not.toHaveText('', { timeout: 10_000 });
+
+    // One whole-run request, for the gen on the first frame, after rows had arrived.
+    expect(requests).toEqual([{ type: 'stats_request', stats_gen: 1, scope: 'raw' }]);
+    expect(order.indexOf('infinite_resp')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('infinite_resp')).toBeLessThan(order.indexOf('stats_request'));
+  });
+
+  test('a session that does not report df_meta.stats never gets a stats_request', async ({ page, request }) => {
+    const session = `ws-nosched-${Date.now()}`;
+    await loadBuckarooSession(request, session);
+
+    const sentTypes: string[] = [];
+    page.on('websocket', (socket) => {
+      socket.on('framesent', (frame) => {
+        if (typeof frame.payload === 'string') sentTypes.push(JSON.parse(frame.payload).type);
+      });
+    });
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+    await expect(page.locator('.status-bar')).toBeVisible();
+    // Longer than the scheduler would wait for rows that never come.
+    await page.waitForTimeout(3000);
+
+    expect(sentTypes).toContain('infinite_request');
+    expect(sentTypes).not.toContain('stats_request');
+    await expect(page.getByTestId('stats-status')).toHaveCount(0);
+  });
+
   test('WebSocket receives data for scrolled rows', async ({ page, request }) => {
     // Create a larger dataset (100 rows) to force infinite scrolling
     const rows = [];

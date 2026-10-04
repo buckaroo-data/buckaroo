@@ -4,7 +4,7 @@ import * as _ from "lodash-es";
 import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
 import { ColDef, GridApi, GridOptions } from "ag-grid-community";
 import { basicIntFormatter } from "./DFViewerParts/Displayer";
-import { DFMeta } from "./WidgetTypes";
+import { DFMeta, DFMetaStats } from "./WidgetTypes";
 import { BuckarooOptions } from "./WidgetTypes";
 import { BuckarooState, BKeys } from "./WidgetTypes";
 import { CustomCellEditorProps } from 'ag-grid-react';
@@ -307,6 +307,11 @@ export const SearchEditor =  memo(({ value, onValueChange, stopEditing }: Custom
     );
 });
 
+/** Renders df_meta.stats in the status bar (rows-first c4). Stub. */
+export const StatsStatusCell = function (_params: { value?: DFMetaStats; context?: { onComputeStats?: () => void } }) {
+    return null;
+};
+
 export function StatusBar({
     dfMeta,
     buckarooState,
@@ -334,6 +339,8 @@ export function StatusBar({
      *  Python's ComponentConfig TypedDict; cell renderers read them via
      *  params.context.componentConfig. */
     componentConfig?: Record<string, unknown>;
+    /** Sends a forced stats_request; shown as a control while the stats are not computed. */
+    onComputeStats?: () => void;
 }) {
     if (false) {
 	console.log("heightOverride", heightOverride);

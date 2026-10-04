@@ -96,6 +96,7 @@ STORYBOOK_TESTS=(
     "pw-tests/outside-params.spec.ts"
     "pw-tests/fitcontent-height.spec.ts"
     "pw-tests/stats-pending-pinned-rows.spec.ts"
+    "pw-tests/stats-scheduler-states.spec.ts"
     # "pw-tests/example.spec.ts"  # Has pre-existing failures, excluded for now
 )
 
