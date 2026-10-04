@@ -9,9 +9,12 @@
  *   - "error"         "Stats error: <reason>", pinned keys omitted
  *   - "complete"      "Summary stats ready", the values in place
  *
- * The buttons switch the status. The button in the status bar sends
- * `stats_request {force: true}` through a fake model, which logs what it was
- * asked to send. Used by stats-scheduler-states.spec.ts.
+ * The buttons switch the status. The "partial" button is "pending" with the
+ * stats of one column in, as a partial stats_update leaves them. The button in
+ * the status bar sends `stats_request {force: true, incremental: true}` through
+ * a fake model, which logs what it was asked to send and answers
+ * `visible_columns` with the columns the grid reports. Used by
+ * stats-scheduler-states.spec.ts.
  */
 import type { Meta, StoryObj } from "@storybook/react";
 import React, { useMemo, useState } from "react";
@@ -38,6 +41,12 @@ const mainData: DFData = [
 const completeStats: DFData = [
   { index: "dtype", a: "int64", b: "object" },
   { index: "mean", a: 2, b: "N/A" },
+];
+
+// dtype comes with the schema; mean has arrived for column a only.
+const partialStats: DFData = [
+  { index: "dtype", a: "int64", b: "object" },
+  { index: "mean", a: 2 },
 ];
 
 const viewerConfig: DFViewerConfig = {
@@ -67,6 +76,8 @@ const commandConfig: CommandConfigT = { argspecs: {}, defaultArgs: {} };
 
 const StatsSchedulerStatesInner: React.FC = () => {
   const [status, setStatus] = useState<StatsStatus>("pending");
+  const [partial, setPartial] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
   const [sent, setSent] = useState<unknown[]>([]);
   const [buckarooState, setBuckarooState] = useState<BuckarooState>({
     sampled: false,
@@ -95,14 +106,15 @@ const StatsSchedulerStatesInner: React.FC = () => {
     [status],
   );
 
-  // The model the control sends through: it answers get("df_meta") from the
-  // story's state and logs what it is asked to send.
+  // The model the control sends through: it answers get("df_meta") and
+  // get("visible_columns") from the story's state and logs what it is asked to
+  // send.
   const model = useMemo(
     () => ({
-      get: (key: string) => (key === "df_meta" ? df_meta : undefined),
+      get: (key: string) => (key === "df_meta" ? df_meta : key === "visible_columns" ? visibleColumns : undefined),
       send: (msg: unknown) => setSent((log) => [...log, msg]),
     }),
-    [df_meta],
+    [df_meta, visibleColumns],
   );
 
   const src = useMemo(() => {
@@ -120,20 +132,38 @@ const StatsSchedulerStatesInner: React.FC = () => {
   const df_data_dict = useMemo(
     () => ({
       main: [] as DFData,
-      all_stats: status === "complete" ? completeStats : ([] as DFData),
+      all_stats: status === "complete" ? completeStats : partial ? partialStats : ([] as DFData),
       empty: [] as DFData,
     }),
-    [status],
+    [status, partial],
   );
 
   return (
     <div style={{ width: 900 }}>
       <div style={{ padding: "8px 12px", marginBottom: 8 }}>
         {STATUSES.map((s) => (
-          <button key={s} data-testid={`status-${s}`} onClick={() => setStatus(s)} style={{ marginRight: 8 }}>
+          <button
+            key={s}
+            data-testid={`status-${s}`}
+            onClick={() => {
+              setStatus(s);
+              setPartial(false);
+            }}
+            style={{ marginRight: 8 }}
+          >
             {s}
           </button>
         ))}
+        <button
+          data-testid="status-partial"
+          onClick={() => {
+            setStatus("pending");
+            setPartial(true);
+          }}
+          style={{ marginRight: 8 }}
+        >
+          partial
+        </button>
         <span style={{ fontFamily: "monospace", fontSize: 12 }}>df_meta.stats.status = {status}</span>
       </div>
       <div style={{ height: 400 }} data-testid="widget-host">
@@ -150,6 +180,7 @@ const StatsSchedulerStatesInner: React.FC = () => {
           buckaroo_options={buckarooOptions}
           src={src}
           on_compute_stats={() => requestStats(model, { force: true })}
+          on_visible_columns={setVisibleColumns}
         />
       </div>
       <pre data-testid="sent-log" style={{ fontSize: 12 }}>

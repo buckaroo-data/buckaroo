@@ -7,7 +7,7 @@
  * Tests assert CURRENT behavior on main (Option A in docs/rerender-test-plan.md).
  * Tests tagged "[captures current flash]" are tracking pain, not validating it.
  */
-import { render, act } from "@testing-library/react";
+import { render, act, waitFor } from "@testing-library/react";
 import { BuckarooInfiniteWidget } from "./BuckarooWidgetInfinite";
 import { KeyAwareSmartRowCache } from "./DFViewerParts/SmartRowCache";
 import { getSpyCalls, resetSpy, setMockColumnState } from "../test-utils/agGridSpy";
@@ -891,5 +891,39 @@ describe("BuckarooInfiniteWidget — stats not yet available (rows-first c0a)", 
       rerender(<BuckarooInfiniteWidget {...first} df_data_dict={{ summary_stats: [{ index: "dtype", a: "int64" }] }} />);
       expect(inFlightAttr()).toBe("false");
     });
+  });
+});
+
+// Rows-first c4b: the widget hands the grid the callback that reports which
+// columns it shows, which the stats scheduler sends as its hint.
+describe("BuckarooInfiniteWidget on_visible_columns (rows-first c4b)", () => {
+  it("passes the callback to the grid, which reports the data columns of its viewport through it", async () => {
+    const onVisible = jest.fn();
+    const { container } = render(
+      <BuckarooInfiniteWidget
+        df_data_dict={{ summary_stats: [] }}
+        df_display_args={baseDisplayArgs}
+        df_meta={baseDfMeta}
+        operations={[]}
+        on_operations={jest.fn()}
+        operation_results={{} as any}
+        command_config={{ argspecs: {}, defaultArgs: {} }}
+        buckaroo_state={initialState}
+        on_buckaroo_state={jest.fn()}
+        buckaroo_options={baseOptions}
+        src={mkSrc()}
+        on_visible_columns={onVisible}
+      />,
+    );
+
+    // The grid is mocked, so give it the header cell AG Grid would render.
+    container.querySelector(".theme-hanger")!.insertAdjacentHTML(
+      "beforeend",
+      '<div class="ag-header-viewport"><div class="ag-header-cell" col-id="a"></div></div>',
+    );
+    const gridProps = getSpyCalls().lastProps;
+    expect(typeof gridProps.onVirtualColumnsChanged).toBe("function");
+    gridProps.onVirtualColumnsChanged({});
+    await waitFor(() => expect(onVisible).toHaveBeenCalledWith(["a"]));
   });
 });

@@ -65,8 +65,10 @@ const bState = (over: Record<string, any> = {}): any => ({
     df_display: "main", show_commands: false, ...over,
 });
 
+// Every request is a time-boxed step (rows-first c4b); the earlier phases sent
+// the whole run, so this helper had no `incremental`.
 const request = (gen: number, extra: Record<string, any> = {}) => ({
-    type: "stats_request", stats_gen: gen, scope: "raw", ...extra,
+    type: "stats_request", stats_gen: gen, scope: "raw", incremental: true, ...extra,
 });
 
 const makeModel = (stats?: Record<string, any>) =>
@@ -228,6 +230,66 @@ describe("one request per reply", () => {
         model.set("df_meta", meta({ status: "not_computed", tier: "schema", gen: 3 }));
         await tick(10_000);
         expect(model.sent).toEqual([request(3)]);
+    });
+});
+
+describe("incremental requests (rows-first c4b)", () => {
+    const sendFirst = async (model: FakeModel) => {
+        start(model);
+        rowsArrived(model);
+        await tick();
+    };
+
+    it("asks for a time-boxed step, with no columns hint while the grid has not reported its columns", async () => {
+        const model = makeModel(pending(3));
+        await sendFirst(model);
+        expect(model.sent).toEqual([{ type: "stats_request", stats_gen: 3, scope: "raw", incremental: true }]);
+        expect(model.sent[0]).not.toHaveProperty("columns");
+        expect(model.sent[0]).not.toHaveProperty("force");
+    });
+
+    it("sends the columns the grid shows as the hint", async () => {
+        const model = makeModel(pending(3));
+        model.state.visible_columns = ["b", "c"];
+        await sendFirst(model);
+        expect(model.sent).toEqual([request(3, { columns: ["b", "c"] })]);
+    });
+
+    it("sends no hint for an empty list of visible columns", async () => {
+        const model = makeModel(pending(3));
+        model.state.visible_columns = [];
+        await sendFirst(model);
+        expect(model.sent).toEqual([request(3)]);
+    });
+
+    it("reads the hint again for each request of a run, so a column scrolled into view goes out next", async () => {
+        const model = makeModel(pending(3));
+        model.state.visible_columns = ["a", "b"];
+        await sendFirst(model);
+
+        model.set("visible_columns", ["e", "f"]);
+        model.set("df_data_dict", dict([statRow("mean")]));
+        await tick();
+        model.set("df_data_dict", dict([statRow("mean"), statRow("std")]));
+        await tick();
+        expect(model.sent).toEqual([
+            request(3, { columns: ["a", "b"] }),
+            request(3, { columns: ["e", "f"] }),
+            request(3, { columns: ["e", "f"] }),
+        ]);
+    });
+
+    it("sends the same shape for the first request of the next gen after a state change", async () => {
+        const model = makeModel(pending(3));
+        model.state.visible_columns = ["a", "b"];
+        await sendFirst(model);
+
+        model.set("buckaroo_state", bState({ post_processing: "log_scale" }));
+        model.frame({ df_meta: meta(pending(4)), df_data_dict: dict() });
+        await tick();
+        rowsArrived(model);
+        await tick(DEBOUNCE);
+        expect(model.sent).toEqual([request(3, { columns: ["a", "b"] }), request(4, { columns: ["a", "b"] })]);
     });
 });
 
@@ -436,6 +498,13 @@ describe("requestStats", () => {
         expect(model.sent).toEqual([request(7, { force: true })]);
     });
 
+    it("carries the columns the grid shows, for a forced request too", () => {
+        const model = makeModel({ status: "not_computed", tier: "schema", gen: 7 });
+        model.state.visible_columns = ["a", "b"];
+        expect(requestStats(model, { force: true })).toBe(true);
+        expect(model.sent).toEqual([request(7, { force: true, columns: ["a", "b"] })]);
+    });
+
     it("sends nothing when df_meta carries no stats.gen", () => {
         const model = makeModel();
         expect(requestStats(model)).toBe(false);
@@ -512,12 +581,13 @@ describe("wired into WebSocketModel", () => {
         }
     }
 
-    const update = (gen: number, stat: string, final: boolean) => ({
+    const update = (gen: number, stat: string, final: boolean, remaining?: number) => ({
         type: "stats_update",
         stats_gen: gen,
         scope: "raw",
         tier: "full",
         final,
+        ...(remaining === undefined ? {} : { remaining }),
         payload: { format: "json", layout: "wide", data: [{ index: stat, level_0: stat, a: 1 }] },
         elapsed_ms: 5,
     });
@@ -554,6 +624,88 @@ describe("wired into WebSocketModel", () => {
         expect(ws.sent).toHaveLength(2);
         expect(model.get("df_meta").stats.status).toBe("complete");
         expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "mean", "std"]);
+    });
+
+    it("walks partial replies to the final one: one request per reply, the stats pending until the last", async () => {
+        const { ws, model } = makeSocketModel(pending(3));
+        model.set("visible_columns", ["a"]);
+        const pendingMeta = model.get("df_meta");
+        rowsFromServer(ws);
+        await tick();
+        const asked = request(3, { columns: ["a"] });
+        expect(ws.sent).toEqual([asked]);
+
+        for (const [i, stat] of ["mean", "std", "max"].entries()) {
+            ws.deliver(update(3, stat, false, 3 - i));
+            await tick();
+            expect(ws.sent).toEqual(Array(i + 2).fill(asked));
+            // The merge adds the rows, and the stats stay pending: the same
+            // df_meta, so the placeholders and the loading text stay.
+            expect(model.get("df_meta")).toBe(pendingMeta);
+            expect(model.get("df_meta").stats.status).toBe("pending");
+        }
+        expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "mean", "std", "max"]);
+
+        // The final reply carries the complete all_stats.
+        ws.deliver({
+            ...update(3, "min", true, 0),
+            payload: {
+                format: "json",
+                layout: "wide",
+                data: ["dtype", "mean", "std", "max", "min"].map((stat) => ({ index: stat, level_0: stat, a: stat === "dtype" ? "int64" : 2 })),
+            },
+        });
+        await tick(10_000);
+        expect(ws.sent).toHaveLength(4);
+        expect(model.get("df_meta").stats).toEqual({ status: "complete", tier: "full", gen: 3 });
+        expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "mean", "std", "max", "min"]);
+        expect(model.get("df_data_dict").all_stats[1].a).toBe(2);
+    });
+
+    it("ends the run at a whole-run final from a server that ignores the incremental field", async () => {
+        const { ws, model } = makeSocketModel(pending(3));
+        rowsFromServer(ws);
+        await tick();
+        expect(ws.sent).toEqual([request(3)]);
+
+        // An older server runs every unit and answers final, with no `remaining`.
+        ws.deliver(update(3, "mean", true));
+        await tick(10_000);
+        expect(ws.sent).toHaveLength(1);
+        expect(model.get("df_meta").stats.status).toBe("complete");
+        expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "mean"]);
+    });
+
+    it("stops a run when the gen changes, drops its late replies, and starts one for the new gen", async () => {
+        const { ws, model } = makeSocketModel(pending(3));
+        model.set("visible_columns", ["a"]);
+        rowsFromServer(ws);
+        await tick();
+        ws.deliver(update(3, "mean", false, 2));
+        await tick();
+        expect(ws.sent).toEqual([request(3, { columns: ["a"] }), request(3, { columns: ["a"] })]);
+
+        // A state change moved the server to gen 4 with the run for gen 3 in flight.
+        ws.deliver({ type: "initial_state", df_meta: meta(pending(4)), df_data_dict: dict() });
+        await tick();
+        ws.deliver(update(3, "std", false, 1));
+        await tick(100);
+        expect(ws.sent).toHaveLength(2);
+        expect(model.get("df_data_dict").all_stats).toEqual([]);
+
+        rowsFromServer(ws);
+        await tick(DEBOUNCE);
+        expect(ws.sent[2]).toEqual(request(4, { columns: ["a"] }));
+
+        // The new run chains like the old one did.
+        ws.deliver(update(4, "mean", false, 1));
+        await tick();
+        expect(ws.sent).toHaveLength(4);
+        expect(ws.sent[3]).toEqual(request(4, { columns: ["a"] }));
+        ws.deliver(update(4, "std", true, 0));
+        await tick(10_000);
+        expect(ws.sent).toHaveLength(4);
+        expect(model.get("df_meta").stats.status).toBe("complete");
     });
 
     it("moves on to the next gen when a state change frame arrives", async () => {

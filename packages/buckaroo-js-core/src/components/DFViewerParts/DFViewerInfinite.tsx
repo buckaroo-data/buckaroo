@@ -183,6 +183,8 @@ export function DFViewerInfinite({
     // placeholder row; when "not_computed" it is omitted. Undefined behaves
     // as "complete".
     stats_status?: StatsStatus;
+    // Called with the data columns in the grid's viewport, now and whenever they change.
+    on_visible_columns?: (columns: string[]) => void;
 }) {
     /*
     The idea is to do some pre-setup here for

@@ -4,7 +4,8 @@
  * While df_meta.stats says the stats are not computed, the status bar offers a
  * control that asks the server for them. BuckarooView hands the widget the
  * callback, and the callback sends `stats_request {force: true}` through
- * whatever IModel the host gave it.
+ * whatever IModel the host gave it. The grid reports the columns it shows, and
+ * BuckarooView keeps them on the model, where the request reads its hint.
  */
 import { render, cleanup, act } from "@testing-library/react";
 import { BuckarooView } from "./BuckarooView";
@@ -64,7 +65,24 @@ describe("BuckarooView on_compute_stats (rows-first c4)", () => {
         expect(typeof props().on_compute_stats).toBe("function");
 
         props().on_compute_stats();
-        expect(sent).toEqual([{ type: "stats_request", stats_gen: 9, scope: "raw", force: true }]);
+        // A time-boxed step, like the scheduler's (rows-first c4b).
+        expect(sent).toEqual([{ type: "stats_request", stats_gen: 9, scope: "raw", incremental: true, force: true }]);
+    });
+
+    it("records the columns the grid shows on the model, and the control's request carries them as its hint", async () => {
+        const { model, sent, props } = await mountBuckaroo({
+            df_meta: metaWith({ status: "not_computed", tier: "schema", gen: 9 }),
+            df_data_dict: {},
+            df_display_args: displayArgs,
+        });
+        expect(typeof props().on_visible_columns).toBe("function");
+
+        props().on_visible_columns(["a", "b"]);
+        expect(model.get("visible_columns")).toEqual(["a", "b"]);
+        props().on_compute_stats();
+        expect(sent).toEqual([
+            { type: "stats_request", stats_gen: 9, scope: "raw", incremental: true, force: true, columns: ["a", "b"] },
+        ]);
     });
 
     it("sends nothing when the model's df_meta carries no stats.gen", async () => {

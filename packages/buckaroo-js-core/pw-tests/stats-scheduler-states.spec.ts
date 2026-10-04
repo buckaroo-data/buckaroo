@@ -8,7 +8,9 @@
  * grid's height changes only with the pinned area: placeholders hold the height
  * of the values that replace them, and omitted rows take theirs away. In
  * "not_computed" the status bar offers a Compute summary stats button, which
- * sends stats_request {force: true}.
+ * sends stats_request {force: true, incremental: true} with the columns the grid
+ * shows (rows-first c4b). While the stats are pending, a stat row that has
+ * arrived for some columns leaves the cells of the others empty.
  */
 import { test, expect, Page } from "@playwright/test";
 import { waitForCells } from "./ag-pw-utils";
@@ -83,17 +85,38 @@ test("each stats status shows its own text in the status bar and nothing moves b
   expect(pageErrors).toEqual([]);
 });
 
-test("the Compute summary stats control sends stats_request with force", async ({ page }) => {
+test("the Compute summary stats control sends an incremental stats_request with force and the visible columns", async ({ page }) => {
   await page.goto(STORY_URL);
   await waitForCells(page);
 
   await page.getByTestId("status-not_computed").click();
   await page.getByRole("button", { name: "Compute summary stats" }).click();
 
+  // The story's grid shows columns a and b (the index column is not a stats column).
   const sent = page.getByTestId("sent-log");
   await expect.poll(async () => JSON.parse((await sent.textContent()) ?? "[]")).toEqual([
-    { type: "stats_request", stats_gen: 7, scope: "raw", force: true },
+    { type: "stats_request", stats_gen: 7, scope: "raw", incremental: true, force: true, columns: ["a", "b"] },
   ]);
+});
+
+test("a stat row that has arrived for one column leaves the other columns' cells empty while the stats are pending", async ({ page }) => {
+  await page.goto(STORY_URL);
+  await waitForCells(page);
+
+  await page.getByTestId("status-partial").click();
+  await expect(page.getByTestId("stats-status")).toHaveAttribute("data-stats-status", "pending");
+  await expect(page.getByTestId("stats-status")).toContainText("Computing summary stats");
+
+  const meanCell = (col: string) => page.locator(`.ag-floating-top .ag-row[row-id="main-mean"] [col-id="${col}"]`);
+  await expect(meanCell("a")).toHaveText("2", { timeout: 10_000 });
+  // Column b has no mean yet: the cell is empty.
+  await expect(meanCell("b")).toHaveText("");
+  // dtype came with the schema, for both columns.
+  await expect(page.locator('.ag-floating-top .ag-row[row-id="main-dtype"] [col-id="b"]')).toHaveText("object");
+
+  // The stats arrive for column b too: the cell fills in.
+  await page.getByTestId("status-complete").click();
+  await expect(meanCell("b")).toHaveText("N/A", { timeout: 10_000 });
 });
 
 test("no control is offered while the stats are pending, in error or complete", async ({ page }) => {

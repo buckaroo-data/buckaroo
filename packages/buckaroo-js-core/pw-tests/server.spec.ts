@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 import { loadSession, waitForGrid, getRowCount, getCellText } from './server-helpers';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
@@ -506,9 +506,9 @@ test.describe('WebSocket data flow', () => {
   // tests put the pending state on a real session's first frame and answer
   // the page's stats_request themselves. Rows, config and the stats payload
   // all come from the real server.
-  async function loadBuckarooSession(request: any, sessionId: string) {
+  async function loadBuckarooSession(request: any, sessionId: string, path: string = csvPath) {
     const resp = await request.post(`${BASE}/load`, {
-      data: { session: sessionId, path: csvPath, mode: 'buckaroo' },
+      data: { session: sessionId, path, mode: 'buckaroo' },
     });
     expect(resp.ok()).toBe(true);
   }
@@ -563,8 +563,11 @@ test.describe('WebSocket data flow', () => {
     await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'complete', { timeout: 10_000 });
     await expect(page.locator('.ag-floating-top [col-id="b"]').first()).not.toHaveText('', { timeout: 10_000 });
 
-    // One whole-run request, for the gen on the first frame, after rows had arrived.
-    expect(requests).toEqual([{ type: 'stats_request', stats_gen: 1, scope: 'raw' }]);
+    // One request, for the gen on the first frame, after rows had arrived: an
+    // incremental step carrying the columns the grid shows (rows-first c4b). This
+    // harness answers it with a final reply carrying every stat, as a server
+    // that does not know the field does, and the page takes that as the end.
+    expect(requests).toEqual([{ type: 'stats_request', stats_gen: 1, scope: 'raw', incremental: true, columns: ['a', 'b', 'c'] }]);
     expect(order.indexOf('infinite_resp')).toBeGreaterThanOrEqual(0);
     expect(order.indexOf('infinite_resp')).toBeLessThan(order.indexOf('stats_request'));
   });
@@ -613,7 +616,173 @@ test.describe('WebSocket data flow', () => {
     expect(requests).toEqual([]);
 
     await page.getByRole('button', { name: 'Compute summary stats' }).click();
-    await expect.poll(() => requests).toEqual([{ type: 'stats_request', stats_gen: 4, scope: 'raw', force: true }]);
+    await expect.poll(() => requests).toEqual([
+      { type: 'stats_request', stats_gen: 4, scope: 'raw', incremental: true, force: true, columns: ['a', 'b', 'c'] },
+    ]);
+  });
+
+  // Rows-first c4b: a server on the unit path answers an incremental request
+  // with a partial stats_update and expects another request. The harness
+  // answers from the test, with the session's real all_stats as the final
+  // payload, so no xorq is needed.
+  async function routeStatsRequests(
+    page: Page,
+    session: string,
+    onRequest: (msg: any, send: (m: object) => void, h: { realStats: unknown; firstFrame: any }) => void,
+  ) {
+    const h = { requests: [] as any[], realStats: undefined as unknown, firstFrame: undefined as any };
+    await page.routeWebSocket(new RegExp(`/ws/${session}`), (ws) => {
+      const server = ws.connectToServer();
+      server.onMessage((message) => {
+        if (typeof message === 'string') {
+          const msg = JSON.parse(message);
+          if (msg.type === 'initial_state' && h.realStats === undefined) {
+            h.realStats = msg.df_data_dict.all_stats;
+            msg.df_data_dict.all_stats = [];
+            msg.df_meta = { ...msg.df_meta, stats: { status: 'pending', tier: 'schema', gen: 1 } };
+            h.firstFrame = msg;
+            ws.send(JSON.stringify(msg));
+            return;
+          }
+        }
+        ws.send(message);
+      });
+      ws.onMessage((message) => {
+        if (typeof message === 'string') {
+          const msg = JSON.parse(message);
+          if (msg.type === 'stats_request') {
+            h.requests.push(msg);
+            onRequest(msg, (m) => ws.send(JSON.stringify(m)), h);
+            return;
+          }
+        }
+        server.send(message);
+      });
+    });
+    return h;
+  }
+  const partialUpdate = (gen: number, remaining: number) => ({
+    type: 'stats_update', stats_gen: gen, scope: 'raw', tier: 'full', final: false, remaining,
+    payload: { format: 'json', layout: 'wide', data: [{ index: 'dtype', level_0: 'dtype', a: 'object', b: 'int64', c: 'float64' }] },
+    elapsed_ms: 1,
+  });
+
+  test('partial updates: the page asks again for each one, keeps the stats pending, and completes on the final', async ({ page, request }) => {
+    const session = `ws-incremental-${Date.now()}`;
+    await loadBuckarooSession(request, session);
+
+    let releaseFinal!: () => void;
+    const finalGate = new Promise<void>((resolve) => { releaseFinal = resolve; });
+    const h = await routeStatsRequests(page, session, (msg, send, harness) => {
+      if (harness.requests.length <= 2) {
+        send(partialUpdate(msg.stats_gen, 3 - harness.requests.length));
+        return;
+      }
+      void finalGate.then(() => send({
+        type: 'stats_update', stats_gen: msg.stats_gen, scope: 'raw', tier: 'full', final: true, remaining: 0,
+        payload: harness.realStats, elapsed_ms: 1,
+      }));
+    });
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+
+    // Two partial replies, two more requests, and the third waits for its reply.
+    await expect.poll(() => h.requests.length, { timeout: 10_000 }).toBe(3);
+    const asked = { type: 'stats_request', stats_gen: 1, scope: 'raw', incremental: true, columns: ['a', 'b', 'c'] };
+    expect(h.requests).toEqual([asked, asked, asked]);
+    // The partial rows are in, and the stats are still pending: no final yet.
+    await expect(page.locator('.ag-floating-top [col-id="b"]').first()).toHaveText('int64', { timeout: 10_000 });
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'pending');
+    await page.waitForTimeout(500);
+    expect(h.requests).toHaveLength(3);
+
+    releaseFinal();
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'complete', { timeout: 10_000 });
+    await page.waitForTimeout(500);
+    expect(h.requests).toHaveLength(3);
+  });
+
+  test('the columns hint follows the grid viewport: a wide table sends the columns on screen, and the next request the ones scrolled to', async ({ page, request }) => {
+    const wideCsv = path.join(os.tmpdir(), `buckaroo_e2e_wide_${Date.now()}.csv`);
+    const names = Array.from({ length: 60 }, (_, i) => `column_${i}`);
+    fs.writeFileSync(wideCsv, [names.join(','), names.map((_, i) => String(i)).join(','), names.map((_, i) => String(i * 2)).join(',')].join('\n') + '\n');
+    try {
+      const session = `ws-incremental-wide-${Date.now()}`;
+      await loadBuckarooSession(request, session, wideCsv);
+
+      // Each partial reply waits for the test, so the grid can scroll between requests.
+      const replies: Array<() => void> = [];
+      const h = await routeStatsRequests(page, session, (msg, send) => {
+        replies.push(() => send(partialUpdate(msg.stats_gen, 5)));
+      });
+      await page.goto(`${BASE}/s/${session}`);
+      await waitForGrid(page);
+
+      // The data grid's header cells (the status bar is a grid too).
+      const headerIds = () => page.locator('.df-viewer .ag-header-viewport .ag-header-cell[col-id]').evaluateAll(
+        (cells) => cells.map((c) => c.getAttribute('col-id') as string));
+      await expect.poll(() => h.requests.length, { timeout: 10_000 }).toBe(1);
+      const first: string[] = h.requests[0].columns;
+      expect(first).toEqual(expect.any(Array));
+      // Only the columns on screen, from the left edge: not all sixty.
+      expect(first.length).toBeGreaterThan(2);
+      expect(first.length).toBeLessThan(40);
+      expect(first[0]).toBe('a');
+      // The grid may lay out more columns after the first rows, so the hint is
+      // the columns it showed at the time: the leading ones.
+      expect((await headerIds()).filter((id) => id !== 'index').slice(0, first.length)).toEqual(first);
+
+      // Scroll to the right edge, then let the first reply through. The scroll
+      // event is sent by hand each time: the grid may not have been listening
+      // for the first one, and setting the same offset again sends none.
+      await expect.poll(async () => {
+        await page.locator('.df-viewer .ag-body-horizontal-scroll-viewport').evaluate((el) => {
+          el.scrollLeft = el.scrollWidth;
+          el.dispatchEvent(new Event('scroll'));
+        });
+        return (await headerIds()).includes('a');
+      }, { timeout: 10_000 }).toBe(false);
+      const scrolledTo = (await headerIds()).filter((id) => id !== 'index');
+      replies[0]();
+      await expect.poll(() => h.requests.length, { timeout: 10_000 }).toBe(2);
+      const second: string[] = h.requests[1].columns;
+      expect(second).toEqual(expect.any(Array));
+      expect(second).not.toContain('a');
+      expect(second).toContain(scrolledTo[scrolledTo.length - 1]);
+    } finally {
+      cleanupFile(wideCsv);
+    }
+  });
+
+  test('a gen change in the middle of a run: the old gen is dropped and the page asks again for the new one', async ({ page, request }) => {
+    const session = `ws-incremental-gen-${Date.now()}`;
+    await loadBuckarooSession(request, session);
+
+    const h = await routeStatsRequests(page, session, (msg, send, harness) => {
+      if (harness.requests.length === 1) {
+        send(partialUpdate(msg.stats_gen, 2));
+      } else if (harness.requests.length === 2) {
+        // The server moved to gen 2 (a state change) with the run for gen 1
+        // in flight; its late reply for gen 1 follows the frame.
+        const frame = { ...harness.firstFrame, df_meta: { ...harness.firstFrame.df_meta, stats: { status: 'pending', tier: 'schema', gen: 2 } } };
+        send(frame);
+        send(partialUpdate(1, 1));
+      } else {
+        send({
+          type: 'stats_update', stats_gen: msg.stats_gen, scope: 'raw', tier: 'full', final: true, remaining: 0,
+          payload: harness.realStats, elapsed_ms: 1,
+        });
+      }
+    });
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+
+    await expect(page.getByTestId('stats-status')).toHaveAttribute('data-stats-status', 'complete', { timeout: 15_000 });
+    // Two requests for gen 1, then one for gen 2, and none for gen 1 after the change.
+    expect(h.requests.map((r) => r.stats_gen)).toEqual([1, 1, 2]);
+    expect(h.requests[2]).toMatchObject({ incremental: true, columns: ['a', 'b', 'c'] });
   });
 
   test('a session that does not report df_meta.stats never gets a stats_request', async ({ page, request }) => {
