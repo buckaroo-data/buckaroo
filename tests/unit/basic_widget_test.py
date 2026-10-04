@@ -288,6 +288,41 @@ def test_quick_command_args_change_does_not_double_fire_operation_result():
     )
 
 
+def test_default_tier_widget_change_sequence_and_merged_sd():
+    """Characterization for the ``_handle_widget_change`` split (rows-first
+    s1): a default-tier pandas widget keeps the order in which a search change
+    reaches the dataflow's and widget's traits, and its merged_sd."""
+    bw = BuckarooWidget(pd.DataFrame({
+        'price': [12.5, 18.9, 7.4, 22.1, 14.0], 'qty': [1, 2, 1, 3, 2],
+        'category': ['a', 'b', 'a', 'c', 'b']}))
+    msd = bw.dataflow.merged_sd
+    assert {col: (sd['length'], sd['_type'], sd['dtype']) for col, sd in msd.items()} == {
+        'a': (5, 'float', 'float64'), 'b': (5, 'integer', 'int64'),
+        'c': (5, 'string', 'object')}
+    assert msd['a']['mean'] == pytest.approx(14.98)
+
+    seen = []
+    bw.dataflow.observe(lambda c: seen.append(('dataflow', c['name'])), names=[
+        'summary_sd', 'merged_sd', 'widget_args_tuple', 'df_data_dict',
+        'df_display_args', 'df_meta', 'operations', 'raw_sd_key', 'clean_sd_key',
+        'filt_sd_key', 'summary_stats_cache', 'processed_result', 'cleaned'])
+    bw.observe(lambda c: seen.append(('widget', c['name'])),
+        names=['df_data_dict', 'df_display_args', 'df_meta', 'operations'])
+    bw.dataflow.quick_command_args = {'search': ['a']}
+    assert seen == [
+        ('widget', 'df_data_dict'), ('dataflow', 'df_data_dict'),
+        ('widget', 'df_display_args'), ('dataflow', 'df_display_args'),
+        ('dataflow', 'widget_args_tuple'), ('dataflow', 'merged_sd'),
+        ('dataflow', 'summary_sd'), ('dataflow', 'processed_result'),
+        ('widget', 'df_meta'), ('dataflow', 'df_meta'), ('dataflow', 'cleaned'),
+        ('dataflow', 'summary_stats_cache'), ('dataflow', 'widget_args_tuple'),
+        ('dataflow', 'merged_sd'), ('dataflow', 'filt_sd_key'),
+        ('widget', 'operations'), ('dataflow', 'operations')]
+    assert {col: (sd['length'], sd['filtered_length'])
+        for col, sd in bw.dataflow.merged_sd.items()} == {
+        'a': (5, 2), 'b': (5, 2), 'c': (5, 2)}
+
+
 def test_multi_index_cols() -> None:
     df = get_multiindex_cols_df()
     bw = BuckarooWidget(df)
