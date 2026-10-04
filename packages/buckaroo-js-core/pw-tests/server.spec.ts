@@ -744,6 +744,9 @@ test.describe('WebSocket data flow', () => {
         return (await headerIds()).includes('a');
       }, { timeout: 10_000 }).toBe(false);
       const scrolledTo = (await headerIds()).filter((id) => id !== 'index');
+      // The grid reports its columns a frame after it renders them: let that pass
+      // before the next request can be sent.
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       replies[0]();
       await expect.poll(() => h.requests.length, { timeout: 10_000 }).toBe(2);
       const second: string[] = h.requests[1].columns;
