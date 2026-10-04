@@ -10,7 +10,7 @@ import { IDisplayArgs } from "../components/DFViewerParts/gridUtils";
 import { stampLayoutType, isFitContentLayout } from "../components/DFViewerParts/displayArgsUtils";
 import { IModel } from "./IModel";
 import { makeLatestDictDecoder, RawDFDataDict } from "./latestDictDecoder";
-import { requestStats, setVisibleColumns } from "./StateOrchestrator";
+import { forceStats, setVisibleColumns } from "./StateOrchestrator";
 
 export type BuckarooServerMode = "viewer" | "buckaroo";
 
@@ -285,10 +285,11 @@ export function BuckarooView({
         model.save_changes();
     }, [model]);
 
-    // The status bar's Compute summary stats button, shown while the server
-    // reports the stats as not computed.
-    const onComputeStats = React.useCallback(() => {
-        requestStats(model, { force: true });
+    // The Compute summary stats control, shown while the server reports the
+    // stats as not computed: the status bar's button, and the summary view's
+    // button and per-column form (which pass their columns).
+    const onComputeStats = React.useCallback((opts?: { columns?: string[] }) => {
+        forceStats(model, opts);
     }, [model]);
 
     // The columns the grid shows, kept on the model for stats requests to carry

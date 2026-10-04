@@ -785,7 +785,9 @@ describe("a forced run is continued by the scheduler (rows-first c5)", () => {
 
     it("drops the run when the gen moves on, and does not continue a late reply", async () => {
         const model = await startForced();
-        model.frame({ df_meta: meta(notComputed({ gen: 6 })), df_data_dict: dict() });
+        // The next gen's frame, with the stats pending as the run left them: only
+        // the gen differs.
+        model.frame({ df_meta: meta(notComputed({ gen: 6, status: "pending" })), df_data_dict: dict() });
         await tick();
         // A reply for the old run arrives after the new frame.
         model.set("df_data_dict", dict([statRow("min")]));

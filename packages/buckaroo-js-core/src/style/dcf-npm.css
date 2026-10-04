@@ -453,6 +453,33 @@ div.dependent-tabs ul.tabs li.active {
     padding: 0 6px;
     cursor: pointer;
 }
+/* The summary view while the stats are not computed (rows-first c5): the reason,
+ * and the control that asks for them, in place of the grid. */
+.bk-stats-empty {
+    box-sizing: border-box;
+    min-height: 120px;
+    padding: 16px;
+    font-size: 13px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-top: none;
+}
+.bk-stats-empty-message {
+    margin: 0 0 12px;
+}
+.bk-stats-empty-control {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.bk-stats-empty-control select,
+.bk-stats-empty-control button {
+    font-size: 12px;
+    padding: 2px 8px;
+}
+.bk-stats-empty-control button {
+    cursor: pointer;
+}
 .status-bar .ag-center-cols-viewport {
     min-height: unset !important;
 }

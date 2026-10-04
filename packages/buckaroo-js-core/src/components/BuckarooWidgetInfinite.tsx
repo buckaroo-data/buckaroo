@@ -5,6 +5,7 @@ import { ColumnsEditor } from "./ColumnsEditor";
 
 import { DFData } from "./DFViewerParts/DFWhole";
 import { StatusBar } from "./StatusBar";
+import { StatsColumnOption, StatsEmptyState } from "./StatsEmptyState";
 import { BuckarooState } from "./WidgetTypes";
 import { BuckarooOptions } from "./WidgetTypes";
 import { DFMeta, getStatsStatus } from "./WidgetTypes";
@@ -12,6 +13,7 @@ import { CommandConfigT } from "./CommandUtils";
 import { Operation } from "./OperationUtils";
 import {
     getDs,
+    getFieldVal,
     IDisplayArgs,
 } from "./DFViewerParts/gridUtils";
 import { stampLayoutType, isFitContentLayout } from "./DFViewerParts/displayArgsUtils";
@@ -229,6 +231,19 @@ export function BuckarooInfiniteWidget({
             [cDisp, df_data_dict, mainDs, df_meta.total_rows],
         );
 
+        // A view that lists stats (the summary view, whose rows are not the
+        // data's) has nothing to show while the stats are not computed. It shows
+        // why instead, with the control that asks for them.
+        const statsEmptyState = df_meta.stats?.status === "not_computed" && cDisp.data_key !== "main";
+        const statsColumns = useMemo<StatsColumnOption[]>(
+            () =>
+                (cDisp.df_viewer_config?.column_config ?? []).map((cc) => ({
+                    field: getFieldVal(cc),
+                    label: "header_name" in cc ? String(cc.header_name) : cc.col_path.join(" / "),
+                })),
+            [cDisp],
+        );
+
         // Operations minus filter-like ops (search, OnlyOutliers — Python
         // marks them with meta.quick_command=true). These don't change row
         // identity; quick_command_args already carries the same info, so
@@ -354,20 +369,29 @@ export function BuckarooInfiniteWidget({
                         componentConfig={effectiveDisplayArgs['main']?.df_viewer_config?.component_config as Record<string, unknown> | undefined}
                         onComputeStats={on_compute_stats}
                     />
-                    <DFViewerInfinite
-                        key={effectiveDataframeId}
-                        data_wrapper={data_wrapper}
-                        df_viewer_config={cDisp.df_viewer_config}
-                        summary_stats_data={summaryStatsData}
-                        outside_df_params={outsideDFParams}
-                        activeCol={activeCol}
-                        setActiveCol={setActiveCol}
-                        error_info={""}
-                        view_name={buckaroo_state.df_display}
-                        data_key={cDisp.data_key}
-                        stats_status={getStatsStatus(df_meta)}
-                        on_visible_columns={on_visible_columns}
-                    />
+                    {statsEmptyState && df_meta.stats !== undefined ? (
+                        <StatsEmptyState
+                            stats={df_meta.stats}
+                            columns={statsColumns}
+                            onComputeStats={on_compute_stats}
+                            themeConfig={cDisp.df_viewer_config?.component_config?.theme}
+                        />
+                    ) : (
+                        <DFViewerInfinite
+                            key={effectiveDataframeId}
+                            data_wrapper={data_wrapper}
+                            df_viewer_config={cDisp.df_viewer_config}
+                            summary_stats_data={summaryStatsData}
+                            outside_df_params={outsideDFParams}
+                            activeCol={activeCol}
+                            setActiveCol={setActiveCol}
+                            error_info={""}
+                            view_name={buckaroo_state.df_display}
+                            data_key={cDisp.data_key}
+                            stats_status={getStatsStatus(df_meta)}
+                            on_visible_columns={on_visible_columns}
+                        />
+                    )}
                 </div>
                 {buckaroo_state.show_commands ? (
                     <ColumnsEditor

@@ -4,7 +4,8 @@ import * as _ from "lodash-es";
 import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
 import { ColDef, GridApi, GridOptions } from "ag-grid-community";
 import { basicIntFormatter } from "./DFViewerParts/Displayer";
-import { DFMeta, DFMetaStats } from "./WidgetTypes";
+import { DFMeta, DFMetaStats, canRequestStats, statsOverCeiling } from "./WidgetTypes";
+import { notComputedMessage } from "./StatsEmptyState";
 import { BuckarooOptions } from "./WidgetTypes";
 import { BuckarooState, BKeys } from "./WidgetTypes";
 import { CustomCellEditorProps } from 'ag-grid-react';
@@ -312,13 +313,27 @@ export const SearchEditor =  memo(({ value, onValueChange, stopEditing }: Custom
  * loading while they are pending, a control to ask for them while they are not
  * computed, the reason when they failed. The cell always renders one line in a
  * fixed-width column, so changing status moves nothing.
+ *
+ * A session that is not computed offers the control unless the server's ceiling
+ * refused the stats or nothing is left to ask for. The control's label reads
+ * Continue when a run was paused on cost. It calls the host's callback with no
+ * arguments; the host asks for the tier df_meta.stats allows (see forceStats).
  */
-export const StatsStatusCell = function (params: { value?: DFMetaStats; context?: { onComputeStats?: (opts?: { columns?: string[] }) => void } }) {
+export const StatsStatusCell = function (params: {
+    value?: DFMetaStats;
+    context?: { onComputeStats?: (opts?: { columns?: string[] }) => void };
+}) {
     const stats = params.value;
     if (stats === undefined) return null;
     const onComputeStats = params.context?.onComputeStats;
     const cell = (content: React.ReactNode, extra: React.HTMLAttributes<HTMLSpanElement> = {}) => (
-        <span className="bk-stats-status" data-testid="stats-status" data-stats-status={stats.status} {...extra}>
+        <span
+            className="bk-stats-status"
+            data-testid="stats-status"
+            data-stats-status={stats.status}
+            {...(stats.status === "not_computed" && stats.reason !== undefined ? { "data-stats-reason": stats.reason } : {})}
+            {...extra}
+        >
             {content}
         </span>
     );
@@ -331,16 +346,21 @@ export const StatsStatusCell = function (params: { value?: DFMetaStats; context?
                 </>,
                 { role: "status", "aria-live": "polite" },
             );
-        case "not_computed":
-            return onComputeStats ? (
+        case "not_computed": {
+            const message = notComputedMessage(stats);
+            if (statsOverCeiling(stats)) {
+                return cell("Summary stats unavailable: size limit", { title: message });
+            }
+            return onComputeStats && canRequestStats(stats) ? (
                 cell(
-                    <button type="button" title="Summary stats are not computed" onClick={() => onComputeStats()}>
-                        Compute summary stats
+                    <button type="button" title={message} onClick={() => onComputeStats()}>
+                        {stats.reason === "cost" ? "Continue computing stats" : "Compute summary stats"}
                     </button>,
                 )
             ) : (
-                cell("Summary stats not computed")
+                cell("Summary stats not computed", { title: message })
             );
+        }
         case "error": {
             const text = stats.reason ? `Stats error: ${stats.reason}` : "Stats error";
             return cell(text, { title: text });

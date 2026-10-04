@@ -252,10 +252,11 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
         model.save_changes();
     }, [model]);
 
-    // The status bar's Compute summary stats button, shown while the server
-    // reports the stats as not computed.
-    const onComputeStats = React.useCallback(() => {
-        srt.requestStats(model, { force: true });
+    // The Compute summary stats control, shown while the server reports the
+    // stats as not computed: the status bar's button, and the summary view's
+    // button and per-column form (which pass their columns).
+    const onComputeStats = React.useCallback((opts?: { columns?: string[] }) => {
+        srt.forceStats(model, opts);
     }, [model]);
 
     // The columns the grid shows, kept on the model for stats requests to carry

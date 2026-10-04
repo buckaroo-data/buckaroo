@@ -48,13 +48,57 @@ export interface DFMeta {
 export const getStatsStatus = (meta: DFMeta | undefined): StatsStatus =>
     meta?.stats?.status ?? "complete";
 
-// Stubs: the real helpers come with the fix.
-export const statsRequestable = (_stats: DFMetaStats | undefined): string[] => [];
-export const statsAutoRequest = (_stats: DFMetaStats | undefined): boolean => false;
-export const nextRequestTier = (_stats: DFMetaStats | undefined): StatsTier | undefined => undefined;
-export const canRequestStats = (_stats: DFMetaStats | undefined): boolean => false;
-export const demandTier = (_stats: DFMetaStats | undefined): StatsTier | undefined => undefined;
-export const statsOverCeiling = (_stats: DFMetaStats | undefined): boolean => false;
+// What a server that leaves a policy field out means by it (see DFMetaStats).
+const DEFAULT_REQUESTABLE: readonly string[] = ["full"];
+
+export const statsRequestable = (stats: DFMetaStats | undefined): string[] =>
+    stats?.requestable ?? [...DEFAULT_REQUESTABLE];
+
+export const statsAutoRequest = (stats: DFMetaStats | undefined): boolean => stats?.auto_request !== false;
+
+const tierRank = (tier: string | undefined): number => {
+    const rank = STATS_TIERS.indexOf(tier as StatsTier);
+    return rank === -1 ? 0 : rank;
+};
+
+/**
+ * The tier a request for more stats should ask for: the smallest tier in
+ * `requestable` above the one reached, so scalar goes before full. Names that
+ * are not tiers are ignored. Undefined when there is nothing left to ask for.
+ */
+export const nextRequestTier = (stats: DFMetaStats | undefined): StatsTier | undefined => {
+    if (stats === undefined) return undefined;
+    const requestable = statsRequestable(stats);
+    const reached = tierRank(stats.tier);
+    return STATS_TIERS.find((tier) => requestable.includes(tier) && tierRank(tier) > reached);
+};
+
+/**
+ * Whether the server's ceiling keeps the stats from being computed. It says so
+ * with reason "ceiling" when the ceiling cut a request down. When the server
+ * sized the session at the ceiling itself the reason is "size" and there is
+ * nothing above it to ask for, which comes to the same thing for the user.
+ */
+export const statsOverCeiling = (stats: DFMetaStats | undefined): boolean =>
+    stats?.status === "not_computed" &&
+    (stats.reason === "ceiling" ||
+        (stats.reason === "size" && stats.requestable !== undefined && nextRequestTier(stats) === undefined));
+
+/** Whether the "Compute summary stats" control applies: the stats are not
+ *  computed, the server's ceiling did not refuse them, and a tier is left. */
+export const canRequestStats = (stats: DFMetaStats | undefined): boolean =>
+    stats?.status === "not_computed" && !statsOverCeiling(stats) && nextRequestTier(stats) !== undefined;
+
+/**
+ * The tier of a request for the columns styling needs stats for (`demand_columns`):
+ * the smallest tier from scalar up that the policy allows, the target included,
+ * since scalar is where min and max come from. Undefined when it allows none.
+ */
+export const demandTier = (stats: DFMetaStats | undefined): StatsTier | undefined => {
+    if (stats === undefined) return undefined;
+    const allowed = [...statsRequestable(stats), ...(stats.tier_target === undefined ? [] : [stats.tier_target])];
+    return STATS_TIERS.find((tier) => tierRank(tier) >= tierRank("scalar") && allowed.includes(tier));
+};
 
 export interface BuckarooOptions {
     sampled: string[];

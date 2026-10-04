@@ -8,6 +8,11 @@
  *   stats_update  {stats_gen, scope, tier, final, payload, elapsed_ms}
  *   stats_aborted {stats_gen, current_gen?, scope, reason}
  *
+ * A final `stats_update` may also carry `status` and `reason` (rows-first c5):
+ * `{final: true, status: "not_computed", reason: "ceiling"}`, with no payload,
+ * answers a request the server refused, and the session is left in that state.
+ * Without a `status` a final update completes the session.
+ *
  * `payload` is an inline wide DFEnvelope holding `all_stats`. `stats_gen` is the
  * server's counter for the state the stats describe; it rides on every
  * `initial_state` as `df_meta.stats.gen`, and a reply for any other gen is for
@@ -22,11 +27,18 @@ import { DFData, DFDataOrPayload } from "../components/DFViewerParts/DFWhole";
 import { DFMeta, DFMetaStats, StatsStatus } from "../components/WidgetTypes";
 import { IModel } from "./IModel";
 
-/** The capability this client advertises, as one value of `?caps=` on the
+/** A capability this client advertises, as one value of `?caps=` on the
  *  WebSocket URL: it merges `stats_update` messages. The server records it per
  *  connection when the socket opens, since it sends the first message before
  *  the client can say anything. */
 export const STATS_UPDATE_CAP = "stats_update";
+
+/** The second capability: this client can show a session whose stats are not
+ *  computed, with the reason, and send tiered requests (see forceStats). A
+ *  server applies its stats policy only to a client that has it. */
+export const STATS_ONDEMAND_CAP = "stats_ondemand";
+
+const CLIENT_CAPS = [STATS_UPDATE_CAP, STATS_ONDEMAND_CAP];
 
 const decodeQueryValue = (value: string): string => {
     try {
@@ -36,10 +48,11 @@ const decodeQueryValue = (value: string): string => {
     }
 };
 
-/** `wsUrl` with `caps=stats_update` added: a new query on a bare URL, a new
- *  parameter after an existing query, or a comma-joined value when the host
- *  already passes `caps`. The fragment stays last and other parameters are
- *  left as the host wrote them. */
+/** `wsUrl` with `caps=stats_update,stats_ondemand` added: a new query on a bare
+ *  URL, a new parameter after an existing query, or a comma-joined value when
+ *  the host already passes `caps`, to which only the capabilities it lacks are
+ *  added. The fragment stays last and other parameters are left as the host
+ *  wrote them. */
 export function withStatsCapability(wsUrl: string): string {
     const hashAt = wsUrl.indexOf("#");
     const fragment = hashAt === -1 ? "" : wsUrl.slice(hashAt);
@@ -50,13 +63,15 @@ export function withStatsCapability(wsUrl: string): string {
 
     const capsAt = params.findIndex((p) => p === "caps" || p.startsWith("caps="));
     if (capsAt === -1) {
-        params.push(`caps=${STATS_UPDATE_CAP}`);
+        params.push(`caps=${CLIENT_CAPS.join(",")}`);
     } else {
         const caps = decodeQueryValue(params[capsAt].slice("caps=".length))
             .split(",")
             .map((cap) => cap.trim())
             .filter((cap) => cap !== "");
-        if (!caps.includes(STATS_UPDATE_CAP)) caps.push(STATS_UPDATE_CAP);
+        for (const cap of CLIENT_CAPS) {
+            if (!caps.includes(cap)) caps.push(cap);
+        }
         params[capsAt] = `caps=${caps.join(",")}`;
     }
     return `${path}?${params.join("&")}${fragment}`;
@@ -126,6 +141,19 @@ const genOf = (meta: DFMeta | undefined): number | undefined => {
     return typeof gen === "number" ? gen : undefined;
 };
 
+/**
+ * `df_meta.stats` after a final update. With no status it is complete at the
+ * update's tier, and the policy fields, which only describe what is left to
+ * ask for, go. With a status (a refusal, or a run for some columns only) the
+ * session keeps its stats and takes the status and the reason, if the update
+ * names one; the update's tier is what was asked for, not what was reached.
+ */
+function finalStats(stats: DFMetaStats, msg: StatsUpdateMessage): DFMetaStats {
+    const status = msg.status ?? "complete";
+    if (status === "complete") return { status, tier: msg.tier ?? stats.tier, gen: stats.gen };
+    return { ...stats, status, ...(msg.reason === undefined ? {} : { reason: msg.reason }) };
+}
+
 /** What the channel needs of a model. */
 type StatsModel = Pick<IModel, "get" | "set">;
 
@@ -172,20 +200,24 @@ export class StatsChannel {
     }
 
     private async applyUpdate(msg: StatsUpdateMessage): Promise<void> {
-        const update = await decodeDFData(msg.payload);
+        // A reply that did not run (a request over the ceiling) has no payload
+        // and nothing to merge.
+        const update = msg.payload === undefined ? undefined : await decodeDFData(msg.payload);
         for (;;) {
             // A frame may have moved the gen on while something decoded.
             if (msg.stats_gen !== this.expectedGen) return;
-            const dict: Record<string, DFDataOrPayload> | null | undefined = this.model.get("df_data_dict");
-            // The dict is decoded when the seed built it and raw when a later
-            // initial_state did.
-            const base = await decodeDFData(dict?.all_stats);
-            // A frame replaced the dict (or moved the gen) while it decoded:
-            // start over from the new one.
-            if (dict !== this.model.get("df_data_dict") || msg.stats_gen !== this.expectedGen) continue;
-            this.model.set("df_data_dict", { ...dict, all_stats: mergeStatRows(base, update) });
+            if (update !== undefined) {
+                const dict: Record<string, DFDataOrPayload> | null | undefined = this.model.get("df_data_dict");
+                // The dict is decoded when the seed built it and raw when a later
+                // initial_state did.
+                const base = await decodeDFData(dict?.all_stats);
+                // A frame replaced the dict (or moved the gen) while it decoded:
+                // start over from the new one.
+                if (dict !== this.model.get("df_data_dict") || msg.stats_gen !== this.expectedGen) continue;
+                this.model.set("df_data_dict", { ...dict, all_stats: mergeStatRows(base, update) });
+            }
             if (msg.final) {
-                this.replaceStats((stats) => ({ status: "complete", tier: msg.tier ?? stats.tier, gen: stats.gen }));
+                this.replaceStats((stats) => finalStats(stats, msg));
             }
             return;
         }
