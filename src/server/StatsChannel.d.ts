@@ -54,6 +54,9 @@ type StatsModel = Pick<IModel, "get" | "set">;
 export declare class StatsChannel {
     private model;
     private applying;
+    private filled;
+    private filledGen;
+    private filledDict;
     constructor(model: StatsModel);
     /**
      * The stats_gen of the state the client is showing, or `undefined` when the
@@ -74,6 +77,13 @@ export declare class StatsChannel {
     private receiveUpdate;
     private applyUpdate;
     private receiveAborted;
+    /** Note the columns `update` filled in the dict this channel has just
+     *  written over `before`. */
+    private noteFilled;
+    /** The columns the run's replies filled, as of the reply that ends it:
+     *  none when the gen or the dict has changed since. The next run starts
+     *  from nothing. */
+    private takeFilled;
     /** Replace `df_meta.stats` in a new `df_meta`, the reference that c0a's
      *  `inFlight` rule and the pinned rows' placeholders key on. */
     private replaceStats;
