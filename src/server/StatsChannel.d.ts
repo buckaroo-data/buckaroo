@@ -1,4 +1,5 @@
 import { DFData, DFDataOrPayload } from '../components/DFViewerParts/DFWhole';
+import { StatsStatus } from '../components/WidgetTypes';
 import { IModel } from './IModel';
 /** The capability this client advertises, as one value of `?caps=` on the
  *  WebSocket URL: it merges `stats_update` messages. The server records it per
@@ -16,6 +17,8 @@ export interface StatsUpdateMessage {
     scope?: string;
     tier?: string;
     final?: boolean;
+    status?: StatsStatus;
+    reason?: string;
     payload?: DFDataOrPayload;
     elapsed_ms?: number;
 }
