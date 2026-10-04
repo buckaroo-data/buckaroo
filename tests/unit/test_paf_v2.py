@@ -969,3 +969,11 @@ class TestStatUnits:
     def test_an_unknown_namespace_is_an_error(self):
         with pytest.raises(ValueError, match='namespace'):
             self._pipeline().plan(StatState(self._permuted(), columns=('c',), namespace='both'))
+
+    @pytest.mark.parametrize('backend', ['pandas', 'polars'])
+    def test_the_scalar_tier_has_no_pandas_or_polars_units(self, backend):
+        """The scalar tier is xorq's. A state that asks for it must not be
+        answered with full-tier units."""
+        pipeline = StatPipeline(_stat_lists()[backend], unit_test=False)
+        with pytest.raises(ValueError, match='full tier'):
+            pipeline.plan(StatState(_mixed_frames()[backend], tier='scalar'))

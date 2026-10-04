@@ -14,12 +14,14 @@ import pytest
 
 xo = pytest.importorskip("xorq.api")
 
+from xorq.vendor.ibis.expr import operations as ops  # noqa: E402
+
 from buckaroo.pluggable_analysis_framework import perf_log  # noqa: E402
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (  # noqa: E402
     XorqStatPipeline,
     XorqColumn)
 from buckaroo.pluggable_analysis_framework.stat_func import stat  # noqa: E402
-from buckaroo.pluggable_analysis_framework.stat_units import StatState, merge_fragments  # noqa: E402
+from buckaroo.pluggable_analysis_framework.stat_units import StatState, StatUnit, merge_fragments  # noqa: E402
 from buckaroo.customizations.xorq_stats_v2 import (  # noqa: E402
     XORQ_STATS_V2)
 
@@ -1270,3 +1272,113 @@ class TestColumnChunkSplit:
         single, _errors = XorqStatPipeline(XORQ_STATS_V2, unit_test=False).process_table(table)
         assert spy.kinds().count("batch") == 2  # one per run: the refused split and the single batch
         assert _stable(split) == _stable(single)
+
+
+# ============================================================
+# The scalar tier (rows-first p34)
+# ============================================================
+
+# What the full tier reports and the scalar tier does not.
+_FULL_ONLY = {"median", "distinct_count", "distinct_per", "histogram"}
+
+
+def _tier_run(table, tier, **pipeline_kwargs):
+    """Every unit of a run of ``tier``, run in order: ``(acc, [(unit, fragment)])``."""
+    return _run_units(XorqStatPipeline(XORQ_STATS_V2, unit_test=False, **pipeline_kwargs), StatState(table, tier=tier))
+
+
+def _union(run):
+    return merge_fragments(fragment for _unit, fragment in run[1])
+
+
+class TestScalarTier:
+    """The scalar tier of a xorq run: the scalar class of the batch without
+    ``approx_median`` and ``distinct_count``, and no histogram query. Its
+    ``histogram_bins`` come from the batch's ``min`` and ``max``, so a
+    ``color_map`` column needs no further query."""
+
+    _ALL = ("ints", "floats", "strs", "bools")
+
+    def test_an_unknown_tier_is_refused(self):
+        with pytest.raises(ValueError, match="tier"):
+            StatState(_make_table(), tier="median")
+
+    def test_the_scalar_plan_is_the_batch_alone(self):
+        units = XorqStatPipeline(XORQ_STATS_V2, unit_test=False).plan(StatState(_make_table(), tier="scalar"))
+        assert [(u.id, u.phase, u.cost, u.after) for u in units] == [("batch", "batch", "scan", ())]
+        assert units[0].columns == self._ALL
+
+    def test_a_scalar_run_issues_the_batch_query_and_no_histogram_query(self, monkeypatch):
+        spy = _QuerySpy(monkeypatch)
+        _tier_run(_make_table(), "scalar")
+        assert spy.kinds() == ["batch"]
+
+    def test_the_scalar_batch_has_no_approx_median_and_no_distinct_count(self, monkeypatch):
+        spy = _QuerySpy(monkeypatch)
+        _tier_run(_make_table(), "scalar")
+        (batch,) = spy.queries
+        # ApproxCountDistinct is a CountDistinct, so this finds both distinct aggregates.
+        assert not list(batch.op().find((ops.ApproxMedian, ops.CountDistinct)))
+        # The same search finds them in the full batch, so it is looking at the right thing.
+        spy.queries.clear()
+        _tier_run(_make_table(), "full")
+        assert list(spy.queries[0].op().find(ops.ApproxMedian)) and list(spy.queries[0].op().find(ops.CountDistinct))
+
+    def test_the_scalar_stats_are_the_full_stats_without_the_keys_the_tier_leaves_out(self):
+        table = _make_table()
+        scalar, full = _union(_tier_run(table, "scalar")), _union(_tier_run(table, "full"))
+        for col in self._ALL:
+            assert set(scalar[col]) == set(full[col]) - _FULL_ONLY, col
+            assert _stable(scalar[col]) == _stable({key: full[col][key] for key in scalar[col]}), col
+        assert {"length", "null_count", "min", "max", "mean", "std", "non_null_count", "nan_per",
+            "histogram_bins", "_type"} <= set(scalar["ints"])
+
+    def test_the_accumulator_reports_what_the_fragments_do(self):
+        acc, run = _tier_run(_make_table_with_nulls(), "scalar")
+        assert _stable(acc.sd()) == _stable(_union((acc, run)))
+        assert not any(_FULL_ONLY & set(stats) for stats in acc.sd().values())
+        assert acc.errors == []
+
+    def test_histogram_bins_come_with_the_batch_and_equal_the_full_tier_s(self, monkeypatch):
+        table = _make_table()
+        spy = _QuerySpy(monkeypatch)
+        scalar = _union(_tier_run(table, "scalar"))
+        assert spy.kinds() == ["batch"]
+        full = _union(_tier_run(table, "full"))
+        for col in ("ints", "floats"):
+            assert len(scalar[col]["histogram_bins"]) == 11, col
+            assert scalar[col]["histogram_bins"] == full[col]["histogram_bins"], col
+        assert scalar["strs"]["histogram_bins"] == scalar["bools"]["histogram_bins"] == []
+
+    def test_a_low_cardinality_integer_gets_bins_the_full_tier_does_not(self):
+        """Without ``distinct_count`` the cardinality is unknown and the column
+        is treated as one that wants bins. The full tier counts, finds five or
+        fewer values, and sends none."""
+        table = xo.memtable(pd.DataFrame({"few": [1, 2, 3, 1, 2, 3, 1], "many": [1, 2, 3, 4, 5, 6, 7]}))
+        scalar, full = _union(_tier_run(table, "scalar")), _union(_tier_run(table, "full"))
+        assert len(scalar["few"]["histogram_bins"]) == 11
+        assert full["few"]["histogram_bins"] == []
+        assert scalar["many"]["histogram_bins"] == full["many"]["histogram_bins"]
+
+    def test_a_skipped_column_has_no_scalar_unit_and_keeps_its_structural_entry(self):
+        pipeline = XorqStatPipeline(XORQ_STATS_V2, unit_test=False)
+        state = StatState(_make_table(), frozenset({"strs"}), tier="scalar")
+        assert pipeline.plan(state)[0].columns == ("ints", "floats", "bools")
+        acc, _run = _run_units(pipeline, state)
+        assert set(acc.sd()["strs"]) == {"orig_col_name", "rewritten_col_name", "dtype", "length", "min", "max"}
+        assert acc.sd()["strs"]["length"] == 7
+
+    def test_a_chunked_scalar_batch_equals_the_single_batch(self, tmp_path):
+        scan = _six_column_scan(tmp_path)
+        single = _union(_tier_run(scan, "scalar"))
+        pipeline = _chunked(2 * _SIX_ROWS)
+        state = StatState(scan, rows=_SIX_ROWS, tier="scalar")
+        assert [u.id for u in pipeline.plan(state)] == ["batch:0", "batch:1", "batch:2"]
+        assert _stable(_union(_run_units(pipeline, state))) == _stable(single)
+
+    def test_the_scalar_tier_runs_no_histogram_unit(self):
+        pipeline = XorqStatPipeline(XORQ_STATS_V2, unit_test=False)
+        acc = pipeline.new_accumulator(StatState(_make_table(), tier="scalar"))
+        histogram = StatUnit("histogram:ints", ("ints",), "histogram", after=("batch",), cost="query")
+        with pytest.raises(ValueError, match="scalar"):
+            pipeline.run(histogram, acc)

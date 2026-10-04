@@ -40,6 +40,7 @@ from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
 from buckaroo.pluggable_analysis_framework.stat_units import StatAccumulator, StatState, StatUnit, merge_fragments
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 from buckaroo.serialization_utils import resolve_summary_stats_payload
+from buckaroo.server import stat_run as stat_run_mod
 from buckaroo.server import stats_wire
 from buckaroo.server.data_loading import ServerDataflow, handle_infinite_request_buckaroo
 from buckaroo.server.data_loading_polars import (PolarsServerDataflow, create_polars_dataflow, handle_infinite_request_buckaroo_polars, load_file_polars)
@@ -681,6 +682,33 @@ class TestStatRun:
         assert run.status == "error" and isinstance(run.error, RuntimeError)
         assert run.run_next() is None, "a failed run is not retried"
         assert run.fragments == [{"x": {"v": 1}}]
+
+    def test_the_full_run_over_every_column_is_the_run_that_assigns(self, backend):
+        run, _dataflow = _stat_run(backend)
+        assert (run.tier, run.assigns) == ("full", True)
+
+    def test_a_run_over_a_column_group_has_its_own_key_and_assigns_nothing(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        run = StatRun(4, "raw", stats, state=dataclasses.replace(stats.state, columns=("price",)))
+        assert run.key == (4, "raw", "full", ("price",))
+        assert (run.tier, run.assigns) == ("full", False)
+        assert [u.columns for u in run.units] == [("price",)]
+        while run.run_next() is not None:
+            pass
+        assert list(run.acc.sd()) == ["price"]
+
+    def test_the_key_of_a_run_names_its_tier_and_group_unless_it_is_the_full_run(self):
+        key = stat_run_mod.stat_run_key
+        assert key(4, "raw") == key(4, "raw", "full", None) == (4, "raw")
+        assert key(4, "raw", "scalar") == (4, "raw", "scalar", None)
+        assert key(4, "raw", "full", ["b", "a"]) == (4, "raw", "full", ("b", "a"))
+
+    def test_a_pandas_or_polars_run_has_only_the_full_tier(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        with pytest.raises(ValueError, match="full tier"):
+            StatRun(4, "raw", stats, state=dataclasses.replace(stats.state, tier="scalar"))
 
 
 class _FakeClock:

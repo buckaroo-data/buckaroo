@@ -859,3 +859,39 @@ class TestCapabilities:
     def test_a_tier_the_host_named_has_nothing_to_pull(self, sp, caps):
         assert stats_wire.stats_to_pull(_session(sp, "schema", "deferred"), _client(caps)) is False
         assert stats_wire.stats_to_pull(_session(sp, "scalar", "deferred"), _client(caps)) is False
+
+
+class TestScalarTierServing:
+    """``serves_scalar_tier`` (rows-first p34): which client a ``stats_request``
+    is answered with the scalar tier for. A session whose policy target is
+    ``scalar`` and has nothing computed serves it to a client that advertised
+    ``stats_ondemand``, which takes tiers. Every other client is served as
+    before."""
+
+    @pytest.mark.parametrize("tier, limits, expected", [
+        ("auto", SCALAR_BY_SIZE, True),
+        ("scalar", {}, True),
+        ("full", FULL_OVER_CEILING, True),
+        ("auto", SCHEMA_BY_SIZE, False),
+        ("schema", {}, False),
+        ("scalar", SCALAR_OVER_CEILING, False),
+        ("auto", {}, False),
+        ("full", {}, False)])
+    def test_an_ondemand_client_is_served_a_session_whose_target_is_scalar(self, sp, tier, limits, expected):
+        session = _session(sp, tier, "deferred", limits)
+        assert stats_wire.serves_scalar_tier(session, _client(ONDEMAND_CAPS)) is expected
+
+    @pytest.mark.parametrize("caps", [UPDATE_CAPS, LEGACY_CAPS, frozenset({"stats_ondemand"})])
+    @pytest.mark.parametrize("tier, limits", [("auto", SCALAR_BY_SIZE), ("scalar", {})])
+    def test_a_client_without_both_bits_is_not(self, sp, caps, tier, limits):
+        assert stats_wire.serves_scalar_tier(_session(sp, tier, "deferred", limits), _client(caps)) is False
+
+    def test_a_session_whose_stats_are_complete_serves_no_tier(self, sp):
+        session = _session(sp, "auto", "deferred", SCALAR_BY_SIZE)
+        session.stats_status, session.stats_reason = "complete", None
+        assert stats_wire.serves_scalar_tier(session, _client(ONDEMAND_CAPS)) is False
+
+    def test_a_session_with_no_policy_has_no_target_to_serve(self, sp):
+        session = _session(sp, "scalar", "inline", resolve=False)
+        assert (session.stats_status, session.stats_policy) == ("not_computed", None)
+        assert stats_wire.serves_scalar_tier(session, _client(ONDEMAND_CAPS)) is False

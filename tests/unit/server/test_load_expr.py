@@ -30,6 +30,7 @@ from xorq.caching import ParquetSnapshotCache, ParquetStorage  # noqa: E402
 from xorq.common.utils.graph_utils import replace_nodes, walk_nodes  # noqa: E402
 from xorq.common.utils.provenance_utils import read_parquet_provenance  # noqa: E402
 from xorq.expr.relations import CachedNode  # noqa: E402
+from xorq.vendor.ibis.expr import operations as ops  # noqa: E402
 
 from buckaroo.dataflow.dataflow import assemble_merged_sd  # noqa: E402
 from buckaroo.dataflow.sd_cache import split_chain_by_scope  # noqa: E402
@@ -41,7 +42,7 @@ from buckaroo.serialization_utils import resolve_summary_stats_payload  # noqa: 
 from buckaroo.server import session as session_mod  # noqa: E402
 from buckaroo.server import stats_wire, telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
-from buckaroo.server.stat_run import StatRun  # noqa: E402
+from buckaroo.server.stat_run import StatCursor, StatRun  # noqa: E402
 from buckaroo.server.stats_wire import start_stat_run  # noqa: E402
 from buckaroo.server.websocket_handler import DataStreamHandler  # noqa: E402
 from tests.unit.dataflow.scoped_summary_stats_test import (  # noqa: E402
@@ -3058,6 +3059,315 @@ class TestStatUnits:
         assert len(_batch_queries(queries)) == 1, "each chunk of a join would run the whole join again"
         whole = xorq_loading.XorqServerDataflow(joined, skip_main_serial=True)
         assert _as_json(split.merged_sd) == _as_json(whole.merged_sd)
+
+
+# The stat rows the wire carries for the five-by-three table: the scalar tier is
+# the full tier's rows without the three it leaves out.
+_SCALAR_WIRE_ONLY = {"dtype", "min", "max", "null_count", "mean", "std", "non_null_count", "histogram_bins"}
+_FULL_ONLY_WIRE = {"distinct_count", "median", "histogram"}
+
+# The three ways an entry reaches a scalar target, as (host tier, limits).
+_SCALAR_TARGETS = {"by size": ("auto", _SCALAR_BY_SIZE), "named by the host": ("scalar", {}),
+    "full over the ceiling": ("full", {"ceiling_full_rows": 3})}
+
+
+def _scalar_session(dataflow):
+    """A buckaroo-mode session over ``dataflow`` whose policy target is
+    ``scalar`` and has nothing computed, as ``/load_expr`` leaves one."""
+    session = session_mod.SessionState(session_id="s", path="p")
+    session.mode, session.backend, session.xorq_dataflow = "buckaroo", "xorq", dataflow
+    session.stats_tier, session.stats_delivery = "auto", "deferred"
+    session.stats_policy = {"tier_target": "scalar", "auto_request": True, "requestable": ["full"],
+        "reason": "size", "estimate": {"rows": 12, "cols": 6}}
+    session_mod.begin_stats_generation(session)
+    return session
+
+
+def _ondemand_client():
+    return SimpleNamespace(caps=frozenset({"stats_update", "stats_ondemand"}), search_string="",
+        stats_cursor=StatCursor(), display_args_hash=None)
+
+
+class TestScalarTierWire(tornado.testing.AsyncHTTPTestCase):
+    """The scalar tier on a ``/load_expr`` session whose policy target is
+    ``scalar`` (rows-first p34). A client that advertised ``stats_ondemand``
+    pulls it with ``stats_request`` and gets ``stats_update`` messages whose
+    tier is ``scalar``. The run behaves like a filtered one: fragments go to
+    the clients and nothing is assigned to the dataflow, the session snapshot
+    or ``summary_stats_cache``, so the scalar stats can never be served as the
+    complete ones."""
+
+    def get_app(self):
+        return make_app()
+
+    def setUp(self):
+        super().setUp()
+        self.builds_root = tempfile.mkdtemp()
+        self.project_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.builds_root, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, self.project_root, ignore_errors=True)
+        self.build_path = _build_stats_wire_dir(self.builds_root)
+        self.clients = []
+
+    def tearDown(self):
+        for ws in self.clients:
+            ws.close()
+        super().tearDown()
+
+    def _session(self, sid):
+        return self._app.settings["sessions"].get(sid)
+
+    async def _load(self, sid, limits=None, **body):
+        with _stats_limits(**(limits or {})):
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": self.build_path, "project_root": self.project_root, **body})
+        self.assertEqual(resp.code, 200, resp.body)
+
+    async def _scalar_target(self, sid):
+        """A deferred ``auto`` session that resolved to a scalar target by size."""
+        await self._load(sid, limits=_SCALAR_BY_SIZE, stats_tier="auto", stats_delivery="deferred")
+
+    async def _connect(self, sid, caps=None):
+        suffix = f"?caps={caps}" if caps else ""
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/{sid}{suffix}")
+        self.clients.append(ws)
+        return ws, await _read_json(ws)
+
+    def _stats(self, frame):
+        stats = frame["df_meta"].get("stats")
+        self.assertIsNotNone(stats, "initial_state carries no df_meta.stats")
+        return stats
+
+    async def _inline_frame(self, sid):
+        await self._load(sid)
+        return (await self._connect(sid))[1]
+
+    async def _pull(self, ws, gen, **fields):
+        """The reply to an incremental ``stats_request``."""
+        ws.write_message(_stats_request(gen, incremental=True, **fields))
+        return await _read_json(ws)
+
+    async def _pull_update(self, ws, gen, **fields):
+        """The reply to an incremental ``stats_request``, which must be a ``stats_update``."""
+        reply = await self._pull(ws, gen, **fields)
+        self.assertEqual(reply["type"], "stats_update", reply)
+        return reply
+
+    @tornado.testing.gen_test
+    async def test_an_ondemand_client_pulls_the_scalar_tier_of_a_scalar_target(self):
+        for index, (name, (tier, limits)) in enumerate(_SCALAR_TARGETS.items()):
+            for incremental in (True, False):
+                sid = f"st-pull-{index}-{incremental}"
+                await self._load(sid, limits=limits, stats_tier=tier, stats_delivery="deferred")
+                ws, first = await self._connect(sid, caps=_ONDEMAND)
+                stats = self._stats(first)
+                self.assertEqual((stats["status"], stats["tier_target"]), ("not_computed", "scalar"), name)
+
+                with _count_stat_queries() as queries:
+                    ws.write_message(_stats_request(stats["gen"], **({"incremental": True} if incremental else {})))
+                    update = await _read_json(ws)
+
+                label = f"{name}, incremental={incremental}"
+                self.assertEqual(update["type"], "stats_update", f"{label}: {update}")
+                self.assertEqual((update["tier"], update["final"], update["remaining"]), ("scalar", True, 0), label)
+                self.assertEqual((update["stats_gen"], update["scope"]), (stats["gen"], "raw"), label)
+                self.assertIsInstance(update["elapsed_ms"], (int, float))
+                self.assertEqual(set(_rows_by_stat(update["payload"])), _SCALAR_WIRE_ONLY, label)
+                self.assertEqual([type(q.op()).__name__ for q in queries], ["Aggregate"], label)
+                self.assertFalse(list(queries[0].op().find((ops.ApproxMedian, ops.CountDistinct))), label)
+
+    @tornado.testing.gen_test
+    async def test_the_scalar_fragments_equal_the_full_stats_for_the_keys_they_cover(self):
+        full = _rows_by_stat((await self._inline_frame("st-eq-inline"))["df_data_dict"]["all_stats"])
+        await self._scalar_target("st-eq")
+        ws, first = await self._connect("st-eq", caps=_ONDEMAND)
+        scalar = _rows_by_stat((await self._pull_update(ws, self._stats(first)["gen"]))["payload"])
+
+        self.assertEqual(set(scalar), set(full) - _FULL_ONLY_WIRE)
+        for stat, row in scalar.items():
+            for column, value in row.items():
+                if column in ("index", "level_0") or (stat, column) == ("histogram_bins", "b"):
+                    continue
+                self.assertEqual(_as_json(value), _as_json(full[stat][column]), (stat, column))
+        # qty has three distinct values: unknown at this tier, so it gets bins that the full tier leaves out.
+        self.assertEqual((len(scalar["histogram_bins"]["b"]), full["histogram_bins"]["b"]), (11, []))
+
+    @tornado.testing.gen_test
+    async def test_a_scalar_run_assigns_nothing(self):
+        sid = "st-nothing"
+        await self._scalar_target(sid)
+        session = self._session(sid)
+        dataflow = session.xorq_dataflow
+        ws, first = await self._connect(sid, caps=_ONDEMAND)
+        gen = self._stats(first)["gen"]
+        held = (dataflow.summary_sd, session.df_data_dict, session.df_display_args, session.df_meta)
+        cached = set(dataflow.summary_stats_cache)
+
+        await self._pull_update(ws, gen)
+
+        self.assertTrue(all(a is b for a, b in zip(held,
+            (dataflow.summary_sd, session.df_data_dict, session.df_display_args, session.df_meta))))
+        self.assertEqual(set(dataflow.summary_stats_cache), cached, "nothing is written to summary_stats_cache")
+        self.assertEqual((session.stats_status, session.stats_reason, dataflow.stats_tier),
+            ("not_computed", "size", "schema"))
+        self.assertEqual(list(session.stat_runs), [(gen, "raw", "scalar", None)], "the run is kept for later clients")
+        _, later = await self._connect(sid, caps=_ONDEMAND)
+        self.assertEqual((self._stats(later)["status"], list(_rows_by_stat(later["df_data_dict"]["all_stats"]))),
+            ("not_computed", ["dtype"]), "a client that connects later is told the same as the first one")
+
+    @tornado.testing.gen_test
+    async def test_a_client_that_asks_later_reads_the_fragments_the_run_holds(self):
+        sid = "st-later"
+        await self._scalar_target(sid)
+        a, first = await self._connect(sid, caps=_ONDEMAND)
+        gen = self._stats(first)["gen"]
+        rows = _rows_by_stat((await self._pull_update(a, gen))["payload"])
+        b, _ = await self._connect(sid, caps=_ONDEMAND)
+
+        with _count_stat_queries() as queries:
+            caught_up = await self._pull_update(b, gen)
+
+        self.assertEqual(queries, [], "the run's units ran once")
+        self.assertEqual((caught_up["tier"], caught_up["final"]), ("scalar", True))
+        self.assertEqual(_as_json(_rows_by_stat(caught_up["payload"])), _as_json(rows))
+
+    @tornado.testing.gen_test
+    async def test_a_scalar_run_is_never_served_as_the_complete_stats(self):
+        inline = await self._inline_frame("st-never-inline")
+        await self._scalar_target("st-never")
+        a, first = await self._connect("st-never", caps=_ONDEMAND)
+        gen = self._stats(first)["gen"]
+        self.assertEqual((await self._pull_update(a, gen))["tier"], "scalar")
+
+        # The policy put the session below full for a client that cannot take that: it is owed the full stats.
+        _, legacy = await self._connect("st-never")
+        stats = self._stats(legacy)
+        self.assertEqual((stats["status"], stats["tier"]), ("complete", "full"))
+        self.assertEqual(_comparable(legacy), _comparable(inline))
+        self.assertEqual(set(_rows_by_stat(legacy["df_data_dict"]["all_stats"])),
+            set(_rows_by_stat(inline["df_data_dict"]["all_stats"])))
+        self.assertTrue(_FULL_ONLY_WIRE <= set(_rows_by_stat(legacy["df_data_dict"]["all_stats"])))
+        # Once the full stats exist a request for the session is answered with them.
+        update = await self._pull_update(a, gen)
+        self.assertEqual((update["tier"], update["final"]), ("full", True))
+        self.assertTrue(_FULL_ONLY_WIRE <= set(_rows_by_stat(update["payload"])))
+
+    @tornado.testing.gen_test
+    async def test_a_scalar_run_and_a_column_scoped_run_are_stored_apart_from_the_full_run(self):
+        await self._load("st-keys", stats_delivery="deferred")
+        session = self._session("st-keys")
+        runs = {"full": start_stat_run(session), "scalar": start_stat_run(session, tier="scalar"),
+            "scalar group": start_stat_run(session, tier="scalar", columns=("qty",)),
+            "full group": start_stat_run(session, tier="full", columns=("qty",))}
+        gen = session.stats_gen
+        self.assertEqual({name: run.key for name, run in runs.items()}, {
+            "full": (gen, "raw"), "scalar": (gen, "raw", "scalar", None),
+            "scalar group": (gen, "raw", "scalar", ("qty",)), "full group": (gen, "raw", "full", ("qty",))})
+        self.assertEqual(session.stat_runs, {run.key: run for run in runs.values()})
+        self.assertIs(start_stat_run(session, tier="scalar"), runs["scalar"], "one run for a tier and group")
+        self.assertEqual({name: run.assigns for name, run in runs.items()},
+            {"full": True, "scalar": False, "scalar group": False, "full group": False})
+        self.assertEqual([u.id for u in runs["scalar"].units], ["batch"])
+        self.assertEqual([u.id for u in runs["scalar group"].units], ["batch"])
+        self.assertEqual([u.columns for u in runs["full group"].units], [("qty",), ("qty",)])
+
+    @tornado.testing.gen_test
+    async def test_runs_that_assign_nothing_leave_the_dataflow_the_snapshot_and_the_cache_alone(self):
+        await self._load("st-scoped", stats_delivery="deferred")
+        session = self._session("st-scoped")
+        dataflow = session.xorq_dataflow
+        held = (dataflow.summary_sd, session.df_data_dict)
+        cached = set(dataflow.summary_stats_cache)
+        key = dataflow._scope_cache_key(split_chain_by_scope(dataflow.operations)["filt"], tier="full")
+
+        for tier, columns in (("scalar", None), ("scalar", ("qty",)), ("full", ("qty",))):
+            run = start_stat_run(session, tier=tier, columns=columns)
+            stats_wire.run_units(run, None)
+            self.assertEqual(run.status, "complete")
+            rows = _rows_by_stat(stats_wire.partial_payload(dataflow, run, run.fragments))
+            columns_sent = {c for row in rows.values() for c in row} - {"index", "level_0"}
+            self.assertEqual(columns_sent, {"a", "b", "c"} if columns is None else {"b"}, (tier, columns))
+        self.assertTrue(all(a is b for a, b in zip(held, (dataflow.summary_sd, session.df_data_dict))))
+        self.assertEqual(set(dataflow.summary_stats_cache), cached)
+        self.assertEqual((session.stats_status, dataflow.stats_tier), ("pending", "schema"))
+
+        # The run that is assigned is a whole full run, whatever else ran.
+        self.assertTrue(stats_wire.complete_stats(session))
+        self.assertEqual(set(dataflow.summary_stats_cache) - cached, {key})
+        self.assertTrue(_FULL_ONLY_WIRE <= set(_rows_by_stat(session.df_data_dict["all_stats"])))
+
+    @tornado.testing.gen_test
+    async def test_a_scalar_run_is_not_assigned_even_if_it_is_stored_under_the_full_key(self):
+        await self._load("st-guard", stats_delivery="deferred")
+        session = self._session("st-guard")
+        dataflow = session.xorq_dataflow
+        cached = set(dataflow.summary_stats_cache)
+        run = start_stat_run(session, tier="scalar")
+        stats_wire.run_units(run, None)
+        session.stat_runs[(session.stats_gen, "raw")] = run
+
+        with self.assertLogs("buckaroo.server.stats_wire", level="ERROR"):
+            self.assertFalse(stats_wire.complete_stats(session))
+
+        self.assertEqual((session.stats_status, session.stats_reason), ("error", "stats_failed"))
+        self.assertEqual(set(dataflow.summary_stats_cache), cached)
+
+
+class TestScalarTierRequests:
+    """An incremental scalar request on a session whose batch is cut into
+    chunks (rows-first p34): one chunk per request, each reply reporting the
+    ``scalar`` tier, and the last one ``final``."""
+
+    @staticmethod
+    def _session(tmp_path, **kwargs):
+        expr = _wide_parquet_expr(tmp_path)
+        dataflow = xorq_loading.XorqServerDataflow(expr, skip_main_serial=True, stats_tier="schema", **kwargs)
+        return _scalar_session(dataflow)
+
+    @staticmethod
+    def _request(session, client, **fields):
+        return stats_wire.handle_stats_request(
+            session, {"type": "stats_request", "stats_gen": session.stats_gen, "scope": "raw", **fields}, client)
+
+    def test_each_request_runs_one_chunk_and_reports_the_scalar_tier(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(stats_wire, "STATS_BUDGET_S", 0)
+        # 24 cells at 12 rows is two columns per chunk: three batch units.
+        session, client = self._session(tmp_path, stat_chunk_cells=24), _ondemand_client()
+        replies = [self._request(session, client, incremental=True) for _ in range(3)]
+        assert [r["type"] for r in replies] == ["stats_update"] * 3, replies
+        assert [(r["tier"], r["final"], r["remaining"]) for r in replies] == [
+            ("scalar", False, 2), ("scalar", False, 1), ("scalar", True, 0)]
+        assert [{c for row in _rows_by_stat(r["payload"]).values() for c in row} - {"index", "level_0"}
+            for r in replies] == [{"a", "b"}, {"c", "d"}, {"e", "f"}]
+        whole = self._request(self._session(tmp_path), _ondemand_client())
+        assert _as_json(_merge_stat_payloads(r["payload"] for r in replies)) == _as_json(
+            _merge_stat_payloads([whole["payload"]]))
+
+    def test_a_request_after_the_last_chunk_replays_nothing_and_runs_nothing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(stats_wire, "STATS_BUDGET_S", 0)
+        session, client = self._session(tmp_path, stat_chunk_cells=24), _ondemand_client()
+        for _ in range(3):
+            self._request(session, client, incremental=True)
+        with _count_stat_queries() as queries:
+            again = self._request(session, client, incremental=True)
+        assert queries == []
+        assert again["type"] == "stats_update", again
+        assert (again["tier"], again["final"], again["remaining"]) == ("scalar", True, 0)
+
+    def test_a_unit_that_fails_aborts_the_request_and_not_the_session(self, tmp_path, caplog):
+        session, client = self._session(tmp_path), _ondemand_client()
+        dataflow = session.xorq_dataflow
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        run = StatRun(session.stats_gen, "raw", _SlowStats(stats, fail_on="batch"),
+            state=dataclasses.replace(stats.state, tier="scalar"))
+        session.stat_runs[run.key] = run
+        for _ in range(2):
+            reply = self._request(session, client, incremental=True)
+            assert (reply["type"], reply["reason"]) == ("stats_aborted", "error")
+        assert run.status == "error", "a failed run is not retried"
+        assert (session.stats_status, session.stats_reason) == ("not_computed", "size"), "the full tier is still open"
+        assert any("stat unit failed" in record.getMessage() for record in caplog.records)
 
 
 class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
