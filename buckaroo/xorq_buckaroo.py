@@ -219,16 +219,22 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
         """Identity, dtype, typing flags and row count for every column of an
         expression, with no query beyond ``_expr_count`` (cached per
         expression). Carries the same values full stats give those keys, so
-        styling that reads only them renders the same. ``_get_summary_sd``
-        handles a pandas frame before it gets here."""
+        styling that reads only them renders the same. A column in
+        ``skip_stat_columns`` gets only name, dtype and length, as at the full
+        tier, so its typing comes from ``init_sd``. ``_get_summary_sd`` handles
+        a pandas frame before it gets here."""
         expr = cast("XorqExpr", processed_df)
         schema = expr.schema()
         length = _expr_count(expr)
-        return {
-            rewritten_col: {
+        skip = getattr(self, 'skip_stat_columns', None) or ()
+        sd: dict = {}
+        for orig_col, rewritten_col in old_col_new_col(expr):
+            dtype = str(schema[str(orig_col)])
+            typing = {'dtype': dtype} if orig_col in skip else schema_stats(dtype)
+            sd[rewritten_col] = {
                 'orig_col_name': orig_col, 'rewritten_col_name': rewritten_col,
-                **schema_stats(str(schema[str(orig_col)])), 'length': length}
-            for orig_col, rewritten_col in old_col_new_col(expr)}
+                **typing, 'length': length}
+        return sd
 
 
 _XORQ_ANALYSIS_KLASSES = list(XORQ_STATS_V2) + [DefaultSummaryStatsStyling, DefaultMainStyling]
