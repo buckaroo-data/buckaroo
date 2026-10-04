@@ -31,6 +31,7 @@ from xorq.common.utils.graph_utils import replace_nodes, walk_nodes  # noqa: E40
 from xorq.common.utils.provenance_utils import read_parquet_provenance  # noqa: E402
 from xorq.expr.relations import CachedNode  # noqa: E402
 from xorq.vendor.ibis.expr import operations as ops  # noqa: E402
+from xorq.vendor.ibis.expr.types.core import Expr  # noqa: E402
 
 from buckaroo.dataflow.dataflow import assemble_merged_sd  # noqa: E402
 from buckaroo.dataflow.sd_cache import split_chain_by_scope  # noqa: E402
@@ -4287,6 +4288,360 @@ class TestTierFieldsAndOlderClients(_LimitsWire):
         self.assertEqual([(r["tier"], r["final"], r["remaining"]) for r in replies],
             [("full", False, 3), ("full", False, 2), ("full", False, 1), ("full", True, 0)])
         self.assertTrue(all("status" not in r for r in replies))
+
+
+# ---------------------------------------------------------------------------
+# Guards for huge sources (rows-first p37)
+# ---------------------------------------------------------------------------
+
+# A display klass that turns sorting back on for every column, as a klass that
+# sets its own ag_grid_specs might.
+_SORTABLE_STYLING = '''
+class SortableStyling(DefaultMainStyling):
+    df_display_name = "main"
+
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        base_config = super().style_column(col, column_metadata)
+        base_config["ag_grid_specs"] = {**base_config.get("ag_grid_specs", {}), "sortable": True, "minWidth": 90}
+        return base_config
+'''
+
+# The same from the host's side: an override applied after the klasses have styled.
+_SORTABLE_OVERRIDE = {"qty": {"ag_grid_specs": {"sortable": True}}}
+
+
+@contextmanager
+def _guard_limits(**limits):
+    """Sort and search thresholds for the block, as ``BUCKAROO_*`` environment
+    overrides, which are read each time a load resolves its guards. The table
+    ``_build_stats_wire_dir`` builds has five rows, so a ``sort_disable_rows`` of
+    3 puts it above the sort threshold."""
+    env = {f"BUCKAROO_{name.upper()}": str(value) for name, value in limits.items()}
+    with patch.dict(os.environ, env):
+        yield
+
+
+@contextmanager
+def _count_backend_queries():
+    """Record the outermost op of every query sent to the backend (``execute``
+    and ``to_pyarrow``) while the block runs: a count is ``CountStar``."""
+    queries = []
+    original_execute, original_to_pyarrow = Expr.execute, Expr.to_pyarrow
+
+    def execute(self, *args, **kwargs):
+        queries.append(type(self.op()).__name__)
+        return original_execute(self, *args, **kwargs)
+
+    def to_pyarrow(self, *args, **kwargs):
+        queries.append(type(self.op()).__name__)
+        return original_to_pyarrow(self, *args, **kwargs)
+
+    with patch.object(Expr, "execute", execute), patch.object(Expr, "to_pyarrow", to_pyarrow):
+        yield queries
+
+
+def _grid_columns(frame, display="main"):
+    """Every column config the grid of ``display`` is built from, the index
+    columns included."""
+    config = frame["df_display_args"][display]["df_viewer_config"]
+    return config["column_config"] + config["left_col_configs"]
+
+
+def _sortable(column):
+    return column.get("ag_grid_specs", {}).get("sortable")
+
+
+class TestSortGuardDataflow:
+    """The sort guard on the dataflow (rows-first p37): ``set_sort_enabled`` turns
+    sorting off in the display config as a final pass, after the klasses and the
+    host's overrides, and the state of the dataflow survives a rebuild."""
+
+    @staticmethod
+    def _main(dataflow):
+        config = dataflow.df_display_args["main"]["df_viewer_config"]
+        return config["column_config"] + config["left_col_configs"]
+
+    def test_a_dataflow_sorts_by_default(self):
+        dataflow = _build_dataflow()
+        assert dataflow.sort_enabled is True
+        assert all(_sortable(c) is not False for c in self._main(dataflow))
+
+    def test_disabling_sorting_covers_every_column_including_one_an_override_sets(self):
+        dataflow = _build_dataflow(column_config_overrides=_SORTABLE_OVERRIDE)
+        assert [_sortable(c) for c in self._main(dataflow) if c.get("header_name") == "qty"] == [True]
+        dataflow.set_sort_enabled(False)
+        columns = self._main(dataflow)
+        assert len(columns) == 4
+        assert [_sortable(c) for c in columns] == [False] * 4
+
+    def test_the_summary_display_is_not_changed(self):
+        dataflow = _build_dataflow()
+        before = json.dumps(dataflow.df_display_args["summary"], sort_keys=True)
+        dataflow.set_sort_enabled(False)
+        assert json.dumps(dataflow.df_display_args["summary"], sort_keys=True) == before
+
+    def test_enabling_sorting_again_restores_the_config(self):
+        dataflow = _build_dataflow()
+        before = json.dumps(dataflow.df_display_args, sort_keys=True)
+        dataflow.set_sort_enabled(False)
+        assert json.dumps(dataflow.df_display_args, sort_keys=True) != before
+        dataflow.set_sort_enabled(True)
+        assert json.dumps(dataflow.df_display_args, sort_keys=True) == before
+
+    def test_the_guard_survives_a_state_change_and_new_stats(self):
+        dataflow = _build_dataflow(stats_tier="schema")
+        dataflow.set_sort_enabled(False)
+        dataflow.quick_command_args = {"search": ["a"]}
+        assert [_sortable(c) for c in self._main(dataflow)] == [False] * 4
+        stats_wire.assign_full_stats(dataflow)
+        assert [_sortable(c) for c in self._main(dataflow)] == [False] * 4
+
+
+class TestSortGuardWire(_LimitsWire):
+    """A session a host opened with a stats policy, over the sort threshold
+    (rows-first p37): sorting is off in its config, a sorted window is refused
+    with ``sort_disabled``, and ``df_meta`` says so. The table has five rows, so a
+    ``sort_disable_rows`` of 3 is over."""
+
+    DISPLAY_FILES = {"sortable_styling.py": _SORTABLE_STYLING}
+
+    async def _window(self, ws, **fields):
+        ws.write_message(json.dumps({"type": "infinite_request", "payload_args": {"start": 0, "end": 5,
+            "sourceName": "default", "origEnd": 5, **fields}}))
+        return await _read_json(ws)
+
+    async def _served(self, ws, **fields):
+        """A window the server serves: the ``infinite_resp``, then its parquet frame."""
+        resp = await self._window(ws, **fields)
+        self.assertEqual((resp["type"], resp.get("error_info")), ("infinite_resp", None), resp)
+        self.assertIsInstance(await ws.read_message(), bytes)
+        return resp
+
+    async def _refused(self, ws, **fields):
+        """A window the server refuses, with nothing after it: the next frame
+        read is the answer to the next request, not a parquet frame."""
+        resp = await self._refusal(ws, **fields)
+        again = await self._window(ws)
+        self.assertEqual((again["type"], again["length"]), ("infinite_resp", 5), again)
+        self.assertIsInstance(await ws.read_message(), bytes)
+        return resp
+
+    async def _refusal(self, ws, **fields):
+        resp = await self._window(ws, **fields)
+        self.assertEqual((resp["type"], resp.get("error_code")), ("infinite_resp", "sort_disabled"), resp)
+        return resp
+
+    @tornado.testing.gen_test
+    async def test_every_column_stops_sorting_whatever_a_klass_or_an_override_says(self):
+        with _guard_limits(sort_disable_rows=3):
+            await self._load("sg-columns", column_config_overrides=_SORTABLE_OVERRIDE)
+        _, frame = await self._connect("sg-columns")
+        columns = _grid_columns(frame)
+        self.assertEqual(len(columns), 4)
+        self.assertEqual([_sortable(c) for c in columns], [False] * 4, columns)
+        by_name = {c["header_name"]: c["ag_grid_specs"] for c in columns if "header_name" in c and c["col_name"] != "index"}
+        self.assertEqual(by_name["price"], {"minWidth": 90, "sortable": False}, "the klass's other specs are kept")
+        self.assertEqual(by_name["qty"], {"sortable": False},
+            "the override replaced the specs, and the guard has the last word")
+        self.assertEqual(frame["df_display_args"], self._session("sg-columns").df_display_args)
+
+
+    @tornado.testing.gen_test
+    async def test_a_sorted_window_is_refused_and_no_query_runs(self):
+        with _guard_limits(sort_disable_rows=3):
+            await self._load("sg-refuse")
+        ws, _ = await self._connect("sg-refuse")
+        with _count_backend_queries() as queries:
+            refusal = await self._refusal(ws, sort="a", sort_direction="asc")
+        self.assertEqual(queries, [])
+        self.assertEqual(refusal["length"], 0)
+        self.assertEqual(refusal["key"]["sort"], "a")
+        self.assertTrue(isinstance(refusal["error_info"], str) and refusal["error_info"])
+        again = await self._window(ws)
+        self.assertEqual((again["type"], again["length"]), ("infinite_resp", 5), again)
+        self.assertIsInstance(await ws.read_message(), bytes, "no frame followed the refusal")
+
+    @tornado.testing.gen_test
+    async def test_the_second_window_of_a_request_is_judged_too(self):
+        with _guard_limits(sort_disable_rows=3):
+            await self._load("sg-second")
+        ws, _ = await self._connect("sg-second")
+        second = {"start": 5, "end": 10, "sourceName": "default", "origEnd": 10, "sort": "a", "sort_direction": "asc"}
+        first = await self._window(ws, second_request=second)
+        self.assertEqual((first["type"], first.get("error_info")), ("infinite_resp", None), first)
+        self.assertIsInstance(await ws.read_message(), bytes)
+        refusal = await _read_json(ws)
+        self.assertEqual((refusal["type"], refusal["error_code"], refusal["key"]), ("infinite_resp", "sort_disabled",
+            second))
+
+
+    @tornado.testing.gen_test
+    async def test_df_meta_carries_the_sort_flag_for_every_client(self):
+        with _guard_limits(sort_disable_rows=3):
+            await self._load("sg-meta")
+        for caps in (_ONDEMAND, "stats_update", None):
+            _, frame = await self._connect("sg-meta", caps=caps)
+            self.assertEqual(frame["df_meta"].get("sort"), "disabled", caps)
+            self.assertNotIn("search", frame["df_meta"], caps)
+
+    @tornado.testing.gen_test
+    async def test_df_meta_carries_the_search_flag_when_its_threshold_is_passed_and_search_is_still_served(self):
+        with _guard_limits(sort_disable_rows=100, search_disable_rows=3):
+            await self._load("sg-search")
+        ws, frame = await self._connect("sg-search")
+        self.assertEqual(frame["df_meta"].get("search"), "disabled")
+        self.assertNotIn("sort", frame["df_meta"])
+        self.assertTrue(all(_sortable(c) is not False for c in _grid_columns(frame)))
+        await self._state(ws, search_string="a")
+        self.assertEqual((await self._served(ws))["length"], 2, "the server has no switch for search")
+
+
+    @tornado.testing.gen_test
+    async def test_the_guard_follows_a_state_change(self):
+        with _guard_limits(sort_disable_rows=3):
+            await self._load("sg-state")
+        ws, _ = await self._connect("sg-state")
+        frame = await self._state(ws, post_processing="first_three")
+        self.assertEqual(frame["df_meta"].get("sort"), "disabled")
+        self.assertEqual([_sortable(c) for c in _grid_columns(frame)], [False] * 4)
+        await self._refused(ws, sort="a", sort_direction="desc")
+
+    @tornado.testing.gen_test
+    async def test_the_guard_holds_once_the_stats_are_complete(self):
+        with _guard_limits(sort_disable_rows=3):
+            await self._load("sg-complete")
+        ws, first = await self._connect("sg-complete")
+        replies = await self._ask_to_the_end(ws, self._stats(first)["gen"])
+        self.assertTrue(replies[-1]["final"])
+        session = self._session("sg-complete")
+        self.assertEqual(session.stats_status, "complete")
+        config = session.df_display_args["main"]["df_viewer_config"]
+        self.assertEqual([_sortable(c) for c in config["column_config"] + config["left_col_configs"]], [False] * 4)
+        if "df_display_args" in replies[-1]:
+            held = replies[-1]["df_display_args"]["main"]["df_viewer_config"]
+            self.assertEqual([_sortable(c) for c in held["column_config"] + held["left_col_configs"]], [False] * 4)
+        await self._refused(ws, sort="b", sort_direction="asc")
+
+    @tornado.testing.gen_test
+    async def test_a_reload_resolves_the_guard_again(self):
+        with _guard_limits(sort_disable_rows=100):
+            await self._load("sg-reload")
+        ws, first = await self._connect("sg-reload")
+        self.assertNotIn("sort", first["df_meta"])
+        with _guard_limits(sort_disable_rows=3):
+            await self._reload("sg-reload")
+        frame = await _read_json(ws)
+        self.assertEqual(frame["df_meta"].get("sort"), "disabled")
+        self.assertEqual([_sortable(c) for c in _grid_columns(frame)], [False] * 4)
+        await self._refused(ws, sort="a", sort_direction="asc")
+        with _guard_limits(sort_disable_rows=100):
+            await self._reload("sg-reload")
+        frame = await _read_json(ws)
+        self.assertNotIn("sort", frame["df_meta"])
+        self.assertTrue(all(_sortable(c) is not False for c in _grid_columns(frame)))
+        await self._served(ws, sort="a", sort_direction="asc")
+
+    @tornado.testing.gen_test
+    async def test_a_load_of_a_file_ends_the_guard(self):
+        sid = "sg-load"
+        with _guard_limits(sort_disable_rows=3):
+            await self._load(sid)
+        ws, _ = await self._connect(sid)
+        csv_fd, csv_path = tempfile.mkstemp(suffix=".csv")
+        os.close(csv_fd)
+        try:
+            pd.DataFrame({"x": [1, 2, 3], "y": ["p", "q", "r"]}).to_csv(csv_path, index=False)
+            resp = await _post(self.get_http_port(), "/load", {"session": sid, "path": csv_path, "mode": "buckaroo"})
+            self.assertEqual(resp.code, 200, resp.body)
+        finally:
+            os.unlink(csv_path)
+        frame = await _read_json(ws)
+        self.assertNotIn("sort", frame["df_meta"])
+        self.assertIsNone(getattr(self._session(sid), "source_guards", "missing"))
+        self.assertEqual((await self._served(ws, sort="a", sort_direction="asc"))["length"], 3)
+
+
+class TestSearchedCountMemo:
+    """A searched xorq window counts the filtered rows, and ``search_expr`` builds
+    a new expression each time, which ``_expr_count`` caches by object, so every
+    request counted again. The count is now held for (base expression, term)
+    (rows-first p37, plan 2 section 4.3)."""
+
+    WINDOW = {"start": 0, "end": 5, "sourceName": "default", "origEnd": 5}
+
+    @staticmethod
+    def _counts(queries):
+        return queries.count("CountStar")
+
+    def test_a_repeated_searched_window_issues_one_count(self):
+        dataflow = _build_dataflow()
+        with _count_backend_queries() as queries:
+            first, _ = xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="a")
+            second, _ = xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="a")
+        assert (first["length"], second["length"]) == (2, 2)
+        assert self._counts(queries) == 1
+
+    def test_another_window_of_the_same_search_reuses_the_count(self):
+        dataflow = _build_dataflow()
+        with _count_backend_queries() as queries:
+            for start, end in ((0, 1), (1, 2), (0, 2)):
+                resp, parquet = xorq_loading.handle_infinite_request_xorq(dataflow,
+                    {**self.WINDOW, "start": start, "end": end}, search_string="a")
+                assert (resp["length"], pq.read_table(io.BytesIO(parquet)).num_rows) == (2, end - start)
+        assert self._counts(queries) == 1
+
+    def test_each_term_is_counted_once(self):
+        dataflow = _build_dataflow()
+        with _count_backend_queries() as queries:
+            lengths = [xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string=term)[0]["length"]
+                for term in ("a", "b", "a", "b", "c", "a")]
+        assert lengths == [2, 2, 2, 2, 1, 2]
+        assert self._counts(queries) == 3
+
+    def test_a_new_base_expression_is_counted_again(self):
+        dataflow = _build_dataflow()
+        before, _ = xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="a")
+        dataflow.quick_command_args = {"search": ["b"]}
+        with _count_backend_queries() as queries:
+            after, _ = xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="a")
+            xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="a")
+        assert (before["length"], after["length"]) == (2, 0), "the rows the quick search left hold no a"
+        assert self._counts(queries) == 1
+
+
+
+class TestSearchedWindowCountsWire(_LimitsWire):
+    """The same through the WebSocket: the term a client types is per client, and
+    the count it costs is shared."""
+
+    async def _window(self, ws, **fields):
+        ws.write_message(json.dumps({"type": "infinite_request", "payload_args": {"start": 0, "end": 5,
+            "sourceName": "default", "origEnd": 5, **fields}}))
+        resp = await _read_json(ws)
+        self.assertIsInstance(await ws.read_message(), bytes)
+        return resp
+
+    @tornado.testing.gen_test
+    async def test_a_repeated_searched_window_issues_one_count(self):
+        await self._load("sc-repeat", stats_delivery="inline")
+        ws, _ = await self._connect("sc-repeat", caps=None)
+        await self._state(ws, search_string="a")
+        with _count_backend_queries() as queries:
+            lengths = [(await self._window(ws, start=start, end=end))["length"] for start, end in ((0, 5), (0, 5), (1, 2))]
+        self.assertEqual(lengths, [2, 2, 2])
+        self.assertEqual(queries.count("CountStar"), 1)
+
+    @tornado.testing.gen_test
+    async def test_two_clients_searching_the_same_term_share_the_count(self):
+        await self._load("sc-share", stats_delivery="inline")
+        a, _ = await self._connect("sc-share", caps=None)
+        b, _ = await self._connect("sc-share", caps=None)
+        for ws in (a, b):
+            await self._state(ws, search_string="a")
+        with _count_backend_queries() as queries:
+            self.assertEqual([(await self._window(ws))["length"] for ws in (a, b, a, b)], [2, 2, 2, 2])
+        self.assertEqual(queries.count("CountStar"), 1)
 
 
 class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
