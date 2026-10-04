@@ -217,6 +217,30 @@ describe("stats_update merge", () => {
     });
 });
 
+describe("stats_update order", () => {
+    it("merges updates in arrival order when an earlier payload decodes slower", async () => {
+        let release: () => void = () => {};
+        gate = new Promise<void>((resolve) => { release = resolve; });
+        try {
+            const { ws, model, events } = makeModel(3);
+            const held = { format: "json", layout: "wide", data: [row("mean", { a: 1 })], hold: true };
+            ws.deliver(update(3, [], { final: false, payload: held }));
+            ws.deliver(update(3, [row("mean", { a: 2 })]));
+            await settle(); // the second payload has decoded; the first is held
+            release();
+            await settle();
+            // The final update goes last: its value stands and the status
+            // completes only after both merges.
+            const mean = model.get("df_data_dict").all_stats.find((r: any) => r.index === "mean");
+            expect(mean.a).toBe(2);
+            expect(events.map((e) => e.event)).toEqual(["change:df_data_dict", "change:df_data_dict", "change:df_meta"]);
+        } finally {
+            release();
+            gate = Promise.resolve();
+        }
+    });
+});
+
 describe("stats_update and df_meta.stats", () => {
     it("a final update marks the stats complete at the update's tier", async () => {
         const { ws, model, events } = makeModel(3);
