@@ -3944,6 +3944,46 @@ class TestCostGuardWire(_LimitsWire):
         self.assertEqual((session.stats_status, session.cost_paused), ("complete", False))
 
     @tornado.testing.gen_test
+    async def test_a_client_that_connected_while_paused_is_sent_the_rebuilt_config_when_it_continues(self):
+        """Its frame was ``not_computed`` and carried the schema tier's config, so the
+        complete stats have to say it changed, whether the request names the
+        tier the session is headed for or leaves it out."""
+        for index, fields in enumerate(({}, {"tier": "full"})):
+            sid = f"cg-late-{index}"
+            _ws, gen = await self._paused_session(sid)
+            session = self._session(sid)
+            late, frame = await self._connect(sid)
+            self.assertEqual({key: self._stats(frame).get(key) for key in ("status", "reason", "tier_target")},
+                {"status": "not_computed", "reason": "cost", "tier_target": "full"}, fields)
+            replies = await self._ask_to_the_end(late, gen, force=True, **fields)
+            final = replies[-1]
+            self.assertEqual((final["type"], final["final"], session.stats_status), ("stats_update", True, "complete"),
+                fields)
+            for reply in replies[:-1]:
+                self.assertNotIn("df_display_args", reply, fields)
+            self.assertIn("df_display_args", final, fields)
+            self.assertEqual(_as_json(final["df_display_args"]), _as_json(session.df_display_args), fields)
+            self.assertNotEqual(_as_json(frame["df_display_args"]), _as_json(session.df_display_args),
+                "the complete stats change the config the paused frame carried")
+
+    @tornado.testing.gen_test
+    async def test_a_client_that_changed_state_while_paused_is_sent_the_rebuilt_config_when_it_continues(self):
+        """A state change while paused sends the client a new ``not_computed`` frame, with
+        the schema tier's config and its own search highlight."""
+        ws, _gen = await self._paused_session("cg-search")
+        session = self._session("cg-search")
+        frame = await self._state(ws, quick_command_args={"search": ["b"]}, search_string="b")
+        stats = self._stats(frame)
+        self.assertEqual((stats["status"], stats["reason"]), ("not_computed", "cost"))
+        replies = await self._ask_to_the_end(ws, stats["gen"], force=True)
+        final = replies[-1]
+        self.assertEqual((final["type"], final["final"], session.stats_status), ("stats_update", True, "complete"))
+        self.assertIn("df_display_args", final)
+        self.assertEqual(_as_json(final["df_display_args"]),
+            _as_json(stats_wire.highlighted_display_args(session.df_display_args, "b")))
+        self.assertNotEqual(_as_json(frame["df_display_args"]), _as_json(final["df_display_args"]))
+
+    @tornado.testing.gen_test
     async def test_a_client_without_both_bits_is_not_held_by_the_pause(self):
         _ws, gen = await self._paused_session("cg-legacy")
         session = self._session("cg-legacy")
