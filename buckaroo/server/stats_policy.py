@@ -1,8 +1,9 @@
 """Which stats tier an entry should reach, decided from its size.
 
-Pure functions. Nothing in the handlers, the session or the dataflow imports
-this module yet; it exists so the policy can be tested without a backend
-before it is wired in.
+Pure functions, so the policy can be tested without a backend. The load
+handlers resolve it (``stats_wire.resolve_session_policy``), the session applies
+a forced tier on top of it (``session.effective_stats_policy``) and a
+``stats_request`` is judged against it.
 
 Tiers, lowest to highest:
 
@@ -22,6 +23,9 @@ so the cost does not grow with the file.
 
 :func:`route_polars_entry` is the separate size rule for polars: an entry
 above R rows belongs on xorq's ``/load_expr``, not eager ``/load``.
+
+:func:`demand_columns` is the demand scan: which columns a built display config
+needs ``min`` and ``max`` for even when the policy computes no stats.
 
 The thresholds are PROVISIONAL. They are the values the phase-0 measurements
 proposed (one Apple M4 Pro, 115 tallyman telemetry loads, xorq stats on
@@ -261,6 +265,35 @@ def route_polars_entry(rows: int, cols: int, limits: StatsLimits | None = None) 
     if limits is None:
         limits = StatsLimits.from_env()
     return "xorq" if rows > limits.polars_route_rows else "eager"
+
+
+def demand_columns(display_args: Any, pairs: Any) -> list[str]:
+    """The columns a display config reads ``histogram_bins`` of: the
+    ``val_column`` of every ``color_map_config`` whose ``color_rule`` is
+    ``color_map``, in any display of ``display_args`` (``df_display_args``). The
+    scan reads the config alone, so it sends no query. It covers the rules a host
+    put in the column overrides and the ones a klass adds at style time, since
+    both are in the config once it is built.
+
+    ``pairs`` are the ``(original, rewritten)`` names of the table's columns. A
+    ``val_column`` may be either, and a rewritten name wins over an original
+    that looks like one, as the client reads it; one that is neither (or not a
+    string) names no column and is dropped. A ``color_map`` rule with no
+    ``val_column`` reads nothing, and neither does a categorical rule or a
+    tooltip. The result is the rewritten names, once each, in the table's order;
+    ``display_args`` is not changed and may have any shape."""
+    wanted = set()
+    for display in display_args.values() if isinstance(display_args, dict) else ():
+        config = display.get("df_viewer_config") if isinstance(display, dict) else None
+        columns = config.get("column_config") if isinstance(config, dict) else None
+        for column in columns if isinstance(columns, list) else ():
+            rule = column.get("color_map_config") if isinstance(column, dict) else None
+            val_column = rule.get("val_column") if isinstance(rule, dict) else None
+            if isinstance(val_column, str) and rule.get("color_rule") == "color_map":
+                wanted.add(val_column)
+    by_name = {**{orig: new for orig, new in pairs}, **{new: new for _orig, new in pairs}}
+    named = {by_name[name] for name in wanted if name in by_name}
+    return [new for _orig, new in pairs if new in named]
 
 
 def probe_dtypes(obj: Any) -> dict[str, str]:

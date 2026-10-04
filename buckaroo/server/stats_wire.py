@@ -33,6 +33,24 @@ status stay as they were, so the scalar stats are never served as the complete
 ones. Only the full run over every column reaches the final assignment
 (``StatRun.assigns``).
 
+That client can also say what it wants (rows-first p36a). ``stats_request`` takes
+``tier`` (``scalar`` or ``full``), ``force`` and, with a ``tier``, ``columns`` that
+scope the run to those columns (a run that is never assigned, like the scalar one).
+The server judges every such request itself, in this order: a tier the ceiling
+refuses for the cells asked for is answered ``stats_update {final: true, status:
+"not_computed", reason: "ceiling"}`` and runs nothing; a whole-table tier below the
+target, or above it without ``force``, is ``not_requestable``; while the cost guard
+has paused the session, a request without ``force`` is answered with reason
+``cost``. A ``force`` above the target sets the session's ``stats_override``
+(``session.effective_stats_policy``) and clears the pause. An automatic request,
+one without ``force``, that ran a unit over ``STATS_COST_BUDGET_S`` and left units
+to run pauses the session (``cost_paused``): the status is ``not_computed`` for
+``cost`` until a ``force`` request. The fields mean nothing to any other client,
+or on a session with no policy. The demand scan (``stats_policy.demand_columns``)
+names the columns the display config's ``color_map`` rules read, and
+``df_meta.stats.demand_columns`` carries them to a client, which asks for them as
+a scoped scalar request.
+
 Every send site goes through ``build_state_message_for`` (or ``broadcast_state``,
 which calls it per client), because the session holds one shared snapshot and
 the client is known only to the handler that owns the connection.
@@ -55,6 +73,7 @@ import json
 import logging
 import time
 import traceback
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from buckaroo.dataflow.sd_cache import split_chain_by_scope
@@ -62,9 +81,11 @@ from buckaroo.df_util import old_col_new_col
 from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.pluggable_analysis_framework.stat_units import Fragment
 from buckaroo.server.data_loading import get_buckaroo_display_state
-from buckaroo.server.session import SessionState, build_state_message, stats_deferred_by_policy
+from buckaroo.server.session import (
+    SessionState, build_state_message, effective_stats_policy, restore_stats_status, session_dataflow,
+    stats_deferred_by_policy)
 from buckaroo.server.stat_run import StatCursor, StatRun, stat_run_key
-from buckaroo.server.stats_policy import resolve_stats_policy
+from buckaroo.server.stats_policy import TIERS, demand_columns, resolve_stats_policy
 
 log = logging.getLogger("buckaroo.server.stats_wire")
 
@@ -91,6 +112,19 @@ STATS_SCOPES = ("raw",)
 # others and a query is alone in its own. It cannot cut a unit short: the
 # longest unit is what a waiting ``infinite_request`` stalls behind.
 STATS_BUDGET_S = 0.075
+
+# The longest an automatic unit may take before the cost guard pauses the
+# session, in seconds. PROVISIONAL: a unit cannot be cut short, so this bounds
+# how long the loop is held by one unit that nobody asked for. The number is the
+# tallyman client's base timeout (10 s), not a measurement of units. For scale:
+# the largest unit on parking_2017 (10.8M rows x 43 columns), the scalar batch,
+# takes 0.9 to 1.0 s, and the slowest in-limit telemetry load (an 11.8M-row CSV
+# union) took 22 s for all of its units together.
+STATS_COST_BUDGET_S = 10.0
+
+# The tiers a ``stats_request`` can name. ``schema`` is what a session has until
+# something is computed, so there is nothing to request at it.
+REQUEST_TIERS = ("scalar", "full")
 
 
 def parse_caps(raw: str) -> frozenset:
@@ -123,9 +157,10 @@ def serves_scalar_tier(session: SessionState, client: Any) -> bool:
     """Whether a ``stats_request`` from ``client`` is answered with the scalar
     tier: the client advertised both bits, so it takes tiers, and the session has
     nothing computed (``not_computed``) and a policy target of ``scalar``,
-    whether the size rule, the host or the ceiling put it there. Any other client
-    of such a session is served as ``stats_to_pull`` says."""
-    policy = session.stats_policy
+    whether the size rule, the host or the ceiling put it there, or a forced
+    request raised it (``effective_stats_policy``). Any other client of such a
+    session is served as ``stats_to_pull`` says."""
+    policy = effective_stats_policy(session)
     return (client_has_ondemand(client) and session.stats_status == "not_computed" and policy is not None
         and policy["tier_target"] == "scalar")
 
@@ -141,18 +176,11 @@ def resolve_session_policy(stats_tier: str, dataflow_tier: str, rows: int, cols:
     return resolve_stats_policy("xorq", "xorq_build", rows, cols, host_tier=stats_tier)
 
 
-def session_dataflow(session: Optional[SessionState]) -> Any:
-    """The dataflow behind a buckaroo-mode session, or ``None`` (viewer and lazy
-    sessions have none)."""
-    if session is None or session.mode != "buckaroo":
-        return None
-    return session.xorq_dataflow if session.backend == "xorq" else session.dataflow
-
-
 def refresh_session_snapshot(session: SessionState, dataflow: Any) -> None:
     """Copy the dataflow's display state onto the session snapshot that new
     clients and every push read, and re-apply ``component_config`` so theme
-    settings survive. The dataflow reaches no client until this runs."""
+    settings survive. The dataflow reaches no client until this runs. The demand
+    columns follow the config the snapshot now holds."""
     refreshed = get_buckaroo_display_state(dataflow)
     session.df_display_args = refreshed["df_display_args"]
     session.df_data_dict = refreshed["df_data_dict"]
@@ -164,6 +192,26 @@ def refresh_session_snapshot(session: SessionState, dataflow: Any) -> None:
             dvc = session.df_display_args[key].get("df_viewer_config")
             if dvc is not None:
                 dvc["component_config"] = {**dvc.get("component_config", {}), **session.component_config}
+    refresh_demand_columns(session, dataflow)
+
+
+def refresh_demand_columns(session: SessionState, dataflow: Any) -> None:
+    """Put the columns the session's display config wants min and max for in
+    ``session.stats_policy["demand_columns"]``, where ``df_meta.stats`` reports
+    them: the demand scan (``stats_policy.demand_columns``) over the snapshot's
+    config, read from the config alone with no query. Only a ``schema`` target
+    has demand, since a higher one computes those columns anyway. The key is
+    absent when there are none."""
+    policy = session.stats_policy
+    if policy is None:
+        return
+    columns: list = []
+    if policy["tier_target"] == "schema" and dataflow.processed_df is not None:
+        columns = demand_columns(session.df_display_args, old_col_new_col(dataflow.processed_df))
+    if columns:
+        policy["demand_columns"] = columns
+    else:
+        policy.pop("demand_columns", None)
 
 
 def start_stat_run(session: SessionState, scope: str = "raw", tier: str = "full",
@@ -216,7 +264,8 @@ def highlighted_display_args(display_args: dict, term: str) -> dict:
 
 
 def run_units(run: StatRun, budget_s: Optional[float], prefer: Sequence[str] = (),
-        clock: Callable[[], float] = time.perf_counter, session_id: Optional[str] = None) -> int:
+        clock: Callable[[], float] = time.perf_counter, session_id: Optional[str] = None,
+        timings: Optional[list] = None) -> int:
     """Run units of ``run`` for one request, and return how many.
 
     At least one runs while the run is pending. Another starts only while the
@@ -225,7 +274,8 @@ def run_units(run: StatRun, budget_s: Optional[float], prefer: Sequence[str] = (
     its request. ``budget_s=None`` runs every unit still to run. ``prefer`` are
     column names as a client writes them (the rewritten ``a, b, c``), whose
     units go first. A unit that raises fails the run and the exception
-    propagates. Each unit is a ``stats.unit`` span."""
+    propagates. Each unit is a ``stats.unit`` span. ``timings``, when given,
+    gets the seconds each unit took (the run's own timer), for the cost guard."""
     started = clock()
     ran = 0
     while run.status == "pending":
@@ -235,9 +285,12 @@ def run_units(run: StatRun, budget_s: Optional[float], prefer: Sequence[str] = (
         if unit is None:
             run.run_next()  # no unit is left: this marks the run complete
             break
+        spent = run.elapsed_s
         with perf_log.perf_span("stats.unit", session=session_id, stats_gen=run.stats_gen, unit=unit.id,
             phase=unit.phase, cost=unit.cost, columns=len(unit.columns)):
             run.run_next(prefer, "rewritten")
+        if timings is not None:
+            timings.append(run.elapsed_s - spent)
         ran += 1
     return ran
 
@@ -432,14 +485,14 @@ def _elapsed_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
 
 
-def _plan_run(session: SessionState, tier: str = "full") -> Optional[StatRun]:
-    """The session's ``StatRun`` at ``tier`` for the current generation, or
-    ``None`` when it cannot be planned (there is no frame, or the dataflow's
-    stats class cannot plan the one it has: a post-processor that failed leaves
-    an error frame). For the full tier the whole-run path then decides what the
-    stats are."""
+def _plan_run(session: SessionState, tier: str = "full", columns: Optional[Sequence[Any]] = None) -> Optional[StatRun]:
+    """The session's ``StatRun`` at ``tier`` (over ``columns``, original names,
+    when a request scoped it) for the current generation, or ``None`` when it
+    cannot be planned (there is no frame, or the dataflow's stats class cannot
+    plan the one it has: a post-processor that failed leaves an error frame). For
+    the full tier the whole-run path then decides what the stats are."""
     try:
-        return start_stat_run(session, tier=tier)
+        return start_stat_run(session, tier=tier, columns=columns)
     except Exception:
         log.warning("stat units not planned session=%s stats_gen=%s: %s", session.session_id, session.stats_gen,
             traceback.format_exc())
@@ -467,7 +520,8 @@ def _serve_units(session: SessionState, client: Any, prefer: Sequence[str], stat
     cursor = getattr(client, "stats_cursor", None) or StatCursor()
     if cursor.caught_up(run):
         try:
-            info["units"] = run_units(run, STATS_BUDGET_S, prefer, session_id=session.session_id)
+            info["units"] = run_units(run, STATS_BUDGET_S, prefer, session_id=session.session_id,
+                timings=info.setdefault("timings", []))
         except Exception:
             log.error("stat unit failed session=%s stats_gen=%s: %s", session.session_id, session.stats_gen,
                 traceback.format_exc())
@@ -481,11 +535,15 @@ def _serve_units(session: SessionState, client: Any, prefer: Sequence[str], stat
         "elapsed_ms": _elapsed_ms(started)}
 
 
-def _serve_scalar(session: SessionState, client: Any, prefer: Sequence[str], incremental: bool, stats_gen: Any,
-        scope: Any, started: float, info: dict) -> dict:
-    """The reply to a ``stats_request`` on a session whose target is ``scalar``:
-    a ``stats_update`` with ``tier: "scalar"`` holding the fragments this client
-    has not seen, ``final`` once the run is done. An incremental request runs
+def _serve_run(session: SessionState, client: Any, prefer: Sequence[str], incremental: bool, stats_gen: Any,
+        scope: Any, started: float, info: dict, tier: str = "scalar",
+        columns: Optional[Sequence[Any]] = None) -> dict:
+    """The reply to a ``stats_request`` served from a run that is not the
+    session's stats: the ``scalar`` run over the whole table, or a run over named
+    ``columns`` (original names) at ``tier``. A ``stats_update`` with that tier
+    holding the fragments this client has not seen, ``final`` once the run is
+    done; the final one also says what the session still is (``status``, and the
+    ``reason``), since this run did not change it. An incremental request runs
     units for the time budget, as the full run's does; any other runs every unit
     still to run.
 
@@ -494,22 +552,133 @@ def _serve_scalar(session: SessionState, client: Any, prefer: Sequence[str], inc
     the status, the snapshot and the caches are as they were. A unit that raises
     aborts the request and the run (it is not retried) but not the session, whose
     full tier is still open."""
-    run = _plan_run(session, "scalar")
+    run = _plan_run(session, tier, columns)
     if run is None or run.status == "error":
         return _aborted(stats_gen, scope, "error", session)
     cursor = getattr(client, "stats_cursor", None) or StatCursor()
     if cursor.caught_up(run):
         try:
             info["units"] = run_units(run, STATS_BUDGET_S if incremental else None, prefer,
-                session_id=session.session_id)
+                session_id=session.session_id, timings=info.setdefault("timings", []))
         except Exception:
-            log.error("scalar stat unit failed session=%s stats_gen=%s: %s", session.session_id, session.stats_gen,
-                traceback.format_exc())
+            log.error("%s stat unit failed session=%s stats_gen=%s: %s", run.tier, session.session_id,
+                session.stats_gen, traceback.format_exc())
             return _aborted(stats_gen, scope, "error", session)
     fragments = cursor.take(run)
-    return {"type": "stats_update", "stats_gen": stats_gen, "scope": scope, "tier": run.tier,
+    reply = {"type": "stats_update", "stats_gen": stats_gen, "scope": scope, "tier": run.tier,
         "final": run.status != "pending", "remaining": run.remaining,
         "payload": partial_payload(session_dataflow(session), run, fragments), "elapsed_ms": _elapsed_ms(started)}
+    if reply["final"]:
+        reply["status"] = session.stats_status
+        if session.stats_reason:
+            reply["reason"] = session.stats_reason
+    return reply
+
+
+@dataclass(frozen=True)
+class TierRequest:
+    """The part of a ``stats_request`` an ondemand client's ``tier``, ``force``
+    and ``columns`` say. ``tier`` is ``None`` for the session's own target;
+    ``columns`` (original names, in frame order) is set only for a request that
+    scopes the run, which needs a ``tier``."""
+    tier: Optional[str]
+    force: bool
+    columns: Optional[tuple]
+
+
+def tier_fields_apply(session: SessionState, client: Any) -> bool:
+    """Whether ``tier``, ``force`` and a scoping ``columns`` mean anything for
+    this request: the client advertised both bits, and the session has a policy
+    to enforce them against. For any other client they are ignored."""
+    return client_has_ondemand(client) and session.stats_policy is not None
+
+
+def _tier_request(msg: dict, dataflow: Any) -> Optional[TierRequest]:
+    """The request's ``TierRequest``, or ``None`` when a field is not one the
+    server can read: a ``tier`` other than ``scalar`` or ``full``, a ``force``
+    that is not a boolean, or ``columns`` (with a ``tier``) that is not a
+    non-empty list of the grid's column names. Without a ``tier``, ``columns`` is
+    only the hint it always was."""
+    tier, force, columns = msg.get("tier"), msg.get("force"), msg.get("columns")
+    force = False if force is None else force
+    if (tier is not None and tier not in REQUEST_TIERS) or not isinstance(force, bool):
+        return None
+    if tier is None or columns is None:
+        return TierRequest(tier, force, None)
+    pairs = old_col_new_col(dataflow.processed_df)
+    if not (isinstance(columns, list) and columns and all(isinstance(c, str) for c in columns)
+            and set(columns) <= {rewritten for _orig, rewritten in pairs}):
+        return None
+    wanted = set(columns)
+    return TierRequest(tier, force, tuple(orig for orig, rewritten in pairs if rewritten in wanted))
+
+
+def _refused(session: SessionState, stats_gen: Any, scope: Any, tier: str, reason: str, started: float,
+        info: dict) -> dict:
+    """The reply to a request the server will not run (reason ``ceiling`` or
+    ``cost``): a final ``stats_update`` with no payload that says the session has
+    no more stats than it had, so a client can show why and stop asking."""
+    info["refused"] = reason
+    return {"type": "stats_update", "stats_gen": stats_gen, "scope": scope, "tier": tier, "final": True,
+        "remaining": 0, "status": "not_computed", "reason": reason, "elapsed_ms": _elapsed_ms(started)}
+
+
+def _gate_request(session: SessionState, asked: TierRequest, stats_gen: Any, scope: Any, started: float,
+        info: dict) -> Optional[dict]:
+    """Judge a tier request against the policy in force, in the order the module
+    docstring gives: the ceiling for the cells asked for (``resolve_stats_policy``
+    with the tier as the host's, the same function load uses), then, for a
+    whole-table request, whether the tier is the target or above it with
+    ``force``, then the cost pause. Returns the reply that refuses it, or
+    ``None`` when it may run. The count is the one load took."""
+    policy = effective_stats_policy(session)
+    estimate, target = policy["estimate"], policy["tier_target"]
+    scoped = asked.columns is not None
+    tier = asked.tier or target
+    if not scoped and tier == "schema":
+        return _aborted(stats_gen, scope, "not_requestable", session)
+    cols = len(asked.columns) if scoped else estimate["cols"]
+    if resolve_stats_policy("xorq", "xorq_build", estimate["rows"], cols, host_tier=tier)["tier_target"] != tier:
+        return _refused(session, stats_gen, scope, tier, "ceiling", started, info)
+    if not scoped:
+        rank, target_rank = TIERS.index(tier), TIERS.index(target)
+        if rank < target_rank or (rank > target_rank and not asked.force):
+            return _aborted(stats_gen, scope, "not_requestable", session)
+    if session.cost_paused and not asked.force:
+        return _refused(session, stats_gen, scope, tier, "cost", started, info)
+    return None
+
+
+def _apply_force(session: SessionState, client: Any, asked: TierRequest) -> None:
+    """What a ``force`` request does to the session before it runs: clear the
+    cost pause, and for a whole-table tier above the target, record the override
+    so the target (and the status) follow it for this and later unfiltered
+    generations. The client that forced a ``full`` run holds the schema-tier
+    display config, so its digest is kept for the final reply to compare."""
+    if not asked.force:
+        return
+    session.cost_paused = False
+    target = effective_stats_policy(session)["tier_target"]
+    if asked.columns is None and asked.tier is not None and TIERS.index(asked.tier) > TIERS.index(target):
+        session.stats_override, session.stats_override_gen = asked.tier, session.stats_gen
+        if asked.tier == "full" and getattr(client, "display_args_hash", None) is None:
+            client.display_args_hash = display_args_hash(session.df_display_args)
+    restore_stats_status(session)
+
+
+def _pause_if_slow(session: SessionState, reply: dict, info: dict) -> None:
+    """The cost guard. An automatic request (one with no ``force``, from a client
+    the fields apply to) whose reply leaves units to run, and which ran a unit
+    over ``STATS_COST_BUDGET_S``, pauses the session: the status is
+    ``not_computed`` for ``cost``, and the next automatic request is refused until
+    a ``force`` one clears it. A request that finished the run holds nothing back,
+    and a forced one is the user's own choice."""
+    if not info.get("automatic") or reply["type"] != "stats_update" or reply["final"]:
+        return
+    if max(info.get("timings") or [0.0]) > STATS_COST_BUDGET_S:
+        session.cost_paused = True
+        session.stats_status, session.stats_reason = "not_computed", "cost"
+        info["paused"] = True
 
 
 def _rebuilt_display_args(session: SessionState, client: Any) -> Optional[dict]:
@@ -543,8 +712,23 @@ def _answer_stats_request(session: Optional[SessionState], msg: dict, client: An
         return _aborted(stats_gen, scope, "unsupported_scope", session)
     if incremental is not None and not isinstance(incremental, bool):
         return _aborted(stats_gen, scope, "bad_request", session)
+    if tier_fields_apply(session, client):
+        asked = _tier_request(msg, dataflow)
+        if asked is None:
+            return _aborted(stats_gen, scope, "bad_request", session)
+        # A complete session answers from the dataflow, and a failed one is an
+        # error below, whatever the request names.
+        if session.stats_status in ("pending", "not_computed"):
+            refusal = _gate_request(session, asked, stats_gen, scope, started, info)
+            if refusal is not None:
+                return refusal
+            info["automatic"] = not asked.force
+            _apply_force(session, client, asked)
+            if asked.columns is not None:
+                return _serve_run(session, client, prefer, bool(incremental), stats_gen, scope, started, info,
+                    tier=asked.tier, columns=asked.columns)
     if serves_scalar_tier(session, client):
-        return _serve_scalar(session, client, prefer, bool(incremental), stats_gen, scope, started, info)
+        return _serve_run(session, client, prefer, bool(incremental), stats_gen, scope, started, info)
     to_pull = stats_to_pull(session, client)
     if session.stats_status == "not_computed" and not to_pull:
         return _aborted(stats_gen, scope, "not_requestable", session)
@@ -585,8 +769,11 @@ def handle_stats_request(session: Optional[SessionState], msg: dict, client: Any
     names (``a, b, c``), a hint for which units go first, and a whole-run
     request ignores it. A malformed request is ``stats_aborted`` with reason
     ``bad_request``, and is not run as a whole run. On a session whose target is
-    ``scalar`` an ondemand client's request is answered as ``_serve_scalar``
+    ``scalar`` an ondemand client's request is answered as ``_serve_run``
     says: ``stats_update`` messages with ``tier: "scalar"`` and nothing assigned.
+    ``tier``, ``force`` and ``columns`` are read for an ondemand client of a
+    session with a policy (see the module docstring), and ``elapsed_ms`` is in
+    every ``stats_update``.
 
     The ``stats.request`` span records the request and its ``outcome``
     (``update`` or the abort reason), which is where updates sent, requests
@@ -603,10 +790,15 @@ def handle_stats_request(session: Optional[SessionState], msg: dict, client: Any
             log.error("stats_request error session=%s: %s", session.session_id if session else None,
                 traceback.format_exc())
             reply = _aborted(stats_gen, scope, "error", session)
+        _pause_if_slow(session, reply, info)
         if reply["type"] == "stats_update":
             span.set_attr(outcome="update", tier=reply["tier"], final=reply["final"], remaining=reply["remaining"])
         else:
             span.set_attr(outcome=reply["reason"])
         if "units" in info:
             span.set_attr(units=info["units"])
+        if "refused" in info:
+            span.set_attr(refused=info["refused"])
+        if info.get("paused"):
+            span.set_attr(paused=True)
     return reply

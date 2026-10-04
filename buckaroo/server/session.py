@@ -5,6 +5,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
 import pandas as pd
+
+from buckaroo.dataflow.sd_cache import split_chain_by_scope
+from buckaroo.server.stats_policy import TIERS, resolve_stats_policy
+
 # polars is optional — only used in lazy mode
 
 log = logging.getLogger("buckaroo.server.session")
@@ -25,8 +29,8 @@ STATS_DELIVERIES = ("inline", "deferred")
 STATS_TIER_REQUESTS = ("auto", "full", "scalar", "schema")
 
 # Why a session is ``not_computed``, in ``df_meta.stats.reason``: the server's size
-# rule, the host naming a tier, the cost guard pausing a run (phase 6a), or the
-# ceiling lowering a request. (``error`` has its own reason, ``stats_failed``.)
+# rule, the host naming a tier, the cost guard pausing a run, or the ceiling
+# lowering a request. (``error`` has its own reason, ``stats_failed``.)
 STATS_REASONS = ("size", "host", "cost", "ceiling")
 
 # What a client assumes for a ``df_meta.stats`` field the server leaves out. The
@@ -59,15 +63,24 @@ def dataflow_stats_tier(stats_tier: str, stats_delivery: str) -> str:
 STATS_STATUSES = ("complete", "pending", "not_computed", "error")
 
 
-def initial_stats_status(stats_tier: str, stats_delivery: str, policy: Optional[dict] = None) -> tuple[str, Optional[str]]:
+def initial_stats_status(stats_tier: str, stats_delivery: str, policy: Optional[dict] = None,
+        cost_paused: bool = False) -> tuple[str, Optional[str]]:
     """The status, and its reason, of a session whose stats generation has just
-    started, from the policy pair and the policy resolved at load. A target below
-    ``full`` is ``not_computed`` for the reason the policy gives; with no policy
-    (a dataflow built with its stats inline) a tier named below ``full`` is the
-    host's."""
-    if policy is not None and policy["tier_target"] != "full":
-        return "not_computed", policy["reason"]
-    if policy is None and stats_tier in ("scalar", "schema"):
+    started, from the policy pair, the policy in force and the cost guard. A
+    session with a policy is ``not_computed`` for ``cost`` while its automatic
+    stats are paused (``cost_paused``), else for the reason the policy gives when
+    its target is below ``full``, else ``pending``: a policy exists only for a
+    dataflow built at the schema tier, so a ``full`` target has its stats still
+    to run. With no policy (a dataflow built with its stats inline) a tier named
+    below ``full`` is the host's, and the stats are complete unless delivery is
+    deferred."""
+    if policy is not None:
+        if cost_paused:
+            return "not_computed", "cost"
+        if policy["tier_target"] != "full":
+            return "not_computed", policy["reason"]
+        return "pending", None
+    if stats_tier in ("scalar", "schema"):
         return "not_computed", "host"
     if stats_delivery == "deferred":
         return "pending", None
@@ -116,8 +129,10 @@ class SessionState:
     # the entry (``tier_target``, ``auto_request``, ``requestable``, ``reason``,
     # ``estimate``), resolved by /load_expr and /reload_expr once the schema-tier
     # dataflow and the count exist. ``None`` for a dataflow built with its stats
-    # inline, and for anything /load serves. Later phases add ``omitted_keys``,
-    # ``approx_keys`` and ``demand_columns``, which ``stats_meta`` reports.
+    # inline, and for anything /load serves. ``demand_columns`` is written to it
+    # whenever the display config changes (``stats_wire.refresh_demand_columns``);
+    # later phases add ``omitted_keys`` and ``approx_keys``. ``stats_meta`` reports
+    # them, for the policy in force (``effective_stats_policy``).
     stats_policy: Optional[dict] = None
     # The stats generation: a counter the server owns, bumped whenever the
     # dataflow state the stats describe changes (/load, /load_expr, /load_compare,
@@ -129,6 +144,18 @@ class SessionState:
     stats_gen: int = 0
     stats_status: str = "complete"
     stats_reason: Optional[str] = None
+    # What a client's forced ``stats_request`` set on the session (rows-first
+    # p36a). ``stats_override`` is the tier it forced above the policy's target
+    # (``scalar`` or ``full``) and ``stats_override_gen`` the generation it was
+    # made in: it raises the target of a later generation as long as the state
+    # is not filtered (``effective_stats_policy``). ``cost_paused`` is set when an
+    # automatic unit ran over the budget, and holds back further automatic
+    # requests until a forced one. Both survive a generation and /reload_expr,
+    # which is why they live here and not on a client; ``reset_stats_controls``
+    # clears them.
+    stats_override: Optional[str] = None
+    stats_override_gen: int = 0
+    cost_paused: bool = False
     # The ``StatRun``s (stat_run.py) of the current generation, keyed by
     # ``(stats_gen, scope)``: the planned units, the fragments they have
     # produced and the accumulator they read. Dropped whenever the generation
@@ -171,14 +198,73 @@ mismatch. Lockstep with the buckaroo PyPI version is the documented expectation;
 this field is the runtime escape hatch."""
 
 
+def session_dataflow(session: Optional["SessionState"]) -> Any:
+    """The dataflow behind a buckaroo-mode session, or ``None`` (viewer and lazy
+    sessions have none)."""
+    if session is None or session.mode != "buckaroo":
+        return None
+    return session.xorq_dataflow if session.backend == "xorq" else session.dataflow
+
+
+def _filtered(session: "SessionState") -> bool:
+    """Whether the session's current state has a quick command (a search) on it,
+    which makes its stats a filtered scope's: the dataflow's ``filt`` chain is
+    the ``clean`` chain plus the quick commands (``sd_cache.split_chain_by_scope``)."""
+    scopes = split_chain_by_scope(getattr(session_dataflow(session), "operations", None) or [])
+    return len(scopes["filt"]) != len(scopes["clean"])
+
+
+def effective_stats_policy(session: "SessionState") -> Optional[dict]:
+    """The policy in force for the session's current state: the one resolved at
+    load (``session.stats_policy``, itself, when nothing changes it), or, when a
+    forced request raised the tier (``stats_override``), the policy that tier
+    resolves to for the same entry. The override never lowers the target and the
+    ceiling still holds for it. It applies to an unfiltered state, and to the
+    generation it was forced in (a filtered state's forced stats are that
+    state's); another filtered generation has the policy of the load.
+
+    The thresholds are read again, as every resolution does. The reason stays the
+    load's while the target is below ``full``, and the demand columns are dropped:
+    they are the columns a ``schema`` target still wants, and a raised target
+    computes them."""
+    policy = session.stats_policy
+    override = session.stats_override
+    if policy is None or override is None or TIERS.index(override) <= TIERS.index(policy["tier_target"]):
+        return policy
+    if session.stats_override_gen != session.stats_gen and _filtered(session):
+        return policy
+    estimate = policy["estimate"]
+    raised = resolve_stats_policy("xorq", "xorq_build", estimate["rows"], estimate["cols"], host_tier=override)
+    if TIERS.index(raised["tier_target"]) <= TIERS.index(policy["tier_target"]):
+        return policy
+    return {**raised, "reason": None if raised["tier_target"] == "full" else policy["reason"],
+        "estimate": dict(estimate)}
+
+
+def reset_stats_controls(session: "SessionState") -> None:
+    """Forget what clients set with ``force`` and the cost guard's pause: the
+    session now holds another dataset, or its host named a tier again."""
+    session.stats_override, session.stats_override_gen, session.cost_paused = None, 0, False
+
+
+def restore_stats_status(session: "SessionState") -> None:
+    """Take a ``pending`` or ``not_computed`` session's status back to what its
+    policy in force and the cost guard give, without starting a generation: a
+    forced request has raised the target or cleared the pause, and the stats of
+    this generation are the same state's."""
+    if session.stats_policy is not None and session.stats_status in ("pending", "not_computed"):
+        session.stats_status, session.stats_reason = initial_stats_status(
+            session.stats_tier, session.stats_delivery, effective_stats_policy(session), session.cost_paused)
+
+
 def begin_stats_generation(session: "SessionState") -> None:
     """Start a new stats generation: the session's dataflow state has changed,
     so stats for the previous one no longer describe it. The status restarts
-    from the session's policy pair, and the stat runs of the old generation are
-    dropped."""
+    from the session's policy pair, the policy in force and the cost guard, and
+    the stat runs of the old generation are dropped."""
     session.stats_gen += 1
     session.stats_status, session.stats_reason = initial_stats_status(
-        session.stats_tier, session.stats_delivery, session.stats_policy)
+        session.stats_tier, session.stats_delivery, effective_stats_policy(session), session.cost_paused)
     session.stat_runs.clear()
 
 
@@ -229,8 +315,11 @@ def stats_meta(session: "SessionState", ondemand: bool = True) -> Optional[dict]
     stats: dict = {"status": status, "tier": "full" if status == "complete" else "schema", "gen": session.stats_gen}
     if reason:
         stats["reason"] = reason
-    policy = session.stats_policy
-    reported = policy is not None and not (session.stats_tier == "full" and policy["tier_target"] == "full")
+    policy = effective_stats_policy(session)
+    # An explicit ``full`` within the ceiling reports no policy, unless the cost
+    # guard has paused it: the client then needs the target to continue.
+    reported = policy is not None and (session.cost_paused or not (session.stats_tier == "full"
+        and policy["tier_target"] == "full"))
     if ondemand and reported and status in ("pending", "not_computed"):
         stats.update(_policy_fields(policy))
     return stats

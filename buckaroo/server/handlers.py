@@ -15,8 +15,9 @@ from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.server.session import (
-    STATS_DELIVERIES, STATS_TIER_REQUESTS, begin_stats_generation, dataflow_stats_tier)
-from buckaroo.server.stats_wire import broadcast_state, refresh_session_snapshot, resolve_session_policy
+    STATS_DELIVERIES, STATS_TIER_REQUESTS, begin_stats_generation, dataflow_stats_tier, reset_stats_controls)
+from buckaroo.server.stats_wire import (
+    broadcast_state, refresh_demand_columns, refresh_session_snapshot, resolve_session_policy)
 from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
@@ -371,6 +372,7 @@ class LoadHandler(tornado.web.RequestHandler):
         # no deferred stats, whatever policy a prior /load_expr on this session
         # left behind, and the generation moves on with the data.
         session.stats_tier, session.stats_delivery, session.stats_policy = "full", "inline", None
+        reset_stats_controls(session)
         begin_stats_generation(session)
 
         # Notify connected clients and open browser
@@ -506,6 +508,11 @@ class LoadExprHandler(tornado.web.RequestHandler):
             self.set_status(400)
             self.write(policy_error)
             return
+        # What a client forced or the cost guard paused (SessionState.stats_override,
+        # cost_paused) belongs to one expression: a rebuild of the same one keeps it,
+        # and so does a re-POST that names no stats_tier.
+        same_expression = (existing is not None and existing.backend == "xorq" and existing.build_dir == build_dir
+            and existing.cache_dir == cache_dir)
         # /load swaps a session to pandas without clearing build_dir, so the
         # backend is checked too — else its pandas metadata comes back here.
         if (not force_reload and not has_config and existing
@@ -627,6 +634,8 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.stats_tier = stats_tier
         session.stats_delivery = stats_delivery
         session.stats_policy = stats_policy
+        if not same_expression or body.get("stats_tier") is not None:
+            reset_stats_controls(session)
         session.tele_sink = tele_sink
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
@@ -667,6 +676,9 @@ class LoadExprHandler(tornado.web.RequestHandler):
                     dvc["component_config"] = {
                         **dvc.get("component_config", {}),
                         **component_config}
+
+        # The demand scan reads the config just stored; no query is sent.
+        refresh_demand_columns(session, xorq_dataflow)
 
         # A new expression is a new stats generation; a deferred session starts
         # it pending.
@@ -813,6 +825,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         session.mode = "viewer"
         # A viewer session has no dataflow and so no deferred stats.
         session.stats_tier, session.stats_delivery, session.stats_policy = "full", "inline", None
+        reset_stats_controls(session)
         begin_stats_generation(session)
 
         # Push to WebSocket clients. Reset per-client live search (#851).
@@ -849,6 +862,9 @@ class ReloadExprHandler(tornado.web.RequestHandler):
     The session's stored ``stats_tier`` / ``stats_delivery`` are replayed too.
     The body is optional; a pair in it replaces the stored one (and is stored)
     when the reload succeeds. The stats policy is resolved again for the pair.
+    A forced tier and a cost pause (``SessionState.stats_override``,
+    ``cost_paused``) are kept, unless the body names a ``stats_tier``, which
+    starts the session's stats decisions over.
 
     Returns 404 when the session does not exist, 400 when it is not a xorq
     session, has no project_root recorded or carries an invalid stats policy,
@@ -884,8 +900,9 @@ class ReloadExprHandler(tornado.web.RequestHandler):
                 "message": "Session has no project_root — pass project_root to /load_expr first"})
             return
 
+        body = self._optional_body()
         stats_tier, stats_delivery, policy_error = _stats_policy_from_body(
-            self._optional_body(), session.stats_tier, session.stats_delivery)
+            body, session.stats_tier, session.stats_delivery)
         if policy_error is not None:
             self.set_status(400)
             self.write(policy_error)
@@ -941,6 +958,8 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         session.stats_tier = stats_tier
         session.stats_delivery = stats_delivery
         session.stats_policy = stats_policy
+        if body.get("stats_tier") is not None:
+            reset_stats_controls(session)
         refresh_session_snapshot(session, xorq_dataflow)
         begin_stats_generation(session)
 
