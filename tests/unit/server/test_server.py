@@ -11,6 +11,7 @@ import tornado.testing
 import tornado.websocket
 
 from buckaroo.server.app import make_app as _make_app
+from buckaroo.server.session import build_state_message
 
 # Temp file cleanup fails on Windows due to file locking (WinError 32)
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Temp file locking prevents cleanup on Windows")
@@ -239,6 +240,30 @@ class TestLoad(tornado.testing.AsyncHTTPTestCase):
                 session = self._app.settings["sessions"].get("plain-1")
                 dvc = session.df_display_args["main"]["df_viewer_config"]
                 self.assertEqual(dvc.get("extra_grid_config"), {})
+            finally:
+                os.unlink(f.name)
+
+    def test_load_does_not_take_stats_tier_and_resolves_to_full(self):
+        """/load serves the eager backends, whose stats cost does not grow with
+        the file, so they resolve to full: the request fields are not read and
+        a policy left on the session by an earlier /load_expr is dropped
+        (rows-first p33)."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                body = {"session": "stats-tier-1", "path": f.name, "mode": "buckaroo", "stats_tier": "schema",
+                    "stats_delivery": "deferred"}
+                for _ in range(2):
+                    resp = self.fetch("/load", method="POST", body=json.dumps(body),
+                        headers={"Content-Type": "application/json"})
+                    self.assertEqual(resp.code, 200)
+                    session = self._app.settings["sessions"].get("stats-tier-1")
+                    self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+                    self.assertIsNone(session.stats_policy)
+                    self.assertEqual(session.stats_status, "complete")
+                    self.assertNotIn("stats", build_state_message(session)["df_meta"])
+                    # A /load_expr that came first would have left a policy behind.
+                    session.stats_policy = {"tier_target": "schema", "reason": "size"}
             finally:
                 os.unlink(f.name)
 
