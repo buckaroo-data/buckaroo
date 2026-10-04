@@ -1,14 +1,16 @@
-"""Unit tests for ``buckaroo.server.stats_policy`` (rows-first p31).
+"""Unit tests for ``buckaroo.server.stats_policy`` (rows-first p31, p31b).
 
 Everything here is pure Python: the policy is a function of numbers, the
 probes read a schema or a parquet footer, and nothing needs a server. The
 module is not wired into any handler, session or dataflow in this phase.
 
-Thresholds are provisional, so the table tests pass an explicit
-``StatsLimits`` instead of reading the module defaults. The few tests that
-use the defaults assert only facts the plan requires of any calibration
-(the 78M-row entry cannot reach ``full``).
+The thresholds are the provisional values proposed by the phase-0
+measurements (p31b). The boundary tables run on the module defaults, so a
+change to a ``DEFAULT_*`` constant fails them and the table is updated
+together with the constant. ``TestCalibratedDefaults`` pins each default to
+its literal value.
 """
+import dataclasses
 import importlib
 import importlib.util
 import io
@@ -22,9 +24,20 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-ENV_FIELDS = {"BUCKAROO_STATS_FULL_AUTO_ROWS": "full_auto_rows",
+ENV_FIELDS = {"BUCKAROO_STATS_FULL_AUTO_ROWS": "full_auto_rows", "BUCKAROO_STATS_FULL_AUTO_CELLS": "full_auto_cells",
     "BUCKAROO_STATS_SCALAR_AUTO_CELLS": "scalar_auto_cells", "BUCKAROO_STATS_CEILING_FULL_ROWS": "ceiling_full_rows",
+    "BUCKAROO_STATS_CEILING_FULL_CELLS": "ceiling_full_cells",
     "BUCKAROO_STATS_CEILING_SCALAR_CELLS": "ceiling_scalar_cells", "BUCKAROO_POLARS_ROUTE_ROWS": "polars_route_rows"}
+
+# The phase-0 values (measurements-phase0.md, "Proposed values"), written out
+# so a change to a module default has to change a test too.
+CALIBRATED = {"full_auto_rows": 12_000_000, "full_auto_cells": 520_000_000, "scalar_auto_cells": 1_000_000_000,
+    "ceiling_full_rows": 25_000_000, "ceiling_full_cells": 1_000_000_000, "ceiling_scalar_cells": 4_000_000_000,
+    "polars_route_rows": 8_000_000}
+CALIBRATED_CONSTANTS = {"DEFAULT_FULL_AUTO_ROWS": 12_000_000, "DEFAULT_FULL_AUTO_CELLS": 520_000_000,
+    "DEFAULT_SCALAR_AUTO_CELLS": 1_000_000_000, "DEFAULT_CEILING_FULL_ROWS": 25_000_000,
+    "DEFAULT_CEILING_FULL_CELLS": 1_000_000_000, "DEFAULT_CEILING_SCALAR_CELLS": 4_000_000_000,
+    "DEFAULT_POLARS_ROUTE_ROWS": 8_000_000}
 
 TIER_RANK = {"schema": 0, "scalar": 1, "full": 2}
 
@@ -45,14 +58,9 @@ def clean_env(monkeypatch):
 
 @pytest.fixture
 def lim(sp):
-    """The plan's proposed starting values, pinned so a recalibration of the
-    module defaults does not move these tables."""
-    return sp.StatsLimits(
-        full_auto_rows=10_000_000,
-        scalar_auto_cells=500_000_000,
-        ceiling_full_rows=50_000_000,
-        ceiling_scalar_cells=None,
-        polars_route_rows=10_000_000)
+    """The module defaults. The tables are written against the calibrated
+    values, so moving a ``DEFAULT_*`` constant fails them."""
+    return sp.StatsLimits()
 
 
 def _resolve(sp, lim, backend, source_kind, rows, cols, host_tier=None, bytes=None):
@@ -63,38 +71,88 @@ def _resolve(sp, lim, backend, source_kind, rows, cols, host_tier=None, bytes=No
 # (backend, source_kind, rows, cols, host_tier) -> (tier_target, auto_request,
 # requestable, reason). The row counts of 42.3M, 54.1M and 78.0M and the 44
 # columns are the three tallyman entries over 70 s; 10.8M x 43 is parking_2017.
+# Each threshold has an equal, a one-below and a one-above row, in rows and,
+# where the rule reads cells, in cells (a row count or a column count moves
+# the product). The comments give the cell count where it decides the row.
 RESOLVE_TABLE = [
-    # Eager backends resolve to full and ignore the host tier.
+    # Eager backends resolve to full and ignore the host tier and the cell bounds.
     ("pandas", "memory", 52_814, 27, None, ("full", True, [], None)),
     ("pandas", "parquet", 1_000_000, 43, None, ("full", True, [], None)),
     ("polars", "parquet", 10_800_000, 43, None, ("full", True, [], None)),
     ("polars", "parquet", 10_800_000, 43, "schema", ("full", True, [], None)),
     ("pandas", "csv", 52_814, 27, "scalar", ("full", True, [], None)),
-    # xorq sized by the policy alone.
+    ("pandas", "memory", 30_000_000, 100, None, ("full", True, [], None)),
+    # xorq sized by the policy alone: full up to 12M rows.
     ("xorq", "parquet", 0, 0, None, ("full", True, [], None)),
     ("xorq", "parquet", 52_814, 27, None, ("full", True, [], None)),
-    ("xorq", "parquet", 10_000_000, 43, None, ("full", True, [], None)),
-    ("xorq", "parquet", 10_000_001, 43, None, ("scalar", True, ["full"], "size")),
-    ("xorq", "parquet", 10_800_000, 43, None, ("scalar", True, ["full"], "size")),
-    ("xorq", "parquet", 11_363_636, 44, None, ("scalar", True, ["full"], "size")),
-    ("xorq", "parquet", 11_363_637, 44, None, ("schema", False, ["scalar", "full"], "size")),
-    ("xorq", "csv", 42_300_000, 44, None, ("schema", False, ["scalar", "full"], "size")),
-    ("xorq", "csv", 50_000_000, 44, None, ("schema", False, ["scalar", "full"], "size")),
+    ("xorq", "parquet", 10_800_000, 43, None, ("full", True, [], None)),
+    ("xorq", "parquet", 11_999_999, 43, None, ("full", True, [], None)),
+    ("xorq", "parquet", 12_000_000, 43, None, ("full", True, [], None)),
+    ("xorq", "parquet", 12_000_001, 43, None, ("scalar", True, ["full"], "size")),
+    ("xorq", "parquet", 12_000_000, 10, None, ("full", True, [], None)),
+    ("xorq", "parquet", 12_000_001, 10, None, ("scalar", True, ["full"], "size")),
+    # The 11.7M-row CSV entries: 515.8M cells at 44 columns, 527.5M at 45.
+    ("xorq", "csv", 11_721_603, 44, None, ("full", True, [], None)),
+    ("xorq", "csv", 11_721_603, 45, None, ("scalar", True, ["full"], "size")),
+    # full auto also stops at 520M cells, reached by rows or by columns.
+    ("xorq", "parquet", 9_999_999, 52, None, ("full", True, [], None)),
+    ("xorq", "parquet", 10_000_000, 52, None, ("full", True, [], None)),
+    ("xorq", "parquet", 10_000_001, 52, None, ("scalar", True, ["full"], "size")),
+    ("xorq", "parquet", 8_000_000, 65, None, ("full", True, [], None)),
+    ("xorq", "parquet", 8_000_000, 66, None, ("scalar", True, ["full"], "size")),
+    # scalar auto up to 1.0B cells; full stays requestable up to its own ceiling.
+    ("xorq", "parquet", 11_000_000, 90, None, ("scalar", True, ["full"], "size")),
+    ("xorq", "parquet", 11_000_000, 100, None, ("schema", False, ["scalar"], "size")),
+    ("xorq", "parquet", 19_999_999, 50, None, ("scalar", True, ["full"], "size")),
+    ("xorq", "parquet", 20_000_000, 50, None, ("scalar", True, ["full"], "size")),
+    ("xorq", "parquet", 20_000_001, 50, None, ("schema", False, ["scalar"], "size")),
+    ("xorq", "parquet", 22_727_272, 44, None, ("scalar", True, ["full"], "size")),
+    ("xorq", "parquet", 22_727_273, 44, None, ("schema", False, ["scalar"], "size")),
+    ("xorq", "parquet", 12_500_000, 80, None, ("scalar", True, ["full"], "size")),
+    ("xorq", "parquet", 12_500_000, 81, None, ("schema", False, ["scalar"], "size")),
+    # The three slow tallyman entries are above 1.8B cells and start at schema.
+    ("xorq", "csv", 42_300_000, 44, None, ("schema", False, ["scalar"], "size")),
+    ("xorq", "csv", 50_000_000, 44, None, ("schema", False, ["scalar"], "size")),
     ("xorq", "csv", 54_100_000, 44, None, ("schema", False, ["scalar"], "size")),
     ("xorq", "csv", 78_000_000, 44, None, ("schema", False, ["scalar"], "size")),
     ("xorq", "csv", 78_000_000, 44, "auto", ("schema", False, ["scalar"], "size")),
+    # Past the scalar ceiling (4.0B cells) nothing is requestable.
+    ("xorq", "csv", 100_000_000, 40, None, ("schema", False, ["scalar"], "size")),
+    ("xorq", "csv", 100_000_001, 40, None, ("schema", False, [], "size")),
     # The host lowers freely.
     ("xorq", "parquet", 1_000_000, 43, "schema", ("schema", False, ["scalar", "full"], "host")),
     ("xorq", "parquet", 1_000_000, 43, "scalar", ("scalar", True, ["full"], "host")),
     ("xorq", "parquet", 1_000_000, 43, "full", ("full", True, [], None)),
-    # The host raises only as far as the ceiling.
+    # The host raises only as far as the ceiling on full: 25M rows ...
     ("xorq", "parquet", 12_000_000, 43, "full", ("full", True, [], None)),
-    ("xorq", "csv", 42_300_000, 44, "full", ("full", True, [], None)),
-    ("xorq", "csv", 50_000_000, 44, "full", ("full", True, [], None)),
+    ("xorq", "parquet", 24_999_999, 10, "full", ("full", True, [], None)),
+    ("xorq", "parquet", 25_000_000, 10, "full", ("full", True, [], None)),
+    ("xorq", "parquet", 25_000_001, 10, "full", ("scalar", True, [], "ceiling")),
+    ("xorq", "parquet", 25_000_000, 10, None, ("scalar", True, ["full"], "size")),
+    ("xorq", "parquet", 25_000_001, 10, None, ("scalar", True, [], "size")),
+    # ... or 1.0B cells, reached by rows or by columns.
+    ("xorq", "parquet", 24_999_999, 40, "full", ("full", True, [], None)),
+    ("xorq", "parquet", 25_000_000, 40, "full", ("full", True, [], None)),
+    ("xorq", "parquet", 25_000_000, 41, "full", ("scalar", True, [], "ceiling")),
+    ("xorq", "parquet", 20_000_000, 50, "full", ("full", True, [], None)),
+    ("xorq", "parquet", 20_000_001, 50, "full", ("scalar", True, [], "ceiling")),
+    ("xorq", "parquet", 11_000_000, 90, "full", ("full", True, [], None)),
+    ("xorq", "parquet", 11_000_000, 91, "full", ("scalar", True, [], "ceiling")),
+    ("xorq", "csv", 42_300_000, 44, "full", ("scalar", True, [], "ceiling")),
+    ("xorq", "csv", 50_000_000, 44, "full", ("scalar", True, [], "ceiling")),
     ("xorq", "csv", 50_000_001, 44, "full", ("scalar", True, [], "ceiling")),
     ("xorq", "csv", 78_000_000, 44, "full", ("scalar", True, [], "ceiling")),
     ("xorq", "csv", 78_000_000, 44, "scalar", ("scalar", True, [], "host")),
     ("xorq", "csv", 78_000_000, 44, "schema", ("schema", False, ["scalar"], "host")),
+    # The ceiling on scalar is 4.0B cells, reached by rows or by columns.
+    ("xorq", "csv", 99_999_999, 40, "scalar", ("scalar", True, [], "host")),
+    ("xorq", "csv", 100_000_000, 40, "scalar", ("scalar", True, [], "host")),
+    ("xorq", "csv", 100_000_001, 40, "scalar", ("schema", False, [], "ceiling")),
+    ("xorq", "csv", 50_000_000, 80, "scalar", ("scalar", True, [], "host")),
+    ("xorq", "csv", 50_000_000, 81, "scalar", ("schema", False, [], "ceiling")),
+    ("xorq", "csv", 100_000_000, 40, "full", ("scalar", True, [], "ceiling")),
+    ("xorq", "csv", 100_000_001, 40, "full", ("schema", False, [], "ceiling")),
+    ("xorq", "csv", 100_000_001, 40, "schema", ("schema", False, [], "host")),
 ]
 
 
@@ -184,6 +242,23 @@ class TestResolveStatsPolicy:
         assert out["tier_target"] == "full" or "full" in out["requestable"]
 
 
+class TestCalibratedDefaults:
+    """The module defaults are the phase-0 proposals, one literal per value."""
+
+    def test_limits_defaults(self, sp):
+        assert dataclasses.asdict(sp.StatsLimits()) == CALIBRATED
+
+    def test_module_constants(self, sp):
+        assert {name: getattr(sp, name, None) for name in CALIBRATED_CONSTANTS} == CALIBRATED_CONSTANTS
+
+    def test_from_env_with_a_clean_environment_is_the_calibrated_set(self, sp):
+        assert dataclasses.asdict(sp.StatsLimits.from_env()) == CALIBRATED
+
+    def test_every_limit_has_an_environment_override(self, sp):
+        """A new limit without an override could not be tuned on a server."""
+        assert set(ENV_FIELDS.values()) == {f.name for f in dataclasses.fields(sp.StatsLimits)}
+
+
 class TestCeiling:
     """The ceiling is applied inside the function, so every caller gets it:
     load, /reload_expr and a stats_request {force} all end in this call."""
@@ -260,6 +335,42 @@ class TestCeiling:
                 assert forced["reason"] == "ceiling"
 
 
+    @pytest.mark.parametrize("rows, cols",
+        [(20_000_001, 50), (25_000_000, 41), (11_000_000, 91), (24_999_999, 41), (42_300_000, 44), (78_000_000, 44)])
+    @pytest.mark.parametrize("host_tier", HOST_TIERS)
+    def test_full_never_resolves_above_the_cell_ceiling(self, sp, lim, rows, cols, host_tier):
+        """1.0B cells, whatever the row count and the host asks for."""
+        assert rows * cols > 1_000_000_000
+        out = _resolve(sp, lim, "xorq", "parquet", rows, cols, host_tier)
+        assert out["tier_target"] != "full"
+        assert "full" not in out["requestable"]
+
+    @pytest.mark.parametrize("rows, cols",
+        [(25_000_001, 10), (25_000_001, 1), (30_000_000, 5), (42_300_000, 4), (78_000_000, 1)])
+    @pytest.mark.parametrize("host_tier", HOST_TIERS)
+    def test_full_never_resolves_above_25m_rows_however_few_the_cells(self, sp, lim, rows, cols, host_tier):
+        """The row ceiling holds on its own: these entries are under 1.0B cells."""
+        assert rows * cols < 1_000_000_000
+        out = _resolve(sp, lim, "xorq", "parquet", rows, cols, host_tier)
+        assert out["tier_target"] != "full"
+        assert "full" not in out["requestable"]
+
+    @pytest.mark.parametrize("rows, cols",
+        [(100_000_001, 40), (50_000_000, 81), (1_000_000, 4_001), (500_000_000, 10)])
+    @pytest.mark.parametrize("host_tier", HOST_TIERS)
+    def test_nothing_above_the_scalar_ceiling_resolves_past_schema(self, sp, lim, rows, cols, host_tier):
+        """4.0B cells, the placeholder scalar ceiling."""
+        assert rows * cols > 4_000_000_000
+        out = _resolve(sp, lim, "xorq", "parquet", rows, cols, host_tier)
+        assert out["tier_target"] == "schema"
+        assert out["requestable"] == []
+
+    def test_a_scalar_ceiling_is_on_by_default(self, sp):
+        out = sp.resolve_stats_policy("xorq", "csv", 100_000_001, 40, host_tier="scalar", limits=sp.StatsLimits())
+        assert out["tier_target"] == "schema"
+        assert out["reason"] == "ceiling"
+
+
 class TestLimitsFromEnv:
     def test_defaults_when_the_environment_is_empty(self, sp):
         assert sp.StatsLimits.from_env() == sp.StatsLimits()
@@ -289,6 +400,22 @@ class TestLimitsFromEnv:
     def test_resolve_reads_the_environment_when_no_limits_are_passed(self, sp, monkeypatch):
         monkeypatch.setenv("BUCKAROO_STATS_CEILING_FULL_ROWS", "1000")
         out = sp.resolve_stats_policy("xorq", "parquet", 5_000, 10, host_tier="full")
+        assert out["tier_target"] == "scalar"
+        assert out["reason"] == "ceiling"
+
+    def test_the_full_auto_cell_bound_comes_from_the_environment(self, sp, monkeypatch):
+        args = ("xorq", "parquet", 5_000, 10)
+        assert sp.resolve_stats_policy(*args)["tier_target"] == "full"
+        monkeypatch.setenv("BUCKAROO_STATS_FULL_AUTO_CELLS", "1000")
+        out = sp.resolve_stats_policy(*args)
+        assert out["tier_target"] == "scalar"
+        assert out["reason"] == "size"
+
+    def test_the_full_ceiling_cell_bound_comes_from_the_environment(self, sp, monkeypatch):
+        args = ("xorq", "parquet", 5_000, 10)
+        assert sp.resolve_stats_policy(*args, host_tier="full")["tier_target"] == "full"
+        monkeypatch.setenv("BUCKAROO_STATS_CEILING_FULL_CELLS", "1000")
+        out = sp.resolve_stats_policy(*args, host_tier="full")
         assert out["tier_target"] == "scalar"
         assert out["reason"] == "ceiling"
 
@@ -430,6 +557,14 @@ class TestRoutePolarsEntry:
         assert sp.route_polars_entry(5_000, 3) == "eager"
         monkeypatch.setenv("BUCKAROO_POLARS_ROUTE_ROWS", "1000")
         assert sp.route_polars_entry(5_000, 3) == "xorq"
+
+    @pytest.mark.parametrize("rows, expected",
+        [(0, "eager"), (7_999_999, "eager"), (8_000_000, "eager"), (8_000_001, "xorq"), (10_000_000, "xorq"),
+         (10_800_000, "xorq")])
+    def test_default_r_is_8m_rows(self, sp, rows, expected):
+        """Equal, one below and one above R, on the module defaults; 10.8M
+        rows (parking_2017) was eager under the old 10M threshold."""
+        assert sp.route_polars_entry(rows, 43) == expected
 
     def test_defaults_route_the_78m_row_entry_to_xorq(self, sp):
         assert sp.route_polars_entry(78_000_000, 44) == "xorq"
