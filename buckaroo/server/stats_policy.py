@@ -164,9 +164,17 @@ def resolve_stats_policy(backend: str, source_kind: str, rows: int, cols: int, b
     Eager backends ignore ``host_tier``. ``source_kind`` and ``bytes`` are
     accepted for the rules that will read them (a CSV size rule, and a bytes
     threshold if calibration wants one); no threshold reads them yet.
+    ``source_kind`` must be a ``str``, its vocabulary being the caller's.
+    ``bytes`` is ``None`` or a non-negative integer, echoed as a plain ``int``.
+    A value of the wrong type raises ``TypeError`` and a negative count
+    ``ValueError``.
     """
+    if not isinstance(source_kind, str):
+        raise TypeError(f"source_kind must be a str, got {source_kind!r}")
     rows = _count("rows", rows)
     cols = _count("cols", cols)
+    if bytes is not None:
+        bytes = _count("bytes", bytes)
     if host_tier == "auto":
         host_tier = None
     if host_tier is not None and host_tier not in TIERS:
