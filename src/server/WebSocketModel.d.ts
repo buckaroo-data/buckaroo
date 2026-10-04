@@ -1,4 +1,5 @@
 import { StatsChannel } from './StatsChannel';
+import { StateOrchestrator } from './StateOrchestrator';
 export declare class WebSocketModel {
     private ws;
     private pendingMsg;
@@ -6,6 +7,7 @@ export declare class WebSocketModel {
     private state;
     private pendingChanges;
     readonly stats: StatsChannel;
+    readonly scheduler: StateOrchestrator;
     constructor(ws: WebSocket, initialState: Record<string, any>);
     send(msg: any): void;
     get(key: string): any;
