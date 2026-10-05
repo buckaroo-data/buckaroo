@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
+from buckaroo.pluggable_analysis_framework.source_digest import text_digest
+from buckaroo.pluggable_analysis_framework.stat_cache import StatCache
 from buckaroo.server.git_state_guard import install_git_state_guard
 from buckaroo.server.window import clamp_window
 from buckaroo.serialization_utils import make_infinite_resp
@@ -37,16 +39,14 @@ install_git_state_guard()
 
 
 def _make_cache_storage(cache_storage_path):
-    """Build a ``ParquetSnapshotCache`` from a filesystem path string.
+    """Build the summary-stat cache (ADR-001) under a filesystem path string.
 
     Returns ``None`` when ``cache_storage_path`` is falsy so callers can
     check with a simple ``if self.cache_storage``.
     """
     if not cache_storage_path:
         return None
-    from xorq.caching import ParquetSnapshotCache, ParquetStorage, SnapshotStrategy  # noqa: PLC0415
-    storage = ParquetStorage(base_path=Path(cache_storage_path))
-    return ParquetSnapshotCache(strategy=SnapshotStrategy(), storage=storage)
+    return StatCache.for_cache_storage_path(cache_storage_path)
 
 
 class XorqServerDataflow(XorqDataflow):
@@ -64,6 +64,10 @@ class XorqServerDataflow(XorqDataflow):
     and project-authored post-processing classes discovered under
     ``<project_root>/post_processing/*.py``; the built-in xorq stats are
     kept first so collisions resolve to the built-in.
+
+    ``data_id`` identifies the rows the expression reads (for tallyman, the
+    digest of the entry's snapshot). It keys the summary-stat cache; without
+    it the key is a hash of ``expr``, computed once.
     """
 
     sampling_klass = XorqInfiniteSampling
@@ -72,13 +76,14 @@ class XorqServerDataflow(XorqDataflow):
     DFStatsClass = XorqDfStatsV2
     analysis_klasses = _XORQ_ANALYSIS_KLASSES
 
-    def __init__(self, expr, *args, extra_klasses=None, cache_storage_path=None, **kwargs):
+    def __init__(self, expr, *args, extra_klasses=None, cache_storage_path=None, data_id=None, **kwargs):
         if extra_klasses:
             # Per-instance override — class-level _XORQ_ANALYSIS_KLASSES is
             # left untouched so other sessions / direct widget usage don't
             # inherit one project's stats.
             self.analysis_klasses = list(_XORQ_ANALYSIS_KLASSES) + list(extra_klasses)
         self.cache_storage = _make_cache_storage(cache_storage_path)
+        self.data_id = data_id
         super().__init__(expr, *args, **kwargs)
 
 
@@ -360,7 +365,11 @@ def _compile_project_stat(name: str, path: Path, stat_decorator, XorqColumn):
     compute.__annotations__ = {params[0].name: XorqColumn}
     compute.__name__ = name
     compute.__qualname__ = name
-    return stat_decorator()(compute)
+    wrapped = stat_decorator()(compute)
+    # Key cached cells by the source this stat was compiled from, not by
+    # whatever the file holds when the key is computed.
+    wrapped._stat_func.source_digest = text_digest(source)
+    return wrapped
 
 
 # ---------------------------------------------------------------------------
@@ -459,6 +468,8 @@ def _compile_project_post_processing(name: str, path: Path):
     return type(f"ProjectPostProcessing_{name}", (ColAnalysis,), {
         "provides_defaults": {},
         "post_processing_method": name,
+        # Identifies the post-processing in the stat cache's scope_id.
+        "source_digest": text_digest(source),
         "post_process_df": classmethod(
             lambda kls, expr, _f=process: [_f(expr), {}]),
     })

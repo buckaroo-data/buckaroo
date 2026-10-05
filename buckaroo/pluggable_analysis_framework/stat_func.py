@@ -13,6 +13,8 @@ import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional, TypedDict, get_type_hints
 
+from .source_digest import callable_digest
+
 
 class MultipleProvides(TypedDict):
     """Marker base class for stat funcs that return more than one accumulator key.
@@ -163,6 +165,9 @@ class StatFunc:
         column_filter: optional predicate on column dtype
         quiet: suppress error reporting
         default: fallback value on failure (MISSING = no fallback)
+        source_digest: digest of the source that defines ``func``, taken when
+            the stat was defined (see ``source_digest.callable_digest``). Keys
+            the stat's cached cells; None means "derive it from ``func``".
     """
     name: str
     func: Callable
@@ -172,6 +177,7 @@ class StatFunc:
     column_filter: Optional[Callable] = None
     quiet: bool = False
     default: Any = field(default_factory=lambda: MISSING)
+    source_digest: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +320,8 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         provides_keys = _get_provides_from_return_type(func.__name__, return_type)
 
         stat_func = StatFunc(name=func.__name__, func=func, requires=requires, provides=provides_keys,
-            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default)
+            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default,
+            source_digest=callable_digest(func))
 
         # Attach metadata to the function so pipeline can find it
         func._stat_func = stat_func

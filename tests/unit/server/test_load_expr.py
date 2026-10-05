@@ -464,15 +464,28 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             self.assertEqual(resp.code, 200)
 
             executed = []
+            loading = []
             orig_execute = ibis_core.Expr.execute
+            orig_load = xorq_loading.load_expr_build_dir
 
             def spy(expr, *args, **kwargs):
-                executed.append(expr)
+                if not loading:
+                    executed.append(expr)
                 return orig_execute(expr, *args, **kwargs)
+
+            def load_unspied(*args, **kwargs):
+                # xorq's load_expr runs a query to rehydrate the build's
+                # memtable; loading the expression is out of scope here.
+                loading.append(True)
+                try:
+                    return orig_load(*args, **kwargs)
+                finally:
+                    loading.pop()
 
             # A fresh process carries no row counts over.
             with patch.object(xorq_buckaroo, "_expr_count_cache", type(xorq_buckaroo._expr_count_cache)()), \
-                    patch.object(ibis_core.Expr, "execute", spy):
+                    patch.object(ibis_core.Expr, "execute", spy), \
+                    patch.object(xorq_loading, "load_expr_build_dir", load_unspied):
                 resp = await _post(self.get_http_port(), "/load_expr", {"session": "lx-hit-b", **body})
             self.assertEqual(resp.code, 200)
             self.assertEqual(json.loads(resp.body)["rows"], 10)
