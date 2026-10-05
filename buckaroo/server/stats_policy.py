@@ -23,6 +23,12 @@ so the cost does not grow with the file.
 :func:`route_polars_entry` is the separate size rule for polars: an entry
 above R rows belongs on xorq's ``/load_expr``, not eager ``/load``.
 
+:func:`resolve_source_guards` is the rule for the two requests that stay expensive
+whether or not stats are computed, a sorted window and a searched one (rows-first
+p37). Its thresholds are apart from the stats ones (:class:`GuardLimits`), because a
+sort or a search scales with rows where the stats tiers scale with cells, and
+:func:`disable_sorting` is the pass that turns sorting off in a display config.
+
 The thresholds are PROVISIONAL. They are the values the phase-0 measurements
 proposed (one Apple M4 Pro, 115 tallyman telemetry loads, xorq stats on
 parquet and CSV slices, eager polars RSS), and they rest on gaps: the
@@ -48,6 +54,15 @@ warning.
 * ``BUCKAROO_POLARS_ROUTE_ROWS`` (8,000,000 rows): R for
   :func:`route_polars_entry`. A memory threshold, set apart from the stats
   ones, and sized for ``pre_limit`` False (see the constant below).
+
+The guard thresholds are PROVISIONAL too and read the same way (on every call, a
+bad value ignored with a warning):
+
+* ``BUCKAROO_SORT_DISABLE_ROWS`` (25,000,000 rows): a source with more rows has
+  sorting turned off.
+* ``BUCKAROO_SEARCH_DISABLE_ROWS`` (none): a source with more rows reports its
+  search as disabled. The flag is advice for a client; the server serves a search
+  either way.
 """
 from __future__ import annotations
 
@@ -91,11 +106,28 @@ DEFAULT_CEILING_SCALAR_CELLS: int | None = 4_000_000_000
 # be about 14M rows.
 DEFAULT_POLARS_ROUTE_ROWS: int = 8_000_000
 
+# Sorting a window sorts the whole source on the loop thread. At 10.8M rows x 43
+# columns that took 261-287 ms warm on parquet, and at 3M rows of CSV 326-337 ms
+# (phase-0 measurements, item 4). Extrapolated linearly (nothing above 12M rows was
+# measured) a 25M-row source costs about 0.7 s on parquet and 2.8 s on CSV, and the
+# 42.3M, 54.1M and 78.0M entries 1.1 to 2.1 s and 4.6 to 8.5 s. 25M is the ceiling
+# on full stats (the geometric midpoint of the telemetry gap between 11.8M and 42.3M
+# rows), so an entry whose full stats the server refuses is one whose sort it
+# refuses. A guess in the same gap, not a measurement.
+DEFAULT_SORT_DISABLE_ROWS: int | None = 25_000_000
+# The server never refuses a search (plan 3 question 7), so there is no number for
+# this one: the flag stays "enabled" until a host sets a threshold.
+DEFAULT_SEARCH_DISABLE_ROWS: int | None = None
+
 # Environment variable -> StatsLimits field.
 _ENV_FIELDS = {"BUCKAROO_STATS_FULL_AUTO_ROWS": "full_auto_rows",
     "BUCKAROO_STATS_SCALAR_AUTO_CELLS": "scalar_auto_cells", "BUCKAROO_STATS_CEILING_FULL_ROWS": "ceiling_full_rows",
     "BUCKAROO_STATS_CEILING_SCALAR_CELLS": "ceiling_scalar_cells", "BUCKAROO_POLARS_ROUTE_ROWS": "polars_route_rows",
     "BUCKAROO_STATS_FULL_AUTO_CELLS": "full_auto_cells", "BUCKAROO_STATS_CEILING_FULL_CELLS": "ceiling_full_cells"}
+
+# Environment variable -> GuardLimits field.
+_GUARD_ENV_FIELDS = {"BUCKAROO_SORT_DISABLE_ROWS": "sort_disable_rows",
+    "BUCKAROO_SEARCH_DISABLE_ROWS": "search_disable_rows"}
 
 # Lowest to highest.
 TIERS = ("schema", "scalar", "full")
@@ -118,6 +150,17 @@ def _env_int(name: str) -> int | None:
     return value
 
 
+def _env_overrides(env_fields: dict[str, str]) -> dict[str, int]:
+    """The ``{field: value}`` of every variable in ``env_fields`` that is set to a
+    non-negative integer."""
+    overrides = {}
+    for name, field in env_fields.items():
+        value = _env_int(name)
+        if value is not None:
+            overrides[field] = value
+    return overrides
+
+
 @dataclass(frozen=True)
 class StatsLimits:
     """The thresholds :func:`resolve_stats_policy` and
@@ -135,12 +178,20 @@ class StatsLimits:
     @classmethod
     def from_env(cls) -> StatsLimits:
         """The defaults with any ``BUCKAROO_*`` overrides applied."""
-        overrides = {}
-        for name, field in _ENV_FIELDS.items():
-            value = _env_int(name)
-            if value is not None:
-                overrides[field] = value
-        return cls(**overrides)
+        return cls(**_env_overrides(_ENV_FIELDS))
+
+
+@dataclass(frozen=True)
+class GuardLimits:
+    """The thresholds :func:`resolve_source_guards` reads, in rows. ``None`` means
+    the flag is never turned off."""
+    sort_disable_rows: int | None = DEFAULT_SORT_DISABLE_ROWS
+    search_disable_rows: int | None = DEFAULT_SEARCH_DISABLE_ROWS
+
+    @classmethod
+    def from_env(cls) -> GuardLimits:
+        """The defaults with any ``BUCKAROO_*`` overrides applied."""
+        return cls(**_env_overrides(_GUARD_ENV_FIELDS))
 
 
 def _count(name: str, value: Any) -> int:
@@ -261,6 +312,66 @@ def route_polars_entry(rows: int, cols: int, limits: StatsLimits | None = None) 
     if limits is None:
         limits = StatsLimits.from_env()
     return "xorq" if rows > limits.polars_route_rows else "eager"
+
+
+def resolve_source_guards(backend: str, source_kind: str, rows: int, cols: int,
+        limits: GuardLimits | None = None) -> dict[str, str]:
+    """Whether sort and search stay on for a source of this size.
+
+    Returns ``{"sort": ..., "search": ...}``, each ``"enabled"`` or ``"disabled"``:
+    a flag is ``"disabled"`` when the source has more rows than its threshold in
+    ``limits`` (default :meth:`GuardLimits.from_env`) and the threshold is set.
+    ``rows`` is the count load already took; nothing is counted here. Eager
+    backends always keep both, since their windows come from a bounded frame.
+    ``cols`` and ``source_kind`` are accepted so a rule can read them without a
+    signature change; only ``rows`` decides today. Inputs are checked as
+    :func:`resolve_stats_policy` checks them.
+    """
+    if not isinstance(source_kind, str):
+        raise TypeError(f"source_kind must be a str, got {source_kind!r}")
+    rows = _count("rows", rows)
+    _count("cols", cols)
+    if limits is None:
+        limits = GuardLimits.from_env()
+    if backend in EAGER_BACKENDS:
+        return {"sort": "enabled", "search": "enabled"}
+
+    def flag(threshold: int | None) -> str:
+        return "disabled" if threshold is not None and rows > threshold else "enabled"
+
+    return {"sort": flag(limits.sort_disable_rows), "search": flag(limits.search_disable_rows)}
+
+
+def _unsortable(column: Any) -> Any:
+    """A column config with ``ag_grid_specs.sortable`` false, its other specs kept."""
+    if not isinstance(column, dict):
+        return column
+    specs = column.get("ag_grid_specs")
+    return {**column, "ag_grid_specs": {**(specs if isinstance(specs, dict) else {}), "sortable": False}}
+
+
+def disable_sorting(display_args: Any) -> Any:
+    """A copy of ``df_display_args`` in which no column of a display served by
+    ``infinite_request`` can sort: every ``column_config`` and ``left_col_configs``
+    entry of a display whose ``data_key`` is ``main`` gets ``ag_grid_specs.sortable``
+    false, whatever a klass or an override set. A display with another
+    ``data_key`` (the summary grid) is a client-side grid and is left as it is.
+
+    It is the last step of building the config (``XorqServerDataflow``), after the
+    klasses styled it and ``column_config_overrides`` were merged, so neither can
+    bypass it. ``display_args`` is not changed and may have any shape."""
+    if not isinstance(display_args, dict):
+        return display_args
+    out = {}
+    for name, display in display_args.items():
+        config = display.get("df_viewer_config") if isinstance(display, dict) else None
+        if not isinstance(config, dict) or display.get("data_key") != "main":
+            out[name] = display
+            continue
+        columns = {key: [_unsortable(column) for column in config[key]]
+            for key in ("column_config", "left_col_configs") if isinstance(config.get(key), list)}
+        out[name] = {**display, "df_viewer_config": {**config, **columns}}
+    return out
 
 
 def probe_dtypes(obj: Any) -> dict[str, str]:

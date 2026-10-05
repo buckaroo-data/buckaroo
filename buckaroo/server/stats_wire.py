@@ -24,6 +24,12 @@ session. A tier the host named below ``full`` (``scalar``, ``schema``) is its
 choice and reaches every client as ``not_computed``. ``stats_to_pull`` decides,
 per client, whether a session has stats left to compute.
 
+A session opened with a stats policy also resolves the guards for huge sources
+(``resolve_session_guards``, rows-first p37): above the sort threshold the dataflow
+turns sorting off in its display config (``apply_source_guards``) and a sorted
+window is refused (``session.sort_refusal``). Neither depends on the client or on
+what stats the session has.
+
 Every send site goes through ``build_state_message_for`` (or ``broadcast_state``,
 which calls it per client), because the session holds one shared snapshot and
 the client is known only to the handler that owns the connection.
@@ -42,7 +48,7 @@ from buckaroo.dataflow.sd_cache import split_chain_by_scope
 from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import get_buckaroo_display_state
 from buckaroo.server.session import SessionState, build_state_message, stats_deferred_by_policy
-from buckaroo.server.stats_policy import resolve_stats_policy
+from buckaroo.server.stats_policy import resolve_source_guards, resolve_stats_policy
 
 log = logging.getLogger("buckaroo.server.stats_wire")
 
@@ -99,6 +105,27 @@ def resolve_session_policy(stats_tier: str, dataflow_tier: str, rows: int, cols:
     if dataflow_tier != "schema":
         return None
     return resolve_stats_policy("xorq", "xorq_build", rows, cols, host_tier=stats_tier)
+
+
+def resolve_session_guards(dataflow_tier: str, rows: int, cols: int) -> Optional[dict]:
+    """The guards for a session the handler has just built, from the size load took
+    (``rows`` and ``cols``, so no query runs): ``{"sort": ..., "search": ...}``, each
+    ``"enabled"`` or ``"disabled"`` (``stats_policy.resolve_source_guards``). ``None``
+    unless the dataflow was built at the schema tier, which is to say unless the host
+    opened the session with a stats policy, as ``resolve_session_policy`` does: a
+    session built with its stats inline is not guarded."""
+    if dataflow_tier != "schema":
+        return None
+    return resolve_source_guards("xorq", "xorq_build", rows, cols)
+
+
+def apply_source_guards(session: SessionState, dataflow: Any, guards: Optional[dict]) -> None:
+    """Record ``guards`` on the session and set the dataflow's sort switch to match,
+    which rebuilds its display config when the switch moves. Called before the
+    session snapshot is taken from the dataflow, since the config in the snapshot is
+    the one a client sorts by."""
+    session.source_guards = guards
+    dataflow.set_sort_enabled(guards is None or guards["sort"] != "disabled")
 
 
 def session_dataflow(session: Optional[SessionState]) -> Any:

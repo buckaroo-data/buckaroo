@@ -907,6 +907,11 @@ class TestGuardLimits:
     def test_from_env_with_a_clean_environment_is_the_default_set(self, sp):
         assert dataclasses.asdict(_guard_api(sp, "GuardLimits").from_env()) == GUARD_DEFAULTS
 
+    def test_the_stats_limits_do_not_carry_the_guard_thresholds(self, sp):
+        """They are separate numbers (plan 3 section 3.5): a threshold on stats
+        says nothing about the cost of a sorted window."""
+        assert not {"sort_disable_rows", "search_disable_rows"} & {f.name for f in dataclasses.fields(sp.StatsLimits)}
+
     @pytest.mark.parametrize("name, field", GUARD_ENV_FIELDS.items())
     def test_each_variable_overrides_its_field(self, sp, monkeypatch, name, field):
         monkeypatch.setenv(name, "12345")
@@ -983,6 +988,11 @@ class TestResolveSourceGuards:
         monkeypatch.setenv("BUCKAROO_STATS_CEILING_SCALAR_CELLS", "1")
         assert _guards(sp, "xorq", 5_000) == ENABLED
 
+    def test_the_stats_policy_ignores_the_guard_thresholds(self, sp, monkeypatch):
+        monkeypatch.setenv("BUCKAROO_SORT_DISABLE_ROWS", "1")
+        monkeypatch.setenv("BUCKAROO_SEARCH_DISABLE_ROWS", "1")
+        assert sp.resolve_stats_policy("xorq", "parquet", 5_000, 10)["tier_target"] == "full"
+
     def test_the_environment_is_read_on_each_call(self, sp):
         resolve = _guard_api(sp, "resolve_source_guards")
         assert resolve("xorq", "parquet", 5_000, 10) == ENABLED
@@ -1038,6 +1048,12 @@ class TestGuardFlagsInDfMeta:
         assert session_mod.build_state_message(_guarded("disabled", "disabled"))["df_meta"] == {"total_rows": 5,
             "sort": "disabled", "search": "disabled"}
 
+    @pytest.mark.parametrize("session", [_guarded(), session_mod.SessionState(session_id="s", path="p")],
+        ids=["enabled", "unresolved"])
+    def test_enabled_flags_leave_the_message_as_it_was(self, session):
+        session.df_meta = {"total_rows": 5}
+        assert session_mod.build_state_message(session)["df_meta"] == {"total_rows": 5}
+
     @pytest.mark.parametrize("ondemand", [True, False])
     def test_every_client_is_told(self, ondemand):
         """The server refuses the sort whoever asks, so no capability gates the flag."""
@@ -1049,6 +1065,11 @@ class TestGuardFlagsInDfMeta:
         session.source_guards = {"sort": "disabled", "search": "enabled"}
         df_meta = session_mod.build_state_message(session)["df_meta"]
         assert df_meta == {"total_rows": 5, "sort": "disabled", "stats": session_mod.stats_meta(session)}
+
+    def test_the_session_s_df_meta_is_not_changed(self):
+        session = _guarded("disabled", "disabled")
+        session_mod.build_state_message(session)
+        assert session.df_meta == {"total_rows": 5}
 
     def test_a_client_reads_what_is_left_out_as_enabled(self):
         read = getattr(session_mod, "guards_with_defaults", None)
