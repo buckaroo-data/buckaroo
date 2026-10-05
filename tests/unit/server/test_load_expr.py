@@ -1385,6 +1385,259 @@ class TestLoadExprStatsPolicy(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(project_root, ignore_errors=True)
 
 
+def _build_scan_dir(data_root, builds_root, joined=False):
+    """Build the twelve-row, six-column parquet read of ``_wide_parquet_expr`` to
+    ``builds_root`` and return the build path. ``joined`` builds a join of it
+    with a second parquet read instead, an expression the batch split refuses."""
+    expr = _wide_parquet_expr(data_root, "left" if joined else "wide")
+    if joined:
+        pd.DataFrame({"n0": [float(i) for i in range(12)], "extra": list(range(12))}).to_parquet(
+            data_root / "right.parquet")
+        expr = expr.join(xo.deferred_read_parquet(str(data_root / "right.parquet")), "n0")
+    return str(xo.build_expr(expr, builds_dir=builds_root))
+
+
+@contextmanager
+def _spy_units():
+    """Record the id of every unit ``XorqStatPipeline`` runs while the block runs."""
+    ran = []
+    original = XorqStatPipeline.run
+
+    def spy(pipeline, unit, acc):
+        ran.append(unit.id)
+        return original(pipeline, unit, acc)
+
+    with patch.object(XorqStatPipeline, "run", spy):
+        yield ran
+
+
+def _batch_ids(ran):
+    return [unit_id for unit_id in ran if unit_id.startswith("batch")]
+
+
+class TestLoadExprStatChunkCells(tornado.testing.AsyncHTTPTestCase):
+    """``stat_chunk_cells`` on POST /load_expr (rows-first s6): the host's opt-in
+    to cutting the xorq stats batch into column chunks, so that no single stat
+    unit holds the loop for a whole scan. It is stored beside the stats policy
+    fields, replayed by /reload_expr and kept out of the has_config tuple. The
+    pipeline's scan guard still decides which sources are cut. The fixture has
+    twelve rows and six columns, so 36 cells is three columns per chunk."""
+
+    def get_app(self):
+        return make_app()
+
+    def setUp(self):
+        super().setUp()
+        data_root = Path(tempfile.mkdtemp())
+        self.builds_root = tempfile.mkdtemp()
+        self.project_root = tempfile.mkdtemp()
+        for root in (data_root, self.builds_root, self.project_root):
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        self.scan_build = _build_scan_dir(data_root, self.builds_root)
+        self.join_build = _build_scan_dir(data_root, self.builds_root, joined=True)
+        # Zero runs exactly one unit per incremental request.
+        budget = patch.object(stats_wire, "STATS_BUDGET_S", 0)
+        budget.start()
+        self.addCleanup(budget.stop)
+        self.clients = []
+
+    def tearDown(self):
+        for ws in self.clients:
+            ws.close()
+        super().tearDown()
+
+    def _session(self, sid):
+        return self._app.settings["sessions"].get(sid)
+
+    async def _post_load(self, sid, build_dir=None, **body):
+        return await _post(self.get_http_port(), "/load_expr",
+            {"session": sid, "build_dir": build_dir or self.scan_build, **body})
+
+    async def _load(self, sid, build_dir=None, **body):
+        resp = await self._post_load(sid, build_dir, **body)
+        self.assertEqual(resp.code, 200, resp.body)
+
+    async def _connect(self, sid, caps=None):
+        """Open a WebSocket, with ``caps`` as ``?caps=``. Returns it with its
+        first ``initial_state``."""
+        suffix = f"?caps={caps}" if caps else ""
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/{sid}{suffix}")
+        self.clients.append(ws)
+        return ws, await _read_json(ws)
+
+    async def _pull(self, sid, build_dir=None, **body):
+        """Load ``sid`` with deferred stats and pull them one unit per request,
+        as a client with ``stats_update`` would. Returns the first
+        ``initial_state``, the ids of the units that ran and every reply."""
+        await self._load(sid, build_dir, stats_delivery="deferred", **body)
+        ws, first = await self._connect(sid, caps="stats_update")
+        gen = first["df_meta"]["stats"]["gen"]
+        replies = []
+        with _spy_units() as ran:
+            for _ in range(12):
+                ws.write_message(_stats_request(gen, incremental=True))
+                replies.append(await _read_json(ws))
+                if replies[-1]["type"] != "stats_update" or replies[-1]["final"]:
+                    break
+        return first, ran, replies
+
+    @tornado.testing.gen_test
+    async def test_the_field_reaches_the_dataflow_and_is_stored_beside_the_kwargs(self):
+        await self._load("cc-field", stat_chunk_cells=36)
+        session = self._session("cc-field")
+        self.assertEqual(session.xorq_dataflow.stat_chunk_cells, 36)
+        self.assertEqual(session.stat_chunk_cells, 36)
+        self.assertNotIn("stat_chunk_cells", session.dataflow_kwargs)
+
+    @tornado.testing.gen_test
+    async def test_the_default_is_off_and_null_is_the_same_as_absent(self):
+        with _count_stat_queries() as queries:
+            await self._load("cc-default")
+        self.assertEqual(len(_batch_queries(queries)), 1)
+        await self._load("cc-null", stat_chunk_cells=None)
+        for sid in ("cc-default", "cc-null"):
+            self.assertIsNone(self._session(sid).stat_chunk_cells)
+            self.assertIsNone(self._session(sid).xorq_dataflow.stat_chunk_cells)
+        _, default = await self._connect("cc-default")
+        _, null = await self._connect("cc-null")
+        self.assertEqual(_comparable(default), _comparable(null))
+
+    @tornado.testing.gen_test
+    async def test_a_parquet_scan_runs_several_batch_units_and_assembles_the_unsplit_stats(self):
+        _, whole_ran, whole = await self._pull("cc-whole")
+        first, ran, replies = await self._pull("cc-split", stat_chunk_cells=36)
+        self.assertEqual(_batch_ids(whole_ran), ["batch"])
+        self.assertEqual(_batch_ids(ran), ["batch:0", "batch:1"])
+        self.assertEqual(len(ran), len(whole_ran) + 1)
+        self.assertEqual((first["df_meta"]["stats"]["status"], first["df_meta"]["stats"]["tier"]),
+            ("pending", "schema"))
+        self.assertEqual([r["type"] for r in replies], ["stats_update"] * len(ran))
+        self.assertTrue(replies[-1]["final"])
+        self.assertEqual(_as_json(_rows_by_stat(replies[-1]["payload"])),
+            _as_json(_rows_by_stat(whole[-1]["payload"])))
+        self.assertEqual(_as_json(self._session("cc-split").xorq_dataflow.merged_sd),
+            _as_json(self._session("cc-whole").xorq_dataflow.merged_sd))
+
+    @tornado.testing.gen_test
+    async def test_inline_stats_are_cut_too_and_the_frame_is_unchanged(self):
+        await self._load("cc-inline-whole")
+        _, whole = await self._connect("cc-inline-whole")
+        with _count_stat_queries() as queries:
+            await self._load("cc-inline", stat_chunk_cells=36)
+        self.assertEqual(len(_batch_queries(queries)), 2)
+        _, frame = await self._connect("cc-inline")
+        self.assertEqual(_comparable(frame), _comparable(whole))
+
+    @tornado.testing.gen_test
+    async def test_a_join_keeps_the_single_batch_and_nothing_reports_a_problem(self):
+        _, _, whole = await self._pull("cc-join-whole", self.join_build)
+        first, ran, replies = await self._pull("cc-join", self.join_build, stat_chunk_cells=12)
+        self.assertEqual(self._session("cc-join").stat_chunk_cells, 12)
+        self.assertEqual(_batch_ids(ran), ["batch"])
+        self.assertEqual(set(first["df_meta"]["stats"]), {"status", "tier", "gen"})
+        self.assertEqual(first["df_meta"]["stats"]["status"], "pending")
+        for reply in replies:
+            self.assertEqual(reply["type"], "stats_update")
+            self.assertNotIn("reason", reply)
+            self.assertNotIn("status", reply)
+        self.assertTrue(replies[-1]["final"])
+        self.assertEqual(_as_json(_rows_by_stat(replies[-1]["payload"])),
+            _as_json(_rows_by_stat(whole[-1]["payload"])))
+        _, done = await self._connect("cc-join", caps="stats_update")
+        self.assertEqual(done["df_meta"]["stats"]["status"], "complete")
+        self.assertNotIn("reason", done["df_meta"]["stats"])
+
+    @tornado.testing.gen_test
+    async def test_invalid_values_are_a_400(self):
+        for value in (0, -36, 1.5, 36.0, True, False, "36", [36], {"cells": 36}):
+            resp = await self._post_load("cc-bad", stat_chunk_cells=value)
+            self.assertEqual(resp.code, 400, value)
+            body = json.loads(resp.body)
+            self.assertEqual(body["error_code"], "invalid_stat_chunk_cells", value)
+            self.assertIn("stat_chunk_cells", body["message"])
+        self.assertIsNone(self._session("cc-bad"))
+
+    @tornado.testing.gen_test
+    async def test_an_invalid_value_leaves_the_stored_one(self):
+        await self._load("cc-kept", stat_chunk_cells=36)
+        before = self._session("cc-kept").xorq_dataflow
+        resp = await self._post_load("cc-kept", stat_chunk_cells=0)
+        self.assertEqual(resp.code, 400)
+        session = self._session("cc-kept")
+        self.assertEqual(session.stat_chunk_cells, 36)
+        self.assertIs(session.xorq_dataflow, before)
+
+    @tornado.testing.gen_test
+    async def test_warm_repost_with_an_unchanged_value_short_circuits(self):
+        body = {"stat_chunk_cells": 36}
+        await self._load("cc-warm", **body)
+        with patch.object(xorq_loading, "load_expr_build_dir",
+            side_effect=AssertionError("an unchanged value must take the warm exit")):
+            same = await self._post_load("cc-warm", **body)
+            omitted = await self._post_load("cc-warm")
+        self.assertEqual(same.code, 200)
+        self.assertEqual(omitted.code, 200, "omitting the field keeps the session's")
+        session = self._session("cc-warm")
+        self.assertEqual(session.stat_chunk_cells, 36)
+        self.assertEqual(session.xorq_dataflow.stat_chunk_cells, 36)
+
+    @tornado.testing.gen_test
+    async def test_the_off_value_sent_on_every_post_does_not_defeat_the_warm_exit(self):
+        """has_config tests truthiness; the field is not in it, so a host that
+        always sends null (or a count) does not rebuild on every POST (#944)."""
+        await self._load("cc-warm-null", stat_chunk_cells=None)
+        with patch.object(xorq_loading, "load_expr_build_dir",
+            side_effect=AssertionError("the warm exit must not see the field as config")):
+            resp = await self._post_load("cc-warm-null", stat_chunk_cells=None)
+        self.assertEqual(resp.code, 200)
+
+    @tornado.testing.gen_test
+    async def test_warm_repost_with_a_changed_value_rebuilds(self):
+        original = xorq_loading.load_expr_build_dir
+        calls = []
+
+        def counting_loader(bd, **kwargs):
+            calls.append(bd)
+            return original(bd, **kwargs)
+
+        with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
+            await self._load("cc-changed")
+            self.assertEqual(len(calls), 1)
+            await self._load("cc-changed", stat_chunk_cells=36)
+            self.assertEqual(len(calls), 2, "turning the split on must rebuild")
+            self.assertEqual(self._session("cc-changed").xorq_dataflow.stat_chunk_cells, 36)
+            await self._load("cc-changed", stat_chunk_cells=24)
+            self.assertEqual(len(calls), 3, "a different count must rebuild")
+            await self._load("cc-changed", stat_chunk_cells=None)
+            self.assertEqual(len(calls), 4, "an explicit null turns the split off, which must rebuild")
+        session = self._session("cc-changed")
+        self.assertIsNone(session.stat_chunk_cells)
+        self.assertIsNone(session.xorq_dataflow.stat_chunk_cells)
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_replays_the_stored_value(self):
+        await self._load("cc-reload", project_root=self.project_root, stat_chunk_cells=36)
+        before = self._session("cc-reload").xorq_dataflow
+        with _count_stat_queries() as queries:
+            resp = await _post(self.get_http_port(), "/reload_expr/cc-reload", {})
+        self.assertEqual(resp.code, 200, resp.body)
+        session = self._session("cc-reload")
+        self.assertIsNot(session.xorq_dataflow, before)
+        self.assertEqual(session.xorq_dataflow.stat_chunk_cells, 36)
+        self.assertEqual(session.stat_chunk_cells, 36)
+        self.assertEqual(len(_batch_queries(queries)), 2, "the rebuilt dataflow must split its batch")
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_without_a_stored_value_builds_the_single_batch(self):
+        await self._load("cc-reload-off", project_root=self.project_root)
+        with _count_stat_queries() as queries:
+            resp = await _post(self.get_http_port(), "/reload_expr/cc-reload-off", {})
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertIsNone(self._session("cc-reload-off").xorq_dataflow.stat_chunk_cells)
+        self.assertEqual(len(_batch_queries(queries)), 1)
+
+
 def _build_stats_wire_dir(builds_root):
     """Build the ``_stats_tier_expr`` table to ``builds_root``. Its float column
     has a 1e9 maximum, so full stats change that column's ``minWidth`` and a

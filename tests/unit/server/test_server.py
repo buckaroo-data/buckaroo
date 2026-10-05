@@ -267,6 +267,22 @@ class TestLoad(tornado.testing.AsyncHTTPTestCase):
             finally:
                 os.unlink(f.name)
 
+    def test_load_drops_a_stat_chunk_cells_left_by_load_expr(self):
+        """The count belongs to the xorq stats batch, which /load does not run: a
+        session that /load_expr gave one starts over (rows-first s6)."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                session = self._app.settings["sessions"].create("chunk-cells-1", "")
+                session.stat_chunk_cells = 60_000_000
+                resp = self.fetch("/load", method="POST",
+                    body=json.dumps({"session": "chunk-cells-1", "path": f.name, "mode": "buckaroo"}),
+                    headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+                self.assertIsNone(session.stat_chunk_cells)
+            finally:
+                os.unlink(f.name)
+
 
 class TestSessionPage(tornado.testing.AsyncHTTPTestCase):
     def get_app(self):
