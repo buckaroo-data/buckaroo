@@ -16,6 +16,14 @@
  * go in `df_meta.stats.computed_columns`, which the summary view reads to show
  * what the run computed.
  *
+ * The server leaves `df_meta.stats.tier` where it was while a session is not
+ * computed, so a run for the whole table that reached scalar shows nowhere in the
+ * frame. The channel records it as `df_meta.stats.reached_tier` (rows-first c5b),
+ * from the tier of the final reply. A reply does not say whether its run covered
+ * the whole table or named columns, so the channel reads that from the
+ * `stats_request` the client sent last, which `requestStats` records on the model
+ * under STATS_REQUESTED_KEY.
+ *
  * `payload` is an inline wide DFEnvelope holding `all_stats`. `stats_gen` is the
  * server's counter for the state the stats describe; it rides on every
  * `initial_state` as `df_meta.stats.gen`, and a reply for any other gen is for
@@ -27,7 +35,7 @@
  */
 import { decodeDFData } from "../components/DFViewerParts/resolveDFData";
 import { DFData, DFDataOrPayload } from "../components/DFViewerParts/DFWhole";
-import { DFMeta, DFMetaStats, StatsStatus } from "../components/WidgetTypes";
+import { DFMeta, DFMetaStats, STATS_TIERS, StatsStatus, StatsTier, higherTier } from "../components/WidgetTypes";
 import { IModel } from "./IModel";
 
 /** A capability this client advertises, as one value of `?caps=` on the
@@ -42,6 +50,19 @@ export const STATS_UPDATE_CAP = "stats_update";
 export const STATS_ONDEMAND_CAP = "stats_ondemand";
 
 const CLIENT_CAPS = [STATS_UPDATE_CAP, STATS_ONDEMAND_CAP];
+
+/** The model key under which requestStats records the `stats_request` it sent
+ *  last. The channel reads it to tell a final reply to a run for the whole table
+ *  (a tier and no columns) from one to a run for some columns. */
+export const STATS_REQUESTED_KEY = "stats_requested";
+
+/** What requestStats records under STATS_REQUESTED_KEY: the fields of the
+ *  request that say what it was for. */
+export interface StatsRequested {
+    gen: number;
+    tier?: string;
+    columns?: string[];
+}
 
 const decodeQueryValue = (value: string): string => {
     try {
@@ -169,15 +190,27 @@ function withComputedColumns(stats: DFMetaStats, columns: string[]): DFMetaStats
  * update's tier, and the policy fields, which only describe what is left to
  * ask for, go. With a status (a refusal, or a run for some columns only) the
  * session keeps its stats and takes the status and the reason, if the update
- * names one; the update's tier is what was asked for, not what was reached.
+ * names one; the update's tier is what was asked for, not what was reached,
+ * except where `reached` names the tier a run for the whole table reached (see
+ * reachedBy), which goes in `reached_tier` when it is higher than the one there.
  * `filled` lists the columns the run's replies merged, and a session left not
  * computed adds them to `computed_columns`.
  */
-function finalStats(stats: DFMetaStats, msg: StatsUpdateMessage, filled: string[]): DFMetaStats {
+function finalStats(
+    stats: DFMetaStats,
+    msg: StatsUpdateMessage,
+    filled: string[],
+    reached?: StatsTier,
+): DFMetaStats {
     const status = msg.status ?? "complete";
     if (status === "complete") return { status, tier: msg.tier ?? stats.tier, gen: stats.gen };
     return withComputedColumns(
-        { ...stats, status, ...(msg.reason === undefined ? {} : { reason: msg.reason }) },
+        {
+            ...stats,
+            status,
+            ...(msg.reason === undefined ? {} : { reason: msg.reason }),
+            ...(reached === undefined ? {} : { reached_tier: higherTier(stats.reached_tier, reached) }),
+        },
         filled,
     );
 }
@@ -256,7 +289,8 @@ export class StatsChannel {
             }
             if (msg.final) {
                 const filled = this.takeFilled(msg.stats_gen);
-                this.replaceStats((stats) => finalStats(stats, msg, filled));
+                const reached = this.reachedBy(msg);
+                this.replaceStats((stats) => finalStats(stats, msg, filled, reached));
             }
             return;
         }
@@ -274,6 +308,19 @@ export class StatsChannel {
         } else if (msg.reason === "not_requestable") {
             this.replaceStats((stats) => withComputedColumns({ ...stats, status: "not_computed" }, filled));
         }
+    }
+
+    /** The tier a final reply reached for the whole table, or undefined. The
+     *  reply must have left the session not computed and carried a payload (a
+     *  refusal, reason ceiling or cost, has none and names the tier that was
+     *  asked for), and the request sent last must be for this gen and this tier
+     *  with no columns: a tier with columns is a run for those columns. */
+    private reachedBy(msg: StatsUpdateMessage): StatsTier | undefined {
+        const tier = STATS_TIERS.find((t) => t === msg.tier);
+        if (msg.status !== "not_computed" || msg.payload === undefined || tier === undefined) return undefined;
+        const asked: StatsRequested | undefined = this.model.get(STATS_REQUESTED_KEY);
+        const wholeTable = asked?.gen === msg.stats_gen && asked.tier === tier && asked.columns === undefined;
+        return wholeTable ? tier : undefined;
     }
 
     /** Note the columns `update` filled in the dict this channel has just

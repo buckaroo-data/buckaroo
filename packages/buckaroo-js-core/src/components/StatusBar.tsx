@@ -4,8 +4,8 @@ import * as _ from "lodash-es";
 import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
 import { ColDef, GridApi, GridOptions } from "ag-grid-community";
 import { basicIntFormatter } from "./DFViewerParts/Displayer";
-import { DFMeta, DFMetaStats, canRequestStats, statsOverCeiling } from "./WidgetTypes";
-import { notComputedMessage } from "./StatsEmptyState";
+import { DFMeta, DFMetaStats, canRequestStats, nextRequestTier, statsOverCeiling, tierReached } from "./WidgetTypes";
+import { TIER_DETAILS, notComputedMessage } from "./StatsEmptyState";
 import { BuckarooOptions } from "./WidgetTypes";
 import { BuckarooState, BKeys } from "./WidgetTypes";
 import { CustomCellEditorProps } from 'ag-grid-react';
@@ -308,6 +308,9 @@ export const SearchEditor =  memo(({ value, onValueChange, stopEditing }: Custom
     );
 });
 
+// How the status bar names the tier a not computed session has reached.
+const REACHED_TIER_NAMES = { scalar: "Basic stats", full: "Summary stats" } as const;
+
 /**
  * Where the summary stats stand, as the server reports it in df_meta.stats:
  * loading while they are pending, a control to ask for them while they are not
@@ -318,6 +321,11 @@ export const SearchEditor =  memo(({ value, onValueChange, stopEditing }: Custom
  * refused the stats or nothing is left to ask for. The control's label reads
  * Continue when a run was paused on cost. It calls the host's callback with no
  * arguments; the host asks for the tier df_meta.stats allows (see forceStats).
+ *
+ * Once a run has reached a tier (see tierReached) the cell says which tier is on
+ * screen. The control, if a tier is left, then names the next one; when none is
+ * left, or there is no handler, a label says the stats are computed, whatever
+ * the ceiling says, since the stats on screen are not unavailable.
  */
 export const StatsStatusCell = function (params: {
     value?: DFMetaStats;
@@ -348,6 +356,23 @@ export const StatsStatusCell = function (params: {
             );
         case "not_computed": {
             const message = notComputedMessage(stats);
+            const reached = tierReached(stats);
+            if (reached !== "schema") {
+                const shown = REACHED_TIER_NAMES[reached];
+                const next = nextRequestTier(stats);
+                return onComputeStats && canRequestStats(stats) && next !== undefined ? (
+                    cell(
+                        <>
+                            <span>{shown}</span>
+                            <button type="button" title={TIER_DETAILS[next].title} onClick={() => onComputeStats()}>
+                                {TIER_DETAILS[next].label}
+                            </button>
+                        </>,
+                    )
+                ) : (
+                    cell(`${shown} computed`, { title: TIER_DETAILS[reached].title })
+                );
+            }
             if (statsOverCeiling(stats)) {
                 return cell("Summary stats unavailable: size limit", { title: message });
             }

@@ -39,8 +39,9 @@ export interface DFMetaStats {
     // the columns whose stats the run merged into all_stats.
     computed_columns?: string[];
     // Also set by StatsChannel, never sent: the highest tier a run for the whole
-    // table has reached, from the tier of its final reply. The server's `tier`
-    // stays at the tier the session was published at while it is not computed.
+    // table has reached, from the tier of its final reply (see tierReached). The
+    // server's `tier` stays at the tier the session was published at while it is
+    // not computed. A frame from the server replaces df_meta, and with it this.
     reached_tier?: StatsTier;
 }
 
@@ -65,25 +66,49 @@ export const statsRequestable = (stats: DFMetaStats | undefined): string[] =>
 
 export const statsAutoRequest = (stats: DFMetaStats | undefined): boolean => stats?.auto_request !== false;
 
-// Stubs: the real helpers come with the fix.
-export const tierReached = (stats: DFMetaStats | undefined): StatsTier =>
-    STATS_TIERS.find((tier) => tier === stats?.tier) ?? "schema";
-export const autoRequestTier = (_stats: DFMetaStats | undefined): StatsTier | undefined => undefined;
-
 const tierRank = (tier: string | undefined): number => {
     const rank = STATS_TIERS.indexOf(tier as StatsTier);
     return rank === -1 ? 0 : rank;
 };
 
+/** The higher of two tier names. A name that is not a tier counts as schema. */
+export const higherTier = (a: string | undefined, b: string | undefined): StatsTier =>
+    STATS_TIERS[Math.max(tierRank(a), tierRank(b))];
+
+/**
+ * The highest tier the session has reached: the server's `tier` or the tier
+ * StatsChannel recorded in `reached_tier`, whichever is higher. The server
+ * leaves `tier` at the tier a session was published at while it is not
+ * computed, so a run for the whole table that reached scalar shows only in
+ * `reached_tier`.
+ */
+export const tierReached = (stats: DFMetaStats | undefined): StatsTier => higherTier(stats?.tier, stats?.reached_tier);
+
+/**
+ * The tier the client should request on its own, without a click: the target
+ * the server sized the session to (`tier_target`), for a session that is not
+ * computed, that the server says to request for (`auto_request`, absent means
+ * true) and that is neither at its ceiling nor paused on cost, while the tier
+ * reached is below the target. `requestable` lists the tiers above the target,
+ * so it plays no part. Undefined when there is nothing to request.
+ */
+export const autoRequestTier = (stats: DFMetaStats | undefined): StatsTier | undefined => {
+    if (stats?.status !== "not_computed" || !statsAutoRequest(stats)) return undefined;
+    if (stats.reason === "ceiling" || stats.reason === "cost") return undefined;
+    const target = STATS_TIERS.find((tier) => tier === stats.tier_target);
+    return target !== undefined && tierRank(target) > tierRank(tierReached(stats)) ? target : undefined;
+};
+
 /**
  * The tier a request for more stats should ask for: the smallest tier in
- * `requestable` above the one reached, so scalar goes before full. Names that
- * are not tiers are ignored. Undefined when there is nothing left to ask for.
+ * `requestable` above the one reached (see tierReached), so scalar goes before
+ * full. Names that are not tiers are ignored. Undefined when there is nothing
+ * left to ask for.
  */
 export const nextRequestTier = (stats: DFMetaStats | undefined): StatsTier | undefined => {
     if (stats === undefined) return undefined;
     const requestable = statsRequestable(stats);
-    const reached = tierRank(stats.tier);
+    const reached = tierRank(tierReached(stats));
     return STATS_TIERS.find((tier) => requestable.includes(tier) && tierRank(tier) > reached);
 };
 
@@ -106,12 +131,14 @@ export const canRequestStats = (stats: DFMetaStats | undefined): boolean =>
 /**
  * The tier of a request for the columns styling needs stats for (`demand_columns`):
  * the smallest tier from scalar up that the policy allows, the target included,
- * since scalar is where min and max come from. Undefined when it allows none.
+ * since scalar is where min and max come from. Undefined when it allows none, or
+ * when the tier reached already covers it.
  */
 export const demandTier = (stats: DFMetaStats | undefined): StatsTier | undefined => {
     if (stats === undefined) return undefined;
     const allowed = [...statsRequestable(stats), ...(stats.tier_target === undefined ? [] : [stats.tier_target])];
-    return STATS_TIERS.find((tier) => tierRank(tier) >= tierRank("scalar") && allowed.includes(tier));
+    const tier = STATS_TIERS.find((t) => tierRank(t) >= tierRank("scalar") && allowed.includes(t));
+    return tier !== undefined && tierRank(tier) > tierRank(tierReached(stats)) ? tier : undefined;
 };
 
 export interface BuckarooOptions {

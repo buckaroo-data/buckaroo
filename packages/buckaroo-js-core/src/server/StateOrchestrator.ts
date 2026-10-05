@@ -21,11 +21,16 @@
  *
  * A session the server's policy left without stats says so with status
  * "not_computed" and the fields of its policy (see DFMetaStats). The scheduler
- * asks for nothing on such a session, with two exceptions. With `auto_request`
- * false it asks for the columns in `demand_columns`, whose styling needs stats
- * now, as one scoped request per gen (see demand runs below). And it continues
- * a run the user started with the "Compute summary stats" control (see
- * forceStats): each reply that is not final is answered with the same request.
+ * asks for nothing on such a session, with three exceptions. With `auto_request`
+ * not false and a `tier_target` above the tier reached (a session sized to
+ * scalar, or a scalar a host named) it asks for that tier on its own, once per
+ * gen, and continues the run to its final reply (see autoRequestTier; the
+ * request is `{tier}`, not forced and with no columns, so it covers the whole
+ * table). With `auto_request` false it asks for the columns in `demand_columns`,
+ * whose styling needs stats now, as one scoped request per gen (see demand runs
+ * below). And it continues a run the user started with the "Compute summary
+ * stats" control (see forceStats): each reply that is not final is answered with
+ * the same request.
  *
  * It watches the model and sends through it, so any IModel works:
  *
@@ -57,14 +62,16 @@ import {
     DFMeta,
     DFMetaStats,
     StatsTier,
+    autoRequestTier,
     demandTier,
     nextRequestTier,
     statsAutoRequest,
 } from "../components/WidgetTypes";
 import { IModel } from "./IModel";
+import { STATS_REQUESTED_KEY, StatsRequested } from "./StatsChannel";
 
 /** What the scheduler needs of a model. */
-export type StatsModel = Pick<IModel, "get" | "on" | "off" | "send">;
+export type StatsModel = Pick<IModel, "get" | "set" | "on" | "off" | "send">;
 
 /** The fields of buckaroo_state the server reruns the dataflow for, and so
  *  bumps stats_gen on. Mirrors _DATAFLOW_FIELDS in
@@ -93,33 +100,66 @@ export interface StatsRequestOptions {
     force?: boolean;
     /** The tier asked for. */
     tier?: string;
-    /** The columns the request is for. A forced request names the columns it
-     *  is for or none, so the grid's columns are not added to it. A request
-     *  that is not forced carries them as a hint when it names none. */
+    /** The columns the request is for. A request that names a tier or is forced
+     *  names the columns it is for or none, since the server reads `columns` with
+     *  a tier as the scope of the run, so the grid's columns are not added to it.
+     *  Any other request carries them as a hint when it names none. */
     columns?: string[];
 }
 
 /**
  * Send a time-boxed `stats_request` for the stats_gen of the state the model
- * shows. The scheduler's requests carry the columns the grid shows as the hint,
- * when they are known; a request that names its columns carries those instead,
- * and a forced one carries only those. Returns false, and sends nothing, when
- * the model's df_meta carries no stats.gen.
+ * shows. A request that names no tier and is not forced (the scheduler's run of a
+ * pending session) carries the columns the grid shows as the hint, when they are
+ * known; a request that names its columns carries those instead, and one that
+ * names a tier or is forced carries only those. Returns false, and sends
+ * nothing, when the model's df_meta carries no stats.gen.
+ *
+ * The request is recorded on the model under STATS_REQUESTED_KEY, before it is
+ * sent, for StatsChannel to tell the run it answers.
  */
-export function requestStats(model: Pick<IModel, "get" | "send">, opts: StatsRequestOptions = {}): boolean {
+export function requestStats(
+    model: Pick<IModel, "get" | "set" | "send">,
+    opts: StatsRequestOptions = {},
+): boolean {
     const gen = (model.get("df_meta") as DFMeta | undefined)?.stats?.gen;
     if (typeof gen !== "number") return false;
-    const columns = opts.columns ?? (opts.force ? undefined : (model.get(VISIBLE_COLUMNS_KEY) as string[] | undefined));
+    const columns =
+        opts.columns ??
+        (opts.force || opts.tier !== undefined ? undefined : (model.get(VISIBLE_COLUMNS_KEY) as string[] | undefined));
+    const named = Array.isArray(columns) && columns.length > 0 ? columns : undefined;
+    const requested: StatsRequested = {
+        gen,
+        ...(opts.tier === undefined ? {} : { tier: opts.tier }),
+        ...(named === undefined ? {} : { columns: named }),
+    };
+    model.set(STATS_REQUESTED_KEY, requested);
     model.send({
         type: "stats_request",
         stats_gen: gen,
         scope: "raw",
         incremental: true,
         ...(opts.tier === undefined ? {} : { tier: opts.tier }),
-        ...(Array.isArray(columns) && columns.length > 0 ? { columns } : {}),
+        ...(named === undefined ? {} : { columns: named }),
         ...(opts.force ? { force: true } : {}),
     });
     return true;
+}
+
+/**
+ * Mark the stats pending in a new df_meta, and return the stats it carries, or
+ * undefined when the model's df_meta has none. The server sends no frame to a
+ * capable client while a run it asked for is in progress, so without this the
+ * loading text and the placeholder rows would wait for the first reply, and the
+ * control would stay on screen to be clicked again. A final reply, a refusal or
+ * a frame from the server puts the status it names in place of it.
+ */
+function markStatsPending(model: Pick<IModel, "get" | "set">): DFMetaStats | undefined {
+    const meta = model.get("df_meta") as DFMeta | undefined;
+    if (meta?.stats === undefined) return undefined;
+    const stats: DFMetaStats = { ...meta.stats, status: "pending" };
+    model.set("df_meta", { ...meta, stats });
+    return stats;
 }
 
 /** The model key that records a run the user started, for the scheduler to
@@ -140,24 +180,18 @@ export interface ForcedRun {
  * is the per-column form. Sends nothing, and returns false, when no tier is
  * left to ask for or df_meta carries no stats.gen.
  *
- * The stats are marked pending in a new df_meta. The server sends no frame to a
- * capable client, so without this the loading text and the placeholder rows
- * would wait for the first reply, and the control would stay on screen to be
- * clicked again. A final reply, a refusal or a frame from the server puts the
- * status it names in place of it.
- *
- * The run is recorded on the model, where a scheduler started on it picks it up
- * and answers each reply that is not final with the same request.
+ * The stats are marked pending in a new df_meta (see markStatsPending). The run
+ * is recorded on the model, where a scheduler started on it picks it up and
+ * answers each reply that is not final with the same request.
  */
 export function forceStats(model: Pick<IModel, "get" | "set" | "send">, opts: { columns?: string[] } = {}): boolean {
-    const meta = model.get("df_meta") as DFMeta | undefined;
-    const stats = meta?.stats;
+    const stats = (model.get("df_meta") as DFMeta | undefined)?.stats;
     const tier = nextRequestTier(stats);
-    if (meta === undefined || stats === undefined || tier === undefined || typeof stats.gen !== "number") return false;
+    if (stats === undefined || tier === undefined || typeof stats.gen !== "number") return false;
     const columns = opts.columns !== undefined && opts.columns.length > 0 ? opts.columns : undefined;
     if (!requestStats(model, { force: true, tier, columns })) return false;
     const run: ForcedRun = { gen: stats.gen, tier, ...(columns === undefined ? {} : { columns }) };
-    model.set("df_meta", { ...meta, stats: { ...stats, status: "pending" } });
+    markStatsPending(model);
     model.set(FORCED_RUN_KEY, run);
     return true;
 }
@@ -183,16 +217,20 @@ type Timer = ReturnType<typeof setTimeout>;
 // What the scheduler is driving. "auto" is the run of a pending session. A
 // "demand" run asks for the columns whose styling needs stats, on a session
 // that does not auto-request: a scoped request, at the tier that carries min and
-// max. A "forced" run is one the user started; its first request was sent by
-// forceStats and the scheduler sends the rest.
+// max. A "target" run asks for the tier a not computed session is sized to, on
+// one that auto-requests: a request for the tier alone, which covers the whole
+// table; `sent` is set when the first request has gone out. A "forced" run is
+// one the user started; its first request was sent by forceStats and the
+// scheduler sends the rest.
 type Run =
     | { kind: "auto" }
     | { kind: "demand"; columns: string[]; tier: StatsTier }
+    | { kind: "target"; gen: number; tier: StatsTier; sent: boolean }
     | { kind: "forced"; gen: number; tier: string; columns?: string[] };
 
-// The parts of df_meta.stats a demand or forced run is watching: a change in
-// any of them means the reply to the run's request has arrived and ended it.
-// A new df_meta with the same three is a full frame for the same state.
+// The parts of df_meta.stats a demand, target or forced run is watching: a
+// change in any of them means the reply to the run's request has arrived and
+// ended it. A new df_meta with the same three is a full frame for the same state.
 interface StatsBasis {
     status: string;
     reason?: string;
@@ -223,7 +261,8 @@ export class StateOrchestrator {
     private runKey: string | undefined;
     // The stats a demand or forced run started from.
     private basis: StatsBasis | undefined;
-    // A demand run that has ended, which is not started again.
+    // A demand run, or a target run whose request was sent, that has ended: it
+    // is not started again, whatever state it left.
     private doneKey: string | undefined;
     // A request is out and its reply has not been seen.
     private inFlight = false;
@@ -310,7 +349,7 @@ export class StateOrchestrator {
     private readonly onState = (next?: BuckarooState): void => {
         const prev = this.seenState;
         this.seenState = next ?? this.model.get("buckaroo_state");
-        if (this.run === undefined || this.run.kind === "forced" || !touchesDataflow(prev, this.seenState)) return;
+        if (this.run === undefined || this.requestOut(this.run) || !touchesDataflow(prev, this.seenState)) return;
         this.begin(this.runKey!, this.run, this.basis);
     };
 
@@ -328,8 +367,8 @@ export class StateOrchestrator {
 
         const stats = meta?.stats;
         if (this.adoptForced(stats)) return;
-        if (this.run?.kind === "forced") {
-            this.syncForced(stats, metaChanged, dictChanged);
+        if (this.run !== undefined && this.requestOut(this.run)) {
+            this.syncOwned(stats, metaChanged, dictChanged);
             if (this.run !== undefined) return;
             // The run is over; what it left is handled like any other state.
         }
@@ -360,13 +399,18 @@ export class StateOrchestrator {
 
     // The run the stats ask for, if any. A pending session is run whole, unless
     // the server says not to auto-request, and then only the columns whose
-    // styling needs stats are asked for. A not computed session is asked for
-    // nothing, on the same condition.
+    // styling needs stats are asked for. A not computed session that
+    // auto-requests is asked for the tier it is sized to (see autoRequestTier);
+    // one that does not, for the demand columns alone.
     private desiredRun(stats: DFMetaStats | undefined): { key: string; run: Run } | undefined {
         if (stats === undefined || typeof stats.gen !== "number") return undefined;
         if (stats.status !== "pending" && stats.status !== "not_computed") return undefined;
         if (statsAutoRequest(stats)) {
-            return stats.status === "pending" ? { key: JSON.stringify(["auto", stats.gen]), run: { kind: "auto" } } : undefined;
+            if (stats.status === "pending") return { key: JSON.stringify(["auto", stats.gen]), run: { kind: "auto" } };
+            const tier = autoRequestTier(stats);
+            return tier === undefined
+                ? undefined
+                : { key: JSON.stringify(["target", stats.gen, tier]), run: { kind: "target", gen: stats.gen, tier, sent: false } };
         }
         const columns = stats.demand_columns;
         const tier = demandTier(stats);
@@ -391,11 +435,21 @@ export class StateOrchestrator {
         return true;
     }
 
-    private syncForced(stats: DFMetaStats | undefined, metaChanged: boolean, dictChanged: boolean): void {
+    // Whether `run` has a request out that the scheduler answers for: a forced run
+    // (forceStats sent its first), or a target run once its first has gone. Such a
+    // run marks the stats pending itself, so it is read here and not through
+    // desiredRun, which would take a pending session for a run of its own.
+    private requestOut(run: Run): run is Extract<Run, { kind: "forced" | "target" }> {
+        return run.kind === "forced" || (run.kind === "target" && run.sent);
+    }
+
+    private syncOwned(stats: DFMetaStats | undefined, metaChanged: boolean, dictChanged: boolean): void {
         const run = this.run;
-        if (run?.kind !== "forced") return;
+        if (run === undefined || !this.requestOut(run)) return;
         if (stats?.gen !== run.gen || (metaChanged && this.basisChanged(stats))) {
-            // A final reply, a refusal or a new state ends the run.
+            // A final reply, a refusal or a new state ends the run. A target run
+            // is not asked for again for the state it ended in, whatever that was.
+            if (run.kind === "target") this.doneKey = this.runKey;
             this.standDown();
         } else if (this.inFlight && dictChanged && !metaChanged) {
             // A reply that is not final: ask again.
@@ -460,12 +514,28 @@ export class StateOrchestrator {
                 ? { columns: run.columns, tier: run.tier }
                 : run.kind === "forced"
                   ? { force: true, tier: run.tier, columns: run.columns }
-                  : {};
+                  : run.kind === "target"
+                    ? { tier: run.tier }
+                    : {};
         if (requestStats(this.model, opts)) {
             this.inFlight = true;
             this.sentAt = Date.now();
             this.delayMs = 0;
+            if (run.kind === "target" && !run.sent) this.sendTarget(run);
         }
+    }
+
+    // The first request of a target run is out: from here the run is read as an
+    // owned one (see requestOut), with the stats marked pending as forceStats
+    // marks them. The basis becomes the pending one, so that only a reply, which
+    // moves the status on, ends the run, and the df_meta written here is the one
+    // the next sync has already seen.
+    private sendTarget(run: Extract<Run, { kind: "target" }>): void {
+        run.sent = true;
+        const stats = markStatsPending(this.model);
+        if (stats === undefined) return;
+        this.basis = basisOf(stats);
+        this.seenMeta = this.model.get("df_meta");
     }
 
     private noteRequestTime(): void {

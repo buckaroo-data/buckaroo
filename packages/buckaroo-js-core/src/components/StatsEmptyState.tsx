@@ -62,7 +62,8 @@ export function notComputedMessage(stats: DFMetaStats): string {
     }
 }
 
-const TIER_DETAILS: Record<string, { label: string; title: string }> = {
+/** What each tier's control says (label) and what the tier covers (title). */
+export const TIER_DETAILS: Record<string, { label: string; title: string }> = {
     scalar: { label: "Compute basic stats", title: "Null counts, min, max, mean and std for each column" },
     full: { label: "Compute full stats", title: "Every summary stat, with histograms and value counts. Slower." },
 };

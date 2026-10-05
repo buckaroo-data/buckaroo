@@ -161,11 +161,21 @@ describe("statsOverCeiling", () => {
 // client keeps what the final replies said in `reached_tier` (rows-first c5b),
 // and the helpers read the higher of the two.
 describe("the tier a session has reached (rows-first c5b)", () => {
+    it("is schema for a session that has reached nothing", () => {
+        expect(tierReached(stats())).toBe("schema");
+        expect(tierReached(stats({ tier: undefined }))).toBe("schema");
+        expect(tierReached(undefined)).toBe("schema");
+    });
+
     it("follows the server's tier and the client's reached_tier, whichever is higher", () => {
         expect(tierReached(stats({ tier: "scalar" }))).toBe("scalar");
         expect(tierReached(stats({ reached_tier: "scalar" }))).toBe("scalar");
         expect(tierReached(stats({ tier: "schema", reached_tier: "full" }))).toBe("full");
         expect(tierReached(stats({ tier: "full", reached_tier: "scalar" }))).toBe("full");
+    });
+
+    it("ignores a tier name it does not know", () => {
+        expect(tierReached(stats({ tier: "none" }))).toBe("schema");
     });
 
     it("moves nextRequestTier up: scalar, then full, then nothing", () => {
@@ -178,6 +188,11 @@ describe("the tier a session has reached (rows-first c5b)", () => {
     it("leaves no tier to ask for when the server allows scalar only and it has been reached", () => {
         expect(nextRequestTier(stats({ requestable: ["scalar"], reached_tier: "scalar" }))).toBeUndefined();
         expect(canRequestStats(stats({ requestable: ["scalar"], reached_tier: "scalar" }))).toBe(false);
+    });
+
+    it("with the server's default requestable (full), a reached scalar still leaves full", () => {
+        expect(nextRequestTier(stats({ reached_tier: "scalar" }))).toBe("full");
+        expect(canRequestStats(stats({ reached_tier: "scalar" }))).toBe(true);
     });
 
     it("canRequestStats is false once the highest requestable tier has been reached", () => {
@@ -207,4 +222,34 @@ describe("autoRequestTier (rows-first c5b)", () => {
         expect(autoRequestTier(scalarTarget({ requestable: ["full"] }))).toBe("scalar");
     });
 
+    it("is undefined when the server says not to request on its own", () => {
+        expect(autoRequestTier(scalarTarget({ auto_request: false }))).toBeUndefined();
+    });
+
+    it("is undefined for the ceiling and for a paused run", () => {
+        expect(autoRequestTier(scalarTarget({ reason: "ceiling" }))).toBeUndefined();
+        expect(autoRequestTier(scalarTarget({ reason: "cost" }))).toBeUndefined();
+    });
+
+    it("is undefined when the target is schema, which is never requested automatically", () => {
+        expect(autoRequestTier(scalarTarget({ tier_target: "schema", auto_request: true }))).toBeUndefined();
+    });
+
+    it("is undefined once the target has been reached", () => {
+        expect(autoRequestTier(scalarTarget({ reached_tier: "scalar" }))).toBeUndefined();
+        expect(autoRequestTier(scalarTarget({ reached_tier: "full" }))).toBeUndefined();
+    });
+
+    it("is undefined without a target, or with one that is not a tier", () => {
+        expect(autoRequestTier(stats({ reason: "size" }))).toBeUndefined();
+        expect(autoRequestTier(scalarTarget({ tier_target: "everything" }))).toBeUndefined();
+    });
+
+    it.each(["pending", "complete", "error"] as const)("is undefined when the status is %s", (status) => {
+        expect(autoRequestTier(scalarTarget({ status }))).toBeUndefined();
+    });
+
+    it("is undefined without stats", () => {
+        expect(autoRequestTier(undefined)).toBeUndefined();
+    });
 });

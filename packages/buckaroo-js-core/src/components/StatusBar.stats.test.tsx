@@ -302,4 +302,13 @@ describe("StatsStatusCell, tier reached (rows-first c5b)", () => {
         expect(screen.getByTestId("stats-status")).toHaveTextContent("Basic stats computed");
     });
 
+    it("a session that has reached nothing reads as before", () => {
+        cell(reached({ reached_tier: undefined }), jest.fn());
+        expect(screen.getByRole("button", { name: "Compute summary stats" })).toBeInTheDocument();
+    });
+
+    it("a paused run still offers Continue", () => {
+        cell(reached({ reached_tier: undefined, reason: "cost" }), jest.fn());
+        expect(screen.getByRole("button", { name: "Continue computing stats" })).toBeInTheDocument();
+    });
 });

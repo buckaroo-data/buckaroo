@@ -477,6 +477,56 @@ describe("the tier a final stats_update reached (rows-first c5b)", () => {
         });
     });
 
+    it("a reply that is not final records nothing", async () => {
+        const { ws, model } = makePolicyModel();
+        forceStats(model);
+        const pendingMeta = model.get("df_meta");
+        ws.deliver(wholeTable("scalar", { final: false, status: undefined }));
+        await settle();
+        expect(model.get("df_meta")).toBe(pendingMeta);
+        expect(model.get("df_meta").stats).not.toHaveProperty("reached_tier");
+    });
+
+    it("a run for some columns records nothing: it did not reach the tier for the table", async () => {
+        const { ws, model } = makePolicyModel();
+        forceStats(model, { columns: ["a"] });
+        ws.deliver(update(3, [row("min", { a: 1 })], { tier: "scalar", status: "not_computed" }));
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, computed_columns: ["a"] });
+    });
+
+    it("a reply to no request records nothing", async () => {
+        const { ws, model } = makePolicyModel();
+        ws.deliver(wholeTable("scalar"));
+        await settle();
+        expect(model.get("df_meta").stats).not.toHaveProperty("reached_tier");
+    });
+
+    it("a reply for a tier other than the one asked for records nothing", async () => {
+        const { ws, model } = makePolicyModel();
+        // The request was for scalar (the control's first tier); this reply is for full.
+        forceStats(model);
+        ws.deliver(wholeTable("full"));
+        await settle();
+        expect(model.get("df_meta").stats).not.toHaveProperty("reached_tier");
+    });
+
+    it("a refusal records nothing, whatever tier it names", async () => {
+        const { ws, model } = makePolicyModel();
+        forceStats(model);
+        ws.deliver({ type: "stats_update", stats_gen: 3, scope: "raw", tier: "scalar", final: true, status: "not_computed", reason: "ceiling" });
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, reason: "ceiling" });
+    });
+
+    it("stats_aborted records nothing", async () => {
+        const { ws, model } = makePolicyModel();
+        forceStats(model);
+        ws.deliver({ type: "stats_aborted", stats_gen: 3, current_gen: 3, scope: "raw", reason: "not_requestable" });
+        await settle();
+        expect(model.get("df_meta").stats).toEqual(policyStats);
+    });
+
     it("the next whole-table run records the next tier, and a lower one never lowers it", async () => {
         const { ws, model } = makePolicyModel();
         forceStats(model);
@@ -516,6 +566,13 @@ describe("the tier a final stats_update reached (rows-first c5b)", () => {
         expect(model.get("df_meta").stats).not.toHaveProperty("reached_tier");
     });
 
+    it("a final reply with no status completes the session as before, with no reached_tier", async () => {
+        const { ws, model } = makePolicyModel();
+        forceStats(model);
+        ws.deliver(update(3, [row("mean", { a: 2 })], { tier: "scalar" }));
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({ status: "complete", tier: "scalar", gen: 3 });
+    });
 });
 
 describe("stats_gen", () => {

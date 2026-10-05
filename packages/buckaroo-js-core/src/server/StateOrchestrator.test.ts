@@ -888,7 +888,9 @@ describe("a scalar target is requested on its own (rows-first c5b)", () => {
 
         const quiet = makeModel(scalarTarget());
         start(quiet);
-        await tick(FIRST_PAINT_TIMEOUT);
+        await tick(FIRST_PAINT_TIMEOUT - 1);
+        expect(quiet.sent).toEqual([]);
+        await tick(2);
         expect(quiet.sent).toEqual([target()]);
     });
 
@@ -940,6 +942,26 @@ describe("a scalar target is requested on its own (rows-first c5b)", () => {
         expect(model.sent).toEqual([target()]);
     });
 
+    it("sends nothing when the server says not to request on its own", async () => {
+        const model = await startTarget(scalarTarget({ auto_request: false }));
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+
+    it.each(["ceiling", "cost"])("sends nothing for reason %s", async (reason) => {
+        const model = await startTarget(scalarTarget({ reason }));
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+
+    it("sends nothing when the target is schema, or the tier has been reached", async () => {
+        for (const stats of [scalarTarget({ tier_target: "schema" }), scalarTarget({ reached_tier: "scalar" })]) {
+            const model = await startTarget(stats);
+            await tick(10_000);
+            expect(model.sent).toEqual([]);
+        }
+    });
+
     it("asks for the next gen's target after a state change, and not again for the gen it left", async () => {
         const model = await startTarget();
         model.set("buckaroo_state", bState({ post_processing: "log_scale" }));
@@ -952,6 +974,13 @@ describe("a scalar target is requested on its own (rows-first c5b)", () => {
         expect(model.sent).toHaveLength(2);
     });
 
+    it("a session that started with the stats pending is run whole, as before", async () => {
+        const model = makeModel({ ...scalarTarget(), status: "pending" });
+        start(model);
+        rowsArrived(model);
+        await tick();
+        expect(model.sent).toEqual([request(3)]);
+    });
 });
 
 describe("the control and the scheduler read the tier reached (rows-first c5b)", () => {
@@ -974,6 +1003,12 @@ describe("the control and the scheduler read the tier reached (rows-first c5b)",
         expect(model.get("df_meta")).toBe(before);
     });
 
+    it("forceStats still asks for scalar on a session that has reached nothing", () => {
+        const model = makeModel(schemaTarget());
+        expect(forceStats(model)).toBe(true);
+        expect(model.sent).toEqual([request(5, { force: true, tier: "scalar" })]);
+    });
+
     it("the scheduler does not ask for the demand columns' scalar stats once scalar has been reached for the whole table", async () => {
         const model = makeModel(policy({ demand_columns: ["a"], reached_tier: "scalar" }));
         start(model);
@@ -982,6 +1017,13 @@ describe("the control and the scheduler read the tier reached (rows-first c5b)",
         expect(model.sent).toEqual([]);
     });
 
+    it("the scheduler still asks for the demand columns at full when only scalar has been reached", async () => {
+        const model = makeModel(policy({ demand_columns: ["a"], requestable: ["full"], reached_tier: "scalar" }));
+        start(model);
+        rowsArrived(model);
+        await tick();
+        expect(model.sent).toEqual([request(3, { columns: ["a"], tier: "full" })]);
+    });
 });
 
 describe("requestStats", () => {
@@ -1487,5 +1529,14 @@ describe("wired into WebSocketModel", () => {
             expect(ws.sent[1]).toEqual(request(4, { force: true, tier: "scalar" }));
         });
 
+        it("a run for one column does not count as the tier for the table", async () => {
+            const { ws, model } = makeSocketModel(schemaTarget());
+            forceStats(model, { columns: ["a"] });
+            ws.deliver(scalarRun("min", true, 0));
+            await tick(10_000);
+            expect(model.get("df_meta").stats).not.toHaveProperty("reached_tier");
+            forceStats(model);
+            expect(ws.sent[1]).toEqual(forcedRequest());
+        });
     });
 });
