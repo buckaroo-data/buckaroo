@@ -15,6 +15,11 @@ export declare const SearchEditor: React.MemoExoticComponent<({ value, onValueCh
  * refused the stats or nothing is left to ask for. The control's label reads
  * Continue when a run was paused on cost. It calls the host's callback with no
  * arguments; the host asks for the tier df_meta.stats allows (see forceStats).
+ *
+ * Once a run has reached a tier (see tierReached) the cell says which tier is on
+ * screen. The control, if a tier is left, then names the next one; when none is
+ * left, or there is no handler, a label says the stats are computed, whatever
+ * the ceiling says, since the stats on screen are not unavailable.
  */
 export declare const StatsStatusCell: (params: {
     value?: DFMetaStats;

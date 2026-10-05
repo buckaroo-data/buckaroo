@@ -29,6 +29,11 @@ export declare function formatStatsEstimate(estimate: DFMetaStats["estimate"]): 
  *  session that is not computed, with the size when it sent one. A session at
  *  the server's ceiling reads as over the size limit, however the server put it. */
 export declare function notComputedMessage(stats: DFMetaStats): string;
+/** What each tier's control says (label) and what the tier covers (title). */
+export declare const TIER_DETAILS: Record<string, {
+    label: string;
+    title: string;
+}>;
 /**
  * What the summary view shows while the stats are not computed: why, and the
  * control that asks for them. The control is one button for the next tier the

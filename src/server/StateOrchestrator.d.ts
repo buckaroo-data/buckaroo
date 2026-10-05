@@ -1,7 +1,7 @@
 import { BuckarooState } from '../components/WidgetTypes';
 import { IModel } from './IModel';
 /** What the scheduler needs of a model. */
-export type StatsModel = Pick<IModel, "get" | "on" | "off" | "send">;
+export type StatsModel = Pick<IModel, "get" | "set" | "on" | "off" | "send">;
 /** The fields of buckaroo_state the server reruns the dataflow for, and so
  *  bumps stats_gen on. Mirrors _DATAFLOW_FIELDS in
  *  buckaroo/server/websocket_handler.py. */
@@ -20,19 +20,24 @@ export interface StatsRequestOptions {
     force?: boolean;
     /** The tier asked for. */
     tier?: string;
-    /** The columns the request is for. A forced request names the columns it
-     *  is for or none, so the grid's columns are not added to it. A request
-     *  that is not forced carries them as a hint when it names none. */
+    /** The columns the request is for. A request that names a tier or is forced
+     *  names the columns it is for or none, since the server reads `columns` with
+     *  a tier as the scope of the run, so the grid's columns are not added to it.
+     *  Any other request carries them as a hint when it names none. */
     columns?: string[];
 }
 /**
  * Send a time-boxed `stats_request` for the stats_gen of the state the model
- * shows. The scheduler's requests carry the columns the grid shows as the hint,
- * when they are known; a request that names its columns carries those instead,
- * and a forced one carries only those. Returns false, and sends nothing, when
- * the model's df_meta carries no stats.gen.
+ * shows. A request that names no tier and is not forced (the scheduler's run of a
+ * pending session) carries the columns the grid shows as the hint, when they are
+ * known; a request that names its columns carries those instead, and one that
+ * names a tier or is forced carries only those. Returns false, and sends
+ * nothing, when the model's df_meta carries no stats.gen.
+ *
+ * The request is recorded on the model under STATS_REQUESTED_KEY, before it is
+ * sent, for StatsChannel to tell the run it answers.
  */
-export declare function requestStats(model: Pick<IModel, "get" | "send">, opts?: StatsRequestOptions): boolean;
+export declare function requestStats(model: Pick<IModel, "get" | "set" | "send">, opts?: StatsRequestOptions): boolean;
 /** The model key that records a run the user started, for the scheduler to
  *  continue. */
 export declare const FORCED_RUN_KEY = "stats_forced";
@@ -49,14 +54,9 @@ export interface ForcedRun {
  * is the per-column form. Sends nothing, and returns false, when no tier is
  * left to ask for or df_meta carries no stats.gen.
  *
- * The stats are marked pending in a new df_meta. The server sends no frame to a
- * capable client, so without this the loading text and the placeholder rows
- * would wait for the first reply, and the control would stay on screen to be
- * clicked again. A final reply, a refusal or a frame from the server puts the
- * status it names in place of it.
- *
- * The run is recorded on the model, where a scheduler started on it picks it up
- * and answers each reply that is not final with the same request.
+ * The stats are marked pending in a new df_meta (see markStatsPending). The run
+ * is recorded on the model, where a scheduler started on it picks it up and
+ * answers each reply that is not final with the same request.
  */
 export declare function forceStats(model: Pick<IModel, "get" | "set" | "send">, opts?: {
     columns?: string[];
@@ -118,13 +118,15 @@ export declare class StateOrchestrator {
     private sync;
     private desiredRun;
     private adoptForced;
-    private syncForced;
+    private requestOut;
+    private syncOwned;
     private basisChanged;
     private begin;
     private standDown;
     private markPainted;
     private arm;
     private fire;
+    private sendTarget;
     private noteRequestTime;
     private clearTimers;
 }
