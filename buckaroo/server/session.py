@@ -131,6 +131,12 @@ class SessionState:
     # dataflow is built at follows from the pair (dataflow_stats_tier).
     stats_tier: str = "full"
     stats_delivery: str = "inline"
+    # The /load_expr host opt-in to cutting the xorq stats batch into column
+    # chunks of about this many cells (``None`` is off), so that no single stat
+    # unit holds the loop for a whole scan. Stored with the pair above, not in
+    # dataflow_kwargs, and replayed by /reload_expr; the dataflow's scan guard
+    # still decides which sources are cut.
+    stat_chunk_cells: Optional[int] = None
     # What ``stats_policy.resolve_stats_policy`` made of the pair and the size of
     # the entry (``tier_target``, ``auto_request``, ``requestable``, ``reason``,
     # ``estimate``), resolved by /load_expr and /reload_expr once the schema-tier

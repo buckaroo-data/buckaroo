@@ -373,6 +373,7 @@ class LoadHandler(tornado.web.RequestHandler):
         # no deferred stats, whatever policy a prior /load_expr on this session
         # left behind, and the generation moves on with the data.
         session.stats_tier, session.stats_delivery, session.stats_policy = "full", "inline", None
+        session.stat_chunk_cells = None
         session.source_guards = None
         reset_stats_controls(session)
         begin_stats_generation(session)
@@ -407,6 +408,26 @@ def _stats_policy_from_body(body: dict, current_tier: str, current_delivery: str
         return None, None, {"error_code": "invalid_stats_delivery",
             "message": f"stats_delivery must be one of {list(STATS_DELIVERIES)}, got {stats_delivery!r}"}
     return stats_tier, stats_delivery, None
+
+
+def _stat_chunk_cells_from_body(body: dict, current: int | None):
+    """Read ``stat_chunk_cells`` from a request body: the cell count the xorq
+    stats batch is cut by, or ``None`` for off.
+
+    A body that omits the field keeps ``current`` (the session's, or ``None``
+    for a new session), as the other stats fields do. An explicit ``null`` turns
+    the split off. Returns ``(stat_chunk_cells, None)``, or ``(None, error)``
+    with the 400 response body for anything that is not a positive integer (a
+    bool and an integral float included)."""
+    if "stat_chunk_cells" not in body:
+        return current, None
+    stat_chunk_cells = body["stat_chunk_cells"]
+    if stat_chunk_cells is None:
+        return None, None
+    if isinstance(stat_chunk_cells, bool) or not isinstance(stat_chunk_cells, int) or stat_chunk_cells <= 0:
+        return None, {"error_code": "invalid_stat_chunk_cells",
+            "message": f"stat_chunk_cells must be a positive integer cell count or null, got {stat_chunk_cells!r}"}
+    return stat_chunk_cells, None
 
 
 class LoadExprHandler(tornado.web.RequestHandler):
@@ -467,10 +488,10 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # Config-bearing fields that change how the result is computed or
         # rendered. If the caller passes any of these on a warm POST we must
         # re-run the pipeline — returning cached metadata would silently
-        # ignore the new config. stats_tier and stats_delivery are not in this
-        # tuple: it tests truthiness, and a host that sends the pair on every
-        # POST would never get the warm exit (#944). They are compared with the
-        # session's stored pair below instead.
+        # ignore the new config. stats_tier, stats_delivery and stat_chunk_cells
+        # are not in this tuple: it tests truthiness, and a host that sends
+        # them on every POST would never get the warm exit (#944). They are
+        # compared with the session's stored values below instead.
         has_config = any(body.get(k) for k in (
             "component_config", "column_config_overrides", "extra_grid_config",
             "init_sd", "skip_stat_columns"))
@@ -510,6 +531,12 @@ class LoadExprHandler(tornado.web.RequestHandler):
             self.set_status(400)
             self.write(policy_error)
             return
+        stat_chunk_cells, chunk_error = _stat_chunk_cells_from_body(
+            body, existing.stat_chunk_cells if existing is not None else None)
+        if chunk_error is not None:
+            self.set_status(400)
+            self.write(chunk_error)
+            return
         # What a client forced or the cost guard paused (SessionState.stats_override,
         # cost_paused) belongs to one expression: a rebuild of the same one keeps it,
         # and so does a re-POST that names no stats_tier.
@@ -520,7 +547,8 @@ class LoadExprHandler(tornado.web.RequestHandler):
         if (not force_reload and not has_config and existing
                 and existing.backend == "xorq" and existing.build_dir == build_dir
                 and existing.cache_dir == cache_dir and existing.metadata
-                and (existing.stats_tier, existing.stats_delivery) == (stats_tier, stats_delivery)):
+                and (existing.stats_tier, existing.stats_delivery) == (stats_tier, stats_delivery)
+                and existing.stat_chunk_cells == stat_chunk_cells):
             # The pipeline is skipped, but the refreshed page still opens a new
             # WS and pulls a fresh time-to-first-rows. Re-arm first-pull telemetry
             # on the existing session — rebind this request's sink and reset the
@@ -602,7 +630,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 with perf_log.perf_span("firstpull.dataflow_construct", session=session_id):
                     xorq_dataflow = xorq_loading.XorqServerDataflow(
                         expr, skip_main_serial=True, extra_klasses=extra_klasses,
-                        stats_tier=dataflow_tier, **dataflow_kwargs)
+                        stats_tier=dataflow_tier, stat_chunk_cells=stat_chunk_cells, **dataflow_kwargs)
                 # Spanning metadata too leaves only the small klass-load step
                 # unmeasured inside the outer firstpull.load_expr total.
                 with perf_log.perf_span("firstpull.metadata", session=session_id):
@@ -638,6 +666,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.dataflow_kwargs = dataflow_kwargs
         session.stats_tier = stats_tier
         session.stats_delivery = stats_delivery
+        session.stat_chunk_cells = stat_chunk_cells
         session.stats_policy = stats_policy
         if not same_expression or body.get("stats_tier") is not None:
             reset_stats_controls(session)
@@ -832,6 +861,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         session.mode = "viewer"
         # A viewer session has no dataflow and so no deferred stats.
         session.stats_tier, session.stats_delivery, session.stats_policy = "full", "inline", None
+        session.stat_chunk_cells = None
         session.source_guards = None
         reset_stats_controls(session)
         begin_stats_generation(session)
@@ -870,6 +900,8 @@ class ReloadExprHandler(tornado.web.RequestHandler):
     The session's stored ``stats_tier`` / ``stats_delivery`` are replayed too.
     The body is optional; a pair in it replaces the stored one (and is stored)
     when the reload succeeds. The stats policy is resolved again for the pair.
+    The stored ``stat_chunk_cells`` is replayed as it is: the body has no field
+    for it.
     A forced tier and a cost pause (``SessionState.stats_override``,
     ``cost_paused``) are kept, unless the body names a ``stats_tier``, which
     starts the session's stats decisions over.
@@ -933,7 +965,7 @@ class ReloadExprHandler(tornado.web.RequestHandler):
             dataflow_tier = dataflow_stats_tier(stats_tier, stats_delivery)
             xorq_dataflow = xorq_loading.XorqServerDataflow(
                 session.expr, skip_main_serial=True, extra_klasses=extra_klasses,
-                stats_tier=dataflow_tier, **session.dataflow_kwargs)
+                stats_tier=dataflow_tier, stat_chunk_cells=session.stat_chunk_cells, **session.dataflow_kwargs)
             # Resolved again, with the count the load took: the expression is
             # reused, so there is no new one to take.
             stats_policy = resolve_session_policy(stats_tier, dataflow_tier, session.metadata["rows"],
