@@ -1581,6 +1581,16 @@ class TestDisableSorting:
         assert out["main"]["df_viewer_config"]["column_config"][0]["ag_grid_specs"] == {"minWidth": 90,
             "sortable": False}
 
+    def test_specs_that_are_not_a_dict_are_replaced(self, sp):
+        out = self._disable(sp, _grid_display([{"col_name": "a", "ag_grid_specs": None}]))
+        assert out["main"]["df_viewer_config"]["column_config"] == [{"col_name": "a",
+            "ag_grid_specs": {"sortable": False}}]
+
+    def test_a_column_entry_that_is_not_a_dict_is_left_as_it_is(self, sp):
+        out = self._disable(sp, _grid_display([None, "a", {"col_name": "b"}]))
+        assert out["main"]["df_viewer_config"]["column_config"] == [None, "a", {"col_name": "b",
+            "ag_grid_specs": {"sortable": False}}]
+
     def test_a_display_the_client_sorts_itself_is_left_alone(self, sp):
         summary = [{"col_name": "a", "header_name": "price", "ag_grid_specs": {"sortable": True}}, {"col_name": "b"}]
         display = _grid_display([{"col_name": "a"}], summary_columns=summary)
