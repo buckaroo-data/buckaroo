@@ -833,6 +833,157 @@ describe("a forced run is continued by the scheduler (rows-first c5)", () => {
     });
 });
 
+// A session the server sized to scalar (or a host named scalar for) is not
+// computed until the client asks, and auto_request (absent means true) says the
+// client should ask up to tier_target on its own (rows-first c5b). The first
+// frame: not_computed, a reason of size or host, tier_target scalar, and no
+// requestable, since that lists the tiers above the target.
+const scalarTarget = (over: Record<string, any> = {}) => ({
+    status: "not_computed",
+    tier: "schema",
+    gen: 3,
+    reason: "size",
+    tier_target: "scalar",
+    estimate: { rows: 10_800_000, cols: 43 },
+    ...over,
+});
+
+describe("a scalar target is requested on its own (rows-first c5b)", () => {
+    // The request: the target tier, incremental, not forced, and naming no
+    // columns (a tier with columns scopes the run to them).
+    const target = (gen = 3) => request(gen, { tier: "scalar" });
+    const startTarget = async (stats: Record<string, any> = scalarTarget()) => {
+        const model = makeModel(stats);
+        model.state.visible_columns = ["a", "b"];
+        start(model);
+        rowsArrived(model);
+        await tick();
+        return model;
+    };
+
+    it.each(["size", "host"])("sends one incremental request for the target tier, without a click (reason %s)", async (reason) => {
+        const model = await startTarget(scalarTarget({ reason }));
+        expect(model.sent).toEqual([target()]);
+        await tick(10_000);
+        expect(model.sent).toHaveLength(1);
+    });
+
+    it("does not force the tier, and adds neither the grid's columns nor any other", async () => {
+        const model = await startTarget();
+        expect(model.sent[0]).not.toHaveProperty("force");
+        expect(model.sent[0]).not.toHaveProperty("columns");
+    });
+
+    it("asks after the first rows, or when the wait for them times out, and once however many row responses follow", async () => {
+        const model = makeModel(scalarTarget());
+        start(model);
+        await tick(100);
+        expect(model.sent).toEqual([]);
+        rowsArrived(model);
+        rowsArrived(model);
+        await tick();
+        rowsArrived(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([target()]);
+
+        const quiet = makeModel(scalarTarget());
+        start(quiet);
+        await tick(FIRST_PAINT_TIMEOUT);
+        expect(quiet.sent).toEqual([target()]);
+    });
+
+    // The server sends no frame to a capable client while it runs, so the
+    // scheduler marks the stats pending as the control does: the loading text
+    // shows at once, and the control is not there to start a second run.
+    it("marks the stats pending in a new df_meta, keeping the rest of it", async () => {
+        const model = makeModel(scalarTarget());
+        const before = model.get("df_meta");
+        start(model);
+        rowsArrived(model);
+        await tick();
+        const after = model.get("df_meta");
+        expect(after).not.toBe(before);
+        expect(after.stats).toEqual({ ...scalarTarget(), status: "pending" });
+        expect(after.total_rows).toBe(before.total_rows);
+    });
+
+    it("asks again, with the same request, for each reply that is not final, and stops at the final one", async () => {
+        const model = await startTarget();
+        expect(model.sent).toEqual([target()]);
+
+        model.set("df_data_dict", dict([statRow("min")]));
+        await tick();
+        expect(model.sent).toEqual([target(), target()]);
+        model.set("df_data_dict", dict([statRow("min"), statRow("max")]));
+        await tick();
+        expect(model.sent).toHaveLength(3);
+
+        // The final reply leaves the session not computed, with the tier reached.
+        model.set("df_data_dict", dict([statRow("min"), statRow("max"), statRow("std")]));
+        model.set("df_meta", meta(scalarTarget({ reached_tier: "scalar", computed_columns: ["a"] })));
+        await tick(10_000);
+        expect(model.sent).toHaveLength(3);
+    });
+
+    it("does not ask again after a refusal, though the session is not computed again for the same target", async () => {
+        const model = await startTarget();
+        // stats_aborted not_requestable (a server that does not serve the tier) replaces df_meta only.
+        model.set("df_meta", meta(scalarTarget()));
+        await tick(10_000);
+        expect(model.sent).toEqual([target()]);
+
+        // Nor for a full frame under the same gen.
+        model.frame({ df_meta: meta(scalarTarget()), df_data_dict: dict([statRow("dtype")]) });
+        await tick();
+        rowsArrived(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([target()]);
+    });
+
+    it("asks for the next gen's target after a state change, and not again for the gen it left", async () => {
+        const model = await startTarget();
+        model.set("buckaroo_state", bState({ post_processing: "log_scale" }));
+        model.frame({ df_meta: meta(scalarTarget({ gen: 4 })), df_data_dict: dict() });
+        await tick();
+        rowsArrived(model);
+        await tick(DEBOUNCE);
+        expect(model.sent).toEqual([target(3), target(4)]);
+        await tick(10_000);
+        expect(model.sent).toHaveLength(2);
+    });
+
+});
+
+describe("the control and the scheduler read the tier reached (rows-first c5b)", () => {
+    const schemaTarget = (over: Record<string, any> = {}) => policy({ gen: 5, ...over });
+
+    it("forceStats asks for full once scalar has been reached", () => {
+        const model = makeModel(schemaTarget({ reached_tier: "scalar" }));
+        expect(forceStats(model)).toBe(true);
+        expect(model.sent).toEqual([request(5, { force: true, tier: "full" })]);
+    });
+
+    it.each([
+        ["full has been reached", { reached_tier: "full" }],
+        ["scalar is all the server allows and has been reached", { requestable: ["scalar"], reached_tier: "scalar" }],
+    ])("forceStats sends nothing when %s", (_name, over) => {
+        const model = makeModel(schemaTarget(over));
+        const before = model.get("df_meta");
+        expect(forceStats(model)).toBe(false);
+        expect(model.sent).toEqual([]);
+        expect(model.get("df_meta")).toBe(before);
+    });
+
+    it("the scheduler does not ask for the demand columns' scalar stats once scalar has been reached for the whole table", async () => {
+        const model = makeModel(policy({ demand_columns: ["a"], reached_tier: "scalar" }));
+        start(model);
+        rowsArrived(model);
+        await tick(10_000);
+        expect(model.sent).toEqual([]);
+    });
+
+});
+
 describe("requestStats", () => {
     it("sends a stats_request for the gen the model shows", () => {
         const model = makeModel(pending(7));
@@ -870,6 +1021,17 @@ describe("requestStats", () => {
         expect(requestStats(model, { force: true, tier: "scalar", columns: ["c"] })).toBe(true);
         expect(requestStats(model, { columns: ["d"] })).toBe(true);
         expect(model.sent).toEqual([request(7, { force: true, tier: "scalar", columns: ["c"] }), request(7, { columns: ["d"] })]);
+    });
+
+    // The server reads `columns` with a `tier` as the scope of the run, so the
+    // grid's columns (an ordering hint) must not ride on a request for a tier
+    // (rows-first c5b).
+    it("adds no columns hint to a request for a tier, forced or not", () => {
+        const model = makeModel({ status: "not_computed", tier: "schema", gen: 7 });
+        model.state.visible_columns = ["a", "b"];
+        expect(requestStats(model, { tier: "scalar" })).toBe(true);
+        expect(model.sent).toEqual([request(7, { tier: "scalar" })]);
+        expect(model.sent[0]).not.toHaveProperty("columns");
     });
 
     it("sends no tier and no columns the caller did not name, and no hint for an empty list", () => {
@@ -1195,5 +1357,135 @@ describe("wired into WebSocketModel", () => {
                 computed_columns: ["a"],
             });
         });
+    });
+
+    // The two defects the integration run found on the merged stack
+    // (rows-first c5b): a scalar target was never requested, and the control
+    // asked for scalar on every click.
+    describe("tier bookkeeping (rows-first c5b)", () => {
+        const scalarRun = (stat: string, final: boolean, remaining: number, gen = 3) => ({
+            ...update(gen, stat, final, remaining),
+            tier: "scalar",
+            // The server's final reply to a scalar run: the session is still not computed.
+            ...(final ? { status: "not_computed", reason: "size" } : {}),
+        });
+        const schemaTarget = (gen = 3) => policy({ gen, tier_target: "schema", requestable: ["scalar", "full"] });
+        const scalarRequest = request(3, { tier: "scalar" });
+        const forcedRequest = (extra: Record<string, any> = {}) => request(3, { force: true, tier: "scalar", ...extra });
+
+        it("a scalar target is requested without a click, walked to its final reply, and not requested again", async () => {
+            const { ws, model } = makeSocketModel(scalarTarget());
+            model.set("visible_columns", ["a"]);
+            await tick(100);
+            expect(ws.sent).toEqual([]);
+
+            rowsFromServer(ws);
+            await tick();
+            expect(ws.sent).toEqual([scalarRequest]);
+            expect(model.get("df_meta").stats.status).toBe("pending");
+
+            ws.deliver(scalarRun("min", false, 1));
+            await tick();
+            expect(ws.sent).toEqual([scalarRequest, scalarRequest]);
+            expect(model.get("df_meta").stats.status).toBe("pending");
+
+            ws.deliver(scalarRun("max", true, 0));
+            await tick(10_000);
+            expect(ws.sent).toHaveLength(2);
+            expect(model.get("df_meta").stats).toEqual({
+                ...scalarTarget(),
+                computed_columns: ["a"],
+                reached_tier: "scalar",
+            });
+            expect(model.get("df_data_dict").all_stats.map((r: any) => r.index)).toEqual(["dtype", "min", "max"]);
+        });
+
+        it("a gen change stops the run, drops its late replies, and the new gen's target is requested", async () => {
+            const { ws, model } = makeSocketModel(scalarTarget());
+            rowsFromServer(ws);
+            await tick();
+            ws.deliver(scalarRun("min", false, 1));
+            await tick();
+            expect(ws.sent).toHaveLength(2);
+
+            ws.deliver({ type: "initial_state", df_meta: meta(scalarTarget({ gen: 4 })), df_data_dict: dict() });
+            await tick();
+            ws.deliver(scalarRun("max", true, 0));
+            await tick(100);
+            expect(ws.sent).toHaveLength(2);
+            expect(model.get("df_meta").stats).toEqual(scalarTarget({ gen: 4 }));
+
+            rowsFromServer(ws);
+            await tick(DEBOUNCE);
+            expect(ws.sent[2]).toEqual(request(4, { tier: "scalar" }));
+            ws.deliver(scalarRun("max", true, 0, 4));
+            await tick(10_000);
+            expect(ws.sent).toHaveLength(3);
+            expect(model.get("df_meta").stats.reached_tier).toBe("scalar");
+        });
+
+        it("a server that refuses the tier ends the run and is not asked again", async () => {
+            const { ws, model } = makeSocketModel(scalarTarget());
+            rowsFromServer(ws);
+            await tick();
+            ws.deliver({ type: "stats_aborted", stats_gen: 3, current_gen: 3, scope: "raw", reason: "not_requestable" });
+            await tick(10_000);
+            expect(ws.sent).toEqual([scalarRequest]);
+            expect(model.get("df_meta").stats).toEqual(scalarTarget());
+        });
+
+        it("a ceiling reply to the automatic request ends in the ceiling message and nothing more is sent", async () => {
+            const { ws, model } = makeSocketModel(scalarTarget());
+            rowsFromServer(ws);
+            await tick();
+            ws.deliver({ type: "stats_update", stats_gen: 3, scope: "raw", tier: "scalar", final: true, status: "not_computed", reason: "ceiling" });
+            await tick(10_000);
+            expect(ws.sent).toEqual([scalarRequest]);
+            expect(model.get("df_meta").stats).toEqual(scalarTarget({ reason: "ceiling" }));
+        });
+
+        it("the control asks for scalar, then full: each final reply moves it up, and after full there is nothing to ask for", async () => {
+            const { ws, model } = makeSocketModel(schemaTarget());
+            expect(forceStats(model)).toBe(true);
+            expect(ws.sent).toEqual([forcedRequest()]);
+
+            // The reply the integration run saw: final, tier scalar, still not computed.
+            ws.deliver(scalarRun("min", true, 0));
+            await tick(10_000);
+            expect(model.get("df_meta").stats).toMatchObject({ status: "not_computed", tier: "schema", reached_tier: "scalar" });
+
+            expect(forceStats(model)).toBe(true);
+            expect(ws.sent).toEqual([forcedRequest(), forcedRequest({ tier: "full" })]);
+
+            ws.deliver({ ...update(3, "mean", true, 0), tier: "full" });
+            await tick(10_000);
+            expect(model.get("df_meta").stats).toEqual({ status: "complete", tier: "full", gen: 3 });
+            expect(forceStats(model)).toBe(false);
+            expect(ws.sent).toHaveLength(2);
+        });
+
+        it("a server that allows scalar only: after the scalar run the control has nothing left to ask for", async () => {
+            const { ws, model } = makeSocketModel({ ...schemaTarget(), requestable: ["scalar"] });
+            forceStats(model);
+            ws.deliver(scalarRun("min", true, 0));
+            await tick(10_000);
+            expect(forceStats(model)).toBe(false);
+            expect(ws.sent).toEqual([forcedRequest()]);
+        });
+
+        it("a gen change resets the tier reached: the control asks for scalar again on the new gen", async () => {
+            const { ws, model } = makeSocketModel(schemaTarget());
+            forceStats(model);
+            ws.deliver(scalarRun("min", true, 0));
+            await tick(10_000);
+            expect(model.get("df_meta").stats.reached_tier).toBe("scalar");
+
+            ws.deliver({ type: "initial_state", df_meta: meta(schemaTarget(4)), df_data_dict: dict() });
+            await tick();
+            expect(model.get("df_meta").stats).not.toHaveProperty("reached_tier");
+            expect(forceStats(model)).toBe(true);
+            expect(ws.sent[1]).toEqual(request(4, { force: true, tier: "scalar" }));
+        });
+
     });
 });

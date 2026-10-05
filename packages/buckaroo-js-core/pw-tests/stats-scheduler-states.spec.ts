@@ -17,6 +17,13 @@
  * stats with no blank pinned row, its summary view shows why the stats are
  * missing with the control that asks for them (basic before full, with a
  * per-column form), and over the ceiling it says so and offers nothing.
+ *
+ * The TierRuns story (rows-first c5b) runs the real model, channel, scheduler and
+ * control against a scripted server. A session the server sized to scalar is
+ * requested without a click, a session sized to schema is run by the control one
+ * tier at a time (scalar, then full), the status bar says which tier is shown
+ * and drops the control when nothing is left to ask for, and a new gen starts
+ * over.
  */
 import { test, expect, Page } from "@playwright/test";
 import { waitForCells } from "./ag-pw-utils";
@@ -256,4 +263,86 @@ test("a paused run offers Continue, which asks for the tier that is left", async
     { type: "stats_request", stats_gen: 7, scope: "raw", incremental: true, force: true, tier: "full" },
   ]);
   await expect(page.getByTestId("stats-status")).toHaveAttribute("data-stats-status", "pending");
+});
+
+const TIER_RUNS_URL =
+  "http://localhost:6006/iframe.html?viewMode=story&id=buckaroo-statsschedulerstates--tier-runs&globals=&args=";
+
+// The requests of a run for the whole table, as the control and the scheduler send them.
+const scalarRun = { type: "stats_request", stats_gen: 7, scope: "raw", incremental: true, tier: "scalar" };
+const forced = (tier: string, gen = 7) => ({ ...scalarRun, stats_gen: gen, force: true, tier });
+
+test("a scalar target is requested without a click, and the status bar then says which tier is shown", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (e) => pageErrors.push(e.message));
+  await page.goto(TIER_RUNS_URL);
+  await waitForCells(page);
+  await page.getByTestId("scenario-scalar-target").click();
+
+  // One request for the target tier per reply, from the scheduler: not forced,
+  // and naming no columns.
+  await expect.poll(() => sentLog(page)).toEqual([scalarRun, scalarRun]);
+  const cell = page.getByTestId("stats-status");
+  await expect(cell).toContainText("Basic stats");
+  await expect(cell).toHaveAttribute("data-stats-status", "not_computed");
+  // Full is still open, and the control is the one for it.
+  await expect(page.getByRole("button", { name: "Compute full stats" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Compute summary stats" })).toHaveCount(0);
+
+  // Nothing more is asked for on its own.
+  await page.waitForTimeout(600);
+  expect(await sentLog(page)).toHaveLength(2);
+
+  // The summary view shows what the run computed, not the empty state.
+  await page.getByTestId("view-summary").click();
+  await expect(page.getByTestId("stats-empty-state")).toHaveCount(0);
+  await expect(page.locator(".df-viewer")).toHaveCount(1);
+  expect(pageErrors).toEqual([]);
+});
+
+test("the control asks for scalar, then full, and after the full run it is gone", async ({ page }) => {
+  await page.goto(TIER_RUNS_URL);
+  await waitForCells(page);
+  const cell = page.getByTestId("stats-status");
+
+  // Nothing is requested on its own for a session sized to schema.
+  await page.waitForTimeout(600);
+  expect(await sentLog(page)).toEqual([]);
+
+  await page.getByRole("button", { name: "Compute summary stats" }).click();
+  await expect.poll(() => sentLog(page)).toEqual([forced("scalar"), forced("scalar")]);
+  await expect(cell).toContainText("Basic stats");
+
+  // The second click goes up a tier: it does not ask for scalar again.
+  await page.getByRole("button", { name: "Compute full stats" }).click();
+  await expect.poll(() => sentLog(page)).toEqual([forced("scalar"), forced("scalar"), forced("full")]);
+  await expect(cell).toHaveAttribute("data-stats-status", "complete");
+  await expect(cell).toContainText("Summary stats ready");
+  await expect(page.getByRole("button", { name: /compute|continue/i })).toHaveCount(0);
+});
+
+test("when the server allows scalar only, the control is replaced by a label that says which tier", async ({ page }) => {
+  await page.goto(TIER_RUNS_URL);
+  await waitForCells(page);
+  await page.getByTestId("scenario-scalar-only").click();
+
+  await page.getByRole("button", { name: "Compute summary stats" }).click();
+  await expect.poll(() => sentLog(page)).toEqual([forced("scalar"), forced("scalar")]);
+  const cell = page.getByTestId("stats-status");
+  await expect(cell).toContainText("Basic stats computed");
+  await expect(cell).toHaveAttribute("data-stats-status", "not_computed");
+  await expect(page.getByRole("button", { name: /compute|continue/i })).toHaveCount(0);
+});
+
+test("a new gen starts over: the control asks for scalar again", async ({ page }) => {
+  await page.goto(TIER_RUNS_URL);
+  await waitForCells(page);
+  await page.getByRole("button", { name: "Compute summary stats" }).click();
+  await expect.poll(() => sentLog(page)).toEqual([forced("scalar"), forced("scalar")]);
+  await expect(page.getByRole("button", { name: "Compute full stats" })).toBeVisible();
+
+  await page.getByTestId("new-gen").click();
+  await page.getByRole("button", { name: "Compute summary stats" }).click();
+  await expect.poll(async () => (await sentLog(page)).length).toBe(3);
+  expect((await sentLog(page))[2]).toEqual(forced("scalar", 8));
 });

@@ -227,3 +227,79 @@ describe("StatsStatusCell, not computed by policy (rows-first c5)", () => {
         expect(screen.getByTestId("stats-status")).toHaveTextContent("Summary stats ready");
     });
 });
+
+// A session that is not computed can have a run for the whole table behind it
+// (rows-first c5b): the client records the tier its final reply reached in
+// df_meta.stats.reached_tier, since the server's `tier` stays at schema. The
+// cell says which tier is on screen, offers the control only while a tier above
+// it is left, and otherwise says the stats are computed.
+describe("StatsStatusCell, tier reached (rows-first c5b)", () => {
+    const reached = (over: Partial<DFMetaStats> = {}): DFMetaStats => ({
+        status: "not_computed",
+        tier: "schema",
+        gen: 1,
+        reason: "size",
+        tier_target: "schema",
+        estimate: { rows: 12_400_000, cols: 44 },
+        auto_request: false,
+        requestable: ["scalar", "full"],
+        reached_tier: "scalar",
+        ...over,
+    });
+    const cell = (value: DFMetaStats | undefined, onComputeStats?: (opts?: { columns?: string[] }) => void) =>
+        render(<StatsStatusCell value={value} context={{ onComputeStats }} />);
+
+    it("after scalar, with full left: says basic stats are shown, and the control now asks for full", () => {
+        const onComputeStats = jest.fn();
+        cell(reached(), onComputeStats);
+        const root = screen.getByTestId("stats-status");
+        expect(root).toHaveAttribute("data-stats-status", "not_computed");
+        expect(root).toHaveTextContent("Basic stats");
+        // The button is not the one the session started with.
+        expect(screen.queryByRole("button", { name: "Compute summary stats" })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Compute full stats" }));
+        expect(onComputeStats).toHaveBeenCalledTimes(1);
+        expect(onComputeStats).toHaveBeenCalledWith();
+    });
+
+    it("after scalar on a session the server sized to scalar (requestable absent, so full is left)", () => {
+        cell(reached({ tier_target: "scalar", auto_request: undefined, requestable: undefined }), jest.fn());
+        expect(screen.getByRole("button", { name: "Compute full stats" })).toBeInTheDocument();
+        expect(screen.getByTestId("stats-status")).toHaveTextContent("Basic stats");
+    });
+
+    it("after scalar, with nothing above it requestable: the control is replaced by a label that says which tier", () => {
+        cell(reached({ requestable: ["scalar"] }), jest.fn());
+        expect(screen.queryByRole("button")).not.toBeInTheDocument();
+        const root = screen.getByTestId("stats-status");
+        expect(root).toHaveAttribute("data-stats-status", "not_computed");
+        expect(root).toHaveTextContent("Basic stats computed");
+        expect(root).toHaveAttribute("title", expect.stringContaining("min, max"));
+    });
+
+    it("after full: the label says the summary stats are computed, with no control", () => {
+        cell(reached({ reached_tier: "full" }), jest.fn());
+        expect(screen.queryByRole("button")).not.toBeInTheDocument();
+        expect(screen.getByTestId("stats-status")).toHaveTextContent("Summary stats computed");
+    });
+
+    it("the ceiling does not take the label away: scalar stats are on screen", () => {
+        cell(reached({ reason: "ceiling" }), jest.fn());
+        expect(screen.queryByRole("button")).not.toBeInTheDocument();
+        const root = screen.getByTestId("stats-status");
+        expect(root).toHaveTextContent("Basic stats computed");
+        expect(root).not.toHaveTextContent("unavailable");
+    });
+
+    it("a session at its ceiling that was sized to scalar reads as computed once scalar is in, not as unavailable", () => {
+        cell(reached({ tier_target: "scalar", requestable: [] }), jest.fn());
+        expect(screen.getByTestId("stats-status")).toHaveTextContent("Basic stats computed");
+    });
+
+    it("with no handler there is no control to offer, so the label", () => {
+        cell(reached());
+        expect(screen.queryByRole("button")).not.toBeInTheDocument();
+        expect(screen.getByTestId("stats-status")).toHaveTextContent("Basic stats computed");
+    });
+
+});

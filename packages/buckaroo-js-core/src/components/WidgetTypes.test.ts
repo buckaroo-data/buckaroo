@@ -8,12 +8,14 @@
  */
 import {
     DFMetaStats,
+    autoRequestTier,
     canRequestStats,
     demandTier,
     nextRequestTier,
     statsAutoRequest,
     statsOverCeiling,
     statsRequestable,
+    tierReached,
 } from "./WidgetTypes";
 
 const stats = (over: Partial<DFMetaStats> = {}): DFMetaStats => ({
@@ -152,4 +154,57 @@ describe("statsOverCeiling", () => {
     it("is false without stats", () => {
         expect(statsOverCeiling(undefined)).toBe(false);
     });
+});
+
+// The server keeps `tier` at the tier a not computed session was published at,
+// so a run for the whole table that reached scalar leaves it "schema". The
+// client keeps what the final replies said in `reached_tier` (rows-first c5b),
+// and the helpers read the higher of the two.
+describe("the tier a session has reached (rows-first c5b)", () => {
+    it("follows the server's tier and the client's reached_tier, whichever is higher", () => {
+        expect(tierReached(stats({ tier: "scalar" }))).toBe("scalar");
+        expect(tierReached(stats({ reached_tier: "scalar" }))).toBe("scalar");
+        expect(tierReached(stats({ tier: "schema", reached_tier: "full" }))).toBe("full");
+        expect(tierReached(stats({ tier: "full", reached_tier: "scalar" }))).toBe("full");
+    });
+
+    it("moves nextRequestTier up: scalar, then full, then nothing", () => {
+        const policy = { requestable: ["scalar", "full"] };
+        expect(nextRequestTier(stats(policy))).toBe("scalar");
+        expect(nextRequestTier(stats({ ...policy, reached_tier: "scalar" }))).toBe("full");
+        expect(nextRequestTier(stats({ ...policy, reached_tier: "full" }))).toBeUndefined();
+    });
+
+    it("leaves no tier to ask for when the server allows scalar only and it has been reached", () => {
+        expect(nextRequestTier(stats({ requestable: ["scalar"], reached_tier: "scalar" }))).toBeUndefined();
+        expect(canRequestStats(stats({ requestable: ["scalar"], reached_tier: "scalar" }))).toBe(false);
+    });
+
+    it("canRequestStats is false once the highest requestable tier has been reached", () => {
+        expect(canRequestStats(stats({ requestable: ["scalar", "full"], reached_tier: "full" }))).toBe(false);
+    });
+});
+
+// The server says auto_request when the client should ask for stats up to
+// tier_target on its own (absent means true). A session sized to scalar is not
+// computed until the client asks, so the scheduler asks for that tier, unless the
+// ceiling or the cost guard is why nothing is computed.
+describe("autoRequestTier (rows-first c5b)", () => {
+    const scalarTarget = (over: Partial<DFMetaStats> = {}) =>
+        stats({ reason: "size", tier_target: "scalar", estimate: { rows: 10_800_000, cols: 43 }, ...over });
+
+    it("is the target tier for a session the server sized to scalar, with auto_request absent", () => {
+        expect(autoRequestTier(scalarTarget())).toBe("scalar");
+        expect(autoRequestTier(scalarTarget({ auto_request: true }))).toBe("scalar");
+    });
+
+    it("is the target tier for a scalar a host named", () => {
+        expect(autoRequestTier(scalarTarget({ reason: "host" }))).toBe("scalar");
+    });
+
+    it("does not depend on requestable, which lists the tiers above the target", () => {
+        expect(autoRequestTier(scalarTarget({ requestable: [] }))).toBe("scalar");
+        expect(autoRequestTier(scalarTarget({ requestable: ["full"] }))).toBe("scalar");
+    });
+
 });

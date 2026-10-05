@@ -8,6 +8,7 @@
  */
 import { WebSocketModel } from "./WebSocketModel";
 import { withStatsCapability } from "./StatsChannel";
+import { forceStats, requestStats } from "./StateOrchestrator";
 import { decodeDFData } from "../components/DFViewerParts/resolveDFData";
 
 // A wide summary-stats envelope (parquet_b64, layout "wide") as the server
@@ -433,6 +434,88 @@ describe("a final stats_update with a status", () => {
         expect(model.get("df_meta").stats.reason).toBe("size");
         expect(events).toEqual([]);
     });
+});
+
+// The server leaves df_meta.stats.tier at "schema" while a session is not
+// computed, so after a run for the whole table that reached scalar nothing in the
+// frame says so. The channel records it as df_meta.stats.reached_tier, from the
+// tier of the final reply, so the control can ask for the next tier (rows-first
+// c5b). A reply does not say whether its run was for the whole table or for some
+// columns, so the channel takes that from the request the client sent last, which
+// requestStats records on the model.
+describe("the tier a final stats_update reached (rows-first c5b)", () => {
+    const policyStats = {
+        status: "not_computed",
+        tier: "schema",
+        gen: 3,
+        reason: "size",
+        tier_target: "schema",
+        estimate: { rows: 12_400_000, cols: 44 },
+        auto_request: false,
+        requestable: ["scalar", "full"],
+    };
+    const makePolicyModel = () => {
+        const ws = new FakeSocket();
+        const model = new WebSocketModel(ws as unknown as WebSocket, {
+            df_meta: metaFor(policyStats),
+            df_data_dict: { all_stats: schemaStats() },
+        });
+        return { ws, model };
+    };
+    const wholeTable = (tier: string, over: object = {}) =>
+        update(3, [row("min", { a: 1, b: 2, c: null }), row("max", { a: 9, b: 8, c: null })], { tier, status: "not_computed", ...over });
+
+    it("a final reply to the whole-table run for scalar records scalar, and leaves the server's tier alone", async () => {
+        const { ws, model } = makePolicyModel();
+        expect(forceStats(model)).toBe(true);
+        ws.deliver(wholeTable("scalar"));
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({
+            ...policyStats,
+            computed_columns: ["a", "b"],
+            reached_tier: "scalar",
+        });
+    });
+
+    it("the next whole-table run records the next tier, and a lower one never lowers it", async () => {
+        const { ws, model } = makePolicyModel();
+        forceStats(model);
+        ws.deliver(wholeTable("scalar"));
+        await settle();
+        expect(forceStats(model)).toBe(true);
+        expect(ws.sent.map((m) => m.tier)).toEqual(["scalar", "full"]);
+        ws.deliver(wholeTable("full"));
+        await settle();
+        expect(model.get("df_meta").stats.reached_tier).toBe("full");
+
+        // A scalar request sent afterwards, whose reply lands late, does not take it back.
+        requestStats(model, { force: true, tier: "scalar" });
+        ws.deliver(wholeTable("scalar"));
+        await settle();
+        expect(model.get("df_meta").stats.reached_tier).toBe("full");
+    });
+
+    it("a gen change resets it: the frame for the new gen carries none", async () => {
+        const { ws, model } = makePolicyModel();
+        forceStats(model);
+        ws.deliver(wholeTable("scalar"));
+        await settle();
+        expect(model.get("df_meta").stats.reached_tier).toBe("scalar");
+
+        ws.deliver({
+            type: "initial_state",
+            df_meta: metaFor({ ...policyStats, gen: 4 }),
+            df_data_dict: { all_stats: schemaStats() },
+        });
+        await settle();
+        expect(model.get("df_meta").stats).toEqual({ ...policyStats, gen: 4 });
+
+        // The request was for gen 3, not the new gen: a reply for gen 4 records nothing.
+        ws.deliver(wholeTable("scalar", { stats_gen: 4 }));
+        await settle();
+        expect(model.get("df_meta").stats).not.toHaveProperty("reached_tier");
+    });
+
 });
 
 describe("stats_gen", () => {

@@ -38,6 +38,10 @@ export interface DFMetaStats {
     // for some columns, or for the demand columns): the grid's own names of
     // the columns whose stats the run merged into all_stats.
     computed_columns?: string[];
+    // Also set by StatsChannel, never sent: the highest tier a run for the whole
+    // table has reached, from the tier of its final reply. The server's `tier`
+    // stays at the tier the session was published at while it is not computed.
+    reached_tier?: StatsTier;
 }
 
 export interface DFMeta {
@@ -60,6 +64,11 @@ export const statsRequestable = (stats: DFMetaStats | undefined): string[] =>
     stats?.requestable ?? [...DEFAULT_REQUESTABLE];
 
 export const statsAutoRequest = (stats: DFMetaStats | undefined): boolean => stats?.auto_request !== false;
+
+// Stubs: the real helpers come with the fix.
+export const tierReached = (stats: DFMetaStats | undefined): StatsTier =>
+    STATS_TIERS.find((tier) => tier === stats?.tier) ?? "schema";
+export const autoRequestTier = (_stats: DFMetaStats | undefined): StatsTier | undefined => undefined;
 
 const tierRank = (tier: string | undefined): number => {
     const rank = STATS_TIERS.indexOf(tier as StatsTier);
