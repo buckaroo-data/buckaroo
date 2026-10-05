@@ -2537,12 +2537,13 @@ class TestSortGuardWire(_LimitsWire):
         self.assertIsInstance(await ws.read_message(), bytes)
         return resp
 
-    async def _refused(self, ws, **fields):
+    async def _refused(self, ws, rows=5, **fields):
         """A window the server refuses, with nothing after it: the next frame
-        read is the answer to the next request, not a parquet frame."""
+        read is the answer to the next request, not a parquet frame. ``rows`` is
+        the length of that next answer."""
         resp = await self._refusal(ws, **fields)
         again = await self._window(ws)
-        self.assertEqual((again["type"], again["length"]), ("infinite_resp", 5), again)
+        self.assertEqual((again["type"], again["length"]), ("infinite_resp", rows), again)
         self.assertIsInstance(await ws.read_message(), bytes)
         return resp
 
@@ -2624,7 +2625,7 @@ class TestSortGuardWire(_LimitsWire):
         frame = await self._state(ws, post_processing="first_three")
         self.assertEqual(frame["df_meta"].get("sort"), "disabled")
         self.assertEqual([_sortable(c) for c in _grid_columns(frame)], [False] * 4)
-        await self._refused(ws, sort="a", sort_direction="desc")
+        await self._refused(ws, rows=3, sort="a", sort_direction="desc")
 
     @tornado.testing.gen_test
     async def test_the_guard_holds_once_the_stats_are_complete(self):
@@ -2680,6 +2681,29 @@ class TestSortGuardWire(_LimitsWire):
         self.assertIsNone(getattr(self._session(sid), "source_guards", "missing"))
         self.assertEqual((await self._served(ws, sort="a", sort_direction="asc"))["length"], 3)
 
+    @tornado.testing.gen_test
+    async def test_a_comparison_ends_the_guard(self):
+        sid = "sg-compare"
+        with _guard_limits(sort_disable_rows=3):
+            await self._load(sid)
+        ws, _ = await self._connect(sid)
+        paths = []
+        try:
+            for frame in (pd.DataFrame({"id": [1, 2], "v": [10, 20]}), pd.DataFrame({"id": [1, 3], "v": [10, 30]})):
+                fd, path = tempfile.mkstemp(suffix=".csv")
+                os.close(fd)
+                frame.to_csv(path, index=False)
+                paths.append(path)
+            resp = await _post(self.get_http_port(), "/load_compare",
+                {"session": sid, "path1": paths[0], "path2": paths[1], "join_columns": ["id"]})
+            self.assertEqual(resp.code, 200, resp.body)
+        finally:
+            for path in paths:
+                os.unlink(path)
+        frame = await _read_json(ws)
+        self.assertNotIn("sort", frame["df_meta"])
+        self.assertIsNone(getattr(self._session(sid), "source_guards", "missing"))
+
 
 class TestSearchedCountMemo:
     """A searched xorq window counts the filtered rows, and ``search_expr`` builds
@@ -2728,6 +2752,37 @@ class TestSearchedCountMemo:
         assert (before["length"], after["length"]) == (2, 0), "the rows the quick search left hold no a"
         assert self._counts(queries) == 1
 
+    @staticmethod
+    def _terms_per_base():
+        per_base = getattr(xorq_loading, "_SEARCHED_EXPRS_PER_BASE", None)
+        assert per_base is not None, "xorq_loading._SEARCHED_EXPRS_PER_BASE does not exist"
+        return per_base
+
+    def test_a_base_keeps_a_bounded_number_of_terms(self):
+        dataflow = _build_dataflow()
+        terms = [f"t{i}" for i in range(self._terms_per_base() + 5)]
+        for term in terms:
+            xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string=term)
+        with _count_backend_queries() as queries:
+            xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string=terms[-1])
+            assert self._counts(queries) == 0, "the latest term is held"
+            xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string=terms[0])
+            assert self._counts(queries) == 1, "the oldest was dropped to make room"
+
+    def test_a_term_asked_again_is_the_last_to_go(self):
+        dataflow = _build_dataflow()
+        terms = [f"t{i}" for i in range(self._terms_per_base())]
+        for term in terms:
+            xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string=term)
+        # t0 is the oldest of a full base; asking for it again makes it the newest,
+        # so the next new term takes t1's place.
+        xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string=terms[0])
+        xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="newcomer")
+        with _count_backend_queries() as queries:
+            xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string=terms[0])
+            assert self._counts(queries) == 0, "a term that was asked again is still held"
+            xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string=terms[1])
+            assert self._counts(queries) == 1, "the least recently asked term was dropped"
 
 
 class TestSearchedWindowCountsWire(_LimitsWire):
