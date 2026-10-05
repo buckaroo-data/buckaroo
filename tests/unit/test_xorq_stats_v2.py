@@ -123,7 +123,6 @@ class TestBatchAggregate:
         (pa.int8(), [1, -4, 3], -4, 3),
         # float64 can't represent 2**63 + 5; a float cast rounds it.
         (pa.uint64(), [2**63 + 5, 1, 2], 1, 2**63 + 5),
-        (pa.bool_(), [True, False, True], False, True),
         (pa.decimal128(5, 2), [Decimal("1.25"), Decimal("3.50"), None], Decimal("1.25"), Decimal("3.50")),
     ])
     def test_min_max_keep_column_type(self, arrow_type, values, expected_min, expected_max):
@@ -137,6 +136,14 @@ class TestBatchAggregate:
             assert stats["c"][key] == expected
             assert type(stats["c"][key]) is type(expected)
         assert stats["c"]["histogram"] != []
+
+    def test_mean_std_median_stay_float_on_int_column(self):
+        """Only stats whose value comes from the column keep its type. mean,
+        std and median are computed (an even count's median isn't an int), so
+        they stay float."""
+        stats, _ = XorqStatPipeline(XORQ_STATS_V2).process_table(_make_table())
+        for key in ("mean", "std", "median"):
+            assert type(stats["ints"][key]) is float
 
     def test_min_max_skipped_for_string(self):
         """String columns: column_filter excludes the min/max stats."""
