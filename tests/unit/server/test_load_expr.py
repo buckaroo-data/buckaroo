@@ -2,6 +2,7 @@
 XorqBuckarooInfiniteWidget over a xorq/ibis expression."""
 import dataclasses
 import datetime
+import gc
 import io
 import json
 import os
@@ -9,6 +10,7 @@ import shutil
 import sys
 import tempfile
 import time
+import weakref
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -4447,6 +4449,51 @@ class TestSortGuardWire(_LimitsWire):
             "the override replaced the specs, and the guard has the last word")
         self.assertEqual(frame["df_display_args"], self._session("sg-columns").df_display_args)
 
+    @tornado.testing.gen_test
+    async def test_a_session_built_the_old_way_is_not_guarded(self):
+        """No stats policy, no guard: inline stats is what every host gets today."""
+        with _guard_limits(sort_disable_rows=3):
+            await self._load("sg-inline", stats_delivery="inline")
+        ws, frame = await self._connect("sg-inline")
+        self.assertNotIn("sort", frame["df_meta"])
+        self.assertTrue(all(_sortable(c) is not False for c in _grid_columns(frame)))
+        await self._served(ws, sort="a", sort_direction="asc")
+
+    @tornado.testing.gen_test
+    async def test_a_session_under_both_thresholds_sends_no_flags(self):
+        with _guard_limits(sort_disable_rows=100, search_disable_rows=100):
+            await self._load("sg-none")
+        _, frame = await self._connect("sg-none")
+        self.assertFalse({"sort", "search"} & set(frame["df_meta"]), frame["df_meta"])
+
+    @tornado.testing.gen_test
+    async def test_a_session_within_the_threshold_is_as_it_was(self):
+        with _guard_limits(sort_disable_rows=5):
+            await self._load("sg-within")
+        ws, frame = await self._connect("sg-within")
+        self.assertNotIn("sort", frame["df_meta"])
+        self.assertTrue(all(_sortable(c) is not False for c in _grid_columns(frame)))
+        self.assertEqual([_sortable(c) for c in frame["df_display_args"]["main"]["df_viewer_config"]["column_config"]],
+            [True] * 3, "the klass's own setting stands")
+        await self._served(ws, sort="a", sort_direction="asc")
+
+    @tornado.testing.gen_test
+    async def test_the_summary_display_still_sorts(self):
+        with _guard_limits(sort_disable_rows=3):
+            await self._load("sg-summary")
+        _, frame = await self._connect("sg-summary")
+        self.assertTrue(_grid_columns(frame, "summary"))
+        self.assertTrue(all(_sortable(c) is not False for c in _grid_columns(frame, "summary")))
+
+    @tornado.testing.gen_test
+    async def test_unsorted_and_searched_windows_are_served(self):
+        with _guard_limits(sort_disable_rows=3):
+            await self._load("sg-serve")
+        ws, _ = await self._connect("sg-serve")
+        self.assertEqual((await self._served(ws))["length"], 5)
+        await self._state(ws, search_string="a")
+        self.assertEqual((await self._served(ws))["length"], 2)
+
 
     @tornado.testing.gen_test
     async def test_a_sorted_window_is_refused_and_no_query_runs(self):
@@ -4664,6 +4711,48 @@ class TestSearchedCountMemo:
             assert self._counts(queries) == 0, "a term that was asked again is still held"
             xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string=terms[1])
             assert self._counts(queries) == 1, "the least recently asked term was dropped"
+
+
+    def test_a_window_with_no_term_counts_nothing_new(self):
+        dataflow = _build_dataflow()
+        with _count_backend_queries() as queries:
+            for _ in range(3):
+                resp, _ = xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="")
+        assert resp["length"] == 5
+        assert self._counts(queries) == 0
+
+    def test_a_count_that_failed_is_not_remembered(self):
+        dataflow = _build_dataflow()
+        failures = [RuntimeError("the backend is down")]
+        original = Expr.execute
+
+        def execute(expr, *args, **kwargs):
+            if type(expr.op()).__name__ == "CountStar" and failures:
+                raise failures.pop()
+            return original(expr, *args, **kwargs)
+
+        with patch.object(Expr, "execute", execute):
+            first, _ = xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="a")
+            second, _ = xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="a")
+        assert (first["length"], second["length"]) == (0, 2), "the next request counts again and gets the real count"
+    @pytest.mark.parametrize("table", [{"x": [1, 2, 3], "name": ["a", "b", "a"]}, {"x": [1, 2, 3]}],
+        ids=["with a string column", "no string column"])
+    def test_the_memo_does_not_keep_the_base_expression_alive(self, table):
+        dataflow = _build_dataflow(xo.memtable(table, name="t"))
+        resp, _ = xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="a")
+        assert resp["length"] == (2 if "name" in table else 3)
+        base = weakref.ref(dataflow.widget_args_tuple[1])
+        del dataflow
+        gc.collect()
+        assert base() is None
+
+    def test_a_source_with_no_string_column_is_not_searched_and_counts_nothing_new(self):
+        dataflow = _build_dataflow(xo.memtable({"x": [1, 2, 3]}, name="t"))
+        with _count_backend_queries() as queries:
+            lengths = [xorq_loading.handle_infinite_request_xorq(dataflow, self.WINDOW, search_string="a")[0]["length"]
+                for _ in range(2)]
+        assert lengths == [3, 3]
+        assert self._counts(queries) == 0
 
 
 class TestSearchedWindowCountsWire(_LimitsWire):

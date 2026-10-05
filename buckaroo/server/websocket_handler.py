@@ -9,7 +9,7 @@ import tornado.websocket
 
 from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy)
-from buckaroo.server.session import begin_stats_generation, dataflow_stats_tier
+from buckaroo.server.session import begin_stats_generation, dataflow_stats_tier, sort_refusal
 from buckaroo.server.stat_run import StatCursor
 from buckaroo.server.stats_wire import (broadcast_state, build_state_message_for, handle_stats_request, highlighted_display_args, parse_caps, refresh_session_snapshot)
 
@@ -220,6 +220,11 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # each backend can apply the filter in its native
             # expression layer.
             search = self.search_string or ""
+            # A source too large to sort in a request refuses the window before any
+            # query runs, the second window of a request included.
+            refusal = sort_refusal(session, pa)
+            if refusal is not None:
+                return refusal, b""
             if session.mode == "lazy" and session.ldf is not None:
                 return handle_infinite_request_lazy(session.ldf, session.orig_to_rw,
                     session.rw_to_orig, session.metadata.get("rows", 0), pa)

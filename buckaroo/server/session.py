@@ -39,6 +39,12 @@ STATS_REASONS = ("size", "host", "cost", "ceiling")
 STATS_FIELD_DEFAULTS: Dict[str, Any] = {"auto_request": True, "requestable": ["full"], "omitted_keys": [],
     "approx_keys": [], "demand_columns": []}
 
+# What a client assumes for the ``df_meta.sort`` and ``df_meta.search`` flags
+# (rows-first p37) a message leaves out. The server sends a flag only when a
+# source is too large for that request, so a session under the thresholds sends
+# the message it always has.
+SOURCE_GUARD_DEFAULTS: Dict[str, str] = {"sort": "enabled", "search": "enabled"}
+
 
 def dataflow_stats_tier(stats_tier: str, stats_delivery: str) -> str:
     """The tier a session's dataflow is constructed at. Only a session whose
@@ -134,6 +140,14 @@ class SessionState:
     # later phases add ``omitted_keys`` and ``approx_keys``. ``stats_meta`` reports
     # them, for the policy in force (``effective_stats_policy``).
     stats_policy: Optional[dict] = None
+    # Whether sort and search stay on for the entry (``stats_policy.resolve_source_guards``:
+    # ``{"sort": "enabled" | "disabled", "search": ...}``), resolved by /load_expr and
+    # /reload_expr for a session a host opened with a stats policy. ``None`` for a
+    # dataflow built with its stats inline, and for anything /load serves, which are
+    # not guarded. ``build_state_message`` reports a disabled flag in ``df_meta``,
+    # and a sorted window of a session whose sort is disabled is refused
+    # (``sort_refusal``).
+    source_guards: Optional[dict] = None
     # The stats generation: a counter the server owns, bumped whenever the
     # dataflow state the stats describe changes (/load, /load_expr, /load_compare,
     # /reload_expr, and a buckaroo_state_change that touches a dataflow field).
@@ -342,6 +356,35 @@ def stats_with_defaults(df_meta: Optional[dict]) -> dict:
     return out
 
 
+def guards_with_defaults(df_meta: Optional[dict]) -> dict:
+    """The ``sort`` and ``search`` flags of a ``df_meta`` as a client reads them:
+    one the message leaves out is ``enabled``, which is also what an old server
+    sends."""
+    meta = df_meta or {}
+    return {name: meta.get(name, default) for name, default in SOURCE_GUARD_DEFAULTS.items()}
+
+
+def _guard_flags(session: "SessionState") -> dict:
+    """The flags ``df_meta`` reports for the session: the ones that are not at their default."""
+    return {name: value for name, value in (session.source_guards or {}).items()
+        if name in SOURCE_GUARD_DEFAULTS and value != SOURCE_GUARD_DEFAULTS[name]}
+
+
+def sort_refusal(session: "SessionState", payload_args: Any) -> Optional[dict]:
+    """The ``infinite_resp`` that refuses a window with a ``sort`` on a session
+    whose sort is disabled, or ``None`` for any other request. It carries
+    ``error_code: "sort_disabled"`` beside the ``error_info`` every error response
+    has, and no rows, so the grid sees an error for that window and no parquet frame
+    follows."""
+    guards = session.source_guards
+    if not guards or guards.get("sort") != "disabled":
+        return None
+    if not isinstance(payload_args, dict) or not payload_args.get("sort"):
+        return None
+    return {"type": "infinite_resp", "key": payload_args, "length": 0, "error_code": "sort_disabled",
+        "error_info": "Sorting is turned off for this source: it has too many rows to sort in a request."}
+
+
 def build_state_message(session: "SessionState", metadata: dict | None = None,
                          search_string: str = "", ondemand: bool = True) -> dict:
     """Build the full ``initial_state`` WebSocket payload from a session.
@@ -362,12 +405,13 @@ def build_state_message(session: "SessionState", metadata: dict | None = None,
     Returns:
         A dict ready to be JSON-serialised and sent to WebSocket clients.
     """
-    # The dataflow rebuilds df_meta wholesale, so the stats status is injected
-    # here, into a copy, rather than stored in it.
+    # The dataflow rebuilds df_meta wholesale, so the stats status and the guard
+    # flags are injected here, into a copy, rather than stored in it.
     df_meta = session.df_meta
     stats = stats_meta(session, ondemand=ondemand)
-    if stats is not None:
-        df_meta = {**df_meta, "stats": stats}
+    flags = _guard_flags(session)
+    if stats is not None or flags:
+        df_meta = {**df_meta, **flags, **({"stats": stats} if stats is not None else {})}
     msg: dict = {"type": "initial_state", "protocol_version": PROTOCOL_VERSION,
         "metadata": metadata if metadata is not None else session.metadata,
         "prompt": session.prompt, "df_display_args": session.df_display_args, "df_data_dict": session.df_data_dict,

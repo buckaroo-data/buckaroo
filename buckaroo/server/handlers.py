@@ -17,7 +17,8 @@ from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.server.session import (
     STATS_DELIVERIES, STATS_TIER_REQUESTS, begin_stats_generation, dataflow_stats_tier, reset_stats_controls)
 from buckaroo.server.stats_wire import (
-    broadcast_state, refresh_demand_columns, refresh_session_snapshot, resolve_session_policy)
+    apply_source_guards, broadcast_state, refresh_demand_columns, refresh_session_snapshot, resolve_session_guards,
+    resolve_session_policy)
 from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
@@ -372,6 +373,7 @@ class LoadHandler(tornado.web.RequestHandler):
         # no deferred stats, whatever policy a prior /load_expr on this session
         # left behind, and the generation moves on with the data.
         session.stats_tier, session.stats_delivery, session.stats_policy = "full", "inline", None
+        session.source_guards = None
         reset_stats_controls(session)
         begin_stats_generation(session)
 
@@ -621,6 +623,9 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # the policy can still keep it there; one that ran its stats in the
         # constructor has nothing left to resolve (None).
         stats_policy = resolve_session_policy(stats_tier, dataflow_tier, metadata["rows"], len(metadata["columns"]))
+        # The guards for huge sources ride with the policy: a session a host opened
+        # with one has them, any other has none.
+        source_guards = resolve_session_guards(dataflow_tier, metadata["rows"], len(metadata["columns"]))
 
         sessions = self.application.settings["sessions"]
         session = sessions.get_or_create(session_id, build_dir)
@@ -636,6 +641,8 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.stats_policy = stats_policy
         if not same_expression or body.get("stats_tier") is not None:
             reset_stats_controls(session)
+        # Before the snapshot below: it holds the config a client sorts by.
+        apply_source_guards(session, xorq_dataflow, source_guards)
         session.tele_sink = tele_sink
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
@@ -825,6 +832,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         session.mode = "viewer"
         # A viewer session has no dataflow and so no deferred stats.
         session.stats_tier, session.stats_delivery, session.stats_policy = "full", "inline", None
+        session.source_guards = None
         reset_stats_controls(session)
         begin_stats_generation(session)
 
@@ -930,6 +938,8 @@ class ReloadExprHandler(tornado.web.RequestHandler):
             # reused, so there is no new one to take.
             stats_policy = resolve_session_policy(stats_tier, dataflow_tier, session.metadata["rows"],
                 len(session.metadata["columns"]))
+            source_guards = resolve_session_guards(dataflow_tier, session.metadata["rows"],
+                len(session.metadata["columns"]))
         except Exception:
             tb = traceback.format_exc()
             log.error("reload_expr error session=%s: %s", session_id, tb)
@@ -960,6 +970,7 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         session.stats_policy = stats_policy
         if body.get("stats_tier") is not None:
             reset_stats_controls(session)
+        apply_source_guards(session, xorq_dataflow, source_guards)
         refresh_session_snapshot(session, xorq_dataflow)
         begin_stats_generation(session)
 
