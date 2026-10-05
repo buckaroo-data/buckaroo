@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 import pandas as pd
 import pytest
 
+from buckaroo.pluggable_analysis_framework import stat_func as stat_func_mod
 from buckaroo.pluggable_analysis_framework.stat_func import (StatKey, StatFunc, RawSeries, MISSING, MultipleProvides, stat, collect_stat_funcs)
 from buckaroo.pluggable_analysis_framework.stat_result import (Ok, Err, UpstreamError, StatError, resolve_accumulator)
 from buckaroo.pluggable_analysis_framework.typed_dag import (build_typed_dag, build_column_dag, DAGConfigError)
@@ -390,6 +391,19 @@ class TestBuildTypedDag:
             assert len(w) == 1
             assert 'mismatch' in str(w[0].message).lower()
 
+    def test_column_value_provider_flags_concrete_consumer(self):
+        """A ``ColumnValue`` key holds an int on an integer column, so a consumer
+        declaring ``float`` for it is flagged. ``ColumnValue`` and ``Any``
+        consumers are not."""
+        ColumnValue = stat_func_mod.ColumnValue
+        provider = StatFunc('low', lambda: 1, [], [StatKey('low', ColumnValue)], False)
+        for consumer_type, n_warnings in [(float, 1), (ColumnValue, 0), (Any, 0)]:
+            consumer = StatFunc('c', lambda low: low, [StatKey('low', consumer_type)], [StatKey('y', Any)], False)
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                build_typed_dag([provider, consumer])
+            assert len(w) == n_warnings, consumer_type
+
     def test_empty_input(self):
         assert build_typed_dag([]) == []
 
@@ -594,6 +608,26 @@ class TestStatPipeline:
         assert isinstance(errors[0].error, TypeError)
         assert 'int' in str(errors[0].error)
         assert 'str' in str(errors[0].error)
+
+    def test_column_value_follows_the_column_type(self):
+        """A ``ColumnValue`` stat holds a value drawn from the column (min, max,
+        mode), so its type follows the column's dtype. The boundary type check
+        passes it through on every dtype, on both the provider and consumer side."""
+        ColumnValue = stat_func_mod.ColumnValue
+
+        @stat()
+        def first_val(ser: RawSeries) -> ColumnValue:
+            return ser.tolist()[0]
+
+        @stat()
+        def first_type(first_val: ColumnValue) -> str:
+            return type(first_val).__name__
+
+        pipeline = StatPipeline([first_val, first_type], unit_test=False)
+        for ser, type_name in [(pd.Series([3, 1]), 'int'), (pd.Series([1.5]), 'float'), (pd.Series(['a']), 'str')]:
+            result, errors = pipeline.process_column('c', ser.dtype, raw_series=ser)
+            assert errors == []
+            assert result['first_type'] == type_name
 
     def test_column_filter(self):
         """Numeric-only stat should not appear for string columns."""
