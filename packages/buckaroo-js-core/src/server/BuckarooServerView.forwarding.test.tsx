@@ -93,3 +93,15 @@ describe("BuckarooServerView autoHeight forwarding (#846)", () => {
         expect(capturedViewProps[capturedViewProps.length - 1].autoHeight).toBe(false);
     });
 });
+
+describe("BuckarooServerView sort forwarding (#984)", () => {
+    it("forwards sort and onSortChange to BuckarooView", async () => {
+        const sort = { column: "fare", direction: "desc" } as const;
+        const onSortChange = jest.fn();
+        render(<BuckarooServerView wsUrl="ws://x/ws/s" sort={sort} onSortChange={onSortChange} />);
+        await waitFor(() => expect(capturedViewProps.length).toBeGreaterThan(0));
+        const last = capturedViewProps[capturedViewProps.length - 1];
+        expect(last.sort).toEqual(sort);
+        expect(last.onSortChange).toBe(onSortChange);
+    });
+});

@@ -656,3 +656,71 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     });
   });
 });
+
+describe("BuckarooInfiniteWidget host sort is main-view only (#984)", () => {
+  const propsBase = () => ({
+    df_data_dict: { summary_stats: [{ index: "mean", a: 10 }] },
+    df_display_args: baseDisplayArgs,
+    df_meta: baseDfMeta,
+    operations: [],
+    on_operations: jest.fn(),
+    operation_results: {} as any,
+    command_config: { argspecs: {}, defaultArgs: {} },
+    buckaroo_options: baseOptions,
+    src: mkSrc(),
+    on_buckaroo_state: jest.fn(),
+  });
+  const initialSortOf = (field: string) =>
+    getSpyCalls().lastProps.columnDefs.find((c: any) => c.field === field)?.initialSort;
+  const fireSortChanged = (columnState: any[]) =>
+    getSpyCalls().lastProps.gridOptions.onSortChanged({
+      api: { getColumnState: () => columnState, ensureIndexVisible: () => {} },
+    });
+
+  it("applies initial_sort when the grid mounts on main", () => {
+    render(
+      <BuckarooInfiniteWidget
+        {...propsBase()}
+        buckaroo_state={{ ...initialState, df_display: "main" }}
+        initial_sort={{ column: "a", direction: "desc" }}
+      />,
+    );
+    expect(initialSortOf("a")).toBe("desc");
+  });
+
+  it("does not apply initial_sort when the grid mounts on another view", () => {
+    render(
+      <BuckarooInfiniteWidget
+        {...propsBase()}
+        buckaroo_state={{ ...initialState, df_display: "summary" }}
+        initial_sort={{ column: "a", direction: "desc" }}
+      />,
+    );
+    expect(initialSortOf("a")).toBeUndefined();
+  });
+
+  it("reports sort changes on main, and not on another view", () => {
+    const props = propsBase();
+    const onSortChange = jest.fn();
+    const { rerender } = render(
+      <BuckarooInfiniteWidget
+        {...props}
+        buckaroo_state={{ ...initialState, df_display: "main" }}
+        on_sort_change={onSortChange}
+      />,
+    );
+    fireSortChanged([{ colId: "a", sort: "asc", sortIndex: 0 }]);
+    expect(onSortChange).toHaveBeenLastCalledWith({ column: "a", direction: "asc" });
+
+    onSortChange.mockClear();
+    rerender(
+      <BuckarooInfiniteWidget
+        {...props}
+        buckaroo_state={{ ...initialState, df_display: "summary" }}
+        on_sort_change={onSortChange}
+      />,
+    );
+    fireSortChanged([{ colId: "a", sort: "desc", sortIndex: 0 }]);
+    expect(onSortChange).not.toHaveBeenCalled();
+  });
+});

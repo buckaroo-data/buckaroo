@@ -2,6 +2,7 @@ import {
     CellRendererSelectorResult,
     ColDef,
     ColGroupDef,
+    ColumnState,
     DomLayoutType,
     ICellRendererParams,
     IDatasource,
@@ -412,6 +413,63 @@ export interface IDisplayArgs {
     data_key: string;
     df_viewer_config: DFViewerConfig;
     summary_stats_key: string;
+}
+
+/** A single-column sort named by the column's header_name, which is stable
+ *  across frames, rather than AG Grid's colId, which is the positional
+ *  rewritten name (a, b, c...) and differs from frame to frame. */
+export interface HeaderSort {
+    column: string;
+    direction: "asc" | "desc";
+}
+
+// Columns a sort can be named by: plain (not multi-index) columns, data or
+// index, that aren't hidden. Hidden columns are skipped so a hidden column
+// that shares a header with a visible one never wins, e.g. a diff frame's
+// before-value `fare` next to `fare_v2` shown under the header "fare".
+const sortableColumns = (config: DFViewerConfig): NormalColumnConfig[] =>
+  [...config.column_config, ...config.left_col_configs].filter(
+    (cc): cc is NormalColumnConfig => !_.has(cc, 'col_path') && cc.ag_grid_specs?.hide !== true);
+
+/** The colId of the visible column whose header_name is `column`. */
+export function resolveSortColId(config: DFViewerConfig, column: string): string | undefined {
+  return sortableColumns(config).find((cc) => cc.header_name === column)?.col_name;
+}
+
+/** Sets initialSort on the column def `sort` names, so the grid's first row
+ *  request is already sorted. An unknown column leaves colDefs unchanged and,
+ *  when warnIfUnknown, logs a console.warn naming it. */
+export function withInitialSort(
+    colDefs: (ColDef|ColGroupDef)[], config: DFViewerConfig, sort?: HeaderSort,
+    warnIfUnknown: boolean = true,
+): (ColDef|ColGroupDef)[] {
+  if (sort === undefined) {
+    return colDefs;
+  }
+  const colId = resolveSortColId(config, sort.column);
+  if (colId === undefined) {
+    if (warnIfUnknown) {
+      console.warn(`[buckaroo] initial sort column ${JSON.stringify(sort.column)} matches no visible column header; loading unsorted`);
+    }
+    return colDefs;
+  }
+  return colDefs.map((cd) =>
+    (cd as ColDef).field === colId ? { ...cd, initialSort: sort.direction } : cd);
+}
+
+/** The grid's sort by header_name. null when the grid is unsorted, sorted on
+ *  more than one column (getDs only sends single-column sorts), or sorted on
+ *  a column that has no header_name. */
+export function headerSortFromColumnState(config: DFViewerConfig, state: ColumnState[]): HeaderSort | null {
+  const sorted = state.filter((cs) => cs.sort === "asc" || cs.sort === "desc");
+  if (sorted.length !== 1) {
+    return null;
+  }
+  const cc = sortableColumns(config).find((c) => c.col_name === sorted[0].colId);
+  if (cc === undefined) {
+    return null;
+  }
+  return { column: cc.header_name, direction: sorted[0].sort as HeaderSort["direction"] };
 }
 
 export interface TimedIDatasource extends IDatasource {
