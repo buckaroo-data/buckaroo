@@ -20,15 +20,17 @@ import pandas as pd
 
 from .col_analysis import AObjs, ColAnalysis
 from .stat_pipeline import StatPipeline, errors_to_errdict
+from .stat_units import StatState, UnitStats
 from .utils import FAST_SUMMARY_WHEN_GREATER
 from .safe_summary_df import output_full_reproduce
 
 
-class DfStatsV2:
+class DfStatsV2(UnitStats):
     """Tie a StatPipeline to a DataFrame, exposing ``.sdf`` and ``.errs``.
 
     Used by DataFlow, autocleaning, and other consumers as the pandas
-    summary-stats executor.
+    summary-stats executor. ``run=False`` builds it without computing anything,
+    for a caller that drives ``plan`` / ``run`` itself.
     """
 
     ap_class = StatPipeline
@@ -39,19 +41,23 @@ class DfStatsV2:
         cls.ap_class(col_analysis_objs)
 
     def __init__(self, df_stats_df: pd.DataFrame, col_analysis_objs: AObjs, operating_df_name: str = None,
-            debug: bool = False, skip_columns=None) -> None:
+            debug: bool = False, skip_columns=None, run: bool = True) -> None:
         self.df = self.get_operating_df(df_stats_df, force_full_eval=False)
         self.col_order = self.df.columns
         self.ap = self.ap_class(col_analysis_objs)
         self.operating_df_name = operating_df_name
         self.debug = debug
+        self.state = StatState(self.df, frozenset(skip_columns or ()))
 
-        self.sdf, errors = self.ap.process_df(self.df, self.debug, skip_columns=skip_columns)
-        self.errs = errors_to_errdict(errors)
+        self.sdf = {}
+        self.errs = {}
         self.stat_errors = []
+        if run:
+            self.sdf, errors = self.ap.process_df(self.df, self.debug, skip_columns=skip_columns)
+            self.errs = errors_to_errdict(errors)
 
-        if self.errs:
-            output_full_reproduce(self.errs, self.sdf, operating_df_name)
+            if self.errs:
+                output_full_reproduce(self.errs, self.sdf, operating_df_name)
 
     def get_operating_df(self, df: pd.DataFrame, force_full_eval: bool) -> pd.DataFrame:
         """Downsample large DataFrames for performance."""
@@ -80,8 +86,9 @@ class DfStatsV2:
             self.ap.print_errors(errors + self.stat_errors)
 
 
-class PlDfStatsV2:
-    """Polars summary-stats executor. Uses StatPipeline with @stat polars functions."""
+class PlDfStatsV2(UnitStats):
+    """Polars summary-stats executor. Uses StatPipeline with @stat polars functions.
+    ``run=False`` builds it without computing anything, as for ``DfStatsV2``."""
 
     @classmethod
     def verify_analysis_objects(cls, objs):
@@ -93,14 +100,18 @@ class PlDfStatsV2:
             return df.sample(n=min(50_000, rows), seed=42)
         return df
 
-    def __init__(self, df, col_analysis_objs, operating_df_name=None, debug=False, skip_columns=None):
+    def __init__(self, df, col_analysis_objs, operating_df_name=None, debug=False, skip_columns=None, run=True):
         self.df = self.get_operating_df(df)
         self.ap = StatPipeline(col_analysis_objs, unit_test=False)
-        self.sdf, errors = self.ap.process_df(self.df, debug, skip_columns=skip_columns)
-        self.errs = errors_to_errdict(errors)
+        self.state = StatState(self.df, frozenset(skip_columns or ()))
+        self.sdf = {}
+        self.errs = {}
         self.stat_errors = []
-        if self.errs:
-            output_full_reproduce(self.errs, self.sdf, operating_df_name)
+        if run:
+            self.sdf, errors = self.ap.process_df(self.df, debug, skip_columns=skip_columns)
+            self.errs = errors_to_errdict(errors)
+            if self.errs:
+                output_full_reproduce(self.errs, self.sdf, operating_df_name)
 
     def add_analysis(self, a_obj):
         """Add a new analysis class interactively."""

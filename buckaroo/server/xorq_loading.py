@@ -14,11 +14,15 @@ import logging
 import os
 import traceback
 import uuid
+import weakref
+from collections import OrderedDict
 from pathlib import Path
 
 import pyarrow.parquet as pq
 
+from buckaroo.customizations.xorq_commands import search_expr
 from buckaroo.server.git_state_guard import install_git_state_guard
+from buckaroo.server.stats_policy import disable_sorting
 from buckaroo.server.window import clamp_window
 from buckaroo.serialization_utils import make_infinite_resp
 from buckaroo.xorq_buckaroo import (
@@ -64,22 +68,49 @@ class XorqServerDataflow(XorqDataflow):
     and project-authored post-processing classes discovered under
     ``<project_root>/post_processing/*.py``; the built-in xorq stats are
     kept first so collisions resolve to the built-in.
+
+    ``stat_chunk_cells`` is the host's request (off when ``None``) to run the
+    stats batch aggregate in chunks of about that many cells instead of one
+    query; the stats pipeline still refuses it for any source that is not a
+    plain parquet scan (``XorqStatPipeline.chunk_refusal``).
+
+    ``sort_enabled`` is whether the grid served by ``infinite_request`` may sort.
+    The server turns it off (``set_sort_enabled``) for a source with too many rows
+    to sort in a request (``stats_policy.resolve_source_guards``); the config is
+    then built with ``stats_policy.disable_sorting`` as its last step, so no
+    klass or override can turn sorting back on, and every rebuild keeps it.
     """
 
+    sort_enabled = True
     sampling_klass = XorqInfiniteSampling
     autocleaning_klass = XorqAutocleaning
     autoclean_conf = (NoCleaningConfXorq,)
     DFStatsClass = XorqDfStatsV2
     analysis_klasses = _XORQ_ANALYSIS_KLASSES
 
-    def __init__(self, expr, *args, extra_klasses=None, cache_storage_path=None, **kwargs):
+    def __init__(self, expr, *args, extra_klasses=None, cache_storage_path=None, stat_chunk_cells=None, **kwargs):
         if extra_klasses:
             # Per-instance override — class-level _XORQ_ANALYSIS_KLASSES is
             # left untouched so other sessions / direct widget usage don't
             # inherit one project's stats.
             self.analysis_klasses = list(_XORQ_ANALYSIS_KLASSES) + list(extra_klasses)
         self.cache_storage = _make_cache_storage(cache_storage_path)
+        self.stat_chunk_cells = stat_chunk_cells
         super().__init__(expr, *args, **kwargs)
+
+    def set_sort_enabled(self, enabled: bool) -> None:
+        """Turn sorting on or off in the display config, rebuilding it now when
+        the switch moves."""
+        if enabled == self.sort_enabled:
+            return
+        self.sort_enabled = enabled
+        _unused, processed_df, merged_sd = self.widget_args_tuple
+        if processed_df is not None:
+            self.df_display_args = self._build_df_display_args(processed_df, merged_sd)
+
+    def _build_df_display_args(self, processed_df, merged_sd):
+        display_args = super()._build_df_display_args(processed_df, merged_sd)
+        return display_args if self.sort_enabled else disable_sorting(display_args)
 
 
 def load_expr_build_dir(build_dir: str, cache_dir=None):
@@ -556,6 +587,40 @@ def _compile_project_display(path: Path, ColAnalysis, *extra_bases):
     return found
 
 
+# The searched expression of each (base expression, term). ``search_expr`` builds
+# a new expression on every call and ``_expr_count`` caches by expression object, so
+# every request for a searched window counted its rows again (0.5 to 1 s on 10.8M
+# rows). Holding the expression makes the second request a hit in ``_expr_count``'s
+# cache, which still does not cache a count that failed. Keyed weakly by the base
+# expression, the dataflow's ``processed_df``, which a state change replaces, so an
+# entry lasts as long as its base; a base keeps at most this many terms, the least
+# recently used going first.
+_SEARCHED_EXPRS_PER_BASE = 16
+_searched_exprs: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _searched_expr(base, term):
+    """``search_expr(base, term)``: the same object each time for the same pair."""
+    if not term:
+        return base
+    terms = _searched_exprs.get(base)
+    expr = terms.get(term) if terms is not None else None
+    if expr is not None:
+        terms.move_to_end(term)
+        return expr
+    expr = search_expr(base, term)
+    if expr is base:
+        # No string column to search: there is nothing to hold, and the base held as
+        # its own value would never be freed.
+        return base
+    if terms is None:
+        terms = _searched_exprs[base] = OrderedDict()
+    terms[term] = expr
+    if len(terms) > _SEARCHED_EXPRS_PER_BASE:
+        terms.popitem(last=False)
+    return expr
+
+
 def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
         payload_args: dict, search_string: str = "") -> tuple[dict, bytes]:
     """Drive one infinite_request window against a xorq expression.
@@ -567,13 +632,12 @@ def handle_infinite_request_xorq(xorq_dataflow: XorqServerDataflow,
     delegates to ``window_to_parquet`` and returns the
     ``(json_msg, parquet_bytes)`` pair the WebSocket handler ships as
     a text + binary frame pair (matching the pandas/polars paths)."""
-    from buckaroo.customizations.xorq_commands import search_expr
     _unused, processed_df, merged_sd = xorq_dataflow.widget_args_tuple
     if processed_df is None:
         return ({"type": "infinite_resp", "key": payload_args, "length": 0}, b"")
 
     try:
-        filtered_expr = search_expr(processed_df, search_string) if search_string else processed_df
+        filtered_expr = _searched_expr(processed_df, search_string)
 
         sort = payload_args.get("sort")
         sort_col = None

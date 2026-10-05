@@ -9,15 +9,44 @@ review:
 * ``.json`` files are read as standard JSON arrays (matches
   ``pd.read_json`` default ``lines=False`` so the same file loads under
   either backend).
+
+It also pins the schema stats tier (rows-first s2) for the pandas and
+polars server dataflows side by side: ``stats_tier="schema"`` publishes
+the display state full stats give, without reading a value.
 """
+import base64
+import dataclasses
+import datetime
+import decimal
+import inspect
+import io
 import json
 import os
 import tempfile
+import threading
 
+import pandas as pd
 import polars as pl
+import pyarrow.parquet as pq
 import pytest
+from tornado.ioloop import IOLoop
 
-from buckaroo.server.data_loading_polars import (create_polars_dataflow, handle_infinite_request_buckaroo_polars, load_file_polars)
+from buckaroo.dataflow.dataflow import assemble_merged_sd
+from buckaroo.dataflow.sd_cache import split_chain_by_scope
+from buckaroo.jlisp.lisp_utils import s as lisp_sym
+from buckaroo.pluggable_analysis_framework import perf_log
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
+from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
+from buckaroo.pluggable_analysis_framework.stat_units import StatAccumulator, StatState, StatUnit, merge_fragments
+from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
+from buckaroo.serialization_utils import resolve_summary_stats_payload
+from buckaroo.server import stat_run as stat_run_mod
+from buckaroo.server import stats_wire
+from buckaroo.server.data_loading import ServerDataflow, handle_infinite_request_buckaroo
+from buckaroo.server.data_loading_polars import (PolarsServerDataflow, create_polars_dataflow, handle_infinite_request_buckaroo_polars, load_file_polars)
+from buckaroo.server.stat_run import StatCursor, StatRun
+from buckaroo.styling_helpers import float_, obj_
+from tests.unit.dataflow.scoped_summary_stats_test import (_OverridingPostProcessing, _run_units, _scope_inputs, _scope_sds_by_units)
 
 
 def _payload(start=0, end=100):
@@ -89,3 +118,826 @@ def test_load_file_polars_ndjson_still_works():
 def test_load_file_polars_unsupported_extension():
     with pytest.raises(ValueError, match="Unsupported file format"):
         load_file_polars("/tmp/foo.xyz")
+
+
+# ---------------------------------------------------------------------------
+# stats_tier="schema" on the pandas and polars server dataflows (rows-first s2)
+# ---------------------------------------------------------------------------
+
+_BACKENDS = {
+    "pandas": (ServerDataflow, pd.DataFrame, handle_infinite_request_buckaroo),
+    "polars": (PolarsServerDataflow, pl.DataFrame, handle_infinite_request_buckaroo_polars)}
+
+# price has a 1e9 maximum, so its estimated column width depends on the min and
+# max that only full stats supply.
+_TIER_DATA = {
+    "price": [12.5, 18.9, 7.4, 22.1, 1e9],
+    "qty": [1, 2, 1, 3, 2],
+    "category": ["a", "b", "a", "c", "b"]}
+
+# The same columns with a different number of rows per value in every column.
+# polars does not keep the order of equal counts, so on _TIER_DATA the mode of
+# two full-stats runs over the same frame can differ.
+_UNTIED_DATA = {
+    "price": [12.5, 12.5, 12.5, 18.9, 18.9, 1e9],
+    "qty": [1, 1, 1, 2, 2, 3],
+    "category": ["a", "a", "a", "b", "b", "c"]}
+
+# Stats that read values. The schema tier must not publish any of them.
+_DATA_STAT_KEYS = {
+    "mean", "std", "median", "min", "max", "null_count", "non_null_count",
+    "distinct_count", "unique_count", "value_counts", "mode", "histogram",
+    "histogram_bins", "memory_usage"}
+
+
+@pytest.fixture(params=list(_BACKENDS))
+def backend(request):
+    return request.param
+
+
+def _frame(backend, data=None):
+    return _BACKENDS[backend][1](_TIER_DATA if data is None else data)
+
+
+def _typed_frame(backend):
+    """One column per kind of dtype the typing stats tell apart."""
+    days = [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2), datetime.date(2020, 1, 3)]
+    if backend == "pandas":
+        return pd.DataFrame({
+            "float": [1.5, 2.5, 3.5], "int": [1, 2, 3],
+            "nullable_int": pd.array([1, None, 3], dtype="Int64"),
+            "bool": [True, False, True], "str": ["a", "b", "c"],
+            "datetime": pd.to_datetime(days), "datetime_utc": pd.to_datetime(days, utc=True),
+            "timedelta": pd.to_timedelta([1, 2, 3], unit="D"),
+            "category": pd.Categorical(["a", "b", "a"])})
+    return pl.DataFrame({
+        "float": [1.5, 2.5, 3.5], "int32": pl.Series([1, 2, 3], dtype=pl.Int32),
+        "bool": [True, False, True], "str": ["a", "b", "c"], "date": days,
+        "datetime": [datetime.datetime(2020, 1, d) for d in (1, 2, 3)],
+        "duration": [datetime.timedelta(days=d) for d in (1, 2, 3)],
+        "time": [datetime.time(h) for h in (1, 2, 3)],
+        "decimal": pl.Series([decimal.Decimal("1.5")] * 3, dtype=pl.Decimal(10, 2)),
+        "binary": [b"a", b"b", b"c"],
+        "category": pl.Series(["a", "b", "a"], dtype=pl.Categorical)})
+
+
+def _build_dataflow(backend, frame=None, **kwargs):
+    frame = _frame(backend) if frame is None else frame
+    return _BACKENDS[backend][0](frame, skip_main_serial=True, **kwargs)
+
+
+def _three_scope_dataflow(backend, data=None, **kwargs):
+    """A dataflow with a search (filt scope) active and, on pandas, a user op
+    (clean scope), so each scope holds its own summary-stats cache entry. The
+    polars conf ships no command to run outside a search, so there raw and
+    clean are one scope."""
+    dataflow = _build_dataflow(backend, _frame(backend, data), **kwargs)
+    if backend == "pandas":
+        dataflow.operations = [[lisp_sym("fillna"), {"symbol": "df"}, "qty", 0]]
+    dataflow.quick_command_args = {"search": ["a"]}
+    return dataflow
+
+
+def _scope_keys(dataflow, tier):
+    chains = split_chain_by_scope(dataflow.operations)
+    return {scope: dataflow._scope_cache_key(chain, tier=tier) for scope, chain in chains.items()}
+
+
+def _spy_stat_pipeline(monkeypatch):
+    """Record the columns of every frame ``StatPipeline.process_df`` runs on,
+    apart from the ``PERVERSE_DF`` its DAG self-check uses, which has no part
+    of the loaded data in it."""
+    frames = []
+    original = StatPipeline.process_df
+
+    def spy(self, df, *args, **kwargs):
+        if list(df.columns) != list(PERVERSE_DF.columns):
+            frames.append(list(df.columns))
+        return original(self, df, *args, **kwargs)
+
+    monkeypatch.setattr(StatPipeline, "process_df", spy)
+    return frames
+
+
+def _without_min_width(column_config):
+    return [{**cc, "ag_grid_specs": {k: v for k, v in cc["ag_grid_specs"].items() if k != "minWidth"}}
+        for cc in column_config]
+
+
+def _as_json(sd):
+    """Comparable form of an sd: json equates NaN with NaN where == would not."""
+    return json.dumps(sd, sort_keys=True, default=str)
+
+
+def _wire_stat_names(dataflow):
+    """The stat names in the ``all_stats`` payload sent to the client."""
+    envelope = dataflow.df_data_dict["all_stats"]
+    table = pq.read_table(io.BytesIO(base64.b64decode(envelope["data"])))
+    return {name.split("__", 1)[1] for name in table.column_names}
+
+
+def _viewer_config(dataflow, display="main"):
+    return dataflow.df_display_args[display]["df_viewer_config"]
+
+
+class _NoopPostProcessing(ColAnalysis):
+    provides_defaults = {}
+    post_processing_method = "noop_post"
+
+    @classmethod
+    def post_process_df(cls, df):
+        return [df, {}]
+
+
+class TestStatsTierSchema:
+    """``stats_tier="schema"`` on ``ServerDataflow`` and
+    ``PolarsServerDataflow``: every column is typed from its dtype alone, so
+    the dataflow publishes the display state full stats give with no stat
+    computed on the data."""
+
+    def test_matches_full_stats_display_state(self, backend):
+        full = _build_dataflow(backend)
+        schema = _build_dataflow(backend, stats_tier="schema")
+        assert schema.df_display_args.keys() == full.df_display_args.keys()
+        for name, full_arg in full.df_display_args.items():
+            schema_arg = schema.df_display_args[name]
+            assert schema_arg["data_key"] == full_arg["data_key"]
+            assert schema_arg["summary_stats_key"] == full_arg["summary_stats_key"]
+            full_cfg, schema_cfg = full_arg["df_viewer_config"], schema_arg["df_viewer_config"]
+            assert schema_cfg["pinned_rows"] == full_cfg["pinned_rows"]
+            assert (_without_min_width(schema_cfg["column_config"])
+                == _without_min_width(full_cfg["column_config"]))
+
+    def test_host_supplied_pinned_rows_match_full_stats(self, backend):
+        """pinned_rows is configuration, so it is the same in every tier even
+        when it names a stat the schema tier does not compute."""
+        pinned = [obj_("dtype"), float_("mean")]
+        full = _build_dataflow(backend, pinned_rows=pinned)
+        schema = _build_dataflow(backend, stats_tier="schema", pinned_rows=pinned)
+        assert _viewer_config(schema)["pinned_rows"] == _viewer_config(full)["pinned_rows"] == pinned
+
+    def test_min_width_is_the_stats_derived_difference(self, backend):
+        widths = {}
+        for tier in ("full", "schema"):
+            cfg = _viewer_config(_build_dataflow(backend, stats_tier=tier))
+            widths[tier] = {cc["header_name"]: cc["ag_grid_specs"]["minWidth"]
+                for cc in cfg["column_config"]}
+        # price's 1e9 maximum widens it under full stats; without min and max
+        # the estimate falls back to a one-digit value.
+        assert widths["schema"]["price"] < widths["full"]["price"]
+
+    def test_typing_matches_full_stats_for_every_dtype(self, backend):
+        full = _build_dataflow(backend, _typed_frame(backend))
+        schema = _build_dataflow(backend, _typed_frame(backend), stats_tier="schema")
+        assert schema.merged_sd.keys() == full.merged_sd.keys()
+        for col, stats in schema.merged_sd.items():
+            assert {"orig_col_name", "rewritten_col_name", "dtype", "_type", "length"} <= stats.keys()
+            assert stats == {k: full.merged_sd[col][k] for k in stats}
+        assert {"duration", "categorical", "datetime"} <= {
+            stats["_type"] for stats in schema.merged_sd.values()}
+
+    def test_publishes_no_data_derived_stat(self, backend):
+        full = _build_dataflow(backend)
+        schema = _build_dataflow(backend, stats_tier="schema")
+        for stats in schema.merged_sd.values():
+            assert not _DATA_STAT_KEYS & stats.keys()
+        assert _wire_stat_names(schema) == {"dtype"}
+        # The same reads on the full tier see the stats, so they would notice.
+        assert _DATA_STAT_KEYS & full.merged_sd["a"].keys()
+        assert {"dtype", "histogram_bins"} <= _wire_stat_names(full)
+
+    def test_computes_no_stat_on_the_data(self, backend, monkeypatch):
+        frames = _spy_stat_pipeline(monkeypatch)
+        dataflow = _build_dataflow(backend, stats_tier="schema")
+        dataflow.quick_command_args = {"search": ["a"]}
+        dataflow.add_analysis(_NoopPostProcessing)
+        assert frames == []
+        assert "noop_post" in dataflow.buckaroo_options["post_processing"]
+
+    def test_the_spy_sees_the_pipeline_at_the_full_tier(self, backend, monkeypatch):
+        frames = _spy_stat_pipeline(monkeypatch)
+        _build_dataflow(backend)
+        assert frames, "the spy would not notice a stat computed on the data"
+
+    def test_init_sd_hints_and_overrides_still_apply(self, backend):
+        dataflow = _build_dataflow(
+            backend, stats_tier="schema",
+            init_sd={"qty": {"displayer_args": {"displayer": "string", "max_length": 200}}},
+            column_config_overrides={
+                "category": {"displayer_args": {"displayer": "string", "max_length": 5000}}})
+        by_header = {cc["header_name"]: cc for cc in _viewer_config(dataflow)["column_config"]}
+        assert by_header["qty"]["displayer_args"]["max_length"] == 200
+        assert by_header["category"]["displayer_args"]["max_length"] == 5000
+
+    def test_skipped_column_keeps_init_sd_typing(self, backend):
+        """A column in ``skip_stat_columns`` gets only its names from the
+        pipeline, so its ``_type`` comes from ``init_sd``. The schema tier
+        must not layer the dtype-derived typing keys over it."""
+        kwargs = {
+            "init_sd": {"qty": {"_type": "float", "mean": 1.8, "min": 1, "max": 3}},
+            "skip_stat_columns": ["qty"]}
+        full = _build_dataflow(backend, **kwargs)
+        schema = _build_dataflow(backend, stats_tier="schema", **kwargs)
+
+        def merged(dataflow, orig_col):
+            return next(v for v in dataflow.merged_sd.values() if v["orig_col_name"] == orig_col)
+
+        assert merged(full, "qty")["_type"] == "float"
+        assert merged(schema, "qty")["_type"] == "float"
+        assert not {"is_numeric", "is_integer", "is_float", "dtype"} & merged(schema, "qty").keys()
+        assert merged(schema, "price")["_type"] == "float"
+        assert merged(schema, "price")["is_float"] is True
+        assert (_without_min_width(_viewer_config(schema)["column_config"])
+            == _without_min_width(_viewer_config(full)["column_config"]))
+
+    def test_empty_frame_matches_full_stats(self, backend):
+        """Full stats publish nothing for a frame with no rows (the pipeline
+        returns an empty summary), so the schema tier does the same."""
+        empty = {"x": [], "y": []}
+        full = _build_dataflow(backend, _frame(backend, empty))
+        schema = _build_dataflow(backend, _frame(backend, empty), stats_tier="schema")
+        assert full.merged_sd == {}
+        assert schema.merged_sd == {}
+        assert schema.df_display_args == full.df_display_args
+
+    def test_sorted_infinite_request_works(self, backend):
+        dataflow = _build_dataflow(backend, stats_tier="schema")
+        qty = next(k for k, v in dataflow.merged_sd.items() if v["orig_col_name"] == "qty")
+        handler = _BACKENDS[backend][2]
+        resp, parquet = handler(dataflow, {"start": 0, "end": 5, "sourceName": "default",
+            "sort": qty, "sort_direction": "desc"})
+        assert "error_info" not in resp
+        assert resp["length"] == 5
+        assert pq.read_table(io.BytesIO(parquet)).column(qty).to_pylist() == [3, 2, 2, 1, 1]
+
+    def test_pending_state_writes_no_full_tier_cache_key(self, backend):
+        dataflow = _three_scope_dataflow(backend, stats_tier="schema")
+        full_keys = set(_scope_keys(dataflow, "full").values())
+        assert len(full_keys) == (3 if backend == "pandas" else 2)
+        assert dataflow.summary_stats_cache
+        assert not full_keys & dataflow.summary_stats_cache.keys()
+
+    def test_later_full_assignment_reaches_merged_sd_for_all_scopes(self, backend):
+        full = _three_scope_dataflow(backend, _UNTIED_DATA)
+        dataflow = _three_scope_dataflow(backend, _UNTIED_DATA, stats_tier="schema")
+        assert "mean" not in dataflow.merged_sd["a"]
+        assert {"mean", "filtered_mean"} <= full.merged_sd["a"].keys()
+
+        dataflow.stats_tier = "full"
+        dataflow.summary_sd = full.summary_sd
+
+        assert _as_json(dataflow.merged_sd) == _as_json(full.merged_sd)
+
+    def test_full_scope_sds_cached_first_are_used_without_the_pipeline(self, backend, monkeypatch):
+        full = _three_scope_dataflow(backend)
+        dataflow = _three_scope_dataflow(backend, stats_tier="schema")
+        cache = dict(dataflow.summary_stats_cache)
+        for scope, key in _scope_keys(dataflow, "full").items():
+            cache[key] = full.summary_stats_cache[getattr(full, f"{scope}_sd_key")]
+        dataflow.summary_stats_cache = cache
+        frames = _spy_stat_pipeline(monkeypatch)
+
+        dataflow.stats_tier = "full"
+        dataflow.summary_sd = full.summary_sd
+
+        assert frames == []
+        assert _as_json(dataflow.merged_sd) == _as_json(full.merged_sd)
+
+    def test_assembled_sd_equals_merged_sd_with_init_sd_and_a_user_op(self, backend):
+        # init_sd is keyed by the original column name; price is rewritten to "a".
+        dataflow = _three_scope_dataflow(backend, stats_tier="schema", init_sd={
+            "price": {"displayer_args": {"displayer": "string", "max_length": 99}, "init_only": 1}})
+        sd = dataflow.merged_sd["a"]
+        assert sd["init_only"] == 1, "init_sd must reach merged_sd under the rewritten name"
+        assert "filtered_length" in sd, "the filter layer must be active"
+        if backend == "pandas":
+            assert "cleaned_length" in sd, "the cleaning layer must be active"
+
+        assembled = assemble_merged_sd(**_scope_inputs(dataflow))
+
+        assert _as_json(assembled) == _as_json(dataflow.merged_sd)
+
+
+def test_object_column_is_typed_as_a_string_at_the_schema_tier():
+    """pandas gives an object column no dtype to tell strings from other
+    values, and calls an empty one a string, so the schema tier types every
+    object column as one. Full stats read the values and call the mixed column
+    ``obj``; the gap closes when full stats arrive."""
+    def frame():
+        return pd.DataFrame({
+            "words": pd.Series(["a", "b", "c"], dtype=object),
+            "mixed": pd.Series([1, "b", 2.5], dtype=object)})
+
+    types = {}
+    for tier in ("full", "schema"):
+        sd = ServerDataflow(frame(), skip_main_serial=True, stats_tier=tier).merged_sd
+        types[tier] = {v["orig_col_name"]: v["_type"] for v in sd.values()}
+    assert types["full"] == {"words": "string", "mixed": "obj"}
+    assert types["schema"] == {"words": "string", "mixed": "string"}
+
+
+# ---------------------------------------------------------------------------
+# Resumable stat units on the pandas and polars server dataflows (rows-first s4)
+# ---------------------------------------------------------------------------
+
+
+class TestStatUnits:
+    """``plan`` and ``run`` on the stats class a dataflow builds, in place of
+    the all-at-once constructor."""
+
+    def test_build_stats_without_running_computes_nothing(self, backend, monkeypatch):
+        dataflow = _build_dataflow(backend)
+        frames = _spy_stat_pipeline(monkeypatch)
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        stats.plan(stats.state)
+        assert frames == []
+        assert stats.sdf == {} and stats.errs == {}
+
+    def test_the_default_run_goes_through_the_units(self, backend, monkeypatch):
+        """Every column the constructor computes is computed inside a unit, so
+        the inline path and a caller running units one at a time cannot
+        differ. (The DAG self-check runs ``PERVERSE_DF`` through the same
+        units, which has no part of the loaded data in it.)"""
+        depth, inside, outside, unit_columns = [0], [], [], []
+        original_run, original_column = StatPipeline.run, StatPipeline.process_column
+
+        def spy_run(self, unit, acc):
+            depth[0] += 1
+            if list(acc.state.data.columns) != list(PERVERSE_DF.columns):
+                unit_columns.append(unit.columns)
+            try:
+                return original_run(self, unit, acc)
+            finally:
+                depth[0] -= 1
+
+        def spy_column(self, *args, **kwargs):
+            (inside if depth[0] else outside).append(kwargs.get("column_name"))
+            return original_column(self, *args, **kwargs)
+
+        monkeypatch.setattr(StatPipeline, "run", spy_run)
+        monkeypatch.setattr(StatPipeline, "process_column", spy_column)
+        _three_scope_dataflow(backend)
+        assert {c for cols in unit_columns for c in cols} == {"price", "qty", "category"}
+        assert inside and outside == [], "a column's stats ran outside a unit"
+
+    def test_units_assembled_equal_merged_sd_with_init_sd_cleaning_and_overrides(self, backend):
+        """The fragments of each scope's units, assembled by
+        ``assemble_merged_sd`` with ``init_sd``, a cleaning op (pandas), a
+        search filter and a post-processing override, are the dataflow's own
+        ``merged_sd``. init_sd is keyed by the original name; price is "a"."""
+        dataflow = _three_scope_dataflow(backend, _UNTIED_DATA, init_sd={
+            "price": {"displayer_args": {"displayer": "string", "max_length": 99}, "init_only": 1}},
+            column_config_overrides={"category": {"displayer_args": {"displayer": "string", "max_length": 5000}}})
+        dataflow.add_analysis(_OverridingPostProcessing)
+        dataflow.post_processing_method = "override_post"
+        sd = dataflow.merged_sd
+        assert sd["a"]["init_only"] == 1 and sd["b"]["from_post"] == 1 and sd["b"]["mean"] == 99.5
+        assert "filtered_length" in sd["a"], "the filter layer must be active"
+        if backend == "pandas":
+            assert "cleaned_length" in sd["a"], "the cleaning layer must be active"
+
+        sds = _scope_sds_by_units(dataflow)
+        inputs = _scope_inputs(dataflow)
+        assembled = assemble_merged_sd(init_sd=inputs["init_sd"], cleaned_sd=inputs["cleaned_sd"], raw_sd=sds["raw"],
+            processed_sd=inputs["processed_sd"], processed_df=inputs["processed_df"], chains=inputs["chains"],
+            clean_sd=sds["clean"], filt_sd=sds["filt"])
+
+        assert _as_json(assembled) == _as_json(dataflow.merged_sd)
+
+    def test_a_column_group_request_returns_only_those_columns(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        for names in (("qty", "category"), ("b", "c")):  # original or rewritten names
+            state = dataclasses.replace(stats.state, columns=names)
+            acc = stats.new_accumulator(state)
+            fragments = [stats.run(unit, acc) for unit in stats.plan(state)]
+            assert [list(f) for f in fragments] == [["qty"], ["category"]]
+            assert list(acc.sd()) == ["qty", "category"]
+
+    def test_skip_stat_columns_get_no_unit(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA), skip_stat_columns=["qty"],
+            init_sd={"qty": {"_type": "float"}})
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        assert stats.state.skip_columns == {"qty"}
+        assert [u.columns for u in stats.plan(stats.state)] == [("price",), ("category",)]
+        acc, fragments = _run_units(stats)
+        assert all("qty" not in f for f in fragments)
+        assert set(acc.sd()) == {"price", "qty", "category"}
+
+
+def _stat_run(backend, gen=4):
+    dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+    return StatRun(gen, "raw", dataflow.build_stats(dataflow.processed_df, run=False)), dataflow
+
+
+# Original names that are also rewritten names of other columns: the rewritten
+# names are c -> a, b -> b, a -> c.
+_PERMUTED_DATA = {
+    "c": [12.5, 12.5, 12.5, 18.9, 18.9, 1e9],
+    "b": [1, 1, 1, 2, 2, 3],
+    "a": ["a", "a", "a", "b", "b", "c"]}
+
+
+def _permuted_stat_run(backend, gen=4):
+    dataflow = _build_dataflow(backend, _frame(backend, _PERMUTED_DATA))
+    return StatRun(gen, "raw", dataflow.build_stats(dataflow.processed_df, run=False)), dataflow
+
+
+class TestStatRun:
+    """The run a session holds for one generation and scope: the planned
+    units, the fragments they produced in the order they finished, and the
+    accumulator the units read. It runs a unit only when asked."""
+
+    def test_a_run_is_keyed_by_generation_and_scope_and_plans_its_units(self, backend):
+        run, _dataflow = _stat_run(backend)
+        assert run.key == (4, "raw")
+        assert run.status == "pending" and run.remaining == 3
+        assert [u.columns for u in run.units] == [("price",), ("qty",), ("category",)]
+        assert run.fragments == [] and run.ran == []
+
+    def test_fragments_are_appended_in_completion_order(self, backend):
+        run, _dataflow = _stat_run(backend)
+        while True:
+            before = list(run.fragments)
+            fragment = run.run_next(prefer=("category",))
+            if fragment is None:
+                break
+            assert run.fragments[:-1] == before, "nothing already in the list changes"
+            assert run.fragments[-1] is fragment
+        assert [list(f) for f in run.fragments] == [["category"], ["price"], ["qty"]]
+        assert len(run.ran) == 3 and len(set(run.ran)) == 3
+
+    def test_prefer_runs_the_units_that_name_those_columns_first(self, backend):
+        run, _dataflow = _stat_run(backend)
+        assert run.next_unit().columns == ("price",)
+        assert run.next_unit(prefer=("c",)).columns == ("category",), "a rewritten name works too"
+        assert run.next_unit(prefer=("nothing",)).columns == ("price",)
+
+    def test_prefer_reads_a_name_that_is_an_original_name_as_that_column(self, backend):
+        """"a" is the original name of the last column and the rewritten name
+        of the first. Read once, as the original name, it picks the last."""
+        run, _dataflow = _permuted_stat_run(backend)
+        assert [u.columns for u in run.units] == [("c",), ("b",), ("a",)]
+        assert run.next_unit(prefer=("a",)).columns == ("a",)
+        assert run.next_unit(prefer=("b",)).columns == ("b",)
+        assert run.next_unit(prefer=("c",)).columns == ("c",)
+
+    def test_prefer_in_the_rewritten_namespace_reads_a_client_s_names(self, backend):
+        """A client knows only the rewritten names: its "c" is the column
+        whose original name is "a"."""
+        run, _dataflow = _permuted_stat_run(backend)
+        assert run.next_unit(prefer=("c",), namespace="rewritten").columns == ("a",)
+        assert run.next_unit(prefer=("a",), namespace="rewritten").columns == ("c",)
+        assert run.next_unit(prefer=("zzz",), namespace="rewritten").columns == ("c",)
+
+    def test_run_next_runs_the_unit_prefer_picks_in_its_namespace(self, backend):
+        run, _dataflow = _permuted_stat_run(backend)
+        assert list(run.run_next(prefer=("c",), namespace="rewritten")) == ["a"]
+        assert list(run.run_next(prefer=("c",))) == ["c"]
+        assert run.ran == ["column:a", "column:c"]
+
+    def test_prefer_with_an_unknown_namespace_is_an_error(self, backend):
+        run, _dataflow = _permuted_stat_run(backend)
+        with pytest.raises(ValueError, match="namespace"):
+            run.next_unit(prefer=("c",), namespace="both")
+
+    def test_the_run_is_complete_when_no_unit_is_left(self, backend):
+        run, _dataflow = _stat_run(backend)
+        while run.run_next() is not None:
+            pass
+        assert (run.status, run.remaining) == ("complete", 0)
+        assert run.next_unit() is None and run.run_next() is None
+        assert len(run.fragments) == 3, "asking again runs nothing"
+
+    def test_the_accumulator_holds_what_the_fragments_hold(self, backend):
+        run, _dataflow = _stat_run(backend)
+        while run.run_next() is not None:
+            pass
+        assert merge_fragments(run.fragments) == run.acc.sd()
+
+    def test_raw_sd_is_the_full_stats_summary_sd(self, backend):
+        run, dataflow = _stat_run(backend)
+        while run.run_next() is not None:
+            pass
+        assert _as_json(run.raw_sd()) == _as_json(dataflow.summary_sd)
+
+    def test_cursors_read_one_list_each_at_its_own_pace(self, backend):
+        run, _dataflow = _stat_run(backend)
+        a, b = StatCursor(), StatCursor()
+        run.run_next()
+        run.run_next()
+        first_a = a.take(run)
+        assert len(first_a) == 2 and a.take(run) == [] and a.caught_up(run)
+        run.run_next()
+        assert not a.caught_up(run) and b.position == 0, "one cursor's reads move no other"
+        all_b = b.take(run)
+        rest_a = a.take(run)
+        assert (len(all_b), len(rest_a)) == (3, 1)
+        assert merge_fragments(first_a + rest_a) == merge_fragments(all_b)
+        assert len(set(run.ran)) == 3, "no unit ran twice"
+
+    def test_a_cursor_starts_again_on_another_run(self, backend):
+        first, _dataflow = _stat_run(backend, gen=1)
+        second, _dataflow = _stat_run(backend, gen=2)
+        first.run_next()
+        second.run_next()
+        second.run_next()
+        cursor = StatCursor()
+        assert len(cursor.take(first)) == 1
+        assert len(cursor.take(second)) == 2, "a position in one run means nothing in another"
+
+    def test_a_run_has_no_thread_timer_or_callback(self, backend, monkeypatch):
+        scheduled = []
+        monkeypatch.setattr(threading.Thread, "start", lambda self, *a, **k: scheduled.append("thread"))
+        for name in ("add_callback", "call_later", "call_at", "add_timeout"):
+            monkeypatch.setattr(IOLoop, name, lambda self, *a, _n=name, **k: scheduled.append(_n))
+        threads_before = threading.active_count()
+        run, _dataflow = _stat_run(backend)
+        while run.run_next() is not None:
+            pass
+        assert scheduled == [] and threading.active_count() == threads_before
+        assert not [name for name, value in vars(run).items()
+            if isinstance(value, (threading.Thread, threading.Timer)) or inspect.isroutine(value)]
+
+    def test_a_unit_that_raises_fails_the_run(self):
+
+        class _FailingStats:
+            state = StatState(data=None)
+
+            def plan(self, state):
+                return [StatUnit("one", ("x",), "column"), StatUnit("two", ("y",), "column")]
+
+            def new_accumulator(self, state):
+                return StatAccumulator(state, columns=["x", "y"])
+
+            def run(self, unit, acc):
+                if unit.id == "two":
+                    raise RuntimeError("boom")
+                return {"x": {"v": 1}}
+
+        run = StatRun(1, "raw", _FailingStats())
+        run.run_next()
+        with pytest.raises(RuntimeError, match="boom"):
+            run.run_next()
+        assert run.status == "error" and isinstance(run.error, RuntimeError)
+        assert run.run_next() is None, "a failed run is not retried"
+        assert run.fragments == [{"x": {"v": 1}}]
+
+    def test_the_full_run_over_every_column_is_the_run_that_assigns(self, backend):
+        run, _dataflow = _stat_run(backend)
+        assert (run.tier, run.assigns) == ("full", True)
+
+    def test_a_run_over_a_column_group_has_its_own_key_and_assigns_nothing(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        run = StatRun(4, "raw", stats, state=dataclasses.replace(stats.state, columns=("price",)))
+        assert run.key == (4, "raw", "full", ("price",))
+        assert (run.tier, run.assigns) == ("full", False)
+        assert [u.columns for u in run.units] == [("price",)]
+        while run.run_next() is not None:
+            pass
+        assert list(run.acc.sd()) == ["price"]
+
+    def test_the_key_of_a_run_names_its_tier_and_group_unless_it_is_the_full_run(self):
+        key = stat_run_mod.stat_run_key
+        assert key(4, "raw") == key(4, "raw", "full", None) == (4, "raw")
+        assert key(4, "raw", "scalar") == (4, "raw", "scalar", None)
+        assert key(4, "raw", "full", ["b", "a"]) == (4, "raw", "full", ("b", "a"))
+
+    def test_a_pandas_or_polars_run_has_only_the_full_tier(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        stats = dataflow.build_stats(dataflow.processed_df, run=False)
+        with pytest.raises(ValueError, match="full tier"):
+            StatRun(4, "raw", stats, state=dataclasses.replace(stats.state, tier="scalar"))
+
+
+class _FakeClock:
+    """A clock a test moves by hand, so a budget can be spent without waiting."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+class _CostedStats:
+    """A stats class whose units run for real and cost what the test says on a
+    fake clock: ``cost`` is the default and ``costs`` maps a unit id to its own."""
+
+    def __init__(self, stats, clock, cost, costs=None):
+        self._stats, self._clock, self._cost, self._costs = stats, clock, cost, costs or {}
+        self.state = stats.state
+
+    def plan(self, state):
+        return self._stats.plan(state)
+
+    def new_accumulator(self, state):
+        return self._stats.new_accumulator(state)
+
+    def run(self, unit, acc):
+        fragment = self._stats.run(unit, acc)
+        self._clock.now += self._costs.get(unit.id, self._cost)
+        return fragment
+
+
+def _costed_run(backend, clock, cost, costs=None, gen=4):
+    run, dataflow = _stat_run(backend, gen)
+    run.stats = _CostedStats(run.stats, clock, cost, costs)
+    return run, dataflow
+
+
+def _without_memory_usage(sd):
+    """``sd`` without the ``memory_usage`` stats, which pandas reads off the
+    index and so depend on what ran on the frame before."""
+    return {col: {k: v for k, v in stats.items() if not k.endswith("memory_usage")} for col, stats in sd.items()}
+
+
+def _stat_rows(payload):
+    """The decoded ``all_stats`` rows of a payload, keyed by stat name."""
+    return {row["index"]: row for row in resolve_summary_stats_payload(payload)}
+
+
+class TestRunUnits:
+    """Running a ``StatRun``'s units for one request (rows-first s5): as many as
+    fit in the request's time budget, and at least one."""
+
+    def test_units_that_cost_little_run_together_within_the_budget(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.01)
+        assert stats_wire.run_units(run, 0.075, clock=clock) == 3
+        assert run.status == "complete" and run.remaining == 0
+
+    def test_a_request_stops_once_the_budget_is_spent(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.04)
+        assert stats_wire.run_units(run, 0.075, clock=clock) == 2
+        assert run.status == "pending" and run.remaining == 1
+
+    def test_a_unit_that_costs_more_than_the_budget_is_the_only_one_of_its_request(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.2)
+        assert [stats_wire.run_units(run, 0.075, clock=clock) for _ in range(3)] == [1, 1, 1]
+        assert run.status == "complete"
+
+    def test_a_cold_unit_after_warm_ones_ends_the_request(self, backend):
+        """A snapshot-cache hit costs milliseconds and a miss is a query: the
+        units that hit run together, and the first miss is the last of its
+        request."""
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.005, costs={"column:category": 0.5})
+        assert stats_wire.run_units(run, 0.075, prefer=("c",), clock=clock) == 1
+        assert run.ran == ["column:category"]
+        assert stats_wire.run_units(run, 0.075, clock=clock) == 2
+        assert run.status == "complete"
+
+    def test_one_unit_runs_whatever_the_budget(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.0)
+        assert stats_wire.run_units(run, 0, clock=clock) == 1
+        assert run.remaining == 2
+
+    def test_no_budget_runs_every_unit(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=10.0)
+        assert stats_wire.run_units(run, None, clock=clock) == 3
+        assert run.status == "complete"
+
+    def test_a_complete_run_runs_nothing(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.0)
+        stats_wire.run_units(run, None, clock=clock)
+        assert stats_wire.run_units(run, 0.075, clock=clock) == 0
+        assert len(run.fragments) == 3
+
+    def test_the_columns_hint_is_read_in_the_client_s_rewritten_names(self, backend):
+        """The grid knows only a, b, c: "c" is the third column, category."""
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=1.0)
+        stats_wire.run_units(run, 0, prefer=["c"], clock=clock)
+        stats_wire.run_units(run, 0, prefer=["b"], clock=clock)
+        assert run.ran == ["column:category", "column:qty"]
+
+    def test_a_unit_that_raises_fails_the_run_and_the_error_propagates(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.0)
+
+        def boom(unit, acc):
+            raise RuntimeError("unit failed")
+
+        run.stats.run = boom
+        with pytest.raises(RuntimeError, match="unit failed"):
+            stats_wire.run_units(run, 0.075, clock=clock)
+        assert run.status == "error"
+
+    def test_each_unit_is_a_stats_unit_span_on_the_bound_sink(self, backend):
+        clock = _FakeClock()
+        run, _dataflow = _costed_run(backend, clock, cost=0.0)
+        spans = []
+        with perf_log.telemetry_context("run-units", spans.append):
+            stats_wire.run_units(run, None, clock=clock, session_id="run-units")
+        units = [r for r in spans if r["name"] == "stats.unit"]
+        assert [r["attrs"]["unit"] for r in units] == run.ran
+        for record, unit in zip(units, run.units):
+            assert record["trace"] == "run-units"
+            attrs = record["attrs"]
+            assert (attrs["session"], attrs["stats_gen"]) == ("run-units", 4)
+            assert (attrs["phase"], attrs["cost"], attrs["columns"]) == (unit.phase, unit.cost, len(unit.columns))
+
+    def test_the_run_adds_up_the_time_its_units_took(self, backend):
+        run, _dataflow = _stat_run(backend)
+        assert run.elapsed_s == 0
+        run.run_next()
+        first = run.elapsed_s
+        assert first > 0
+        run.run_next()
+        assert run.elapsed_s > first
+
+    def test_a_clean_run_has_no_errors(self, backend):
+        run, _dataflow = _stat_run(backend)
+        stats_wire.run_units(run, None)
+        assert run.errs() == {}
+
+
+class TestPartialPayload:
+    """The ``all_stats`` payload of the fragments a client has not seen: the
+    stats of the state, assembled the way ``merged_sd`` is, for the columns
+    those fragments cover."""
+
+    def test_the_payload_of_every_fragment_is_the_dataflow_s_all_stats(self, backend):
+        run, dataflow = _stat_run(backend)
+        stats_wire.run_units(run, None)
+        payload = stats_wire.partial_payload(dataflow, run, run.fragments)
+        assert (payload["format"], payload["layout"]) == ("parquet_b64", "wide")
+        assert _stat_rows(payload) == _stat_rows(dataflow.df_data_dict["all_stats"])
+
+    def test_the_payload_holds_only_the_columns_the_fragments_cover(self, backend):
+        run, _dataflow = _stat_run(backend)
+        fragment = run.run_next(prefer=("category",))
+        payload = stats_wire.partial_payload(_dataflow, run, [fragment])
+        columns = {name for row in _stat_rows(payload).values() for name in row if name not in ("index", "level_0")}
+        assert columns == {"c"}, "category is the third column, rewritten to c"
+
+    def test_a_search_filter_keys_the_run_s_stats_as_filtered(self, backend):
+        """With a search active the run analyzes the filtered frame, so its
+        stats are the ``filtered_*`` keys of ``merged_sd`` and the bare keys
+        stay the unfiltered scope's."""
+        dataflow = _three_scope_dataflow(backend, _UNTIED_DATA)
+        run = StatRun(4, "raw", dataflow.build_stats(dataflow.processed_df, run=False))
+        stats_wire.run_units(run, None)
+        assert _as_json(_without_memory_usage(dataflow._assemble_merged_sd(run.raw_sd()))) == _as_json(
+            _without_memory_usage(dataflow.merged_sd))
+
+    def test_init_sd_overrides_win_over_the_run_s_stats_as_in_merged_sd(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA),
+            init_sd={"qty": {"mean": 99.5, "from_init": 1}})
+        run = StatRun(4, "raw", dataflow.build_stats(dataflow.processed_df, run=False))
+        stats_wire.run_units(run, None)
+        assembled = dataflow._assemble_merged_sd(run.raw_sd())
+        assert _as_json(assembled) == _as_json(dataflow.merged_sd)
+        assert assembled["b"]["from_init"] == 1
+
+
+class TestAssembledMergedSd:
+    """``_assemble_merged_sd`` is the body of the ``merged_sd`` observer."""
+
+    def test_it_is_merged_sd_with_no_sd_standing_in(self, backend):
+        dataflow = _three_scope_dataflow(backend, _UNTIED_DATA)
+        assert _as_json(dataflow._assemble_merged_sd()) == _as_json(dataflow.merged_sd)
+
+    def test_a_running_sd_stands_in_for_the_scopes_that_share_the_filt_chain(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA), stats_tier="schema")
+        full = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        assembled = dataflow._assemble_merged_sd(full.summary_sd)
+        assert _as_json(assembled) == _as_json(full.merged_sd)
+        assert "mean" not in dataflow.merged_sd["a"], "the dataflow itself is still at the schema tier"
+
+
+class TestHighlightedDisplayArgs:
+    def test_the_term_is_set_on_string_columns_of_a_copy(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        original = json.dumps(dataflow.df_display_args, sort_keys=True, default=str)
+        highlighted = stats_wire.highlighted_display_args(dataflow.df_display_args, "ca")
+        assert json.dumps(dataflow.df_display_args, sort_keys=True, default=str) == original
+        phrases = [col["displayer_args"]["highlight_phrase"]
+            for col in highlighted["main"]["df_viewer_config"]["column_config"]
+            if col.get("displayer_args", {}).get("highlight_phrase")]
+        assert phrases == [["ca"]]
+
+    def test_an_empty_term_removes_the_highlight(self, backend):
+        dataflow = _build_dataflow(backend, _frame(backend, _UNTIED_DATA))
+        highlighted = stats_wire.highlighted_display_args(dataflow.df_display_args, "ca")
+        cleared = stats_wire.highlighted_display_args(highlighted, "")
+        assert json.dumps(cleared, sort_keys=True, default=str) == json.dumps(
+            dataflow.df_display_args, sort_keys=True, default=str)
+
+
+class TestDisplayArgsHash:
+    def test_equal_content_hashes_equal_whatever_the_key_order(self):
+        assert stats_wire.display_args_hash({"a": 1, "b": [1, 2]}) == stats_wire.display_args_hash({"b": [1, 2], "a": 1})
+
+    def test_a_changed_value_changes_the_hash(self):
+        assert stats_wire.display_args_hash({"a": 1}) != stats_wire.display_args_hash({"a": 2})
+
+    def test_nan_hashes_equal_to_nan(self):
+        assert stats_wire.display_args_hash({"a": float("nan")}) == stats_wire.display_args_hash({"a": float("nan")})

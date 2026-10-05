@@ -8,6 +8,7 @@ import pytest
 import tornado.testing
 
 from buckaroo.server.app import make_app as _make_app
+from buckaroo.server.session import build_state_message
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Temp file locking prevents cleanup on Windows")
 
@@ -113,6 +114,53 @@ class TestLoadCompare(tornado.testing.AsyncHTTPTestCase):
             finally:
                 os.unlink(f1.name)
                 os.unlink(f2.name)
+
+    def test_load_compare_resolves_to_full_and_clears_a_stats_policy(self):
+        """A compare session is a viewer with no dataflow, so no stats are
+        deferred or refused: a policy that an earlier /load_expr left on the
+        session is dropped (rows-first p33)."""
+        session = self._app.settings["sessions"].create("cmp-policy", "")
+        session.stats_tier, session.stats_delivery = "auto", "deferred"
+        session.stats_policy = {"tier_target": "schema", "reason": "size"}
+        df1 = pd.DataFrame({"id": [1, 2], "score": [100, 200]})
+        df2 = pd.DataFrame({"id": [1, 2], "score": [100, 999]})
+
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f1, \
+             tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f2:
+            _write_df(df1, f1.name)
+            _write_df(df2, f2.name)
+            try:
+                resp = self._post_compare({"session": "cmp-policy", "path1": f1.name, "path2": f2.name,
+                    "join_columns": ["id"]})
+                self.assertEqual(resp.code, 200)
+            finally:
+                os.unlink(f1.name)
+                os.unlink(f2.name)
+        self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+        self.assertIsNone(session.stats_policy)
+        self.assertEqual(session.stats_status, "complete")
+        self.assertNotIn("stats", build_state_message(session)["df_meta"])
+
+    def test_load_compare_drops_a_stat_chunk_cells_left_by_load_expr(self):
+        """A compare session runs no xorq stats batch, so the count a prior
+        /load_expr stored on the session is dropped (rows-first s6)."""
+        session = self._app.settings["sessions"].create("cmp-chunk-cells", "")
+        session.stat_chunk_cells = 60_000_000
+        df1 = pd.DataFrame({"id": [1, 2], "score": [100, 200]})
+        df2 = pd.DataFrame({"id": [1, 2], "score": [100, 999]})
+
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f1, \
+             tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f2:
+            _write_df(df1, f1.name)
+            _write_df(df2, f2.name)
+            try:
+                resp = self._post_compare({"session": "cmp-chunk-cells", "path1": f1.name, "path2": f2.name,
+                    "join_columns": ["id"]})
+                self.assertEqual(resp.code, 200)
+            finally:
+                os.unlink(f1.name)
+                os.unlink(f2.name)
+        self.assertIsNone(session.stat_chunk_cells)
 
     def test_missing_fields(self):
         resp = self._post_compare({"session": "x", "path1": "/a"})

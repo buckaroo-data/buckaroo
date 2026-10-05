@@ -14,6 +14,7 @@ from buckaroo.pluggable_analysis_framework.stat_result import (Ok, Err, Upstream
 from buckaroo.pluggable_analysis_framework.typed_dag import (build_typed_dag, build_column_dag, DAGConfigError)
 from buckaroo.pluggable_analysis_framework.column_filters import (is_numeric, is_string, is_temporal, is_boolean, any_of, not_)
 from buckaroo.pluggable_analysis_framework.stat_pipeline import (StatPipeline, _normalize_inputs, errors_to_errdict)
+from buckaroo.pluggable_analysis_framework.stat_units import StatState, merge_fragments, rewrite_sd
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
 from buckaroo.pluggable_analysis_framework.utils import PERVERSE_DF
 
@@ -736,3 +737,243 @@ class TestIntegration:
             assert col_stats['length'] == 4
             assert isinstance(col_stats['distinct_per'], float)
             assert col_stats['distinct_per'] > 0
+
+
+# ============================================================================
+# Characterization: process_df is process_column run over each column
+# ============================================================================
+
+def _mixed_frames():
+    """The same mixed-dtype columns as a pandas and a polars frame. Every column
+    has a different count for each of its values: polars does not keep the order
+    of equal counts, so ties would make two runs differ."""
+    pl = pytest.importorskip("polars")
+    data = {
+        'ints': [3, 1, 2, 3, 3, 1],
+        'floats': [0.5, 0.5, 0.5, 2.5, 2.5, None],
+        'words': ['x', 'y', 'x', 'z', 'x', 'y'],
+        'flags': [True, False, True, True, False, True]}
+    return {'pandas': pd.DataFrame(data), 'polars': pl.DataFrame(data)}
+
+
+def _stat_lists():
+    from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
+    from buckaroo.customizations.pl_stats_v2 import PL_ANALYSIS_V2
+    return {'pandas': PD_ANALYSIS_V2, 'polars': PL_ANALYSIS_V2}
+
+
+class TestProcessDfCharacterization:
+    """What ``process_df`` returns, written as the ``process_column`` loop it is
+    today, so a refactor of it into resumable units can be checked against
+    something that does not go through the units."""
+
+    @staticmethod
+    def _by_hand(pipeline, df, skip=()):
+        from buckaroo.df_util import old_col_new_col
+        expected = {}
+        for orig, rewritten in old_col_new_col(df):
+            if orig in skip:
+                expected[rewritten] = {'orig_col_name': orig, 'rewritten_col_name': rewritten}
+                continue
+            ser = df[orig]
+            stats, _errors = pipeline.process_column(column_name=rewritten, column_dtype=ser.dtype, raw_series=ser,
+                sampled_series=ser, raw_dataframe=df,
+                initial_stats={'orig_col_name': orig, 'rewritten_col_name': rewritten})
+            expected[rewritten] = stats
+        return expected
+
+    @pytest.mark.parametrize('backend', ['pandas', 'polars'])
+    @pytest.mark.parametrize('skip', [(), ('floats',)])
+    def test_process_df_equals_the_column_loop(self, backend, skip):
+        df = _mixed_frames()[backend]
+        pipeline = StatPipeline(_stat_lists()[backend], unit_test=False)
+        result, errors = pipeline.process_df(df, skip_columns=set(skip))
+        expected = self._by_hand(pipeline, df, skip)
+        assert errors == []
+        assert list(result) == list(expected), "columns must keep the frame's order"
+        for col in expected:
+            assert repr(result[col]) == repr(expected[col]), col
+
+    def test_errors_are_collected_per_column(self):
+        @stat()
+        def fails_on_words(ser: RawSeries) -> int:
+            if isinstance(ser.iloc[0], str):
+                raise ValueError('words')
+            return 0
+
+        pipeline = StatPipeline([length, fails_on_words], unit_test=False)
+        _result, errors = pipeline.process_df(_mixed_frames()['pandas'])
+        assert [(e.column, e.stat_key) for e in errors] == [('c', 'fails_on_words')]
+
+
+# ============================================================================
+# Resumable units: plan(state) and run(unit, acc) (rows-first s4)
+# ============================================================================
+
+class TestStatUnits:
+    """``plan(state)`` lists the units of a run, one per column, and
+    ``run(unit, acc)`` runs one and returns a ``{orig_col: {stat: value}}``
+    fragment. ``process_df`` is these two run over every unit, so a caller that
+    runs them one at a time gets what it would have got all at once."""
+
+    @staticmethod
+    def _df():
+        # Original names differ from the rewritten a, b, c.
+        return pd.DataFrame({'amount': [1, 2, 3, 1], 'word': ['x', 'y', 'x', 'x'], 'score': [0.5, 1.5, None, 2.5]})
+
+    @staticmethod
+    def _pipeline():
+        return StatPipeline([length, null_count, distinct_count, distinct_per, nan_per], unit_test=False)
+
+    @staticmethod
+    def _run_units(pipeline, state):
+        acc = pipeline.new_accumulator(state)
+        fragments = [pipeline.run(unit, acc) for unit in pipeline.plan(state)]
+        return acc, fragments
+
+    def test_plan_is_one_unit_per_column_in_column_order(self):
+        units = self._pipeline().plan(StatState(self._df()))
+        assert [u.columns for u in units] == [('amount',), ('word',), ('score',)]
+        assert len({u.id for u in units}) == 3
+        assert {u.phase for u in units} == {'column'}
+        assert all(u.after == () for u in units), "no column's stats read another column's"
+
+    def test_plan_and_a_new_accumulator_compute_nothing(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(StatPipeline, 'process_column', lambda self, *a, **k: calls.append(a))
+        pipeline, state = self._pipeline(), StatState(self._df())
+        pipeline.plan(state)
+        pipeline.new_accumulator(state)
+        assert calls == []
+
+    def test_run_returns_the_fragment_of_its_unit_keyed_by_original_name(self):
+        pipeline, state = self._pipeline(), StatState(self._df())
+        acc = pipeline.new_accumulator(state)
+        fragment = pipeline.run(pipeline.plan(state)[1], acc)
+        assert list(fragment) == ['word']
+        assert fragment['word']['length'] == 4
+        assert fragment['word']['distinct_count'] == 2
+        assert (fragment['word']['orig_col_name'], fragment['word']['rewritten_col_name']) == ('word', 'b')
+        assert list(acc.sd()) == ['word'], "a column with no unit run yet has no entry"
+
+    def test_the_union_of_fragments_is_what_process_df_returns(self):
+        df, pipeline = self._df(), self._pipeline()
+        acc, fragments = self._run_units(pipeline, StatState(df))
+        expected, errors = pipeline.process_df(df)
+        assert rewrite_sd(merge_fragments(fragments), df) == expected
+        assert list(acc.sd()) == ['amount', 'word', 'score']
+        assert [(e.column, e.stat_key) for e in acc.errors] == [(e.column, e.stat_key) for e in errors]
+
+    def test_an_error_in_a_unit_is_recorded_on_the_accumulator(self):
+
+        @stat()
+        def fails_on_words(ser: RawSeries) -> int:
+            if isinstance(ser.iloc[0], str):
+                raise ValueError('words')
+            return 0
+
+        pipeline = StatPipeline([length, fails_on_words], unit_test=False)
+        acc, fragments = self._run_units(pipeline, StatState(self._df()))
+        assert [(e.column, e.stat_key) for e in acc.errors] == [('b', 'fails_on_words')]
+        assert fragments[1]['word']['fails_on_words'] is None
+
+    @pytest.mark.parametrize('names', [('word',), ('b',)])
+    def test_a_column_group_returns_only_those_columns(self, names):
+        """A group is named by original or rewritten name, since the client
+        only knows the rewritten ones."""
+        pipeline = self._pipeline()
+        state = StatState(self._df(), columns=names)
+        assert [u.columns for u in pipeline.plan(state)] == [('word',)]
+        acc, fragments = self._run_units(pipeline, state)
+        assert [list(f) for f in fragments] == [['word']]
+        assert list(acc.sd()) == ['word']
+
+    @pytest.mark.parametrize('names', [('score',), ('c',)])
+    def test_priority_columns_are_planned_first(self, names):
+        units = self._pipeline().plan(StatState(self._df(), priority=names))
+        assert [u.columns[0] for u in units] == ['score', 'amount', 'word']
+
+    def test_an_empty_frame_has_no_units(self):
+        pipeline, state = self._pipeline(), StatState(pd.DataFrame({'x': pd.Series([], dtype='int64')}))
+        assert pipeline.plan(state) == []
+        assert pipeline.new_accumulator(state).sd() == {}
+
+    @pytest.mark.parametrize('backend', ['pandas', 'polars'])
+    def test_real_stats_run_unit_by_unit_equal_process_df(self, backend):
+        df = _mixed_frames()[backend]
+        pipeline = StatPipeline(_stat_lists()[backend], unit_test=False)
+        acc, fragments = self._run_units(pipeline, StatState(df))
+        expected, errors = pipeline.process_df(df)
+        assert len(fragments) == len(df.columns)
+        assert repr(rewrite_sd(merge_fragments(fragments), df)) == repr(expected)
+        assert errors == [] and acc.errors == []
+
+    # A name can be an original column name and, at the same time, the
+    # rewritten name of another column. ``permuted`` has that: its rewritten
+    # names are c -> a, b -> b, a -> c.
+    @staticmethod
+    def _permuted():
+        return pd.DataFrame({'c': [1, 2, 3, 1], 'b': ['x', 'y', 'x', 'x'], 'a': [0.5, 1.5, None, 2.5]})
+
+    @pytest.mark.parametrize('columns, expected', [
+        (('c',), ['c']),
+        (('a',), ['a']),
+        (('a', 'c'), ['c', 'a']),
+        (('b',), ['b']),
+    ])
+    def test_a_name_that_is_an_original_name_picks_that_column_only(self, columns, expected):
+        """'c' is the original name of one column and the rewritten name of
+        another. Read once, as the original name, it asks for one column."""
+        state = StatState(self._permuted(), columns=columns)
+        assert [u.columns[0] for u in self._pipeline().plan(state)] == expected
+
+    def test_a_rewritten_name_that_is_no_original_name_still_picks_its_column(self):
+        df = self._permuted().rename(columns={'b': 'word'})
+        state = StatState(df, columns=('b',))
+        assert [u.columns for u in self._pipeline().plan(state)] == [('word',)]
+
+    @pytest.mark.parametrize('columns, expected', [
+        (('c',), ['a']),
+        (('a',), ['c']),
+        (('b',), ['b']),
+        (('a', 'c'), ['c', 'a']),
+    ])
+    def test_the_rewritten_namespace_reads_every_name_as_a_rewritten_name(self, columns, expected):
+        state = StatState(self._permuted(), columns=columns, namespace='rewritten')
+        pipeline = self._pipeline()
+        assert [u.columns[0] for u in pipeline.plan(state)] == expected
+        acc, fragments = self._run_units(pipeline, state)
+        assert list(acc.sd()) == expected and [list(f) for f in fragments] == [[c] for c in expected]
+
+    def test_the_original_namespace_ignores_a_rewritten_name(self):
+        df = self._permuted().rename(columns={'b': 'word'})
+        state = StatState(df, columns=('b', 'c'), namespace='original')
+        assert [u.columns for u in self._pipeline().plan(state)] == [('c',)]
+
+    def test_a_group_outside_the_frame_is_empty(self):
+        assert self._pipeline().plan(StatState(self._permuted(), columns=('zzz',))) == []
+
+    def test_priority_reads_a_name_that_is_an_original_name_as_that_column(self):
+        state = StatState(self._permuted(), priority=('a',))
+        assert [u.columns[0] for u in self._pipeline().plan(state)] == ['a', 'c', 'b']
+
+    @pytest.mark.parametrize('namespace, priority, expected', [
+        ('original', ('a',), ['a', 'c', 'b']),
+        ('rewritten', ('c',), ['a', 'c', 'b']),
+        ('rewritten', ('a',), ['c', 'b', 'a']),
+    ])
+    def test_priority_reads_each_name_once_in_its_namespace(self, namespace, priority, expected):
+        state = StatState(self._permuted(), priority=priority, namespace=namespace)
+        assert [u.columns[0] for u in self._pipeline().plan(state)] == expected
+
+    def test_an_unknown_namespace_is_an_error(self):
+        with pytest.raises(ValueError, match='namespace'):
+            self._pipeline().plan(StatState(self._permuted(), columns=('c',), namespace='both'))
+
+    @pytest.mark.parametrize('backend', ['pandas', 'polars'])
+    def test_the_scalar_tier_has_no_pandas_or_polars_units(self, backend):
+        """The scalar tier is xorq's. A state that asks for it must not be
+        answered with full-tier units."""
+        pipeline = StatPipeline(_stat_lists()[backend], unit_test=False)
+        with pytest.raises(ValueError, match='full tier'):
+            pipeline.plan(StatState(_mixed_frames()[backend], tier='scalar'))

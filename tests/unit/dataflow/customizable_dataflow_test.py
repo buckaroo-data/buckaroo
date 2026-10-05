@@ -75,6 +75,25 @@ def test_widget_instatiation():
     assert dfc.df_data_dict['main'] == BASIC_DF_JSON_DATA
     assert dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
 
+def test_all_stats_and_display_args_are_built_separately(monkeypatch):
+    """``_handle_widget_change`` is the composition of separately callable
+    builders (rows-first s1): the stats payload can be rebuilt without
+    rebuilding column_config, and column_config without serializing stats."""
+    dfc = ACDFC(BASIC_DF)
+    _unused, processed_df, merged_sd = dfc.widget_args_tuple
+    serialized = []
+    original = dfc._sd_to_jsondf
+    monkeypatch.setattr(dfc, '_sd_to_jsondf', lambda sd: serialized.append(sd) or original(sd))
+
+    display_args = dfc._build_df_display_args(processed_df, merged_sd)
+    assert serialized == [], "building display args must not serialize all_stats"
+    assert display_args == dfc.df_display_args
+
+    data_dict = dfc._build_df_data_dict(processed_df, merged_sd)
+    assert serialized == [merged_sd]
+    assert data_dict == dfc.df_data_dict
+
+
 def test_widget_operations_instatiation():
     dfc = ACDFC(BASIC_DF)
     # dfc starts with operations of [{'meta':'no-op'], but the first
