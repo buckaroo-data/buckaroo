@@ -212,14 +212,16 @@ class LoadHandler(tornado.web.RequestHandler):
         port = self.application.settings["port"]
         return find_or_create_session_window(session_id, port, reload_if_found=True)
 
-    def _load_polars_with_error_handling(self, path: str):
+    def _load_polars_with_error_handling(self, path: str, session_id: str):
         """Eager polars load for ``backend='polars'``. Errors share the
         same shape as the pandas loader so the response surface is
         identical from the client's POV."""
         try:
             from buckaroo.server.data_loading_polars import load_file_polars, get_metadata_polars
-            df = load_file_polars(path)
-            metadata = get_metadata_polars(df, path)
+            with perf_log.perf_span("firstpull.file_load", session=session_id):
+                df = load_file_polars(path)
+            with perf_log.perf_span("firstpull.metadata", session=session_id):
+                metadata = get_metadata_polars(df, path)
             return df, metadata
         except FileNotFoundError:
             self.set_status(404)
@@ -245,16 +247,20 @@ class LoadHandler(tornado.web.RequestHandler):
             self.write(resp)
             return None, None
 
-    def _load_file_with_error_handling(self, path: str, is_lazy: bool):
+    def _load_file_with_error_handling(self, path: str, is_lazy: bool, session_id: str):
         """Load file and handle errors. Returns (file_obj, metadata) or (None, None)."""
         try:
             if is_lazy:
-                ldf = load_file_lazy(path)
-                metadata = get_metadata_lazy(ldf, path)
+                with perf_log.perf_span("firstpull.file_load", session=session_id):
+                    ldf = load_file_lazy(path)
+                with perf_log.perf_span("firstpull.metadata", session=session_id):
+                    metadata = get_metadata_lazy(ldf, path)
                 return ldf, metadata
             else:
-                df = load_file(path)
-                metadata = get_metadata(df, path)
+                with perf_log.perf_span("firstpull.file_load", session=session_id):
+                    df = load_file(path)
+                with perf_log.perf_span("firstpull.metadata", session=session_id):
+                    metadata = get_metadata(df, path)
                 return df, metadata
         except FileNotFoundError:
             self.set_status(404)
@@ -321,45 +327,55 @@ class LoadHandler(tornado.web.RequestHandler):
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
+        # Companion telemetry endpoint (#996): the load's firstpull.* spans
+        # POST to it, and the sink stays on the session for the WS first pull.
+        # Every /load re-arms, as a reload's page pulls a fresh first screen.
+        tele_sink = telemetry.sink_for_url(body.get("telemetry_url"))
+        telemetry.arm_session(session, tele_sink)
 
-        # Load data in appropriate mode
-        if backend == "polars" and mode == "buckaroo":
-            file_obj, metadata = self._load_polars_with_error_handling(path)
-        else:
-            file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"))
-        if file_obj is None:
-            return
-
-        if mode == "lazy":
-            self._load_lazy_polars(session, path, file_obj, metadata)
-        else:
-            session.df = file_obj
-            session.metadata = metadata
-            if mode == "buckaroo":
-                if backend == "polars":
-                    from buckaroo.server.data_loading_polars import create_polars_dataflow
-                    dataflow = create_polars_dataflow(file_obj,
-                        column_config_overrides=column_config_overrides,
-                        extra_grid_config=extra_grid_config, init_sd=init_sd)
-                else:
-                    dataflow = create_dataflow(file_obj,
-                        column_config_overrides=column_config_overrides,
-                        extra_grid_config=extra_grid_config, init_sd=init_sd)
-                session.dataflow = dataflow
-                buckaroo_state = get_buckaroo_display_state(dataflow)
-                session.df_display_args = buckaroo_state["df_display_args"]
-                session.df_data_dict = buckaroo_state["df_data_dict"]
-                session.df_meta = buckaroo_state["df_meta"]
-                session.buckaroo_state = buckaroo_state["buckaroo_state"]
-                session.buckaroo_options = buckaroo_state["buckaroo_options"]
-                session.command_config = buckaroo_state["command_config"]
-                session.operation_results = buckaroo_state["operation_results"]
-                session.operations = buckaroo_state["operations"]
+        with telemetry.firstpull_load(session_id, tele_sink, "load", path=path, backend=backend, mode=mode):
+            # Load data in appropriate mode
+            if backend == "polars" and mode == "buckaroo":
+                file_obj, metadata = self._load_polars_with_error_handling(path, session_id)
             else:
-                display_state = get_display_state(file_obj, path)
-                session.df_display_args = display_state["df_display_args"]
-                session.df_data_dict = display_state["df_data_dict"]
-                session.df_meta = display_state["df_meta"]
+                file_obj, metadata = self._load_file_with_error_handling(path, is_lazy=(mode == "lazy"),
+                    session_id=session_id)
+            if file_obj is None:
+                return
+
+            if mode == "lazy":
+                self._load_lazy_polars(session, path, file_obj, metadata)
+            else:
+                session.df = file_obj
+                session.metadata = metadata
+                if mode == "buckaroo":
+                    # The stats run inside the dataflow constructor, so this is
+                    # the span a slow load shows up in.
+                    with perf_log.perf_span("firstpull.dataflow_construct", session=session_id):
+                        if backend == "polars":
+                            from buckaroo.server.data_loading_polars import create_polars_dataflow
+                            dataflow = create_polars_dataflow(file_obj,
+                                column_config_overrides=column_config_overrides,
+                                extra_grid_config=extra_grid_config, init_sd=init_sd)
+                        else:
+                            dataflow = create_dataflow(file_obj,
+                                column_config_overrides=column_config_overrides,
+                                extra_grid_config=extra_grid_config, init_sd=init_sd)
+                    session.dataflow = dataflow
+                    buckaroo_state = get_buckaroo_display_state(dataflow)
+                    session.df_display_args = buckaroo_state["df_display_args"]
+                    session.df_data_dict = buckaroo_state["df_data_dict"]
+                    session.df_meta = buckaroo_state["df_meta"]
+                    session.buckaroo_state = buckaroo_state["buckaroo_state"]
+                    session.buckaroo_options = buckaroo_state["buckaroo_options"]
+                    session.command_config = buckaroo_state["command_config"]
+                    session.operation_results = buckaroo_state["operation_results"]
+                    session.operations = buckaroo_state["operations"]
+                else:
+                    display_state = get_display_state(file_obj, path)
+                    session.df_display_args = display_state["df_display_args"]
+                    session.df_data_dict = display_state["df_data_dict"]
+                    session.df_meta = display_state["df_meta"]
 
         # Merge component_config into df_display_args if provided
         if component_config and session.df_display_args:
@@ -445,15 +461,10 @@ class LoadExprHandler(tornado.web.RequestHandler):
 
         # Companion telemetry endpoint (#943): when present, the firstpull.*
         # spans POST themselves to the companion as session-correlated records.
-        # Build the sink once here (on the IOLoop, where make_http_sink captures
-        # AsyncHTTPClient/IOLoop.current()) and stash it on the session so the WS
-        # first-pull spans reuse it. Built before the warm-session early-exit so a
-        # warm re-POST still re-arms telemetry for its fresh WS pull (#944) — the
-        # exit skips the pipeline, not the next time-to-first-rows. Absent →
-        # tele_sink is None and telemetry_context is a no-op, so normal buckaroo
-        # usage is unaffected.
-        telemetry_url = body.get("telemetry_url")
-        tele_sink = telemetry.make_http_sink(telemetry_url) if telemetry_url else None
+        # Built before the warm-session early-exit so a warm re-POST still
+        # re-arms telemetry for its fresh WS pull (#944) — the exit skips the
+        # pipeline, not the next time-to-first-rows.
+        tele_sink = telemetry.sink_for_url(body.get("telemetry_url"))
 
         # Short-circuit: if this session is already loaded with the same
         # build_dir (and no new config was supplied), skip the expensive
@@ -474,12 +485,8 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 and existing.backend == "xorq" and existing.build_dir == build_dir
                 and existing.cache_dir == cache_dir and existing.metadata):
             # The pipeline is skipped, but the refreshed page still opens a new
-            # WS and pulls a fresh time-to-first-rows. Re-arm first-pull telemetry
-            # on the existing session — rebind this request's sink and reset the
-            # seen flag — else the flag stays True from the prior load and the
-            # warm pull's span is silently dropped (#944).
-            existing.tele_sink = tele_sink
-            existing._perf_first_payload_seen = False
+            # WS and pulls a fresh time-to-first-rows (#944).
+            telemetry.arm_session(existing, tele_sink)
             if no_browser or not self.application.settings.get("open_browser", False):
                 browser_action = "skipped"
             else:
@@ -527,13 +534,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         project_root = body.get("project_root")
 
         try:
-            # session= correlates these spans across concurrent loads — the
-            # handler is async, so two /load_expr requests can interleave in
-            # the log even though no await sits inside a single span.
-            with (
-                perf_log.telemetry_context(session_id, tele_sink),
-                perf_log.perf_span("firstpull.load_expr", session=session_id, build_dir=build_dir),
-            ):
+            with telemetry.firstpull_load(session_id, tele_sink, "load_expr", build_dir=build_dir):
                 # The harness reads "expression build" as just this call, so it
                 # gets its own span rather than being outer-minus-inner residual.
                 with perf_log.perf_span("firstpull.expr_load", session=session_id):
@@ -578,20 +579,16 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session.cache_dir = cache_dir
         session.project_root = project_root
         session.dataflow_kwargs = dataflow_kwargs
-        session.tele_sink = tele_sink
         session.xorq_dataflow = xorq_dataflow
         # Clear pandas-side state left by a prior /load on the same
         # session so WS dispatch can no longer reach a stale dataflow.
         session.df = None
         session.dataflow = None
         session.ldf = None
-        # Re-arm first-pull telemetry (#944): this is a genuine reload (new
-        # expr / force_reload / new config — the warm-session early-exit above
-        # already returned for an identical reload), so the next WS pull is a
-        # fresh time-to-first-rows and must emit its firstpull.ws_first_payload
-        # span again. Without this the flag stays True from the prior load and
-        # every reload's first-pull telemetry is silently dropped.
-        session._perf_first_payload_seen = False
+        # A genuine reload (new expr / force_reload / new config — the warm
+        # early-exit above already returned for an identical one), so the next
+        # WS pull is a fresh time-to-first-rows (#944).
+        telemetry.arm_session(session, tele_sink)
         session.metadata = metadata
         session.prompt = prompt
         if component_config:
@@ -709,28 +706,34 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         if session_id is None:
             return
 
-        df1 = self._load_file(path1)
-        if df1 is None:
-            return
-        df2 = self._load_file(path2)
-        if df2 is None:
-            return
+        # Companion telemetry endpoint (#996), as for /load and /load_expr.
+        tele_sink = telemetry.sink_for_url(body.get("telemetry_url"))
+        with telemetry.firstpull_load(session_id, tele_sink, "load_compare", path1=path1, path2=path2):
+            with perf_log.perf_span("firstpull.file_load", session=session_id, path=path1):
+                df1 = self._load_file(path1)
+            if df1 is None:
+                return
+            with perf_log.perf_span("firstpull.file_load", session=session_id, path=path2):
+                df2 = self._load_file(path2)
+            if df2 is None:
+                return
 
-        try:
-            merged_df, column_config_overrides, eqs = col_join_dfs(df1, df2, join_columns, how)
-        except ValueError as e:
-            self.set_status(400)
-            self.write({"error_code": "compare_error", "message": str(e)})
-            return
-        except Exception:
-            tb = traceback.format_exc()
-            log.error("compare error: %s", tb)
-            resp: dict = {"error_code": "compare_error", "message": "Failed to compare files"}
-            if _BUCKAROO_DEBUG:
-                resp["details"] = tb
-            self.set_status(500)
-            self.write(resp)
-            return
+            try:
+                with perf_log.perf_span("firstpull.compare", session=session_id):
+                    merged_df, column_config_overrides, eqs = col_join_dfs(df1, df2, join_columns, how)
+            except ValueError as e:
+                self.set_status(400)
+                self.write({"error_code": "compare_error", "message": str(e)})
+                return
+            except Exception:
+                tb = traceback.format_exc()
+                log.error("compare error: %s", tb)
+                resp: dict = {"error_code": "compare_error", "message": "Failed to compare files"}
+                if _BUCKAROO_DEBUG:
+                    resp["details"] = tb
+                self.set_status(500)
+                self.write(resp)
+                return
 
         # Build display state from merged DataFrame
         display_state = get_display_state(merged_df, path1)
@@ -766,6 +769,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         session.df_data_dict = display_state["df_data_dict"]
         session.df_meta = display_state["df_meta"]
         session.mode = "viewer"
+        telemetry.arm_session(session, tele_sink)
 
         # Push to WebSocket clients
         if session.ws_clients:
