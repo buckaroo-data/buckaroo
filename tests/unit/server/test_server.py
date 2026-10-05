@@ -54,6 +54,36 @@ class TestHealth(tornado.testing.AsyncHTTPTestCase):
         self.assertIn("uptime_s", body)
 
 
+class TestMakeAppDefaultNoBrowser(tornado.testing.AsyncHTTPTestCase):
+    """``make_app()`` with no arguments must not open browser windows.
+
+    The CLI passes ``open_browser`` explicitly (``--no-browser``), so the
+    default only reaches library callers — tests and scripts that build a
+    throwaway server. With the old default of True, every ``/load`` they made
+    opened a Chrome window on a server that was gone a moment later."""
+
+    def get_app(self):
+        return _make_app()
+
+    def test_default_is_no_browser(self):
+        self.assertFalse(self._app.settings["open_browser"])
+
+    def test_load_without_no_browser_opens_nothing(self):
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                with mock.patch("buckaroo.server.handlers.find_or_create_session_window",
+                    return_value="opened") as opener:
+                    resp = self.fetch("/load", method="POST",
+                        body=json.dumps({"session": "default-browser", "path": f.name}),
+                        headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+                self.assertEqual(json.loads(resp.body)["browser_action"], "disabled")
+                opener.assert_not_called()
+            finally:
+                os.unlink(f.name)
+
+
 class TestLoad(tornado.testing.AsyncHTTPTestCase):
     def get_app(self):
         return make_app()

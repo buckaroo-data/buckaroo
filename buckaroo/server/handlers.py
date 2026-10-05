@@ -206,7 +206,7 @@ class LoadHandler(tornado.web.RequestHandler):
 
     def _handle_browser_window(self, session_id: str) -> str:
         """Handle browser window management."""
-        if not self.application.settings.get("open_browser", True):
+        if not self.application.settings.get("open_browser", False):
             return "disabled"
 
         port = self.application.settings["port"]
@@ -487,7 +487,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
             # The pipeline is skipped, but the refreshed page still opens a new
             # WS and pulls a fresh time-to-first-rows (#944).
             telemetry.arm_session(existing, tele_sink)
-            if no_browser or not self.application.settings.get("open_browser", True):
+            if no_browser or not self.application.settings.get("open_browser", False):
                 browser_action = "skipped"
             else:
                 port = self.application.settings["port"]
@@ -628,7 +628,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 except Exception:
                     session.ws_clients.discard(client)
 
-        if no_browser or not self.application.settings.get("open_browser", True):
+        if no_browser or not self.application.settings.get("open_browser", False):
             browser_action = "skipped"
         else:
             port = self.application.settings["port"]
@@ -784,7 +784,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
                     session.ws_clients.discard(client)
 
         # Browser window
-        if no_browser or not self.application.settings.get("open_browser", True):
+        if no_browser or not self.application.settings.get("open_browser", False):
             browser_action = "skipped"
         else:
             port = self.application.settings.get("port", 8888)
