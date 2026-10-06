@@ -25,7 +25,7 @@ from typing import Any, TypedDict
 import numpy as np
 import pandas as pd
 
-from buckaroo.pluggable_analysis_framework.stat_func import (StatFunc, StatKey, stat, RawSeries)
+from buckaroo.pluggable_analysis_framework.stat_func import (ColumnValue, StatFunc, StatKey, stat, RawSeries)
 from buckaroo.pluggable_analysis_framework.column_filters import is_numeric_not_bool
 from buckaroo.jlisp.lisp_utils import s, sA
 from buckaroo.auto_clean.heuristic_lang import get_top_score
@@ -106,7 +106,8 @@ def _type(is_bool: bool, is_numeric: bool, is_float: bool,
 # ============================================================
 
 BaseSummaryResult = TypedDict('BaseSummaryResult',
-    {'length': int, 'null_count': int, 'value_counts': pd.Series, 'mode': Any, 'min': Any, 'max': Any})
+    {'length': int, 'null_count': int, 'value_counts': pd.Series, 'mode': ColumnValue, 'min': ColumnValue,
+     'max': ColumnValue})
 
 
 @stat()
@@ -152,7 +153,8 @@ def numeric_stats(ser: RawSeries) -> NumericStatsResult:
 # ============================================================
 
 ComputedSummaryResult = TypedDict('ComputedSummaryResult',
-    {'non_null_count': int, 'most_freq': Any, '2nd_freq': Any, '3rd_freq': Any, '4th_freq': Any, '5th_freq': Any,
+    {'non_null_count': int, 'most_freq': ColumnValue, '2nd_freq': ColumnValue, '3rd_freq': ColumnValue,
+     '4th_freq': ColumnValue, '5th_freq': ColumnValue,
      'unique_count': int, 'empty_count': int, 'distinct_count': int, 'distinct_per': float, 'empty_per': float,
      'unique_per': float, 'nan_per': float})
 

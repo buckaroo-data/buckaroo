@@ -17,7 +17,7 @@ from buckaroo.df_util import old_col_new_col
 
 from . import perf_log
 from .col_analysis import ColAnalysis, ErrDict, SDType
-from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqExpr, XorqExecute, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
+from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqExpr, XorqExecute, RAW_MARKER_TYPES, MISSING, ColumnValue, collect_stat_funcs)
 from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_typed_dag, build_column_dag, DAGConfigError
 from .utils import PERVERSE_DF
@@ -73,7 +73,7 @@ def _normalize_inputs(inputs: list) -> List[StatFunc]:
 
 
 def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_name: str, raw_series=None,
-        sampled_series=None, raw_dataframe=None, xorq_expr=None, xorq_execute=None) -> None:
+        sampled_series=None, raw_dataframe=None, xorq_expr=None, xorq_execute=None) -> Optional[Exception]:
     """Execute a single StatFunc, updating the accumulator in place.
 
     Handles:
@@ -81,6 +81,10 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
     - Upstream error propagation
     - Multi-value return unpacking (TypedDict returns)
     - Default fallback on error
+
+    Returns the exception ``sf.func`` raised, including one a ``default``
+    replaced, so a caller can tell a fallback value from a computed one.
+    None when the function ran cleanly or didn't run (upstream error).
     """
     # Build kwargs from requires
     kwargs = {}
@@ -109,6 +113,7 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
             if isinstance(result, Ok):
                 # Type check at the boundary: catch mismatched stat definitions early
                 if (req.type is not Any
+                        and req.type is not ColumnValue
                         and req.type not in RAW_MARKER_TYPES
                         and result.value is not None
                         and not isinstance(result.value, req.type)):
@@ -140,7 +145,7 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
             break
 
     if has_upstream_err:
-        return
+        return None
 
     # Execute the function
     try:
@@ -170,6 +175,8 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
             for sk in sf.provides:
                 accumulator[sk.name] = Err(error=e, stat_func_name=sf.name, column_name=column_name,
                     inputs=kwargs.copy())
+        return e
+    return None
 
 
 class StatPipeline:

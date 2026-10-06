@@ -31,7 +31,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (XorqColumn, XorqExpr, XorqExecute)
-from buckaroo.pluggable_analysis_framework.stat_func import MultipleProvides, stat
+from buckaroo.pluggable_analysis_framework.stat_func import ColumnValue, MultipleProvides, stat
 from buckaroo.customizations.histogram import fmt_bucket
 
 try:
@@ -48,7 +48,8 @@ except ImportError:
 
 
 def _is_numeric_ibis(dtype) -> bool:
-    """True for numeric (incl. boolean — matches ibis's own definition)."""
+    """True for numeric dtypes. Excludes boolean: ibis's ``Boolean.is_numeric()``
+    is False, so boolean columns get no min/max."""
     return dtype.is_numeric()
 
 
@@ -145,6 +146,8 @@ def _type(is_bool: bool, is_integer: bool, is_float: bool, is_datetime: bool, is
 # folds them into a single ``table.aggregate(...)`` call and the resulting
 # scalar lands in the accumulator under the key matching the function name.
 # Type annotations describe the *eventual scalar type* in the accumulator.
+# ``min`` and ``max`` are ``ColumnValue``: no cast, so they keep the column's
+# type (int on an int column, Decimal on a decimal column).
 #
 # Names like ``min`` / ``max`` shadow the corresponding builtins inside this
 # module — intentional. Module-internal code never calls ``builtins.min`` /
@@ -158,13 +161,13 @@ def null_count(col: XorqColumn) -> int:
 
 
 @stat(column_filter=_is_numeric_ibis)
-def min(col: XorqColumn) -> float:
-    return col.min().cast("float64")
+def min(col: XorqColumn) -> ColumnValue:
+    return col.min()
 
 
 @stat(column_filter=_is_numeric_ibis)
-def max(col: XorqColumn) -> float:
-    return col.max().cast("float64")
+def max(col: XorqColumn) -> ColumnValue:
+    return col.max()
 
 
 @stat(column_filter=_distinct_count_supported)
@@ -239,13 +242,13 @@ def distinct_per(length: int, distinct_count: int) -> float:
 # ============================================================
 
 
-def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str, min_val: float,
-        max_val: float) -> list:
+def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str, min_val: Any,
+        max_val: Any) -> list:
     if min_val is None or max_val is None:
         return []
-    if (isinstance(min_val, float) and math.isnan(min_val)) or (
-        isinstance(max_val, float) and math.isnan(max_val)
-    ):
+    # min/max keep the column's type (int, Decimal); bucket math runs in float64.
+    min_val, max_val = float(min_val), float(max_val)
+    if math.isnan(min_val) or math.isnan(max_val):
         return []
     if min_val == max_val:
         return []
@@ -327,7 +330,7 @@ def _categorical_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, co
 
 @stat(default=[])
 def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numeric: bool, is_bool: bool, length: int,
-        distinct_count: int, min: float, max: float) -> list:
+        distinct_count: int, min: ColumnValue, max: ColumnValue) -> list:
     """10-bucket numeric histogram or top-10 categorical histogram.
 
     Numeric columns with very few distinct values (<= 5) fall through to
@@ -358,7 +361,7 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
 
 
 @stat(default=[])
-def histogram_bins(is_numeric: bool, is_bool: bool, distinct_count: int, min: float, max: float) -> list:
+def histogram_bins(is_numeric: bool, is_bool: bool, distinct_count: int, min: ColumnValue, max: ColumnValue) -> list:
     """Evenly-spaced numeric bin edges consumed by the JS ``color_map`` styler.
 
     Returns 11 edges (10 equal-width bins) spanning [min, max] — the same
@@ -379,10 +382,12 @@ def histogram_bins(is_numeric: bool, is_bool: bool, distinct_count: int, min: fl
         return []
     if min is None or max is None:
         return []
-    if min == max:
+    # min/max keep the column's type; the JS color_map wants float edges.
+    lo, hi = float(min), float(max)
+    if lo == hi:
         return []
-    width = (max - min) / 10
-    return [min + i * width for i in range(11)]
+    width = (hi - lo) / 10
+    return [lo + i * width for i in range(11)]
 
 
 # ============================================================
