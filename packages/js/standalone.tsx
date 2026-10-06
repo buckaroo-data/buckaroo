@@ -75,28 +75,57 @@ function updateFilenameDisplay(metadata: any, prompt?: string) {
     }
 }
 
+/** What the model held for `keys` when a component first rendered. */
+function snapshotModel(model: WebSocketModel, keys: string[]): Record<string, any> {
+    return Object.fromEntries(keys.map((k) => [k, model.get(k)]));
+}
+
+/** A change:* emitted between the first render and the effect that registers
+ *  the listeners had no listener. The model holds the latest value of every
+ *  key, so apply each one that differs from what the first render read. */
+function catchUpOnModel(
+    model: WebSocketModel,
+    seed: Record<string, any>,
+    appliers: Record<string, (v: any) => void>,
+) {
+    for (const [key, apply] of Object.entries(appliers)) {
+        const v = model.get(key);
+        if (v !== undefined && v !== seed[key]) apply(v);
+    }
+}
+
 function ViewerApp({ model, src }: { model: WebSocketModel; src: any }) {
     const [dfMeta, setDfMeta] = React.useState(model.get("df_meta") || { total_rows: 0 });
     const [dfDataDict, setDfDataDict] = React.useState(model.get("df_data_dict") || {});
     const [dfDisplayArgs, setDfDisplayArgs] = React.useState(patchDisplayArgsHeight(model.get("df_display_args") || {}));
+    const seed = React.useRef(snapshotModel(model, ["df_meta", "df_data_dict", "df_display_args"]));
+    // A full frame reaches the view as change:df_data_dict and again as
+    // metadata; this decodes each dict once and applies only the newest decode.
+    const loadDict = React.useMemo(
+        () => srt.makeLatestDictDecoder(setDfDataDict, model.get("df_data_dict")),
+        [model],
+    );
 
     React.useEffect(() => {
         const onMeta = (metadata: any, prompt?: string) => {
             updateFilenameDisplay(metadata, prompt);
             setDfMeta(model.get("df_meta") || { total_rows: metadata.rows || 0 });
-            srt.decodeDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
+            loadDict(model.get("df_data_dict"));
             setDfDisplayArgs(patchDisplayArgsHeight(model.get("df_display_args") || {}));
         };
         model.on("metadata", onMeta);
 
         const onDfMeta = (v: any) => setDfMeta(v);
-        const onDfDataDict = (v: any) => {
-            srt.decodeDFDataDict(v).then(setDfDataDict);
-        };
+        const onDfDataDict = (v: any) => loadDict(v);
         const onDfDisplayArgs = (v: any) => setDfDisplayArgs(patchDisplayArgsHeight(v));
         model.on("change:df_meta", onDfMeta);
         model.on("change:df_data_dict", onDfDataDict);
         model.on("change:df_display_args", onDfDisplayArgs);
+        catchUpOnModel(model, seed.current, {
+            df_meta: onDfMeta,
+            df_data_dict: onDfDataDict,
+            df_display_args: onDfDisplayArgs,
+        });
 
         // Catch up on metadata that arrived before useEffect registered listeners
         const existingMeta = model.get("metadata");
@@ -110,7 +139,7 @@ function ViewerApp({ model, src }: { model: WebSocketModel; src: any }) {
             model.off("change:df_data_dict", onDfDataDict);
             model.off("change:df_display_args", onDfDisplayArgs);
         };
-    }, [model]);
+    }, [model, loadDict]);
 
     if (!dfDisplayArgs || !dfDisplayArgs["main"]) {
         return <div style={{ padding: 20, fontFamily: "sans-serif" }}>
@@ -140,12 +169,20 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
     const [commandConfig, setCommandConfig] = React.useState(model.get("command_config") || {});
     const [operationResults, setOperationResults] = React.useState(model.get("operation_results") || {});
     const [operations, setOperations] = React.useState(model.get("operations") || []);
+    const seed = React.useRef(snapshotModel(model, [
+        "df_meta", "df_data_dict", "df_display_args", "buckaroo_state", "buckaroo_options",
+        "command_config", "operation_results", "operations",
+    ]));
+    const loadDict = React.useMemo(
+        () => srt.makeLatestDictDecoder(setDfDataDict, model.get("df_data_dict")),
+        [model],
+    );
 
     React.useEffect(() => {
         const onMeta = (metadata: any, prompt?: string) => {
             updateFilenameDisplay(metadata, prompt);
             setDfMeta(model.get("df_meta") || { total_rows: 0 });
-            srt.decodeDFDataDict(model.get("df_data_dict") || {}).then(setDfDataDict);
+            loadDict(model.get("df_data_dict"));
             setDfDisplayArgs(patchDisplayArgsHeight(model.get("df_display_args") || {}));
             setBuckarooState(model.get("buckaroo_state") || {});
             setBuckarooOptions(model.get("buckaroo_options") || {});
@@ -168,9 +205,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
         };
 
         // df_data_dict needs async pre-resolution of parquet_b64 values
-        const onDfDataDict = (v: any) => {
-            srt.decodeDFDataDict(v).then(setDfDataDict);
-        };
+        const onDfDataDict = (v: any) => loadDict(v);
         model.on("change:df_data_dict", onDfDataDict);
 
         const onDfDisplayArgs = (v: any) => setDfDisplayArgs(patchDisplayArgsHeight(v));
@@ -185,6 +220,16 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
             ["operation_results", onChange("operation_results", setOperationResults)],
             ["operations", onChange("operations", setOperations)],
         ];
+        catchUpOnModel(model, seed.current, {
+            df_meta: setDfMeta,
+            df_data_dict: onDfDataDict,
+            df_display_args: onDfDisplayArgs,
+            buckaroo_state: setBuckarooState,
+            buckaroo_options: setBuckarooOptions,
+            command_config: setCommandConfig,
+            operation_results: setOperationResults,
+            operations: setOperations,
+        });
 
         return () => {
             model.off("metadata", onMeta);
@@ -193,7 +238,7 @@ function BuckarooApp({ model, src }: { model: WebSocketModel; src: any }) {
                 model.off(`change:${key}`, handler);
             }
         };
-    }, [model]);
+    }, [model, loadDict]);
 
     const onBuckarooState = React.useCallback((newState: any) => {
         // newState may be a value or a setter function

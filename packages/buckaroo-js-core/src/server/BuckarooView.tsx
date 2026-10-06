@@ -1,15 +1,15 @@
 import * as React from "react";
 
 import { BuckarooInfiniteWidget, DFViewerInfiniteDS, getKeySmartRowCache } from "../components/BuckarooWidgetInfinite";
-import { decodeDFDataDict } from "../components/DFViewerParts/resolveDFData";
 import { DFMeta, BuckarooState, BuckarooOptions } from "../components/WidgetTypes";
 import { CommandConfigT } from "../components/CommandUtils";
 import { Operation } from "../components/OperationUtils";
 import { OperationResult, baseOperationResults } from "../components/DependentTabs";
-import { DFData, DFDataOrPayload } from "../components/DFViewerParts/DFWhole";
+import { DFData } from "../components/DFViewerParts/DFWhole";
 import { IDisplayArgs } from "../components/DFViewerParts/gridUtils";
 import { stampLayoutType, isFitContentLayout } from "../components/DFViewerParts/displayArgsUtils";
 import { IModel } from "./IModel";
+import { makeLatestDictDecoder, RawDFDataDict } from "./latestDictDecoder";
 
 export type BuckarooServerMode = "viewer" | "buckaroo";
 
@@ -161,6 +161,22 @@ export function BuckarooView({
     const onMetadataRef = React.useRef(onMetadata);
     React.useEffect(() => { onMetadataRef.current = onMetadata; }, [onMetadata]);
 
+    // Every df_data_dict that reaches the view (the seed, change:df_data_dict,
+    // the metadata handler, the catch-up on subscribe) goes through one
+    // decoder, so a frame decodes once and the newest decode wins. The seed is
+    // already applied when it needs no resolution.
+    const dictDecoderRef = React.useRef<((raw: RawDFDataDict) => void) | null>(null);
+    if (dictDecoderRef.current === null) {
+        dictDecoderRef.current = makeLatestDictDecoder(
+            (d) => {
+                setDfDataDict(d as Record<string, DFData>);
+                setDataReady(true);
+            },
+            initialNeedsResolution ? undefined : (initialState.df_data_dict as RawDFDataDict),
+        );
+    }
+    const loadDfDataDict = dictDecoderRef.current;
+
     // Resolve any parquet-encoded payloads in df_data_dict. Pre-resolved
     // dicts (e.g. when BuckarooServerView already ran decodeDFDataDict)
     // pass through unchanged, so this is cheap in the common case. Skip
@@ -168,19 +184,13 @@ export function BuckarooView({
     // for the BuckarooServerView path.
     React.useEffect(() => {
         if (!initialNeedsResolution) return;
-        let cancelled = false;
-        const dict = initialState.df_data_dict as Record<string, DFDataOrPayload> | undefined;
+        const dict = initialState.df_data_dict as RawDFDataDict;
         if (!dict) {
             setDataReady(true);
             return;
         }
-        decodeDFDataDict(dict).then((d) => {
-            if (cancelled) return;
-            setDfDataDict(d as Record<string, DFData>);
-            setDataReady(true);
-        });
-        return () => { cancelled = true; };
-    }, [initialState, initialNeedsResolution]);
+        loadDfDataDict(dict);
+    }, [initialState, initialNeedsResolution, loadDfDataDict]);
 
     // Fire onMetadata for the initial payload, matching BuckarooServerView's
     // pre-split behavior.
@@ -202,8 +212,7 @@ export function BuckarooView({
         const onMeta = (metadata: BuckarooServerMetadata, prompt?: string) => {
             onMetadataRef.current?.(metadata, prompt);
             setDfMeta((model.get("df_meta") as DFMeta | undefined) ?? { ...DEFAULT_DF_META, total_rows: metadata?.rows ?? 0 });
-            decodeDFDataDict((model.get("df_data_dict") as Record<string, DFDataOrPayload> | undefined) ?? {})
-                .then((d) => setDfDataDict(d as Record<string, DFData>));
+            loadDfDataDict(model.get("df_data_dict") as RawDFDataDict);
             setDfDisplayArgs((model.get("df_display_args") as Record<string, IDisplayArgs> | undefined) ?? {});
             setBuckarooStateLocal((model.get("buckaroo_state") as BuckarooState | undefined) ?? DEFAULT_BUCKAROO_STATE);
             setBuckarooOptions((model.get("buckaroo_options") as BuckarooOptions | undefined) ?? DEFAULT_BUCKAROO_OPTIONS);
@@ -212,9 +221,7 @@ export function BuckarooView({
             setOperations((model.get("operations") as Operation[] | undefined) ?? []);
         };
         const onDfMeta = (v: DFMeta) => setDfMeta(v);
-        const onDfDataDict = (v: Record<string, DFDataOrPayload>) => {
-            decodeDFDataDict(v).then((d) => setDfDataDict(d as Record<string, DFData>));
-        };
+        const onDfDataDict = (v: RawDFDataDict) => loadDfDataDict(v);
         const onDfDisplayArgs = (v: Record<string, IDisplayArgs>) => setDfDisplayArgs(v);
         const onBState = (v: BuckarooState) => setBuckarooStateLocal(v);
         const onBOpts = (v: BuckarooOptions) => setBuckarooOptions(v);
@@ -232,6 +239,25 @@ export function BuckarooView({
         model.on("change:operation_results", onOpRes);
         model.on("change:operations", onOps);
 
+        // A change:* emitted after the model was built and before this effect
+        // ran had no listener. The model holds the latest value of every key,
+        // so read each one now that the handlers are in place. A value that is
+        // the one already held is a no-op (same reference).
+        const catchUp: Array<[string, (v: any) => void]> = [
+            ["df_meta", onDfMeta],
+            ["df_data_dict", onDfDataDict],
+            ["df_display_args", onDfDisplayArgs],
+            ["buckaroo_state", onBState],
+            ["buckaroo_options", onBOpts],
+            ["command_config", onCmdCfg],
+            ["operation_results", onOpRes],
+            ["operations", onOps],
+        ];
+        for (const [key, apply] of catchUp) {
+            const v = model.get(key);
+            if (v !== undefined) apply(v);
+        }
+
         return () => {
             model.off("metadata", onMeta);
             model.off("change:df_meta", onDfMeta);
@@ -243,7 +269,7 @@ export function BuckarooView({
             model.off("change:operation_results", onOpRes);
             model.off("change:operations", onOps);
         };
-    }, [model]);
+    }, [model, loadDfDataDict]);
 
     const onBuckarooState = React.useCallback<React.Dispatch<React.SetStateAction<BuckarooState>>>((newState) => {
         const resolved = typeof newState === "function"
