@@ -10,6 +10,8 @@ import pytest
 
 xo = pytest.importorskip("xorq.api")
 
+import xorq.vendor.ibis.expr.types.core as ibis_core  # noqa: E402
+
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (  # noqa: E402
     XorqDfStatsV2)
 from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2  # noqa: E402
@@ -72,3 +74,38 @@ class TestXorqDfStatsV2:
         stats.add_analysis(double_length)
         assert stats.sdf["ints"]["double_length"] == 10
         assert stats.sdf["strs"]["double_length"] == 10
+
+    def test_add_analysis_keeps_skip_columns_skipped(self):
+        """A column skipped at construction (its stats come from elsewhere) stays
+        unscanned when add_analysis reruns the pipeline (#1060)."""
+        from buckaroo.pluggable_analysis_framework.stat_func import XorqColumn, stat
+
+        @stat()
+        def non_null(col: XorqColumn) -> int:
+            return col.count()
+
+        stats = XorqDfStatsV2(_table(), XORQ_STATS_V2, skip_columns=["strs"])
+        skipped_keys = set(stats.sdf["strs"])
+        stats.add_analysis(non_null)
+        assert stats.sdf["ints"]["non_null"] == 5
+        assert set(stats.sdf["strs"]) == skipped_keys
+
+    def test_add_analysis_refreshes_length(self, monkeypatch):
+        """``length`` is the row count of the last run. A first run that couldn't
+        count the table leaves it None, and add_analysis's rerun fills it in
+        (#1060)."""
+        from buckaroo.pluggable_analysis_framework.stat_func import stat
+
+        @stat()
+        def double_length(length: int) -> int:
+            return length * 2
+
+        def backend_down(expr, *args, **kwargs):
+            raise ConnectionError("backend down")
+
+        with monkeypatch.context() as m:
+            m.setattr(ibis_core.Expr, "execute", backend_down)
+            stats = XorqDfStatsV2(_table(), XORQ_STATS_V2)
+        assert stats.length is None
+        stats.add_analysis(double_length)
+        assert stats.length == 5

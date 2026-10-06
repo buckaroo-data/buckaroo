@@ -35,7 +35,7 @@ from buckaroo.pluggable_analysis_framework import stat_cache as sc  # noqa: E402
 from buckaroo.pluggable_analysis_framework.stat_func import (  # noqa: E402
     ColumnValue, StatFunc, StatKey, XorqColumn, XorqExecute, XorqExpr, stat)
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (  # noqa: E402
-    TOTAL_LENGTH_KEY, XorqStatPipeline)
+    TOTAL_LENGTH_KEY, XorqDfStatsV2, XorqStatPipeline)
 
 
 def _table():
@@ -651,6 +651,22 @@ class TestPipelineCache:
         assert spy.batch_cells() == {(c, "non_null") for c in _table().columns}
         assert sd["ints"]["non_null"] == 40
         assert len(_parts(cache, "s")) == 2
+
+    def test_add_analysis_reruns_inside_the_constructors_scope(self, tmp_path):
+        """``add_analysis`` reruns with the ``scope_id`` the constructor was given,
+        so it reads that scope's cells and writes the new stat's cells there
+        (#1060)."""
+        cache = sc.StatCache(tmp_path)
+        stats = XorqDfStatsV2(_table(), XORQ_STATS_V2, cache_storage=cache, scope_id="s")
+        with ExecSpy() as spy:
+            stats.add_analysis(non_null)
+        assert spy.batch_cells() == {(c, "non_null") for c in _table().columns}
+        assert len(_parts(cache, "s")) == 2
+        with ExecSpy() as spy:
+            sd, errs = _pipeline(cache, XORQ_STATS_V2 + [non_null]).process_table(_table(), scope_id="s")
+        assert errs == []
+        assert spy.queries == []
+        assert sd["ints"]["non_null"] == 40
 
     def test_column_bisect_computes_only_new_columns(self, tmp_path):
         cache = sc.StatCache(tmp_path)
