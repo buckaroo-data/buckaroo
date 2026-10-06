@@ -157,6 +157,14 @@ def _ddd_xorq_table(name):
         return None
 
 
+@pytest.fixture(autouse=True)
+def _pyarrow_default_timezones(monkeypatch):
+    """Run under pyarrow's default timezone handling. Importing pandera sets
+    ``PYARROW_IGNORE_TIMEZONE=1`` (for pyspark), and collecting
+    ``test_buckaroo_pandera.py`` imports it for the whole session."""
+    monkeypatch.delenv("PYARROW_IGNORE_TIMEZONE", raising=False)
+
+
 class ExecSpy:
     """Records every backend query. Patches xorq's ``Expr.execute``, which the
     stat pipeline and ``_expr_count``'s ``count()`` both go through."""
@@ -484,6 +492,18 @@ class TestStorage:
         got = cache.read("s").values.get("a", {})
         assert got.get("ok@1") == 7, f"writing {value!r} lost the rest of the part"
         assert "v@x" not in got or _same(got["v@x"], value), f"{value!r} came back as {got['v@x']!r}"
+
+    def test_an_aware_datetime_shifted_by_pyarrow_is_not_cached(self, tmp_path, monkeypatch):
+        """With ``PYARROW_IGNORE_TIMEZONE`` set, as importing pandera does,
+        pyarrow stores an aware datetime's wall time as UTC. The round-trip
+        check sees the shifted instant and leaves the value out."""
+        monkeypatch.setenv("PYARROW_IGNORE_TIMEZONE", "1")
+        value = dt.datetime(2020, 1, 1, tzinfo=zoneinfo.ZoneInfo("America/New_York"))
+        cache = sc.StatCache(tmp_path)
+        cache.write("s", {"a": {"ok@1": 7, "v@x": value}})
+        got = cache.read("s").values.get("a", {})
+        assert got.get("ok@1") == 7
+        assert "v@x" not in got, f"{value!r} was cached as {got['v@x']!r}"
 
 
 # ============================================================
