@@ -156,3 +156,12 @@ def test_fmt_tail_bucket_names_infinite_bounds():
     assert fmt_tail_bucket(198.0, INF, 4.0) == '198–inf'
     assert fmt_tail_bucket(-INF, 1.5, 4.0) == '-inf<>1.5'
     assert fmt_tail_bucket(-INF, INF, 4.0) == '-inf<>inf'
+
+
+@pytest.mark.parametrize('values', [[INF, -INF] * 5, [5.0] * 10 + [INF], [None] * 5 + [INF]],
+    ids=['only_infinities', 'constant_beside_infinity', 'null_beside_infinity'])
+def test_columns_with_nothing_to_bucket_still_get_a_histogram(values):
+    """No finite spread to bucket: no error, and the column still gets a (categorical) histogram."""
+    sdf, errs = _process(pd.DataFrame({'a': values}))
+    assert errs == []
+    assert len(sdf['a']['histogram']) > 0

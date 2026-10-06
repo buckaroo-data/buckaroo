@@ -24,6 +24,7 @@ from buckaroo.pluggable_analysis_framework.stat_cache import StatCache  # noqa: 
 from buckaroo.pluggable_analysis_framework.stat_func import stat  # noqa: E402
 from buckaroo.customizations.xorq_stats_v2 import (  # noqa: E402
     XORQ_STATS_V2)
+from tests.unit.test_utils import assert_numeric_histogram, ddd_float_columns_with_infinities  # noqa: E402
 
 
 def _make_table():
@@ -480,6 +481,16 @@ class TestHistogram:
         assert all(math.isfinite(b) for b in bins)
         assert bins[0] == 1.0
         assert abs(bins[-1] - 6.0) < 1e-9
+
+    @pytest.mark.parametrize("values", ddd_float_columns_with_infinities())
+    def test_ddd_float_columns_with_infinities_keep_a_numeric_histogram(self, values):
+        """The same DDD columns as the pandas and polars tests. A NaN is read as null, as pandas -> arrow does:
+        a NaN max still empties the xorq histogram, separately from infinities."""
+        col = [None if isinstance(v, float) and math.isnan(v) else v for v in values]
+        table = xo.memtable(pa.table({"vals": pa.array(col, pa.float64())}))
+        stats, errors = XorqStatPipeline(XORQ_STATS_V2).process_table(table)
+        assert errors == []
+        assert_numeric_histogram(stats["vals"]["histogram"], stats["vals"]["histogram_bins"])
 
     def test_histogram_bins_numeric(self):
         """histogram_bins must be 11 evenly-spaced edges for numeric columns."""
