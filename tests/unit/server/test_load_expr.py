@@ -1071,6 +1071,11 @@ class _NoopPostProcessing(ColAnalysis):
         return [expr, {}]
 
 
+class _V1Analysis(ColAnalysis):
+    """Fails DAG validation: v1 ColAnalysis classes are no longer supported."""
+    provides_defaults = {"foo": 1}
+
+
 class TestStatsTierSchema:
     """``XorqServerDataflow(..., stats_tier="schema")`` (rows-first s1): the
     dataflow publishes identity and typing for every column, with no data query
@@ -1120,6 +1125,15 @@ class TestStatsTierSchema:
         dataflow.add_analysis(_NoopPostProcessing)
         assert stat_queries == []
         assert ops and set(ops) == {"CountStar"}
+
+    def test_add_analysis_that_fails_validation_keeps_the_klasses(self):
+        dataflow = _build_dataflow(stats_tier="schema")
+        before = list(dataflow.analysis_klasses)
+        with pytest.raises(TypeError):
+            dataflow.add_analysis(_V1Analysis)
+        assert dataflow.analysis_klasses == before
+        dataflow.add_analysis(_NoopPostProcessing)
+        assert dataflow.analysis_klasses == [*before, _NoopPostProcessing]
 
     def test_the_spy_sees_stat_queries_at_the_full_tier(self, monkeypatch):
         ops, stat_queries = _spy_data_queries(monkeypatch)
