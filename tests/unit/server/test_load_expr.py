@@ -1673,6 +1673,22 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         self._assert_complete(await _read_json(b), gen + 1, inline)
 
     @tornado.testing.gen_test
+    async def test_numbered_change_on_a_deferred_session_echoes_reply_seq_to_its_sender_only(self):
+        """#998's ``reply_seq`` rides the stats-aware broadcast: the caps client
+        that sent a numbered dataflow change gets it on its pending frame, and
+        the legacy client gets a complete frame without it."""
+        sid = "sw-reply-seq"
+        a, a_open, b, _ = await self._pair(sid)
+        gen = self._stats(a_open)["gen"]
+        change = json.loads(_state_change(post_processing="first_three"))
+        a.write_message(json.dumps({**change, "state_seq": 5}))
+        a_frame, b_frame = await _read_json(a), await _read_json(b)
+        self.assertEqual(a_frame.get("reply_seq"), 5)
+        self.assertNotIn("reply_seq", b_frame)
+        self._assert_pending(a_frame, gen + 1)
+        self.assertEqual(self._stats(b_frame)["status"], "complete")
+
+    @tornado.testing.gen_test
     async def test_load_push_leaves_both_clients_complete(self):
         """/load swaps the session to pandas, which has no deferred stats: the
         stored policy must not leave it looking pending."""
@@ -1751,10 +1767,10 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         session = self._session("sw-overlay-order")
         sent: list = []
         legacy = SimpleNamespace(search_string="ca", caps=frozenset(), session_id="sw-overlay-order",
-            write_message=sent.append)
+            write_message=sent.append, _with_highlight=DataStreamHandler._with_highlight)
         self.assertEqual(getattr(session, "stats_status", None), "pending")
 
-        DataStreamHandler._send_highlight_overlay(legacy, session)
+        DataStreamHandler._send_client_state(legacy, session, session.buckaroo_state)
 
         self.assertEqual(session.stats_status, "complete")
         overlay = json.loads(sent[0])["df_display_args"]["main"]["df_viewer_config"]["column_config"]

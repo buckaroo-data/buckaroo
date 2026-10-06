@@ -25,7 +25,7 @@ import json
 import logging
 import time
 import traceback
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from buckaroo.dataflow.sd_cache import split_chain_by_scope
 from buckaroo.pluggable_analysis_framework import perf_log
@@ -143,21 +143,26 @@ def complete_stats(session: SessionState) -> bool:
     return True
 
 
-def build_state_message_for(session: SessionState, client: Any, metadata: Optional[dict] = None) -> dict:
+def build_state_message_for(session: SessionState, client: Any, metadata: Optional[dict] = None,
+                            reply_seq: Optional[int] = None) -> dict:
     """The ``initial_state`` message for one client.
 
     A client without the ``stats_update`` capability on a pending deferred
     session gets its missing stats run first, so its message is complete; a
     capable client gets the session snapshot as it is (stats-free while the
     session is pending) and pulls the rest. The search term is the recipient's
-    own (#851)."""
+    own (#851), and ``reply_seq`` is passed through to ``build_state_message``
+    (#998)."""
     if (session.stats_delivery == "deferred" and session.stats_status == "pending"
             and not client_has_cap(client, STATS_UPDATE_CAP)):
         complete_stats(session)
-    return build_state_message(session, metadata=metadata, search_string=getattr(client, "search_string", ""))
+    return build_state_message(session, metadata=metadata, search_string=getattr(client, "search_string", ""),
+        reply_seq=reply_seq)
 
 
-def broadcast_state(session: SessionState, metadata: Optional[dict] = None, reset_search: bool = False) -> None:
+def broadcast_state(session: SessionState, metadata: Optional[dict] = None, reset_search: bool = False,
+                    reply_to: Any = None, reply_seq: Optional[int] = None,
+                    highlight: Optional[Callable[[Any, str], Any]] = None) -> None:
     """Send every connected client its own ``initial_state``. A client whose
     write fails is dropped from the session.
 
@@ -165,12 +170,21 @@ def broadcast_state(session: SessionState, metadata: Optional[dict] = None, rese
     push that replaces the dataset. Clients that merge ``stats_update`` go
     first: a legacy client's message completes the session's stats, and a
     message built after that would carry them, so the capable client would
-    never see the pending state its own frame is meant to describe."""
+    never see the pending state its own frame is meant to describe.
+
+    ``reply_seq`` goes on the copy for ``reply_to`` only, the client whose
+    ``buckaroo_state_change`` this answers (#998); the others made no change,
+    so every copy is current for them. ``highlight(df_display_args, term)``,
+    when given, puts each client's own live-search highlight on its copy."""
     for client in sorted(session.ws_clients, key=lambda c: not client_has_cap(c, STATS_UPDATE_CAP)):
         try:
             if reset_search:
                 client.search_string = ""
-            client.write_message(json.dumps(build_state_message_for(session, client, metadata=metadata)))
+            msg = build_state_message_for(session, client, metadata=metadata,
+                reply_seq=reply_seq if client is reply_to else None)
+            if highlight is not None:
+                msg["df_display_args"] = highlight(msg["df_display_args"], getattr(client, "search_string", ""))
+            client.write_message(json.dumps(msg))
         except Exception:
             session.ws_clients.discard(client)
 

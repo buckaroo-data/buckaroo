@@ -24,11 +24,16 @@ export const getSimpleTooltip = (tooltipField:string) => {
     	// This should be possible with the tooltipValueGetter, but that
 	    // wasn't working for some reason
 
-    	if (props.data.index === "histogram") {
+    	if (props.data?.index === "histogram") {
             return;
 	    }
-    	const val = props.data[tooltipField].toString()
-	    return <div className="ag-tooltip">{val}</div>;
+        // A pinned row whose stats have not arrived has no value for the
+        // column, and a row that has not loaded has no data: show nothing.
+        const raw = props.data?.[tooltipField];
+        if (raw === undefined || raw === null) {
+            return;
+        }
+	    return <div className="ag-tooltip">{raw.toString()}</div>;
     };
     return simpleTooltip;
 }
