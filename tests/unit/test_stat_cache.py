@@ -738,6 +738,25 @@ class TestPipelineCache:
         assert all(sd[f"c{i}"]["digits_max"] == 9 for i in range(64) if i not in bad)
         assert len(spy.queries) <= 40
 
+    def test_a_batch_too_large_to_run_fails_no_cell(self):
+        """A query can fail for its size while every cell runs fine alone. Only a
+        cell whose own aggregate failed is reported failed, so isolating the
+        batch computes them all (#1062)."""
+        table = _wide_table(30)
+        expected, _ = XorqStatPipeline([low], unit_test=False).process_table(table)
+        real = ibis_core.Expr.execute
+
+        def small_queries_only(expr, *args, **kwargs):
+            if len(list(expr.schema().names)) > 5:
+                raise RuntimeError("query too large")
+            return real(expr, *args, **kwargs)
+
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr(ibis_core.Expr, "execute", small_queries_only)
+            sd, errs = XorqStatPipeline([low], unit_test=False).process_table(table)
+        assert errs == []
+        assert {c: sd[c]["low"] for c in table.columns} == {c: expected[c]["low"] for c in table.columns}
+
     def test_cells_recorded_failed_without_a_scan_are_not_cached(self, tmp_path):
         """A failure nobody ran isn't evidence about the stat, so it isn't
         cached. Once the data stops failing those cells compute, while the cells
