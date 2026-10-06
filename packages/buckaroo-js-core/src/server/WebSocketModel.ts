@@ -13,6 +13,16 @@
  * Binary protocol (matching anywidget's msg + buffers pattern):
  *   Server sends a JSON text frame (infinite_resp), then a binary frame (Parquet).
  *   This class pairs them and emits "msg:custom" with (msg, [DataView]).
+ *
+ * State-change sequencing (#998):
+ *   Each buckaroo_state_change carries an incrementing `state_seq`. The
+ *   server echoes it as `reply_seq` on the initial_state it sends back to
+ *   this client. A reply whose `reply_seq` is older than the latest
+ *   `state_seq` sent answers a change that a later one has superseded, so
+ *   it is dropped; applying it would set buckaroo_state back and make the
+ *   grid purge and re-request rows for the old state. An initial_state
+ *   with no `reply_seq` (another tab's change, a /load push, a fresh
+ *   connection) always applies.
  */
 export class WebSocketModel {
     private ws: WebSocket;
@@ -20,6 +30,7 @@ export class WebSocketModel {
     private handlers: Map<string, Set<Function>> = new Map();
     private state: Record<string, any>;
     private pendingChanges: Set<string> = new Set();
+    private stateSeq = 0;
 
     constructor(ws: WebSocket, initialState: Record<string, any>) {
         this.state = { ...initialState };
@@ -37,9 +48,13 @@ export class WebSocketModel {
                     this.state._metadata = msg;
                     this.emit("metadata", msg);
                 } else if (msg.type === "initial_state") {
+                    if (typeof msg.reply_seq === "number" && msg.reply_seq < this.stateSeq) {
+                        // Stale reply to a change this model has since superseded (#998).
+                        return;
+                    }
                     // Bulk state update from server
                     for (const [k, v] of Object.entries(msg)) {
-                        if (k === "type") continue;
+                        if (k === "type" || k === "reply_seq") continue;
                         this.state[k] = v;
                         this.emit(`change:${k}`, v);
                     }
@@ -82,9 +97,11 @@ export class WebSocketModel {
         if (this.ws.readyState !== WebSocket.OPEN) return;
         // Sync buckaroo_state changes back to the server
         if (this.pendingChanges.has("buckaroo_state")) {
+            this.stateSeq += 1;
             this.ws.send(JSON.stringify({
                 type: "buckaroo_state_change",
                 new_state: this.state["buckaroo_state"],
+                state_seq: this.stateSeq,
             }));
         }
         this.pendingChanges.clear();
