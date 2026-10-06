@@ -2,6 +2,7 @@
 
 - **Status:** Approved (2026-10-06) and implemented in #1040, which absorbed #1041 (D8) and #1042 (the cache, D1–D7 and D9–D12). The design was settled in a review session on 2026-10-05; "Amendments after review" lists what review of the implementation changed.
 - **Affected code:** `buckaroo/pluggable_analysis_framework/xorq_stat_pipeline.py` (`_execute_cached`, `_process_table_impl`), `buckaroo/customizations/xorq_stats_v2.py`, `buckaroo/pluggable_analysis_framework/stat_func.py` and `stat_pipeline.py` (type marker, dependency checks), `buckaroo/server/handlers.py` (`data_id` on `/load_expr`), `buckaroo/server/xorq_loading.py`. In tallyman, `src/tallyman_companion/buckaroo_lifecycle.py`.
+- **Related ADRs:** ADR-002 (rows-first delivery, which assumes this cache) and ADR-003 (stat tiers, whose D11 extends `stat_id` to cover an approximate implementation).
 - **Related tickets:** #1037 (warm re-POST with equal config re-runs the pipeline), #1038 (stats run on the IOLoop), #1039 (wire layout for `all_stats`), #943, #944 and #951 (cache telemetry), buckaroo-data/tallyman#177 (stat-cache wipe on every klass reload).
 
 ## Terms
@@ -178,7 +179,7 @@ On a batch failure, each stat is retried as its own aggregate over the missing c
 
 ### D13. Scope: the xorq server path, in a format the polars path can adopt
 
-This work covers the xorq server only. The key leaves room for a per-column data identity, so that the polars `ColumnExecutor` path, which keys on `series_hash`, can move to this format later. That move would also fix its two gaps described under "Problem".
+This work covers the xorq server only. The key leaves room for a per-column data identity, so that the polars `ColumnExecutor` path, which keys on `series_hash`, can move to this format later. That move would also fix its two gaps described under "Problem". The polars path has a second problem the xorq path does not: above 1M cells and 50,000 rows pandas and polars compute `length`, `null_count`, `min` and `max` on a 50,000-row sample (#1050). Cells computed that way would be cached as exact unless ADR-003 D2 (exact scalars never read the sample) lands first.
 
 ## Amendments after review (2026-10-06)
 
@@ -196,7 +197,8 @@ The decisions above are as settled on 2026-10-05. Review of the implementation c
 - The wire format for `all_stats`. It stays `sd_to_parquet_b64` (5ms at 27 columns). The variant layout on the wire is #1039; it only matters for wide frames.
 - `load_expr_build_dir`, which takes 40–100ms. Deferring it would move the wait to the first row window rather than remove it, and speeding it up is xorq work.
 - The warm re-POST with an equal config (#1037).
-- A driver for progressive column bisect (D10, after #1038).
+- A driver for progressive column bisect (D10, after #1038). ADR-002 lists it, with the xorq batch split of #1035 and a child process, as a place where cold stats could be split. A cache miss runs on the IOLoop for as long as the stats take.
+- A cell for an approximate value. A stat's `stat_id` names its exact implementation, so ADR-003 D11 requires the id to change when an approximate implementation runs, and nothing here writes one.
 - Persisting filtered scopes (D3).
 
 ## Delivery
