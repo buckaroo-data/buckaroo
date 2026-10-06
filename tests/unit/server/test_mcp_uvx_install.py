@@ -364,14 +364,21 @@ class TestMcpInstall:
                 f"Expected column count '3' in response text:\n{full_text[:500]}"
             )
 
-            # Step 4: HTTP-fetch /health and verify static_files
-            health_url = f"http://localhost:{port}/health"
-            req = urllib.request.Request(health_url)
+            # Step 4: verify static_files via /diagnostics. /health is now
+            # minimal ({status, version}); static-file state moved behind the
+            # token on /diagnostics. The token is in the server's connection
+            # file (written at startup).
+            from buckaroo.server.security import read_connection_file
+            conn = read_connection_file(port) or {}
+            token = conn.get("token", "")
+            diag_url = f"http://localhost:{port}/diagnostics"
+            req = urllib.request.Request(diag_url,
+                headers={"Authorization": f"token {token}"} if token else {})
             with urllib.request.urlopen(req, timeout=5) as resp:
-                assert resp.status == 200, f"/health returned {resp.status}"
-                health = json.loads(resp.read())
+                assert resp.status == 200, f"/diagnostics returned {resp.status}"
+                diag = json.loads(resp.read())
 
-            static_files = health.get("static_files", {})
+            static_files = diag.get("static_files", {})
             critical = ["standalone.js", "standalone.css", "compiled.css", "widget.js"]
             # JS files must be non-empty; CSS files must exist but may be
             # empty in some builds (e.g. compiled.css can be 0 bytes).
