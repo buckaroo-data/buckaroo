@@ -2,6 +2,7 @@ import copy
 import json
 import logging
 import os
+import time
 import traceback
 from contextlib import nullcontext
 from urllib.parse import urlparse
@@ -11,7 +12,7 @@ import tornado.websocket
 from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy)
 from buckaroo.server.session import begin_stats_generation, dataflow_stats_tier
-from buckaroo.server.stats_wire import (broadcast_state, build_state_message_for, handle_stats_request, parse_caps, refresh_session_snapshot)
+from buckaroo.server.stats_wire import (broadcast_state, build_state_message_for, handle_stats_request, parse_caps, push_stats, refresh_session_snapshot)
 
 
 def _handle_infinite_request_xorq(xorq_dataflow, payload_args, search_string=""):
@@ -44,6 +45,10 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # client can say anything, and the other send sites push one shared
         # snapshot (stats_wire.build_state_message_for reads it per client).
         self.caps = parse_caps(self.get_query_argument("caps", ""))
+        # The stats_gen this connection is owed a ``stats_update`` for: set when
+        # it is sent a pending frame (stats_wire.build_state_message_for),
+        # cleared by the push that follows its next row reply.
+        self.stats_owed = None
         sessions = self.application.settings["sessions"]
         sessions.add_ws_client(session_id, self)
 
@@ -276,6 +281,8 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         tele_sink = session.tele_sink if not_seen else None
         first_payload = not_seen and (perf_log.enabled() or tele_sink is not None)
 
+        last_write = None
+
         def _dispatch_and_send(pa, span_label):
             # Dispatch one window and send its two-frame reply: a JSON text
             # frame, then the binary Parquet frame when non-empty. On the initial
@@ -285,11 +292,12 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # v2.
             span = (perf_log.perf_span(span_label, session=self.session_id)
                     if first_payload else nullcontext())
+            nonlocal last_write
             with span:
                 resp, parquet = _dispatch(pa)
-                self.write_message(json.dumps(resp))
+                last_write = self.write_message(json.dumps(resp))
                 if parquet:
-                    self.write_message(parquet, binary=True)
+                    last_write = self.write_message(parquet, binary=True)
 
         try:
             with perf_log.telemetry_context(self.session_id, tele_sink):
@@ -307,6 +315,30 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             log.error("infinite_request error session=%s: %s", self.session_id, tb)
             self.write_message(json.dumps({"type": "infinite_resp", "key": payload_args, "length": 0,
                 "error_info": tb if _BUCKAROO_DEBUG else "Request failed"}))
+        if self.stats_owed is not None and last_write is not None:
+            # D2: the stats follow the rows. The continuation runs once the last
+            # frame of this reply is written, so none of the stats work can
+            # delay it.
+            owed, rows_done = self.stats_owed, time.perf_counter()
+            last_write.add_done_callback(lambda _: self._push_stats(owed, rows_done))
+
+    def _push_stats(self, stats_gen, rows_done):
+        """Send the ``stats_update`` this connection is owed for ``stats_gen``.
+        Does nothing when the connection has closed since the row reply, or
+        when ``push_stats`` finds nothing owed (a newer generation, or already
+        pushed). A newer generation's own pending frame registered its own
+        push."""
+        if self.ws_connection is None:
+            return
+        sessions = self.application.settings["sessions"]
+        session = sessions.get(self.session_id)
+        with perf_log.telemetry_context(self.session_id, session.tele_sink if session else None):
+            reply = push_stats(session, self, stats_gen, rows_done)
+        if reply is not None:
+            try:
+                self.write_message(json.dumps(reply))
+            except tornado.websocket.WebSocketClosedError:
+                log.debug("stats push write failed for session=%s", self.session_id)
 
     def on_close(self):
         sessions = self.application.settings["sessions"]

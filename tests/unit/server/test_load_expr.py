@@ -1813,6 +1813,7 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         ws.write_message(json.dumps({"type": "infinite_request", "payload_args": window}))
         self.assertEqual((await _read_json(ws))["length"], 5)
         pq.read_table(io.BytesIO(await ws.read_message()))
+        self.assertEqual((await _read_json(ws))["type"], "stats_update", "the push follows the rows")
         ws.write_message(_stats_request(self._stats(first)["gen"]))
         self.assertEqual((await _read_json(ws))["type"], "stats_update")
         ws.write_message(json.dumps({"type": "infinite_request", "payload_args": window}))

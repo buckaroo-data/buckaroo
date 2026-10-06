@@ -5,10 +5,12 @@ schema tier and leaves the rest of the stats to later. Two kinds of client
 reach them:
 
 * A client that advertised ``?caps=stats_update`` on its WebSocket URL gets a
-  stats-free ``initial_state`` (``df_meta.stats.status == "pending"``), pulls
-  the stats with ``stats_request {stats_gen, scope}`` and merges the
-  ``stats_update`` that answers it. A request for a generation the session has
-  left gets ``stats_aborted``.
+  stats-free ``initial_state`` (``df_meta.stats.status == "pending"``) and is
+  owed the stats for that generation. The server pushes them as a
+  ``stats_update`` once it has finished sending the client's first row reply
+  (``push_stats``, ADR-002 D2), and the client merges it. The client may also
+  ask with ``stats_request {stats_gen, scope}``; a request for a generation the
+  session has left gets ``stats_aborted``.
 * Any other client gets complete messages: ``build_state_message_for`` runs the
   missing stats synchronously before it builds a message for one, which is
   today's cost, paid on the loop.
@@ -17,8 +19,8 @@ Every send site goes through ``build_state_message_for`` (or ``broadcast_state``
 which calls it per client), because the session holds one shared snapshot and
 the client is known only to the handler that owns the connection.
 
-The request here is the whole run: one synchronous call that computes the full
-stats and applies the final assignment (``set_stats_tier``,
+A push and a request are each the whole run: one synchronous call that computes
+the full stats and applies the final assignment (``set_stats_tier``,
 ``refresh_session_snapshot``). Resumable units generalize it later.
 """
 import json
@@ -126,12 +128,16 @@ def build_state_message_for(session: SessionState, client: Any, metadata: Option
     A client without the ``stats_update`` capability on a pending deferred
     session gets its missing stats run first, so its message is complete; a
     capable client gets the session snapshot as it is (stats-free while the
-    session is pending) and pulls the rest. The search term is the recipient's
+    session is pending) and is recorded as owed that generation's stats
+    (``client.stats_owed``), which ``push_stats`` delivers after its first row
+    reply. The search term is the recipient's
     own (#851), and ``reply_seq`` is passed through to ``build_state_message``
     (#998)."""
     if (session.stats_delivery == "deferred" and session.stats_status == "pending"
             and not client_has_cap(client, STATS_UPDATE_CAP)):
         complete_stats(session)
+    elif session.stats_status == "pending" and client_has_cap(client, STATS_UPDATE_CAP):
+        client.stats_owed = session.stats_gen
     return build_state_message(session, metadata=metadata, search_string=getattr(client, "search_string", ""),
         reply_seq=reply_seq)
 
@@ -214,8 +220,41 @@ def handle_stats_request(session: Optional[SessionState], msg: dict) -> dict:
             log.error("stats_request error session=%s: %s", session.session_id if session else None,
                 traceback.format_exc())
             reply = _aborted(stats_gen, scope, "error", session)
-        if reply["type"] == "stats_update":
-            span.set_attr(outcome="update", tier=reply["tier"])
-        else:
-            span.set_attr(outcome=reply["reason"])
+        _record_outcome(span, reply)
+    return reply
+
+
+def _record_outcome(span: Any, reply: dict) -> None:
+    if reply["type"] == "stats_update":
+        span.set_attr(outcome="update", tier=reply["tier"])
+    else:
+        span.set_attr(outcome=reply["reason"])
+
+
+def push_stats(session: Optional[SessionState], client: Any, stats_gen: int, rows_done: float) -> Optional[dict]:
+    """The ``stats_update`` (or ``stats_aborted``) owed to ``client`` for
+    ``stats_gen``, or ``None`` when nothing is owed any more: the client was
+    already pushed this generation, or the session has moved to another one (the
+    ``initial_state`` that started it registered its own push). ``rows_done`` is
+    the ``perf_counter`` time the row reply finished sending.
+
+    The caller runs this on the write future of the client's first row reply
+    and sends the result, so rows reach the socket before any stats work starts.
+    The stats run once per session: a later connection's push is answered from
+    the session. The ``stats.push`` span records the gap since the rows and the
+    ``outcome``; the caller binds the session's telemetry sink around this call."""
+    if getattr(client, "stats_owed", None) != stats_gen:
+        return None
+    client.stats_owed = None
+    if session is None or session.stats_gen != stats_gen:
+        return None
+    started = time.perf_counter()
+    with perf_log.perf_span("stats.push", session=session.session_id, stats_gen=stats_gen,
+        gap_ms=round((started - rows_done) * 1000, 1)) as span:
+        try:
+            reply = _answer_stats_request(session, stats_gen, "raw", started)
+        except Exception:
+            log.error("stats push error session=%s: %s", session.session_id, traceback.format_exc())
+            reply = _aborted(stats_gen, "raw", "error", session)
+        _record_outcome(span, reply)
     return reply
