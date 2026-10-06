@@ -992,6 +992,43 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_warm_session_reruns_when_any_config_field_differs(self):
+        """#1037: an equal field doesn't hide a different one, a config the
+        session was not loaded with is new, and omitting config keeps the
+        session's rather than re-running."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            original = xorq_loading.load_expr_build_dir
+            calls = []
+            def counting_loader(bd, **kwargs):
+                calls.append(bd)
+                return original(bd, **kwargs)
+
+            overrides, _ = _CONFIG_VARIANTS["column_config_overrides"]
+            grid, other_grid = _CONFIG_VARIANTS["extra_grid_config"]
+            with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
+                body = {"session": "lx-config-mixed", "build_dir": build_path}
+                await _post(self.get_http_port(), "/load_expr", body)
+                self.assertEqual(len(calls), 1)
+                await _post(self.get_http_port(), "/load_expr",
+                    {**body, "column_config_overrides": overrides})
+                self.assertEqual(len(calls), 2, "a config the session never held is new")
+
+                await _post(self.get_http_port(), "/load_expr",
+                    {**body, "column_config_overrides": overrides, "extra_grid_config": grid})
+                self.assertEqual(len(calls), 3)
+                await _post(self.get_http_port(), "/load_expr",
+                    {**body, "column_config_overrides": overrides, "extra_grid_config": other_grid})
+                self.assertEqual(len(calls), 4, "one differing field must re-run")
+
+                resp = await _post(self.get_http_port(), "/load_expr", body)
+                self.assertEqual(resp.code, 200, resp.body)
+                self.assertEqual(len(calls), 4, "omitted config must keep the session's")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_warm_exit_requires_a_xorq_session(self):
         """/load swaps a session to pandas but leaves its build_dir, so a later
         /load_expr of the same build must reload instead of taking the
