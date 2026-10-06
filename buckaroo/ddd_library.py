@@ -170,6 +170,43 @@ def get_multiindex_partly_named_index_df() -> pd.DataFrame:
 def df_with_infinity() -> pd.DataFrame:
     return pd.DataFrame({'a': [np.nan, np.inf, np.inf * -1]})
 
+
+def _finite_between_infinities(finite: int, neg_inf: int, pos_inf: int) -> list:
+    """``neg_inf`` negative infinities, ``finite`` evenly spaced floats, then ``pos_inf`` positive infinities."""
+    return [-np.inf] * neg_inf + [i * 1.5 for i in range(finite)] + [np.inf] * pos_inf
+
+
+def df_with_infinities_among_values() -> pd.DataFrame:
+    """Float columns of 101 rows with infinities among the numbers: enough values for a histogram.
+
+    For the first four columns np.quantile(col, .01) or np.quantile(col, .99) is NaN at 101 rows (inf - inf
+    inside numpy's interpolation), so a histogram that takes its tails from the raw column loses its numeric
+    buckets. 'no_inf' is the control. NaN is a missing value in pandas, so 'nan_and_inf' has 99 numbers.
+    """
+    return pd.DataFrame({
+        'pos_inf': _finite_between_infinities(100, 0, 1),
+        'neg_inf': _finite_between_infinities(99, 2, 0),
+        'both_inf': _finite_between_infinities(98, 2, 1),
+        'five_percent_each_side': _finite_between_infinities(91, 5, 5),
+        'nan_and_inf': [np.nan] + _finite_between_infinities(99, 0, 1),
+        'no_inf': _finite_between_infinities(101, 0, 0)})
+
+
+def pl_df_with_infinities_among_values():
+    """The columns of df_with_infinities_among_values, plus a null and a real NaN beside an infinity.
+
+    Polars, because it keeps NaN apart from null: pandas -> arrow turns NaN into null.
+    """
+    import polars as pl
+    return pl.DataFrame({
+        'pos_inf': _finite_between_infinities(100, 0, 1),
+        'neg_inf': _finite_between_infinities(99, 2, 0),
+        'both_inf': _finite_between_infinities(98, 2, 1),
+        'five_percent_each_side': _finite_between_infinities(91, 5, 5),
+        'nan_and_inf': [float('nan')] + _finite_between_infinities(99, 0, 1),
+        'null_and_inf': [None] + _finite_between_infinities(99, 0, 1),
+        'no_inf': _finite_between_infinities(101, 0, 0)})
+
 def df_with_really_big_number() -> pd.DataFrame:
     return pd.DataFrame({"col1": [9999999999999999999, 1]})
 
