@@ -18,16 +18,16 @@ which calls it per client), because the session holds one shared snapshot and
 the client is known only to the handler that owns the connection.
 
 The request here is the whole run: one synchronous call that computes the full
-stats and applies the final assignment (``assign_full_stats``,
+stats and applies the final assignment (``set_stats_tier``,
 ``refresh_session_snapshot``). Resumable units generalize it later.
 """
 import json
 import logging
 import time
 import traceback
-from typing import Any, Optional
+from contextlib import nullcontext
+from typing import Any, Callable, Optional
 
-from buckaroo.dataflow.sd_cache import split_chain_by_scope
 from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import get_buckaroo_display_state
 from buckaroo.server.session import SessionState, build_state_message
@@ -83,41 +83,17 @@ def refresh_session_snapshot(session: SessionState, dataflow: Any) -> None:
                 dvc["component_config"] = {**dvc.get("component_config", {}), **session.component_config}
 
 
-def assign_full_stats(dataflow: Any) -> None:
-    """Take a schema-tier dataflow to the full tier: compute the current
-    state's full stats (or find them in ``summary_stats_cache``, where an
-    earlier visit to the same state left them), write them under the full-tier
-    key, then assign ``summary_sd``. Assigning runs the cascade, which fills the
-    other scopes' entries it still lacks and rebuilds ``merged_sd``,
-    ``df_data_dict`` and ``df_display_args``.
-
-    The cache entry goes in first because ``_populate_sd_cache`` skips a key it
-    finds, so the filt scope is not computed a second time. The tier is a
-    plain attribute, flipped before the compute so ``_get_summary_sd`` runs the
-    full pipeline, and put back if anything raises."""
-    tier = dataflow.stats_tier
-    filt_chain = split_chain_by_scope(dataflow.operations)["filt"]
-    key = dataflow._scope_cache_key(filt_chain, tier="full")
-    dataflow.stats_tier = "full"
-    try:
-        sd = dataflow.summary_stats_cache.get(key)
-        errs = {}
-        if sd is None:
-            sd, errs = dataflow._get_summary_sd(dataflow.processed_df)
-            dataflow.summary_stats_cache = {**dataflow.summary_stats_cache, key: sd}
-        dataflow.summary_sd = sd
-        dataflow.errs = errs
-    except Exception:
-        dataflow.stats_tier = tier
-        raise
-
-
 def complete_stats(session: SessionState) -> bool:
     """Run the stats a pending session is missing, in one synchronous call, and
-    publish them: the final assignment (``assign_full_stats``), then the session
+    publish them: the final assignment (``set_stats_tier``), then the session
     snapshot refreshed and the status set to ``complete`` in the same step, so
     ``all_stats`` and ``df_meta.stats`` cannot disagree. Returns whether the
     session is complete.
+
+    The run is timed as ``stats.complete`` on the session's telemetry sink, or
+    on the sink already bound when the session has none. It is not a
+    ``firstpull.*`` span: a state change or a legacy client's connect completes
+    stats long after the load.
 
     A failure is the session's state for this generation (``error``, reason
     ``stats_failed``) and is not retried by the next request; the next
@@ -128,11 +104,11 @@ def complete_stats(session: SessionState) -> bool:
     if session.stats_status != "pending" or dataflow is None:
         return False
     with (
-        perf_log.telemetry_context(session.session_id, session.tele_sink),
-        perf_log.perf_span("firstpull.stats_total", session=session.session_id, stats_gen=session.stats_gen),
+        perf_log.telemetry_context(session.session_id, session.tele_sink) if session.tele_sink else nullcontext(),
+        perf_log.perf_span("stats.complete", session=session.session_id, stats_gen=session.stats_gen),
     ):
         try:
-            assign_full_stats(dataflow)
+            dataflow.set_stats_tier("full")
             refresh_session_snapshot(session, dataflow)
         except Exception:
             log.error("stats run failed session=%s stats_gen=%s: %s", session.session_id, session.stats_gen,
@@ -143,21 +119,26 @@ def complete_stats(session: SessionState) -> bool:
     return True
 
 
-def build_state_message_for(session: SessionState, client: Any, metadata: Optional[dict] = None) -> dict:
+def build_state_message_for(session: SessionState, client: Any, metadata: Optional[dict] = None,
+                            reply_seq: Optional[int] = None) -> dict:
     """The ``initial_state`` message for one client.
 
     A client without the ``stats_update`` capability on a pending deferred
     session gets its missing stats run first, so its message is complete; a
     capable client gets the session snapshot as it is (stats-free while the
     session is pending) and pulls the rest. The search term is the recipient's
-    own (#851)."""
+    own (#851), and ``reply_seq`` is passed through to ``build_state_message``
+    (#998)."""
     if (session.stats_delivery == "deferred" and session.stats_status == "pending"
             and not client_has_cap(client, STATS_UPDATE_CAP)):
         complete_stats(session)
-    return build_state_message(session, metadata=metadata, search_string=getattr(client, "search_string", ""))
+    return build_state_message(session, metadata=metadata, search_string=getattr(client, "search_string", ""),
+        reply_seq=reply_seq)
 
 
-def broadcast_state(session: SessionState, metadata: Optional[dict] = None, reset_search: bool = False) -> None:
+def broadcast_state(session: SessionState, metadata: Optional[dict] = None, reset_search: bool = False,
+                    reply_to: Any = None, reply_seq: Optional[int] = None,
+                    highlight: Optional[Callable[[Any, str], Any]] = None) -> None:
     """Send every connected client its own ``initial_state``. A client whose
     write fails is dropped from the session.
 
@@ -165,12 +146,21 @@ def broadcast_state(session: SessionState, metadata: Optional[dict] = None, rese
     push that replaces the dataset. Clients that merge ``stats_update`` go
     first: a legacy client's message completes the session's stats, and a
     message built after that would carry them, so the capable client would
-    never see the pending state its own frame is meant to describe."""
+    never see the pending state its own frame is meant to describe.
+
+    ``reply_seq`` goes on the copy for ``reply_to`` only, the client whose
+    ``buckaroo_state_change`` this answers (#998); the others made no change,
+    so every copy is current for them. ``highlight(df_display_args, term)``,
+    when given, puts each client's own live-search highlight on its copy."""
     for client in sorted(session.ws_clients, key=lambda c: not client_has_cap(c, STATS_UPDATE_CAP)):
         try:
             if reset_search:
                 client.search_string = ""
-            client.write_message(json.dumps(build_state_message_for(session, client, metadata=metadata)))
+            msg = build_state_message_for(session, client, metadata=metadata,
+                reply_seq=reply_seq if client is reply_to else None)
+            if highlight is not None:
+                msg["df_display_args"] = highlight(msg["df_display_args"], getattr(client, "search_string", ""))
+            client.write_message(json.dumps(msg))
         except Exception:
             session.ws_clients.discard(client)
 

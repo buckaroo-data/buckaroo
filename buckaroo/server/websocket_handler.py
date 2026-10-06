@@ -134,21 +134,28 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # A deferred session whose stats were completed is at the full tier;
             # the change reruns the cascade at the schema tier again (13 ms
             # against the full stats), and the stats follow as requests.
-            if session.stats_delivery == "deferred":
-                dataflow.stats_tier = dataflow_stats_tier(session.stats_tier, session.stats_delivery)
+            # If applying the change raises, the session still describes the
+            # snapshot it had, so the tier goes back to the one that matches.
+            prior_tier = dataflow.stats_tier
+            try:
+                if session.stats_delivery == "deferred":
+                    dataflow.stats_tier = dataflow_stats_tier(session.stats_tier, session.stats_delivery)
 
-            # Propagate changes to the dataflow (mirrors BuckarooWidgetBase._buckaroo_state)
-            if old_state.get("post_processing") != new_state.get("post_processing"):
-                dataflow.post_processing_method = new_state.get("post_processing", "")
-            if old_state.get("cleaning_method") != new_state.get("cleaning_method"):
-                dataflow.cleaning_method = new_state.get("cleaning_method", "")
-            if old_state.get("quick_command_args") != new_state.get("quick_command_args"):
-                dataflow.quick_command_args = new_state.get("quick_command_args", {})
+                # Propagate changes to the dataflow (mirrors BuckarooWidgetBase._buckaroo_state)
+                if old_state.get("post_processing") != new_state.get("post_processing"):
+                    dataflow.post_processing_method = new_state.get("post_processing", "")
+                if old_state.get("cleaning_method") != new_state.get("cleaning_method"):
+                    dataflow.cleaning_method = new_state.get("cleaning_method", "")
+                if old_state.get("quick_command_args") != new_state.get("quick_command_args"):
+                    dataflow.quick_command_args = new_state.get("quick_command_args", {})
 
-            # Re-extract state from the dataflow — same helper works for both
-            # ServerDataflow and XorqServerDataflow (verified by probe). The
-            # state the stats describe has changed, so the generation moves on.
-            refresh_session_snapshot(session, dataflow)
+                # Re-extract state from the dataflow — same helper works for both
+                # ServerDataflow and XorqServerDataflow (verified by probe).
+                refresh_session_snapshot(session, dataflow)
+            except Exception:
+                dataflow.stats_tier = prior_tier
+                raise
+            # The state the stats describe has changed, so the generation moves on.
             begin_stats_generation(session)
             # Strip search_string before snapshotting onto the session — it
             # belongs to this client only (#851), so a future client that
