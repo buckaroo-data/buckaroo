@@ -214,7 +214,7 @@ function createRender(Widget) {
  * This runs once at mount and on every model change, BEFORE React
  * renders, so components always receive plain DFData arrays.
  */
-function createPredecodingRender(Widget) {
+export function createPredecodingRender(Widget) {
 	return ({ el, model, experimental }) => {
 		let root = ReactDOM.createRoot(el);
 		let unmounted = false;
@@ -230,11 +230,10 @@ function createPredecodingRender(Widget) {
 			);
 		};
 
-		const decodeAndRender = async () => {
-			const raw = model.get('df_data_dict');
-			const resolved = await srt.decodeDFDataDict(raw);
-			doRender(resolved);
-		};
+		// Decoding is async, so a slow decode of an older dict can finish after a
+		// newer one. The decoder renders only the newest dict's result.
+		const loadDict = srt.makeLatestDictDecoder(doRender);
+		const decodeAndRender = () => loadDict(model.get('df_data_dict') ?? {});
 
 		// Initial decode + render
 		decodeAndRender();
