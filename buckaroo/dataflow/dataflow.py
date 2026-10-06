@@ -831,7 +831,9 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
             else:
                 # Stored under the state's key at the new tier, so merged_sd reads
                 # the stats given rather than an entry already there.
-                self.summary_stats_cache = {**self.summary_stats_cache, filt_key: summary[0]}
+                new_cache = dict(self.summary_stats_cache)
+                new_cache[filt_key] = summary[0]
+                self.summary_stats_cache = new_cache
                 if summary[1]:
                     self._summary_errs_cache[filt_key] = summary[1]
             sd, errs = summary

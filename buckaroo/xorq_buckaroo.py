@@ -177,7 +177,7 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
         assigned, before ``operations`` catches up, so ``operations`` would
         still hold the previous search."""
         if scope == 'filt':
-            return split_chain_by_scope(self.merged_operations)['filt']
+            return split_chain_by_scope(self.merged_operations or [])['filt']
         return split_chain_by_scope(self.operations)[scope]
 
     def _stat_scope_id(self, chain: list):
