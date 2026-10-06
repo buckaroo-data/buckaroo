@@ -148,10 +148,9 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
        names (what ``XorqStatPipeline`` produces) to the rewritten
        ``a, b, c`` names that ``pd_to_obj`` and the styling layer expect.
 
-    With a ``cache_storage`` (set by ``XorqServerDataflow``), stats for an
-    unfiltered view are persisted under ``scope_id = (data_id,
-    post-processing)``. Views with ops applied (search, cleaning) aren't
-    persisted (ADR-001 D3); the in-process ``summary_stats_cache`` keeps them.
+    With a ``cache_storage`` (set by ``XorqServerDataflow``), stats are
+    persisted under ``scope_id = (data_id, post-processing, op chain)``, so a
+    committed search or cleaning op gets its own scope (ADR-001 D3).
     """
 
     data_id = None
@@ -184,14 +183,19 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
     def _stat_scope_id(self, chain: list):
         """The persistent cache scope for the frame ``chain`` built: the data,
         the post-processing, and the chain itself, a search included. None
-        when the post-processing has no source to identify it by."""
-        data_id = self.data_id
-        if data_id is None:
-            if self._fallback_data_id is None:
-                self._fallback_data_id = fallback_data_id(self.orig_df)
-            data_id = self._fallback_data_id
-        pp = self.post_processing_method
-        pp_hash = post_processing_hash(self.post_processing_klasses[pp]) if pp else ""
+        when the post-processing has no source to identify it by, or when the
+        key can't be computed: those stats are computed uncached."""
+        try:
+            data_id = self.data_id
+            if data_id is None:
+                if self._fallback_data_id is None:
+                    self._fallback_data_id = fallback_data_id(self.orig_df)
+                data_id = self._fallback_data_id
+            pp = self.post_processing_method
+            pp_hash = post_processing_hash(self.post_processing_klasses[pp]) if pp else ""
+        except Exception:
+            logger.warning("stat cache: no cache key for this view, computing its stats uncached", exc_info=True)
+            return None
         if pp_hash is None:
             return None
         return make_scope_id(data_id, pp_hash, chain)

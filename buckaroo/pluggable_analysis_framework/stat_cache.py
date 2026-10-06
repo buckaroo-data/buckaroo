@@ -442,12 +442,12 @@ class StatCache:
                 # process imports pyarrow.dataset, ~150ms on a fresh load.
                 with pq.ParquetFile(path) as part:
                     table = part.read()
+                _merge_part(scope, table)
             except FileNotFoundError:
                 continue  # compacted away by another process between glob and read
             except Exception as e:
                 log.warning("stat cache: skipping unreadable part %s: %s", path, e)
                 continue
-            _merge_part(scope, table)
             scope.parts_read += 1
             scope.part_paths.append(path)
         return scope
@@ -559,12 +559,21 @@ def _encode_part(values: Dict[Any, Dict[str, Any]], errors: Dict[Any, Dict[str, 
                 log.debug("stat cache: dropping %s: parquet can't write it", name)
                 drop(name, variants[name].originals)
             continue
-        with pq.ParquetFile(pa.BufferReader(data)) as part:
-            table = part.read()
+        try:
+            table = _read_part(data)
+        except Exception:
+            for name in [n for n in variants if not _reads_alone(variants[n])]:
+                log.debug("stat cache: dropping %s: parquet can't read it back", name)
+                drop(name, variants[name].originals)
+            continue
         mismatched = {}
         for name, var in variants.items():
-            back = table.column(name).to_pylist()
-            bad = [i for i, v in var.originals.items() if not _identical(_decode(var.spec, back[i]), v)]
+            try:
+                back = table.column(name).to_pylist()
+            except Exception:
+                mismatched[name] = list(var.originals)
+                continue
+            bad = [i for i, v in var.originals.items() if not _round_trips(var.spec, back[i], v)]
             if bad:
                 mismatched[name] = bad
         if not mismatched:
@@ -597,6 +606,28 @@ def _writes_alone(var: _Variant) -> bool:
     try:
         pq.write_table(pa.table({"v": _variant_array(var)}), pa.BufferOutputStream())
         return True
+    except Exception:
+        return False
+
+
+def _read_part(data: bytes) -> pa.Table:
+    with pq.ParquetFile(pa.BufferReader(data)) as part:
+        return part.read()
+
+
+def _reads_alone(var: _Variant) -> bool:
+    try:
+        buf = pa.BufferOutputStream()
+        pq.write_table(pa.table({"v": _variant_array(var)}), buf)
+        _read_part(buf.getvalue().to_pybytes())
+        return True
+    except Exception:
+        return False
+
+
+def _round_trips(spec: Dict[str, Any], stored: Any, v: Any) -> bool:
+    try:
+        return _identical(_decode(spec, stored), v)
     except Exception:
         return False
 

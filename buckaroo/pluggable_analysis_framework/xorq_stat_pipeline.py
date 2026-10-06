@@ -48,10 +48,12 @@ __all__ = ["XorqStatPipeline", "XorqDfStatsV2", "XorqColumn", "XorqExpr", "XorqE
 
 try:
     import xorq.api as xo
+    from xorq.caching import SnapshotStrategy
 
     HAS_XORQ = True
 except ImportError:
     xo = None
+    SnapshotStrategy = None
     HAS_XORQ = False
 
 log = logging.getLogger(__name__)
@@ -145,7 +147,6 @@ def _is_environmental(e: Optional[BaseException]) -> bool:
 def fallback_data_id(table) -> str:
     """The data identity of an expression when the caller supplies none: the
     hash xorq's snapshot cache gives it, computed once per load."""
-    from xorq.caching import SnapshotStrategy  # noqa: PLC0415  (xorq is optional)
     return SnapshotStrategy().calc_key(table)
 
 
