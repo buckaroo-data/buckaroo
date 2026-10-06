@@ -21,9 +21,6 @@ export interface DFMeta {
     stats?: DFMetaStats;
 }
 
-export const getStatsStatus = (meta: DFMeta | undefined): StatsStatus =>
-    meta?.stats?.status ?? "complete";
-
 export interface BuckarooOptions {
     sampled: string[];
     cleaning_method: string[];
