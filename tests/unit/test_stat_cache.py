@@ -5,6 +5,7 @@ These tests assert structure (which queries run, which cells are computed,
 which parts are written), not wall-clock time.
 """
 
+import functools
 import importlib.metadata
 import importlib.util
 import inspect
@@ -31,7 +32,8 @@ from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2  # noqa: E402
 from buckaroo.pluggable_analysis_framework import stat_cache as sc  # noqa: E402
 from buckaroo.pluggable_analysis_framework.stat_func import (  # noqa: E402
     ColumnValue, StatFunc, StatKey, XorqColumn, XorqExecute, XorqExpr, stat)
-from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline  # noqa: E402
+from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (  # noqa: E402
+    TOTAL_LENGTH_KEY, XorqStatPipeline)
 
 
 def _table():
@@ -174,6 +176,20 @@ def _spy_data_touching_calls(monkeypatch, stats):
     return calls
 
 
+def _import_file(path, source):
+    """Write ``source`` to ``path`` and import it as a module."""
+    path.write_text(source)
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _digest(fn):
+    """The source digest a ``StatFunc`` built from ``fn`` keys its cells by."""
+    return StatFunc("plus", fn, [StatKey("col", XorqColumn)], [StatKey("plus", int)], False).source_digest
+
+
 # ============================================================
 # Stats used by the tests below
 # ============================================================
@@ -211,6 +227,63 @@ def first_value(col: XorqColumn) -> ColumnValue:
 def low_rows(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, low: int) -> int:
     """A per-column query stat that depends on ``low``."""
     return int(execute(expr.filter(expr[orig_col_name] == low).count()))
+
+
+# Column -> the exception the ``queried_rows`` stats raise for it, standing in
+# for their query failing.
+_QUERY_FAILURES: dict = {}
+
+
+@stat()
+def queried_rows(expr: XorqExpr, execute: XorqExecute, orig_col_name: str) -> int:
+    """A per-column query stat."""
+    if orig_col_name in _QUERY_FAILURES:
+        raise _QUERY_FAILURES[orig_col_name]
+    return int(execute(expr.count()))
+
+
+@stat(default=-1)
+def queried_rows_or_default(expr: XorqExpr, execute: XorqExecute, orig_col_name: str) -> int:
+    """``queried_rows`` with a ``default`` standing in for a failure."""
+    if orig_col_name in _QUERY_FAILURES:
+        raise _QUERY_FAILURES[orig_col_name]
+    return int(execute(expr.count()))
+
+
+def _caused_by(err, cause):
+    err.__cause__ = cause
+    return err
+
+
+# Failures that come from where a query ran, not from the stat.
+_ENVIRONMENTAL_FAILURES = {"too-many-open-files": lambda: OSError(24, "Too many open files"),
+    "snapshot-file-gone": lambda: FileNotFoundError(2, "No such file or directory", "part-0.parquet"),
+    "object-store": lambda: Exception("External error: Object Store error: Generic S3 error: request failed"),
+    "engine-io": lambda: Exception("IO error: Too many open files (os error 24)"),
+    "wrapped-os-error": lambda: _caused_by(ValueError("reading the column failed"), OSError(5, "I/O error"))}
+
+# Two post-processing steps in one file.
+TWO_STEPS_SOURCE = '''\
+from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis
+
+
+class HighOnly(ColAnalysis):
+    provides_defaults = {}
+    post_processing_method = "high_only"
+
+    @classmethod
+    def post_process_df(cls, expr):
+        return [expr.filter(expr.ints > 5), {}]
+
+
+class LowOnly(ColAnalysis):
+    provides_defaults = {}
+    post_processing_method = "low_only"
+
+    @classmethod
+    def post_process_df(cls, expr):
+        return [expr.filter(expr.ints < 5), {}]
+'''
 
 
 # ============================================================
@@ -389,6 +462,47 @@ class TestStatHashes:
         path.write_text("def top(col):\n    return col.min() + 1\n")
         assert sc.stat_hashes([sf]) == before
 
+    def test_a_partial_is_keyed_by_its_function_and_bound_arguments(self, tmp_path):
+        module = _import_file(tmp_path / "partials.py", "def plus(col, n):\n    return col.count() + n\n")
+        one = _digest(functools.partial(module.plus, n=1))
+        assert one is not None
+        assert one != _digest(functools.partial(module.plus, n=2))
+        assert one != sc.file_digest(functools.__file__)
+
+    def test_a_partial_of_a_function_with_no_source_file_has_no_digest(self):
+        ns: dict = {}
+        exec(compile("def plus(col, n):\n    return col.count() + n\n", "<cell>", "exec"), ns)
+        assert _digest(functools.partial(ns["plus"], n=1)) is None
+
+    def test_a_closure_is_keyed_by_the_values_it_captures(self, tmp_path):
+        module = _import_file(tmp_path / "closures.py",
+            "def make_plus(n):\n    def plus(col):\n        return col.count() + n\n    return plus\n")
+        assert _digest(module.make_plus(1)) is not None
+        assert _digest(module.make_plus(1)) == _digest(module.make_plus(1))
+        assert _digest(module.make_plus(1)) != _digest(module.make_plus(2))
+
+    def test_a_callable_object_has_no_digest(self, tmp_path):
+        """Its instance state isn't in any file, so its cells are never cached."""
+        module = _import_file(tmp_path / "objects.py",
+            "class Plus:\n    def __init__(self, n):\n        self.n = n\n\n"
+            "    def __call__(self, col):\n        return col.count() + self.n\n")
+        assert _digest(module.Plus(1)) is None
+        assert _digest(module.Plus(1).__call__) is None
+
+    def test_post_processing_hash_covers_file_name_file_content_and_method(self, tmp_path):
+        """A post-processing step is identified by the name of the file that
+        defines it, that file's content, and its method name."""
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        steps = _import_file(tmp_path / "a" / "steps.py", TWO_STEPS_SOURCE)
+        renamed = _import_file(tmp_path / "a" / "other_steps.py", TWO_STEPS_SOURCE)
+        edited = _import_file(tmp_path / "b" / "steps.py", TWO_STEPS_SOURCE + "# edited\n")
+        h = sc.post_processing_hash
+        assert h(steps.HighOnly) is not None
+        assert h(steps.HighOnly) != h(steps.LowOnly)
+        assert h(steps.HighOnly) != h(renamed.HighOnly)
+        assert h(steps.HighOnly) != h(edited.HighOnly)
+
 
 # ============================================================
 # Pipeline: additive, column-bisectable, a full hit does no work
@@ -488,6 +602,76 @@ class TestPipelineCache:
         sd, errs = _pipeline(cache).process_table(_table(), scope_id="s")
         assert errs == []
         assert sd["ints"]["min"] == 0
+
+    @pytest.mark.parametrize("make_err", list(_ENVIRONMENTAL_FAILURES.values()), ids=list(_ENVIRONMENTAL_FAILURES))
+    @pytest.mark.parametrize("stat_obj", [queried_rows, queried_rows_or_default], ids=["error", "default"])
+    def test_a_query_failing_for_its_environment_is_never_cached(self, tmp_path, monkeypatch, stat_obj, make_err):
+        """A per-column query that fails because of where it ran (out of file
+        handles, a snapshot file gone, an object store or engine IO error, or
+        any error one of those caused) says nothing about the stat, though
+        queries before and after it succeeded. Neither its error nor the
+        ``default`` standing in for it is cached."""
+        cache = sc.StatCache(tmp_path)
+        stats = [low, high, stat_obj]
+        monkeypatch.setitem(_QUERY_FAILURES, "ints", make_err())
+        _pipeline(cache, stats).process_table(_table(), scope_id="s")
+        monkeypatch.delitem(_QUERY_FAILURES, "ints")
+        sd, errs = _pipeline(cache, stats).process_table(_table(), scope_id="s")
+        assert errs == []
+        assert sd["ints"][stat_obj.__name__] == 40
+        assert sd["floats"][stat_obj.__name__] == 40
+
+    @pytest.mark.parametrize("stat_obj", [queried_rows, queried_rows_or_default], ids=["error", "default"])
+    def test_a_query_failing_with_no_query_succeeding_after_it_is_not_cached(self, tmp_path, monkeypatch,
+            stat_obj):
+        """The backend can go away partway through a run, with an error that
+        doesn't name the cause. The batch succeeding earlier doesn't show the
+        backend was up for the queries after it: a failure is cached only
+        when a query succeeded after it."""
+        cache = sc.StatCache(tmp_path)
+        stats = [low, high, stat_obj]
+        for col in _table().columns:
+            monkeypatch.setitem(_QUERY_FAILURES, col, RuntimeError("snapshot unavailable"))
+        _pipeline(cache, stats).process_table(_table(), scope_id="s")
+        for col in _table().columns:
+            monkeypatch.delitem(_QUERY_FAILURES, col)
+        sd, errs = _pipeline(cache, stats).process_table(_table(), scope_id="s")
+        assert errs == []
+        assert sd["ints"][stat_obj.__name__] == 40
+
+    def test_batch_failures_with_no_query_succeeding_after_them_are_not_cached(self, tmp_path, monkeypatch):
+        """The batch fails and the ``count()`` canary succeeds, then the
+        backend goes away, so isolating the batch fails every stat's own
+        aggregate. The canary ran before those failures and doesn't show the
+        backend was up for them, so none of them is cached."""
+        cache = sc.StatCache(tmp_path)
+        real = ibis_core.Expr.execute
+
+        def canary_only(expr, *args, **kwargs):
+            if getattr(expr, "schema", None) is None or list(expr.schema().names) != [TOTAL_LENGTH_KEY]:
+                raise RuntimeError("snapshot unavailable")
+            return real(expr, *args, **kwargs)
+
+        with monkeypatch.context() as m:
+            m.setattr(ibis_core.Expr, "execute", canary_only)
+            _sd, errs = _pipeline(cache, [low, high]).process_table(_table(), scope_id="s")
+        assert errs
+        sd, errs = _pipeline(cache, [low, high]).process_table(_table(), scope_id="s")
+        assert errs == []
+        assert sd["ints"]["low"] == 0
+
+    def test_a_partial_stat_is_keyed_by_its_bound_arguments(self, tmp_path):
+        """A stat built from ``functools.partial`` runs its function with the
+        bound arguments, so rebinding them recomputes the stat instead of
+        serving the value computed with the old ones."""
+        module = _import_file(tmp_path / "partials.py", "def plus(col, n):\n    return col.count() + n\n")
+        cache = sc.StatCache(tmp_path / "cache")
+        for n in (1, 2):
+            sf = StatFunc("plus", functools.partial(module.plus, n=n), [StatKey("col", XorqColumn)],
+                [StatKey("plus", int)], False)
+            sd, errs = _pipeline(cache, [sf]).process_table(_table(), scope_id="s")
+            assert errs == []
+            assert sd["ints"]["plus"] == 40 + n
 
     @pytest.mark.parametrize("name", [name for name, _ in _ddd_frames()])
     def test_ddd_frames_load_the_same_warm_as_cold(self, tmp_path, name):
@@ -589,17 +773,32 @@ class TestServerDataflowScopes:
         assert spy.queries == []
 
     @staticmethod
-    def _load(cache_path, monkeypatch, data_id="d1"):
+    def _load(cache_path, monkeypatch, data_id="d1", extra_klasses=None):
         from buckaroo import xorq_buckaroo
         from buckaroo.server.xorq_loading import XorqServerDataflow
         # A fresh server process: no row counts carried over.
         monkeypatch.setattr(xorq_buckaroo, "_expr_count_cache", type(xorq_buckaroo._expr_count_cache)())
         return XorqServerDataflow(_table(), skip_main_serial=True, cache_storage_path=str(cache_path),
-            data_id=data_id)
+            data_id=data_id, extra_klasses=extra_klasses)
 
     @staticmethod
     def _length(dataflow, col="strs"):
         return next(v["length"] for v in dataflow.summary_sd.values() if v["orig_col_name"] == col)
+
+    @staticmethod
+    def _stat(dataflow, col, key):
+        return next(v[key] for v in dataflow.summary_sd.values() if v["orig_col_name"] == col)
+
+    def test_post_processing_steps_in_one_file_get_their_own_scopes(self, tmp_path, monkeypatch):
+        """Two post-processing steps defined in one file share the file, so
+        switching from one to the other must still show the second step's
+        stats, not the first's."""
+        steps = _import_file(tmp_path / "steps.py", TWO_STEPS_SOURCE)
+        dataflow = self._load(tmp_path / "cache", monkeypatch, extra_klasses=[steps.HighOnly, steps.LowOnly])
+        dataflow.post_processing_method = "high_only"
+        assert (self._stat(dataflow, "ints", "min"), self._stat(dataflow, "ints", "max")) == (6, 12)
+        dataflow.post_processing_method = "low_only"
+        assert (self._stat(dataflow, "ints", "min"), self._stat(dataflow, "ints", "max")) == (0, 4)
 
     def test_a_search_reads_its_own_cells(self, tmp_path, monkeypatch):
         """A committed search filters the rows the stats run over, so it's part
