@@ -214,7 +214,7 @@ function createRender(Widget) {
  * This runs once at mount and on every model change, BEFORE React
  * renders, so components always receive plain DFData arrays.
  */
-function createPredecodingRender(Widget) {
+export function createPredecodingRender(Widget) {
 	return ({ el, model, experimental }) => {
 		let root = ReactDOM.createRoot(el);
 		let unmounted = false;
