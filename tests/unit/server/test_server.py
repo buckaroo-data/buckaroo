@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import tempfile
+import urllib.parse
 from unittest import mock
 
 import pandas as pd
@@ -11,7 +12,7 @@ import tornado.httpclient
 import tornado.testing
 import tornado.websocket
 
-from buckaroo.server import telemetry
+from buckaroo.server import focus, telemetry
 from buckaroo.server.app import make_app as _make_app
 
 # Temp file cleanup fails on Windows due to file locking (WinError 32)
@@ -1180,3 +1181,137 @@ class TestLoadTelemetry(tornado.testing.AsyncHTTPTestCase):
         session = sessions.get("ld-silent")
         self.assertIsNone(session.tele_sink)
         self.assertFalse(session._perf_first_payload_seen)
+
+
+# ---------------------------------------------------------------------------
+# Security hardening (PR: XSS / AppleScript injection / DNS-rebinding)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionPageIdValidation(tornado.testing.AsyncHTTPTestCase):
+    """``/s/<id>`` interpolates the id into the page HTML, the inline
+    ``<title>`` and a ``const SESSION_ID = "..."`` JS string. A crafted id
+    must be refused (404) before it ever reaches the template, and the
+    reflected payload must not appear in the response body."""
+
+    def get_app(self):
+        return make_app()
+
+    def test_valid_session_id_renders(self):
+        resp = self.fetch("/s/good-session_1.2")
+        self.assertEqual(resp.code, 200)
+        self.assertIn(b"standalone.js", resp.body)
+        self.assertIn(b"good-session_1.2", resp.body)
+
+    def test_js_string_breakout_refused(self):
+        payload = '";alert(document.domain);"'
+        resp = self.fetch("/s/" + urllib.parse.quote(payload, safe=""))
+        self.assertEqual(resp.code, 404)
+        self.assertNotIn(b"alert(document.domain)", resp.body)
+
+    def test_title_breakout_refused(self):
+        payload = "</title><script>alert(1)</script>"
+        resp = self.fetch("/s/" + urllib.parse.quote(payload, safe=""))
+        self.assertEqual(resp.code, 404)
+        self.assertNotIn(b"<script>alert(1)", resp.body)
+
+
+class TestLoadSessionIdValidation(tornado.testing.AsyncHTTPTestCase):
+    def get_app(self):
+        return make_app()
+
+    @tornado.testing.gen_test
+    async def test_load_rejects_bad_session_id(self):
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                resp = await _async_fetch(self.get_http_port(), "/load", method="POST",
+                    body=json.dumps({"session": '";alert(1);"', "path": f.name}))
+                self.assertEqual(resp.code, 400)
+                self.assertEqual(json.loads(resp.body)["error_code"], "invalid_session")
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_load_accepts_valid_session_id(self):
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                resp = await _async_fetch(self.get_http_port(), "/load", method="POST",
+                    body=json.dumps({"session": "sess-ok_1", "path": f.name}))
+                self.assertEqual(resp.code, 200)
+            finally:
+                os.unlink(f.name)
+
+
+class TestReloadExprSessionIdValidation(tornado.testing.AsyncHTTPTestCase):
+    def get_app(self):
+        return make_app()
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_rejects_bad_session_id(self):
+        # A malformed id is refused as invalid — distinct from the
+        # session_not_found a well-formed-but-unknown id gets.
+        resp = await _async_fetch(self.get_http_port(),
+            "/reload_expr/" + urllib.parse.quote('"><img>', safe=""), method="POST", body="")
+        self.assertEqual(resp.code, 404)
+        self.assertEqual(json.loads(resp.body)["error_code"], "invalid_session")
+
+
+class TestWsSessionIdValidation(tornado.testing.AsyncHTTPTestCase):
+    def get_app(self):
+        return make_app()
+
+    @tornado.testing.gen_test(timeout=10)
+    async def test_ws_rejects_bad_session_id(self):
+        url = (f"ws://localhost:{self.get_http_port()}/ws/"
+            + urllib.parse.quote('"><script>', safe=""))
+        with self.assertRaises(tornado.httpclient.HTTPClientError):
+            await tornado.websocket.websocket_connect(url)
+
+    @tornado.testing.gen_test(timeout=10)
+    async def test_ws_accepts_valid_session_id(self):
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/ws-valid_1")
+        ws.close()
+
+
+class TestHostHeaderCheck(tornado.testing.AsyncHTTPTestCase):
+    """DNS-rebinding defense: a non-loopback Host header is refused (403)
+    unless BUCKAROO_ALLOW_REMOTE_ACCESS is set. Mirrors Jupyter's
+    allow_remote_access=False default."""
+
+    def get_app(self):
+        return make_app()
+
+    def test_local_host_allowed(self):
+        self.assertEqual(self.fetch("/health").code, 200)
+
+    def test_foreign_host_refused_on_health(self):
+        resp = self.fetch("/health", headers={"Host": "evil.example"})
+        self.assertEqual(resp.code, 403)
+        self.assertEqual(json.loads(resp.body)["error_code"], "forbidden_host")
+
+    def test_foreign_host_refused_on_diagnostics(self):
+        resp = self.fetch("/diagnostics", headers={"Host": "attacker.com:8700"})
+        self.assertEqual(resp.code, 403)
+
+    def test_foreign_host_allowed_when_remote_access_enabled(self):
+        with mock.patch.dict(os.environ, {"BUCKAROO_ALLOW_REMOTE_ACCESS": "1"}):
+            resp = self.fetch("/health", headers={"Host": "evil.example"})
+        self.assertEqual(resp.code, 200)
+
+
+def test_focus_invalid_session_id_runs_no_subprocess():
+    """focus.find_or_create_session_window is defense-in-depth: even if a
+    bad id reached it, it must not interpolate it into AppleScript or a URL.
+    It refuses without spawning anything."""
+    with mock.patch("buckaroo.server.focus.subprocess.run") as run, \
+            mock.patch("buckaroo.server.focus.subprocess.Popen") as popen, \
+            mock.patch("buckaroo.server.focus.webbrowser.open") as wopen:
+        status = focus.find_or_create_session_window(
+            'x" & (do shell script "touch /tmp/buckaroo_pwned") & "', 8700)
+    run.assert_not_called()
+    popen.assert_not_called()
+    wopen.assert_not_called()
+    assert "refused" in status.lower()
