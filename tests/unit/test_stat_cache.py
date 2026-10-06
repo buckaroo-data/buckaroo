@@ -7,12 +7,16 @@ which parts are written), not wall-clock time.
 
 import importlib.metadata
 import importlib.util
+import inspect
 import math
 import shutil
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import pandas as pd
+import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -22,10 +26,11 @@ xo = pytest.importorskip("xorq.api")
 import xorq.vendor.ibis.expr.types.core as ibis_core  # noqa: E402
 
 import buckaroo.customizations.histogram as histogram_module  # noqa: E402
+from buckaroo import ddd_library  # noqa: E402
 from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2  # noqa: E402
 from buckaroo.pluggable_analysis_framework import stat_cache as sc  # noqa: E402
 from buckaroo.pluggable_analysis_framework.stat_func import (  # noqa: E402
-    StatFunc, StatKey, XorqColumn, XorqExecute, XorqExpr, stat)
+    ColumnValue, StatFunc, StatKey, XorqColumn, XorqExecute, XorqExpr, stat)
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline  # noqa: E402
 
 
@@ -49,6 +54,73 @@ def _pipeline(cache, stats=XORQ_STATS_V2):
 
 def _parts(cache, scope_id):
     return sorted(cache.scope_dir(scope_id).glob("part-*.parquet"))
+
+
+def _same(a, b) -> bool:
+    """Equal and of the same type, recursively. NaN equals NaN; pandas and
+    numpy temporals must also keep their unit and timezone."""
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, float) and math.isnan(a):
+        return math.isnan(b)
+    if isinstance(a, (list, tuple)):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict):
+        return list(a) == list(b) and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, (pd.Timestamp, pd.Timedelta)):
+        return a == b and a.unit == b.unit and str(getattr(a, "tz", None)) == str(getattr(b, "tz", None))
+    if isinstance(a, (np.datetime64, np.timedelta64)):
+        return a.dtype == b.dtype and (a == b or (np.isnat(a) and np.isnat(b)))
+    if isinstance(a, Decimal):
+        return a.as_tuple() == b.as_tuple()
+    return bool(a == b)
+
+
+def _ddd_frames():
+    """Every frame the DDD builds, pandas and polars, by name."""
+    for name, fn in inspect.getmembers(ddd_library, inspect.isfunction):
+        if fn.__module__ == ddd_library.__name__ and not name.startswith("_"):
+            df = fn()
+            if isinstance(df, (pd.DataFrame, pl.DataFrame)):
+                yield name, df
+
+
+def _ddd_values():
+    """``(id, values)`` per DDD column: every value a stat can see in it, each
+    cell and the whole column as a list, as pandas hands them over and as
+    polars does (pandas frames converted where polars can)."""
+    def polars_values(name, df):
+        for col in df.columns:
+            ser = df[col]
+            yield f"polars-{name}-{col}", [ser[i] for i in range(len(ser))] + [ser.to_list()]
+
+    for name, df in _ddd_frames():
+        if isinstance(df, pl.DataFrame):
+            yield from polars_values(name, df)
+            continue
+        for j in range(df.shape[1]):
+            ser = df.iloc[:, j]
+            yield f"pandas-{name}-{j}", [ser.iloc[i] for i in range(len(ser))] + [ser.tolist()]
+        if not isinstance(df.columns, pd.MultiIndex) and all(isinstance(c, str) for c in df.columns):
+            try:
+                converted = pl.from_pandas(df.reset_index(drop=True))
+            except Exception:
+                continue
+            yield from polars_values(f"{name}-from-pandas", converted)
+
+
+def _ddd_xorq_table(name):
+    """The DDD frame ``name`` as a xorq table, or None when xorq can't load it
+    (non-string column names, types arrow can't convert)."""
+    df = dict(_ddd_frames())[name]
+    try:
+        if isinstance(df, pl.DataFrame):
+            return xo.memtable(df.to_arrow(), name="t")
+        if isinstance(df.columns, pd.MultiIndex) or not all(isinstance(c, str) for c in df.columns):
+            return None
+        return xo.memtable(pa.Table.from_pandas(df, preserve_index=False), name="t")
+    except Exception:
+        return None
 
 
 class ExecSpy:
@@ -130,6 +202,12 @@ def high(col: XorqColumn) -> int:
 
 
 @stat()
+def first_value(col: XorqColumn) -> ColumnValue:
+    """A value drawn from the column, whatever its type."""
+    return col.arbitrary()
+
+
+@stat()
 def low_rows(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, low: int) -> int:
     """A per-column query stat that depends on ``low``."""
     return int(execute(expr.filter(expr[orig_col_name] == low).count()))
@@ -208,6 +286,41 @@ class TestStorage:
         cache.write("s", {"a": {"x@1": 1}})
         (cache.scope_dir("s") / "part-0000-corrupt.parquet").write_bytes(b"not parquet")
         assert cache.read("s").values == {"a": {"x@1": 1}}
+
+    @pytest.mark.parametrize("values", [pytest.param(v, id=i) for i, v in _ddd_values()])
+    def test_ddd_values_round_trip(self, tmp_path, values):
+        """Every value a stat can see in a DDD column, each cell and the whole
+        column as a list, as pandas and as polars hand them over, comes back
+        with its own type and value."""
+        cache = sc.StatCache(tmp_path)
+        cells = {f"r{i}": {"v@x": v} for i, v in enumerate(values)}
+        cache.write("s", cells)
+        got = cache.read("s").values
+        for col, cell in cells.items():
+            assert col in got and "v@x" in got[col], f"{cell['v@x']!r} wasn't cached"
+            assert _same(got[col]["v@x"], cell["v@x"]), f"{cell['v@x']!r} came back as {got[col]['v@x']!r}"
+
+    @pytest.mark.parametrize("value",
+        [pytest.param(pd.Timestamp("2020-01-01 00:00:05.000000001"), id="timestamp-ns"),
+         pytest.param(pd.Timestamp("2020-01-01 05:00", tz="US/Eastern"), id="timestamp-tz"),
+         pytest.param(pd.Timestamp("2020-01-05 00:00:01").as_unit("s"), id="timestamp-s"),
+         pytest.param(pd.Timedelta("4 days").as_unit("s"), id="timedelta-s"),
+         pytest.param(pd.Timedelta("1500ms").as_unit("ms"), id="timedelta-ms"),
+         pytest.param(pd.Timedelta(5), id="timedelta-ns"),
+         pytest.param(np.datetime64("2020-01-01T00:00:05.000000001", "ns"), id="datetime64-ns"),
+         pytest.param({"p#lo": 1, "p#hi": 3}, id="struct-hash-key"),
+         pytest.param({"a,b": 1, "a": 2}, id="struct-comma-key"),
+         pytest.param({"big": 2**63 + 5, "small": 1}, id="struct-uint64"),
+         pytest.param(Decimal("-0.00"), id="decimal-negative-zero")])
+    def test_value_round_trips(self, tmp_path, value):
+        """Values outside the DDD that stats return: pandas and numpy temporals
+        keep their unit, timezone and nanoseconds, and struct keys may hold any
+        character."""
+        cache = sc.StatCache(tmp_path)
+        cache.write("s", {"a": {"v@x": value}})
+        got = cache.read("s").values.get("a", {})
+        assert "v@x" in got, f"{value!r} wasn't cached"
+        assert _same(got["v@x"], value), f"{value!r} came back as {got['v@x']!r}"
 
 
 # ============================================================
@@ -375,6 +488,23 @@ class TestPipelineCache:
         sd, errs = _pipeline(cache).process_table(_table(), scope_id="s")
         assert errs == []
         assert sd["ints"]["min"] == 0
+
+    @pytest.mark.parametrize("name", [name for name, _ in _ddd_frames()])
+    def test_ddd_frames_load_the_same_warm_as_cold(self, tmp_path, name):
+        """A warm load of any DDD frame xorq can load returns exactly the stats
+        the cold load computed, a ``ColumnValue`` stat over every column
+        included."""
+        table = _ddd_xorq_table(name)
+        if table is None:
+            pytest.skip(f"xorq can't load {name}")
+        cache = sc.StatCache(tmp_path)
+        stats = XORQ_STATS_V2 + [first_value]
+        cold, cold_errs = _pipeline(cache, stats).process_table(table, scope_id="s")
+        warm, warm_errs = _pipeline(cache, stats).process_table(table, scope_id="s")
+        assert {(e.column, e.stat_key) for e in warm_errs} == {(e.column, e.stat_key) for e in cold_errs}
+        for col, cells in cold.items():
+            for key, value in cells.items():
+                assert _same(warm[col][key], value), f"{col}.{key}: {value!r} came back as {warm[col][key]!r}"
 
     def test_a_stat_with_no_source_file_is_never_cached(self, tmp_path):
         """A stat compiled from a string (a notebook cell, ``exec``) has no file
