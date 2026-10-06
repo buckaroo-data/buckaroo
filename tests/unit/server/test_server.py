@@ -11,6 +11,7 @@ import tornado.httpclient
 import tornado.testing
 import tornado.websocket
 
+from buckaroo.server import telemetry
 from buckaroo.server.app import make_app as _make_app
 
 # Temp file cleanup fails on Windows due to file locking (WinError 32)
@@ -52,6 +53,36 @@ class TestHealth(tornado.testing.AsyncHTTPTestCase):
         self.assertIn("pid", body)
         self.assertIn("started", body)
         self.assertIn("uptime_s", body)
+
+
+class TestMakeAppDefaultNoBrowser(tornado.testing.AsyncHTTPTestCase):
+    """``make_app()`` with no arguments must not open browser windows.
+
+    The CLI passes ``open_browser`` explicitly (``--no-browser``), so the
+    default only reaches library callers — tests and scripts that build a
+    throwaway server. With the old default of True, every ``/load`` they made
+    opened a Chrome window on a server that was gone a moment later."""
+
+    def get_app(self):
+        return _make_app()
+
+    def test_default_is_no_browser(self):
+        self.assertFalse(self._app.settings["open_browser"])
+
+    def test_load_without_no_browser_opens_nothing(self):
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                with mock.patch("buckaroo.server.handlers.find_or_create_session_window",
+                    return_value="opened") as opener:
+                    resp = self.fetch("/load", method="POST",
+                        body=json.dumps({"session": "default-browser", "path": f.name}),
+                        headers={"Content-Type": "application/json"})
+                self.assertEqual(resp.code, 200)
+                self.assertEqual(json.loads(resp.body)["browser_action"], "disabled")
+                opener.assert_not_called()
+            finally:
+                os.unlink(f.name)
 
 
 class TestLoad(tornado.testing.AsyncHTTPTestCase):
@@ -826,3 +857,153 @@ class TestLoadPushesToWebSocket(tornado.testing.AsyncHTTPTestCase):
                 ws.close()
             finally:
                 os.unlink(f.name)
+
+
+class TestLoadTelemetry(tornado.testing.AsyncHTTPTestCase):
+    """#996: /load takes ``telemetry_url`` the way /load_expr does (#943, #944):
+    the sink is built once, stored on the session for the WS first-pull spans,
+    and the load's steps emit ``firstpull.*`` records to it."""
+
+    TELEMETRY_URL = "http://companion.invalid/internal/telemetry"
+
+    def get_app(self):
+        return make_app()
+
+    async def _load(self, sid, path, captured, **extra):
+        # Capture records in-process: make_http_sink -> list.append, so the
+        # wiring (telemetry_url -> context -> spans) is what's under test. The
+        # real POST has its own test (test_telemetry_sink.py).
+        with mock.patch.object(telemetry, "make_http_sink", lambda url, **kw: captured.append):
+            return await _async_fetch(self.get_http_port(), "/load", method="POST",
+                body=json.dumps({"session": sid, "path": path,
+                    "telemetry_url": self.TELEMETRY_URL, **extra}))
+
+    async def _first_pull(self, sid):
+        ws = await tornado.websocket.websocket_connect(
+            f"ws://localhost:{self.get_http_port()}/ws/{sid}")
+        await ws.read_message()  # discard initial_state
+        ws.write_message(json.dumps({
+            "type": "infinite_request",
+            "payload_args": {"start": 0, "end": 5, "sourceName": "default", "origEnd": 5}}))
+        await ws.read_message()  # json frame
+        await ws.read_message()  # binary frame
+        ws.close()
+
+    @tornado.testing.gen_test
+    async def test_load_polars_emits_session_correlated_firstpull_spans(self):
+        """A polars /load with telemetry_url emits the load's steps as
+        firstpull.* records under the outer firstpull.load total, every one
+        carrying the session as its trace and ``attrs.session``."""
+        captured: list = []
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                resp = await self._load("ld-telem", f.name, captured,
+                    mode="buckaroo", backend="polars")
+                self.assertEqual(resp.code, 200)
+            finally:
+                os.unlink(f.name)
+
+        names = [r["name"] for r in captured]
+        for name in ("firstpull.load", "firstpull.file_load",
+                     "firstpull.dataflow_construct", "firstpull.metadata"):
+            self.assertIn(name, names, f"missing {name}; got {names}")
+        self.assertTrue(all(r["trace"] == "ld-telem" for r in captured),
+            f"all spans must carry the session trace; got {[r['trace'] for r in captured]}")
+        self.assertTrue(all(r["source"] == "server" for r in captured))
+        self.assertTrue(all(r["attrs"]["session"] == "ld-telem" for r in captured),
+            f"all spans must carry attrs.session; got {[r['attrs'] for r in captured]}")
+        outer = next(r for r in captured if r["name"] == "firstpull.load")
+        self.assertEqual(outer["attrs"]["backend"], "polars")
+        # The steps nest inside the outer total, so they close before it does.
+        for r in captured:
+            self.assertLessEqual(r["t_end_ms"], outer["t_end_ms"])
+
+    @tornado.testing.gen_test
+    async def test_load_pandas_emits_firstpull_spans(self):
+        """The default pandas backend goes through the same spans."""
+        captured: list = []
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                resp = await self._load("ld-pd-telem", f.name, captured, mode="buckaroo")
+                self.assertEqual(resp.code, 200)
+            finally:
+                os.unlink(f.name)
+        names = [r["name"] for r in captured]
+        for name in ("firstpull.load", "firstpull.file_load",
+                     "firstpull.dataflow_construct", "firstpull.metadata"):
+            self.assertIn(name, names, f"missing {name}; got {names}")
+        self.assertEqual(next(r for r in captured if r["name"] == "firstpull.load")
+            ["attrs"]["backend"], "pandas")
+
+    @tornado.testing.gen_test
+    async def test_load_stores_sink_so_ws_first_pull_emits(self):
+        """The sink built by /load is stored on the session, so the WS handler
+        (a separate async context) emits firstpull.ws_first_payload through it,
+        and builds it exactly once rather than again in the WS path."""
+        captured: list = []
+        sink_factory = mock.MagicMock(side_effect=lambda url, **kw: captured.append)
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                with mock.patch.object(telemetry, "make_http_sink", sink_factory):
+                    resp = await _async_fetch(self.get_http_port(), "/load", method="POST",
+                        body=json.dumps({"session": "ld-ws", "path": f.name,
+                            "mode": "buckaroo", "backend": "polars",
+                            "telemetry_url": self.TELEMETRY_URL}))
+                    self.assertEqual(resp.code, 200)
+                    await self._first_pull("ld-ws")
+            finally:
+                os.unlink(f.name)
+        self.assertEqual(sink_factory.call_count, 1,
+            f"sink must be built once in /load and reused; got {sink_factory.call_count}")
+        ws_span = next((r for r in captured if r["name"] == "firstpull.ws_first_payload"), None)
+        self.assertIsNotNone(ws_span, f"no ws_first_payload span; got {[r['name'] for r in captured]}")
+        self.assertEqual(ws_span["trace"], "ld-ws")
+
+    @tornado.testing.gen_test
+    async def test_load_rearms_first_pull_telemetry_on_repeat_load(self):
+        """Each /load into an existing session re-arms first-pull telemetry
+        (#944): the refreshed page opens a new WS and pulls a fresh
+        time-to-first-rows, so the second pull's span must reach the second
+        request's sink, not be dropped because the flag stayed True."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                first: list = []
+                await self._load("ld-rearm", f.name, first, mode="buckaroo")
+                await self._first_pull("ld-rearm")
+                self.assertIn("firstpull.ws_first_payload", [r["name"] for r in first])
+
+                second: list = []
+                await self._load("ld-rearm", f.name, second, mode="buckaroo")
+                await self._first_pull("ld-rearm")
+                self.assertIn("firstpull.ws_first_payload", [r["name"] for r in second],
+                    "a repeat /load must re-arm first-pull telemetry")
+            finally:
+                os.unlink(f.name)
+
+    @tornado.testing.gen_test
+    async def test_load_without_telemetry_url_clears_sink(self):
+        """No telemetry_url: the sink is never built, and a sink left on the
+        session by an earlier load is unbound, so the WS first pull emits
+        nothing. The flag is still re-armed (perf logging reads it too)."""
+        sessions = self._app.settings["sessions"]
+        stale = sessions.create("ld-silent", "")
+        stale.tele_sink = lambda record: None
+        stale._perf_first_payload_seen = True
+        sink_factory = mock.MagicMock()
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            _write_test_csv(f.name)
+            try:
+                with mock.patch.object(telemetry, "make_http_sink", sink_factory):
+                    resp = await _async_fetch(self.get_http_port(), "/load", method="POST",
+                        body=json.dumps({"session": "ld-silent", "path": f.name}))
+                self.assertEqual(resp.code, 200)
+            finally:
+                os.unlink(f.name)
+        sink_factory.assert_not_called()
+        session = sessions.get("ld-silent")
+        self.assertIsNone(session.tele_sink)
+        self.assertFalse(session._perf_first_payload_seen)
