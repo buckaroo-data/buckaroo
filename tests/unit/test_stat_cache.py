@@ -400,6 +400,19 @@ class TestStorage:
         (cache.scope_dir("s") / "part-0000-corrupt.parquet").write_bytes(b"not parquet")
         assert cache.read("s").values == {"a": {"x@1": 1}}
 
+    def test_a_part_with_a_foreign_schema_is_skipped_and_compaction_still_runs(self, tmp_path):
+        """A part that reads as parquet but isn't a stat cache part (no column
+        or computed field) is skipped like an unreadable one, by reads and by
+        compaction."""
+        cache = sc.StatCache(tmp_path)
+        cache.write("s", {"a": {"x@1": 1}})
+        pq.write_table(pa.table({"other": [1]}), cache.scope_dir("s") / "part-0000-foreign.parquet")
+        assert cache.read("s").values == {"a": {"x@1": 1}}
+        for i in range(sc.MAX_PARTS):
+            cache.write("s", {"a": {f"stat{i}@1": i}})
+        assert len(_parts(cache, "s")) <= sc.MAX_PARTS
+        assert cache.read("s").values == {"a": {"x@1": 1, **{f"stat{i}@1": i for i in range(sc.MAX_PARTS)}}}
+
     @pytest.mark.parametrize("values", _ddd_params(_ddd_values()))
     def test_ddd_values_round_trip(self, tmp_path, values):
         """Every value a stat can see in a DDD column, each cell and the whole
@@ -472,18 +485,14 @@ class TestStorage:
          pytest.param(np.array([1, 2]), id="ndarray"),
          pytest.param("\ud800", id="lone-surrogate"),
          pytest.param(dt.timedelta.max, id="timedelta-past-int64-microseconds"),
+         # Each of these raises while the part is read back (#1052).
          pytest.param(pd.Timestamp("2020-01-01").tz_localize(dt.timezone(dt.timedelta(hours=5), "PKT")),
-             id="timestamp-named-offset", marks=pytest.mark.xfail(strict=True,
-                 reason="#1052: tz 'PKT' can't be read back")),
+             id="timestamp-named-offset"),
          pytest.param(dt.datetime(2020, 1, 1, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30))),
-             id="datetime-fixed-offset",
-             marks=pytest.mark.xfail(strict=True, reason="#1052: tz 'UTC+05:30' can't be read back")),
-         pytest.param(dt.datetime(1, 1, 1, tzinfo=zoneinfo.ZoneInfo("Asia/Kolkata")), id="datetime-before-year-1-utc",
-             marks=pytest.mark.xfail(strict=True, reason="#1052: reading it back overflows")),
-         pytest.param(np.datetime64("NaT"), id="datetime64-generic-nat",
-             marks=pytest.mark.xfail(strict=True, reason="#1052: decoding a generic unit raises")),
-         pytest.param(_nested(200), id="list-200-deep",
-             marks=pytest.mark.xfail(strict=True, reason="#1052: parquet can't read it back"))])
+             id="datetime-fixed-offset"),
+         pytest.param(dt.datetime(1, 1, 1, tzinfo=zoneinfo.ZoneInfo("Asia/Kolkata")), id="datetime-before-year-1-utc"),
+         pytest.param(np.datetime64("NaT"), id="datetime64-generic-nat"),
+         pytest.param(_nested(200), id="list-200-deep")])
     def test_a_value_that_does_not_round_trip_costs_only_its_own_cell(self, tmp_path, value):
         """A value the codec can't store, or can't read back exactly, is left
         out, and the rest of the part is cached."""
@@ -900,6 +909,19 @@ class TestServerDataflowScopes:
     @staticmethod
     def _stat(dataflow, col, key):
         return next(v[key] for v in dataflow.summary_sd.values() if v["orig_col_name"] == col)
+
+    def test_a_cache_key_that_cant_be_computed_falls_back_to_uncached_stats(self, tmp_path, monkeypatch):
+        """With no ``data_id`` the scope is keyed by xorq's snapshot hash. When
+        that raises, the load computes its stats uncached instead of failing."""
+        from buckaroo import xorq_buckaroo
+
+        def no_key(table):
+            raise RuntimeError("can't hash this expression")
+        monkeypatch.setattr(xorq_buckaroo, "fallback_data_id", no_key)
+        dataflow = self._load(tmp_path, monkeypatch, data_id=None)
+        assert self._length(dataflow) == 40
+        assert self._stat(dataflow, "ints", "max") == 12
+        assert not list(tmp_path.glob("parquet/v1/*/part-*.parquet"))
 
     def test_post_processing_steps_in_one_file_get_their_own_scopes(self, tmp_path, monkeypatch):
         """Two post-processing steps defined in one file share the file, so
