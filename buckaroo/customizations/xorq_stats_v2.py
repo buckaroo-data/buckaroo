@@ -242,6 +242,22 @@ def distinct_per(length: int, distinct_count: int) -> float:
 # ============================================================
 
 
+def _finite_range(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str) -> tuple | None:
+    """``(expr, lo, hi)`` for a float column whose min or max is infinite: ``expr``
+    without the column's +/-inf rows, and the min and max of the rows left.
+
+    Bucketing over an infinite range makes every bucket NaN, so the histogram
+    and its bins span the finite values and leave the infinities out (#1055).
+    ``None`` when no usable finite range remains.
+    """
+    finite = expr.filter(~expr[col].isinf())
+    df = execute(finite.aggregate(lo=finite[col].min(), hi=finite[col].max()))
+    lo, hi = df["lo"].iloc[0], df["hi"].iloc[0]
+    if pd.isna(lo) or pd.isna(hi):
+        return None
+    return finite, float(lo), float(hi)
+
+
 def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: str, min_val: Any,
         max_val: Any) -> list:
     if min_val is None or max_val is None:
@@ -250,6 +266,11 @@ def _numeric_histogram(execute: Callable[[Any], pd.DataFrame], expr: Any, col: s
     min_val, max_val = float(min_val), float(max_val)
     if math.isnan(min_val) or math.isnan(max_val):
         return []
+    if math.isinf(min_val) or math.isinf(max_val):
+        bounded = _finite_range(execute, expr, col)
+        if bounded is None:
+            return []
+        expr, min_val, max_val = bounded
     if min_val == max_val:
         return []
 
@@ -361,13 +382,15 @@ def histogram(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numer
 
 
 @stat(default=[])
-def histogram_bins(is_numeric: bool, is_bool: bool, distinct_count: int, min: ColumnValue, max: ColumnValue) -> list:
+def histogram_bins(expr: XorqExpr, execute: XorqExecute, orig_col_name: str, is_numeric: bool, is_bool: bool,
+        distinct_count: int, min: ColumnValue, max: ColumnValue) -> list:
     """Evenly-spaced numeric bin edges consumed by the JS ``color_map`` styler.
 
     Returns 11 edges (10 equal-width bins) spanning [min, max] — the same
-    10-bucket layout used by ``_numeric_histogram``.  Pure computation: only
-    depends on ``min`` / ``max`` from the batch aggregate so no extra query
-    is needed.
+    10-bucket layout used by ``_numeric_histogram``.  Computed from ``min`` /
+    ``max`` in the batch aggregate with no query of its own, except on a float
+    column whose min or max is infinite: the edges then span the finite values
+    (one small query, as in ``_numeric_histogram``).
 
     The JS ``color_map`` rule reads ``histogram_stats[col].histogram_bins``
     to map cell values onto a colour gradient (e.g. DIVERGING_RED_WHITE_BLUE).
@@ -384,6 +407,11 @@ def histogram_bins(is_numeric: bool, is_bool: bool, distinct_count: int, min: Co
         return []
     # min/max keep the column's type; the JS color_map wants float edges.
     lo, hi = float(min), float(max)
+    if math.isinf(lo) or math.isinf(hi):
+        bounded = _finite_range(execute, expr, orig_col_name)
+        if bounded is None:
+            return []
+        _, lo, hi = bounded
     if lo == hi:
         return []
     width = (hi - lo) / 10
