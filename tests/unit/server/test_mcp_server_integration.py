@@ -114,6 +114,22 @@ def _poll_health_gone(port: int, timeout: float = 10.0) -> bool:
     return False
 
 
+def _conn_pid(port: int, timeout: float = 5.0):
+    """The server's pid from its 0600 connection file (written at startup).
+
+    /health no longer carries pid (PR2); the connection file is how a parent
+    learns it.
+    """
+    from buckaroo.server.security import read_connection_file
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        conn = read_connection_file(port)
+        if conn and conn.get("pid"):
+            return conn["pid"]
+        time.sleep(0.1)
+    return None
+
+
 def _start_server(port: int) -> subprocess.Popen:
     """Start ``python -m buckaroo.server`` on the given port.
 
@@ -168,9 +184,9 @@ class TestServerSubprocessHealthCheck:
                     f"exit code: {proc.returncode}\nstderr: {stderr_text}")
 
             assert health["status"] == "ok"
-            assert isinstance(health["pid"], int)
-            assert isinstance(health["uptime_s"], (int, float))
             assert "version" in health
+            # pid lives in the connection file now, not in /health.
+            assert isinstance(_conn_pid(port), int)
 
             # Terminate cleanly
             proc.terminate()
@@ -291,9 +307,7 @@ class TestKillStdioKillsTornado:
                 os.unlink(tmp_csv)
             # Best-effort cleanup: kill any server left on the port
             try:
-                resp = urlopen(f"http://localhost:{server_port}/health", timeout=1)
-                health = json.loads(resp.read())
-                pid = health.get("pid")
+                pid = _conn_pid(server_port, timeout=1)
                 if pid:
                     os.kill(pid, signal.SIGTERM)
             except Exception:
@@ -333,6 +347,7 @@ class TestPortConflictNonBuckaroo:
         try:
             with (
                 patch.object(m, "SERVER_URL", f"http://localhost:{port}"),
+                patch.object(m, "SERVER_PORT", port),
                 patch("time.sleep"),
             ):
                 # _health_check() gets non-JSON from fake server → returns None
@@ -373,7 +388,8 @@ class TestVersionMismatchRestart:
         try:
             health = _poll_health(port, timeout=15)
             assert health is not None, "Old server did not start"
-            old_pid = health["pid"]
+            old_pid = _conn_pid(port)
+            assert old_pid is not None, "Old server wrote no connection file"
             real_version = health["version"]
 
             m = buckaroo_mcp_tool
@@ -399,6 +415,7 @@ class TestVersionMismatchRestart:
 
                 with (
                     patch.object(m, "SERVER_URL", f"http://localhost:{port}"),
+                    patch.object(m, "SERVER_PORT", port),
                     patch("subprocess.Popen", side_effect=patched_popen),
                 ):
                     result = m.ensure_server()
@@ -434,10 +451,9 @@ class TestVersionMismatchRestart:
                 _kill_proc(p)
             # Final safety: kill anything on our port
             try:
-                resp = urlopen(f"http://localhost:{port}/health", timeout=1)
-                h = json.loads(resp.read())
-                if h.get("pid"):
-                    _kill_pid(h["pid"])
+                pid = _conn_pid(port, timeout=1)
+                if pid:
+                    _kill_pid(pid)
             except Exception:
                 pass
 
@@ -464,12 +480,13 @@ class TestReuseMatchingServer:
             try:
                 with (
                     patch.object(m, "SERVER_URL", f"http://localhost:{port}"),
+                    patch.object(m, "SERVER_PORT", port),
                     patch("subprocess.Popen") as mock_popen,
                 ):
                     result = m.ensure_server()
 
                 assert result["server_status"] == "reused"
-                assert result["server_pid"] == health["pid"]
+                assert result["server_pid"] == _conn_pid(port)
                 mock_popen.assert_not_called()
             finally:
                 m._server_proc = saved_proc

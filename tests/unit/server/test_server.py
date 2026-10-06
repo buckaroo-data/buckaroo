@@ -64,9 +64,12 @@ class TestHealth(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(resp.code, 200)
         body = json.loads(resp.body)
         self.assertEqual(body["status"], "ok")
-        self.assertIn("pid", body)
-        self.assertIn("started", body)
-        self.assertIn("uptime_s", body)
+        self.assertIn("version", body)
+        # /health is intentionally minimal now — pid/paths/static-file state
+        # moved to the token-authenticated /diagnostics (PR2). See
+        # test_server_auth.TestHealthExemptAndMinimal.
+        self.assertNotIn("pid", body)
+        self.assertNotIn("static_files", body)
 
 
 class TestMakeAppDefaultNoBrowser(tornado.testing.AsyncHTTPTestCase):
