@@ -449,6 +449,94 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(cache_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_load_expr_full_hit_runs_no_queries(self):
+        """ADR-001 D9: a fresh session over a fully cached entry runs no
+        backend query at all, the metadata row count included. Without a
+        data_id the cache scope comes from the build's expression."""
+        from buckaroo import xorq_buckaroo
+        import xorq.vendor.ibis.expr.types.core as ibis_core
+        builds_root = tempfile.mkdtemp()
+        cache_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            body = {"build_dir": build_path, "cache_storage_path": cache_root}
+            resp = await _post(self.get_http_port(), "/load_expr", {"session": "lx-hit-a", **body})
+            self.assertEqual(resp.code, 200)
+
+            executed = []
+            loading = []
+            orig_execute = ibis_core.Expr.execute
+            orig_load = xorq_loading.load_expr_build_dir
+
+            def spy(expr, *args, **kwargs):
+                if not loading:
+                    executed.append(expr)
+                return orig_execute(expr, *args, **kwargs)
+
+            def load_unspied(*args, **kwargs):
+                # xorq's load_expr runs a query to rehydrate the build's
+                # memtable; loading the expression is out of scope here.
+                loading.append(True)
+                try:
+                    return orig_load(*args, **kwargs)
+                finally:
+                    loading.pop()
+
+            # A fresh process carries no row counts over.
+            with patch.object(xorq_buckaroo, "_expr_count_cache", type(xorq_buckaroo._expr_count_cache)()), \
+                    patch.object(ibis_core.Expr, "execute", spy), \
+                    patch.object(xorq_loading, "load_expr_build_dir", load_unspied):
+                resp = await _post(self.get_http_port(), "/load_expr", {"session": "lx-hit-b", **body})
+            self.assertEqual(resp.code, 200)
+            self.assertEqual(json.loads(resp.body)["rows"], 10)
+            self.assertEqual(executed, [])
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(cache_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_warm_repost_with_new_data_id_recomputes(self):
+        """A re-POST of a loaded session with a different data_id means the
+        entry's rows changed, so it can't take the warm early exit: the stats
+        run again under a new cache scope."""
+        builds_root = tempfile.mkdtemp()
+        cache_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            body = {"session": "lx-data-id", "build_dir": build_path, "cache_storage_path": cache_root}
+            resp = await _post(self.get_http_port(), "/load_expr", {**body, "data_id": "digest-1"})
+            self.assertEqual(resp.code, 200)
+            resp = await _post(self.get_http_port(), "/load_expr", {**body, "data_id": "digest-2"})
+            self.assertEqual(resp.code, 200)
+            scopes = list((Path(cache_root) / "parquet" / "v1").iterdir())
+            self.assertEqual(len(scopes), 2)
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(cache_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_repost_with_another_build_does_not_inherit_data_id(self):
+        """A re-POST that omits data_id keeps the session's only for the same
+        build. Another build's rows have nothing to do with the old data_id,
+        so they mustn't be served its stats or row count."""
+        builds_root = tempfile.mkdtemp()
+        cache_root = tempfile.mkdtemp()
+        try:
+            build_a = _build_expr_dir(builds_root)
+            build_b = str(xo.build_expr(
+                xo.memtable({'idx': [100, 200, 300], 'name': ['x', 'y', 'z']}, name='t'), builds_dir=builds_root))
+            body = {"session": "lx-data-id-build", "cache_storage_path": cache_root}
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {**body, "build_dir": build_a, "data_id": "digest-a"})
+            self.assertEqual(resp.code, 200)
+            resp = await _post(self.get_http_port(), "/load_expr", {**body, "build_dir": build_b})
+            self.assertEqual(resp.code, 200)
+            self.assertEqual(json.loads(resp.body)["rows"], 3)
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(cache_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_load_expr_telemetry_emits_session_correlated_spans(self):
         """#943: POST /load_expr with telemetry_url must emit session-correlated
         span records, including a firstpull.summary_stats span carrying the
