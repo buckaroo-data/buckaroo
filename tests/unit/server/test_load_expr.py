@@ -37,11 +37,14 @@ from xorq.vendor.ibis.expr.types.core import Expr  # noqa: E402
 
 from buckaroo.dataflow.sd_cache import split_chain_by_scope  # noqa: E402
 from buckaroo.jlisp.lisp_utils import s as lisp_sym  # noqa: E402
+from buckaroo.pluggable_analysis_framework import perf_log  # noqa: E402
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: E402
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline  # noqa: E402
 from buckaroo.serialization_utils import resolve_summary_stats_payload  # noqa: E402
 from buckaroo.server import telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
+from buckaroo.server.session import SessionState, begin_stats_generation  # noqa: E402
+from buckaroo.server.stats_wire import complete_stats  # noqa: E402
 from buckaroo.server.websocket_handler import DataStreamHandler  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
@@ -1657,6 +1660,48 @@ def _count_stat_queries():
         yield queries
 
 
+def _deferred_session():
+    """A pending deferred session over a schema-tier dataflow, as /load_expr
+    leaves one."""
+    session = SessionState(session_id="s", path="", mode="buckaroo", backend="xorq",
+        xorq_dataflow=_build_dataflow(stats_tier="schema"), stats_tier="full", stats_delivery="deferred")
+    begin_stats_generation(session)
+    return session
+
+
+class TestCompleteStats:
+    """``complete_stats`` takes a deferred session's dataflow to the full tier."""
+
+    def test_a_cache_hit_keeps_the_errs_of_the_run_that_filled_the_cache(self):
+        session = _deferred_session()
+        dataflow = session.xorq_dataflow
+        errs = {"a": {"stat": "boom"}}
+        real = dataflow._get_summary_sd
+        dataflow._get_summary_sd = lambda df, scope="filt": (real(df, scope)[0], errs) if dataflow.stats_tier == "full" else real(df, scope)
+        assert complete_stats(session)
+
+        # A search and its clearing, each reset to the schema tier as a state
+        # change does, bring the dataflow back to a state whose stats are cached.
+        for args in ({"search": ["a"]}, {}):
+            dataflow.stats_tier = "schema"
+            dataflow.quick_command_args = args
+        begin_stats_generation(session)
+        assert complete_stats(session)
+
+        assert dataflow.errs == errs
+
+    def test_spans_reach_the_bound_sink_when_the_session_has_none_and_are_not_first_pull(self):
+        session = _deferred_session()
+        records = []
+
+        with perf_log.telemetry_context("outer", records.append):
+            assert complete_stats(session)
+
+        names = {record["name"] for record in records}
+        assert "stats.complete" in names
+        assert not {name for name in names if name.startswith("firstpull.")}
+
+
 class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
     """``stats_request``, ``stats_update`` and ``stats_aborted`` on a deferred
     ``/load_expr`` session, the ``stats_gen`` counter and ``df_meta.stats``, and
@@ -1984,6 +2029,23 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         complete = session.df_display_args["main"]["df_viewer_config"]["column_config"]
         self.assertEqual({cc["col_name"]: cc["ag_grid_specs"] for cc in overlay},
             {cc["col_name"]: cc["ag_grid_specs"] for cc in complete})
+
+    @tornado.testing.gen_test
+    async def test_a_failed_state_change_leaves_the_dataflow_at_the_tier_the_session_describes(self):
+        """The change resets a completed session's dataflow to the schema tier
+        before it applies the change. When applying it raises, the session still
+        describes the full stats of the snapshot it has, so the dataflow must
+        stay at the tier that matches."""
+        await self._load("sw-failed-change", stats_delivery="deferred")
+        ws, _ = await self._connect("sw-failed-change")
+        session = self._session("sw-failed-change")
+        self.assertEqual((session.stats_status, session.xorq_dataflow.stats_tier), ("complete", "full"))
+
+        with patch("buckaroo.server.websocket_handler.refresh_session_snapshot", side_effect=RuntimeError("boom")):
+            ws.write_message(_state_change(quick_command_args={"search": ["a"]}))
+            self.assertEqual((await _read_json(ws))["error_code"], "state_change_error")
+
+        self.assertEqual((session.stats_status, session.xorq_dataflow.stats_tier), ("complete", "full"))
 
     @tornado.testing.gen_test
     async def test_a_client_connecting_after_completion_gets_the_complete_state(self):
