@@ -4,6 +4,7 @@ import atexit
 import json
 import logging
 import os
+import secrets
 import signal
 import subprocess
 import sys
@@ -15,23 +16,76 @@ from urllib.request import Request, urlopen
 
 from mcp.server.fastmcp import FastMCP
 
+from buckaroo.server.security import read_connection_file
+
 LOG_DIR = os.path.join(os.path.expanduser("~"), ".buckaroo", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, "mcp_tool.log")
 
-logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+logging.basicConfig(filename=LOG_FILE, level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger("buckaroo.mcp_tool")
 
 SERVER_PORT = int(os.environ.get("BUCKAROO_PORT", "8700"))
 SERVER_URL = f"http://localhost:{SERVER_PORT}"
 SESSION_ID = uuid.uuid4().hex[:12]
 
+# The token we authenticate to the server with. When we spawn the server we
+# pass this to it via BUCKAROO_TOKEN; when we reuse a server someone else
+# started, ensure_server() overwrites this with the token from that server's
+# 0600 connection file. BUCKAROO_TOKEN in our own env (a parent set it) wins.
+TOKEN = os.environ.get("BUCKAROO_TOKEN") or secrets.token_hex(24)
+
 log.info("MCP tool starting — server=%s session=%s", SERVER_URL, SESSION_ID)
+
+
+def _auth_headers(extra=None):
+    """Request headers carrying the server token (skipped when auth off)."""
+    headers = dict(extra or {})
+    if TOKEN:
+        headers["Authorization"] = f"token {TOKEN}"
+    return headers
+
+
+def _listener_pid(port: int):
+    """PID of the process LISTENING on *port* (not clients), via lsof.
+
+    Only the listener is a kill candidate — never a connected browser tab.
+    """
+    try:
+        out = subprocess.run(["lsof", "-ti", f"TCP:{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=5).stdout.split()
+        return int(out[0]) if out else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _cmdline_is_buckaroo(pid: int) -> bool:
+    try:
+        out = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=5).stdout
+        return "buckaroo.server" in out
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _safe_to_kill(port: int, recorded_pid):
+    """The pid we may kill to free *port*, or None when we can't confirm one.
+
+    A pid qualifies only if its command line proves it is a buckaroo server
+    (our 0600 connection-file pid or the current lsof listener), so we never
+    SIGKILL an unrelated process — a reused/stale pid, or the ssh forwarder
+    sitting on a forwarded port whose real server (and connection file) live
+    on another machine. If the command-line check is unavailable but our
+    recorded pid is exactly the current listener, that agreement is enough.
+    """
+    listener = _listener_pid(port)
+    for pid in (recorded_pid, listener):
+        if pid and _cmdline_is_buckaroo(pid):
+            return pid
+    if recorded_pid and recorded_pid == listener:
+        return recorded_pid
+    return None
 
 # Track server subprocess so we can kill it on exit
 _server_proc: subprocess.Popen | None = None
@@ -55,14 +109,10 @@ def _start_server_monitor(server_pid: int):
         "except OSError:\n"
         "    pass\n"
     )
-    _server_monitor = subprocess.Popen(
-        [sys.executable, "-c", monitor_code],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    _server_monitor = subprocess.Popen([sys.executable, "-c", monitor_code], stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     log.info("Started server monitor (pid=%d) watching server pid=%d",
-             _server_monitor.pid, server_pid)
+        _server_monitor.pid, server_pid)
 
 
 def _cleanup_server():
@@ -106,14 +156,11 @@ signal.signal(signal.SIGTERM, _signal_handler)
 signal.signal(signal.SIGINT, _signal_handler)
 
 
-mcp = FastMCP(
-    "buckaroo-table",
-    instructions=(
+mcp = FastMCP("buckaroo-table", instructions=(
         "When the user mentions or asks about a CSV, TSV, Parquet, or JSON data file, "
         "always use the view_data tool to display it interactively in Buckaroo. "
         "Prefer view_data over reading file contents directly."
-    ),
-)
+    ))
 
 
 @mcp.prompt()
@@ -136,9 +183,9 @@ def _health_check() -> dict | None:
 
 
 def _get_diagnostics() -> dict | None:
-    """Fetch /diagnostics from the running server."""
+    """Fetch /diagnostics from the running server (token-authenticated)."""
     try:
-        resp = urlopen(f"{SERVER_URL}/diagnostics", timeout=5)
+        resp = urlopen(Request(f"{SERVER_URL}/diagnostics", headers=_auth_headers()), timeout=5)
         if resp.status == 200:
             return json.loads(resp.read())
     except (URLError, OSError):
@@ -191,34 +238,44 @@ def ensure_server() -> dict:
       - server_pid: int
       - server_uptime_s: float
     """
+    global TOKEN
     import buckaroo
     expected_version = getattr(buckaroo, "__version__", "unknown")
 
     health = _health_check()
     if health:
         running_version = health.get("version", "unknown")
+        # pid + token now come from the 0600 connection file, never from an
+        # (unauthenticated) HTTP body. A missing file means a pre-token or
+        # foreign server — reuse it by version but we can't learn its token.
+        conn = read_connection_file(SERVER_PORT) or {}
         if running_version == expected_version:
-            log.info("Server already running (v%s) — pid=%s uptime=%.0fs",
-                     running_version, health.get("pid"), health.get("uptime_s", 0))
-            return {
-                "server_status": "reused",
-                "server_pid": health.get("pid"),
-                "server_uptime_s": health.get("uptime_s", 0),
-            }
+            if conn.get("token"):
+                TOKEN = conn["token"]  # authenticate to the server we're reusing
+            log.info("Server already running (v%s) — pid=%s", running_version, conn.get("pid"))
+            return {"server_status": "reused", "server_pid": conn.get("pid"), "server_uptime_s": 0}
         else:
-            old_pid = health.get("pid")
-            log.info("Version mismatch: running=%s expected=%s — killing old server (pid=%s)",
-                     running_version, expected_version, old_pid)
-            if old_pid:
-                try:
-                    os.kill(old_pid, signal.SIGTERM)
-                    time.sleep(1)
-                    # Verify it's gone; SIGKILL if not
-                    if _health_check():
-                        os.kill(old_pid, signal.SIGKILL)
-                        time.sleep(0.5)
-                except OSError as exc:
-                    log.debug("Kill old server error (harmless): %s", exc)
+            recorded_pid = conn.get("pid")
+            kill_pid = _safe_to_kill(SERVER_PORT, recorded_pid)
+            log.info("Version mismatch: running=%s expected=%s — recorded_pid=%s kill_pid=%s",
+                running_version, expected_version, recorded_pid, kill_pid)
+            if kill_pid is None:
+                # Can't confirm the listener is our server (e.g. a forwarded
+                # port, or an unrelated process). Refuse to kill — better to
+                # fail loudly than SIGKILL something we don't own.
+                raise RuntimeError(
+                    f"A different-version server (v{running_version}) is on port "
+                    f"{SERVER_PORT} and could not be confirmed as a buckaroo "
+                    f"process to stop. Stop it manually or set BUCKAROO_PORT to "
+                    f"a free port.")
+            try:
+                os.kill(kill_pid, signal.SIGTERM)
+                time.sleep(1)
+                if _health_check() and _listener_pid(SERVER_PORT) == kill_pid:
+                    os.kill(kill_pid, signal.SIGKILL)
+                    time.sleep(0.5)
+            except OSError as exc:
+                log.debug("Kill old server error (harmless): %s", exc)
 
     global _server_proc
     # Pass --port explicitly so we don't depend on the buckaroo.server default.
@@ -226,10 +283,16 @@ def ensure_server() -> dict:
     # default); the server's argparse default has shifted historically.
     cmd = [sys.executable, "-m", "buckaroo.server", "--port", str(SERVER_PORT)]
 
+    # Hand the child our token so it authenticates to the same secret; the
+    # child also records it in the connection file for any other local client.
+    child_env = dict(os.environ)
+    child_env["BUCKAROO_TOKEN"] = TOKEN
+
     server_log = os.path.join(LOG_DIR, "server.log")
     server_log_fh = open(server_log, "a")
     try:
-        _server_proc = subprocess.Popen(cmd, stdout=server_log_fh, stderr=server_log_fh)
+        _server_proc = subprocess.Popen(cmd, stdout=server_log_fh, stderr=server_log_fh,
+            env=child_env)
     finally:
         # Close the parent-side handle; the child inherits its own copy.
         server_log_fh.close()
@@ -241,29 +304,16 @@ def ensure_server() -> dict:
         log.warning("BUCKAROO_STARTUP_TIMEOUT is not a valid number; using default 5.0s")
         startup_timeout_s = 5.0
     startup_retries = max(1, int(startup_timeout_s / 0.25))
-    log.info(
-        "Starting server: %s (startup_timeout=%.1fs retries=%d)",
-        " ".join(cmd), startup_timeout_s, startup_retries,
-    )
+    log.info("Starting server: %s (startup_timeout=%.1fs retries=%d)", " ".join(cmd), startup_timeout_s,
+        startup_retries)
 
     for i in range(startup_retries):
         time.sleep(0.25)
         health = _health_check()
         if health:
-            log.info("Server ready after %.1fs — pid=%s", (i + 1) * 0.25, health.get("pid"))
-            # Check static files on first start
-            static_files = health.get("static_files", {})
-            missing = [
-                name for name, info in static_files.items()
-                if not info.get("exists") or info.get("size_bytes", 0) == 0
-            ]
-            if missing:
-                log.warning("Static files missing or empty: %s — pages may be blank", missing)
-            return {
-                "server_status": "started",
-                "server_pid": health.get("pid"),
-                "server_uptime_s": health.get("uptime_s", 0),
-            }
+            conn = read_connection_file(SERVER_PORT) or {}
+            log.info("Server ready after %.1fs — pid=%s", (i + 1) * 0.25, conn.get("pid"))
+            return {"server_status": "started", "server_pid": conn.get("pid", _server_proc.pid), "server_uptime_s": 0}
 
     log.error("Server failed to start within 5s — see %s", server_log)
     raise RuntimeError(_format_startup_failure())
@@ -285,11 +335,7 @@ def _view_impl(path: str) -> str:
     log.debug("POST %s/load payload=%s", SERVER_URL, payload.decode())
 
     try:
-        req = Request(
-            f"{SERVER_URL}/load",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
+        req = Request(f"{SERVER_URL}/load", data=payload, headers=_auth_headers({"Content-Type": "application/json"}))
         resp = urlopen(req, timeout=30)
         body = resp.read()
         log.debug("Response status=%d body=%s", resp.status, body[:500])
@@ -310,7 +356,9 @@ def _view_impl(path: str) -> str:
     cols = result["columns"]
     col_lines = "\n".join(f"  - {c['name']} ({c['dtype']})" for c in cols)
 
-    url = f"{SERVER_URL}/s/{SESSION_ID}"
+    # The URL carries the token so opening it authenticates the page (which
+    # then sets the auth cookie its WebSocket rides on).
+    url = f"{SERVER_URL}/s/{SESSION_ID}?token={TOKEN}" if TOKEN else f"{SERVER_URL}/s/{SESSION_ID}"
     browser_action = result.get("browser_action", "unknown")
     server_pid = result.get("server_pid", server_info.get("server_pid", "?"))
 
@@ -323,7 +371,7 @@ def _view_impl(path: str) -> str:
         f"Browser: {browser_action} | Session: {SESSION_ID}"
     )
     log.info("view_data success — %d rows, %d cols, browser=%s, server=%s(%s)",
-             rows, len(cols), browser_action, server_pid, server_info["server_status"])
+        rows, len(cols), browser_action, server_pid, server_info["server_status"])
     return summary
 
 
@@ -364,12 +412,15 @@ def buckaroo_diagnostics() -> str:
             + _format_startup_failure()
         )
 
-    # Fetch full diagnostics
+    # Fetch full diagnostics (authenticated). pid comes from the connection
+    # file now — /health is deliberately minimal.
+    conn = read_connection_file(SERVER_PORT) or {}
     diag = _get_diagnostics()
     if not diag:
         return (
-            f"Server is running (pid={health.get('pid')}) but /diagnostics "
-            f"endpoint unavailable. Server may be an older version.\n\n"
+            f"Server is running (pid={conn.get('pid', '?')}) but /diagnostics "
+            f"is unavailable — the token may be wrong, or the server is an "
+            f"older version.\n\n"
             f"Health: {json.dumps(health, indent=2)}"
         )
 
@@ -385,14 +436,12 @@ def buckaroo_diagnostics() -> str:
     static_summary = "\n".join(
         f"  {name}: {'OK' if info.get('exists') and info.get('size_bytes', 0) > 0 else 'PROBLEM'} "
         f"({info.get('size_bytes', 0):,} bytes)"
-        for name, info in static_files.items()
-    )
+        for name, info in static_files.items())
 
     deps = diag.get("dependencies", {})
     dep_lines = "\n".join(
         f"  {name}: {'installed' if ok else 'MISSING'}"
-        for name, ok in deps.items()
-    )
+        for name, ok in deps.items())
 
     result = (
         f"## Buckaroo Server Diagnostics\n\n"

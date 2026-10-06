@@ -31,8 +31,11 @@ _BUCKAROO_CHROME_PROFILE = os.path.join(
     os.path.expanduser("~"), ".buckaroo", "chrome-profile")
 
 
-def _session_url(session_id: str, port: int) -> str:
-    return f"http://localhost:{port}/s/{session_id}"
+def _session_url(session_id: str, port: int, token: str | None = None) -> str:
+    base = f"http://localhost:{port}/s/{session_id}"
+    # The opened page must carry the token so it authenticates and the
+    # server can set the auth cookie its WebSocket then rides on.
+    return f"{base}?token={token}" if token else base
 
 
 def _detect_chromium_browser() -> str | None:
@@ -167,7 +170,8 @@ def _app_mode_find_and_focus(session_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def find_or_create_session_window(session_id: str, port: int, reload_if_found: bool = False) -> str:
+def find_or_create_session_window(session_id: str, port: int, reload_if_found: bool = False,
+        token: str | None = None) -> str:
     """Find and focus the existing browser window for *session_id*, or create one.
 
     Idempotent: calling this multiple times never creates duplicate windows.
@@ -190,12 +194,12 @@ def find_or_create_session_window(session_id: str, port: int, reload_if_found: b
         return "refused: invalid session id"
 
     if platform.system() != "Darwin":
-        webbrowser.open(_session_url(session_id, port))
+        webbrowser.open(_session_url(session_id, port, token))
         status = "opened in default browser (non-macOS)"
         log.info(status)
         return status
 
-    url = _session_url(session_id, port)
+    url = _session_url(session_id, port, token)
     app_mode = os.environ.get("BUCKAROO_APP_MODE", "").lower() in ("1", "true", "yes")
 
     if app_mode:

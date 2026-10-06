@@ -523,18 +523,27 @@ Start it:
 
     python -m buckaroo.server --port 8700
 
-Then load a file:
+The server authenticates every request with a token (see `Security`_
+below). It mints one at startup and prints it to stderr, or you can set it
+yourself:
+
+.. code-block:: bash
+
+    BUCKAROO_TOKEN=my-secret python -m buckaroo.server --port 8700
+
+Then load a file, passing the token:
 
 .. code-block:: bash
 
     curl -X POST http://localhost:8700/load \
         -H 'Content-Type: application/json' \
+        -H 'Authorization: token my-secret' \
         -d '{"session":"sales", "path":"/data/sales.parquet", "mode":"viewer"}'
 
 The server reads the file (pandas or polars depending on extension and
 what's installed), creates a session, and (by default) opens a browser
-to ``/s/sales``. The page connects back via WebSocket and pulls row
-ranges on demand.
+to ``/s/sales?token=…``. The page connects back via WebSocket and pulls
+row ranges on demand.
 
 ``mode`` controls the widget type:
 
@@ -573,12 +582,14 @@ Start a Buckaroo server somewhere reachable:
 
 .. code-block:: bash
 
-    python -m buckaroo.server --port 8700
+    BUCKAROO_TOKEN=my-secret python -m buckaroo.server --port 8700
     curl -X POST http://localhost:8700/load \
         -H 'Content-Type: application/json' \
+        -H 'Authorization: token my-secret' \
         -d '{"session":"sales", "path":"/data/sales.parquet", "mode":"buckaroo"}'
 
-Then in your React app:
+Then in your React app (pass the token so the WebSocket authenticates, and
+register the app's origin on the server with ``--allow-origin``):
 
 .. code-block:: tsx
 
@@ -589,7 +600,7 @@ Then in your React app:
       return (
         <div style={{ height: 600 }}>
           <BuckarooServerView
-            wsUrl={buckarooWsUrl("http://localhost:8700", "sales")}
+            wsUrl={buckarooWsUrl("http://localhost:8700", "sales", "my-secret")}
             onMetadata={(m) => console.log("loaded:", m.path)}
           />
         </div>
@@ -603,9 +614,44 @@ page uses — selected by the session's ``mode``. Sort, infinite
 scroll, search, and post-processing all work the way they do in the
 standalone page; the server is doing the same things either way.
 
-The server's ``check_origin`` is permissive by default — cross-origin
-embedding works without configuration. Set ``BUCKAROO_STRICT_ORIGIN=1``
-on the server to restrict to localhost.
+For a cross-origin embed (the React app is served from a different origin
+than the Buckaroo server), register the app's origin on the server with
+``--allow-origin`` so its WebSocket is accepted — see `Security`_.
+
+.. _Security:
+
+Security
+~~~~~~~~
+
+The server binds ``127.0.0.1`` and is meant for local use, but a page in
+any browser tab can still reach it, so it is gated the way Jupyter gates
+its server:
+
+- **Token.** Every request needs the server's token, passed as an
+  ``Authorization: token <t>`` header, a ``?token=<t>`` query parameter, or
+  the signed cookie the page sets after its first authenticated load. The
+  server mints a token at startup (printed to stderr and written to the
+  connection file below); set ``BUCKAROO_TOKEN`` to choose your own.
+  ``BUCKAROO_TOKEN=""`` disables auth entirely — only on a machine you
+  trust, since any local process could then read loaded data and load
+  files. Anyone with the token can run code through the server (``/load``
+  reads arbitrary files; ``/load_expr`` and ``project_root`` import project
+  code), so the token is the whole trust boundary.
+- **Host check.** Requests whose ``Host`` header is not a loopback name are
+  refused — the DNS-rebinding defense. ``BUCKAROO_ALLOW_REMOTE_ACCESS=1``
+  turns it off.
+- **Origin allowlist.** A WebSocket is accepted from the server's own
+  origin (the standalone ``/s/`` page) and from any origin passed with
+  ``--allow-origin`` (repeatable, e.g. ``--allow-origin tauri://localhost``
+  ``--allow-origin http://localhost:7860``), or ``BUCKAROO_ALLOW_ORIGIN``
+  (comma-separated). ``--allow-origin '*'`` allows all origins.
+- **Connection file.** A parent process finds a running server through
+  ``~/.buckaroo/runtime/buckaroo-<port>.json`` (mode 0600: ``url``,
+  ``port``, ``pid``, ``token``, ``version``) rather than an unauthenticated
+  endpoint. ``/health`` returns only ``{status, version}``; ``/diagnostics``
+  requires the token.
+- **CSP.** ``/s/`` sends ``Content-Security-Policy: frame-ancestors 'self'``
+  plus any ``--allow-origin`` origins, so only those sites may frame it.
 
 **5b. Static (no server, no Python at view time)**
 

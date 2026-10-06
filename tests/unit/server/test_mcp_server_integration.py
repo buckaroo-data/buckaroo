@@ -199,6 +199,22 @@ class TestServerSubprocessHealthCheck:
         finally:
             _kill_proc(proc)
 
+    def test_sigterm_removes_connection_file(self):
+        """SIGTERM is how the MCP tool stops the server; the connection file
+        (and its token) must not linger afterwards. atexit does not run on a
+        signal, so __main__ removes it in a signal handler."""
+        from buckaroo.server.security import connection_file_path, read_connection_file
+        port = _free_port()
+        proc = _start_server(port)
+        try:
+            assert _conn_pid(port) is not None, "connection file never appeared"
+            proc.send_signal(signal.SIGTERM)
+            proc.wait(timeout=5)
+            assert read_connection_file(port) is None, (
+                f"connection file {connection_file_path(port)} survived SIGTERM")
+        finally:
+            _kill_proc(proc)
+
 
 # ---------------------------------------------------------------------------
 # Test 2: Killing MCP stdio process kills the tornado server

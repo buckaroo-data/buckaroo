@@ -74,11 +74,16 @@ interface ReadyState {
 }
 
 /** Derive a Buckaroo server WebSocket URL from an HTTP server URL + session
- *  id. Accepts `http://...`, `https://...`, or already-`ws[s]://` URLs. */
-export function buckarooWsUrl(serverUrl: string, sessionId: string): string {
+ *  id. Accepts `http://...`, `https://...`, or already-`ws[s]://` URLs.
+ *
+ *  When the server has token auth enabled (the default), pass `token` so the
+ *  WebSocket handshake authenticates. A browser embedder whose page already
+ *  carries the server's auth cookie (same-origin) can omit it. */
+export function buckarooWsUrl(serverUrl: string, sessionId: string, token?: string): string {
     const u = new URL(serverUrl);
     const protocol = u.protocol === "https:" || u.protocol === "wss:" ? "wss:" : "ws:";
-    return `${protocol}//${u.host}/ws/${encodeURIComponent(sessionId)}`;
+    const base = `${protocol}//${u.host}/ws/${encodeURIComponent(sessionId)}`;
+    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
 
 export function BuckarooServerView({

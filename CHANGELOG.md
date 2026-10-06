@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Security (server) — BREAKING
+
+The standalone / MCP server (`buckaroo.server`) now authenticates requests,
+following Jupyter's model. **This is a breaking change for clients that
+reach the server without a token**: update them to pass one, or run with
+`BUCKAROO_TOKEN=""` to opt out on a trusted machine.
+
+- Token auth on by default. The server mints a token at startup (printed to
+  stderr, written to a 0600 connection file at
+  `~/.buckaroo/runtime/buckaroo-<port>.json`), or honors `BUCKAROO_TOKEN`.
+  Pass it as `Authorization: token <t>`, `?token=<t>`, or the cookie the
+  page sets. `BUCKAROO_TOKEN=""` disables auth.
+- WebSocket origin policy is now same-origin plus an allowlist
+  (`--allow-origin` / `BUCKAROO_ALLOW_ORIGIN`, `*` for all), replacing the
+  permissive default. `BUCKAROO_STRICT_ORIGIN` is removed.
+- `Host`-header check refuses non-loopback hosts (DNS-rebinding defense;
+  `BUCKAROO_ALLOW_REMOTE_ACCESS=1` to disable).
+- XSRF cookies on; `/s/` sends a `frame-ancestors` CSP.
+- `/health` is now minimal (`{status, version}`); pid/paths moved to the
+  token-authenticated `/diagnostics`. The MCP tool reads the connection file
+  for the pid and only kills a process it can confirm is a buckaroo server.
+- Session ids are validated (`[A-Za-z0-9._-]`, ≤128) and escaped where the
+  `/s/` page renders them, closing a reflected-XSS vector; the browser-focus
+  path no longer interpolates them into AppleScript.
+
 ## 0.8.3 2025-01-23
 Fixes #299 Update height of ag-grid
 Fixes tooltips so they can display values from other columns

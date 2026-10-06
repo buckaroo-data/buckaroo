@@ -26,4 +26,22 @@ describe("buckarooWsUrl", () => {
             "ws://localhost:8700/ws/with%20space%2Fslash",
         );
     });
+
+    it("appends the token as a query param when given", () => {
+        expect(buckarooWsUrl("http://localhost:8700", "sales", "tok-abc")).toBe(
+            "ws://localhost:8700/ws/sales?token=tok-abc",
+        );
+    });
+
+    it("URL-encodes the token", () => {
+        expect(buckarooWsUrl("http://localhost:8700", "sales", "a/b c")).toBe(
+            "ws://localhost:8700/ws/sales?token=a%2Fb%20c",
+        );
+    });
+
+    it("omits the query when no token is given", () => {
+        expect(buckarooWsUrl("http://localhost:8700", "sales")).toBe(
+            "ws://localhost:8700/ws/sales",
+        );
+    });
 });

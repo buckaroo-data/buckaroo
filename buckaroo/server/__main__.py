@@ -1,6 +1,8 @@
 import argparse
+import atexit
 import logging
 import os
+import signal
 import sys
 import threading
 
@@ -9,11 +11,22 @@ import tornado.ioloop
 import tornado.netutil
 
 from buckaroo.server.app import make_app
+from buckaroo.server.security import remove_connection_file, resolve_token, write_connection_file
 
 LOG_DIR = os.path.join(os.path.expanduser("~"), ".buckaroo", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 _VALID_DATASET_KINDS = ("pandas", "lazy", "xorq")
+
+# Port whose connection file this process owns, so every exit path (atexit,
+# SIGTERM/SIGINT, the stdin watchdog's os._exit) can remove it. A stale token
+# file left by a hard kill would otherwise linger in ~/.buckaroo/runtime.
+_CONN_PORT: int | None = None
+
+
+def _cleanup_connection_file():
+    if _CONN_PORT is not None:
+        remove_connection_file(_CONN_PORT)
 
 
 def parse_dataset_spec(spec: str) -> dict:
@@ -61,7 +74,8 @@ def _argparse_dataset(spec: str) -> dict:
         raise argparse.ArgumentTypeError(str(e)) from e
 
 
-def bind_and_make_app(port: int, open_browser: bool, datasets: list | None = None):
+def bind_and_make_app(port: int, open_browser: bool, datasets: list | None = None,
+        token: str | None = None, allow_origins=()):
     """Bind the listening socket, then build the Application with the *bound*
     port stamped into ``settings``.
 
@@ -71,11 +85,14 @@ def bind_and_make_app(port: int, open_browser: bool, datasets: list | None = Non
     it asks the OS to focus, so the bound port — not the requested ``0`` —
     must end up in settings.
 
+    ``token`` / ``allow_origins`` are passed straight through to ``make_app``.
+
     Returns ``(sockets, bound_port, app)``. Caller owns ``sockets``.
     """
     sockets = tornado.netutil.bind_sockets(port, address="127.0.0.1")
     bound_port = sockets[0].getsockname()[1]
-    app = make_app(port=bound_port, open_browser=open_browser, datasets=datasets)
+    app = make_app(port=bound_port, open_browser=open_browser, datasets=datasets,
+        token=token, allow_origins=allow_origins)
     return sockets, bound_port, app
 
 
@@ -94,6 +111,13 @@ def main():
         "or a build dir (xorq). Examples: "
         "--dataset boston-pandas=pandas:/data/boston.parquet "
         "--dataset boston-xorq=xorq:/builds/boston-xorq")
+    parser.add_argument("--allow-origin", action="append", default=[], dest="allow_origins",
+        metavar="ORIGIN",
+        help="Extra browser origin allowed to open a WebSocket (beyond "
+        "same-origin), for embedders — repeatable. E.g. "
+        "--allow-origin tauri://localhost --allow-origin http://localhost:7860. "
+        "'*' allows all origins. Also settable via BUCKAROO_ALLOW_ORIGIN "
+        "(comma-separated).")
     args = parser.parse_args()
 
     # Line-buffer stdout so the BUCKAROO_PORT handshake reaches a parent supervisor
@@ -114,6 +138,7 @@ def main():
             except Exception as exc:
                 print(f"buckaroo.server: --stdio-control watchdog read failed: {exc!r}; exiting",
                     file=sys.stderr)
+            _cleanup_connection_file()
             os._exit(0)
         threading.Thread(target=_stdin_watchdog, daemon=True).start()
 
@@ -124,15 +149,54 @@ def main():
     log = logging.getLogger("buckaroo.server")
     log.info("Server starting — port=%d open_browser=%s pid=%d", args.port, not args.no_browser, os.getpid())
 
+    # Default-on token (Jupyter model): BUCKAROO_TOKEN wins — an explicit
+    # empty value disables auth; unset mints a fresh token. A parent
+    # supervisor (the MCP tool, Tauri) sets BUCKAROO_TOKEN so it already
+    # knows the token; a direct `buckaroo-server` launch gets a generated
+    # one, surfaced below and in the connection file.
+    token = resolve_token()
+    allow_origins = list(args.allow_origins)
+    env_origins = os.environ.get("BUCKAROO_ALLOW_ORIGIN", "")
+    allow_origins += [o.strip() for o in env_origins.split(",") if o.strip()]
+
     sockets, bound_port, app = bind_and_make_app(port=args.port,
-        open_browser=not args.no_browser, datasets=args.datasets)
+        open_browser=not args.no_browser, datasets=args.datasets,
+        token=token, allow_origins=allow_origins)
     server = tornado.httpserver.HTTPServer(app)
     server.add_sockets(sockets)
+
+    import buckaroo
+    version = getattr(buckaroo, "__version__", "unknown")
+    # Connection file: how a parent (the MCP tool) learns our pid + token
+    # without an unauthenticated endpoint, and the pid it may safely kill.
+    global _CONN_PORT
+    _CONN_PORT = bound_port
+    write_connection_file(bound_port, os.getpid(), token, version)
+    atexit.register(_cleanup_connection_file)
+    # atexit does not run on a signal, and the MCP tool stops the server with
+    # SIGTERM — so remove the file (and its token) on the signal paths too,
+    # then exit the way the default disposition would.
+    def _on_signal(signum, _frame):
+        _cleanup_connection_file()
+        os._exit(0)
+    signal.signal(signal.SIGTERM, _on_signal)
+    signal.signal(signal.SIGINT, _on_signal)
 
     # Handshake line for parent-process supervisors (Tauri sidecar, etc.).
     # stdout was reconfigured to line_buffering above, so the newline flushes.
     print(f"BUCKAROO_PORT={bound_port}")
-    log.info("Server listening on http://127.0.0.1:%d", bound_port)
+    if token:
+        # To stderr (never stdout — that is the handshake channel) so a
+        # direct launch can see how to reach the authenticated server.
+        print(f"Buckaroo listening on http://127.0.0.1:{bound_port}/ "
+            f"(token auth on) — e.g. http://127.0.0.1:{bound_port}/s/<id>?token={token}",
+            file=sys.stderr)
+        log.info("Server listening on http://127.0.0.1:%d (token auth enabled)", bound_port)
+    else:
+        print("WARNING: buckaroo server started with auth DISABLED "
+            "(BUCKAROO_TOKEN=''). Any local process can read loaded data and "
+            "load files.", file=sys.stderr)
+        log.warning("Server listening on http://127.0.0.1:%d with auth DISABLED", bound_port)
 
     tornado.ioloop.IOLoop.current().start()
 

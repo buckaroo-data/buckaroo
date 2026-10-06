@@ -4,13 +4,12 @@ import logging
 import os
 import traceback
 from contextlib import nullcontext
-from urllib.parse import urlparse
 
 import tornado.websocket
 
 from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
-from buckaroo.server.security import LocalHostCheckMixin, is_valid_session_id
+from buckaroo.server.security import AuthMixin, LocalHostCheckMixin, is_valid_session_id, origin_is_allowed
 from buckaroo.server.session import build_state_message
 
 
@@ -31,10 +30,10 @@ _BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
 _DATAFLOW_FIELDS = ("post_processing", "cleaning_method", "quick_command_args")
 
 
-class DataStreamHandler(LocalHostCheckMixin, tornado.websocket.WebSocketHandler):
+class DataStreamHandler(AuthMixin, LocalHostCheckMixin, tornado.websocket.WebSocketHandler):
     def prepare(self):
-        # LocalHostCheckMixin.prepare runs the DNS-rebinding Host check and
-        # may finish() with a 403. Then refuse a malformed session id before
+        # super().prepare() runs the Host check then the token check (both
+        # may finish() with 403). Then refuse a malformed session id before
         # the WS upgrade so it never reaches the dispatch — the upgrade fails
         # with 403 rather than opening a socket we immediately close.
         super().prepare()
@@ -45,6 +44,13 @@ class DataStreamHandler(LocalHostCheckMixin, tornado.websocket.WebSocketHandler)
             log.warning("refused WS upgrade for invalid session id: %r", session_id)
             self.set_status(403)
             self.finish()
+
+    def check_origin(self, origin):
+        # Same-origin (the standalone /s/ page) plus the configured embedder
+        # allowlist. Replaces the previously permissive policy; the token is
+        # still the primary gate. A missing Origin (non-browser) is allowed.
+        return origin_is_allowed(origin, self.settings.get("port"),
+            self.settings.get("allow_origins", ()))
 
     def open(self, session_id):
         self.session_id = session_id
@@ -308,15 +314,3 @@ class DataStreamHandler(LocalHostCheckMixin, tornado.websocket.WebSocketHandler)
     def on_close(self):
         sessions = self.application.settings["sessions"]
         sessions.remove_ws_client(self.session_id, self)
-
-    def check_origin(self, origin):
-        # Allow connections from any origin — this server is local-only by design
-        # and not intended for network exposure. Set BUCKAROO_STRICT_ORIGIN=1 to
-        # restrict to localhost origins if needed.
-        if os.environ.get("BUCKAROO_STRICT_ORIGIN", "").lower() in ("1", "true"):
-            try:
-                hostname = urlparse(origin).hostname
-            except Exception:
-                return False
-            return hostname in ("localhost", "127.0.0.1")
-        return True

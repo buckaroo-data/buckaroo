@@ -15,7 +15,7 @@ from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.server.session import build_state_message
-from buckaroo.server.security import LocalHostCheckMixin, is_valid_session_id
+from buckaroo.server.security import AuthMixin, LocalHostCheckMixin, is_valid_session_id
 from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
@@ -56,20 +56,21 @@ def _check_dependency(module_name: str) -> bool:
         return False
 
 
-class _LocalRequestHandler(LocalHostCheckMixin, tornado.web.RequestHandler):
-    """Base for every HTTP handler. ``LocalHostCheckMixin.prepare`` refuses
-    any request whose ``Host`` header is not loopback (DNS-rebinding
-    defense) before the handler body runs."""
+class _LocalRequestHandler(AuthMixin, LocalHostCheckMixin, tornado.web.RequestHandler):
+    """Base for every HTTP handler. ``prepare`` runs the Host check
+    (DNS-rebinding defense) then the token check before the handler body.
+    A subclass sets ``_auth_exempt = True`` to skip the token check."""
 
 
 class HealthHandler(_LocalRequestHandler):
+    # Exempt so the MCP tool can detect a running server and its version
+    # without the token. Kept deliberately minimal — pid, paths and
+    # static-file state live on /diagnostics, which requires the token.
+    _auth_exempt = True
+
     def get(self):
         import buckaroo
-        start_time = self.application.settings.get("server_start_time", 0)
-        static_path = self.application.settings.get("static_path", "")
-        self.write({"status": "ok", "version": getattr(buckaroo, "__version__", "unknown"), "pid": os.getpid(),
-            "started": start_time, "uptime_s": round(time.time() - start_time, 1),
-            "static_files": _get_static_file_info(static_path)})
+        self.write({"status": "ok", "version": getattr(buckaroo, "__version__", "unknown")})
 
 
 class DiagnosticsHandler(_LocalRequestHandler):
@@ -222,7 +223,8 @@ class LoadHandler(_LocalRequestHandler):
             return "disabled"
 
         port = self.application.settings["port"]
-        return find_or_create_session_window(session_id, port, reload_if_found=True)
+        return find_or_create_session_window(session_id, port, reload_if_found=True,
+            token=self.application.settings.get("token"))
 
     def _load_polars_with_error_handling(self, path: str, session_id: str):
         """Eager polars load for ``backend='polars'``. Errors share the
@@ -518,7 +520,8 @@ class LoadExprHandler(_LocalRequestHandler):
             else:
                 port = self.application.settings["port"]
                 browser_action = find_or_create_session_window(
-                    session_id, port, reload_if_found=True)
+                    session_id, port, reload_if_found=True,
+                    token=self.application.settings.get("token"))
             self.write({"session": session_id, "server_pid": os.getpid(),
                 "browser_action": browser_action, **existing.metadata})
             return
@@ -660,7 +663,8 @@ class LoadExprHandler(_LocalRequestHandler):
             browser_action = "skipped"
         else:
             port = self.application.settings["port"]
-            browser_action = find_or_create_session_window(session_id, port, reload_if_found=True)
+            browser_action = find_or_create_session_window(session_id, port, reload_if_found=True,
+                token=self.application.settings.get("token"))
 
         log.info("load_expr session=%s build_dir=%s rows=%d backend=xorq",
             session_id, build_dir, metadata["rows"])
@@ -1004,6 +1008,17 @@ class SessionPageHandler(_LocalRequestHandler):
 
         self.set_header("Content-Type", "text/html")
         self.set_header("Cache-Control", "no-cache")
+        # frame-ancestors keeps other sites from framing the viewer
+        # (clickjacking / cross-site embedding); the configured embedder
+        # origins are allowed alongside 'self'. Mirrors Jupyter's default.
+        allow_origins = self.application.settings.get("allow_origins", ())
+        frame_ancestors = " ".join(["'self'", *(allow_origins or ())]) or "'self'"
+        self.set_header("Content-Security-Policy", f"frame-ancestors {frame_ancestors}")
+        # Touch xsrf_token so the _xsrf cookie is set on this response when
+        # xsrf_cookies is on; the inline engine-bar JS reads it to send the
+        # X-XSRFToken header on its cookie-authenticated /load POST.
+        if self.settings.get("xsrf_cookies"):
+            _ = self.xsrf_token
         import buckaroo
         ver = getattr(buckaroo, "__version__", "0")
         datasets = self.application.settings.get("datasets", []) or []
@@ -1128,8 +1143,13 @@ SESSION_HTML = """\
             const t0 = performance.now();
             statusEl.textContent = `loading ${ds.label}…`;
             try {
-                const r = await fetch(url, {method: "POST",
-                    headers: {"Content-Type": "application/json"},
+                // This POST is authenticated by the cookie the page already
+                // holds, so it needs the XSRF token (read from the _xsrf
+                // cookie the server set). Same-origin fetch sends the cookie.
+                const headers = {"Content-Type": "application/json"};
+                const xsrf = (document.cookie.match(/(?:^|; )_xsrf=([^;]+)/) || [])[1];
+                if (xsrf) headers["X-XSRFToken"] = decodeURIComponent(xsrf);
+                const r = await fetch(url, {method: "POST", headers,
                     body: JSON.stringify(body)});
                 const dt = Math.round(performance.now() - t0);
                 if (r.ok) {
