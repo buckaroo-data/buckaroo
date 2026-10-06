@@ -1819,6 +1819,57 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual((await _read_json(ws))["type"], "infinite_resp",
             "a stats_update must leave no stray binary frame in the stream")
 
+    async def _first_rows(self, ws):
+        """Ask for the first window and read its two frames."""
+        ws.write_message(json.dumps({"type": "infinite_request",
+            "payload_args": {"start": 0, "end": 5, "sourceName": "default", "origEnd": 5}}))
+        resp = await _read_json(ws)
+        self.assertEqual(resp["type"], "infinite_resp")
+        pq.read_table(io.BytesIO(await ws.read_message()))
+
+    @tornado.testing.gen_test
+    async def test_stats_are_pushed_after_the_first_row_reply_without_a_request(self):
+        await self._load("sw-push", stats_delivery="deferred")
+        inline = await self._inline_frame("sw-push-inline")
+        ws, first = await self._connect("sw-push", caps="stats_update")
+        gen = self._stats(first)["gen"]
+
+        await self._first_rows(ws)
+        update = await _read_json(ws)
+
+        self.assertEqual((update["type"], update["stats_gen"], update["final"]), ("stats_update", gen, True))
+        self.assertEqual(_rows_by_stat(update["payload"]), _rows_by_stat(inline["df_data_dict"]["all_stats"]))
+        await self._first_rows(ws)  # the push is owed once: a second row reply is followed by no second update
+
+    @tornado.testing.gen_test
+    async def test_a_second_connection_is_pushed_the_stats_the_first_connection_ran(self):
+        await self._load("sw-push-two", stats_delivery="deferred")
+        a, _ = await self._connect("sw-push-two", caps="stats_update")
+        b, _ = await self._connect("sw-push-two", caps="stats_update")
+        await self._first_rows(a)
+        self.assertEqual((await _read_json(a))["type"], "stats_update")
+
+        with _count_stat_queries() as queries:
+            await self._first_rows(b)
+            self.assertEqual((await _read_json(b))["type"], "stats_update")
+        self.assertEqual(queries, [], "stats are computed once per session, at the first connection's push")
+
+    @tornado.testing.gen_test
+    async def test_a_push_emits_a_stats_push_span(self):
+        captured: list = []
+        with patch.object(telemetry, "make_http_sink", lambda url, **kw: captured.append):
+            await self._load("sw-push-span", stats_delivery="deferred",
+                telemetry_url="http://companion.invalid/internal/telemetry")
+            ws, first = await self._connect("sw-push-span", caps="stats_update")
+            await self._first_rows(ws)
+            await _read_json(ws)
+
+        (push,) = [r for r in captured if r["name"] == "stats.push"]
+        self.assertEqual(push["trace"], "sw-push-span")
+        self.assertEqual((push["attrs"]["stats_gen"], push["attrs"]["outcome"], push["attrs"]["tier"]),
+            (self._stats(first)["gen"], "update", "full"))
+        self.assertGreaterEqual(push["attrs"]["gap_ms"], 0)
+
     @tornado.testing.gen_test
     async def test_a_stale_stats_gen_gets_stats_aborted_and_runs_nothing(self):
         await self._load("sw-stale", stats_delivery="deferred")
