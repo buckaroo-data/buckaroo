@@ -8,8 +8,10 @@ installed.
 import logging
 import math
 import os
+from decimal import Decimal
 
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 xo = pytest.importorskip("xorq.api")
@@ -114,6 +116,34 @@ class TestBatchAggregate:
         stats, _ = pipeline.process_table(_make_table())
         assert stats["ints"]["min"] == 1.0
         assert stats["ints"]["max"] == 7.0
+
+    @pytest.mark.parametrize("arrow_type, values, expected_min, expected_max", [
+        (pa.int32(), [3, 1, 2], 1, 3),
+        (pa.int32(), [3, None, 1], 1, 3),
+        (pa.int8(), [1, -4, 3], -4, 3),
+        # float64 can't represent 2**63 + 5; a float cast rounds it.
+        (pa.uint64(), [2**63 + 5, 1, 2], 1, 2**63 + 5),
+        (pa.decimal128(5, 2), [Decimal("1.25"), Decimal("3.50"), None], Decimal("1.25"), Decimal("3.50")),
+    ])
+    def test_min_max_keep_column_type(self, arrow_type, values, expected_min, expected_max):
+        """min/max are values of the column, so they keep its type: an int32
+        column's min is ``1``, not ``1.0`` (ADR-001 D8). Dependents (histogram,
+        histogram_bins) still run on every one of these dtypes."""
+        table = xo.memtable(pa.table({"c": pa.array(values, arrow_type)}))
+        stats, errors = XorqStatPipeline(XORQ_STATS_V2).process_table(table)
+        assert errors == []
+        for key, expected in [("min", expected_min), ("max", expected_max)]:
+            assert stats["c"][key] == expected
+            assert type(stats["c"][key]) is type(expected)
+        assert stats["c"]["histogram"] != []
+
+    def test_mean_std_median_stay_float_on_int_column(self):
+        """Only stats whose value comes from the column keep its type. mean,
+        std and median are computed (an even count's median isn't an int), so
+        they stay float."""
+        stats, _ = XorqStatPipeline(XORQ_STATS_V2).process_table(_make_table())
+        for key in ("mean", "std", "median"):
+            assert type(stats["ints"][key]) is float
 
     def test_min_max_skipped_for_string(self):
         """String columns: column_filter excludes the min/max stats."""

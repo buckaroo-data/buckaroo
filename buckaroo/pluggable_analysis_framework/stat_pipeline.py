@@ -17,7 +17,7 @@ from buckaroo.df_util import old_col_new_col
 
 from . import perf_log
 from .col_analysis import ColAnalysis, ErrDict, SDType
-from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqExpr, XorqExecute, RAW_MARKER_TYPES, MISSING, collect_stat_funcs)
+from .stat_func import (StatFunc, RawSeries, SampledSeries, RawDataFrame, XorqExpr, XorqExecute, RAW_MARKER_TYPES, MISSING, ColumnValue, collect_stat_funcs)
 from .stat_result import Ok, Err, UpstreamError, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_typed_dag, build_column_dag, DAGConfigError
 from .utils import PERVERSE_DF
@@ -109,6 +109,7 @@ def _execute_stat_func(sf: StatFunc, accumulator: Dict[str, StatResult], column_
             if isinstance(result, Ok):
                 # Type check at the boundary: catch mismatched stat definitions early
                 if (req.type is not Any
+                        and req.type is not ColumnValue
                         and req.type not in RAW_MARKER_TYPES
                         and result.value is not None
                         and not isinstance(result.value, req.type)):

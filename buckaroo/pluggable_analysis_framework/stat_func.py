@@ -114,6 +114,24 @@ RAW_MARKER_TYPES = (RawSeries, SampledSeries, RawDataFrame, XorqColumn, XorqExpr
 
 
 # ---------------------------------------------------------------------------
+# Value-type marker
+# ---------------------------------------------------------------------------
+
+class ColumnValue:
+    """Type marker: 'a value drawn from the column'.
+
+    For stats like ``min``, ``max``, ``mode`` and ``most_freq``, whose value
+    is one of the column's own values, so its type follows the column's dtype:
+    an int on an integer column, a ``Decimal`` on a decimal column, a bool on a
+    boolean column. The pipeline's boundary type check doesn't apply to it,
+    on either the provider or the consumer side. A consumer that does
+    arithmetic on one should declare it as ``ColumnValue`` and convert
+    explicitly.
+    """
+    pass
+
+
+# ---------------------------------------------------------------------------
 # StatKey — a named, typed slot in the DAG
 # ---------------------------------------------------------------------------
 
