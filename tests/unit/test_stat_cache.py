@@ -394,6 +394,22 @@ class TestStorage:
         assert "stat1@1" not in values
         assert values["stat7@1"] == 7
 
+    def test_a_failing_compaction_still_returns_the_written_part(self, tmp_path, monkeypatch):
+        """The part is on disk before compaction runs, so a compaction failure
+        doesn't turn the write into a failed one (#1061)."""
+        cache = sc.StatCache(tmp_path)
+        for i in range(sc.MAX_PARTS):
+            cache.write("s", {"a": {f"stat{i}@1": i}})
+
+        def disk_full(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(cache, "_compact", disk_full)
+        path = cache.write("s", {"a": {"late@1": 9}})
+        assert path is not None and path.exists()
+        assert len(_parts(cache, "s")) == sc.MAX_PARTS + 1
+        assert cache.read("s").values["a"]["late@1"] == 9
+
     def test_unreadable_part_is_skipped(self, tmp_path):
         cache = sc.StatCache(tmp_path)
         cache.write("s", {"a": {"x@1": 1}})
@@ -651,6 +667,28 @@ class TestPipelineCache:
         assert spy.batch_cells() == {(c, "non_null") for c in _table().columns}
         assert sd["ints"]["non_null"] == 40
         assert len(_parts(cache, "s")) == 2
+
+    def test_a_compaction_failure_is_not_counted_as_a_failed_write(self, tmp_path, monkeypatch):
+        """A run whose part is written and then fails to compact its scope
+        reports the part it wrote, not a write error (#1061)."""
+        cache = sc.StatCache(tmp_path)
+        for i in range(sc.MAX_PARTS):
+            cache.write("s", {"ints": {f"stat{i}@1": i}})
+
+        def disk_full(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(cache, "_compact", disk_full)
+        cold = _pipeline(cache)
+        _sd, errs = cold.process_table(_table(), scope_id="s")
+        assert errs == []
+        cs = cold.cache_run_stats()
+        assert cs["write_errors"] == 0
+        assert cs["parts_written"] == 1 and cs["snapshots"] == 1
+        assert cs["bytes"] > 0
+        warm = _pipeline(cache)
+        warm.process_table(_table(), scope_id="s")
+        assert warm.cache_run_stats()["misses"] == 0
 
     def test_column_bisect_computes_only_new_columns(self, tmp_path):
         cache = sc.StatCache(tmp_path)
