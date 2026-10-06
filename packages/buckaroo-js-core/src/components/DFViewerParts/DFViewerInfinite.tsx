@@ -7,7 +7,7 @@ import {
 import * as _ from "lodash-es";
 import { DFData, DFDataRow, DFViewerConfig, SDFT } from "./DFWhole";
 
-import { getCellRendererSelector, dfToAgrid, extractPinnedRows, extractSDFT } from "./gridUtils";
+import { getCellRendererSelector, dfToAgrid, extractPinnedRows, extractSDFT, getFieldVal } from "./gridUtils";
 
 import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
 import {
@@ -21,6 +21,7 @@ import {
     CellStyleModule,
     ColumnAutoSizeModule,
     PinnedRowModule,
+    RenderApiModule,
     RowSelectionModule,
     TooltipModule,
     TextFilterModule,
@@ -45,6 +46,9 @@ ModuleRegistry.registerModules([
     CellStyleModule,
     ColumnAutoSizeModule,
     PinnedRowModule,
+    // api.refreshCells lives here. Without it the call logs AG Grid error 200
+    // and does nothing.
+    RenderApiModule,
     RowSelectionModule,
     TooltipModule,
     TextFilterModule,
@@ -442,6 +446,32 @@ export function DFViewerInfiniteInner({
                 // ignore until grid ready
             }
         }, [pinnedSig]);
+
+        // color_map reads histogram_bins from the grid context when a cell is
+        // painted, so cells that rendered before the bins arrived keep the
+        // neutral style. Repaint the color-mapped columns when their bins
+        // change after the first render. Bins that are already there at mount
+        // paint correctly, so the first run only records the signature.
+        const colorMapCols = useMemo(
+            () => df_viewer_config.column_config.flatMap((cc) =>
+                cc.color_map_config?.color_rule === "color_map"
+                    ? [{ field: getFieldVal(cc), statsCol: cc.color_map_config.val_column }]
+                    : []),
+            [df_viewer_config.column_config],
+        );
+        const colorMapSig = useMemo(() => {
+            if (colorMapCols.length === 0) return "";
+            const stats = extractSDFT(summary_stats_data);
+            return JSON.stringify(colorMapCols.map(
+                ({ field, statsCol }) => [field, statsCol === undefined ? undefined : stats[statsCol]?.histogram_bins]));
+        }, [colorMapCols, summary_stats_data]);
+        const colorMapSigRef = useRef(colorMapSig);
+        useEffect(() => {
+            if (colorMapSigRef.current === colorMapSig) return;
+            colorMapSigRef.current = colorMapSig;
+            if (colorMapCols.length === 0) return;
+            gridRef.current?.api?.refreshCells({ force: true, columns: colorMapCols.map((c) => c.field) });
+        }, [colorMapSig, colorMapCols]);
         
         // Force update rowData when Raw data changes
         const rawDataSig = useMemo(() => {

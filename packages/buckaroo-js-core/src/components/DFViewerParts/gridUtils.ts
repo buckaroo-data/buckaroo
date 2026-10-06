@@ -97,18 +97,26 @@ export function stripOptionalPinnedKey(key: string): string {
     return isOptionalPinnedKey(key) ? key.slice(1) : key;
 }
 
+// A required key with no row in the summary stats (they have not arrived yet)
+// becomes a placeholder that carries the key as `index`: it keeps its label,
+// gets a row id of its own, and its value cells render empty.
 export function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]) {
-    const result: (DFData[number] | undefined)[] = [];
+    const result: DFData = [];
     for (const cfg of prc) {
         const raw = cfg.primary_key_val;
-        const found = _.find(sdf, { index: stripOptionalPinnedKey(raw) });
-        if (found === undefined && isOptionalPinnedKey(raw)) {
-            continue;
+        const key = stripOptionalPinnedKey(raw);
+        const found = _.find(sdf, { index: key });
+        if (found !== undefined) {
+            result.push(found);
+        } else if (!isOptionalPinnedKey(raw)) {
+            result.push({ index: key });
         }
-        result.push(found);
     }
     return result;
 }
+
+const EmptyCell = () => null;
+const emptyRenderer: CellRendererSelectorResult = { component: EmptyCell };
 
 export function extractSingleSeriesSummary(
     full_summary_stats_df: DFData,
@@ -339,6 +347,9 @@ export function getCellRendererSelector(pinned_rows: PinnedRowConfig[], column_c
             const pk = _.get(params.node.data, "index");
             if (pk === undefined) {
                 return anyRenderer; // default renderer
+            }
+            if (params.value === undefined) {
+                return emptyRenderer; // a stat that has not arrived: leave the cell empty
             }
             const maybePrc: PinnedRowConfig | undefined = _.find(
                 pinned_rows,

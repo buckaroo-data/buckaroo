@@ -52,13 +52,14 @@ test.describe("PinnedRowsTranscriptReplayer", () => {
     await expect(startButton).toBeDisabled();
   });
 
-  test("should show initial grid with None values when no transcript", async ({ page }) => {
+  test("should show labelled, empty pinned rows when no transcript", async ({ page }) => {
     await waitForCells(page);
 
-    // With no transcript data, the grid should show "None" values
-    const noneCells = page.locator('.ag-cell:has-text("None")');
-    const count = await noneCells.count();
-    expect(count).toBeGreaterThan(0);
+    // With no transcript data there are no summary stats yet: each pinned key
+    // shows as a placeholder row with its label and empty value cells.
+    await expect(page.locator('.ag-floating-top [col-id="index"]', { hasText: "null_count" }).first()).toBeVisible();
+    await expect(page.locator('.ag-floating-top [col-id="index"]', { hasText: "empty_count" }).first()).toBeVisible();
+    await expect(page.locator('.ag-cell:has-text("None")')).toHaveCount(0);
   });
 
   test("should replay injected transcript and update grid with data", async ({ page }) => {
