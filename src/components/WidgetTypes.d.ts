@@ -1,8 +1,16 @@
+export type StatsStatus = "complete" | "pending" | "not_computed" | "error";
+export interface DFMetaStats {
+    status: StatsStatus;
+    tier?: string;
+    reason?: string;
+    gen?: number;
+}
 export interface DFMeta {
     total_rows: number;
     columns: number;
     filtered_rows: number;
     rows_shown: number;
+    stats?: DFMetaStats;
 }
 export interface BuckarooOptions {
     sampled: string[];
