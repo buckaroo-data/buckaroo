@@ -55,6 +55,10 @@ uv pip install --python "$MCP_VENV/bin/python" "${WHEEL}[mcp]" -q
     || { error "buckaroo.server failed to import from clean [mcp] venv"; exit 1; }
 success "Clean [mcp] venv ready"
 
+# server-load-expr.spec.ts needs xorq. Added after the import check above so
+# that check still covers [mcp] alone.
+uv pip install --python "$MCP_VENV/bin/python" "${WHEEL}[xorq]" -q
+
 # Export so playwright.config.server.ts picks it up
 export BUCKAROO_SERVER_PYTHON="$MCP_VENV/bin/python"
 

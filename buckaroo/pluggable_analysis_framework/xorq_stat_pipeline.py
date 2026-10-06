@@ -60,6 +60,12 @@ log = logging.getLogger(__name__)
 
 TOTAL_LENGTH_KEY = "__total_length__"
 
+# How many cells of a failing stat, spread across its columns, are run alone
+# before the rest are assumed to fail the same way (see ``_run_batch``).
+UNIFORM_FAILURE_PROBES = 4
+# A failing group this small is isolated one cell at a time instead of split.
+SCAN_CELLS_BELOW = 8
+
 
 def _new_cache_run_stats() -> Dict[str, Any]:
     """Per-``process_table``-run counters for the stat cache.
@@ -518,8 +524,19 @@ class XorqStatPipeline:
         (ADR-001 D11) so one bad expression can't take down every stat on
         every column: a ``count()`` canary first (a failing canary means the
         backend is down, so every item fails), then one aggregate per stat,
-        then one per cell for a stat whose aggregate still fails. Failures are
-        reported at the finest level reached."""
+        then the cells of a stat whose aggregate still fails. Failures are
+        reported at the finest level reached: a cell is reported failed only
+        after an aggregate over that cell alone failed, except in the one
+        case below.
+
+        A stat's cells are isolated by probing ``UNIFORM_FAILURE_PROBES`` of
+        them, spread across its columns, one aggregate each. When every probe
+        fails with the same error the stat is failing everywhere, and the cells
+        not run are recorded as failed with that error and no ``ok_before``, so
+        they are never cached. Otherwise the remaining cells are bisected: a
+        failing group is split in half and each half run, down to groups of
+        ``SCAN_CELLS_BELOW`` that run cell by cell, so a few bad columns among
+        many cost a few scans instead of one per column."""
         values: Dict[int, Any] = {}
         failures: Dict[int, Tuple[BaseException, Optional[int]]] = {}
 
@@ -557,23 +574,71 @@ class XorqStatPipeline:
             failures[0] = (first_err, first_ok)
             return values, failures, length
 
+        def attempt(idxs):
+            """Run ``idxs`` together. None when that succeeds, else the error and
+            the count of queries that had succeeded when it failed."""
+            try:
+                run(idxs)
+            except Exception as e:
+                return e, self._queries_ok
+            return None
+
+        def bisect(idxs, failed):
+            """``failed`` is the failure of an aggregate over exactly ``idxs``.
+            Run each half; a half that fails is split again. A small group is
+            run cell by cell: when most cells fail, splitting would run more
+            aggregates than there are cells."""
+            if len(idxs) == 1:
+                failures[idxs[0]] = failed
+                return
+            if len(idxs) <= SCAN_CELLS_BELOW:
+                for i in idxs:
+                    cell_failed = attempt([i])
+                    if cell_failed is not None:
+                        failures[i] = cell_failed
+                return
+            mid = len(idxs) // 2
+            for half in (idxs[:mid], idxs[mid:]):
+                half_failed = attempt(half)
+                if half_failed is not None:
+                    bisect(half, half_failed)
+
+        def isolate(idxs, failed):
+            """The cells ``idxs`` of one stat failed together as ``failed``."""
+            if len(idxs) > UNIFORM_FAILURE_PROBES:
+                last = len(idxs) - 1
+                probes = [idxs[k * last // (UNIFORM_FAILURE_PROBES - 1)] for k in range(UNIFORM_FAILURE_PROBES)]
+                probe_failures = {}
+                for i in probes:
+                    probe_failed = attempt([i])
+                    if probe_failed is None:
+                        break
+                    probe_failures[i] = probe_failed
+                failures.update(probe_failures)
+                errors = [e for e, _ in probe_failures.values()]
+                if len(errors) == len(probes) and len({(type(e), str(e)) for e in errors}) == 1:
+                    for i in idxs:
+                        failures.setdefault(i, (errors[0], None))
+                    return
+                idxs = [i for i in idxs if i not in values and i not in failures]
+                if not idxs:
+                    return
+                failed = attempt(idxs)
+                if failed is None:
+                    return
+            bisect(idxs, failed)
+
         by_stat: Dict[str, List[int]] = {}
         for i, (_, sf, _) in enumerate(items):
             by_stat.setdefault(sf.name, []).append(i)
         for idxs in by_stat.values():
             if len(by_stat) > 1:
-                try:
-                    run(idxs)
+                failed = attempt(idxs)
+                if failed is None:
                     continue
-                except Exception as stat_err:
-                    if len(idxs) == 1:
-                        failures[idxs[0]] = (stat_err, self._queries_ok)
-                        continue
-            for i in idxs:
-                try:
-                    run([i])
-                except Exception as cell_err:
-                    failures[i] = (cell_err, self._queries_ok)
+            else:
+                failed = (first_err, first_ok)
+            isolate(idxs, failed)
         return values, failures, length
 
     def _write_cells(self, scope_id, cells: "_CellLedger") -> None:
@@ -779,6 +844,10 @@ class XorqDfStatsV2:
             cache_storage=cache_storage)
         self.operating_df_name = operating_df_name
         self.debug = debug
+        # Kept for add_analysis, which reruns the pipeline over the same
+        # columns and cache scope.
+        self.skip_columns = skip_columns
+        self.scope_id = scope_id
         self.sdf, errors = self.ap.process_table(self.table, skip_columns=skip_columns, scope_id=scope_id)
         # The table's row count, from the cache or the batch count(); None if
         # it couldn't be counted.
@@ -802,7 +871,9 @@ class XorqDfStatsV2:
         so DataFlow.add_analysis works against a xorq-backed stats wrapper.
         """
         passed, errors = self.ap.add_stat(a_obj)
-        self.sdf, self.stat_errors = self.ap.process_table(self.table)
+        self.sdf, self.stat_errors = self.ap.process_table(
+            self.table, skip_columns=self.skip_columns, scope_id=self.scope_id)
+        self.length = self.ap.last_length
         self.errs = errors_to_errdict(self.stat_errors)
         if not passed:
             print("DAG validation failed")

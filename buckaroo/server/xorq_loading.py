@@ -101,8 +101,10 @@ def load_expr_build_dir(build_dir: str, cache_dir=None):
     ``xorq.config.default_backend()`` is the xorq-internal singleton
     (cached in ``xorq.config.options.default_backend``). Calling it here
     pre-warms that singleton so xorq's own internal paths (e.g.
-    ``deferred_reads_to_memtables``) reuse the same SessionContext on
-    every call rather than minting a new one.
+    ``deferred_reads_to_memtables``) all use it. ``load_expr`` still
+    connects one backend per profile in the build on every call
+    (``hydrate_cons``); that costs little, but xorq keeps each one alive
+    for the process lifetime, which ``_release_load_state`` undoes (#896).
 
     xorq serializes only a cache node's ``relative_path``, so a loaded
     ``CachedNode`` resolves under ``~/.cache/xorq`` whatever directory the
@@ -123,10 +125,49 @@ def load_expr_build_dir(build_dir: str, cache_dir=None):
     # Also set the ibis-vendor option for any ibis-internal paths that use it.
     if ibis.options.default_backend is None:
         ibis.options.default_backend = con
-    expr = load_expr(build_dir)
+    preexisting_tables = set(con.list_tables())
+    try:
+        expr = load_expr(build_dir)
+    finally:
+        _release_load_state(con, preexisting_tables)
     if cache_dir:
         expr = redirect_cache_dir(expr, cache_dir)
     return expr
+
+
+def _release_load_state(con, preexisting_tables):
+    """Free what ``xorq.api.load_expr`` keeps for the process lifetime (#896).
+
+    ``translate_from_yaml`` is an unbounded ``lru_cache`` keyed on the
+    per-load translation context, so it holds every loaded tree and the
+    backends ``hydrate_cons`` connected for it long after the session that
+    loaded it is gone. Each load builds a new context, so a later load
+    can't hit those entries and clearing them only frees memory.
+
+    Rehydrating a memtable reads its parquet snapshot through ``con``,
+    which registers an ``ibis_read_parquet_*`` table there per load. The
+    rows are already in the memtable by the time ``load_expr`` returns."""
+    from xorq.ibis_yaml.common import translate_from_yaml  # noqa: PLC0415
+    translate_from_yaml.cache_clear()
+    for name in set(con.list_tables()) - preexisting_tables:
+        con.drop_table(name, force=True)
+
+
+def release_memtables(expr) -> None:
+    """Drop ``expr``'s memtables from xorq's default backend (#896).
+
+    xorq's datafusion backend registers a memtable's rows on the default
+    backend each time an expression over it executes and, unlike upstream
+    ibis, never deregisters them, so they stay resident after the session
+    holding ``expr`` lets go of it. Every execute registers the memtable
+    again first, so dropping a name another live session also uses costs
+    that session nothing."""
+    from xorq import config as xorq_config  # noqa: PLC0415
+    from xorq.common.utils.graph_utils import walk_nodes  # noqa: PLC0415
+    from xorq.vendor.ibis.expr import operations as ops  # noqa: PLC0415
+    con = xorq_config.default_backend()
+    for name in {op.name for op in walk_nodes(ops.InMemoryTable, expr)}:
+        con.drop_table(name, force=True)
 
 
 def redirect_cache_dir(expr, cache_dir):
