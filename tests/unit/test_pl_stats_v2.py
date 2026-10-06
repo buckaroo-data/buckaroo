@@ -9,8 +9,11 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import polars as pl
+import pytest
 
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
+from tests.unit.test_utils import (FINITE_COUNTS, INFINITIES, assert_numeric_histogram,
+    ddd_float_columns_with_infinities)
 
 from buckaroo.customizations.pl_stats_v2 import (pl_typing_stats, _type, pl_base_summary_stats, pl_numeric_stats, computed_default_summary_stats, pl_histogram_series, histogram, PL_ANALYSIS_V2)
 from buckaroo.customizations.styling import DefaultMainStyling
@@ -306,6 +309,53 @@ class TestPlHistogram:
         ser = pl.Series('test', [None, None, None], dtype=pl.Float64)
         result, _ = pipeline.process_column('test', ser.dtype, raw_series=ser)
         assert 'histogram' in result
+
+    @pytest.mark.parametrize('beside', [[], [float('nan')], [None]], ids=['alone', 'nan', 'null'])
+    @pytest.mark.parametrize('finite_count', FINITE_COUNTS)
+    @pytest.mark.parametrize('kind', INFINITIES)
+    def test_float_column_with_infinities_keeps_a_numeric_histogram(self, kind, finite_count, beside):
+        """Infinities, alone or beside a NaN or a null, must not drop the column to the categorical histogram.
+        They sit in the tail buckets, and the buckets of the finite values are what they would be without them."""
+        finite = [i * 1.5 for i in range(finite_count)]
+        pipeline = self._make_pipeline()
+        ser = pl.Series('a', finite + INFINITIES[kind] + beside, dtype=pl.Float64)
+        result, errors = pipeline.process_column('a', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert_numeric_histogram(result['histogram'], result['histogram_bins'])
+        base_ser = pl.Series('a', finite + beside, dtype=pl.Float64)
+        base, _ = pipeline.process_column('a', base_ser.dtype, raw_series=base_ser)
+        assert result['histogram_bins'] == base['histogram_bins']
+        assert (result['histogram_args']['normalized_populations']
+            == base['histogram_args']['normalized_populations'])
+
+    @pytest.mark.parametrize('values', ddd_float_columns_with_infinities())
+    def test_ddd_float_columns_with_infinities_keep_a_numeric_histogram(self, values):
+        ser = pl.Series('a', list(values), dtype=pl.Float64)
+        result, errors = self._make_pipeline().process_column('a', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert_numeric_histogram(result['histogram'], result['histogram_bins'])
+
+    def test_float32_column_with_an_infinity_keeps_a_numeric_histogram(self):
+        ser = pl.Series('a', [None] + [i * 1.5 for i in range(100)] + [float('inf')], dtype=pl.Float32)
+        result, errors = self._make_pipeline().process_column('a', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert_numeric_histogram(result['histogram'], result['histogram_bins'])
+
+    @pytest.mark.parametrize('values', [[float('inf'), -float('inf')] * 5, [5.0] * 10 + [float('inf')]],
+        ids=['only_infinities', 'constant_beside_infinity'])
+    def test_columns_with_nothing_to_bucket_still_get_a_histogram(self, values):
+        """No finite spread to bucket: no error, and the column still gets a (categorical) histogram."""
+        ser = pl.Series('a', values, dtype=pl.Float64)
+        result, errors = self._make_pipeline().process_column('a', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert len(result['histogram']) > 0
+
+    def test_tail_buckets_name_the_infinities(self):
+        ser = pl.Series('a', [-float('inf')] + [i * 1.5 for i in range(100)] + [float('inf')])
+        result, _ = self._make_pipeline().process_column('a', ser.dtype, raw_series=ser)
+        low, high = [b['name'] for b in result['histogram'] if 'tail' in b]
+        assert low.startswith('-inf')
+        assert high.endswith('–inf')
 
     def test_bigint_histogram_series(self):
         """Integers near 2^53: np.histogram either raises ValueError (newer
