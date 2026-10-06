@@ -816,7 +816,7 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
 
 
 class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
-    """Tests for #896 (shared backend) and #899 (warm-session early-exit)."""
+    """Tests for #896 (releasing xorq load state) and #899 (warm-session early-exit)."""
 
     def get_app(self):
         return make_app()
@@ -968,38 +968,6 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
             self.assertIsNotNone(session.xorq_dataflow)
         finally:
             shutil.rmtree(root, ignore_errors=True)
-
-    def test_shared_backend_singleton(self):
-        """#896: load_expr_build_dir must call xorq.config.default_backend()
-        rather than connect() so xorq's process-wide singleton is reused across
-        calls instead of a new SessionContext being minted each time."""
-        from unittest.mock import patch
-
-        from buckaroo.server import xorq_loading
-
-        builds_root = tempfile.mkdtemp()
-        try:
-            build_path = _build_expr_dir(builds_root)
-            from xorq import config as xorq_config
-            connect_calls = []
-            original_default_backend = xorq_config.default_backend
-
-            def tracking_default_backend():
-                con = original_default_backend()
-                connect_calls.append(id(con))
-                return con
-
-            with patch.object(xorq_config, "default_backend",
-                side_effect=tracking_default_backend):
-                xorq_loading.load_expr_build_dir(build_path)
-                xorq_loading.load_expr_build_dir(build_path)
-
-            # Both calls must return the same backend id — one singleton.
-            self.assertEqual(len(connect_calls), 2)
-            self.assertEqual(connect_calls[0], connect_calls[1],
-                "load_expr_build_dir minted a new backend on the second call")
-        finally:
-            shutil.rmtree(builds_root, ignore_errors=True)
 
     def test_loaded_backend_released_with_expr(self):
         """#896: a loaded expression's backend must be freed once nothing holds

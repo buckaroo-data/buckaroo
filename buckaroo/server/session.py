@@ -72,6 +72,16 @@ class SessionState:
         """Update the last-accessed timestamp."""
         self.last_accessed = time.time()
 
+    def release_xorq_state(self) -> None:
+        """Drop the xorq expression and dataflow, releasing the memtables
+        xorq left on its process-wide default backend for them (#896)."""
+        if self.expr is not None:
+            # Lazy: xorq is optional, and an expr means it is installed.
+            from buckaroo.server.xorq_loading import release_memtables  # noqa: PLC0415
+            release_memtables(self.expr)
+        self.expr = None
+        self.xorq_dataflow = None
+
 
 PROTOCOL_VERSION = 1
 """Bumped when the WebSocket protocol changes incompatibly. Clients
@@ -172,7 +182,7 @@ class SessionManager:
             if not s.ws_clients and (now - s.last_accessed) > self._ttl_s
         ]
         for sid in to_evict:
-            del self.sessions[sid]
+            self.sessions.pop(sid).release_xorq_state()
             log.info("Evicted idle session=%s", sid)
         if to_evict:
             self._evicted_count += len(to_evict)
