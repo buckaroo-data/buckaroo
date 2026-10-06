@@ -446,6 +446,41 @@ class TestHistogram:
         total_pop = sum(b["population"] for b in h)
         assert abs(total_pop - 100.0) < 0.6  # per-bucket 1dp rounding drift
 
+    @pytest.mark.parametrize("extras", [[float("inf")], [float("-inf")], [float("-inf"), float("inf")]])
+    def test_numeric_histogram_with_infinity(self, extras):
+        """A float column holding an infinity must still produce a histogram.
+
+        Regression (#1055): ``max - min`` was infinite, so every bucket was NaN
+        and the int64 cast failed; ``default=[]`` swallowed the error. The
+        buckets span the finite values and the infinities are left out of them.
+        ``min`` and ``max`` still report the infinities.
+        """
+        vals = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] + extras
+        table = xo.memtable(pd.DataFrame({"vals": vals}))
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(table)
+        assert errors == []
+        assert stats["vals"]["min"] == min(vals)
+        assert stats["vals"]["max"] == max(vals)
+        h = stats["vals"]["histogram"]
+        assert len(h) > 0, "histogram should not be empty for a float column holding an infinity"
+        total_pop = sum(b["population"] for b in h)
+        assert abs(total_pop - 100.0) < 0.6  # per-bucket 1dp rounding drift
+
+    @pytest.mark.parametrize("extras", [[float("inf")], [float("-inf")], [float("-inf"), float("inf")]])
+    def test_histogram_bins_with_infinity(self, extras):
+        """histogram_bins spans the finite range, not ``[nan, inf, inf, ...]`` (#1055)."""
+        vals = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] + extras
+        table = xo.memtable(pd.DataFrame({"vals": vals}))
+        pipeline = XorqStatPipeline(XORQ_STATS_V2)
+        stats, errors = pipeline.process_table(table)
+        assert errors == []
+        bins = stats["vals"]["histogram_bins"]
+        assert len(bins) == 11
+        assert all(math.isfinite(b) for b in bins)
+        assert bins[0] == 1.0
+        assert abs(bins[-1] - 6.0) < 1e-9
+
     def test_histogram_bins_numeric(self):
         """histogram_bins must be 11 evenly-spaced edges for numeric columns."""
         pipeline = XorqStatPipeline(XORQ_STATS_V2)
