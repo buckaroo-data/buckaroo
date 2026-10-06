@@ -1,10 +1,33 @@
+import contextlib
+import os
 from typing import List, Union
 from collections import defaultdict
 import pandas as pd
-import pandera.pandas as pa
 from buckaroo.buckaroo_widget import BuckarooInfiniteWidget
 
 from buckaroo.styling_helpers import obj_, pinned_histogram
+
+
+@contextlib.contextmanager
+def _restoring_env(name: str):
+    """Put ``os.environ[name]`` back as it was (set or unset) on exit.
+
+    pandera sets ``PYARROW_IGNORE_TIMEZONE=1`` when it is imported and leaves it
+    set, which makes pyarrow store an aware datetime's wall time as UTC. Left in
+    place it would apply to everything in the process, not just pandera (#1058).
+    """
+    prior = os.environ.get(name)
+    try:
+        yield
+    finally:
+        if prior is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = prior
+
+
+with _restoring_env("PYARROW_IGNORE_TIMEZONE"):
+    import pandera.pandas as pa
 
 
 def calculate_error_color_num(error_cross_df:pd.DataFrame) -> pd.DataFrame:

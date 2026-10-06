@@ -25,7 +25,7 @@ def test_buckaroo_pandera():
 TZ_ENV = "PYARROW_IGNORE_TIMEZONE"
 
 
-@pytest.mark.parametrize("before, after", [(None, "<unset>")])
+@pytest.mark.parametrize("before, after", [(None, "<unset>"), ("0", "0")])
 def test_importing_buckaroo_pandera_leaves_pyarrow_ignore_timezone_alone(before, after):
     """pandera sets ``PYARROW_IGNORE_TIMEZONE=1`` on import, which makes pyarrow
     shift aware datetimes by their UTC offset. Importing buckaroo's pandera
