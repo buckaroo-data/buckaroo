@@ -20,7 +20,7 @@ from .styling_core import (
     OverrideColumnConfig,
     PinnedRowConfig,
     merge_sd_overrides,
-    merge_sds, merge_column_config, StylingAnalysis, wire_stat_keys)
+    merge_sds, merge_column_config, StylingAnalysis, validate_display_config, wire_stat_keys)
 
 
 from .abc_dataflow import ABCDataflow
@@ -391,6 +391,9 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
                  component_config:Union[Literal[None], ComponentConfig]=None,
                  init_sd:Union[Literal[None], InitSD]=None, skip_main_serial=False,
                  skip_stat_columns=None):
+        # every constructor (widgets, /load, /load_expr) passes through here, so a
+        # malformed display config is rejected before any of it is used
+        validate_display_config(init_sd, column_config_overrides)
         self.init_sd: InitSD
         if init_sd is None:
             self.init_sd = {}

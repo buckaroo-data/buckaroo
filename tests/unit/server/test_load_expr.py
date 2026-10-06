@@ -1333,6 +1333,21 @@ class TestLoadExprCacheDir(tornado.testing.AsyncHTTPTestCase):
             self.assertEqual(json.loads(resp.body)["error_code"], "invalid_cache_dir")
 
     @tornado.testing.gen_test
+    async def test_malformed_display_config_is_rejected(self):
+        """init_sd and column_config_overrides are checked before the build
+        is loaded, so a typo is a 400 naming the key, not a 500 or a table
+        that quietly ignores it."""
+        build_path = _build_expr_dir(os.path.join(self.root, "builds"))
+        for bad, key in (({"init_sd": {"name": {"delete_keys": None}}}, "delete_keys"),
+                         ({"column_config_overrides": {"name": {"displayer_args": "string"}}}, "displayer_args")):
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": "lx-bad-display-config", "build_dir": build_path, **bad})
+            self.assertEqual(resp.code, 400, (bad, resp.body))
+            body = json.loads(resp.body)
+            self.assertEqual(body["error_code"], "invalid_display_config")
+            self.assertIn(key, body["message"])
+
+    @tornado.testing.gen_test
     async def test_repost_without_cache_dir_keeps_the_sessions(self):
         """cache_dir persists across re-POSTs like the other config. A warm
         re-POST that omits it takes the early-exit, and a forced reload that

@@ -158,6 +158,98 @@ def test_init_sd():
         'a': {'orig_col_name':'foo_col', 'rewritten_col_name':'a', 'distinct_count':2, 'foo':8},
         'b': {'orig_col_name':'bar_col', 'rewritten_col_name':'b', 'distinct_count':3}}
 
+
+# (bad init_sd, a key the error has to name). init_sd is user-authored, from
+# notebook calls, JSON on the wire and project display files, so a malformed
+# display config key is rejected where it enters instead of being dropped.
+MALFORMED_INIT_SDS = [
+    ({'foo_col': {'ag_grid_specs': 'wrapText'}}, 'ag_grid_specs'),
+    ({'foo_col': {'displayer_args': 'string'}}, 'displayer_args'),
+    ({'foo_col': {'delete_keys': None}}, 'delete_keys'),
+    ({'foo_col': {'delete_keys': ['tooltip_config', 3]}}, 'delete_keys'),
+    ({'foo_col': {'highlight_color': 3}}, 'highlight_color'),
+    ({'foo_col': {'highlight_regex': ['a']}}, 'highlight_regex'),
+    ({'foo_col': {'highlight_phrase': ['refund', 3]}}, 'highlight_phrase'),
+    ({'foo_col': {'merge_rule': 'hiden'}}, 'merge_rule'),
+    ({'foo_col': {'column_config_override': 'hidden'}}, 'column_config_override'),
+    ({'foo_col': {'column_config_override': {'ag_grid_specs': 'wrapText'}}}, 'ag_grid_specs'),
+    ({'foo_col': 'string'}, 'foo_col'),
+    ([{'foo_col': {}}], 'init_sd'),
+]
+
+
+@pytest.mark.parametrize("init_sd,key", MALFORMED_INIT_SDS)
+def test_init_sd_malformed_display_config_raises(init_sd, key):
+    with pytest.raises(ValueError, match=key):
+        ACDFC(BASIC_DF, init_sd=init_sd)
+
+
+def test_init_sd_error_names_the_column():
+    with pytest.raises(ValueError, match=r"bar_col.*ag_grid_specs.*dict"):
+        ACDFC(BASIC_DF, init_sd={'bar_col': {'ag_grid_specs': 'wrapText'}})
+
+
+def test_init_sd_error_lists_every_problem():
+    """One error listing everything, so fixing a config isn't one round trip per typo."""
+    init_sd = {'foo_col': {'ag_grid_specs': 'wrapText'}, 'bar_col': {'highlight_color': 3}}
+    with pytest.raises(ValueError) as exc_info:
+        ACDFC(BASIC_DF, init_sd=init_sd)
+    msg = str(exc_info.value)
+    assert 'foo_col' in msg and 'ag_grid_specs' in msg
+    assert 'bar_col' in msg and 'highlight_color' in msg
+
+
+def test_init_sd_well_formed_display_config_accepted():
+    """Display config and summary stats share an entry, and only the display
+    config keys are checked: anything else is a stat and passes through.
+    A bare delete_keys string is the one key, as the styling guard reads it."""
+    init_sd = {
+        'foo_col': {
+            'displayer_args': {'displayer': 'integer', 'min_digits': 1, 'max_digits': 3},
+            'ag_grid_specs': {'wrapText': True, 'width': 400},
+            'delete_keys': ['tooltip_config'],
+            'highlight_phrase': ['refund', 'late'],
+            'highlight_regex': 'ref.*',
+            'highlight_color': 'orange',
+            'column_config_override': {'tooltip_config': {'tooltip_type': 'simple', 'val_column': 'foo_col'}},
+            'mean': 3.5,
+            'some_custom_stat': {'nested': [1, 2]}},
+        'bar_col': {'delete_keys': 'tooltip_config', 'merge_rule': 'hidden'}}
+    dfc = ACDFC(BASIC_DF, init_sd=init_sd)
+    assert dfc.init_sd == init_sd
+
+
+MALFORMED_OVERRIDES = [
+    ({'foo_col': {'displayer_args': 'integer'}}, 'displayer_args'),
+    ({'foo_col': {'ag_grid_specs': 'wrapText'}}, 'ag_grid_specs'),
+    ({'foo_col': {'color_map_config': 'color_static'}}, 'color_map_config'),
+    ({'foo_col': {'tooltip_config': 'simple'}}, 'tooltip_config'),
+    ({'foo_col': {'merge_rule': 'hiden'}}, 'merge_rule'),
+    ({'foo_col': 'hidden'}, 'foo_col'),
+    (['foo_col'], 'column_config_overrides'),
+]
+
+
+@pytest.mark.parametrize("overrides,key", MALFORMED_OVERRIDES)
+def test_column_config_overrides_malformed_raises(overrides, key):
+    with pytest.raises(ValueError, match=key):
+        ACDFC(BASIC_DF, column_config_overrides=overrides)
+
+
+def test_column_config_overrides_other_keys_accepted():
+    """An override is merged straight over the column config, so hosts set keys
+    the override type doesn't list, e.g. a header_name that relabels a diff column."""
+    overrides = {
+        'foo_col': {'header_name': 'foo', 'displayer_args': {'displayer': 'integer', 'min_digits': 1, 'max_digits': 3}},
+        'bar_col': {'merge_rule': 'hidden'}}
+    dfc = ACDFC(BASIC_DF, column_config_overrides=overrides)
+    assert dfc.column_config_overrides == overrides
+
+
+def test_widget_malformed_init_sd_raises():
+    with pytest.raises(ValueError, match='ag_grid_specs'):
+        BuckarooInfiniteWidget(BASIC_DF, init_sd={'foo_col': {'ag_grid_specs': 'wrapText'}})
+
 class AlwaysFailStyling(StylingAnalysis):
     requires_summary = []
 
