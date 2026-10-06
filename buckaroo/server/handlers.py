@@ -16,7 +16,7 @@ from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.dataflow.dataflow import STATS_TIERS
 from buckaroo.server.session import (
-    STATS_DELIVERIES, build_state_message, dataflow_stats_tier)
+    DEFAULT_STATS_DELIVERY, DEFAULT_STATS_TIER, STATS_DELIVERIES, build_state_message, dataflow_stats_tier)
 from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
@@ -326,6 +326,9 @@ class LoadHandler(tornado.web.RequestHandler):
         session.backend = backend
         session.xorq_dataflow = None
         session.expr = None
+        # The stats policy is /load_expr's too, so a later /load_expr that
+        # omits it starts from the defaults rather than an earlier load's.
+        session.stats_tier, session.stats_delivery = DEFAULT_STATS_TIER, DEFAULT_STATS_DELIVERY
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
@@ -510,8 +513,8 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # keeps the session's, and one that changes it rebuilds.
         stats_tier, stats_delivery, policy_error = _stats_policy_from_body(
             body,
-            existing.stats_tier if existing is not None else "full",
-            existing.stats_delivery if existing is not None else "inline")
+            existing.stats_tier if existing is not None else DEFAULT_STATS_TIER,
+            existing.stats_delivery if existing is not None else DEFAULT_STATS_DELIVERY)
         if policy_error is not None:
             self.set_status(400)
             self.write(policy_error)

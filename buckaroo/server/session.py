@@ -15,6 +15,9 @@ _DEFAULT_EVICTION_INTERVAL_S = 300.0  # check every 5 minutes
 # dataflow constructor (today's behaviour); ``deferred`` builds the schema tier
 # first and leaves the rest to later requests.
 STATS_DELIVERIES = ("inline", "deferred")
+# The policy of a session no /load_expr has set one for.
+DEFAULT_STATS_TIER = "full"
+DEFAULT_STATS_DELIVERY = "inline"
 
 
 def dataflow_stats_tier(stats_tier: str, stats_delivery: str) -> str:
@@ -59,8 +62,8 @@ class SessionState:
     # there (see STATS_DELIVERIES). Kept apart from dataflow_kwargs, which is
     # splatted into the dataflow constructor, and replayed by /reload_expr. The
     # tier the dataflow is built at follows from the pair (dataflow_stats_tier).
-    stats_tier: str = "full"
-    stats_delivery: str = "inline"
+    stats_tier: str = DEFAULT_STATS_TIER
+    stats_delivery: str = DEFAULT_STATS_DELIVERY
     # Companion telemetry sink (#943): a fire-and-forget POST callable, built
     # once from the /load_expr payload's telemetry_url on the IOLoop (where
     # make_http_sink captures AsyncHTTPClient/IOLoop.current()). Stored here so
