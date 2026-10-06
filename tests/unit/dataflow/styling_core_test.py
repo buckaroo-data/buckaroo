@@ -1,6 +1,7 @@
 import copy
 from typing import Dict, List
 import pandas as pd
+from buckaroo.dataflow import styling_core
 from buckaroo.dataflow.styling_core import ColumnConfig, DFViewerConfig, NormalColumnConfig, PartialColConfig, StylingAnalysis, merge_sd_overrides, rewrite_override_col_references
 from buckaroo.customizations.styling import (DefaultMainStyling, _formatted_char_count, estimate_min_width_px, _HISTOGRAM_MIN_PX, _MIN_COL_PX)
 from buckaroo.ddd_library import get_basic_df2, get_multiindex_index_df, get_multiindex_index_multiindex_with_names_cols_df, get_multiindex_index_with_names_multiindex_cols_df, get_multiindex_with_names_both, get_multiindex_with_names_index_df, get_multiindex_cols_df, get_multiindex_with_names_cols_df, get_tuple_cols_df, get_multiindex_int_cols_df, get_multiindex_int_levels_df, get_multiindex_int_names_df, get_multiindex_partly_named_index_df
@@ -576,3 +577,74 @@ def test_overridden_default_styling_is_used_as_the_last_resort() -> None:
         {'a': {'orig_col_name': 'foo'}}, pd.DataFrame({'foo': [1]}))
     assert col_config == [{'col_name': 'a', 'header_name': 'foo',
         'displayer_args': {'displayer': 'string', 'max_length': 5}}]
+
+
+class RaisingOnStringStyling(DefaultMainStyling):
+    @classmethod
+    def style_column(cls, col, column_metadata):
+        if column_metadata.get('_type') == 'string':
+            raise NameError("boom")
+        return super().style_column(col, column_metadata)
+
+
+class InheritsRaisingStyling(RaisingMainStyling):
+    """Defines no style_column of its own, so RaisingMainStyling's is the one that runs."""
+
+
+def test_check_styling_is_empty_when_every_column_styles() -> None:
+    assert styling_core.check_styling(DefaultMainStyling, FALLBACK_SD, FALLBACK_DF) == []
+    assert styling_core.check_styling(ColoredMainStyling, FALLBACK_SD, FALLBACK_DF) == []
+
+
+def test_check_styling_reports_every_failing_column() -> None:
+    """No fallback and no stopping at the first failure: each column gets its own entry."""
+    failures = styling_core.check_styling(RaisingMainStyling, FALLBACK_SD, FALLBACK_DF)
+    assert [(f.col, f.orig_col_name, f.klass) for f in failures] == [
+        ('a', 'foo', RaisingMainStyling), ('b', 'bar', RaisingMainStyling)]
+    assert all(isinstance(f.exc, NameError) for f in failures)
+
+
+def test_check_styling_reports_only_the_columns_that_fail() -> None:
+    failures = styling_core.check_styling(RaisingOnStringStyling, FALLBACK_SD, FALLBACK_DF)
+    assert [(f.col, f.orig_col_name) for f in failures] == [('b', 'bar')]
+
+
+def test_check_styling_names_the_most_specific_style_column() -> None:
+    """A failure is the most specific style_column raising, even when a parent's would have worked."""
+    failures = styling_core.check_styling(RaisingColoredStyling, FALLBACK_SD, FALLBACK_DF)
+    assert {f.klass for f in failures} == {RaisingColoredStyling}
+    failures = styling_core.check_styling(InheritsRaisingStyling, FALLBACK_SD, FALLBACK_DF)
+    assert {f.klass for f in failures} == {RaisingMainStyling}
+
+
+def test_check_styling_counts_a_non_dict_as_a_failure() -> None:
+    failures = styling_core.check_styling(NoneReturningMainStyling, FALLBACK_SD, FALLBACK_DF)
+    assert [f.col for f in failures] == ['a', 'b']
+
+
+def test_check_styling_leaves_the_sd_alone() -> None:
+    sd = copy.deepcopy(FALLBACK_SD)
+    assert len(styling_core.check_styling(MutateThenRaiseStyling, sd, FALLBACK_DF)) == 2
+    assert sd == FALLBACK_SD
+
+
+def test_check_styling_skips_hidden_columns() -> None:
+    """Hidden columns are never styled for display, so they can't fail."""
+    sd: SDType = {**FALLBACK_SD, 'b': {**FALLBACK_SD['b'], 'merge_rule': 'hidden'}}
+    assert styling_core.check_styling(RaisingOnStringStyling, sd, FALLBACK_DF) == []
+
+
+class RaisingDefaultOnlyStyling(StylingAnalysis):
+    """Overrides only default_styling, which is where rendering starts for this class."""
+    requires_summary = []
+
+    @classmethod
+    def default_styling(cls, col_name, /):
+        raise NameError("boom")
+
+
+def test_check_styling_checks_default_styling_when_nothing_overrides_style_column() -> None:
+    failures = styling_core.check_styling(RaisingDefaultOnlyStyling, FALLBACK_SD, FALLBACK_DF)
+    assert [(f.col, f.klass) for f in failures] == [
+        ('a', RaisingDefaultOnlyStyling), ('b', RaisingDefaultOnlyStyling)]
+    assert styling_core.check_styling(StylingAnalysis, FALLBACK_SD, FALLBACK_DF) == []
