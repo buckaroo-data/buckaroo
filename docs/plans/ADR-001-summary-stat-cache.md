@@ -1,6 +1,6 @@
 # ADR: A summary-stat cache keyed by data identity and per-stat hashes
 
-- **Status:** Proposed (2026-10-05). The design was settled in a review session. Nothing is implemented yet.
+- **Status:** Approved (2026-10-06). The design was settled in a review session on 2026-10-05. D8 is implemented in the same PR as this ADR (#1040, which absorbed #1041). The cache (D1–D7, D9–D12) is #1042.
 - **Affected code:** `buckaroo/pluggable_analysis_framework/xorq_stat_pipeline.py` (`_execute_cached`, `_process_table_impl`), `buckaroo/customizations/xorq_stats_v2.py`, `buckaroo/pluggable_analysis_framework/stat_func.py` and `stat_pipeline.py` (type marker, dependency checks), `buckaroo/server/handlers.py` (`data_id` on `/load_expr`), `buckaroo/server/xorq_loading.py`. In tallyman, `src/tallyman_companion/buckaroo_lifecycle.py`.
 - **Related tickets:** #1037 (warm re-POST with equal config re-runs the pipeline), #1038 (stats run on the IOLoop), #1039 (wire layout for `all_stats`), #943, #944 and #951 (cache telemetry), buckaroo-data/tallyman#177 (stat-cache wipe on every klass reload).
 
@@ -149,7 +149,7 @@ The number of parquet columns is roughly the number of stats times the value typ
 
 Today `min` and `max` are declared `-> float` and cast to `float64` (`xorq_stats_v2.py:160–167`). An int32 column's min comes back as `0.0`. The typed DAG assigns one Python type per stat key and checks dependents with `isinstance` (`stat_pipeline.py:114`).
 
-This PR adds a return-type marker meaning "same type as the column". `min`, `max`, `mode` and `most_freq` use it and drop the cast. `mean` and `std` stay float. `median` also stays float, because an even count gives a non-integer median and `approx_median` is approximate anyway. Dependents that declare `min: float` (`histogram`, `histogram_bins`) accept `int | float`.
+This PR adds a return-type marker, `ColumnValue`, meaning "same type as the column". The boundary type check skips it. The xorq `min` and `max` use it and drop the cast. The xorq stats have no `mode` or `most_freq`; on the pandas side, `mode`, `min`, `max` and `most_freq`…`5th_freq` move from `Any` to `ColumnValue`, with no change in behavior. `mean` and `std` stay float. `median` also stays float, because an even count gives a non-integer median and `approx_median` is approximate anyway. The dependents (`histogram`, `histogram_bins`) declare `min: ColumnValue` and `max: ColumnValue` and convert to float for the bucket math. Declaring `int | float` instead would reject any other numeric type a column's min can have.
 
 It ships ahead of the cache so that the cache's round-trip tests can assert that an int column's `min` comes back as an int.
 
@@ -190,7 +190,7 @@ This work covers the xorq server only. The key leaves room for a per-column data
 
 ## Delivery
 
-1. **PR 1, type system (D8).** The tests asserting that `min`/`max` of an int column are ints go in a separate commit, run on CI and fail there, before the fix lands.
+1. **PR 1, type system (D8).** The tests asserting that `min`/`max` of an int column are ints go in a separate commit, run on CI and fail there, before the fix lands. Opened as #1041 and merged into this ADR's PR (#1040).
 2. **PR 2, the cache (D1–D7, D9–D12).** The failing structural tests land first, as one commit. Then the implementation.
 3. **PR 3, tallyman.** Send `data_id`. Drop the wipe on klass reload (`_clear_stat_cache`, called from `reload_project_sessions`), which closes tallyman#177. Keep the wipe in `_verify_self_heal`: a heal changes `data_id`, so every cell misses anyway, and the wipe removes the scope directory nothing will read again. Pin the buckaroo release that contains PR 2.
 
