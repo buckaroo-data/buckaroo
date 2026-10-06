@@ -117,13 +117,29 @@ def _is_query_func(sf: StatFunc) -> bool:
     return any(r.type is XorqExpr or r.type is XorqExecute for r in sf.requires)
 
 
-def _is_environmental(e: BaseException) -> bool:
+# How an engine reports a failure of its environment rather than of the query:
+# DataFusion's resource, IO and object-store errors, and a Rust io::Error,
+# which renders as "... (os error N)".
+_ENVIRONMENTAL_MESSAGES = ("resources exhausted", "out of memory", "timed out", "timeout", "io error:",
+    "object store error", "(os error ")
+
+
+def _is_environmental(e: Optional[BaseException]) -> bool:
     """A failure that says nothing about the stat: the backend was down,
-    slow, or out of memory. Never cached (ADR-001 D11)."""
-    if isinstance(e, (MemoryError, TimeoutError, ConnectionError)):
-        return True
-    msg = str(e).lower()
-    return any(s in msg for s in ("resources exhausted", "out of memory", "timed out", "timeout"))
+    slow, out of memory, or couldn't read its files. Any OSError counts
+    (connection, timeout, a missing file, no file handles left), and so does
+    an error one caused, since an engine or a stat may wrap it. Never cached
+    (ADR-001 D11)."""
+    seen = set()
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, (MemoryError, OSError)):
+            return True
+        msg = str(e).lower()
+        if any(s in msg for s in _ENVIRONMENTAL_MESSAGES):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
 
 
 def fallback_data_id(table) -> str:
@@ -184,8 +200,9 @@ class XorqStatPipeline:
         # the attribute always exists (e.g. for the unit_test() run kicked off
         # below, which disables the cache).
         self._cache_stats = _new_cache_run_stats()
-        # Successful queries in the current run. A stat error is cached only
-        # when some query succeeded, which shows the backend was up (D11).
+        # Successful queries in the current run. A stat's failure is cached
+        # only when a query succeeded after it, which shows the backend was
+        # up (D11).
         self._queries_ok = 0
         # Row count of the last process_table run (cached or counted), or None.
         self.last_length: Optional[int] = None
@@ -440,9 +457,9 @@ class XorqStatPipeline:
                 self._cache_stats["misses"] += len(sf.provides)
                 stat_name = sf.provides[0].name
                 if i in failures:
-                    accumulators[col][stat_name] = Err(error=failures[i], stat_func_name=sf.name, column_name=col,
-                        inputs={})
-                    cells.failed(col, sf, failures[i])
+                    err, ok_before = failures[i]
+                    accumulators[col][stat_name] = Err(error=err, stat_func_name=sf.name, column_name=col, inputs={})
+                    cells.failed(col, sf, err, ok_before)
                 else:
                     accumulators[col][stat_name] = Ok(values[i])
                     cells.computed(col, sf, {stat_name: values[i]})
@@ -475,7 +492,7 @@ class XorqStatPipeline:
                 if self._perf is not None:
                     self._perf.record("xorq/per-column", col, sf.name, time.perf_counter() - t0)
                 if query_func:
-                    cells.ran_query_func(col, sf, col_accum, raised, self._cache_stats)
+                    cells.ran_query_func(col, sf, col_accum, raised, self._queries_ok, self._cache_stats)
 
             col_key_to_func: Dict[str, StatFunc] = {}
             for sf in col_funcs:
@@ -492,7 +509,9 @@ class XorqStatPipeline:
 
     def _run_batch(self, table, items, need_length: bool):
         """Run the batch aggregate over ``items``; returns ``(values, failures,
-        length)`` keyed by item index.
+        length)`` keyed by item index. A failure is ``(error, ok_before)``:
+        the count of queries that had succeeded when it failed, or None when
+        the backend was down (see ``_CellLedger.failed``).
 
         One query when it succeeds. When it fails, the failure is isolated
         (ADR-001 D11) so one bad expression can't take down every stat on
@@ -501,7 +520,7 @@ class XorqStatPipeline:
         then one per cell for a stat whose aggregate still fails. Failures are
         reported at the finest level reached."""
         values: Dict[int, Any] = {}
-        failures: Dict[int, BaseException] = {}
+        failures: Dict[int, Tuple[BaseException, Optional[int]]] = {}
 
         def run(idxs, with_length=False):
             exprs = [table.count().name(TOTAL_LENGTH_KEY)] if with_length else []
@@ -513,13 +532,14 @@ class XorqStatPipeline:
                 if name in df.columns:
                     values[i] = _to_python_scalar(df[name].iloc[0])
                 else:
-                    failures[i] = KeyError(f"missing aggregate column {name!r} in result")
+                    failures[i] = (KeyError(f"missing aggregate column {name!r} in result"), self._queries_ok)
             if with_length:
                 length = _to_python_scalar(df[TOTAL_LENGTH_KEY].iloc[0])
                 return 0 if length is None else length
             return None
 
         all_idxs = list(range(len(items)))
+        first_ok = self._queries_ok
         try:
             return values, failures, run(all_idxs, with_length=need_length)
         except Exception as batch_err:
@@ -530,10 +550,10 @@ class XorqStatPipeline:
             length = run([], with_length=True)
         except Exception as canary_err:
             for i in all_idxs:
-                failures[i] = canary_err
+                failures[i] = (canary_err, None)
             return values, failures, None
         if len(items) == 1:
-            failures[0] = first_err
+            failures[0] = (first_err, first_ok)
             return values, failures, length
 
         by_stat: Dict[str, List[int]] = {}
@@ -546,24 +566,19 @@ class XorqStatPipeline:
                     continue
                 except Exception as stat_err:
                     if len(idxs) == 1:
-                        failures[idxs[0]] = stat_err
+                        failures[idxs[0]] = (stat_err, self._queries_ok)
                         continue
             for i in idxs:
                 try:
                     run([i])
                 except Exception as cell_err:
-                    failures[i] = cell_err
+                    failures[i] = (cell_err, self._queries_ok)
         return values, failures, length
 
     def _write_cells(self, scope_id, cells: "_CellLedger") -> None:
-        # A stat's error is cached only when some query in this run succeeded,
-        # i.e. the backend was up and the stat failed on its own (D11).
-        values = cells.new_values
-        errors: Dict[Any, Dict[str, str]] = {}
-        if self._queries_ok:
-            errors = cells.new_errors
-            values = {col: {**cells.fallback_values.get(col, {}), **values.get(col, {})}
-                for col in set(values) | set(cells.fallback_values)}
+        errors, fallback_values = cells.settled(self._queries_ok)
+        values = {col: {**fallback_values.get(col, {}), **cells.new_values.get(col, {})}
+            for col in set(cells.new_values) | set(fallback_values)}
         live = cells.live_stat_ids(self.ordered_stat_funcs)
         try:
             path = self.cache_storage.write(scope_id, values, errors, keep=live.__contains__)
@@ -625,10 +640,12 @@ class _CellLedger:
         self.cached = cached
         self.hashes = hashes
         self.new_values: Dict[Any, Dict[str, Any]] = {}
-        # Cached only when some query in the run succeeded (D11): stat errors,
-        # and values a stat's ``default`` substituted for an exception.
-        self.new_errors: Dict[Any, Dict[str, str]] = {}
-        self.fallback_values: Dict[Any, Dict[str, Any]] = {}
+        # Stat errors, and values a stat's ``default`` substituted for an
+        # exception, each with the count of queries that had succeeded when
+        # it failed. Cached only when a query succeeded after it (D11), see
+        # ``settled``.
+        self.new_errors: Dict[Any, Dict[str, Tuple[str, int]]] = {}
+        self.fallback_values: Dict[Any, Dict[str, Tuple[Any, int]]] = {}
 
     def _sid(self, sf: StatFunc, key: str) -> Optional[str]:
         h = self.hashes.get(sf.name)
@@ -668,14 +685,17 @@ class _CellLedger:
             for key, v in values.items():
                 col_values[self._sid(sf, key)] = v
 
-    def failed(self, col, sf: StatFunc, error: BaseException) -> None:
-        if sf.name in self.hashes and not _is_environmental(error):
+    def failed(self, col, sf: StatFunc, error: BaseException, ok_before: Optional[int]) -> None:
+        """Record ``sf`` failing on ``col``. ``ok_before`` is the count of
+        queries that had succeeded when it failed, None when the backend was
+        down."""
+        if sf.name in self.hashes and ok_before is not None and not _is_environmental(error):
             col_errors = self.new_errors.setdefault(col, {})
             for sk in sf.provides:
-                col_errors[self._sid(sf, sk.name)] = f"{type(error).__name__}: {error}"
+                col_errors[self._sid(sf, sk.name)] = (f"{type(error).__name__}: {error}", ok_before)
 
     def ran_query_func(self, col, sf: StatFunc, accum: Dict[str, StatResult],
-            raised: Optional[BaseException], counters) -> None:
+            raised: Optional[BaseException], ok_before: int, counters) -> None:
         """Record a per-column query stat that was asked to run. One that
         didn't run (an upstream error) records nothing. A value its
         ``default`` substituted for an exception is cached like an error."""
@@ -686,7 +706,7 @@ class _CellLedger:
         if raised is not None and _is_environmental(raised):
             return
         if raised is not None and all(isinstance(r, Err) for r in results):
-            self.failed(col, sf, raised)
+            self.failed(col, sf, raised, ok_before)
             return
         values = {sk.name: r.value for sk, r in zip(sf.provides, results)}
         if sf.name not in self.hashes:
@@ -696,9 +716,24 @@ class _CellLedger:
             # rule as an error.
             col_values = self.fallback_values.setdefault(col, {})
             for key, v in values.items():
-                col_values[self._sid(sf, key)] = v
+                col_values[self._sid(sf, key)] = (v, ok_before)
             return
         self.computed(col, sf, values)
+
+    def settled(self, queries_ok: int) -> Tuple[Dict[Any, Dict[str, str]], Dict[Any, Dict[str, Any]]]:
+        """``(errors, fallback values)`` with a successful query after them,
+        given the run's final count of successful queries. The backend
+        answered after each of these failed, so it was up and the stat failed
+        on its own. Succeeding before a failure doesn't show that: the
+        backend can go away partway through a run."""
+        def after(recorded):
+            out: Dict[Any, Dict[str, Any]] = {}
+            for col, cells in recorded.items():
+                kept = {sid: v for sid, (v, ok_before) in cells.items() if ok_before < queries_ok}
+                if kept:
+                    out[col] = kept
+            return out
+        return after(self.new_errors), after(self.fallback_values)
 
     def live_stat_ids(self, stat_funcs: List[StatFunc]) -> Set[str]:
         live = {length_stat_id()}

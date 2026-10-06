@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from buckaroo.pluggable_analysis_framework.source_digest import text_digest
+from buckaroo.pluggable_analysis_framework.source_digest import text_digest, text_md5
 from buckaroo.pluggable_analysis_framework.stat_cache import StatCache
 from buckaroo.server.git_state_guard import install_git_state_guard
 from buckaroo.server.window import clamp_window
@@ -468,8 +468,10 @@ def _compile_project_post_processing(name: str, path: Path):
     return type(f"ProjectPostProcessing_{name}", (ColAnalysis,), {
         "provides_defaults": {},
         "post_processing_method": name,
-        # Identifies the post-processing in the stat cache's scope_id.
-        "source_digest": text_digest(source),
+        # Identify the post-processing in the stat cache's scope_id by the
+        # source it was compiled from (see stat_cache.post_processing_hash).
+        "source_file": str(path),
+        "source_md5": text_md5(source),
         "post_process_df": classmethod(
             lambda kls, expr, _f=process: [_f(expr), {}]),
     })

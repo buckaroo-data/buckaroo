@@ -25,7 +25,7 @@ from typing import Any, Dict, List
 from buckaroo.jlisp.lisp_utils import is_symbol, sym_meta_get
 
 
-def _canonical_chain_repr(chain: List[Any]) -> str:
+def canonical_chain_repr(chain: List[Any]) -> str:
     """Stable JSON serialization of an op chain.
 
     sort_keys keeps dict-of-dicts ordering deterministic across Python
@@ -48,7 +48,7 @@ def hash_chain(chain: List[Any], extra: Any = None) -> str:
     doesn't collide with the previous dataset's cache entry (codex P1
     on #783).
     """
-    payload = _canonical_chain_repr(chain)
+    payload = canonical_chain_repr(chain)
     if extra is not None:
         payload = payload + '|' + str(extra)
     return hashlib.blake2b(payload.encode(), digest_size=8).hexdigest()

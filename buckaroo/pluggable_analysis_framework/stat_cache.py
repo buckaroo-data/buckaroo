@@ -42,7 +42,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .source_digest import callable_digest, file_digest
+from ..dataflow.sd_cache import canonical_chain_repr
+from .source_digest import callable_file, file_digest, file_md5
 from .stat_func import RAW_MARKER_TYPES, StatFunc
 
 log = logging.getLogger(__name__)
@@ -143,18 +144,27 @@ def length_stat_id() -> str:
 def make_scope_id(data_id: Any, post_processing_hash: str = "", operations: Optional[List[Any]] = None) -> str:
     """The identity of the rows stats run over: the caller's ``data_id`` (or a
     hash of the source expression), the post-processing step (empty for the
-    untransformed view), and the op chain applied to it (a search is one)."""
-    key = [LAYOUT_VERSION, str(data_id), post_processing_hash]
-    if operations:
-        key.append(operations)
-    return hashlib.sha256(json.dumps(key, sort_keys=True, default=repr).encode()).hexdigest()[:32]
+    untransformed view), and the op chain applied to it (a search is one), in
+    the canonical form the in-process SD cache keys it by."""
+    key = [LAYOUT_VERSION, str(data_id), post_processing_hash, canonical_chain_repr(operations or [])]
+    return hashlib.sha256(json.dumps(key).encode()).hexdigest()[:32]
 
 
 def post_processing_hash(klass: Any) -> Optional[str]:
-    """Identity of a post-processing class: the digest its loader recorded
-    (project files), else the source of its ``post_process_df``. None when it
-    has neither, and its views aren't persisted."""
-    return getattr(klass, "source_digest", None) or callable_digest(klass.post_process_df)
+    """Identity of a post-processing step: the name of the file that defines
+    it, the md5 of that file, and its ``post_processing_method``, since one
+    file can define several steps. A loader that compiled the step from a
+    file records the name and md5 it read (``source_file``, ``source_md5``);
+    otherwise they come from the file defining ``post_process_df``. None when
+    that file can't be read, and the step's views aren't persisted."""
+    path = getattr(klass, "source_file", None)
+    md5 = getattr(klass, "source_md5", None)
+    if path is None:
+        path = callable_file(klass.post_process_df)
+        md5 = None if path is None else file_md5(path)
+    if md5 is None:
+        return None
+    return _short_hash([os.path.basename(path), md5, klass.post_processing_method])
 
 
 class CachedStatError(Exception):
