@@ -81,3 +81,41 @@ test("a slow decode of an older df_data_dict does not overwrite a newer one", as
   const rendered = renderedDicts();
   expect(rendered[rendered.length - 1]).toBe(decodedNewer);
 });
+
+test("decodes that finish in order each render", async () => {
+  const model = makeModel({ all_stats: { raw: "first" } });
+  const render = createPredecodingRender(() => null);
+  render({ el: document.createElement("div"), model, experimental: {} });
+  const decodedFirst = { all_stats: [{ index: "first" }] };
+  mockPending[0].resolve(decodedFirst);
+  await flush();
+  model.setDict({ all_stats: { raw: "second" } });
+  const decodedSecond = { all_stats: [{ index: "second" }] };
+  mockPending[1].resolve(decodedSecond);
+  await flush();
+
+  expect(renderedDicts()).toEqual([decodedFirst, decodedSecond]);
+});
+
+test("a model with no df_data_dict still renders, with an empty dict", async () => {
+  const model = makeModel(undefined);
+  const render = createPredecodingRender(() => null);
+  render({ el: document.createElement("div"), model, experimental: {} });
+  expect(mockPending.map((p) => p.raw)).toEqual([{}]);
+  mockPending[0].resolve({});
+  await flush();
+
+  expect(renderedDicts()).toEqual([{}]);
+});
+
+test("a decode that finishes after unmount does not render", async () => {
+  const model = makeModel({ all_stats: { raw: "only" } });
+  const render = createPredecodingRender(() => null);
+  const cleanup = render({ el: document.createElement("div"), model, experimental: {} });
+  cleanup();
+  mockPending[0].resolve({ all_stats: [{ index: "only" }] });
+  await flush();
+
+  expect(mockRoot.render).not.toHaveBeenCalled();
+  expect(mockRoot.unmount).toHaveBeenCalledTimes(1);
+});
