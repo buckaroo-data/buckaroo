@@ -168,12 +168,14 @@ test.describe('POST /load_expr', () => {
     const session = `lx-display-${Date.now()}`;
     await loadExpr(request, session, buildExprDir(buildsRoot, BUILD_PRICE_EXPR_PY), { stats_delivery: 'deferred' });
 
-    const events: { dir: string; type: string; start?: number; hasDisplayArgs?: boolean }[] = [];
+    const events: { dir: string; type: string; start?: number; hasDisplayArgs?: boolean; minWidth?: number }[] = [];
     page.on('websocket', (ws) => {
       const record = (dir: string) => (e: { payload: string | Buffer }) => {
         if (typeof e.payload !== 'string') return;
         const msg = JSON.parse(e.payload);
-        events.push({ dir, type: msg.type, start: msg.payload_args?.start, hasDisplayArgs: 'df_display_args' in msg });
+        const price = msg.df_display_args?.main?.df_viewer_config?.column_config?.find((c: any) => c.col_name === 'a');
+        events.push({ dir, type: msg.type, start: msg.payload_args?.start, hasDisplayArgs: 'df_display_args' in msg,
+          minWidth: price?.ag_grid_specs?.minWidth });
       };
       ws.on('framesent', record('sent'));
       ws.on('framereceived', record('received'));
@@ -186,6 +188,9 @@ test.describe('POST /load_expr', () => {
 
     const at = events.findIndex((e) => e.type === 'stats_update');
     expect(events[at].hasDisplayArgs).toBe(true);
+    // The price column's minWidth reads its 1e9 maximum, so it grows once the full stats are in.
+    const pending = events.find((e) => e.type === 'initial_state')!;
+    expect(events[at].minWidth).toBeGreaterThan(pending.minWidth!);
     expect(events.slice(at).filter((e) => e.dir === 'sent' && e.type === 'infinite_request' && e.start === 0)).toEqual([]);
   });
 });
