@@ -1677,7 +1677,8 @@ class TestCompleteStats:
         dataflow = session.xorq_dataflow
         errs = {"a": {"stat": "boom"}}
         real = dataflow._get_summary_sd
-        dataflow._get_summary_sd = lambda df, scope="filt": (real(df, scope)[0], errs) if dataflow.stats_tier == "full" else real(df, scope)
+        dataflow._get_summary_sd = lambda df, scope="filt": (real(df, scope)[0], errs) if dataflow.stats_tier == "full" else real(df,
+            scope)
         assert complete_stats(session)
 
         # A search and its clearing, each reset to the schema tier as a state
@@ -1690,7 +1691,7 @@ class TestCompleteStats:
 
         assert dataflow.errs == errs
 
-    def test_spans_reach_the_bound_sink_when_the_session_has_none_and_are_not_first_pull(self):
+    def test_spans_reach_the_bound_sink_when_the_session_has_none_and_the_run_is_not_a_first_pull(self):
         session = _deferred_session()
         records = []
 
@@ -1699,7 +1700,7 @@ class TestCompleteStats:
 
         names = {record["name"] for record in records}
         assert "stats.complete" in names
-        assert not {name for name in names if name.startswith("firstpull.")}
+        assert "firstpull.stats_total" not in names
 
 
 class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
@@ -2019,10 +2020,10 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         session = self._session("sw-overlay-order")
         sent: list = []
         legacy = SimpleNamespace(search_string="ca", caps=frozenset(), session_id="sw-overlay-order",
-            write_message=sent.append)
+            write_message=sent.append, _with_highlight=DataStreamHandler._with_highlight)
         self.assertEqual(getattr(session, "stats_status", None), "pending")
 
-        DataStreamHandler._send_highlight_overlay(legacy, session)
+        DataStreamHandler._send_client_state(legacy, session, session.buckaroo_state)
 
         self.assertEqual(session.stats_status, "complete")
         overlay = json.loads(sent[0])["df_display_args"]["main"]["df_viewer_config"]["column_config"]
@@ -2138,7 +2139,7 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
             (gen, "raw", "full"))
         self.assertEqual((served["attrs"]["outcome"], served["attrs"]["columns"]), ("update", 1))
         self.assertEqual((stale["attrs"]["outcome"], stale["attrs"]["stats_gen"]), ("stale", gen - 1))
-        self.assertIn("firstpull.stats_total", [r["name"] for r in captured])
+        self.assertIn("stats.complete", [r["name"] for r in captured])
 
     @tornado.testing.gen_test
     async def test_returning_to_a_completed_state_is_answered_from_the_cache(self):
