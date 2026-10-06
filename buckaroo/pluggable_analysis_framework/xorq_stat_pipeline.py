@@ -844,6 +844,10 @@ class XorqDfStatsV2:
             cache_storage=cache_storage)
         self.operating_df_name = operating_df_name
         self.debug = debug
+        # Kept for add_analysis, which reruns the pipeline over the same
+        # columns and cache scope.
+        self.skip_columns = skip_columns
+        self.scope_id = scope_id
         self.sdf, errors = self.ap.process_table(self.table, skip_columns=skip_columns, scope_id=scope_id)
         # The table's row count, from the cache or the batch count(); None if
         # it couldn't be counted.
@@ -867,7 +871,9 @@ class XorqDfStatsV2:
         so DataFlow.add_analysis works against a xorq-backed stats wrapper.
         """
         passed, errors = self.ap.add_stat(a_obj)
-        self.sdf, self.stat_errors = self.ap.process_table(self.table)
+        self.sdf, self.stat_errors = self.ap.process_table(
+            self.table, skip_columns=self.skip_columns, scope_id=self.scope_id)
+        self.length = self.ap.last_length
         self.errs = errors_to_errdict(self.stat_errors)
         if not passed:
             print("DAG validation failed")
