@@ -13,6 +13,8 @@ import platform
 import subprocess
 import webbrowser
 
+from buckaroo.server.security import is_valid_session_id
+
 log = logging.getLogger("buckaroo.server.focus")
 
 # Chromium-based browsers on macOS that share the same AppleScript tab/window API
@@ -179,6 +181,14 @@ def find_or_create_session_window(session_id: str, port: int, reload_if_found: b
       "created new Google Chrome window"
       "opened in default browser"
     """
+    # Defense in depth: the session id is interpolated into AppleScript and
+    # into the session URL below. Handlers already reject malformed ids, so
+    # reaching here with one is a bug — refuse rather than spawn osascript or
+    # a browser against it.
+    if not is_valid_session_id(session_id):
+        log.error("refused window management for invalid session id: %r", session_id)
+        return "refused: invalid session id"
+
     if platform.system() != "Darwin":
         webbrowser.open(_session_url(session_id, port))
         status = "opened in default browser (non-macOS)"

@@ -10,6 +10,7 @@ import tornado.websocket
 
 from buckaroo.pluggable_analysis_framework import perf_log
 from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
+from buckaroo.server.security import LocalHostCheckMixin, is_valid_session_id
 from buckaroo.server.session import build_state_message
 
 
@@ -30,7 +31,21 @@ _BUCKAROO_DEBUG = os.environ.get("BUCKAROO_DEBUG", "").lower() in ("1", "true")
 _DATAFLOW_FIELDS = ("post_processing", "cleaning_method", "quick_command_args")
 
 
-class DataStreamHandler(tornado.websocket.WebSocketHandler):
+class DataStreamHandler(LocalHostCheckMixin, tornado.websocket.WebSocketHandler):
+    def prepare(self):
+        # LocalHostCheckMixin.prepare runs the DNS-rebinding Host check and
+        # may finish() with a 403. Then refuse a malformed session id before
+        # the WS upgrade so it never reaches the dispatch — the upgrade fails
+        # with 403 rather than opening a socket we immediately close.
+        super().prepare()
+        if self._finished:
+            return
+        session_id = self.path_args[0] if self.path_args else None
+        if not is_valid_session_id(session_id):
+            log.warning("refused WS upgrade for invalid session id: %r", session_id)
+            self.set_status(403)
+            self.finish()
+
     def open(self, session_id):
         self.session_id = session_id
         # Per-client live search term (#838, fix for #851/cross-client

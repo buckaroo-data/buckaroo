@@ -15,6 +15,7 @@ from buckaroo.compare import col_join_dfs
 from buckaroo.df_util import old_col_new_col
 from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.server.session import build_state_message
+from buckaroo.server.security import LocalHostCheckMixin, is_valid_session_id
 from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
@@ -55,7 +56,13 @@ def _check_dependency(module_name: str) -> bool:
         return False
 
 
-class HealthHandler(tornado.web.RequestHandler):
+class _LocalRequestHandler(LocalHostCheckMixin, tornado.web.RequestHandler):
+    """Base for every HTTP handler. ``LocalHostCheckMixin.prepare`` refuses
+    any request whose ``Host`` header is not loopback (DNS-rebinding
+    defense) before the handler body runs."""
+
+
+class HealthHandler(_LocalRequestHandler):
     def get(self):
         import buckaroo
         start_time = self.application.settings.get("server_start_time", 0)
@@ -65,7 +72,7 @@ class HealthHandler(tornado.web.RequestHandler):
             "static_files": _get_static_file_info(static_path)})
 
 
-class DiagnosticsHandler(tornado.web.RequestHandler):
+class DiagnosticsHandler(_LocalRequestHandler):
     def get(self):
         import tornado as _tornado
         import buckaroo
@@ -119,7 +126,7 @@ def _list_log_files() -> list:
     return []
 
 
-class LoadHandler(tornado.web.RequestHandler):
+class LoadHandler(_LocalRequestHandler):
     def _parse_request_body(self) -> dict:
         """Parse and validate JSON request body."""
         try:
@@ -155,6 +162,11 @@ class LoadHandler(tornado.web.RequestHandler):
 
         if not session_id:
             session_id = uuid.uuid4().hex
+        elif not is_valid_session_id(session_id):
+            self.set_status(400)
+            self.write({"error_code": "invalid_session",
+                "message": "session must be 1-128 chars of [A-Za-z0-9._-]"})
+            return None, None, None, None, None, None, None
 
         mode = body.get("mode", "viewer")
         prompt = body.get("prompt", "")
@@ -395,7 +407,7 @@ class LoadHandler(tornado.web.RequestHandler):
         self.write({"session": session_id, "server_pid": os.getpid(), "browser_action": browser_action, **metadata})
 
 
-class LoadExprHandler(tornado.web.RequestHandler):
+class LoadExprHandler(_LocalRequestHandler):
     """POST /load_expr — load a xorq/ibis expression from a build dir
     and serve it via the xorq-backed buckaroo dataflow.
 
@@ -433,7 +445,13 @@ class LoadExprHandler(tornado.web.RequestHandler):
             self.write({"error": "Missing 'build_dir'"})
             return
 
-        session_id = body.get("session") or uuid.uuid4().hex
+        session_id = body.get("session")
+        if session_id and not is_valid_session_id(session_id):
+            self.set_status(400)
+            self.write({"error_code": "invalid_session",
+                "message": "session must be 1-128 chars of [A-Za-z0-9._-]"})
+            return
+        session_id = session_id or uuid.uuid4().hex
         no_browser = bool(body.get("no_browser", False))
         force_reload = bool(body.get("force_reload", False))
         # Directory the build's cache nodes read and write their snapshots in
@@ -650,7 +668,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
             "browser_action": browser_action, **metadata})
 
 
-class LoadCompareHandler(tornado.web.RequestHandler):
+class LoadCompareHandler(_LocalRequestHandler):
     """POST /load_compare — load two files, diff them via col_join_dfs, and
     serve the merged result with diff styling applied."""
 
@@ -678,6 +696,12 @@ class LoadCompareHandler(tornado.web.RequestHandler):
         if not session_id or not path1 or not path2 or not join_columns:
             self.set_status(400)
             self.write({"error": "Missing required field(s): session, path1, path2, join_columns"})
+            return None, None, None, None, None, None
+
+        if not is_valid_session_id(session_id):
+            self.set_status(400)
+            self.write({"error_code": "invalid_session",
+                "message": "session must be 1-128 chars of [A-Za-z0-9._-]"})
             return None, None, None, None, None, None
 
         how = body.get("how", "outer")
@@ -807,7 +831,7 @@ class LoadCompareHandler(tornado.web.RequestHandler):
             "rows": len(merged_df), "columns": [str(c) for c in merged_df.columns], "eqs": eqs})
 
 
-class ReloadExprHandler(tornado.web.RequestHandler):
+class ReloadExprHandler(_LocalRequestHandler):
     """POST /reload_expr/<session_id> — refresh post-processing and stat
     klasses on a live xorq session without restarting the server.
 
@@ -825,6 +849,12 @@ class ReloadExprHandler(tornado.web.RequestHandler):
     session or has no project_root recorded, 501 when xorq is not installed."""
 
     async def post(self, session_id):
+        if not is_valid_session_id(session_id):
+            self.set_status(404)
+            self.write({"error_code": "invalid_session",
+                "message": "session must be 1-128 chars of [A-Za-z0-9._-]"})
+            return
+
         sessions = self.application.settings["sessions"]
         session = sessions.get(session_id)
         if session is None:
@@ -959,16 +989,31 @@ def _render_engine_bar(datasets: list) -> tuple:
     return bar, datasets_json
 
 
-class SessionPageHandler(tornado.web.RequestHandler):
+class SessionPageHandler(_LocalRequestHandler):
     def get(self, session_id):
+        # Refuse a malformed id before it reaches the template. The id is
+        # interpolated into the page's HTML, the <title>, and a
+        # `const SESSION_ID = "..."` JS string; validation is the gate,
+        # the per-sink escaping below is defense in depth.
+        if not is_valid_session_id(session_id):
+            self.set_status(404)
+            self.set_header("Content-Type", "application/json")
+            self.write({"error_code": "invalid_session",
+                "message": "session must be 1-128 chars of [A-Za-z0-9._-]"})
+            return
+
         self.set_header("Content-Type", "text/html")
         self.set_header("Cache-Control", "no-cache")
         import buckaroo
         ver = getattr(buckaroo, "__version__", "0")
         datasets = self.application.settings.get("datasets", []) or []
         engine_bar, datasets_json = _render_engine_bar(datasets)
+        # json_encode supplies the surrounding quotes for the JS string and
+        # rewrites </ to <\\/, matching _render_engine_bar's discipline;
+        # xhtml_escape covers the HTML text contexts (title, data attr).
         html = (SESSION_HTML
-            .replace("__SESSION_ID__", session_id)
+            .replace("\"__SESSION_ID_JS__\"", tornado.escape.json_encode(session_id))
+            .replace("__SESSION_ID__", tornado.escape.xhtml_escape(session_id))
             .replace("__VERSION__", ver)
             .replace("__ENGINE_BAR__", engine_bar)
             .replace("__DATASETS_JSON__", datasets_json))
@@ -1028,7 +1073,7 @@ SESSION_HTML = """\
     // survive. The dropdown element is only emitted when at least one
     // operator dataset is registered — see issue #811.
     (function () {
-        const SESSION_ID = "__SESSION_ID__";
+        const SESSION_ID = "__SESSION_ID_JS__";
         const DATASETS = JSON.parse(
             document.getElementById("buckaroo-datasets").textContent || "[]");
         const qs = new URLSearchParams(window.location.search);
