@@ -17,7 +17,7 @@ from buckaroo.server.focus import find_or_create_session_window
 from buckaroo.dataflow.dataflow import STATS_TIERS
 from buckaroo.server.session import (
     DEFAULT_STATS_DELIVERY, DEFAULT_STATS_TIER, STATS_DELIVERIES, begin_stats_generation, dataflow_stats_tier)
-from buckaroo.server.stats_wire import broadcast_state, refresh_session_snapshot
+from buckaroo.server.stats_wire import apply_component_config, broadcast_state, refresh_session_snapshot
 from buckaroo.server import telemetry
 from buckaroo.pluggable_analysis_framework import perf_log
 
@@ -661,13 +661,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
             "generated_py_code": "# server mode"}
         session.operations = []
 
-        if component_config and session.df_display_args:
-            for key in session.df_display_args:
-                dvc = session.df_display_args[key].get("df_viewer_config")
-                if dvc is not None:
-                    dvc["component_config"] = {
-                        **dvc.get("component_config", {}),
-                        **component_config}
+        apply_component_config(session.df_display_args, component_config)
 
         # A new expression is a new stats generation; a deferred session starts
         # it pending.

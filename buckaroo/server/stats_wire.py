@@ -68,6 +68,18 @@ def session_dataflow(session: Optional[SessionState]) -> Any:
     return session.xorq_dataflow if session.backend == "xorq" else session.dataflow
 
 
+def apply_component_config(df_display_args: Optional[dict], component_config: Optional[dict]) -> None:
+    """Merge ``component_config`` (theme and layout settings from the load
+    request) into every display's ``df_viewer_config``, in place, over what the
+    dataflow put there."""
+    if not component_config or not df_display_args:
+        return
+    for display in df_display_args.values():
+        dvc = display.get("df_viewer_config")
+        if dvc is not None:
+            dvc["component_config"] = {**dvc.get("component_config", {}), **component_config}
+
+
 def refresh_session_snapshot(session: SessionState, dataflow: Any) -> None:
     """Copy the dataflow's display state onto the session snapshot that new
     clients and every push read, and re-apply ``component_config`` so theme
@@ -78,11 +90,19 @@ def refresh_session_snapshot(session: SessionState, dataflow: Any) -> None:
     session.df_meta = refreshed["df_meta"]
     session.buckaroo_options = refreshed["buckaroo_options"]
     session.command_config = refreshed["command_config"]
-    if session.component_config and session.df_display_args:
-        for key in session.df_display_args:
-            dvc = session.df_display_args[key].get("df_viewer_config")
-            if dvc is not None:
-                dvc["component_config"] = {**dvc.get("component_config", {}), **session.component_config}
+    apply_component_config(session.df_display_args, session.component_config)
+
+
+def rearm_failed_stats(session: SessionState) -> None:
+    """Put a deferred session whose stats run failed back to pending, for the
+    connection that is about to open (a page reload, a second tab): its pending
+    frame owes it a push, which runs the stats again. A failure that persists
+    ends the same way (``error`` again, after one more run); a transient one,
+    such as a backend timeout, no longer outlasts the generation it hit.
+    Requests and a client's later frames do not retry, so a failing query runs
+    once per connection and not once per keystroke."""
+    if session.stats_delivery == "deferred" and session.stats_status == "error":
+        session.stats_status, session.stats_reason = "pending", None
 
 
 def complete_stats(session: SessionState) -> bool:
@@ -97,9 +117,12 @@ def complete_stats(session: SessionState) -> bool:
     ``firstpull.*`` span: a state change or a legacy client's connect completes
     stats long after the load.
 
-    A failure is the session's state for this generation (``error``, reason
-    ``stats_failed``) and is not retried by the next request; the next
-    generation starts clean."""
+    A failure is the session's state (``error``, reason ``stats_failed``) and is
+    not retried by the next request; ``rearm_failed_stats`` retries it when the
+    next connection opens, and the next generation starts clean.
+
+    ``session.stats_display_args`` is set to the refreshed display config when
+    the stats changed it (see ``SessionState``)."""
     if session.stats_status == "complete":
         return True
     dataflow = session_dataflow(session)
@@ -110,6 +133,7 @@ def complete_stats(session: SessionState) -> bool:
         perf_log.perf_span("stats.complete", session=session.session_id, stats_gen=session.stats_gen),
     ):
         try:
+            schema_display_args = session.df_display_args
             dataflow.set_stats_tier("full")
             refresh_session_snapshot(session, dataflow)
         except Exception:
@@ -118,6 +142,7 @@ def complete_stats(session: SessionState) -> bool:
             session.stats_status, session.stats_reason = "error", "stats_failed"
             return False
     session.stats_status, session.stats_reason = "complete", None
+    session.stats_display_args = session.df_display_args if session.df_display_args != schema_display_args else None
     return True
 
 
@@ -193,11 +218,17 @@ def _answer_stats_request(session: Optional[SessionState], stats_gen: Any, scope
         return _aborted(stats_gen, scope, "not_requestable", session)
     if session.stats_status == "error" or (session.stats_status == "pending" and not complete_stats(session)):
         return _aborted(stats_gen, scope, "error", session)
-    # Complete: from here the answer is the dataflow's own all_stats, with no
-    # query, whether this request ran the stats or an earlier one did.
-    return {"type": "stats_update", "stats_gen": stats_gen, "scope": scope, "tier": dataflow.stats_tier,
+    # Complete: from here the answer is the session's own all_stats, with no
+    # query, whether this request ran the stats or an earlier one did. The tier
+    # is the session's, not the dataflow's: a state change that failed halfway
+    # leaves the dataflow at the schema tier while the snapshot still holds the
+    # full stats.
+    reply = {"type": "stats_update", "stats_gen": stats_gen, "scope": scope, "tier": session.stats_tier,
         "final": True, "payload": session.df_data_dict["all_stats"],
         "elapsed_ms": round((time.perf_counter() - started) * 1000, 1)}
+    if session.stats_display_args is not None:
+        reply["df_display_args"] = session.stats_display_args
+    return reply
 
 
 def handle_stats_request(session: Optional[SessionState], msg: dict) -> dict:

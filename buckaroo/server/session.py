@@ -26,15 +26,6 @@ def dataflow_stats_tier(stats_tier: str, stats_delivery: str) -> str:
     return "schema" if stats_delivery == "deferred" else stats_tier
 
 
-# What ``df_meta.stats.status`` says about a session's stats for its current
-# ``stats_gen``: ``complete`` (the stats of the tier the session is headed for
-# are in the snapshot), ``pending`` (a deferred session that has not produced
-# them yet), ``not_computed`` (the session is headed for the schema tier, so
-# none will arrive) and ``error`` (the run failed; sticky until the next
-# generation).
-STATS_STATUSES = ("complete", "pending", "not_computed", "error")
-
-
 def initial_stats_status(stats_tier: str, stats_delivery: str) -> tuple[str, Optional[str]]:
     """The status, and its reason, of a session whose stats generation has just
     started, from the policy pair alone."""
@@ -91,8 +82,20 @@ class SessionState:
     # sequence (state_seq). ``stats_status`` and ``stats_reason`` live here, not
     # in ``df_meta``, because the dataflow rebuilds df_meta wholesale.
     stats_gen: int = 0
+    # What ``df_meta.stats.status`` says about the stats of the current
+    # ``stats_gen``: ``complete`` (the stats of the tier the session is headed for
+    # are in the snapshot), ``pending`` (a deferred session that has not produced
+    # them yet), ``not_computed`` (the session is headed for the schema tier, so
+    # none will arrive) and ``error`` (the run failed; the next connection to
+    # open retries it, see stats_wire.rearm_failed_stats).
     stats_status: str = "complete"
     stats_reason: Optional[str] = None
+    # The ``df_display_args`` the full stats changed, set when a run completes
+    # (a float column's minWidth reads its min and max) and carried by the
+    # ``stats_update`` that delivers them, so a client whose pending frame held
+    # the schema tier's config gets the stats-derived one. ``None`` while pending,
+    # and when the stats left the config as it was.
+    stats_display_args: Optional[dict] = None
     # Companion telemetry sink (#943): a fire-and-forget POST callable, built
     # once from the /load_expr payload's telemetry_url on the IOLoop (where
     # make_http_sink captures AsyncHTTPClient/IOLoop.current()). Stored here so
@@ -147,6 +150,7 @@ def begin_stats_generation(session: "SessionState") -> None:
     session.stats_gen += 1
     session.stats_status, session.stats_reason = initial_stats_status(
         session.stats_tier, session.stats_delivery)
+    session.stats_display_args = None
 
 
 def stats_meta(session: "SessionState") -> Optional[dict]:

@@ -25,9 +25,16 @@ expr = xo.memtable({
 print(xo.build_expr(expr, builds_dir=sys.argv[1]))
 `;
 
-function buildExprDir(buildsRoot: string): string {
+// A float column whose 1e9 maximum changes its estimated width once full stats arrive.
+const BUILD_PRICE_EXPR_PY = `
+import sys, xorq.api as xo
+expr = xo.memtable({'price': [12.5, 18.9, 7.4, 22.1, 1e9], 'qty': [1, 2, 1, 3, 2]}, name='t')
+print(xo.build_expr(expr, builds_dir=sys.argv[1]))
+`;
+
+function buildExprDir(buildsRoot: string, code: string = BUILD_EXPR_PY): string {
   const [python, ...pythonArgs] = (process.env.BUCKAROO_SERVER_PYTHON ?? 'uv run python').split(' ');
-  const out = execFileSync(python, [...pythonArgs, '-c', BUILD_EXPR_PY, buildsRoot],
+  const out = execFileSync(python, [...pythonArgs, '-c', code, buildsRoot],
     { cwd: ROOT_DIR, encoding: 'utf8' });
   return out.trim().split('\n').pop()!;
 }
@@ -150,5 +157,30 @@ test.describe('POST /load_expr', () => {
     await showSummaryView(page);
     await expect.poll(() => getPinnedCellTexts(page, COL.name), { timeout: 15_000 }).toContain('7');
     expect(await getPinnedCellTexts(page, COL.idx)).toEqual(expect.arrayContaining(['0', '9']));
+  });
+
+  test('the display config the stats change arrives with them, and the grid does not ask for its first rows again', async ({ page, request }) => {
+    const session = `lx-display-${Date.now()}`;
+    await loadExpr(request, session, buildExprDir(buildsRoot, BUILD_PRICE_EXPR_PY), { stats_delivery: 'deferred' });
+
+    const events: { dir: string; type: string; start?: number; hasDisplayArgs?: boolean }[] = [];
+    page.on('websocket', (ws) => {
+      const record = (dir: string) => (e: { payload: string | Buffer }) => {
+        if (typeof e.payload !== 'string') return;
+        const msg = JSON.parse(e.payload);
+        events.push({ dir, type: msg.type, start: msg.payload_args?.start, hasDisplayArgs: 'df_display_args' in msg });
+      };
+      ws.on('framesent', record('sent'));
+      ws.on('framereceived', record('received'));
+    });
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+    await expect.poll(() => events.some((e) => e.type === 'stats_update'), { timeout: 15_000 }).toBe(true);
+    await page.waitForTimeout(1_000);
+
+    const at = events.findIndex((e) => e.type === 'stats_update');
+    expect(events[at].hasDisplayArgs).toBe(true);
+    expect(events.slice(at).filter((e) => e.dir === 'sent' && e.type === 'infinite_request' && e.start === 0)).toEqual([]);
   });
 });

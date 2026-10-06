@@ -95,7 +95,9 @@ export const getKeySmartRowCache = (model: any, setRespError:any) => {
     //const symNum = counter();
     const reqFn: RequestFN = (pa: PayloadArgs) => {
         bkLog("model.send infinite_request → Python", { start: pa.start, end: pa.end });
-        model.send({ type: 'infinite_request', payload_args: pa })
+        // The gen of the state the client is showing: the server starts the stats it owes
+        // after the reply to a request for that gen, not one made before this state arrived.
+        model.send({ type: 'infinite_request', payload_args: pa, stats_gen: model.stats?.expectedGen })
     }
     const src = new KeyAwareSmartRowCache(reqFn)
 

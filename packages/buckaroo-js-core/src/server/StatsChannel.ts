@@ -69,6 +69,10 @@ export interface StatsUpdateMessage {
     tier?: string;
     final?: boolean;
     payload?: DFDataOrPayload;
+    /** The display config the stats change (a float column's minWidth reads
+     *  its min and max), present on a final update when it differs from the
+     *  config the client was sent while the stats were pending. */
+    df_display_args?: Record<string, unknown>;
     elapsed_ms?: number;
 }
 
@@ -180,6 +184,7 @@ export class StatsChannel {
             // start over from the new one.
             if (dict !== this.model.get("df_data_dict") || msg.stats_gen !== this.expectedGen) continue;
             this.model.set("df_data_dict", { ...dict, all_stats: mergeStatRows(base, update) });
+            if (msg.df_display_args) this.model.set("df_display_args", msg.df_display_args);
             if (msg.final) {
                 this.replaceStats((stats) => ({ status: "complete", tier: msg.tier ?? stats.tier, gen: stats.gen }));
             }
