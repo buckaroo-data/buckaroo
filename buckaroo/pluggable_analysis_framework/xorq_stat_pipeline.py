@@ -38,7 +38,7 @@ from .safe_summary_df import output_full_reproduce
 from .stat_cache import (CachedScope, CachedStatError, StatCache, length_stat_id, make_scope_id,
     stat_hashes)
 from .stat_func import XorqColumn, XorqExpr, XorqExecute, RAW_MARKER_TYPES, StatFunc
-from .stat_pipeline import _execute_stat_func, _normalize_inputs, errors_to_errdict
+from .stat_pipeline import _execute_stat_func, _normalize_inputs, errors_to_errdict, with_stat
 from .stat_result import Err, Ok, StatError, StatResult, resolve_accumulator
 from .typed_dag import build_column_dag, build_typed_dag
 from .utils import PERVERSE_DF
@@ -667,18 +667,7 @@ class XorqStatPipeline:
         against). Validates the DAG; returns ``(True, [])`` on success
         or ``(False, [config_error])`` if the DAG can't be built.
         """
-        new_inputs = list(self._original_inputs)
-
-        if isinstance(stat_func_or_class, type):
-            new_inputs = [
-                inp
-                for inp in new_inputs
-                if not (
-                    isinstance(inp, type)
-                    and inp.__name__ == stat_func_or_class.__name__
-                )
-            ]
-        new_inputs.append(stat_func_or_class)
+        new_inputs = with_stat(self._original_inputs, stat_func_or_class)
 
         try:
             new_funcs = _normalize_inputs(new_inputs)
