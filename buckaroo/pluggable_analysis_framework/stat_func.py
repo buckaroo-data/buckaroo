@@ -166,8 +166,9 @@ class StatFunc:
         quiet: suppress error reporting
         default: fallback value on failure (MISSING = no fallback)
         source_digest: digest of the source that defines ``func``, taken when
-            the stat was defined (see ``source_digest.callable_digest``). Keys
-            the stat's cached cells; None means "derive it from ``func``".
+            the StatFunc is constructed (see ``source_digest.callable_digest``).
+            Keys the stat's cached cells. None when ``func`` has no source file,
+            and the stat isn't cached.
     """
     name: str
     func: Callable
@@ -178,6 +179,10 @@ class StatFunc:
     quiet: bool = False
     default: Any = field(default_factory=lambda: MISSING)
     source_digest: Optional[str] = None
+
+    def __post_init__(self):
+        if self.source_digest is None:
+            self.source_digest = callable_digest(self.func)
 
 
 # ---------------------------------------------------------------------------
@@ -320,8 +325,7 @@ def stat(column_filter=None, quiet=False, default=MISSING):
         provides_keys = _get_provides_from_return_type(func.__name__, return_type)
 
         stat_func = StatFunc(name=func.__name__, func=func, requires=requires, provides=provides_keys,
-            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default,
-            source_digest=callable_digest(func))
+            needs_raw=needs_raw, column_filter=column_filter, quiet=quiet, default=default)
 
         # Attach metadata to the function so pipeline can find it
         func._stat_func = stat_func

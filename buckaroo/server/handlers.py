@@ -481,11 +481,11 @@ class LoadExprHandler(tornado.web.RequestHandler):
             cache_dir = existing.cache_dir
         # The identity of the rows the build reads (e.g. tallyman's snapshot
         # digest); it keys the summary-stat cache. Omitted, it carries over
-        # like cache_dir. A new value means the rows changed, so the warm exit
-        # below can't serve the old stats.
+        # like cache_dir, but only for the same build. A new value means the
+        # rows changed, so the warm exit below can't serve the old stats.
         data_id = body.get("data_id")
         existing_kwargs = (existing.dataflow_kwargs or {}) if existing is not None else {}
-        if data_id is None:
+        if data_id is None and existing is not None and existing.build_dir == build_dir:
             data_id = existing_kwargs.get("data_id")
         # /load swaps a session to pandas without clearing build_dir, so the
         # backend is checked too — else its pandas metadata comes back here.

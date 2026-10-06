@@ -579,9 +579,9 @@ class TestServerDataflowScopes:
 
         dataflow.post_processing_method = "head_two"
         assert len(list(scopes_root.iterdir())) == 3
-        # A search filter makes a filtered scope, which isn't persisted.
+        # A search is part of the scope, so it gets its own.
         dataflow.quick_command_args = {"search": ["s1"]}
-        assert len(list(scopes_root.iterdir())) == 3
+        assert len(list(scopes_root.iterdir())) == 4
 
         dataflow = load("d2")
         with ExecSpy() as spy:

@@ -172,11 +172,19 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
             'rows_shown': rows_shown,
             'total_rows': _expr_count(self.orig_df)}
 
-    def _stat_scope_id(self, scope: str):
-        """The persistent cache scope for ``scope``'s frame, or None when ops
-        are applied to it and it isn't persisted."""
-        if split_chain_by_scope(self.operations).get(scope):
-            return None
+    def _scope_chain(self, scope: str) -> list:
+        """The op chain that built ``scope``'s frame. The 'filt' frame's own
+        chain is ``cleaned[3]``: its stats run while ``cleaned`` is being
+        assigned, before ``operations`` catches up, so ``operations`` would
+        still hold the previous search."""
+        if scope == 'filt':
+            return split_chain_by_scope(self.merged_operations)['filt']
+        return split_chain_by_scope(self.operations)[scope]
+
+    def _stat_scope_id(self, chain: list):
+        """The persistent cache scope for the frame ``chain`` built: the data,
+        the post-processing, and the chain itself, a search included. None
+        when the post-processing has no source to identify it by."""
         data_id = self.data_id
         if data_id is None:
             if self._fallback_data_id is None:
@@ -184,15 +192,17 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
             data_id = self._fallback_data_id
         pp = self.post_processing_method
         pp_hash = post_processing_hash(self.post_processing_klasses[pp]) if pp else ""
-        return make_scope_id(data_id, pp_hash)
+        if pp_hash is None:
+            return None
+        return make_scope_id(data_id, pp_hash, chain)
 
-    def _seed_row_counts(self, df, length, scope_id) -> None:
+    def _seed_row_counts(self, df, length, chain: list) -> None:
         """Record the stats' row count so metadata needn't run ``count()``.
-        An unfiltered view without post-processing has the source's rows."""
+        A view with no ops and no post-processing has the source's rows."""
         if length is None:
             return
         _expr_count_cache[df] = length
-        if scope_id is not None and not self.post_processing_method:
+        if not chain and not self.post_processing_method:
             _expr_count_cache[self.orig_df] = length
 
     def _get_summary_sd(self, processed_df: "XorqExpr | pd.DataFrame", scope: str = 'filt'):
@@ -207,7 +217,8 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
                     'rewritten_col_name': rewritten_col}
             return empty, {}
         cache_storage = getattr(self, 'cache_storage', None)
-        scope_id = self._stat_scope_id(scope) if cache_storage is not None else None
+        chain = self._scope_chain(scope)
+        scope_id = self._stat_scope_id(chain) if cache_storage is not None else None
         if scope_id is None:
             cache_storage = None
         # The owning widget injects XorqDfStatsV2 as DFStatsClass (via its
@@ -218,7 +229,7 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
                 processed_df, self.analysis_klasses, self.df_name,
                 debug=self.debug, cache_storage=cache_storage,
                 skip_columns=getattr(self, 'skip_stat_columns', None), scope_id=scope_id)
-            self._seed_row_counts(processed_df, getattr(stats, 'length', None), scope_id)
+            self._seed_row_counts(processed_df, getattr(stats, 'length', None), chain)
             # Attach the summary-stat cache signal (#944) to the span so a
             # telemetry consumer learns whether the stats were cached — the one
             # signal only the server observes (#943). Carries the write side too

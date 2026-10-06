@@ -637,7 +637,7 @@ class _CellLedger:
     def serve(self, col, sf: StatFunc, accum: Dict[str, StatResult], counters) -> bool:
         """Fill ``accum`` with ``sf``'s cached cells for ``col`` if all of them
         are cached; returns whether it did."""
-        if not self.hashes:
+        if sf.name not in self.hashes:
             return False
         results = {}
         for sk in sf.provides:
@@ -663,13 +663,13 @@ class _CellLedger:
             self.new_values.setdefault(None, {})[length_stat_id()] = length
 
     def computed(self, col, sf: StatFunc, values: Dict[str, Any]) -> None:
-        if self.hashes:
+        if sf.name in self.hashes:
             col_values = self.new_values.setdefault(col, {})
             for key, v in values.items():
                 col_values[self._sid(sf, key)] = v
 
     def failed(self, col, sf: StatFunc, error: BaseException) -> None:
-        if self.hashes and not _is_environmental(error):
+        if sf.name in self.hashes and not _is_environmental(error):
             col_errors = self.new_errors.setdefault(col, {})
             for sk in sf.provides:
                 col_errors[self._sid(sf, sk.name)] = f"{type(error).__name__}: {error}"
@@ -689,6 +689,8 @@ class _CellLedger:
             self.failed(col, sf, raised)
             return
         values = {sk.name: r.value for sk, r in zip(sf.provides, results)}
+        if sf.name not in self.hashes:
+            return
         if raised is not None:
             # A default stood in for the exception: cached under the same
             # rule as an error.
@@ -701,7 +703,7 @@ class _CellLedger:
     def live_stat_ids(self, stat_funcs: List[StatFunc]) -> Set[str]:
         live = {length_stat_id()}
         for sf in stat_funcs:
-            if _is_batch_func(sf) or _is_query_func(sf):
+            if (_is_batch_func(sf) or _is_query_func(sf)) and sf.name in self.hashes:
                 live |= {self._sid(sf, sk.name) for sk in sf.provides}
         return live
 
