@@ -335,6 +335,21 @@ class TestPlHistogram:
         assert errors == []
         assert_numeric_histogram(result['histogram'], result['histogram_bins'])
 
+    def test_float32_column_with_an_infinity_keeps_a_numeric_histogram(self):
+        ser = pl.Series('a', [None] + [i * 1.5 for i in range(100)] + [float('inf')], dtype=pl.Float32)
+        result, errors = self._make_pipeline().process_column('a', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert_numeric_histogram(result['histogram'], result['histogram_bins'])
+
+    @pytest.mark.parametrize('values', [[float('inf'), -float('inf')] * 5, [5.0] * 10 + [float('inf')]],
+        ids=['only_infinities', 'constant_beside_infinity'])
+    def test_columns_with_nothing_to_bucket_still_get_a_histogram(self, values):
+        """No finite spread to bucket: no error, and the column still gets a (categorical) histogram."""
+        ser = pl.Series('a', values, dtype=pl.Float64)
+        result, errors = self._make_pipeline().process_column('a', ser.dtype, raw_series=ser)
+        assert errors == []
+        assert len(result['histogram']) > 0
+
     def test_tail_buckets_name_the_infinities(self):
         ser = pl.Series('a', [-float('inf')] + [i * 1.5 for i in range(100)] + [float('inf')])
         result, _ = self._make_pipeline().process_column('a', ser.dtype, raw_series=ser)

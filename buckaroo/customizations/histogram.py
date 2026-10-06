@@ -18,6 +18,8 @@ def _trim(s: str) -> str:
 
 def fmt_num(value: float, step: float, ref: float) -> str:
     """Format one histogram boundary — SI prefix (K/M/B/T) + step-based precision."""
+    if not math.isfinite(value):
+        return str(float(value))  # 'inf' / '-inf' / 'nan', not 'infT' from the SI branch below
     if step > 0 and abs(value) < step * 1e-9:
         value = 0.0
     for threshold, suffix in [(1e12, 'T'), (1e9, 'B'), (1e6, 'M'), (1e3, 'K')]:
