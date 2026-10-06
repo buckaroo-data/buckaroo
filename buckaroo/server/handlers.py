@@ -875,7 +875,8 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         object: the endpoint took no body before the stats policy fields."""
         try:
             body = json.loads(self.request.body)
-        except (json.JSONDecodeError, TypeError):
+        # ValueError covers JSONDecodeError and UnicodeDecodeError (non-UTF-8 bytes).
+        except (ValueError, TypeError):
             return {}
         return body if isinstance(body, dict) else {}
 
