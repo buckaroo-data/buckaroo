@@ -17,6 +17,10 @@ export interface StatsUpdateMessage {
     tier?: string;
     final?: boolean;
     payload?: DFDataOrPayload;
+    /** The display config the stats change (a float column's minWidth reads
+     *  its min and max), present on a final update when it differs from the
+     *  config the client was sent while the stats were pending. */
+    df_display_args?: Record<string, unknown>;
     elapsed_ms?: number;
 }
 export interface StatsAbortedMessage {
