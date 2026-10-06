@@ -15,6 +15,7 @@ import pytest
 import tornado.httpclient
 import tornado.testing
 import tornado.websocket
+from traitlets import TraitError
 
 xo = pytest.importorskip("xorq.api")
 
@@ -1126,6 +1127,16 @@ class TestStatsTierSchema:
         assert stat_queries == []
         assert ops and set(ops) == {"CountStar"}
 
+    def test_an_op_under_a_search_counts_only_the_filtered_frame(self, monkeypatch):
+        """The clean scope's frame is rebuilt on every cache miss, so counting
+        it is a query of its own. The filtered frame's count is one df_meta
+        runs anyway."""
+        dataflow = _build_dataflow(stats_tier="schema")
+        dataflow.quick_command_args = {"search": ["a"]}
+        ops, _stat_queries = _spy_data_queries(monkeypatch)
+        dataflow.operations = [[lisp_sym("fillna"), {"symbol": "df"}, "qty", 0]]
+        assert ops == ["CountStar"]
+
     def test_add_analysis_that_fails_validation_keeps_the_klasses(self):
         dataflow = _build_dataflow(stats_tier="schema")
         before = list(dataflow.analysis_klasses)
@@ -1193,7 +1204,7 @@ class TestStatsTierSchema:
         assert dataflow.summary_stats_cache
         assert not full_keys & dataflow.summary_stats_cache.keys()
 
-    def test_later_full_assignment_reaches_merged_sd_for_all_scopes(self):
+    def test_switching_the_tier_computes_its_stats_for_all_scopes(self):
         expr = _stats_tier_expr()
         full = _three_scope_dataflow(expr)
         dataflow = _three_scope_dataflow(expr, stats_tier="schema")
@@ -1201,8 +1212,30 @@ class TestStatsTierSchema:
         assert {"mean", "cleaned_mean", "filtered_mean"} <= full.merged_sd["a"].keys()
 
         dataflow.stats_tier = "full"
-        dataflow.summary_sd = full.summary_sd
 
+        assert _as_json(dataflow.merged_sd) == _as_json(full.merged_sd)
+
+    def test_an_unknown_tier_is_rejected(self):
+        dataflow = _build_dataflow(stats_tier="schema")
+        with pytest.raises(TraitError):
+            dataflow.stats_tier = "Full"
+        assert dataflow.stats_tier == "schema"
+
+    def test_set_stats_tier_installs_the_summary_it_is_given(self, monkeypatch):
+        """Stats computed off the IOLoop go in as they are: the filtered scope
+        is not computed again, only the scopes the cascade still lacks."""
+        expr = _stats_tier_expr()
+        full = _three_scope_dataflow(expr)
+        dataflow = _three_scope_dataflow(expr, stats_tier="schema")
+        scopes = []
+        original = dataflow._get_summary_sd
+        monkeypatch.setattr(dataflow, "_get_summary_sd",
+            lambda processed_df, scope="filt": scopes.append(scope) or original(processed_df, scope=scope))
+
+        dataflow.set_stats_tier("full", (full.summary_sd, {}))
+
+        assert scopes == ["raw", "clean"]
+        assert dataflow.stats_tier == "full"
         assert _as_json(dataflow.merged_sd) == _as_json(full.merged_sd)
 
     def test_a_summary_sd_from_another_tier_is_not_cached_under_the_new_tier(self):
@@ -1230,8 +1263,7 @@ class TestStatsTierSchema:
         dataflow.summary_stats_cache = cache
         _ops, stat_queries = _spy_data_queries(monkeypatch)
 
-        dataflow.stats_tier = "full"
-        dataflow.summary_sd = full.summary_sd
+        dataflow.set_stats_tier("full")
 
         assert stat_queries == []
         assert _as_json(dataflow.merged_sd) == _as_json(full.merged_sd)
@@ -1419,6 +1451,31 @@ class TestLoadExprStatsPolicy(tornado.testing.AsyncHTTPTestCase):
             self.assertIn("mean", session.xorq_dataflow.merged_sd["a"])
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_a_load_in_between_resets_the_pair(self):
+        """/load replaces the session's xorq state, so a later /load_expr that
+        omits the pair starts from the defaults, not from an earlier load's."""
+        builds_root = tempfile.mkdtemp()
+        csv_fd, csv_path = tempfile.mkstemp(suffix=".csv")
+        os.close(csv_fd)
+        try:
+            build_path = _build_expr_dir(builds_root)
+            pd.DataFrame({"x": [1, 2]}).to_csv(csv_path, index=False)
+            sid = "sp-load-between"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path, "stats_delivery": "deferred"})
+            await _post(self.get_http_port(), "/load",
+                {"session": sid, "path": csv_path, "mode": "buckaroo"})
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path})
+            self.assertEqual(resp.code, 200)
+            session = self._session(sid)
+            self.assertEqual((session.stats_tier, session.stats_delivery), ("full", "inline"))
+            self.assertEqual(session.xorq_dataflow.stats_tier, "full")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            os.unlink(csv_path)
 
     @tornado.testing.gen_test
     async def test_reload_expr_replays_the_stored_pair(self):
