@@ -2243,17 +2243,16 @@ class TestStatsWire(tornado.testing.AsyncHTTPTestCase):
         ws, first = await self._connect("sw-keyed", caps="stats_update")
         gen = self._stats(first)["gen"]
 
-        await self._first_rows(ws, stats_gen=gen - 1)  # a request made before the client saw this state
-        with self.assertRaises(AssertionError, msg="a reply to a stale request pushed the stats"):
-            await _read_json(ws, timeout=0.5)
-
+        # _first_rows reads two frames and asserts the first is an infinite_resp, so
+        # a stats_update slipping in anywhere in this sequence fails it.
+        await self._first_rows(ws, stats_gen=gen - 1)  # made before the client saw this state: no push
         # A sort changes the frame's order, not its stats: the sorted request is
-        # the first reply for this generation and the stats follow it once.
+        # the first reply for this generation, and the stats follow it once.
         await self._first_rows(ws, sort="b", sort_direction="desc")
-        self.assertEqual((await _read_json(ws))["type"], "stats_update")
+        update = await _read_json(ws)
+        self.assertEqual((update["type"], update["stats_gen"]), ("stats_update", gen))
         await self._first_rows(ws, sort="b", sort_direction="asc")
-        with self.assertRaises(AssertionError, msg="a sort pushed the stats again"):
-            await _read_json(ws, timeout=0.5)
+        await self._first_rows(ws, sort="b", sort_direction="desc")
         self.assertEqual(self._session("sw-keyed").stats_gen, gen)
 
     @tornado.testing.gen_test
