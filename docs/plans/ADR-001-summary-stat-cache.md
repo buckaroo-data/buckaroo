@@ -1,6 +1,6 @@
 # ADR: A summary-stat cache keyed by data identity and per-stat hashes
 
-- **Status:** Approved (2026-10-06). The design was settled in a review session on 2026-10-05. D8 is implemented in the same PR as this ADR (#1040, which absorbed #1041). The cache (D1–D7, D9–D12) is #1042.
+- **Status:** Approved (2026-10-06) and implemented in #1040, which absorbed #1041 (D8) and #1042 (the cache, D1–D7 and D9–D12). The design was settled in a review session on 2026-10-05; "Amendments after review" lists what review of the implementation changed.
 - **Affected code:** `buckaroo/pluggable_analysis_framework/xorq_stat_pipeline.py` (`_execute_cached`, `_process_table_impl`), `buckaroo/customizations/xorq_stats_v2.py`, `buckaroo/pluggable_analysis_framework/stat_func.py` and `stat_pipeline.py` (type marker, dependency checks), `buckaroo/server/handlers.py` (`data_id` on `/load_expr`), `buckaroo/server/xorq_loading.py`. In tallyman, `src/tallyman_companion/buckaroo_lifecycle.py`.
 - **Related tickets:** #1037 (warm re-POST with equal config re-runs the pipeline), #1038 (stats run on the IOLoop), #1039 (wire layout for `all_stats`), #943, #944 and #951 (cache telemetry), buckaroo-data/tallyman#177 (stat-cache wipe on every klass reload).
 
@@ -180,6 +180,17 @@ On a batch failure, each stat is retried as its own aggregate over the missing c
 
 This work covers the xorq server only. The key leaves room for a per-column data identity, so that the polars `ColumnExecutor` path, which keys on `series_hash`, can move to this format later. That move would also fix its two gaps described under "Problem".
 
+## Amendments after review (2026-10-06)
+
+The decisions above are as settled on 2026-10-05. Review of the implementation changed or extended these:
+
+- **D3: search scopes are persisted.** `scope_id` also hashes the op chain that built the frame, so a committed search (`quick_command_args`, which does run stats) gets its own scope. The chain comes from `cleaned[3]`, not `operations`: the filtered view's stats run while `cleaned` is being assigned, before `operations` is updated, and reading `operations` there served the unfiltered cells to a search and wrote a search's cells into the unfiltered scope. Only a view with no ops and no post-processing seeds the source's row count. Per-keystroke search still filters row windows only.
+- **D4: every stat hash covers the whole buckaroo package.** A built-in stat reaches buckaroo code outside its own module: `histogram` labels its buckets with `customizations/histogram.py`, which the defining-module digest missed, so a change there served old labels. The engine context now holds a digest of every `.py` file in the package (3.5ms, once per process) and the pyarrow, pandas and numpy versions next to xorq's. Any buckaroo change or release invalidates the built-in cells; the built-ins all live in one module, so little granularity is lost. Project stats still hash their own file, which is complete because they can't import. A `StatFunc` takes its digest when constructed. A stat with no source file (a notebook cell, `exec`) has no hash and isn't cached, and neither are its dependents. Not covered: a stat in a user's own Python package that imports helpers from sibling modules. Only the Python API reaches that; covering it means walking each stat module's imports.
+- **D7: values go through an explicit codec.** Each variant column's type spec rides in its parquet field metadata (`<stat_id>#<type>-<digest>`), so a read never infers a type. The codec covers numpy scalars, `pd.Timestamp` and `pd.Timedelta` with their unit and timezone, `np.datetime64`/`np.timedelta64`, `pd.Period`, `pd.Interval`, `Decimal` (stored as text), lists with nulls or mixed element types, and dicts in key order with any key. A part is verified before it's written by decoding its bytes; a cell that doesn't come back identical is left out and recomputed next time. Every value in the DDD, as pandas and as polars hand it to a stat, round-trips.
+- **D11: isolation goes down to the cell, after a canary.** When the batch fails, a `count()` canary runs first. If it fails too, the backend is down and nothing is cached. Otherwise each stat runs as its own aggregate, and a stat that still fails runs per cell, so a stat that fails on one column still caches its other columns.
+- **D2: `data_id` carries over only for the same build.** A `/load_expr` re-POST that omits `data_id` keeps the session's only when `build_dir` is unchanged.
+- **Reads use `pq.ParquetFile(...).read()`.** The first `pq.read_table` in a process imports `pyarrow.dataset`, about 150ms on a fresh load.
+
 ## Out of scope
 
 - The wire format for `all_stats`. It stays `sd_to_parquet_b64` (5ms at 27 columns). The variant layout on the wire is #1039; it only matters for wide frames.
@@ -191,7 +202,7 @@ This work covers the xorq server only. The key leaves room for a per-column data
 ## Delivery
 
 1. **PR 1, type system (D8).** The tests asserting that `min`/`max` of an int column are ints go in a separate commit, run on CI and fail there, before the fix lands. Opened as #1041 and merged into this ADR's PR (#1040).
-2. **PR 2, the cache (D1–D7, D9–D12).** The failing structural tests land first, as one commit. Then the implementation.
+2. **PR 2, the cache (D1–D7, D9–D12).** The failing structural tests land first, as one commit. Then the implementation. Opened as #1042 and merged into this ADR's PR (#1040).
 3. **PR 3, tallyman.** Send `data_id`. Drop the wipe on klass reload (`_clear_stat_cache`, called from `reload_project_sessions`), which closes tallyman#177. Keep the wipe in `_verify_self_heal`: a heal changes `data_id`, so every cell misses anyway, and the wipe removes the scope directory nothing will read again. Pin the buckaroo release that contains PR 2.
 
 Until PR 3 lands, tallyman's klass-reload wipe deletes every cached stat whenever a project stat is added. For tallyman users, additivity arrives with PR 3.
