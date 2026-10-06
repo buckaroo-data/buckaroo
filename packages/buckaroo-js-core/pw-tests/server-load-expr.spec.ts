@@ -155,6 +155,11 @@ test.describe('POST /load_expr', () => {
     expect(await getCellText(page, COL.name, 0)).toBe('alpha');
 
     await showSummaryView(page);
+    // The server holds the full stats back for a second (playwright.config.server.ts),
+    // so the summary view first shows the schema tier only: no distinct count, min or max.
+    expect(await getPinnedCellTexts(page, COL.name)).not.toContain('7');
+    expect(await getPinnedCellTexts(page, COL.idx)).not.toEqual(expect.arrayContaining(['0', '9']));
+
     await expect.poll(() => getPinnedCellTexts(page, COL.name), { timeout: 15_000 }).toContain('7');
     expect(await getPinnedCellTexts(page, COL.idx)).toEqual(expect.arrayContaining(['0', '9']));
   });

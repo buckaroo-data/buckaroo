@@ -25,6 +25,7 @@ the full stats and applies the final assignment (``set_stats_tier``,
 """
 import json
 import logging
+import os
 import time
 import traceback
 from contextlib import nullcontext
@@ -47,6 +48,11 @@ STATS_UPDATE_CAP = "stats_update"
 # dataflow-field change (``quick_command_args.search``), which bumps the
 # generation.
 STATS_SCOPES = ("raw",)
+
+# Seconds ``complete_stats`` waits before it runs the full stats. For tests
+# that must see a session between its rows and its stats (the Playwright suite
+# sets it); unset or 0 in every other use.
+TEST_STATS_DELAY_ENV = "BUCKAROO_TEST_STATS_DELAY_S"
 
 
 def parse_caps(raw: str) -> frozenset:
@@ -134,6 +140,7 @@ def complete_stats(session: SessionState) -> bool:
     ):
         try:
             schema_display_args = session.df_display_args
+            time.sleep(float(os.environ.get(TEST_STATS_DELAY_ENV) or 0))
             dataflow.set_stats_tier("full")
             refresh_session_snapshot(session, dataflow)
         except Exception:
