@@ -830,13 +830,15 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
                 self.analysis_klasses,
                 self.df_name, debug=self.debug)
             stats.add_analysis(analysis_klass)
-            self.analysis_klasses = stats.ap.ordered_a_objs
+            klasses = stats.ap.ordered_a_objs
         else:
             # Building DFStatsClass here would run the stats this tier exists
             # to skip (twice, since the constructor and add_analysis each
             # process the frame), and it does not go through _get_summary_sd.
-            self.analysis_klasses = self._analysis_klasses_with(analysis_klass)
-        self.DFStatsClass.verify_analysis_objects(self.analysis_klasses)
+            klasses = self._analysis_klasses_with(analysis_klass)
+        # Validate before assigning, so a klass that fails leaves the list as it was.
+        self.DFStatsClass.verify_analysis_objects(klasses)
+        self.analysis_klasses = klasses
         self.setup_options_from_analysis()
         #force recomputation
         self._handle_widget_change({})
