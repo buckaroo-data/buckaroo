@@ -31,7 +31,7 @@ from buckaroo.extension_utils import copy_extend
 from .serialization_utils import EMPTY_DF_WHOLE, check_and_fix_df, pd_to_obj, to_parquet, send_infinite_resp
 from .dataflow.dataflow import CustomizableDataflow
 from .dataflow.dataflow_extras import (Sampling, exception_protect)
-from .dataflow.styling_core import (ComponentConfig, InitSD, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, merge_column_config, EMPTY_DFVIEWER_CONFIG)
+from .dataflow.styling_core import (ComponentConfig, InitSD, OverrideColumnConfig, PinnedRowConfig, StylingAnalysis, EMPTY_DFVIEWER_CONFIG)
 from .dataflow.autocleaning import PandasAutocleaning
 from pathlib import Path
 
@@ -359,39 +359,10 @@ class BuckarooInfiniteWidget(BuckarooWidget):
             _bk_flash("_handle_widget_change EXIT — processed_df is None")
             return
 
-        # df_data_dict is still hardcoded for now
-        # eventually processed_df will be able to add or alter values of df_data_dict
-        # correlation would be added, filtered would probably be altered
-
-        # to expedite processing maybe future provided dfs from
-        # postprcoessing could default to empty until that is
-        # selected, optionally
-        
-        #note this needs to be empty so that we can do the infinite stuff
-        self.df_data_dict = {'main': [],
-            'all_stats': self._sd_to_jsondf(merged_sd),
-            'empty': []}
-
-        temp_display_args = {}
-        for display_name, A_Klass in self.dataflow.df_display_klasses.items():
-            df_viewer_config = A_Klass.get_dfviewer_config(merged_sd, processed_df)
-            base_column_config = df_viewer_config['column_config']
-            df_viewer_config['column_config'] =  merge_column_config(
-                base_column_config, self.dataflow.processed_df, self.dataflow.column_config_overrides)
-            disp_arg = {'data_key': A_Klass.data_key,
-                        #'df_viewer_config': json.loads(json.dumps(df_viewer_config)),
-                        'df_viewer_config': df_viewer_config,
-                        'summary_stats_key': A_Klass.summary_stats_key}
-            temp_display_args[display_name] = disp_arg
-
-        if self.dataflow.pinned_rows is not None:
-            temp_display_args['main']['df_viewer_config']['pinned_rows'] = self.dataflow.pinned_rows
-        if self.dataflow.extra_grid_config:
-            temp_display_args['main']['df_viewer_config']['extra_grid_config'] = self.dataflow.extra_grid_config
-        if self.dataflow.component_config:
-            temp_display_args['main']['df_viewer_config']['component_config'] = self.dataflow.component_config
-
-        self.df_display_args = temp_display_args
+        # The dataflow is built with skip_main_serial, so 'main' stays empty for
+        # the infinite rows.
+        self.df_data_dict = self.dataflow._build_df_data_dict(processed_df, merged_sd)
+        self.df_display_args = self.dataflow._build_df_display_args(processed_df, merged_sd)
         _bk_flash("_handle_widget_change EXIT (df_display_args → JS)")
 
 

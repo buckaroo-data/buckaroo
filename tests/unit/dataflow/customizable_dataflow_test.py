@@ -21,6 +21,11 @@ def always_fail(ser: RawSeries) -> int:
     raise ZeroDivisionError("always fails")
 
 
+@stat()
+def double_length(length: int) -> int:
+    return length * 2
+
+
 BASIC_DF = get_basic_df2()
 EMPTY_DF_JSON = {
             'dfviewer_config': {
@@ -74,6 +79,25 @@ def test_widget_instatiation():
     pd.testing.assert_frame_equal(dfc.processed_df, BASIC_DF)
     assert dfc.df_data_dict['main'] == BASIC_DF_JSON_DATA
     assert dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
+
+def test_all_stats_and_display_args_are_built_separately(monkeypatch):
+    """``_handle_widget_change`` is the composition of separately callable
+    builders (rows-first s1): the stats payload can be rebuilt without
+    rebuilding column_config, and column_config without serializing stats."""
+    dfc = ACDFC(BASIC_DF)
+    _unused, processed_df, merged_sd = dfc.widget_args_tuple
+    serialized = []
+    original = dfc._sd_to_jsondf
+    monkeypatch.setattr(dfc, '_sd_to_jsondf', lambda sd: serialized.append(sd) or original(sd))
+
+    display_args = dfc._build_df_display_args(processed_df, merged_sd)
+    assert serialized == [], "building display args must not serialize all_stats"
+    assert display_args == dfc.df_display_args
+
+    data_dict = dfc._build_df_data_dict(processed_df, merged_sd)
+    assert serialized == [merged_sd]
+    assert data_dict == dfc.df_data_dict
+
 
 def test_widget_operations_instatiation():
     dfc = ACDFC(BASIC_DF)
@@ -275,6 +299,14 @@ def test_add_analysis():
     pd.testing.assert_frame_equal(p_dfc.processed_df, BASIC_DF)
     assert p_dfc.cleaned_sd == {}
     assert p_dfc.df_display_args['main']['df_viewer_config'] == DFVIEWER_CONFIG_DEFAULT
+
+def test_add_analysis_recomputes_the_summary_stats():
+    """The summary stats rerun with the new klass list, so the added stat
+    reaches merged_sd."""
+    bw = BuckarooWidget(BASIC_DF)
+    bw.add_analysis(double_length)
+    for col in ('a', 'b'):
+        assert bw.dataflow.merged_sd[col]['double_length'] == 2 * bw.dataflow.merged_sd[col]['length']
 
 
 class HidePostProcessingAnalysis2(ColAnalysis):

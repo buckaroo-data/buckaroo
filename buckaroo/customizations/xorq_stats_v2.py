@@ -139,6 +139,16 @@ def _type(is_bool: bool, is_integer: bool, is_float: bool, is_datetime: bool, is
     return "obj"
 
 
+def schema_stats(dtype: str) -> dict:
+    """The stats a column's dtype alone determines: ``dtype``, the ``is_*``
+    flags and ``_type``. This is what the xorq dataflow's schema tier
+    publishes, derived through the same stats the pipeline runs."""
+    flags = typing_stats(dtype)
+    return {"dtype": dtype, **flags, "_type": _type(
+        flags["is_bool"], flags["is_integer"], flags["is_float"], flags["is_datetime"],
+        flags["is_string"])}
+
+
 # ============================================================
 # Batched aggregates — one ibis.Expr each, folded into the batch query
 # ============================================================
