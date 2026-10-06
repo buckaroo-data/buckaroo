@@ -58,9 +58,13 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         if msg_type == "infinite_request":
             self._handle_infinite_request(msg.get("payload_args", {}))
         elif msg_type == "buckaroo_state_change":
-            self._handle_buckaroo_state_change(msg.get("new_state") or {})
+            # state_seq (#998): the client's own counter for this change,
+            # echoed back as reply_seq on the initial_state it gets so it
+            # can drop a reply that an overlapping later change superseded.
+            # Optional; a client that sends none gets none back.
+            self._handle_buckaroo_state_change(msg.get("new_state") or {}, state_seq=msg.get("state_seq"))
 
-    def _handle_buckaroo_state_change(self, new_state):
+    def _handle_buckaroo_state_change(self, new_state, state_seq=None):
         sessions = self.application.settings["sessions"]
         session = sessions.get(self.session_id)
         if not session or session.mode != "buckaroo":
@@ -78,24 +82,30 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
 
             # Decide up front whether the dataflow path will run, so we
             # don't both (a) send a per-client overlay AND (b) broadcast
-            # an initial_state in the same turn. The broadcast already
-            # carries any highlight_phrase that ``quick_command_args.search``
-            # produced via cleaning_sd, so the overlay would be redundant
-            # (and tests/clients that read one message back would see two).
+            # an initial_state in the same turn. Each client's copy of the
+            # broadcast carries its own highlight, so the overlay would be
+            # redundant (and tests/clients that read one message back would
+            # see two).
             dataflow_changed = any(old_state.get(f) != new_state.get(f) for f in _DATAFLOW_FIELDS)
 
-            # Per-client live search (#838 / #851). Update self; if no
-            # dataflow change is coming, send a targeted highlight overlay
-            # to this client only. Never touches the session, never broadcasts.
+            # Per-client live search (#838 / #851). Recorded on self only:
+            # never on the session, never broadcast.
             new_search = new_state.get("search_string", "")
             new_search = new_search if isinstance(new_search, str) else ""
-            if self.search_string != new_search:
+            search_changed = self.search_string != new_search
+            if search_changed:
                 self.search_string = new_search
-                if not dataflow_changed:
-                    self._send_highlight_overlay(session)
 
             # Skip if no effective change to the fields that drive the dataflow.
             if not dataflow_changed:
+                # A new search term gets this client its highlight overlay.
+                # A numbered change gets an answer whatever it changed: the
+                # client drops a reply older than its latest change, so a
+                # no-op change that follows a dataflow change would otherwise
+                # leave the earlier reply dropped and nothing newer to apply
+                # (#998).
+                if search_changed or state_seq is not None:
+                    self._send_client_state(session, new_state, reply_seq=state_seq)
                 log.debug("buckaroo_state_change no-op session=%s — skipping rebroadcast", self.session_id)
                 return
 
@@ -133,11 +143,17 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # Broadcast updated state to all connected clients. Each
             # client gets its own search_string re-injected so a
             # dataflow rebuild from one tab doesn't silently clear the
-            # search box on another (or on the typing client itself).
+            # search box on another (or on the typing client itself), and
+            # its own live-search highlight, so the rebuilt display config
+            # doesn't drop it.
+            # Only the originating client gets reply_seq (#998): the
+            # others made no change, so every copy is current for them.
             for client in list(session.ws_clients):
                 try:
-                    msg = build_state_message(session,
-                        search_string=getattr(client, "search_string", ""))
+                    search = getattr(client, "search_string", "")
+                    msg = build_state_message(session, search_string=search,
+                        reply_seq=state_seq if client is self else None)
+                    msg["df_display_args"] = self._with_highlight(session.df_display_args, search)
                     client.write_message(json.dumps(msg))
                 except Exception:
                     session.ws_clients.discard(client)
@@ -148,48 +164,57 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             if _BUCKAROO_DEBUG:
                 err["details"] = tb
             self.write_message(json.dumps(err))
+            # A numbered change is answered even when it fails (#998): the
+            # client has dropped the reply to its previous change as stale,
+            # so the error alone would leave it on the data from before
+            # both. The reply is the session's current data with the
+            # change's own buckaroo_state, as every numbered reply is: the
+            # session's would revert a search box that holds the failed
+            # term, and the box would send it again.
+            if state_seq is not None:
+                self._send_client_state(session, new_state if isinstance(new_state, dict) else old_state,
+                    reply_seq=state_seq)
 
-    def _send_highlight_overlay(self, session):
-        """Send this client an ``initial_state`` with highlight_phrase
-        injected into every string-column ``displayer_args`` so live-typed
-        matches highlight in the grid (#851).
-
-        Per-client because ``search_string`` is per-client — another
-        client's term must not bleed into this one's highlight, and a
-        broadcast initial_state would clobber every other input box. We
-        deep-copy ``session.df_display_args`` so the overlay never
-        mutates the shared session snapshot.
-
-        Empty term clears any prior highlight by sending the pristine
-        df_display_args back. Skipped when no display config is loaded
-        yet — the upcoming ``initial_state`` on first load will be
-        unhighlighted, which is correct (search starts empty).
-        """
-        if not session.df_display_args:
-            return
-        term = self.search_string
-        overlay = copy.deepcopy(session.df_display_args)
+    @staticmethod
+    def _with_highlight(df_display_args, term):
+        """``df_display_args`` with ``term`` as the ``highlight_phrase`` of
+        every string column, as a deep copy so the shared session snapshot
+        is never mutated. With no ``term`` it is returned as it is, so the
+        highlight a committed ``quick_command_args.search`` put there
+        stays."""
+        if not term or not df_display_args:
+            return df_display_args
+        overlay = copy.deepcopy(df_display_args)
         for dva in overlay.values():
             dvc = (dva or {}).get("df_viewer_config") or {}
             for col in dvc.get("column_config", []) or []:
                 disp = col.get("displayer_args")
-                if not isinstance(disp, dict) or disp.get("displayer") != "string":
-                    continue
-                if term:
+                if isinstance(disp, dict) and disp.get("displayer") == "string":
                     disp["highlight_phrase"] = [term]
-                else:
-                    disp.pop("highlight_phrase", None)
+        return overlay
 
-        # Pass self.search_string so the overlay's buckaroo_state
-        # round-trips the typed term back to this client (Codex P1 on
-        # #854 — without it the JS clears the search box on every
-        # keystroke).
-        msg = build_state_message(session, search_string=self.search_string)
-        msg["df_display_args"] = overlay
+    def _send_client_state(self, session, buckaroo_state, reply_seq=None):
+        """Send this client alone an ``initial_state``: the session's
+        current data, ``buckaroo_state`` with this client's search term, and
+        its live-search highlight (#851). It answers a change that reran no
+        dataflow (a new search term, or a numbered change that touched
+        nothing) and a numbered change that failed, so it never touches
+        the session or reaches another client.
+
+        ``buckaroo_state`` is the change's own. The session records one
+        only on a dataflow change, so the session's would put back
+        ``show_commands``, ``df_display`` and ``sampled``. The search term
+        is re-injected so the reply doesn't clear the search box (Codex P1
+        on #854). ``reply_seq`` is the change's ``state_seq`` (#998), so the
+        client drops this reply if it has sent a later change.
+        """
+        msg = build_state_message(session, search_string=self.search_string, reply_seq=reply_seq)
+        msg["buckaroo_state"] = {**buckaroo_state, "search_string": self.search_string}
+        msg["df_display_args"] = self._with_highlight(session.df_display_args, self.search_string)
         try:
             self.write_message(json.dumps(msg))
         except Exception:
-            log.debug("highlight overlay write failed for session=%s", self.session_id)
+            log.debug("client state write failed for session=%s", self.session_id)
 
     def _handle_infinite_request(self, payload_args):
         sessions = self.application.settings["sessions"]

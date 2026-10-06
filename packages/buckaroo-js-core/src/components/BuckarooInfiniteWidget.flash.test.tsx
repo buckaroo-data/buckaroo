@@ -656,3 +656,118 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
     });
   });
 });
+
+// Rows-first c0a: the summary stats can arrive after the rows. Until they do,
+// a pinned key with no stats row shows as a placeholder labelled with its key.
+describe("BuckarooInfiniteWidget — stats not yet available (rows-first c0a)", () => {
+  const pinnedConfig: DFViewerConfig = {
+    ...baseConfig,
+    pinned_rows: [
+      { primary_key_val: "dtype", displayer_args: { displayer: "obj" } },
+      { primary_key_val: "histogram", displayer_args: { displayer: "obj" } },
+    ],
+  };
+  const pinnedDisplayArgs: Record<string, IDisplayArgs> = {
+    main: { data_key: "main", df_viewer_config: pinnedConfig, summary_stats_key: "summary_stats" },
+  };
+
+  const widgetProps = (over: Record<string, unknown> = {}) => ({
+    df_data_dict: { summary_stats: [] as any[] },
+    df_display_args: pinnedDisplayArgs,
+    df_meta: baseDfMeta,
+    operations: [],
+    on_operations: jest.fn(),
+    operation_results: {} as any,
+    command_config: { argspecs: {}, defaultArgs: {} },
+    buckaroo_state: initialState,
+    on_buckaroo_state: jest.fn(),
+    buckaroo_options: baseOptions,
+    src: mkSrc(),
+    ...over,
+  });
+
+  const lastPinnedRows = (): any[] => {
+    const sets = getSpyCalls().setGridOption.filter(([k]) => k === "pinnedTopRowData");
+    return sets[sets.length - 1][1] as any[];
+  };
+  const pinnedRowIds = (rows: any[]): string[] => {
+    const { gridOptions, context } = getSpyCalls().lastProps;
+    return rows.map((data) => gridOptions.getRowId({ data, level: 0, rowPinned: "top", context }));
+  };
+
+  describe("pinned rows with no value", () => {
+    it("shows one placeholder per valueless key, each with its own row id", () => {
+      render(<BuckarooInfiniteWidget {...widgetProps()} />);
+      const rows = lastPinnedRows();
+      // Each placeholder keeps its key as the row label, so the pinned area
+      // holds its height and the rows are told apart.
+      expect(rows).toEqual([{ index: "dtype" }, { index: "histogram" }]);
+      expect(new Set(pinnedRowIds(rows)).size).toBe(2);
+    });
+
+    it("a key that has a value renders it and only the other key gets a placeholder", () => {
+      const stats = [{ index: "dtype", a: "int64" }];
+      render(<BuckarooInfiniteWidget {...widgetProps({ df_data_dict: { summary_stats: stats } })} />);
+      const rows = lastPinnedRows();
+      expect(rows).toEqual([stats[0], { index: "histogram" }]);
+      expect(new Set(pinnedRowIds(rows)).size).toBe(2);
+    });
+
+    it("placeholders turn into the real rows when stats arrive", () => {
+      const props = widgetProps();
+      const { rerender } = render(<BuckarooInfiniteWidget {...props} />);
+      const stats = [
+        { index: "dtype", a: "int64" },
+        { index: "histogram", a: [{ name: "1-5", population: 100 }] },
+      ];
+      rerender(<BuckarooInfiniteWidget {...props} df_data_dict={{ summary_stats: stats }} />);
+      expect(lastPinnedRows()).toEqual(stats);
+    });
+  });
+
+  describe("color_map columns", () => {
+    const colorConfig: DFViewerConfig = {
+      pinned_rows: [],
+      left_col_configs: [],
+      column_config: [
+        { col_name: "a", header_name: "a", displayer_args: { displayer: "obj" },
+          color_map_config: { color_rule: "color_map", map_name: "BLUE_TO_YELLOW", val_column: "a" } },
+        { col_name: "b", header_name: "b", displayer_args: { displayer: "obj" } },
+      ],
+    };
+    const colorDisplayArgs: Record<string, IDisplayArgs> = {
+      main: { data_key: "main", df_viewer_config: colorConfig, summary_stats_key: "summary_stats" },
+    };
+    const colorProps = (stats: any[]) =>
+      widgetProps({ df_display_args: colorDisplayArgs, df_data_dict: { summary_stats: stats } });
+    const forcedRefreshes = () => getSpyCalls().refreshCells.filter((p: any) => p.force === true);
+
+    it("restyles the color-mapped columns when histogram bins arrive after the first render", () => {
+      const props = colorProps([{ index: "dtype", a: "int64", b: "int64" }]);
+      const { rerender } = render(<BuckarooInfiniteWidget {...props} />);
+      expect(forcedRefreshes()).toHaveLength(0);
+
+      rerender(
+        <BuckarooInfiniteWidget
+          {...props}
+          df_data_dict={{ summary_stats: [{ index: "histogram_bins", a: [1, 2, 3, 4, 5], b: [1, 2] }] }}
+        />,
+      );
+      const refreshes = forcedRefreshes();
+      expect(refreshes).toHaveLength(1);
+      expect(refreshes[0].columns).toEqual(["a"]);
+    });
+
+    it("does not refresh when the new stats leave the bins unchanged", () => {
+      const props = colorProps([{ index: "histogram_bins", a: [1, 2, 3, 4, 5] }]);
+      const { rerender } = render(<BuckarooInfiniteWidget {...props} />);
+      rerender(
+        <BuckarooInfiniteWidget
+          {...props}
+          df_data_dict={{ summary_stats: [{ index: "histogram_bins", a: [1, 2, 3, 4, 5] }, { index: "dtype", a: "int64" }] }}
+        />,
+      );
+      expect(forcedRefreshes()).toHaveLength(0);
+    });
+  });
+});
