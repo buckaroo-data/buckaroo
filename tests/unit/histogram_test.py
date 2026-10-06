@@ -1,8 +1,12 @@
+import numpy as np
 import pandas as pd
+import pytest
 from buckaroo.pluggable_analysis_framework.stat_pipeline import StatPipeline
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
 from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2
-from buckaroo.customizations.histogram import fmt_bucket, numeric_histogram
+from buckaroo.customizations.histogram import fmt_bucket, fmt_tail_bucket, numeric_histogram
+from tests.unit.test_utils import (FINITE_COUNTS, INF, INFINITIES, assert_numeric_histogram,
+    ddd_float_columns_with_infinities)
 
 # histogram (@stat) depends on typing_stats (is_numeric) and the summary-stat
 # functions, so the DAG needs the full PD_ANALYSIS_V2 set wired together.
@@ -99,3 +103,56 @@ def test_tail_label_precision():
     result = numeric_histogram(histogram_args, 1.2, 50_000, 0.0)
     assert result[0]['name'] == '1.2–1.4'
     assert result[-1]['name'] == '1.8–50K'
+
+
+# ============================================================
+# Infinities: they belong in the tails, never a reason to drop to the categorical histogram
+# ============================================================
+
+@pytest.mark.parametrize('finite_count', FINITE_COUNTS)
+@pytest.mark.parametrize('kind', INFINITIES)
+def test_float_column_with_infinities_keeps_a_numeric_histogram(kind, finite_count):
+    """Tails are taken over the finite values, so an infinity can't turn them into NaN, empty histogram_args
+    and drop the column to the categorical histogram. The infinities sit in the tail buckets and the buckets
+    of the finite values are what they would be without them."""
+    finite = [i * 1.5 for i in range(finite_count)]
+    sdf, errs = _process(pd.DataFrame({'a': finite + INFINITIES[kind]}))
+    assert errs == []
+    assert_numeric_histogram(sdf['a']['histogram'], sdf['a']['histogram_bins'])
+    ha = sdf['a']['histogram_args']
+    assert np.isfinite(ha['low_tail']) and np.isfinite(ha['high_tail'])
+    base, _ = _process(pd.DataFrame({'a': finite}))
+    assert sdf['a']['histogram_bins'] == base['a']['histogram_bins']
+    assert ha['normalized_populations'] == base['a']['histogram_args']['normalized_populations']
+
+
+@pytest.mark.parametrize('values', ddd_float_columns_with_infinities())
+def test_ddd_float_columns_with_infinities_keep_a_numeric_histogram(values):
+    sdf, errs = _process(pd.DataFrame({'a': list(values)}))
+    assert errs == []
+    assert_numeric_histogram(sdf['a']['histogram'], sdf['a']['histogram_bins'])
+
+
+@pytest.mark.parametrize('dtype', ['float64', 'float32', 'Float64'])
+def test_float_dtypes_with_an_infinity_keep_a_numeric_histogram(dtype):
+    """float32 and the nullable Float64 (a pd.NA beside the infinity) take the same path as float64."""
+    ser = pd.Series([None] + [i * 1.5 for i in range(100)] + [INF], dtype=dtype)
+    sdf, errs = _process(pd.DataFrame({'a': ser}))
+    # a nullable Float64 holding an infinity also raises in mean, median and std; that is separate from the histogram
+    assert [e for e in errs if 'histogram' in e.stat_key] == []
+    assert_numeric_histogram(sdf['a']['histogram'], sdf['a']['histogram_bins'])
+
+
+def test_tail_buckets_name_the_infinities():
+    finite = [i * 1.5 for i in range(100)]
+    sdf, _ = _process(pd.DataFrame({'a': [-INF] + finite + [INF]}))
+    low, high = [b['name'] for b in sdf['a']['histogram'] if 'tail' in b]
+    assert low.startswith('-inf')
+    assert high.endswith('–inf')
+
+
+def test_fmt_tail_bucket_names_infinite_bounds():
+    # an infinite bound is 'inf', not 'infT' from the SI-prefix branch
+    assert fmt_tail_bucket(198.0, INF, 4.0) == '198–inf'
+    assert fmt_tail_bucket(-INF, 1.5, 4.0) == '-inf<>1.5'
+    assert fmt_tail_bucket(-INF, INF, 4.0) == '-inf<>inf'
