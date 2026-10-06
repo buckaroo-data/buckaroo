@@ -7,7 +7,7 @@
  * Tests assert CURRENT behavior on main (Option A in docs/rerender-test-plan.md).
  * Tests tagged "[captures current flash]" are tracking pain, not validating it.
  */
-import { render, act } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { BuckarooInfiniteWidget } from "./BuckarooWidgetInfinite";
 import { KeyAwareSmartRowCache } from "./DFViewerParts/SmartRowCache";
 import { getSpyCalls, resetSpy, setMockColumnState } from "../test-utils/agGridSpy";
@@ -21,14 +21,8 @@ jest.mock("ag-grid-react", () =>
 jest.mock("./useColorScheme", () => ({ useColorScheme: () => "light" }));
 
 // StatusBar also instantiates AgGridReact; stub it so the spy only counts the data grid.
-// The stub records its props so the in-flight tests can read inFlight and drive
-// setBuckarooState the way the real status bar does.
-let mockStatusBarProps: any = null;
 jest.mock("./StatusBar", () => ({
-  StatusBar: (props: any) => {
-    mockStatusBarProps = props;
-    return <div data-testid="status-bar-stub" data-inflight={String(!!props.inFlight)} />;
-  },
+  StatusBar: () => <div data-testid="status-bar-stub" />,
 }));
 
 // DFViewerInfinite-prop capture for identity-stability assertion.
@@ -666,8 +660,6 @@ describe("BuckarooInfiniteWidget — flash matrix (current behavior)", () => {
 // Rows-first c0a: the summary stats can arrive after the rows. Until they do,
 // a pinned key with no stats row shows as a placeholder labelled with its key.
 describe("BuckarooInfiniteWidget — stats not yet available (rows-first c0a)", () => {
-  const withStats = (status: string): DFMeta => ({ ...baseDfMeta, stats: { status } } as DFMeta);
-
   const pinnedConfig: DFViewerConfig = {
     ...baseConfig,
     pinned_rows: [
@@ -776,52 +768,6 @@ describe("BuckarooInfiniteWidget — stats not yet available (rows-first c0a)", 
         />,
       );
       expect(forcedRefreshes()).toHaveLength(0);
-    });
-  });
-
-  describe("in-flight indicator", () => {
-    const inFlightAttr = () => document.querySelector('[data-testid="status-bar-stub"]')!.getAttribute("data-inflight");
-    const dispatchSearch = () =>
-      act(() => {
-        mockStatusBarProps.setBuckarooState({ ...initialState, quick_command_args: { search: ["x"] } });
-      });
-    const props = (meta: DFMeta, dict: Record<string, any[]>) => widgetProps({ df_meta: meta, df_data_dict: dict });
-
-    it("a df_data_dict update alone does not clear it when the server reports df_meta.stats", () => {
-      const meta = withStats("pending");
-      const first = props(meta, { summary_stats: [] });
-      const { rerender } = render(<BuckarooInfiniteWidget {...first} />);
-      dispatchSearch();
-      expect(inFlightAttr()).toBe("true");
-
-      // A stats-only update: a new df_data_dict, the same df_meta.
-      rerender(<BuckarooInfiniteWidget {...first} df_data_dict={{ summary_stats: [{ index: "dtype", a: "int64" }] }} />);
-      expect(inFlightAttr()).toBe("true");
-    });
-
-    it("clears when a frame with a new df_meta and df_data_dict arrives", () => {
-      const first = props(withStats("pending"), { summary_stats: [] });
-      const { rerender } = render(<BuckarooInfiniteWidget {...first} />);
-      dispatchSearch();
-
-      rerender(
-        <BuckarooInfiniteWidget
-          {...first}
-          df_meta={withStats("pending")}
-          df_data_dict={{ summary_stats: [{ index: "dtype", a: "int64" }] }}
-        />,
-      );
-      expect(inFlightAttr()).toBe("false");
-    });
-
-    it("without df_meta.stats a new df_data_dict still clears it, as before", () => {
-      const first = props(baseDfMeta, { summary_stats: [] });
-      const { rerender } = render(<BuckarooInfiniteWidget {...first} />);
-      dispatchSearch();
-      expect(inFlightAttr()).toBe("true");
-
-      rerender(<BuckarooInfiniteWidget {...first} df_data_dict={{ summary_stats: [{ index: "dtype", a: "int64" }] }} />);
-      expect(inFlightAttr()).toBe("false");
     });
   });
 });

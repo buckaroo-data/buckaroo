@@ -7,7 +7,7 @@ import { DFData } from "./DFViewerParts/DFWhole";
 import { StatusBar } from "./StatusBar";
 import { BuckarooState } from "./WidgetTypes";
 import { BuckarooOptions } from "./WidgetTypes";
-import { DFMeta, getStatsStatus } from "./WidgetTypes";
+import { DFMeta } from "./WidgetTypes";
 import { CommandConfigT } from "./CommandUtils";
 import { Operation } from "./OperationUtils";
 import {
@@ -290,23 +290,13 @@ export function BuckarooInfiniteWidget({
         // so we don't accidentally clear on the same dict the user was looking
         // at when they fired the change. Cleared on the *next* dict reference.
         const inFlightAtDictRef = useRef<typeof df_data_dict | null>(null);
-        // The df_meta at that moment. A server that reports df_meta.stats can
-        // send df_data_dict on its own (a stats update for an earlier state),
-        // and df_meta only comes with a full frame, so for those servers a
-        // new df_meta is also needed before the answer to the change counts
-        // as arrived. Servers without df_meta.stats keep the dict-only rule.
-        const inFlightAtMetaRef = useRef<DFMeta | null>(null);
         useEffect(() => {
             if (inFlight && inFlightAtDictRef.current !== null
                     && df_data_dict !== inFlightAtDictRef.current) {
-                if (df_meta === inFlightAtMetaRef.current && df_meta.stats !== undefined) {
-                    return;
-                }
                 setInFlight(false);
                 inFlightAtDictRef.current = null;
-                inFlightAtMetaRef.current = null;
             }
-        }, [df_data_dict, df_meta, inFlight]);
+        }, [df_data_dict, inFlight]);
 
         const wrappedOnBuckarooState = useCallback<
             React.Dispatch<React.SetStateAction<BuckarooState>>
@@ -321,11 +311,10 @@ export function BuckarooInfiniteWidget({
                        !== JSON.stringify(buckaroo_state.quick_command_args);
             if (dataflowChanged) {
                 inFlightAtDictRef.current = df_data_dict;
-                inFlightAtMetaRef.current = df_meta;
                 setInFlight(true);
             }
             on_buckaroo_state(next);
-        }, [buckaroo_state, df_data_dict, df_meta, on_buckaroo_state]);
+        }, [buckaroo_state, df_data_dict, on_buckaroo_state]);
 
         return (
             <div className="dcf-root flex flex-col buckaroo-widget buckaroo-infinite-widget"
@@ -357,7 +346,6 @@ export function BuckarooInfiniteWidget({
                         error_info={""}
                         view_name={buckaroo_state.df_display}
                         data_key={cDisp.data_key}
-                        stats_status={getStatsStatus(df_meta)}
                     />
                 </div>
                 {buckaroo_state.show_commands ? (
@@ -459,7 +447,6 @@ export function DFViewerInfiniteDS({
                         activeCol={activeCol}
                         setActiveCol={setActiveCol}
                         error_info={""}
-                        stats_status={getStatsStatus(df_meta)}
                     />
                 </div>
 

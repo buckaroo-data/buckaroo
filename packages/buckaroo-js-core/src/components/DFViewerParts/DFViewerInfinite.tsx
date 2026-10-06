@@ -8,7 +8,6 @@ import * as _ from "lodash-es";
 import { DFData, DFDataRow, DFViewerConfig, SDFT } from "./DFWhole";
 
 import { getCellRendererSelector, dfToAgrid, extractPinnedRows, extractSDFT, getFieldVal } from "./gridUtils";
-import type { StatsStatus } from "../WidgetTypes";
 
 import { AgGridReact } from "ag-grid-react"; // the AG Grid React Component
 import {
@@ -155,7 +154,6 @@ export function DFViewerInfinite({
     max_rows_in_configs,
     view_name,
     data_key,
-    stats_status,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -179,10 +177,6 @@ export function DFViewerInfinite({
     // a rowId, even though their `index` values overlap (row 0 in main is a
     // different record than row 0 in summary).
     data_key?: string;
-    // df_meta.stats.status. While "pending" a pinned key with no value shows a
-    // placeholder row; when "not_computed" it is omitted. Undefined behaves
-    // as "complete".
-    stats_status?: StatsStatus;
 }) {
     /*
     The idea is to do some pre-setup here for
@@ -243,7 +237,6 @@ export function DFViewerInfinite({
                     effectiveScheme={effectiveScheme}
                     view_name={view_name}
                     data_key={data_key}
-                    stats_status={stats_status}
                 />
             </div>
         </div>)
@@ -261,7 +254,6 @@ export function DFViewerInfiniteInner({
     effectiveScheme,
     view_name,
     data_key,
-    stats_status,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -278,7 +270,6 @@ export function DFViewerInfiniteInner({
     effectiveScheme?: 'light' | 'dark';
     view_name?: string;
     data_key?: string;
-    stats_status?: StatsStatus;
 }) {
     /*
     const lastProps = useRef<any>(null);
@@ -357,8 +348,8 @@ export function DFViewerInfiniteInner({
     // Always re-extract; upstream may mutate summary in-place without changing identity
     // Memoize to ensure it updates when summary_stats_data changes
     const topRowData = useMemo(
-        () => extractPinnedRows(summary_stats_data, pinned_rows ? pinned_rows : [], stats_status) as DFDataRow[],
-        [summary_stats_data, pinned_rows, stats_status]
+        () => extractPinnedRows(summary_stats_data, pinned_rows ? pinned_rows : []) as DFDataRow[],
+        [summary_stats_data, pinned_rows]
     );
     // Pinned rows are extracted and ready
 

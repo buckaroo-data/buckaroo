@@ -276,6 +276,8 @@ describe("testing utility functions in gridUtils ", () => {
       ({
         node: { rowPinned: "bottom", data: { index: indexVal } },
         column: { getColId: () => colId },
+        // A cell with no value renders empty; these rows have one.
+        value: [{ name: "1-5", population: 100 }],
       } as unknown as ICellRendererParams<any, any, any>);
 
     it("resolves the same renderer for `?key` and `key` configs (strip applied at lookup time)", () => {
