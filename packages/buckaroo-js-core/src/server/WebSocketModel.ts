@@ -23,7 +23,11 @@
  *   grid purge and re-request rows for the old state. An initial_state
  *   with no `reply_seq` (another tab's change, a /load push, a fresh
  *   connection) always applies.
+ *
+ * stats_update and stats_aborted frames go to `stats` (see StatsChannel).
  */
+import { StatsChannel } from "./StatsChannel";
+
 export class WebSocketModel {
     private ws: WebSocket;
     private pendingMsg: any = null;
@@ -31,14 +35,17 @@ export class WebSocketModel {
     private state: Record<string, any>;
     private pendingChanges: Set<string> = new Set();
     private stateSeq = 0;
+    readonly stats: StatsChannel;
 
     constructor(ws: WebSocket, initialState: Record<string, any>) {
         this.state = { ...initialState };
         this.ws = ws;
+        this.stats = new StatsChannel(this);
 
         this.ws.onmessage = (event: MessageEvent) => {
             if (typeof event.data === "string") {
                 const msg = JSON.parse(event.data);
+                if (this.stats.handle(msg)) return;
 
                 if (msg.type === "infinite_resp") {
                     // Expect a following binary frame — stash this JSON

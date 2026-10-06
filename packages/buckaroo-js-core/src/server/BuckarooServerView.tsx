@@ -2,6 +2,7 @@ import * as React from "react";
 
 import { decodeDFDataDict } from "../components/DFViewerParts/resolveDFData";
 import { WebSocketModel } from "./WebSocketModel";
+import { withStatsCapability } from "./StatsChannel";
 import {
     BuckarooView,
     BuckarooServerMetadata,
@@ -106,7 +107,8 @@ export function BuckarooServerView({
 
         (async () => {
             try {
-                ws = new WebSocket(wsUrl);
+                // The server reads capabilities from the URL at open.
+                ws = new WebSocket(withStatsCapability(wsUrl));
                 ws.binaryType = "arraybuffer";
 
                 await new Promise<void>((resolve, reject) => {
