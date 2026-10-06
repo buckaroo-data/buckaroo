@@ -322,8 +322,7 @@ class LoadHandler(tornado.web.RequestHandler):
         # by a prior /load_expr on the same session so WS dispatch routes
         # to the new dataflow rather than a stale xorq one.
         session.backend = backend
-        session.xorq_dataflow = None
-        session.expr = None
+        session.release_xorq_state()
         session.prompt = prompt
         if component_config:
             session.component_config = component_config
@@ -584,6 +583,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         session = sessions.get_or_create(session_id, build_dir)
         session.mode = "buckaroo"
         session.backend = "xorq"
+        session.release_xorq_state()
         session.expr = expr
         session.build_dir = build_dir
         session.cache_dir = cache_dir

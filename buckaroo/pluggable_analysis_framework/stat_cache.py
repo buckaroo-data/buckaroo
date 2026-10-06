@@ -458,14 +458,17 @@ class StatCache:
         """Write one part holding ``values`` and ``errors``; returns its path,
         or None when there was nothing cacheable. Compacts the scope once it
         holds more than ``MAX_PARTS`` parts, dropping stat ids ``keep``
-        rejects."""
+        rejects. A compaction failure is logged, not raised: the part is
+        already on disk, and the next write retries the compaction."""
         data = _encode_part(values, errors or {})
         if data is None:
             return None
         path = self._write_bytes(scope_id, data)
-        parts = self._part_paths(scope_id)
-        if len(parts) > MAX_PARTS:
-            self._compact(scope_id, keep)
+        try:
+            if len(self._part_paths(scope_id)) > MAX_PARTS:
+                self._compact(scope_id, keep)
+        except Exception as e:
+            log.warning("stat cache: compacting %s failed, keeping its parts: %s", scope_id, e)
         return path
 
     def _write_bytes(self, scope_id: str, data: bytes) -> Path:

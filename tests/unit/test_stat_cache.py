@@ -52,6 +52,14 @@ def _wide_table(ncols=25):
         name="wide")
 
 
+def _digit_table(ncols, bad=()):
+    """String columns ``digits_max`` can cast to int64. The columns whose index
+    is in ``bad`` hold values it can't, so it fails on them at execution."""
+    return xo.memtable(pa.table({
+        f"c{i}": pa.array([f"s{j}" if i in bad else str(j) for j in range(10)]) for i in range(ncols)}),
+        name="digits")
+
+
 def _pipeline(cache, stats=XORQ_STATS_V2):
     return XorqStatPipeline(stats, unit_test=False, cache_storage=cache)
 
@@ -394,6 +402,22 @@ class TestStorage:
         assert "stat1@1" not in values
         assert values["stat7@1"] == 7
 
+    def test_a_failing_compaction_still_returns_the_written_part(self, tmp_path, monkeypatch):
+        """The part is on disk before compaction runs, so a compaction failure
+        doesn't turn the write into a failed one (#1061)."""
+        cache = sc.StatCache(tmp_path)
+        for i in range(sc.MAX_PARTS):
+            cache.write("s", {"a": {f"stat{i}@1": i}})
+
+        def disk_full(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(cache, "_compact", disk_full)
+        path = cache.write("s", {"a": {"late@1": 9}})
+        assert path is not None and path.exists()
+        assert len(_parts(cache, "s")) == sc.MAX_PARTS + 1
+        assert cache.read("s").values["a"]["late@1"] == 9
+
     def test_unreadable_part_is_skipped(self, tmp_path):
         cache = sc.StatCache(tmp_path)
         cache.write("s", {"a": {"x@1": 1}})
@@ -668,6 +692,28 @@ class TestPipelineCache:
         assert spy.queries == []
         assert sd["ints"]["non_null"] == 40
 
+    def test_a_compaction_failure_is_not_counted_as_a_failed_write(self, tmp_path, monkeypatch):
+        """A run whose part is written and then fails to compact its scope
+        reports the part it wrote, not a write error (#1061)."""
+        cache = sc.StatCache(tmp_path)
+        for i in range(sc.MAX_PARTS):
+            cache.write("s", {"ints": {f"stat{i}@1": i}})
+
+        def disk_full(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(cache, "_compact", disk_full)
+        cold = _pipeline(cache)
+        _sd, errs = cold.process_table(_table(), scope_id="s")
+        assert errs == []
+        cs = cold.cache_run_stats()
+        assert cs["write_errors"] == 0
+        assert cs["parts_written"] == 1 and cs["snapshots"] == 1
+        assert cs["bytes"] > 0
+        warm = _pipeline(cache)
+        warm.process_table(_table(), scope_id="s")
+        assert warm.cache_run_stats()["misses"] == 0
+
     def test_column_bisect_computes_only_new_columns(self, tmp_path):
         cache = sc.StatCache(tmp_path)
         table = _wide_table()
@@ -722,6 +768,61 @@ class TestPipelineCache:
             _sd, errs2 = _pipeline(cache, stats).process_table(_table(), scope_id="s")
         assert spy.queries == []
         assert {(e.column, e.stat_key) for e in errs2} == {("strs", "digits_max")}
+
+    def test_a_stat_failing_on_every_column_costs_a_constant_number_of_scans(self):
+        """Isolating a failed batch used to run one scan per cell of the failing
+        stat. A stat that fails the same way on cells spread across the table
+        is failing everywhere, so the cells not run are recorded as failed
+        instead of scanned (#1062)."""
+        table = _digit_table(25, bad=range(25))
+        with ExecSpy() as spy:
+            _sd, errs = XorqStatPipeline([digits_max], unit_test=False).process_table(table)
+        assert {(e.column, e.stat_key) for e in errs} == {(c, "digits_max") for c in table.columns}
+        assert len(spy.queries) <= 8
+
+    @pytest.mark.parametrize("bad", [{0}, {63}, {17}, {3, 40, 41}, {0, 1, 2, 62, 63}])
+    def test_isolation_finds_the_failing_columns_in_few_scans(self, bad):
+        """A few failing columns among many are found by bisecting the stat's
+        cells rather than scanning each one, and no other column is reported
+        failed (#1062)."""
+        table = _digit_table(64, bad=bad)
+        with ExecSpy() as spy:
+            sd, errs = XorqStatPipeline([digits_max], unit_test=False).process_table(table)
+        assert {e.column for e in errs} == {f"c{i}" for i in bad}
+        assert all(sd[f"c{i}"]["digits_max"] == 9 for i in range(64) if i not in bad)
+        assert len(spy.queries) <= 40
+
+    def test_a_batch_too_large_to_run_fails_no_cell(self):
+        """A query can fail for its size while every cell runs fine alone. Only a
+        cell whose own aggregate failed is reported failed, so isolating the
+        batch computes them all (#1062)."""
+        table = _wide_table(30)
+        expected, _ = XorqStatPipeline([low], unit_test=False).process_table(table)
+        real = ibis_core.Expr.execute
+
+        def small_queries_only(expr, *args, **kwargs):
+            if len(list(expr.schema().names)) > 5:
+                raise RuntimeError("query too large")
+            return real(expr, *args, **kwargs)
+
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr(ibis_core.Expr, "execute", small_queries_only)
+            sd, errs = XorqStatPipeline([low], unit_test=False).process_table(table)
+        assert errs == []
+        assert {c: sd[c]["low"] for c in table.columns} == {c: expected[c]["low"] for c in table.columns}
+
+    def test_cells_recorded_failed_without_a_scan_are_not_cached(self, tmp_path):
+        """A failure nobody ran isn't evidence about the stat, so it isn't
+        cached. Once the data stops failing those cells compute, while the cells
+        that were run and failed stay cached errors (#1062)."""
+        cache = sc.StatCache(tmp_path)
+        stats = XORQ_STATS_V2 + [digits_max]
+        _sd, errs = _pipeline(cache, stats).process_table(_digit_table(25, bad=range(25)), scope_id="s")
+        assert {e.column for e in errs if e.stat_key == "digits_max"} == {f"c{i}" for i in range(25)}
+        sd, errs = _pipeline(cache, stats).process_table(_digit_table(25), scope_id="s")
+        failing = {e.column for e in errs if e.stat_key == "digits_max"}
+        assert 0 < len(failing) < 25
+        assert all(sd[f"c{i}"]["digits_max"] == 9 for i in range(25) if f"c{i}" not in failing)
 
     def test_nothing_is_cached_when_every_query_fails(self, tmp_path, monkeypatch):
         cache = sc.StatCache(tmp_path)
