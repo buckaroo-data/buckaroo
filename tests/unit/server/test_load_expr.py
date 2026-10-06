@@ -815,6 +815,20 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(builds_root, ignore_errors=True)
 
 
+# The config-bearing /load_expr fields, each with a value and a different one.
+_CONFIG_VARIANTS = {
+    "column_config_overrides": (
+        {"name": {"displayer_args": {"displayer": "string", "max_length": 5000}}},
+        {"name": {"displayer_args": {"displayer": "string", "max_length": 6000}}}),
+    "extra_grid_config": ({"rowHeight": 70}, {"rowHeight": 80}),
+    "init_sd": (
+        {"idx": {"displayer_args": {"displayer": "string", "max_length": 200}}},
+        {"idx": {"displayer_args": {"displayer": "string", "max_length": 300}}}),
+    "skip_stat_columns": (["name"], ["idx"]),
+    "component_config": ({"search_debounce": 100}, {"search_debounce": 200}),
+}
+
+
 class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
     """Tests for #896 (releasing xorq load state) and #899 (warm-session early-exit)."""
 
@@ -941,6 +955,39 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
                      "component_config": {"search_debounce": 100}})
                 self.assertEqual(resp.code, 200)
                 self.assertEqual(len(calls), 2, "new config must bypass the early-exit")
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_warm_session_with_same_config_skips_pipeline(self):
+        """#1037: a warm POST whose config fields equal the ones the session
+        holds takes the early-exit. A client that sends its saved config on
+        every open must not re-run expr_load, the dataflow and the metadata
+        each time. A field that differs still re-runs."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            original = xorq_loading.load_expr_build_dir
+            calls = []
+            def counting_loader(bd, **kwargs):
+                calls.append(bd)
+                return original(bd, **kwargs)
+
+            with patch.object(xorq_loading, "load_expr_build_dir", side_effect=counting_loader):
+                for field, (held, other) in _CONFIG_VARIANTS.items():
+                    sid = f"lx-same-config-{field}"
+                    calls.clear()
+                    body = {"session": sid, "build_dir": build_path}
+                    resp = await _post(self.get_http_port(), "/load_expr", {**body, field: held})
+                    self.assertEqual(resp.code, 200, resp.body)
+                    self.assertEqual(len(calls), 1)
+                    resp = await _post(self.get_http_port(), "/load_expr", {**body, field: held})
+                    self.assertEqual(resp.code, 200, resp.body)
+                    self.assertEqual(json.loads(resp.body)["rows"], 10)
+                    self.assertEqual(len(calls), 1, f"equal {field} must take the early-exit")
+                    resp = await _post(self.get_http_port(), "/load_expr", {**body, field: other})
+                    self.assertEqual(resp.code, 200, resp.body)
+                    self.assertEqual(len(calls), 2, f"changed {field} must re-run")
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
 
