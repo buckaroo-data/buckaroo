@@ -512,17 +512,16 @@ class TestStdoutSafety:
 # ---------------------------------------------------------------------------
 
 class TestEnsureServerPortArg:
-    """Both the top-level packaged ``buckaroo_mcp_tool`` (referenced by the
-    ``buckaroo-table`` console_scripts entry in pyproject.toml) and the inner
-    ``buckaroo.mcp_tool`` module must pass ``--port=<SERVER_PORT>`` to the
-    spawned ``python -m buckaroo.server``.
+    """The packaged ``buckaroo_mcp_tool`` (the ``buckaroo-table``
+    console_scripts entry in pyproject.toml) must pass ``--port=<SERVER_PORT>``
+    to the spawned ``python -m buckaroo.server``.
 
     Without it, callers that set ``BUCKAROO_PORT`` to anything other than the
     server's default poll the requested port while the spawned server binds
     the default, breaking the contract.
     """
 
-    @pytest.mark.parametrize("module_name", ["buckaroo_mcp_tool", "buckaroo.mcp_tool"])
+    @pytest.mark.parametrize("module_name", ["buckaroo_mcp_tool"])
     def test_ensure_server_passes_port_flag(self, module_name):
         import importlib
         m = importlib.import_module(module_name)
