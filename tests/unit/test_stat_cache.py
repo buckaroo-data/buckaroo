@@ -5,12 +5,14 @@ These tests assert structure (which queries run, which cells are computed,
 which parts are written), not wall-clock time.
 """
 
+import datetime as dt
 import functools
 import importlib.metadata
 import importlib.util
 import inspect
 import math
 import shutil
+import zoneinfo
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -59,12 +61,15 @@ def _parts(cache, scope_id):
 
 
 def _same(a, b) -> bool:
-    """Equal and of the same type, recursively. NaN equals NaN; pandas and
-    numpy temporals must also keep their unit and timezone."""
+    """Equal and of the same type, recursively. NaN equals NaN and zeros keep
+    their sign; pandas and numpy temporals must also keep their unit and
+    timezone."""
     if type(a) is not type(b):
         return False
-    if isinstance(a, float) and math.isnan(a):
-        return math.isnan(b)
+    if a is pd.NaT:
+        return b is pd.NaT
+    if isinstance(a, float):
+        return math.isnan(b) if math.isnan(a) else a == b and math.copysign(1, a) == math.copysign(1, b)
     if isinstance(a, (list, tuple)):
         return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
     if isinstance(a, dict):
@@ -93,8 +98,9 @@ def _ddd_values():
     polars does (pandas frames converted where polars can)."""
     def polars_values(name, df):
         for col in df.columns:
-            ser = df[col]
-            yield f"polars-{name}-{col}", [ser[i] for i in range(len(ser))] + [ser.to_list()]
+            # to_list, not ser[i]: polars hands a list or array cell over as a Series.
+            values = df[col].to_list()
+            yield f"polars-{name}-{col}", values + [values]
 
     for name, df in _ddd_frames():
         if isinstance(df, pl.DataFrame):
@@ -109,6 +115,32 @@ def _ddd_values():
             except Exception:
                 continue
             yield from polars_values(f"{name}-from-pandas", converted)
+
+
+# DDD cases that fail today, by test id, with the issue tracking each. The
+# xfails are strict, so a fix that makes one pass removes it from here.
+_DDD_KNOWN_FAILURES = {
+    "pandas-df_with_far_future_fixed_offset_timestamps-0": "#1053: a us Timestamp past 2262 isn't cached",
+    **{f"pandas-df_with_nullable_dtypes-{j}": "#1053: pd.NA isn't cached" for j in range(4)},
+    "polars-pl_df_with_temporal_edges-new_york": "#1053: a fold=1 datetime isn't cached",
+    "polars-pl_df_with_temporal_edges-far_kolkata": "#1052: a datetime before year 1 UTC loses the part",
+    "df_with_far_future_fixed_offset_timestamps": "#1052: a pytz.FixedOffset datetime loses the part",
+    "df_with_infinity": "#1057: the failing histogram is the run's last query, never cached",
+    "pl_df_with_temporal_edges": "#1057: the failing time histogram is the run's last query, never cached"}
+
+
+def _ddd_params(cases):
+    """A ``pytest.param`` per ``(id, value)``, xfail when it's a known failure."""
+    return [pytest.param(v, id=i, marks=[pytest.mark.xfail(strict=True, reason=_DDD_KNOWN_FAILURES[i])]
+        if i in _DDD_KNOWN_FAILURES else []) for i, v in cases]
+
+
+def _nested(depth):
+    """``1`` inside ``depth`` lists."""
+    v: Any = 1
+    for _ in range(depth):
+        v = [v]
+    return v
 
 
 def _ddd_xorq_table(name):
@@ -360,7 +392,7 @@ class TestStorage:
         (cache.scope_dir("s") / "part-0000-corrupt.parquet").write_bytes(b"not parquet")
         assert cache.read("s").values == {"a": {"x@1": 1}}
 
-    @pytest.mark.parametrize("values", [pytest.param(v, id=i) for i, v in _ddd_values()])
+    @pytest.mark.parametrize("values", _ddd_params(_ddd_values()))
     def test_ddd_values_round_trip(self, tmp_path, values):
         """Every value a stat can see in a DDD column, each cell and the whole
         column as a list, as pandas and as polars hand them over, comes back
@@ -384,7 +416,37 @@ class TestStorage:
          pytest.param({"p#lo": 1, "p#hi": 3}, id="struct-hash-key"),
          pytest.param({"a,b": 1, "a": 2}, id="struct-comma-key"),
          pytest.param({"big": 2**63 + 5, "small": 1}, id="struct-uint64"),
-         pytest.param(Decimal("-0.00"), id="decimal-negative-zero")])
+         pytest.param(Decimal("-0.00"), id="decimal-negative-zero"),
+         pytest.param(-0.0, id="float-negative-zero"),
+         pytest.param([1.0, float("nan"), None], id="list-nan-and-none"),
+         pytest.param([-1, 2**63], id="list-int-and-uint64"),
+         pytest.param([1, True], id="list-int-and-bool"),
+         pytest.param([[1], ["a"], [1, "a"]], id="list-of-mixed-lists"),
+         pytest.param([{"a": 1}, {"b": 2}], id="list-of-structs-with-different-fields"),
+         pytest.param({"a": None, "b": None}, id="struct-all-null"),
+         pytest.param(_nested(50), id="list-50-deep"),
+         pytest.param([pd.NaT, pd.Timestamp("2020-01-01")], id="list-with-nat"),
+         pytest.param(np.datetime64("2020", "Y"), id="datetime64-years"),
+         pytest.param(np.timedelta64(3, "M"), id="timedelta64-months"),
+         pytest.param(pd.Period("2020-01-01", freq="W-SUN"), id="period-weekly"),
+         pytest.param(pd.Interval(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-02-01")), id="interval-of-timestamps"),
+         pytest.param(pd.Timestamp("2020-01-01").tz_localize(dt.timezone(dt.timedelta(hours=5, minutes=30))),
+             id="timestamp-fixed-offset"),
+         pytest.param(dt.datetime.max, id="datetime-max"),
+         pytest.param(dt.date.min, id="date-min"),
+         pytest.param(dt.timedelta(days=-1, microseconds=1), id="timedelta-negative"),
+         pytest.param([1, pd.NA], id="list-with-pd-na",
+             marks=pytest.mark.xfail(strict=True, reason="#1053: pd.NA isn't cached")),
+         pytest.param(pd.Timestamp("3000-01-01").as_unit("us"), id="timestamp-us-past-2262",
+             marks=pytest.mark.xfail(strict=True, reason="#1053: stored as nanoseconds, which overflow")),
+         pytest.param(pd.Timedelta(np.timedelta64(200_000 * 86_400, "s")), id="timedelta-s-past-ns-range",
+             marks=pytest.mark.xfail(strict=True, reason="#1053: stored as nanoseconds, which overflow")),
+         pytest.param(dt.datetime(2020, 11, 1, 1, 30, fold=1, tzinfo=zoneinfo.ZoneInfo("America/New_York")),
+             id="datetime-fold-1", marks=pytest.mark.xfail(strict=True, reason="#1053: fold=1 never compares equal")),
+         pytest.param({}, id="empty-struct",
+             marks=pytest.mark.xfail(strict=True, reason="#1053: parquet can't write an empty struct")),
+         pytest.param(np.datetime64(5, "10s"), id="datetime64-10s",
+             marks=pytest.mark.xfail(strict=True, reason="#1053: the spec drops the unit's multiplier"))])
     def test_value_round_trips(self, tmp_path, value):
         """Values outside the DDD that stats return: pandas and numpy temporals
         keep their unit, timezone and nanoseconds, and struct keys may hold any
@@ -394,6 +456,34 @@ class TestStorage:
         got = cache.read("s").values.get("a", {})
         assert "v@x" in got, f"{value!r} wasn't cached"
         assert _same(got["v@x"], value), f"{value!r} came back as {got['v@x']!r}"
+
+    @pytest.mark.parametrize("value",
+        [pytest.param(2**64, id="int-past-uint64"),
+         pytest.param(np.complex128(1j), id="complex"),
+         pytest.param({1, 2}, id="set"),
+         pytest.param(np.array([1, 2]), id="ndarray"),
+         pytest.param("\ud800", id="lone-surrogate"),
+         pytest.param(dt.timedelta.max, id="timedelta-past-int64-microseconds"),
+         pytest.param(pd.Timestamp("2020-01-01").tz_localize(dt.timezone(dt.timedelta(hours=5), "PKT")),
+             id="timestamp-named-offset", marks=pytest.mark.xfail(strict=True,
+                 reason="#1052: tz 'PKT' can't be read back")),
+         pytest.param(dt.datetime(2020, 1, 1, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30))),
+             id="datetime-fixed-offset",
+             marks=pytest.mark.xfail(strict=True, reason="#1052: tz 'UTC+05:30' can't be read back")),
+         pytest.param(dt.datetime(1, 1, 1, tzinfo=zoneinfo.ZoneInfo("Asia/Kolkata")), id="datetime-before-year-1-utc",
+             marks=pytest.mark.xfail(strict=True, reason="#1052: reading it back overflows")),
+         pytest.param(np.datetime64("NaT"), id="datetime64-generic-nat",
+             marks=pytest.mark.xfail(strict=True, reason="#1052: decoding a generic unit raises")),
+         pytest.param(_nested(200), id="list-200-deep",
+             marks=pytest.mark.xfail(strict=True, reason="#1052: parquet can't read it back"))])
+    def test_a_value_that_does_not_round_trip_costs_only_its_own_cell(self, tmp_path, value):
+        """A value the codec can't store, or can't read back exactly, is left
+        out, and the rest of the part is cached."""
+        cache = sc.StatCache(tmp_path)
+        cache.write("s", {"a": {"ok@1": 7, "v@x": value}})
+        got = cache.read("s").values.get("a", {})
+        assert got.get("ok@1") == 7, f"writing {value!r} lost the rest of the part"
+        assert "v@x" not in got or _same(got["v@x"], value), f"{value!r} came back as {got['v@x']!r}"
 
 
 # ============================================================
@@ -673,18 +763,20 @@ class TestPipelineCache:
             assert errs == []
             assert sd["ints"]["plus"] == 40 + n
 
-    @pytest.mark.parametrize("name", [name for name, _ in _ddd_frames()])
+    @pytest.mark.parametrize("name", _ddd_params((name, name) for name, _ in _ddd_frames()))
     def test_ddd_frames_load_the_same_warm_as_cold(self, tmp_path, name):
-        """A warm load of any DDD frame xorq can load returns exactly the stats
-        the cold load computed, a ``ColumnValue`` stat over every column
-        included."""
+        """A warm load of any DDD frame xorq can load is served entirely from
+        the cache and returns exactly the stats the cold load computed, a
+        ``ColumnValue`` stat over every column included."""
         table = _ddd_xorq_table(name)
         if table is None:
             pytest.skip(f"xorq can't load {name}")
         cache = sc.StatCache(tmp_path)
         stats = XORQ_STATS_V2 + [first_value]
         cold, cold_errs = _pipeline(cache, stats).process_table(table, scope_id="s")
-        warm, warm_errs = _pipeline(cache, stats).process_table(table, scope_id="s")
+        warm_pipeline = _pipeline(cache, stats)
+        warm, warm_errs = warm_pipeline.process_table(table, scope_id="s")
+        assert warm_pipeline.cache_run_stats()["misses"] == 0, "the warm load recomputed cells the cold load wrote"
         assert {(e.column, e.stat_key) for e in warm_errs} == {(e.column, e.stat_key) for e in cold_errs}
         for col, cells in cold.items():
             for key, value in cells.items():

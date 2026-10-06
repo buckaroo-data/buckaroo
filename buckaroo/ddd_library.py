@@ -259,6 +259,135 @@ def pl_df_with_json_like_strings():
     return pl.DataFrame(_JSON_LIKE_STRINGS)
 
 
+# Edge values for the summary stats and their per-cell cache, which must give
+# every value back with its own type: extremes, specials, empty and all-null
+# columns, nested and timezone-aware types.
+
+def df_with_int_extremes() -> pd.DataFrame:
+    """Each integer dtype at its limits: int64's min and max, uint64's max (past int64's), int8's range."""
+    return pd.DataFrame({
+        'int64': pd.Series([-2**63, 2**63 - 1, 0], dtype='int64'),
+        'uint64': pd.Series([2**64 - 1, 2**63, 0], dtype='uint64'),
+        'int8': pd.Series([-128, 127, 0], dtype='int8')})
+
+
+def pl_df_with_float_specials():
+    """NaN, both infinities, negative zero, the smallest subnormal and the largest float beside a null,
+    a column that is all NaN, and float32.
+
+    Polars, because it keeps NaN apart from null: pandas -> arrow turns NaN into null.
+    """
+    import polars as pl
+    return pl.DataFrame({
+        'specials': pl.Series([float('nan'), float('inf'), float('-inf'), -0.0, 5e-324,
+                               1.7976931348623157e308, None, 1.0], dtype=pl.Float64),
+        'all_nan': pl.Series([float('nan')] * 8, dtype=pl.Float64),
+        'float32': pl.Series([1.1, 2.2, 3.3, float('nan'), 4.4, 5.5, 6.6, 7.7], dtype=pl.Float32)})
+
+
+def pl_df_all_null():
+    """Typed columns holding no values at all, beside a column of polars' Null type."""
+    import polars as pl
+    n = 4
+    return pl.DataFrame({
+        'null': pl.Series([None] * n, dtype=pl.Null),
+        'int': pl.Series([None] * n, dtype=pl.Int64),
+        'float': pl.Series([None] * n, dtype=pl.Float64),
+        'str': pl.Series([None] * n, dtype=pl.String),
+        'bool': pl.Series([None] * n, dtype=pl.Boolean),
+        'datetime': pl.Series([None] * n, dtype=pl.Datetime('us')),
+        'list': pl.Series([None] * n, dtype=pl.List(pl.Int64))})
+
+
+def pl_df_empty():
+    """Columns of several types and zero rows."""
+    import polars as pl
+    return pl.DataFrame(schema={'int': pl.Int64, 'float': pl.Float64, 'str': pl.String,
+        'datetime': pl.Datetime('us')})
+
+
+def pl_df_with_unicode_strings():
+    """Strings that get mangled in transit: emoji, a combining accent, right-to-left and CJK text, an
+    embedded NUL, empty and whitespace-only strings, and one 10,000 characters long."""
+    import polars as pl
+    return pl.DataFrame({
+        'unicode': ['😀', 'é', 'שלום', '中文', '', '  ', '\t\n', None],
+        'nul': ['a\x00b', '\x00', 'x', 'y', 'z', 'w', 'v', 'u'],
+        'long': ['x' * 10_000, 'y', 'z', 'w', 'v', 'u', 't', 's']})
+
+
+def pl_df_with_temporal_edges():
+    """Datetimes with nanoseconds that matter, in a named timezone, and outside pandas' nanosecond
+    range (years 1, 3000 and 9999), beside the calendar's first and last dates, negative durations
+    and times with nanoseconds."""
+    import datetime as dt
+    import polars as pl
+    far = [dt.datetime(1, 1, 1), dt.datetime(9999, 12, 31, 23, 59, 59), dt.datetime(3000, 1, 1), None]
+    return pl.DataFrame({
+        'ns': pl.Series([1, 10**18 + 123, -1, None], dtype=pl.Int64).cast(pl.Datetime('ns')),
+        'new_york': pl.Series([dt.datetime(2020, 1, 1, 12), dt.datetime(2020, 11, 1, 1, 30),
+                               dt.datetime(2020, 7, 1, 12), None]).dt.replace_time_zone('America/New_York', ambiguous='latest'),
+        'far': pl.Series(far, dtype=pl.Datetime('us')),
+        'far_kolkata': pl.Series(far, dtype=pl.Datetime('us')).dt.replace_time_zone('Asia/Kolkata'),
+        'date': [dt.date(1, 1, 1), dt.date(9999, 12, 31), dt.date(2000, 2, 29), None],
+        'duration': pl.Series([-1, 0, 10**15, None], dtype=pl.Int64).cast(pl.Duration('us')),
+        'time': pl.Series([1, 86_399_999_999_999, 0, None], dtype=pl.Int64).cast(pl.Time)})
+
+
+def df_with_fixed_offset_timestamps() -> pd.DataFrame:
+    """Timestamps in fixed-offset timezones (+05:30, -08:00), which arrow names by offset rather
+    than by place."""
+    import datetime as dt
+    times = pd.Series(pd.to_datetime(['2020-01-01 12:00', '2020-07-01 12:00', '2020-01-02 00:00']))
+    return pd.DataFrame({
+        'plus_0530': times.dt.tz_localize(dt.timezone(dt.timedelta(hours=5, minutes=30))),
+        'minus_0800': times.dt.tz_localize(dt.timezone(dt.timedelta(hours=-8)))})
+
+
+def df_with_far_future_fixed_offset_timestamps() -> pd.DataFrame:
+    """Fixed-offset timestamps past 2262, where pandas' nanosecond range ends. They arrive as
+    microsecond pd.Timestamps, and through arrow as datetime.datetime with a pytz.FixedOffset."""
+    import datetime as dt
+    times = pd.Series([dt.datetime(3000, 1, 1, 12), dt.datetime(9999, 12, 31), dt.datetime(2020, 1, 1)],
+        dtype='datetime64[us]')
+    return pd.DataFrame({'plus_0530': times.dt.tz_localize(dt.timezone(dt.timedelta(hours=5, minutes=30)))})
+
+
+def pl_df_with_nested_types():
+    """List, fixed-size array and struct columns holding empty lists, nulls inside lists, structs
+    whose fields are null, and lists of structs."""
+    import polars as pl
+    return pl.DataFrame({
+        'list_int': pl.Series([[1, 2], [], None, [3, None]], dtype=pl.List(pl.Int64)),
+        'list_str': pl.Series([['a'], ['b', 'c'], [], None], dtype=pl.List(pl.String)),
+        'array': pl.Series([[1, 2], [3, 4], None, [5, 6]], dtype=pl.Array(pl.Int64, 2)),
+        'struct': pl.Series([{'a': 1, 'b': 'x'}, {'a': None, 'b': None}, None, {'a': 2, 'b': 'y'}]),
+        'list_of_struct': pl.Series([[{'a': 1}], [], None, [{'a': None}]])})
+
+
+def df_with_nullable_dtypes() -> pd.DataFrame:
+    """pandas' nullable extension dtypes, whose missing cells are pd.NA rather than NaN or None."""
+    return pd.DataFrame({
+        'Int64': pd.array([1, None, 3], dtype='Int64'),
+        'Float64': pd.array([1.5, None, 3.5], dtype='Float64'),
+        'boolean': pd.array([True, None, False], dtype='boolean'),
+        'string': pd.array(['a', None, 'c'], dtype='string')})
+
+
+def df_with_arrow_dtypes() -> pd.DataFrame:
+    """pandas columns backed by pyarrow types numpy has no equivalent of: a map, time32, date64 and
+    a large string."""
+    import pyarrow as pa
+
+    def arrow(values, typ):
+        return pd.Series(pd.arrays.ArrowExtensionArray(pa.array(values, typ)))
+    return pd.DataFrame({
+        'map': arrow([[('k', 1)], [], [('j', 2), ('k', 3)]], pa.map_(pa.string(), pa.int64())),
+        'time32': arrow([0, 1, 86_399], pa.time32('s')),
+        'date64': arrow([0, 86_400_000, 2 * 86_400_000], pa.date64()),
+        'large_string': arrow(['a', 'b', 'c'], pa.large_string())})
+
+
 """
 Mkae a duplicate column dataframe
 
