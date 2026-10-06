@@ -1,11 +1,13 @@
 """End-to-end tests for POST /load_expr — server load path for
 XorqBuckarooInfiniteWidget over a xorq/ibis expression."""
+import gc
 import io
 import json
 import os
 import shutil
 import sys
 import tempfile
+import weakref
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -20,10 +22,12 @@ xo = pytest.importorskip("xorq.api")
 
 import xorq.caching.storage  # noqa: E402
 from attr import evolve  # noqa: E402
+from xorq import config as xorq_config  # noqa: E402
 from xorq.caching import ParquetSnapshotCache, ParquetStorage  # noqa: E402
 from xorq.common.utils.graph_utils import replace_nodes, walk_nodes  # noqa: E402
 from xorq.common.utils.provenance_utils import read_parquet_provenance  # noqa: E402
 from xorq.expr.relations import CachedNode  # noqa: E402
+from xorq.vendor.ibis.expr import operations as ops  # noqa: E402
 
 from buckaroo.server import telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
@@ -996,6 +1000,101 @@ class TestLoadExprPerfFixes(tornado.testing.AsyncHTTPTestCase):
                 "load_expr_build_dir minted a new backend on the second call")
         finally:
             shutil.rmtree(builds_root, ignore_errors=True)
+
+    def test_loaded_backend_released_with_expr(self):
+        """#896: a loaded expression's backend must be freed once nothing holds
+        the expression. xorq's ``translate_from_yaml`` is an unbounded
+        lru_cache keyed on the per-load translation context, so it kept every
+        loaded tree, and the backend each load connects, for the process
+        lifetime."""
+        root = tempfile.mkdtemp()
+        try:
+            parquet_path = os.path.join(root, "t.parquet")
+            pd.DataFrame({"v": range(5)}).to_parquet(parquet_path)
+            build_path = str(xo.build_expr(
+                xo.connect().read_parquet(parquet_path, table_name="t896"),
+                builds_dir=os.path.join(root, "builds")))
+            expr = xorq_loading.load_expr_build_dir(build_path)
+            backend_refs = [weakref.ref(table.source)
+                for table in walk_nodes(ops.DatabaseTable, expr)]
+            self.assertTrue(backend_refs)
+            del expr
+            gc.collect()
+            self.assertEqual([ref for ref in backend_refs if ref() is not None], [],
+                "a dropped expression's backend is still alive")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_load_leaves_no_tables_on_default_backend(self):
+        """#896: rehydrating a memtable reads its parquet snapshot through
+        xorq's process-wide default backend, which registered an
+        ``ibis_read_parquet_*`` table there on every load and never dropped it."""
+        builds_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            con = xorq_config.default_backend()
+            before = set(con.list_tables())
+            xorq_loading.load_expr_build_dir(build_path)
+            self.assertEqual(set(con.list_tables()) - before, set())
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+
+    async def _load_memtable_session(self, sid, builds_dir, name):
+        """POST /load_expr for a one-memtable build named ``name``; the load's
+        stat pipeline executes it, registering ``name`` on xorq's default
+        backend."""
+        build_path = str(xo.build_expr(
+            xo.memtable({"v": [1, 2, 3]}, name=name), builds_dir=builds_dir))
+        resp = await _post(self.get_http_port(), "/load_expr",
+            {"session": sid, "build_dir": build_path})
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertIn(name, xorq_config.default_backend().list_tables())
+
+    @tornado.testing.gen_test
+    async def test_evicted_session_releases_memtables(self):
+        """#896: xorq registers a memtable's rows on its default backend on
+        every execute and never deregisters them, so an evicted session's
+        entry stayed resident for the process lifetime."""
+        root = tempfile.mkdtemp()
+        try:
+            sid = "lx-evict-memtables"
+            await self._load_memtable_session(sid, root, "mt896_evict")
+            sessions = self._app.settings["sessions"]
+            sessions.get(sid).last_accessed = 0
+            self.assertEqual(sessions.evict_idle_sessions(), 1)
+            self.assertNotIn("mt896_evict", xorq_config.default_backend().list_tables())
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_load_swap_releases_memtables(self):
+        """#896: /load swapping a xorq session to pandas drops the expression,
+        so its memtables must leave xorq's default backend with it."""
+        root = tempfile.mkdtemp()
+        try:
+            sid = "lx-swap-memtables"
+            await self._load_memtable_session(sid, root, "mt896_swap")
+            csv_path = os.path.join(root, "t.csv")
+            pd.DataFrame({"a": [1, 2, 3]}).to_csv(csv_path, index=False)
+            resp = await _post(self.get_http_port(), "/load",
+                {"session": sid, "path": csv_path, "mode": "buckaroo"})
+            self.assertEqual(resp.code, 200, resp.body)
+            self.assertNotIn("mt896_swap", xorq_config.default_backend().list_tables())
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    @tornado.testing.gen_test
+    async def test_reload_releases_previous_memtables(self):
+        """#896: /load_expr of a new build on a live session replaces its
+        expression; the old build's memtables must leave the default backend."""
+        root = tempfile.mkdtemp()
+        try:
+            sid = "lx-reload-memtables"
+            await self._load_memtable_session(sid, root, "mt896_old")
+            await self._load_memtable_session(sid, root, "mt896_new")
+            self.assertNotIn("mt896_old", xorq_config.default_backend().list_tables())
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
 
 class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
