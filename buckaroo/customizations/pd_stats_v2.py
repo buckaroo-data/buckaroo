@@ -101,6 +101,25 @@ def _type(is_bool: bool, is_numeric: bool, is_float: bool,
     return "obj"
 
 
+def with_type(flags: dict) -> dict:
+    """``flags``, the ``is_*`` keys a typing stat returns, plus the ``_type``
+    derived from them through the ``_type`` stat."""
+    return {**flags, '_type': _type(**{key.name: flags[key.name] for key in _type._stat_func.requires})}
+
+
+def schema_stats(ser: pd.Series) -> dict:
+    """The stats a column's dtype alone determines: ``dtype``, the ``is_*``
+    flags and ``_type``. ``typing_stats`` runs on a zero-row slice, so no value
+    is read, and ``memory_usage`` is left out because it measures the data.
+
+    An ``object`` column gives the typing nothing to go on, and pandas calls an
+    empty one a string, so every object column types as ``string`` here. Full
+    stats look at the values and may say ``obj``."""
+    flags = typing_stats(ser.iloc[:0])
+    del flags['memory_usage']
+    return with_type(flags)
+
+
 # ============================================================
 # Base Summary Stats (replaces DefaultSummaryStats ColAnalysis)
 # ============================================================
