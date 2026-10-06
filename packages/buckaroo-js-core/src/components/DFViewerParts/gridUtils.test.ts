@@ -196,7 +196,7 @@ describe("testing utility functions in gridUtils ", () => {
       const result = extractPinnedRows(data, pinnedConfig);
       expect(result).toEqual([
         { index: "row1", value: 1 },
-        undefined
+        { index: "missing" }
       ]);
     });
 
@@ -232,10 +232,10 @@ describe("testing utility functions in gridUtils ", () => {
       ]);
     });
 
-    it("still emits undefined for an unprefixed required pinned row when its key is absent", () => {
-      // Backward-compat: required (no `?`) rows preserve the existing
-      // "kept as undefined when absent" behavior so callers that depend on
-      // positional alignment with pinned_rows config keep working.
+    it("emits a placeholder carrying the key for a required pinned row whose key is absent", () => {
+      // Summary stats can arrive after the rows. The placeholder keeps the
+      // row's label and gives it its own row id; an optional row is still
+      // omitted.
       const data: DFData = [
         { index: "histogram_bins", value: 1 }
       ];
@@ -248,7 +248,7 @@ describe("testing utility functions in gridUtils ", () => {
       expect(result.length).toBe(2);
       expect(result).toStrictEqual([
         { index: "histogram_bins", value: 1 },
-        undefined
+        { index: "missing" }
       ]);
     });
   });

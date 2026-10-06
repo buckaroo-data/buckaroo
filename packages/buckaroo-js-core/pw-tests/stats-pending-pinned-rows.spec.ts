@@ -1,22 +1,18 @@
 /**
- * Playwright test for the client states of the two-message protocol
- * (rows-first c0a).
+ * Playwright test for summary stats that arrive after the rows (rows-first
+ * c0a), on the StatsPendingPinnedRows "Manual" story.
  *
- * While summary stats have not arrived, `df_meta.stats.status` decides what
- * the pinned area shows. The StatsPendingPinnedRows story flips the status and
- * supplies the stats on "complete":
- *   - pending: every valueless pinned key shows a placeholder row with its own
- *     row id
- *   - not_computed: valueless pinned keys are omitted
- *   - complete: the values appear and the color-mapped column restyles
+ * Before the stats arrive every pinned key shows a placeholder row with its own
+ * row id, its label, and empty cells. After "Deliver stats now" the values
+ * appear and the color-mapped column restyles.
  */
 import { test, expect } from "@playwright/test";
 import { waitForCells } from "./ag-pw-utils";
 
 const STORY_URL =
-  "http://localhost:6006/iframe.html?viewMode=story&id=buckaroo-dfviewer-statspendingpinnedrows--primary&globals=&args=";
+  "http://localhost:6006/iframe.html?viewMode=story&id=buckaroo-dfviewer-statspendingpinnedrows--manual&globals=&args=";
 
-test("pinned rows follow df_meta.stats.status: placeholders, omitted, then values and colors", async ({ page }) => {
+test("pinned rows are placeholders until the summary stats arrive, then values and colors", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (e) => pageErrors.push(e.message));
 
@@ -28,23 +24,25 @@ test("pinned rows follow df_meta.stats.status: placeholders, omitted, then value
     const ids = await pinnedRows.evaluateAll((els) => els.map((e) => e.getAttribute("row-id")));
     return Array.from(new Set(ids)).sort();
   };
+  const pinnedCell = (rowId: string, colId: string) =>
+    page.locator(`.ag-floating-top .ag-row[row-id="${rowId}"] [col-id="${colId}"]`);
   const bodyCellA = page.locator('.ag-center-cols-container .ag-row[row-index="0"] [col-id="a"]');
   const backgroundOf = (loc: typeof bodyCellA) => loc.evaluate((el) => getComputedStyle(el).backgroundColor);
 
-  // pending: one placeholder per pinned key, each with its own row id.
-  await expect.poll(distinctPinnedRowIds, { timeout: 10_000 }).toEqual(["main-dtype", "main-mean"]);
-  await expect(bodyCellA).toHaveText("1");
+  // Before the stats: one placeholder per pinned key, labelled, value cells empty.
+  await expect.poll(distinctPinnedRowIds, { timeout: 10_000 }).toEqual(["main-dtype", "main-histogram", "main-mean"]);
+  await expect(pinnedCell("main-dtype", "index")).toHaveText("dtype");
+  await expect(pinnedCell("main-dtype", "a")).toHaveText("");
+  await expect(pinnedCell("main-mean", "a")).toHaveText("");
+  await expect(bodyCellA).toHaveText("0");
   const backgroundBeforeBins = await backgroundOf(bodyCellA);
 
-  // not_computed: the valueless keys are omitted.
-  await page.getByTestId("status-not_computed").click();
-  await expect.poll(distinctPinnedRowIds, { timeout: 10_000 }).toEqual([]);
-
-  // complete: the values appear, and the color-mapped column restyles now
+  // The stats arrive: values appear, and the color-mapped column restyles now
   // that its histogram bins exist.
-  await page.getByTestId("status-complete").click();
-  await expect.poll(distinctPinnedRowIds, { timeout: 10_000 }).toEqual(["main-dtype", "main-mean"]);
-  await expect(page.locator('.ag-floating-top .ag-cell[col-id="a"]').first()).toHaveText("int64");
+  await page.getByTestId("deliver-stats").click();
+  await expect(pinnedCell("main-dtype", "a")).toHaveText("int64");
+  await expect(pinnedCell("main-mean", "b")).not.toHaveText("");
+  await expect.poll(distinctPinnedRowIds).toEqual(["main-dtype", "main-histogram", "main-mean"]);
   await expect.poll(() => backgroundOf(bodyCellA), { timeout: 10_000 }).not.toBe(backgroundBeforeBins);
   expect(pageErrors).toEqual([]);
 });
