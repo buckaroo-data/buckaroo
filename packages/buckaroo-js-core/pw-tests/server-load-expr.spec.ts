@@ -137,4 +137,18 @@ test.describe('POST /load_expr', () => {
     await expect.poll(() => getPinnedCellTexts(page, COL.name), { timeout: 15_000 }).toContain('7');
     expect(await getPinnedCellTexts(page, COL.idx)).toEqual(expect.arrayContaining(['0', '9']));
   });
+
+  test('deferred stats: the rows render first and the stats then reach the DOM', async ({ page, request }) => {
+    const session = `lx-deferred-${Date.now()}`;
+    await loadExpr(request, session, buildDir, { stats_delivery: 'deferred' });
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+    expect(await getCellText(page, COL.idx, 0)).toBe('0');
+    expect(await getCellText(page, COL.name, 0)).toBe('alpha');
+
+    await showSummaryView(page);
+    await expect.poll(() => getPinnedCellTexts(page, COL.name), { timeout: 15_000 }).toContain('7');
+    expect(await getPinnedCellTexts(page, COL.idx)).toEqual(expect.arrayContaining(['0', '9']));
+  });
 });
