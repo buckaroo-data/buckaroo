@@ -301,7 +301,11 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
             return self.processed_result[1]
         return {}
 
-    def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, TAny]:
+    def _get_summary_sd(self, processed_df: DataFrameT, scope: str = 'filt') -> Tuple[SDType, TAny]:
+        """Summary stats for ``processed_df``, the frame of ``scope`` ('raw',
+        'clean' or 'filt'; see ``split_chain_by_scope``). Subclasses that
+        persist stats use the scope to tell an unfiltered view from a
+        filtered one."""
         analysis_klasses = self.analysis_klasses
         if analysis_klasses == "foo":
             return {'some-col': {'foo':8}}, {}
@@ -333,7 +337,7 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
         if (id(df), id(klasses)) == self._summary_sd_cache_key:
             return
         self._summary_sd_cache_key = (id(df), id(klasses))
-        result_summary_sd, errs  = self._get_summary_sd(df)
+        result_summary_sd, errs  = self._get_summary_sd(df, scope='filt')
         self.summary_sd = result_summary_sd
         self.errs = errs
 
@@ -665,7 +669,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
             scope_df = self._compute_scope_df(scope)
             if scope_df is None:
                 continue
-            sd, _errs = self._get_summary_sd(scope_df)
+            sd, _errs = self._get_summary_sd(scope_df, scope=scope)
             new_cache[keys[scope]] = sd
             cache_grew = True
 
@@ -710,7 +714,7 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     ### start summary stats block
     #TAny closer to some error type
     @override
-    def _get_summary_sd(self, processed_df: DataFrameT) -> Tuple[SDType, ErrDict]:
+    def _get_summary_sd(self, processed_df: DataFrameT, scope: str = 'filt') -> Tuple[SDType, ErrDict]:
         stats = self.DFStatsClass(
             processed_df,
             self.analysis_klasses,

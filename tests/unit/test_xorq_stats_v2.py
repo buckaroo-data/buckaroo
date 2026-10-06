@@ -20,6 +20,7 @@ from buckaroo.pluggable_analysis_framework import perf_log  # noqa: E402
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import (  # noqa: E402
     XorqStatPipeline,
     XorqColumn)
+from buckaroo.pluggable_analysis_framework.stat_cache import StatCache  # noqa: E402
 from buckaroo.pluggable_analysis_framework.stat_func import stat  # noqa: E402
 from buckaroo.customizations.xorq_stats_v2 import (  # noqa: E402
     XORQ_STATS_V2)
@@ -721,56 +722,31 @@ class TestBackendThreading:
         ), f"histogram is recomputing min/max; saw {backend.calls} queries"
 
 
-class TestCacheStorageExecute:
-    """_execute serves a cache HIT by reading the snapshot parquet directly
-    rather than re-planning the expression through cache().execute()."""
-
-    def test_cache_hit_reads_parquet_directly(self, tmp_path):
-        import buckaroo.pluggable_analysis_framework.xorq_stat_pipeline as xsp
-        from unittest.mock import patch
-
-        cache = xo.ParquetSnapshotCache.from_kwargs(
-            source=xo.connect(), base_path=str(tmp_path))
-        con = xo.connect()
-        df = pd.DataFrame({"k": range(20), "v": [float(i % 7) for i in range(20)]})
-        t = con.create_table("ce_t", df)
-        query = t.filter(t.v > 1)
-
-        pipeline = XorqStatPipeline(XORQ_STATS_V2, cache_storage=cache)
-
-        # First execute is a MISS: the snapshot doesn't exist yet, so the
-        # parquet-read shortcut must NOT fire — it falls through to cache().
-        with patch.object(xsp.pd, "read_parquet", wraps=pd.read_parquet) as miss_spy:
-            result1 = pipeline._execute(query)
-        assert miss_spy.call_count == 0, "read_parquet fired before the cache was populated"
-
-        key = cache.calc_key(query)
-        assert os.path.exists(cache.storage.get_path(key)), "miss did not populate the cache"
-
-        # Second execute is a HIT: served by reading the snapshot parquet,
-        # never re-planning through cache().execute().
-        with patch.object(xsp.pd, "read_parquet", wraps=pd.read_parquet) as hit_spy:
-            result2 = pipeline._execute(query)
-        assert hit_spy.call_count == 1, "cache hit did not read the snapshot parquet"
-
-        pd.testing.assert_frame_equal(
-            result1.reset_index(drop=True), result2.reset_index(drop=True))
+class TestCacheStorageArgument:
+    def test_accepts_a_xorq_snapshot_cache(self, tmp_path):
+        """A xorq ``ParquetSnapshotCache``, the type cache_storage took before
+        the per-cell cache (ADR-001), still works: the stat cache lives under
+        its base_path."""
+        cache = xo.ParquetSnapshotCache.from_kwargs(source=xo.connect(), base_path=str(tmp_path))
+        pipeline = XorqStatPipeline(XORQ_STATS_V2, unit_test=False, cache_storage=cache)
+        pipeline.process_table(_make_table())
+        assert pipeline.cache_run_stats()["parts_written"] == 1
+        assert list((tmp_path / "parquet" / "v1").glob("*/part-*.parquet"))
 
 
 class TestSnapshotCacheRun:
-    """Per-run snapshot-cache behaviour (#910).
+    """Per-run stat-cache behaviour (#910, ADR-001).
 
-    A cold run computes each stat query against the source and writes one
-    snapshot per query; a fully-warm run reads those snapshots without
-    re-scanning the source; every run with a cache configured logs a single
-    summary line carrying the hit/miss/snapshot/byte/error counts."""
+    A cold run computes every cell against the source and writes them as one
+    part; a fully-warm run reads that part without re-scanning the source;
+    every run with a cache configured logs a single summary line carrying the
+    hit/miss/part/byte/error counts."""
 
     _LOGGER = "buckaroo.pluggable_analysis_framework.xorq_stat_pipeline"
 
     @staticmethod
     def _cache(tmp_path):
-        return xo.ParquetSnapshotCache.from_kwargs(
-            source=xo.connect(), base_path=str(tmp_path))
+        return StatCache(tmp_path)
 
     @staticmethod
     def _filter_chain_table():
@@ -789,10 +765,10 @@ class TestSnapshotCacheRun:
         pipeline.process_table(self._filter_chain_table())
         s = pipeline._cache_stats
         assert s["misses"] > 0 and s["hits"] == 0, f"cold run should miss the cache: {s}"
-        assert s["snapshots"] == s["misses"], "each miss should write exactly one snapshot"
+        assert s["snapshots"] == 1, "a run writes its computed cells as one part"
         assert s["bytes"] > 0 and s["write_errors"] == 0
         files = [f for _, _, fs in os.walk(tmp_path) for f in fs if f.endswith(".parquet")]
-        assert files, "expected snapshot parquet files under the cache dir"
+        assert files, "expected a part file under the cache dir"
 
     def test_warm_run_hits_cache(self, tmp_path):
         cache = self._cache(tmp_path)

@@ -479,11 +479,20 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # ~/.cache/xorq and recomputing the embedder's snapshots there.
         if cache_dir is None and existing is not None:
             cache_dir = existing.cache_dir
+        # The identity of the rows the build reads (e.g. tallyman's snapshot
+        # digest); it keys the summary-stat cache. Omitted, it carries over
+        # like cache_dir, but only for the same build. A new value means the
+        # rows changed, so the warm exit below can't serve the old stats.
+        data_id = body.get("data_id")
+        existing_kwargs = (existing.dataflow_kwargs or {}) if existing is not None else {}
+        if data_id is None and existing is not None and existing.build_dir == build_dir:
+            data_id = existing_kwargs.get("data_id")
         # /load swaps a session to pandas without clearing build_dir, so the
         # backend is checked too — else its pandas metadata comes back here.
         if (not force_reload and not has_config and existing
                 and existing.backend == "xorq" and existing.build_dir == build_dir
-                and existing.cache_dir == cache_dir and existing.metadata):
+                and existing.cache_dir == cache_dir and existing_kwargs.get("data_id") == data_id
+                and existing.metadata):
             # The pipeline is skipped, but the refreshed page still opens a new
             # WS and pulls a fresh time-to-first-rows (#944).
             telemetry.arm_session(existing, tele_sink)
@@ -526,6 +535,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # stats).
         dataflow_kwargs = {
             "cache_storage_path": body.get("cache_storage_path"),
+            "data_id": data_id,
             "column_config_overrides": body.get("column_config_overrides"),
             "extra_grid_config": body.get("extra_grid_config"),
             "init_sd": body.get("init_sd"),

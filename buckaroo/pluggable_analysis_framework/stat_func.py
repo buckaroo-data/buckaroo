@@ -13,6 +13,8 @@ import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional, TypedDict, get_type_hints
 
+from .source_digest import callable_digest
+
 
 class MultipleProvides(TypedDict):
     """Marker base class for stat funcs that return more than one accumulator key.
@@ -163,6 +165,10 @@ class StatFunc:
         column_filter: optional predicate on column dtype
         quiet: suppress error reporting
         default: fallback value on failure (MISSING = no fallback)
+        source_digest: digest of the source that defines ``func``, taken when
+            the StatFunc is constructed (see ``source_digest.callable_digest``).
+            Keys the stat's cached cells. None when ``func`` has no source file,
+            and the stat isn't cached.
     """
     name: str
     func: Callable
@@ -172,6 +178,11 @@ class StatFunc:
     column_filter: Optional[Callable] = None
     quiet: bool = False
     default: Any = field(default_factory=lambda: MISSING)
+    source_digest: Optional[str] = None
+
+    def __post_init__(self):
+        if self.source_digest is None:
+            self.source_digest = callable_digest(self.func)
 
 
 # ---------------------------------------------------------------------------
