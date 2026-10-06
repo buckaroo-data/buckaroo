@@ -6,7 +6,7 @@ import { KeyAwareSmartRowCache, PayloadArgs } from './SmartRowCache';
 export declare function getCellRendererorFormatter(dispArgs: DisplayerArgs): ColDef;
 export declare function isOptionalPinnedKey(key: string): boolean;
 export declare function stripOptionalPinnedKey(key: string): string;
-export declare function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]): (import('./DFWhole').DFDataRow | undefined)[];
+export declare function extractPinnedRows(sdf: DFData, prc: PinnedRowConfig[]): DFData;
 export declare function extractSingleSeriesSummary(full_summary_stats_df: DFData, col_name: string): DFWhole;
 export declare const getFieldVal: (f: ColumnConfig) => string;
 export declare function baseColToColDef(f: ColumnConfig): ColDef;
