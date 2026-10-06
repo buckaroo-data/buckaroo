@@ -1580,6 +1580,30 @@ class TestReloadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(project_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_reload_expr_ignores_a_body_it_cannot_parse(self):
+        """The body is optional, so one that isn't JSON (or isn't UTF-8) is
+        treated as absent rather than failing the reload."""
+        builds_root = tempfile.mkdtemp()
+        project_root = tempfile.mkdtemp()
+        try:
+            build_path = _build_expr_dir(builds_root)
+            sid = "re-bad-body"
+            await _post(self.get_http_port(), "/load_expr",
+                {"session": sid, "build_dir": build_path,
+                 "project_root": project_root})
+            client = tornado.httpclient.AsyncHTTPClient()
+            for raw in (b"not json", b"\xff"):
+                resp = await client.fetch(
+                    f"http://localhost:{self.get_http_port()}/reload_expr/{sid}",
+                    method="POST", body=raw,
+                    headers={"Content-Type": "application/json"},
+                    raise_error=False)
+                self.assertEqual(resp.code, 200, raw)
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(project_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_reload_expr_preserves_load_expr_config(self):
         """#957: /reload_expr must rebuild the dataflow with the same
         cache_storage_path, column_config_overrides, extra_grid_config,
