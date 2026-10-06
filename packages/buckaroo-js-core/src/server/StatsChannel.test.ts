@@ -270,6 +270,32 @@ describe("stats_update and df_meta.stats", () => {
     });
 });
 
+describe("stats_update and df_display_args", () => {
+    it("a final update carrying df_display_args replaces the model's, and one without leaves them", async () => {
+        const { ws, model } = makeModel(3);
+        const before = { main: { df_viewer_config: { column_config: [{ col_name: "a" }] } } };
+        const after = { main: { df_viewer_config: { column_config: [{ col_name: "a", ag_grid_specs: { minWidth: 114 } }] } } };
+        model.set("df_display_args", before);
+
+        ws.deliver(update(3, [row("mean", { a: 2 })]));
+        await settle();
+        expect(model.get("df_display_args")).toBe(before);
+
+        ws.deliver(update(3, [row("max", { a: 9 })], { df_display_args: after }));
+        await settle();
+        expect(model.get("df_display_args")).toEqual(after);
+    });
+
+    it("drops the df_display_args of an update for a gen the client has left", async () => {
+        const { ws, model } = makeModel(3);
+        const before = { main: {} };
+        model.set("df_display_args", before);
+        ws.deliver(update(2, [row("mean", { a: 2 })], { df_display_args: { main: { stale: true } } }));
+        await settle();
+        expect(model.get("df_display_args")).toBe(before);
+    });
+});
+
 describe("stats_gen", () => {
     it("drops a stats_update whose stats_gen is not the expected one", async () => {
         const { ws, model, events } = makeModel(3);
