@@ -515,6 +515,28 @@ class TestLoadExpr(tornado.testing.AsyncHTTPTestCase):
             shutil.rmtree(cache_root, ignore_errors=True)
 
     @tornado.testing.gen_test
+    async def test_repost_with_another_build_does_not_inherit_data_id(self):
+        """A re-POST that omits data_id keeps the session's only for the same
+        build. Another build's rows have nothing to do with the old data_id,
+        so they mustn't be served its stats or row count."""
+        builds_root = tempfile.mkdtemp()
+        cache_root = tempfile.mkdtemp()
+        try:
+            build_a = _build_expr_dir(builds_root)
+            build_b = str(xo.build_expr(
+                xo.memtable({'idx': [100, 200, 300], 'name': ['x', 'y', 'z']}, name='t'), builds_dir=builds_root))
+            body = {"session": "lx-data-id-build", "cache_storage_path": cache_root}
+            resp = await _post(self.get_http_port(), "/load_expr",
+                {**body, "build_dir": build_a, "data_id": "digest-a"})
+            self.assertEqual(resp.code, 200)
+            resp = await _post(self.get_http_port(), "/load_expr", {**body, "build_dir": build_b})
+            self.assertEqual(resp.code, 200)
+            self.assertEqual(json.loads(resp.body)["rows"], 3)
+        finally:
+            shutil.rmtree(builds_root, ignore_errors=True)
+            shutil.rmtree(cache_root, ignore_errors=True)
+
+    @tornado.testing.gen_test
     async def test_load_expr_telemetry_emits_session_correlated_spans(self):
         """#943: POST /load_expr with telemetry_url must emit session-correlated
         span records, including a firstpull.summary_stats span carrying the

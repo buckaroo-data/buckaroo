@@ -5,20 +5,27 @@ These tests assert structure (which queries run, which cells are computed,
 which parts are written), not wall-clock time.
 """
 
+import importlib.metadata
+import importlib.util
 import math
+import shutil
 from decimal import Decimal
+from pathlib import Path
+from typing import Any
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 xo = pytest.importorskip("xorq.api")
 
 import xorq.vendor.ibis.expr.types.core as ibis_core  # noqa: E402
 
+import buckaroo.customizations.histogram as histogram_module  # noqa: E402
 from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2  # noqa: E402
 from buckaroo.pluggable_analysis_framework import stat_cache as sc  # noqa: E402
 from buckaroo.pluggable_analysis_framework.stat_func import (  # noqa: E402
-    XorqColumn, XorqExecute, XorqExpr, stat)
+    StatFunc, StatKey, XorqColumn, XorqExecute, XorqExpr, stat)
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline  # noqa: E402
 
 
@@ -230,6 +237,45 @@ class TestStatHashes:
         assert first == again
         assert edited["zeros"] != first["zeros"]
 
+    def test_every_buckaroo_module_is_part_of_every_stat_hash(self, monkeypatch):
+        """A stat's value depends on buckaroo code outside its own file:
+        ``histogram`` takes its bucket labels from ``customizations/histogram.py``.
+        So every stat hash covers the whole package, and editing any module
+        of it invalidates every cached cell."""
+        funcs = [obj._stat_func for obj in XORQ_STATS_V2 if hasattr(obj, "_stat_func")]
+        before = sc.stat_hashes(funcs)
+        edited = Path(histogram_module.__file__)
+        real = sc.file_digest
+        monkeypatch.setattr(sc, "file_digest", lambda p: "edited" if Path(p) == edited else real(p))
+        monkeypatch.setattr(sc, "_ENGINE_CONTEXT", sc._engine_context())
+        after = sc.stat_hashes(funcs)
+        assert after["histogram"] != before["histogram"]
+        assert after["min"] != before["min"]
+
+    @pytest.mark.parametrize("dist", ["pyarrow", "pandas", "numpy"])
+    def test_value_conversion_libraries_are_part_of_every_stat_hash(self, dist, monkeypatch):
+        """Every value passes through pyarrow, pandas and numpy on its way
+        into the accumulator, so their versions are part of every stat hash."""
+        before = sc.stat_hashes([low._stat_func])
+        real = importlib.metadata.version
+        monkeypatch.setattr(importlib.metadata, "version", lambda d: "0.0.0+edited" if d == dist else real(d))
+        monkeypatch.setattr(sc, "_ENGINE_CONTEXT", sc._engine_context())
+        assert sc.stat_hashes([low._stat_func]) != before
+
+    def test_a_stat_func_takes_its_digest_when_constructed(self, tmp_path):
+        """A ``StatFunc`` built directly, without ``@stat``, is keyed by the
+        source it was built from. Editing its file afterwards must not lend
+        the code still loaded the new file's hash."""
+        path = tmp_path / "direct_stat.py"
+        path.write_text("def top(col):\n    return col.max()\n")
+        spec = importlib.util.spec_from_file_location("direct_stat", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sf = StatFunc("top", module.top, [StatKey("col", XorqColumn)], [StatKey("top", Any)], False)
+        before = sc.stat_hashes([sf])
+        path.write_text("def top(col):\n    return col.min() + 1\n")
+        assert sc.stat_hashes([sf]) == before
+
 
 # ============================================================
 # Pipeline: additive, column-bisectable, a full hit does no work
@@ -330,6 +376,24 @@ class TestPipelineCache:
         assert errs == []
         assert sd["ints"]["min"] == 0
 
+    def test_a_stat_with_no_source_file_is_never_cached(self, tmp_path):
+        """A stat compiled from a string (a notebook cell, ``exec``) has no file
+        to hash, and its code object doesn't cover the globals it reads. Its
+        cells are computed on every run and never written."""
+        ns = {"stat": stat, "XorqColumn": XorqColumn}
+        exec(compile("@stat()\ndef twice_count(col: XorqColumn) -> int:\n    return col.count() * 2\n",
+            "<cell>", "exec"), ns)
+        stats = XORQ_STATS_V2 + [ns["twice_count"]]
+        cache = sc.StatCache(tmp_path)
+        for _ in range(2):
+            with ExecSpy() as spy:
+                sd, errs = _pipeline(cache, stats).process_table(_table(), scope_id="s")
+            assert errs == []
+            assert sd["ints"]["twice_count"] == 80
+        assert {s for _, s in spy.batch_cells()} == {"twice_count"}
+        names = [n for part in _parts(cache, "s") for n in pq.read_schema(part).names]
+        assert not [n for n in names if n.startswith("twice_count@")]
+
     def test_cache_run_stats_count_cells_and_parts(self, tmp_path):
         cache = sc.StatCache(tmp_path)
         cold = _pipeline(cache)
@@ -393,3 +457,56 @@ class TestServerDataflowScopes:
         with ExecSpy() as spy:
             dataflow.post_processing_method = "head_two"
         assert spy.queries == []
+
+    @staticmethod
+    def _load(cache_path, monkeypatch, data_id="d1"):
+        from buckaroo import xorq_buckaroo
+        from buckaroo.server.xorq_loading import XorqServerDataflow
+        # A fresh server process: no row counts carried over.
+        monkeypatch.setattr(xorq_buckaroo, "_expr_count_cache", type(xorq_buckaroo._expr_count_cache)())
+        return XorqServerDataflow(_table(), skip_main_serial=True, cache_storage_path=str(cache_path),
+            data_id=data_id)
+
+    @staticmethod
+    def _length(dataflow, col="strs"):
+        return next(v["length"] for v in dataflow.summary_sd.values() if v["orig_col_name"] == col)
+
+    def test_a_search_reads_its_own_cells(self, tmp_path, monkeypatch):
+        """A committed search filters the rows the stats run over, so it's part
+        of the scope. Over a warm unfiltered scope, the search's stats and
+        filtered row count are the 5 matching rows', not all 40."""
+        dataflow = self._load(tmp_path, monkeypatch)
+        assert self._length(dataflow) == 40
+        dataflow.quick_command_args = {"search": ["s1"]}
+        assert self._length(dataflow) == 5
+        assert dataflow.df_meta["filtered_rows"] == 5
+        assert dataflow.df_meta["total_rows"] == 40
+
+    def test_a_search_never_writes_the_unfiltered_scope(self, tmp_path, monkeypatch):
+        """A search over a scope with no cells (here, wiped under a live
+        session) writes the matching rows' cells under its own scope. The next
+        unfiltered load still sees all 40 rows."""
+        dataflow = self._load(tmp_path, monkeypatch)
+        shutil.rmtree(tmp_path / "parquet")
+        dataflow.quick_command_args = {"search": ["s1"]}
+        assert self._length(dataflow) == 5
+        fresh = self._load(tmp_path, monkeypatch)
+        assert self._length(fresh) == 40
+        assert fresh.df_meta["total_rows"] == 40
+
+    def test_a_search_scope_is_cached_and_clearing_it_reads_the_warm_scope(self, tmp_path, monkeypatch):
+        """A search's scope persists like any other, so the same search in a
+        fresh process runs no query. Clearing the search reads the unfiltered
+        scope's cells instead of recomputing them."""
+        self._load(tmp_path, monkeypatch).quick_command_args = {"search": ["s1"]}
+        dataflow = self._load(tmp_path, monkeypatch)
+        with ExecSpy() as spy:
+            dataflow.quick_command_args = {"search": ["s1"]}
+        assert spy.queries == []
+        assert self._length(dataflow) == 5
+        assert dataflow.df_meta["filtered_rows"] == 5
+        assert dataflow.df_meta["total_rows"] == 40
+        with ExecSpy() as spy:
+            dataflow.quick_command_args = {}
+        assert spy.queries == []
+        assert self._length(dataflow) == 40
