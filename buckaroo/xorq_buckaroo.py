@@ -144,7 +144,7 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
 
     1. ``populate_df_meta`` can't ``len(expr)`` — it issues an
        ``expr.count().execute()`` for the row count.
-    2. ``_get_summary_sd`` re-keys the summary dict from original column
+    2. ``_get_full_sd`` re-keys the summary dict from original column
        names (what ``XorqStatPipeline`` produces) to the rewritten
        ``a, b, c`` names that ``pd_to_obj`` and the styling layer expect.
 
@@ -220,8 +220,9 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
                     'orig_col_name': orig_col,
                     'rewritten_col_name': rewritten_col}
             return empty, {}
-        if self.stats_tier == "schema":
-            return self._get_schema_sd(processed_df), {}
+        return super()._get_summary_sd(processed_df, scope)
+
+    def _get_full_sd(self, processed_df: "XorqExpr | pd.DataFrame", scope: str):
         cache_storage = getattr(self, 'cache_storage', None)
         chain = self._scope_chain(scope)
         scope_id = self._stat_scope_id(chain) if cache_storage is not None else None
@@ -241,10 +242,10 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
             # signal only the server observes (#943). Carries the write side too
             # (snapshots/bytes/write_errors, #951) so a cache that stops writing —
             # or a run with write_errors > 0 — is visible to a telemetry consumer
-            # rather than only to a server log no deployment reads. The pandas
-            # branch above already returned, so stats here is always an
-            # XorqDfStatsV2, which always exposes cache_run_stats(); call it
-            # unconditionally so a missing signal fails loudly rather than
+            # rather than only to a server log no deployment reads.
+            # _get_summary_sd keeps pandas frames from reaching here, so stats is
+            # always an XorqDfStatsV2, which always exposes cache_run_stats(); call
+            # it unconditionally so a missing signal fails loudly rather than
             # silently vanishing.
             cs = stats.cache_run_stats()
             span.set_attr(
@@ -268,17 +269,21 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
             rewritten[rewritten_col] = col_meta
         return rewritten, errs
 
-    def _get_schema_sd(self, processed_df: "XorqExpr | pd.DataFrame") -> dict:
+    def _get_schema_sd(self, processed_df: "XorqExpr | pd.DataFrame", scope: str) -> dict:
         """Identity, dtype, typing flags and row count for every column of an
-        expression, with no query beyond ``_expr_count`` (cached per
-        expression). Carries the same values full stats give those keys, so
+        expression. The count (``_expr_count``, cached per expression) is the
+        only query: the filtered frame's is the one ``populate_df_meta`` takes
+        anyway, and the raw frame changes only with the source or the
+        post-processing. The clean scope's frame is rebuilt on every cache miss,
+        so counting it would be a query of its own, and its sd has no
+        ``length``. Carries the same values full stats give those keys, so
         styling that reads only them renders the same. A column in
         ``skip_stat_columns`` gets only name, dtype and length, as at the full
         tier, so its typing comes from ``init_sd``. ``_get_summary_sd`` handles
         a pandas frame before it gets here."""
         expr = cast("XorqExpr", processed_df)
         schema = expr.schema()
-        length = _expr_count(expr)
+        length = {} if scope == 'clean' else {'length': _expr_count(expr)}
         skip = getattr(self, 'skip_stat_columns', None) or ()
         sd: dict = {}
         for orig_col, rewritten_col in old_col_new_col(expr):
@@ -286,7 +291,7 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
             typing = {'dtype': dtype} if orig_col in skip else schema_stats(dtype)
             sd[rewritten_col] = {
                 'orig_col_name': orig_col, 'rewritten_col_name': rewritten_col,
-                **typing, 'length': length}
+                **typing, **length}
         return sd
 
 

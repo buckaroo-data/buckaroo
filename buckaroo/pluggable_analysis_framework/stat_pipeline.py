@@ -23,6 +23,16 @@ from .typed_dag import build_typed_dag, build_column_dag, DAGConfigError
 from .utils import PERVERSE_DF
 
 
+def with_stat(inputs: list, stat_func_or_class) -> list:
+    """``inputs`` with ``stat_func_or_class`` added: a class of the same name is
+    replaced, anything else is appended. The rule both pipelines' ``add_stat``
+    and ``CustomizableDataflow.add_analysis`` follow."""
+    if isinstance(stat_func_or_class, type):
+        inputs = [inp for inp in inputs
+            if not (isinstance(inp, type) and inp.__name__ == stat_func_or_class.__name__)]
+    return [*inputs, stat_func_or_class]
+
+
 def _normalize_inputs(inputs: list) -> List[StatFunc]:
     """Convert a mixed list of StatFunc, @stat functions, and stat-group classes to StatFuncs.
 
@@ -349,15 +359,7 @@ class StatPipeline:
 
         Validates the DAG and runs unit test against PERVERSE_DF.
         """
-        new_inputs = list(self._original_inputs)
-
-        # Remove existing with same name if re-adding
-        if isinstance(stat_func_or_class, type):
-            new_inputs = [
-                inp for inp in new_inputs
-                if not (isinstance(inp, type) and inp.__name__ == stat_func_or_class.__name__)
-            ]
-        new_inputs.append(stat_func_or_class)
+        new_inputs = with_stat(self._original_inputs, stat_func_or_class)
 
         try:
             new_funcs = _normalize_inputs(new_inputs)

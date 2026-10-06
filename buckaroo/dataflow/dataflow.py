@@ -5,12 +5,13 @@ from typing_extensions import override
 import six
 import warnings
 import pandas as pd
-from traitlets import Unicode, Any, observe, Dict
+from traitlets import Unicode, Any, observe, Dict, Enum
 
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis, ErrDict, SDType
 from ..serialization_utils import pd_to_obj, sd_to_parquet_b64, project_sd
 from buckaroo.pluggable_analysis_framework.utils import (filter_analysis)
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import DfStatsV2
+from buckaroo.pluggable_analysis_framework.stat_pipeline import with_stat
 from .autocleaning import SentinelAutocleaning
 from .dataflow_extras import (exception_protect, Sampling)
 from .styling_core import (
@@ -218,10 +219,11 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
     # are id()-based cache keys and the dead "foo"/"bar" test branches below,
     # all of which treat None and [] alike).
     analysis_klasses: List[Type[ColAnalysis]] = []
-    # The content level the summary-stats cascade runs at (see STATS_TIERS).
-    # Instance-level on CustomizableDataflow; ``full`` here so the bare
-    # pipeline's dedupe key and cache keys can read it.
-    stats_tier: str = "full"
+    # The content level the summary-stats cascade runs at (see STATS_TIERS). A
+    # trait, so assigning it reruns _summary_sd at the new tier and an unknown
+    # value is refused. ``set_stats_tier`` switches without that compute when
+    # the new tier's stats are already in hand.
+    stats_tier = Enum(STATS_TIERS, default_value="full")
     summary_sd = Any()
     df_meta = Any()
 
@@ -379,7 +381,7 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
 
     _summary_sd_cache_key = (None, None, None)
 
-    @observe('processed_result', 'analysis_klasses')
+    @observe('processed_result', 'analysis_klasses', 'stats_tier')
     @exception_protect('summary_sd-protector')
     def _summary_sd(self, change):
         # Dedupe: the autocleaning operations cascade re-fires
@@ -395,11 +397,13 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
             # Matches the guards in _merged_sd and _populate_sd_cache, and
             # narrows Optional[DataFrameT] -> DataFrameT for _get_summary_sd.
             return
-        klasses = self.analysis_klasses
-        if (id(df), id(klasses), self.stats_tier) == self._summary_sd_cache_key:
+        key = (id(df), id(self.analysis_klasses), self.stats_tier)
+        if key == self._summary_sd_cache_key:
             return
-        self._summary_sd_cache_key = (id(df), id(klasses), self.stats_tier)
         result_summary_sd, errs  = self._get_summary_sd(df, scope='filt')
+        # Recorded once the stats exist: after a run that raises, the key still
+        # names the frame summary_sd belongs to, which _populate_sd_cache checks.
+        self._summary_sd_cache_key = key
         self.summary_sd = result_summary_sd
         self.errs = errs
 
@@ -697,17 +701,13 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         cache_grew = False
 
         # filt scope reuses the SD that _summary_sd just produced, but only if
-        # it was produced for this frame, klass list and tier. An sd left over
-        # from another (a tier changed since it ran, or an assignment ahead of
-        # the cascade) would be stored under this key and never repaired, since
-        # a present key is a hit. Compute the scope's SD instead.
-        if keys['filt'] not in new_cache:
-            current = (id(self.processed_df), id(self.analysis_klasses), self.stats_tier)
-            if self._summary_sd_cache_key == current:
-                new_cache[keys['filt']] = dict(self.summary_sd or {})
-            else:
-                filt_sd, _errs = self._get_summary_sd(self.processed_df, scope='filt')
-                new_cache[keys['filt']] = filt_sd
+        # it was produced for this frame, klass list and tier. One left over
+        # from an earlier frame (its run raised) stays out of the cache: stored
+        # under this key it would never be repaired, since a present key is a
+        # hit. The next _summary_sd run for this state fills it.
+        current = (id(self.processed_df), id(self.analysis_klasses), self.stats_tier)
+        if keys['filt'] not in new_cache and self._summary_sd_cache_key == current:
+            new_cache[keys['filt']] = dict(self.summary_sd or {})
             cache_grew = True
 
         # raw + clean: fresh compute, but only on cache miss.
@@ -763,8 +763,15 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     #TAny closer to some error type
     @override
     def _get_summary_sd(self, processed_df: DataFrameT, scope: str = 'filt') -> Tuple[SDType, ErrDict]:
+        """``processed_df``'s summary stats at the dataflow's tier: the stats
+        pipeline's (``_get_full_sd``) or the schema's (``_get_schema_sd``)."""
         if self.stats_tier == "schema":
-            return self._get_schema_sd(processed_df), {}
+            return self._get_schema_sd(processed_df, scope), {}
+        return self._get_full_sd(processed_df, scope)
+
+    def _get_full_sd(self, processed_df: DataFrameT, scope: str) -> Tuple[SDType, ErrDict]:
+        """The stats pipeline's summary of ``processed_df``, the frame of
+        ``scope``. A backend overrides this to run its own pipeline."""
         stats = self.DFStatsClass(
             processed_df,
             self.analysis_klasses,
@@ -782,17 +789,47 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
             return sdf, {}
 
 
-    def _get_schema_sd(self, processed_df: DataFrameT) -> SDType:
+    def _get_schema_sd(self, processed_df: DataFrameT, scope: str) -> SDType:
         """Identity and typing keys for every column, from the schema alone.
 
         ``orig_col_name``, ``rewritten_col_name``, ``dtype``, the ``is_*``
         flags, ``_type`` and ``length``: the keys column styling needs to pick
-        displayers, with no data query beyond the row count. A backend opts in
-        to ``stats_tier="schema"`` by overriding this.
+        displayers, with no data query beyond the row count. ``scope`` is the
+        frame's scope, for a backend whose row count is a query. A backend opts
+        in to ``stats_tier="schema"`` by overriding this.
         """
         raise NotImplementedError(f"{type(self).__name__} has no schema stats tier")
 
-    # ### end summary stats block        
+    def set_stats_tier(self, tier: str, summary: Optional[Tuple[SDType, ErrDict]] = None) -> None:
+        """Switch to ``tier`` without computing stats that are already in hand.
+
+        ``summary`` is the current frame's ``(sd, errs)`` at ``tier``, when the
+        caller computed it elsewhere (off the IOLoop, say). Without it, the
+        entry an earlier visit to this state left in ``summary_stats_cache`` is
+        used, and failing that this is plain assignment: the ``stats_tier``
+        observer computes the tier's stats. The cascade then fills the raw and
+        clean scopes from the cache, computing the ones it lacks.
+        """
+        filt_key = self._scope_cache_key(split_chain_by_scope(self.operations)['filt'], tier=tier)
+        if summary is None:
+            cached = self.summary_stats_cache.get(filt_key)
+            if cached is None:
+                self.stats_tier = tier
+                return
+            summary = (cached, {})
+        else:
+            # Stored under the state's key at the new tier, so merged_sd reads
+            # the stats given rather than an entry already there.
+            self.summary_stats_cache = {**self.summary_stats_cache, filt_key: summary[0]}
+        sd, errs = summary
+        # Recorded first, so the stats_tier observer finds this frame's stats
+        # present and leaves them to the assignments below.
+        self._summary_sd_cache_key = (id(self.processed_df), id(self.analysis_klasses), tier)
+        self.stats_tier = tier
+        self.summary_sd = sd
+        self.errs = errs
+
+    # ### end summary stats block
 
     def _sd_to_jsondf(self, sd:SDType):
         """Serialize summary stats to the wire payload (parquet-b64 tagged dict).
@@ -809,38 +846,19 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
     def _df_to_obj(self, df: DataFrameT) -> List[TDict[str, TAny]]:
         return pd_to_obj(self.sampling_klass.serialize_sample(df))
     
-    def _analysis_klasses_with(self, analysis_klass:Type[ColAnalysis]) -> List[Type[ColAnalysis]]:
-        """The klass list the stats pipelines' ``add_stat`` builds: a class of the
-        same name is replaced, anything else is appended."""
-        klasses = list(self.analysis_klasses)
-        if isinstance(analysis_klass, type):
-            klasses = [k for k in klasses
-                if not (isinstance(k, type) and k.__name__ == analysis_klass.__name__)]
-        klasses.append(analysis_klass)
-        return klasses
-
     def add_analysis(self, analysis_klass:Type[ColAnalysis]) -> None:
-        """
-        same as get_summary_sd, call whatever to set summary_sd and trigger further comps
-        """
-
-        if self.stats_tier == "full":
-            stats = self.DFStatsClass(
-                self.processed_df,
-                self.analysis_klasses,
-                self.df_name, debug=self.debug)
-            stats.add_analysis(analysis_klass)
-            klasses = stats.ap.ordered_a_objs
-        else:
-            # Building DFStatsClass here would run the stats this tier exists
-            # to skip (twice, since the constructor and add_analysis each
-            # process the frame), and it does not go through _get_summary_sd.
-            klasses = self._analysis_klasses_with(analysis_klass)
+        """Add ``analysis_klass``, replacing a class of the same name, and rerun
+        the summary stats with it at the dataflow's tier."""
+        klasses = with_stat(self.analysis_klasses, analysis_klass)
         # Validate before assigning, so a klass that fails leaves the list as it was.
         self.DFStatsClass.verify_analysis_objects(klasses)
         self.analysis_klasses = klasses
         self.setup_options_from_analysis()
-        #force recomputation
+        # analysis_klasses is a plain attribute, so the cascade starts here; the
+        # new list misses _summary_sd's dedupe key.
+        self._summary_sd({})
+        # A klass that changes only the displays (post-processing, styling)
+        # leaves summary_sd as it was, and nothing downstream would rebuild them.
         self._handle_widget_change({})
 
 
