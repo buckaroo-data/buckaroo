@@ -32,9 +32,9 @@ function buildExprDir(buildsRoot: string): string {
   return out.trim().split('\n').pop()!;
 }
 
-async function loadExpr(request: any, sessionId: string, buildDir: string) {
+async function loadExpr(request: any, sessionId: string, buildDir: string, extra: Record<string, unknown> = {}) {
   const resp = await request.post(`${BASE}/load_expr`, {
-    data: { session: sessionId, build_dir: buildDir, no_browser: true },
+    data: { session: sessionId, build_dir: buildDir, no_browser: true, ...extra },
   });
   if (!resp.ok()) {
     throw new Error(`/load_expr failed (${resp.status()}): ${await resp.text()}`);
@@ -44,6 +44,17 @@ async function loadExpr(request: any, sessionId: string, buildDir: string) {
 
 async function getPinnedRowCount(page: any): Promise<number> {
   return await page.locator('.df-viewer .ag-floating-top-container .ag-row').count();
+}
+
+// The text of every pinned cell in one column, top to bottom. In the summary
+// view these are the stats: dtype, length, min, max, distinct count and so on.
+async function getPinnedCellTexts(page: any, colId: string): Promise<string[]> {
+  const texts = await page.locator(`.df-viewer .ag-floating-top-container [col-id="${colId}"]`).allInnerTexts();
+  return texts.map((t: string) => t.trim());
+}
+
+async function showSummaryView(page: any) {
+  await page.locator('.status-bar').locator('select').first().selectOption('summary');
 }
 
 test.describe('POST /load_expr', () => {
@@ -112,5 +123,32 @@ test.describe('POST /load_expr', () => {
     // 'beta' is row 1 unfiltered; after the search row 1 is the second 'alpha'.
     await expect.poll(() => getCellText(page, COL.idx, 1), { timeout: 15_000 }).toBe('3');
     expect(await getCellText(page, COL.name, 1)).toBe('alpha');
+  });
+
+  test('eager stats reach the DOM: the summary view shows the computed values', async ({ page, request }) => {
+    const session = `lx-eager-${Date.now()}`;
+    await loadExpr(request, session, buildDir, { stats_delivery: 'inline' });
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+    await showSummaryView(page);
+
+    // 'name' has 7 distinct values; 'idx' runs 0 to 9.
+    await expect.poll(() => getPinnedCellTexts(page, COL.name), { timeout: 15_000 }).toContain('7');
+    expect(await getPinnedCellTexts(page, COL.idx)).toEqual(expect.arrayContaining(['0', '9']));
+  });
+
+  test('deferred stats: the rows render first and the stats then reach the DOM', async ({ page, request }) => {
+    const session = `lx-deferred-${Date.now()}`;
+    await loadExpr(request, session, buildDir, { stats_delivery: 'deferred' });
+
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+    expect(await getCellText(page, COL.idx, 0)).toBe('0');
+    expect(await getCellText(page, COL.name, 0)).toBe('alpha');
+
+    await showSummaryView(page);
+    await expect.poll(() => getPinnedCellTexts(page, COL.name), { timeout: 15_000 }).toContain('7');
+    expect(await getPinnedCellTexts(page, COL.idx)).toEqual(expect.arrayContaining(['0', '9']));
   });
 });

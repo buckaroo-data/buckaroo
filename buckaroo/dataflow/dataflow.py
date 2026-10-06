@@ -404,8 +404,10 @@ class DataFlow(ABCDataflow[DataFrameT], Generic[DataFrameT]):
         # Recorded once the stats exist: after a run that raises, the key still
         # names the frame summary_sd belongs to, which _populate_sd_cache checks.
         self._summary_sd_cache_key = key
-        self.summary_sd = result_summary_sd
+        # errs first: assigning summary_sd runs _populate_sd_cache, which files
+        # them with the sd it caches (see _summary_errs_cache).
         self.errs = errs
+        self.summary_sd = result_summary_sd
 
     @observe('summary_sd', 'processed_result')
     @exception_protect('merged_sd-protector')
@@ -465,6 +467,9 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
             raise ValueError(f"stats_tier must be one of {STATS_TIERS}, got {stats_tier!r}")
         # Set before super().__init__ — assigning raw_df runs the whole cascade.
         self.stats_tier = stats_tier
+        # The errs of the runs behind summary_stats_cache entries that had any,
+        # by the same key (see set_stats_tier).
+        self._summary_errs_cache: TDict[str, ErrDict] = {}
         self.init_sd: InitSD
         if init_sd is None:
             self.init_sd = {}
@@ -708,6 +713,8 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         current = (id(self.processed_df), id(self.analysis_klasses), self.stats_tier)
         if keys['filt'] not in new_cache and self._summary_sd_cache_key == current:
             new_cache[keys['filt']] = dict(self.summary_sd or {})
+            if getattr(self, 'errs', None):
+                self._summary_errs_cache[keys['filt']] = self.errs
             cache_grew = True
 
         # raw + clean: fresh compute, but only on cache miss.
@@ -811,23 +818,35 @@ class CustomizableDataflow(DataFlow[DataFrameT], Generic[DataFrameT]):
         clean scopes from the cache, computing the ones it lacks.
         """
         filt_key = self._scope_cache_key(split_chain_by_scope(self.operations)['filt'], tier=tier)
-        if summary is None:
-            cached = self.summary_stats_cache.get(filt_key)
-            if cached is None:
-                self.stats_tier = tier
-                return
-            summary = (cached, {})
-        else:
-            # Stored under the state's key at the new tier, so merged_sd reads
-            # the stats given rather than an entry already there.
-            self.summary_stats_cache = {**self.summary_stats_cache, filt_key: summary[0]}
-        sd, errs = summary
-        # Recorded first, so the stats_tier observer finds this frame's stats
-        # present and leaves them to the assignments below.
-        self._summary_sd_cache_key = (id(self.processed_df), id(self.analysis_klasses), tier)
-        self.stats_tier = tier
-        self.summary_sd = sd
-        self.errs = errs
+        prior_tier, prior_key = self.stats_tier, self._summary_sd_cache_key
+        try:
+            if summary is None:
+                cached = self.summary_stats_cache.get(filt_key)
+                if cached is None:
+                    self.stats_tier = tier
+                    return
+                # The errs of the run that made the entry, kept apart because
+                # the cache holds sds only.
+                summary = (cached, self._summary_errs_cache.get(filt_key, {}))
+            else:
+                # Stored under the state's key at the new tier, so merged_sd reads
+                # the stats given rather than an entry already there.
+                self.summary_stats_cache = {**self.summary_stats_cache, filt_key: summary[0]}
+                if summary[1]:
+                    self._summary_errs_cache[filt_key] = summary[1]
+            sd, errs = summary
+            # Recorded first, so the stats_tier observer finds this frame's stats
+            # present and leaves them to the assignments below.
+            self._summary_sd_cache_key = (id(self.processed_df), id(self.analysis_klasses), tier)
+            self.stats_tier = tier
+            self.errs = errs
+            self.summary_sd = sd
+        except Exception:
+            # The key goes back first, so the observer the tier change fires
+            # finds the frame's stats present and runs nothing.
+            self._summary_sd_cache_key = prior_key
+            self.stats_tier = prior_tier
+            raise
 
     # ### end summary stats block
 

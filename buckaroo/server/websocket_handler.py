@@ -2,6 +2,7 @@ import copy
 import json
 import logging
 import os
+import time
 import traceback
 from contextlib import nullcontext
 from urllib.parse import urlparse
@@ -9,8 +10,9 @@ from urllib.parse import urlparse
 import tornado.websocket
 
 from buckaroo.pluggable_analysis_framework import perf_log
-from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy, get_buckaroo_display_state)
-from buckaroo.server.session import build_state_message
+from buckaroo.server.data_loading import (handle_infinite_request, handle_infinite_request_buckaroo, handle_infinite_request_lazy)
+from buckaroo.server.session import begin_stats_generation, dataflow_stats_tier
+from buckaroo.server.stats_wire import (broadcast_state, build_state_message_for, handle_stats_request, parse_caps, push_stats, refresh_session_snapshot)
 
 
 def _handle_infinite_request_xorq(xorq_dataflow, payload_args, search_string=""):
@@ -38,6 +40,15 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # highlight overlay below — never broadcast, never stored on the
         # session.
         self.search_string = ""
+        # Capabilities the client advertised on the URL (``?caps=a,b``). Recorded
+        # per connection because this method sends the first message before the
+        # client can say anything, and the other send sites push one shared
+        # snapshot (stats_wire.build_state_message_for reads it per client).
+        self.caps = parse_caps(self.get_query_argument("caps", ""))
+        # The stats_gen this connection is owed a ``stats_update`` for: set when
+        # it is sent a pending frame (stats_wire.build_state_message_for),
+        # cleared by the push that follows its next row reply.
+        self.stats_owed = None
         sessions = self.application.settings["sessions"]
         sessions.add_ws_client(session_id, self)
 
@@ -45,7 +56,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         # search_string="" — fresh connection, no per-client typing yet.
         session = sessions.get(session_id)
         if session and (session.df is not None or session.ldf is not None or session.xorq_dataflow is not None):
-            self.write_message(json.dumps(build_state_message(session, search_string=self.search_string)))
+            self.write_message(json.dumps(build_state_message_for(session, self)))
 
     def on_message(self, message):
         try:
@@ -63,6 +74,22 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # can drop a reply that an overlapping later change superseded.
             # Optional; a client that sends none gets none back.
             self._handle_buckaroo_state_change(msg.get("new_state") or {}, state_seq=msg.get("state_seq"))
+        elif msg_type == "stats_request":
+            self._handle_stats_request(msg)
+
+    def _handle_stats_request(self, msg):
+        """Answer a client's ``stats_request`` with a ``stats_update`` or a
+        ``stats_aborted``. Synchronous, like ``infinite_request``: the request
+        runs the whole stats computation in this call (see ``stats_wire``).
+
+        This branch is its own async context, so the session's telemetry sink
+        is bound here for the ``stats.request`` span and the stats spans under
+        it."""
+        sessions = self.application.settings["sessions"]
+        session = sessions.get(self.session_id)
+        with perf_log.telemetry_context(self.session_id, session.tele_sink if session else None):
+            reply = handle_stats_request(session, msg)
+        self.write_message(json.dumps(reply))
 
     def _handle_buckaroo_state_change(self, new_state, state_seq=None):
         sessions = self.application.settings["sessions"]
@@ -109,36 +136,36 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
                 log.debug("buckaroo_state_change no-op session=%s — skipping rebroadcast", self.session_id)
                 return
 
-            # Propagate changes to the dataflow (mirrors BuckarooWidgetBase._buckaroo_state)
-            if old_state.get("post_processing") != new_state.get("post_processing"):
-                dataflow.post_processing_method = new_state.get("post_processing", "")
-            if old_state.get("cleaning_method") != new_state.get("cleaning_method"):
-                dataflow.cleaning_method = new_state.get("cleaning_method", "")
-            if old_state.get("quick_command_args") != new_state.get("quick_command_args"):
-                dataflow.quick_command_args = new_state.get("quick_command_args", {})
+            # A deferred session whose stats were completed is at the full tier;
+            # the change reruns the cascade at the schema tier again (13 ms
+            # against the full stats), and the stats follow as requests.
+            # If applying the change raises, the session still describes the
+            # snapshot it had, so the tier goes back to the one that matches.
+            prior_tier = dataflow.stats_tier
+            try:
+                if session.stats_delivery == "deferred":
+                    dataflow.stats_tier = dataflow_stats_tier(session.stats_tier, session.stats_delivery)
 
-            # Re-extract state from the dataflow — same helper works for both
-            # ServerDataflow and XorqServerDataflow (verified by probe).
-            buckaroo_state = get_buckaroo_display_state(dataflow)
-            session.df_display_args = buckaroo_state["df_display_args"]
-            session.df_data_dict = buckaroo_state["df_data_dict"]
-            session.df_meta = buckaroo_state["df_meta"]
+                # Propagate changes to the dataflow (mirrors BuckarooWidgetBase._buckaroo_state)
+                if old_state.get("post_processing") != new_state.get("post_processing"):
+                    dataflow.post_processing_method = new_state.get("post_processing", "")
+                if old_state.get("cleaning_method") != new_state.get("cleaning_method"):
+                    dataflow.cleaning_method = new_state.get("cleaning_method", "")
+                if old_state.get("quick_command_args") != new_state.get("quick_command_args"):
+                    dataflow.quick_command_args = new_state.get("quick_command_args", {})
+
+                # Re-extract state from the dataflow — same helper works for both
+                # ServerDataflow and XorqServerDataflow (verified by probe).
+                refresh_session_snapshot(session, dataflow)
+            except Exception:
+                dataflow.stats_tier = prior_tier
+                raise
+            # The state the stats describe has changed, so the generation moves on.
+            begin_stats_generation(session)
             # Strip search_string before snapshotting onto the session — it
             # belongs to this client only (#851), so a future client that
             # connects shouldn't inherit it via build_state_message.
             session.buckaroo_state = {k: v for k, v in new_state.items() if k != "search_string"}
-            session.buckaroo_options = buckaroo_state["buckaroo_options"]
-            session.command_config = buckaroo_state["command_config"]
-
-            # Re-apply component_config so theme settings survive state changes
-            if session.component_config and session.df_display_args:
-                for key in session.df_display_args:
-                    dvc = session.df_display_args[key].get("df_viewer_config")
-                    if dvc is not None:
-                        dvc["component_config"] = {
-                            **dvc.get("component_config", {}),
-                            **session.component_config,
-                        }
 
             # Broadcast updated state to all connected clients. Each
             # client gets its own search_string re-injected so a
@@ -148,15 +175,7 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # doesn't drop it.
             # Only the originating client gets reply_seq (#998): the
             # others made no change, so every copy is current for them.
-            for client in list(session.ws_clients):
-                try:
-                    search = getattr(client, "search_string", "")
-                    msg = build_state_message(session, search_string=search,
-                        reply_seq=state_seq if client is self else None)
-                    msg["df_display_args"] = self._with_highlight(session.df_display_args, search)
-                    client.write_message(json.dumps(msg))
-                except Exception:
-                    session.ws_clients.discard(client)
+            broadcast_state(session, reply_to=self, reply_seq=state_seq, highlight=self._with_highlight)
         except Exception:
             tb = traceback.format_exc()
             log.error("buckaroo_state_change error session=%s: %s", self.session_id, tb)
@@ -207,10 +226,14 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         is re-injected so the reply doesn't clear the search box (Codex P1
         on #854). ``reply_seq`` is the change's ``state_seq`` (#998), so the
         client drops this reply if it has sent a later change.
+
+        The message is built first: for a client without the
+        ``stats_update`` capability it completes the session's stats, which
+        replaces the display config, and the highlight goes on that one.
         """
-        msg = build_state_message(session, search_string=self.search_string, reply_seq=reply_seq)
+        msg = build_state_message_for(session, self, reply_seq=reply_seq)
         msg["buckaroo_state"] = {**buckaroo_state, "search_string": self.search_string}
-        msg["df_display_args"] = self._with_highlight(session.df_display_args, self.search_string)
+        msg["df_display_args"] = self._with_highlight(msg["df_display_args"], self.search_string)
         try:
             self.write_message(json.dumps(msg))
         except Exception:
@@ -258,6 +281,8 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
         tele_sink = session.tele_sink if not_seen else None
         first_payload = not_seen and (perf_log.enabled() or tele_sink is not None)
 
+        last_write = None
+
         def _dispatch_and_send(pa, span_label):
             # Dispatch one window and send its two-frame reply: a JSON text
             # frame, then the binary Parquet frame when non-empty. On the initial
@@ -267,11 +292,12 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             # v2.
             span = (perf_log.perf_span(span_label, session=self.session_id)
                     if first_payload else nullcontext())
+            nonlocal last_write
             with span:
                 resp, parquet = _dispatch(pa)
-                self.write_message(json.dumps(resp))
+                last_write = self.write_message(json.dumps(resp))
                 if parquet:
-                    self.write_message(parquet, binary=True)
+                    last_write = self.write_message(parquet, binary=True)
 
         try:
             with perf_log.telemetry_context(self.session_id, tele_sink):
@@ -289,6 +315,30 @@ class DataStreamHandler(tornado.websocket.WebSocketHandler):
             log.error("infinite_request error session=%s: %s", self.session_id, tb)
             self.write_message(json.dumps({"type": "infinite_resp", "key": payload_args, "length": 0,
                 "error_info": tb if _BUCKAROO_DEBUG else "Request failed"}))
+        if self.stats_owed is not None and last_write is not None:
+            # D2: the stats follow the rows. The continuation runs once the last
+            # frame of this reply is written, so none of the stats work can
+            # delay it.
+            owed, rows_done = self.stats_owed, time.perf_counter()
+            last_write.add_done_callback(lambda _: self._push_stats(owed, rows_done))
+
+    def _push_stats(self, stats_gen, rows_done):
+        """Send the ``stats_update`` this connection is owed for ``stats_gen``.
+        Does nothing when the connection has closed since the row reply, or
+        when ``push_stats`` finds nothing owed (a newer generation, or already
+        pushed). A newer generation's own pending frame registered its own
+        push."""
+        if self.ws_connection is None:
+            return
+        sessions = self.application.settings["sessions"]
+        session = sessions.get(self.session_id)
+        with perf_log.telemetry_context(self.session_id, session.tele_sink if session else None):
+            reply = push_stats(session, self, stats_gen, rows_done)
+        if reply is not None:
+            try:
+                self.write_message(json.dumps(reply))
+            except tornado.websocket.WebSocketClosedError:
+                log.debug("stats push write failed for session=%s", self.session_id)
 
     def on_close(self):
         sessions = self.application.settings["sessions"]

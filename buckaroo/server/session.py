@@ -26,6 +26,25 @@ def dataflow_stats_tier(stats_tier: str, stats_delivery: str) -> str:
     return "schema" if stats_delivery == "deferred" else stats_tier
 
 
+# What ``df_meta.stats.status`` says about a session's stats for its current
+# ``stats_gen``: ``complete`` (the stats of the tier the session is headed for
+# are in the snapshot), ``pending`` (a deferred session that has not produced
+# them yet), ``not_computed`` (the session is headed for the schema tier, so
+# none will arrive) and ``error`` (the run failed; sticky until the next
+# generation).
+STATS_STATUSES = ("complete", "pending", "not_computed", "error")
+
+
+def initial_stats_status(stats_tier: str, stats_delivery: str) -> tuple[str, Optional[str]]:
+    """The status, and its reason, of a session whose stats generation has just
+    started, from the policy pair alone."""
+    if stats_tier != "full":
+        return "not_computed", "host"
+    if stats_delivery == "deferred":
+        return "pending", None
+    return "complete", None
+
+
 @dataclass
 class SessionState:
     session_id: str
@@ -64,6 +83,16 @@ class SessionState:
     # tier the dataflow is built at follows from the pair (dataflow_stats_tier).
     stats_tier: str = DEFAULT_STATS_TIER
     stats_delivery: str = DEFAULT_STATS_DELIVERY
+    # The stats generation: a counter the server owns, bumped whenever the
+    # dataflow state the stats describe changes (/load, /load_expr, /load_compare,
+    # /reload_expr, and a buckaroo_state_change that touches a dataflow field).
+    # It rides on df_meta.stats and on every stats message, so a client can drop
+    # a reply for a state it has left. Independent of any client-owned request
+    # sequence (state_seq). ``stats_status`` and ``stats_reason`` live here, not
+    # in ``df_meta``, because the dataflow rebuilds df_meta wholesale.
+    stats_gen: int = 0
+    stats_status: str = "complete"
+    stats_reason: Optional[str] = None
     # Companion telemetry sink (#943): a fire-and-forget POST callable, built
     # once from the /load_expr payload's telemetry_url on the IOLoop (where
     # make_http_sink captures AsyncHTTPClient/IOLoop.current()). Stored here so
@@ -111,6 +140,33 @@ mismatch. Lockstep with the buckaroo PyPI version is the documented expectation;
 this field is the runtime escape hatch."""
 
 
+def begin_stats_generation(session: "SessionState") -> None:
+    """Start a new stats generation: the session's dataflow state has changed,
+    so stats for the previous one no longer describe it. The status restarts
+    from the session's policy pair."""
+    session.stats_gen += 1
+    session.stats_status, session.stats_reason = initial_stats_status(
+        session.stats_tier, session.stats_delivery)
+
+
+def stats_meta(session: "SessionState") -> Optional[dict]:
+    """The ``df_meta.stats`` value for a session: ``{status, tier, gen}`` plus
+    ``reason`` when there is one. ``tier`` is the tier reached so far, which is
+    the one the session is headed for only once it is complete.
+
+    ``None`` for a session on the default policy (inline delivery, full tier,
+    complete), which sends the message it always has; a client reads a missing
+    ``stats`` as complete."""
+    if session.stats_status == "complete" and session.stats_delivery != "deferred":
+        return None
+    stats: dict = {"status": session.stats_status,
+        "tier": session.stats_tier if session.stats_status == "complete" else "schema",
+        "gen": session.stats_gen}
+    if session.stats_reason:
+        stats["reason"] = session.stats_reason
+    return stats
+
+
 def build_state_message(session: "SessionState", metadata: dict | None = None,
                          search_string: str = "", reply_seq: int | None = None) -> dict:
     """Build the full ``initial_state`` WebSocket payload from a session.
@@ -137,10 +193,16 @@ def build_state_message(session: "SessionState", metadata: dict | None = None,
     Returns:
         A dict ready to be JSON-serialised and sent to WebSocket clients.
     """
+    # The dataflow rebuilds df_meta wholesale, so the stats status is injected
+    # here, into a copy, rather than stored in it.
+    df_meta = session.df_meta
+    stats = stats_meta(session)
+    if stats is not None:
+        df_meta = {**df_meta, "stats": stats}
     msg: dict = {"type": "initial_state", "protocol_version": PROTOCOL_VERSION,
         "metadata": metadata if metadata is not None else session.metadata,
         "prompt": session.prompt, "df_display_args": session.df_display_args, "df_data_dict": session.df_data_dict,
-        "df_meta": session.df_meta, "mode": session.mode}
+        "df_meta": df_meta, "mode": session.mode}
     if reply_seq is not None:
         msg["reply_seq"] = reply_seq
     if session.mode == "buckaroo":
