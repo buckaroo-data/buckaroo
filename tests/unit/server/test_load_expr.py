@@ -25,10 +25,12 @@ from xorq.caching import ParquetSnapshotCache, ParquetStorage  # noqa: E402
 from xorq.common.utils.graph_utils import replace_nodes, walk_nodes  # noqa: E402
 from xorq.common.utils.provenance_utils import read_parquet_provenance  # noqa: E402
 from xorq.expr.relations import CachedNode  # noqa: E402
+from xorq.vendor.ibis.expr.types.core import Expr  # noqa: E402
 
 from buckaroo.dataflow.sd_cache import split_chain_by_scope  # noqa: E402
 from buckaroo.jlisp.lisp_utils import s as lisp_sym  # noqa: E402
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: E402
+from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline  # noqa: E402
 from buckaroo.server import telemetry, xorq_loading  # noqa: E402
 from buckaroo.server.app import make_app as _make_app  # noqa: E402
 
@@ -1028,9 +1030,6 @@ def _three_scope_dataflow(expr=None, **kwargs):
 def _spy_data_queries(monkeypatch):
     """Record the outermost op of every materialisation (``execute`` and
     ``to_pyarrow``), and every stat query XorqStatPipeline sends."""
-    from xorq.vendor.ibis.expr.types.core import Expr
-
-    from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
     ops, stat_queries = [], []
     original_execute, original_to_pyarrow = Expr.execute, Expr.to_pyarrow
     original_stat_execute = XorqStatPipeline._execute
@@ -1343,7 +1342,6 @@ class TestLoadExprStatsPolicy(tornado.testing.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test
     async def test_deferred_delivery_runs_no_stat_query(self):
-        from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline
         builds_root = tempfile.mkdtemp()
         stat_queries = []
         original = XorqStatPipeline._execute

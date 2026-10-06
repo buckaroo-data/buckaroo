@@ -24,7 +24,7 @@ from buckaroo.customizations.pandas_commands import (DropCol, FillNA, GroupBy, N
 from buckaroo.customizations.pd_autoclean_conf import NoCleaningConf
 from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2, PD_AUTOCLEAN_DEFAULT_V2, cleaning_gen_ops
 from buckaroo.dataflow.autocleaning import (AutocleaningConfig, PandasAutocleaning)
-from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
+from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis, assemble_merged_sd
 from buckaroo.dataflow.sd_cache import split_chain_by_scope
 from buckaroo.pluggable_analysis_framework.stat_func import stat
 
@@ -279,7 +279,6 @@ def test_assemble_merged_sd_equals_merged_sd_with_init_sd_and_cleaning():
     """``assemble_merged_sd`` is the body of the ``merged_sd`` observer as a
     pure function, so a server can assemble wire stats from an accumulating
     raw sd without going through the traitlets cascade."""
-    from buckaroo.dataflow.dataflow import assemble_merged_sd
     dfc = _assembly_dataflow()
     sd = dfc.merged_sd['a']
     assert sd['init_only'] == 1, "init_sd override must reach merged_sd under the rewritten name"
@@ -291,7 +290,6 @@ def test_assemble_merged_sd_equals_merged_sd_with_init_sd_and_cleaning():
 
 
 def test_assemble_merged_sd_without_a_processed_df_merges_the_unrewritten_sds():
-    from buckaroo.dataflow.dataflow import assemble_merged_sd
     assembled = assemble_merged_sd(
         init_sd={'x': {'init': 1}}, cleaned_sd={'x': {'cleaned': 2}}, raw_sd={'x': {'raw': 3}},
         processed_sd={'x': {'processed': 4}}, processed_df=None,
@@ -300,7 +298,6 @@ def test_assemble_merged_sd_without_a_processed_df_merges_the_unrewritten_sds():
 
 
 def test_assemble_merged_sd_does_not_mutate_its_inputs():
-    from buckaroo.dataflow.dataflow import assemble_merged_sd
     dfc = _assembly_dataflow()
     inputs = _scope_inputs(dfc)
     sd_names = ('init_sd', 'cleaned_sd', 'raw_sd', 'processed_sd', 'clean_sd', 'filt_sd')
