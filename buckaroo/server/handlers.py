@@ -485,7 +485,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # session's stored pair below instead.
         has_config = any(body.get(k) for k in (
             "component_config", "column_config_overrides", "extra_grid_config",
-            "init_sd", "skip_stat_columns"))
+            "init_sd", "skip_stat_columns", "stat_sources", "column_stat_sources"))
 
         # Companion telemetry endpoint (#943): when present, the firstpull.*
         # spans POST themselves to the companion as session-correlated records.
@@ -572,22 +572,34 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # skip_stat_columns: columns whose summary stats are supplied via init_sd
         # and must not be recomputed (e.g. a diff reusing each source column's
         # stats).
+        # stat_sources / column_stat_sources: columns whose summary stats are
+        # computed over a column of another expression (#1092), e.g. a compare
+        # grid showing each version's own stats beside the join's.
         dataflow_kwargs = {
             "cache_storage_path": body.get("cache_storage_path"),
             "data_id": data_id,
             "column_config_overrides": body.get("column_config_overrides"),
             "extra_grid_config": body.get("extra_grid_config"),
             "init_sd": body.get("init_sd"),
-            "skip_stat_columns": body.get("skip_stat_columns")}
+            "skip_stat_columns": body.get("skip_stat_columns"),
+            "stat_sources": body.get("stat_sources"),
+            "column_stat_sources": body.get("column_stat_sources")}
 
         project_root = body.get("project_root")
+        stat_source_set = None
 
         try:
             with telemetry.firstpull_load(session_id, tele_sink, "load_expr", build_dir=build_dir):
+                # A malformed request fails before anything is loaded.
+                if dataflow_kwargs["stat_sources"] is not None or dataflow_kwargs["column_stat_sources"] is not None:
+                    stat_source_set = xorq_loading.StatSourceSet(
+                        dataflow_kwargs["stat_sources"], dataflow_kwargs["column_stat_sources"])
                 # The harness reads "expression build" as just this call, so it
                 # gets its own span rather than being outer-minus-inner residual.
                 with perf_log.perf_span("firstpull.expr_load", session=session_id):
                     expr = xorq_loading.load_expr_build_dir(build_dir, cache_dir=cache_dir)
+                if stat_source_set is not None:
+                    stat_source_set.validate(expr)
                 if cache_dir:
                     # Runs cached sub-graphs, so it is timed apart from the
                     # expression build. Runs before the dataflow, whose queries
@@ -604,11 +616,17 @@ class LoadExprHandler(tornado.web.RequestHandler):
                     xorq_dataflow = xorq_loading.XorqServerDataflow(
                         expr, skip_main_serial=True, extra_klasses=extra_klasses,
                         stats_tier=dataflow_stats_tier(stats_tier, stats_delivery),
-                        **dataflow_kwargs)
+                        stat_source_set=stat_source_set, **dataflow_kwargs)
                 # Spanning metadata too leaves only the small klass-load step
                 # unmeasured inside the outer firstpull.load_expr total.
                 with perf_log.perf_span("firstpull.metadata", session=session_id):
                     metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, build_dir)
+        except xorq_loading.StatSourceError as e:
+            if stat_source_set is not None:
+                stat_source_set.release()
+            self.set_status(400)
+            self.write({"error_code": e.error_code, "message": e.message})
+            return
         except Exception:
             tb = traceback.format_exc()
             log.error("load_expr error build_dir=%s: %s", build_dir, tb)
@@ -846,7 +864,8 @@ class ReloadExprHandler(tornado.web.RequestHandler):
     and the rebuild replays the session's stored ``/load_expr`` config
     (``SessionState.dataflow_kwargs``) — so stats already in the
     ``cache_storage_path`` store are cache hits, and column overrides,
-    extra grid config, init_sd and skip_stat_columns survive the reload.
+    extra grid config, init_sd, skip_stat_columns and the column stat sources
+    (``stat_sources``, ``column_stat_sources``) survive the reload.
 
     The session's stored ``stats_tier`` / ``stats_delivery`` are replayed too.
     The body is optional; a pair in it replaces the stored one (and is stored)
@@ -936,7 +955,10 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         if bs.get("quick_command_args"):
             xorq_dataflow.quick_command_args = bs["quick_command_args"]
 
+        replaced = session.xorq_dataflow
         session.xorq_dataflow = xorq_dataflow
+        if replaced.stat_source_set is not None:
+            replaced.stat_source_set.release()
         session.stats_tier = stats_tier
         session.stats_delivery = stats_delivery
         refresh_session_snapshot(session, xorq_dataflow)

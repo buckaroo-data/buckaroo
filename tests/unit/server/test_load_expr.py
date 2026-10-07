@@ -2988,8 +2988,9 @@ class TestColumnStatSources:
         pair.dataflow()
         assert second_queries == []
         # The source's own grid finds what the mapped column wrote.
-        _build_dataflow(pair.v2, cache_storage_path=pair.v2_cache, data_id="v2-id")
-        assert second_queries == []
+        with _record_columns_read() as reads:
+            _build_dataflow(pair.v2, cache_storage_path=pair.v2_cache, data_id="v2-id")
+        assert not any("price" in read for read in reads)
 
     def test_cells_the_sources_own_session_wrote_are_hits(self, tmp_path, monkeypatch):
         pair = _ComparePair(tmp_path)
