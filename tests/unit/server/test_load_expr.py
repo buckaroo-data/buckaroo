@@ -39,6 +39,7 @@ from buckaroo.dataflow.sd_cache import split_chain_by_scope  # noqa: E402
 from buckaroo.jlisp.lisp_utils import s as lisp_sym  # noqa: E402
 from buckaroo.pluggable_analysis_framework import perf_log  # noqa: E402
 from buckaroo.pluggable_analysis_framework.col_analysis import ColAnalysis  # noqa: E402
+from buckaroo.pluggable_analysis_framework.stat_cache import StatCache, make_scope_id  # noqa: E402
 from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline  # noqa: E402
 from buckaroo.serialization_utils import resolve_summary_stats_payload  # noqa: E402
 from buckaroo.server import telemetry, xorq_loading  # noqa: E402
@@ -2850,3 +2851,270 @@ class TestLoadExprCacheDir(tornado.testing.AsyncHTTPTestCase):
                  "telemetry_url": "http://companion.invalid/internal/telemetry"})
         self.assertEqual(resp.code, 200, resp.body)
         self.assertIn("firstpull.cache_heal", [r["name"] for r in captured])
+
+
+# ---------------------------------------------------------------------------
+# column_stat_sources (#1092): a column's summary stats computed over the
+# expression the column came from, not over the loaded expression
+# ---------------------------------------------------------------------------
+
+
+class _ComparePair:
+    """Two versions of a table and the outer join a compare grid loads. V1 has
+    keys 1-2 that V2 lacks and V2 has keys 7-8 that V1 lacks, so in the join
+    ``price_v2`` is null for V1-only keys and ``price`` is null for V2-only keys."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.v1 = xo.memtable({
+            "key": [1, 2, 3, 4, 5, 6], "price": [1.0, 2.0, 3.0, None, 5.0, 6.0],
+            "name": ["a", "b", "c", "d", "e", "f"]}, name="v1")
+        self.v2 = xo.memtable({
+            "key": [3, 4, 5, 6, 7, 8], "price": [30.0, 40.0, 50.0, 60.0, 70.0, 80.0],
+            "name": ["c", "d", "e", "f", "g", "h"]}, name="v2")
+        self.join = self.v1.join(self.v2.rename(price_v2="price", name_v2="name"), "key", how="outer")
+        builds = str(root / "builds")
+        self.v1_build = str(xo.build_expr(self.v1, builds_dir=builds))
+        self.v2_build = str(xo.build_expr(self.v2, builds_dir=builds))
+        self.join_build = str(xo.build_expr(self.join, builds_dir=builds))
+        self.v1_cache, self.v2_cache = str(root / "v1-cache"), str(root / "v2-cache")
+        self.join_cache = str(root / "join-cache")
+
+    def stat_sources(self, v1_project_root=None, v2_project_root=None, v2_build_dir=None):
+        v1 = {"build_dir": self.v1_build, "data_id": "v1-id", "cache_storage_path": self.v1_cache}
+        v2 = {"build_dir": v2_build_dir or self.v2_build, "data_id": "v2-id",
+            "cache_storage_path": self.v2_cache}
+        if v1_project_root:
+            v1["project_root"] = str(v1_project_root)
+        if v2_project_root:
+            v2["project_root"] = str(v2_project_root)
+        return {"v1": v1, "v2": v2}
+
+    V2_PRICE = {"price_v2": [{"source": "v2", "column": "price"}]}
+    V2_PRICE_V1_PREFIXED = {"price_v2": [
+        {"source": "v2", "column": "price"}, {"source": "v1", "column": "price", "prefix": "v1_"}]}
+
+    def dataflow(self, column_stat_sources=None, stat_sources=None, expr=None, **kwargs):
+        return xorq_loading.XorqServerDataflow(
+            self.join if expr is None else expr, skip_main_serial=True,
+            cache_storage_path=self.join_cache, data_id="join-id",
+            stat_sources=self.stat_sources() if stat_sources is None else stat_sources,
+            column_stat_sources=self.V2_PRICE if column_stat_sources is None else column_stat_sources,
+            **kwargs)
+
+
+def _own_summary(dataflow, orig_col):
+    """``orig_col``'s summary in ``dataflow``, without the names a session
+    assigns."""
+    sd = next(v for v in dataflow.summary_sd.values() if v["orig_col_name"] == orig_col)
+    return {k: v for k, v in sd.items() if k not in ("orig_col_name", "rewritten_col_name")}
+
+
+def _typed(summary):
+    """``summary`` with each value's type beside it (NaN-safe to compare)."""
+    return {k: (type(v).__name__, repr(v)) for k, v in summary.items()}
+
+
+def _columns_read(query):
+    """The names of the columns a stat query's aggregate reads."""
+    op = query.op()
+    values = []
+    while not isinstance(op, ops.Aggregate):
+        values += [v for v in op.__args__ if isinstance(v, ops.Value)]
+        op = op.parent
+    values += list(op.metrics.values()) + list(op.groups.values())
+    return {f.name for v in values for f in v.find(ops.Field, filter=ops.Value)}
+
+
+@contextmanager
+def _record_columns_read():
+    """The columns each stat query ``XorqStatPipeline`` sends reads, while the
+    block runs."""
+    reads = []
+    original = XorqStatPipeline._execute
+
+    def spy(pipeline, query):
+        reads.append(_columns_read(query))
+        return original(pipeline, query)
+
+    with patch.object(XorqStatPipeline, "_execute", spy):
+        yield reads
+
+
+class TestColumnStatSources:
+    def test_summary_equals_the_source_sessions_and_not_the_joins(self, tmp_path):
+        pair = _ComparePair(tmp_path)
+        mapped = _own_summary(pair.dataflow(), "price_v2")
+        assert _typed(mapped) == _typed(_own_summary(_build_dataflow(pair.v2), "price"))
+        assert mapped["length"] == 6
+        assert mapped["null_count"] == 0
+        assert _typed(mapped) != _typed(_own_summary(_build_dataflow(pair.join), "price_v2"))
+
+    def test_session_names_stay_the_sessions(self, tmp_path):
+        pair = _ComparePair(tmp_path)
+        dataflow = pair.dataflow()
+        sd = next(v for v in dataflow.summary_sd.values() if v["orig_col_name"] == "price_v2")
+        assert sd["orig_col_name"] == "price_v2"
+        assert sd["rewritten_col_name"] in dataflow.summary_sd
+
+    def test_unmapped_columns_keep_the_joins_stats(self, tmp_path):
+        pair = _ComparePair(tmp_path)
+        assert (_typed(_own_summary(pair.dataflow(), "price"))
+            == _typed(_own_summary(_build_dataflow(pair.join), "price")))
+
+    def test_a_mapped_column_gets_no_query_in_any_scope(self, tmp_path):
+        pair = _ComparePair(tmp_path)
+        with _record_columns_read() as control:
+            _build_dataflow(pair.join)
+        assert any("price_v2" in read for read in control), "the unmapped join reads price_v2"
+        with _record_columns_read() as reads:
+            dataflow = pair.dataflow()
+            dataflow.operations = [[lisp_sym("fillna"), {"symbol": "df"}, "price", 0]]
+            dataflow.quick_command_args = {"search": ["c"]}
+        assert reads
+        assert not any("price_v2" in read for read in reads)
+        assert _typed(_own_summary(dataflow, "price_v2")) == _typed(_own_summary(_build_dataflow(pair.v2), "price"))
+
+    def test_cold_source_fills_the_sources_cache_and_nothing_queries_again(self, tmp_path, monkeypatch):
+        pair = _ComparePair(tmp_path)
+        _, first_queries = _spy_data_queries(monkeypatch)
+        pair.dataflow()
+        assert first_queries
+        cached = StatCache.for_cache_storage_path(pair.v2_cache).read(make_scope_id("v2-id"))
+        assert any(sid.startswith("null_count@") for sid in cached.values["price"])
+        assert "price" not in StatCache.for_cache_storage_path(pair.v2_cache).read(make_scope_id("join-id")).values
+
+        _, second_queries = _spy_data_queries(monkeypatch)
+        pair.dataflow()
+        assert second_queries == []
+        # The source's own grid finds what the mapped column wrote.
+        _build_dataflow(pair.v2, cache_storage_path=pair.v2_cache, data_id="v2-id")
+        assert second_queries == []
+
+    def test_cells_the_sources_own_session_wrote_are_hits(self, tmp_path, monkeypatch):
+        pair = _ComparePair(tmp_path)
+        # Warm the join's cells (all of them, price_v2 included) and V2's.
+        _build_dataflow(pair.join, cache_storage_path=pair.join_cache, data_id="join-id")
+        _build_dataflow(pair.v2, cache_storage_path=pair.v2_cache, data_id="v2-id")
+        _, stat_queries = _spy_data_queries(monkeypatch)
+        mapped = _own_summary(pair.dataflow(), "price_v2")
+        assert stat_queries == []
+        assert mapped["null_count"] == 0
+
+    def test_project_stat_runs_from_the_sources_root_only(self, tmp_path):
+        pair = _ComparePair(tmp_path)
+        source_root, session_root = tmp_path / "source-project", tmp_path / "session-project"
+        for root, name in ((source_root, "source_max"), (session_root, "session_max")):
+            (root / "stats").mkdir(parents=True)
+            (root / "stats" / f"{name}.py").write_text("def compute(col):\n    return col.max()\n")
+        dataflow = pair.dataflow(
+            stat_sources=pair.stat_sources(v2_project_root=source_root),
+            extra_klasses=xorq_loading.load_project_stat_klasses(session_root))
+        mapped = _own_summary(dataflow, "price_v2")
+        assert mapped["source_max"] == 80.0
+        assert "session_max" not in mapped
+        own = _own_summary(dataflow, "price")
+        assert "session_max" in own and "source_max" not in own
+
+    def test_prefixed_source_keys_land_under_the_prefix(self, tmp_path):
+        pair = _ComparePair(tmp_path)
+        mapped = _own_summary(pair.dataflow(pair.V2_PRICE_V1_PREFIXED), "price_v2")
+        v1 = _own_summary(_build_dataflow(pair.v1), "price")
+        v2 = _own_summary(_build_dataflow(pair.v2), "price")
+        assert mapped["v1_null_count"] == v1["null_count"] == 1
+        assert mapped["v1_length"] == v1["length"] == 6
+        assert _typed({k: mapped[f"v1_{k}"] for k in v1}) == _typed(v1)
+        assert _typed({k: mapped[k] for k in v2}) == _typed(v2)
+        assert mapped["length"] == 6
+
+    def test_a_source_that_fails_to_load_is_a_stat_error_on_the_mapped_column(self, tmp_path):
+        pair = _ComparePair(tmp_path)
+        dataflow = pair.dataflow(stat_sources=pair.stat_sources(v2_build_dir=str(tmp_path / "missing")))
+        assert any(col == "price_v2" for col, _stat in dataflow.errs)
+        assert "mean" in _own_summary(dataflow, "price")
+
+    def test_a_deferred_session_runs_the_sources_in_the_deferred_stage(self, tmp_path, monkeypatch):
+        pair = _ComparePair(tmp_path)
+        _, stat_queries = _spy_data_queries(monkeypatch)
+        dataflow = pair.dataflow(stats_tier="schema")
+        assert stat_queries == []
+        assert not StatCache.for_cache_storage_path(pair.v2_cache).read(make_scope_id("v2-id")).values
+        dataflow.set_stats_tier("full")
+        assert stat_queries
+        assert (_typed(_own_summary(dataflow, "price_v2"))
+            == _typed(_own_summary(_build_dataflow(pair.v2), "price")))
+
+
+class TestLoadExprColumnStatSources(tornado.testing.AsyncHTTPTestCase):
+    def get_app(self):
+        return make_app()
+
+    def setUp(self):
+        super().setUp()
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.pair = _ComparePair(self.root)
+
+    def _session(self, sid):
+        return self._app.settings["sessions"].get(sid)
+
+    async def _load(self, sid, **body):
+        return await _post(self.get_http_port(), "/load_expr", {
+            "session": sid, "build_dir": self.pair.join_build, "data_id": "join-id",
+            "cache_storage_path": self.pair.join_cache,
+            "stat_sources": self.pair.stat_sources(), "column_stat_sources": self.pair.V2_PRICE, **body})
+
+    @tornado.testing.gen_test
+    async def test_the_mapped_column_shows_the_sources_summary(self):
+        resp = await self._load("cs-load")
+        self.assertEqual(resp.code, 200, resp.body)
+        dataflow = self._session("cs-load").xorq_dataflow
+        self.assertEqual(_typed(_own_summary(dataflow, "price_v2")),
+            _typed(_own_summary(_build_dataflow(self.pair.v2), "price")))
+
+    @tornado.testing.gen_test
+    async def test_invalid_configuration_is_a_400_and_loads_nothing(self):
+        price = {"source": "v2", "column": "price"}
+        cases = [
+            ("unknown_stat_source", {"column_stat_sources": {"price_v2": [{"source": "v3", "column": "price"}]}}),
+            ("column_not_found", {"column_stat_sources": {"nope_v2": [price]}}),
+            ("stat_source_column_not_found",
+                {"column_stat_sources": {"price_v2": [{"source": "v2", "column": "nope"}]}}),
+            ("invalid_column_stat_sources", {"column_stat_sources": {"price_v2": [{**price, "prefix": "v2_"}]}}),
+            ("invalid_column_stat_sources", {"column_stat_sources": {"price_v2": [price, {**price, "column": "key"}]}}),
+            ("invalid_column_stat_sources", {"column_stat_sources": {"price_v2": []}}),
+            ("invalid_stat_sources", {"stat_sources": ["not", "a", "dict"]}),
+        ]
+        for i, (error_code, body) in enumerate(cases):
+            with self.subTest(i=i, error_code=error_code):
+                resp = await self._load(f"cs-bad-{i}", **body)
+                self.assertEqual(resp.code, 400, resp.body)
+                self.assertEqual(json.loads(resp.body)["error_code"], error_code)
+                self.assertIsNone(self._session(f"cs-bad-{i}"))
+
+    @tornado.testing.gen_test
+    async def test_reload_expr_replays_the_sources(self):
+        project_root = self.root / "project"
+        project_root.mkdir()
+        resp = await self._load("cs-reload", project_root=str(project_root))
+        self.assertEqual(resp.code, 200, resp.body)
+        before = self._session("cs-reload").xorq_dataflow
+        resp = await _post(self.get_http_port(), "/reload_expr/cs-reload", {})
+        self.assertEqual(resp.code, 200, resp.body)
+        session = self._session("cs-reload")
+        self.assertIsNot(session.xorq_dataflow, before)
+        self.assertEqual(session.dataflow_kwargs["column_stat_sources"], self.pair.V2_PRICE)
+        self.assertEqual(session.dataflow_kwargs["stat_sources"], self.pair.stat_sources())
+        self.assertEqual(_typed(_own_summary(session.xorq_dataflow, "price_v2")),
+            _typed(_own_summary(_build_dataflow(self.pair.v2), "price")))
+
+    @tornado.testing.gen_test
+    async def test_a_repost_that_changes_them_rebuilds_the_session(self):
+        resp = await self._load("cs-repost")
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertNotIn("v1_null_count", _own_summary(self._session("cs-repost").xorq_dataflow, "price_v2"))
+        resp = await self._load("cs-repost", column_stat_sources=self.pair.V2_PRICE_V1_PREFIXED)
+        self.assertEqual(resp.code, 200, resp.body)
+        session = self._session("cs-repost")
+        self.assertEqual(session.dataflow_kwargs["column_stat_sources"], self.pair.V2_PRICE_V1_PREFIXED)
+        self.assertEqual(_own_summary(session.xorq_dataflow, "price_v2")["v1_null_count"], 1)
