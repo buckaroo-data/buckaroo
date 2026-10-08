@@ -2675,6 +2675,36 @@ class TestLoadExprCacheDir(tornado.testing.AsyncHTTPTestCase):
             self.assertIn(host_cache, p.parents)
 
     @tornado.testing.gen_test
+    async def test_stat_sources_read_the_embedder_snapshots(self):
+        """#1092: a stat source is loaded as its own session would be, with the
+        session's cache_dir, on /load_expr and on /reload_expr. Otherwise its
+        cache nodes resolve under the default cache dir and its stat queries
+        recompute the baked snapshots into a second copy there."""
+        build_path, host_cache, _ = _build_cached_expr_dir(self.root)
+        baked = sorted(host_cache.rglob("*.parquet"))
+        project_root = Path(self.root) / "project"
+        project_root.mkdir()
+        sid = "lx-cache-dir-stat-sources"
+        resp = await _post(self.get_http_port(), "/load_expr", {
+            "session": sid, "build_dir": build_path, "cache_dir": str(host_cache),
+            "project_root": str(project_root),
+            "stat_sources": {"src": {"build_dir": build_path, "data_id": "src-id",
+                "cache_storage_path": os.path.join(self.root, "src-stats")}},
+            "column_stat_sources": {"s": [{"source": "src", "column": "s"}]}})
+        self.assertEqual(resp.code, 200, resp.body)
+        for endpoint in ("load_expr", "reload_expr"):
+            with self.subTest(endpoint=endpoint):
+                if endpoint == "reload_expr":
+                    resp = await _post(self.get_http_port(), f"/reload_expr/{sid}", {})
+                    self.assertEqual(resp.code, 200, resp.body)
+                source = self._app.settings["sessions"].get(sid).xorq_dataflow.stat_source_set.sources["src"]
+                for p in _cache_node_paths(source.loaded_expr()):
+                    self.assertIn(host_cache, p.parents)
+                self.assertEqual(self._default_cache_parquets(), [],
+                    "a stat source re-executed a cached sub-graph into the default cache dir")
+                self.assertEqual(sorted(host_cache.rglob("*.parquet")), baked)
+
+    @tornado.testing.gen_test
     async def test_warm_repost_with_new_cache_dir_reloads(self):
         """A repeat POST that changes cache_dir must not take the warm-session
         early-exit — the loaded expression still points at the old dir."""
@@ -3119,3 +3149,60 @@ class TestLoadExprColumnStatSources(tornado.testing.AsyncHTTPTestCase):
         session = self._session("cs-repost")
         self.assertEqual(session.dataflow_kwargs["column_stat_sources"], self.pair.V2_PRICE_V1_PREFIXED)
         self.assertEqual(_own_summary(session.xorq_dataflow, "price_v2")["v1_null_count"], 1)
+
+    @tornado.testing.gen_test
+    async def test_an_identical_repost_takes_the_warm_exit(self):
+        """A host that sends the same sources on every POST (e.g. each page
+        refresh) keeps its session, as with stats_tier (#944)."""
+        resp = await self._load("cs-warm")
+        self.assertEqual(resp.code, 200, resp.body)
+        before = self._session("cs-warm").xorq_dataflow
+        resp = await self._load("cs-warm")
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertIs(self._session("cs-warm").xorq_dataflow, before)
+
+    @tornado.testing.gen_test
+    async def test_a_repost_that_omits_them_keeps_them(self):
+        """They carry over like data_id: a re-POST of the same build that
+        rebuilds for another reason keeps the mapped column's source stats."""
+        resp = await self._load("cs-carry")
+        self.assertEqual(resp.code, 200, resp.body)
+        before = self._session("cs-carry").xorq_dataflow
+        resp = await _post(self.get_http_port(), "/load_expr", {
+            "session": "cs-carry", "build_dir": self.pair.join_build, "data_id": "join-id-2"})
+        self.assertEqual(resp.code, 200, resp.body)
+        session = self._session("cs-carry")
+        self.assertIsNot(session.xorq_dataflow, before)
+        self.assertEqual(session.dataflow_kwargs["column_stat_sources"], self.pair.V2_PRICE)
+        self.assertEqual(session.dataflow_kwargs["stat_sources"], self.pair.stat_sources())
+        self.assertEqual(_typed(_own_summary(session.xorq_dataflow, "price_v2")),
+            _typed(_own_summary(_build_dataflow(self.pair.v2), "price")))
+
+    @tornado.testing.gen_test
+    async def test_a_repost_with_null_clears_them(self):
+        resp = await self._load("cs-clear")
+        self.assertEqual(resp.code, 200, resp.body)
+        resp = await self._load("cs-clear", stat_sources=None, column_stat_sources=None)
+        self.assertEqual(resp.code, 200, resp.body)
+        session = self._session("cs-clear")
+        self.assertIsNone(session.xorq_dataflow.stat_source_set)
+        self.assertEqual(_typed(_own_summary(session.xorq_dataflow, "price_v2")),
+            _typed(_own_summary(_build_dataflow(self.pair.join), "price_v2")))
+
+    @tornado.testing.gen_test
+    async def test_a_failed_load_releases_the_sessions_and_sources_memtables(self):
+        """#896: a load that fails after the stats ran leaves neither the
+        session expression's memtables nor its sources' on xorq's default
+        backend."""
+        builds = str(self.root / "mt-builds")
+        session_build = str(xo.build_expr(xo.memtable({"v": [1, 2, 3]}, name="mt1092_session"), builds_dir=builds))
+        source_build = str(xo.build_expr(xo.memtable({"v": [4, 5, 6]}, name="mt1092_source"), builds_dir=builds))
+        with patch.object(xorq_loading, "get_xorq_metadata", side_effect=RuntimeError("metadata failed")):
+            resp = await _post(self.get_http_port(), "/load_expr", {
+                "session": "cs-fail", "build_dir": session_build,
+                "stat_sources": {"src": {"build_dir": source_build}},
+                "column_stat_sources": {"v": [{"source": "src", "column": "v"}]}})
+        self.assertEqual(resp.code, 500, resp.body)
+        tables = xorq_config.default_backend().list_tables()
+        self.assertNotIn("mt1092_session", tables)
+        self.assertNotIn("mt1092_source", tables)
