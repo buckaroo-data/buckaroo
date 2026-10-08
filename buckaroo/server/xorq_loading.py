@@ -93,8 +93,8 @@ class XorqServerDataflow(XorqDataflow):
         # Set before super().__init__, which runs the stats. A caller that has
         # built and validated the set passes it in; /reload_expr replays the
         # raw fields and has it built here.
-        if stat_source_set is None and (stat_sources is not None or column_stat_sources is not None):
-            stat_source_set = StatSourceSet(stat_sources, column_stat_sources)
+        if stat_source_set is None:
+            stat_source_set = StatSourceSet.from_fields(stat_sources, column_stat_sources)
         self.stat_source_set = stat_source_set
         super().__init__(expr, *args, **kwargs)
 
@@ -125,11 +125,19 @@ class SourceColumn:
 
 class _StatSource:
     """One stat source: an expression loaded from its build on first use, the
-    stat set its own session runs, and its own stat cache."""
+    stat set its own session runs, and its own stat cache.
 
-    def __init__(self, name: str, spec: dict):
+    ``cache_dir`` is the directory its build's cache nodes resolve in: the
+    spec's own, else the loading session's. The build is loaded and healed
+    in it as ``/load_expr`` loads a session's (#972), so its stat queries read
+    the embedder's snapshots rather than recomputing them under
+    ``~/.cache/xorq``, and a ``data_id``-less scope hashes the same
+    expression the source's own session does."""
+
+    def __init__(self, name: str, spec: dict, cache_dir=None):
         self.name = name
         self.spec = spec
+        self.cache_dir = spec.get("cache_dir") or cache_dir
         self.cache = _make_cache_storage(spec.get("cache_storage_path"))
         self._expr = None
         self._load_error = None
@@ -140,7 +148,10 @@ class _StatSource:
         error on every call, and is not loaded again."""
         if self._expr is None and self._load_error is None:
             try:
-                self._expr = load_expr_build_dir(self.spec["build_dir"])
+                expr = load_expr_build_dir(self.spec["build_dir"], cache_dir=self.cache_dir)
+                if self.cache_dir:
+                    heal_missing_snapshots(expr)
+                self._expr = expr
             except Exception as e:
                 log.warning("stat source %s: build %s failed to load: %s", self.name, self.spec["build_dir"], e)
                 self._load_error = e
@@ -175,7 +186,8 @@ class StatSourceSet:
 
     ``stat_sources`` names expressions by the fields that would load each as a
     session of its own (``build_dir``, and optionally ``data_id``,
-    ``cache_storage_path`` and ``project_root``). ``column_stat_sources`` maps a
+    ``cache_storage_path``, ``project_root`` and ``cache_dir``). A source
+    without a ``cache_dir`` takes the set's, the loading session's. ``column_stat_sources`` maps a
     column of the session's expression to its source columns, each
     ``{"source", "column"}`` and optionally ``"prefix"``. A mapped column has
     exactly one unprefixed source, whose summary replaces the column's; a
@@ -190,19 +202,28 @@ class StatSourceSet:
     Construction raises ``StatSourceError`` for a malformed request; ``validate``
     checks it against the session's expression."""
 
-    def __init__(self, stat_sources, column_stat_sources):
+    def __init__(self, stat_sources, column_stat_sources, cache_dir=None):
         specs = self._parse_sources(stat_sources)
         self.mapping = self._parse_mapping(column_stat_sources, specs)
-        self.sources = {name: _StatSource(name, spec) for name, spec in specs.items()}
+        self.sources = {name: _StatSource(name, spec, cache_dir) for name, spec in specs.items()}
         self._lock = threading.Lock()
         self._runs: dict = {}
+
+    @classmethod
+    def from_fields(cls, stat_sources, column_stat_sources, cache_dir=None):
+        """The set for a session's ``stat_sources`` / ``column_stat_sources``
+        fields, or ``None`` when neither is set."""
+        if stat_sources is None and column_stat_sources is None:
+            return None
+        return cls(stat_sources, column_stat_sources, cache_dir=cache_dir)
 
     @staticmethod
     def _parse_sources(stat_sources) -> dict:
         if stat_sources is None:
             return {}
         bad = StatSourceError("invalid_stat_sources",
-            "stat_sources must map a source name to {build_dir, data_id?, cache_storage_path?, project_root?}")
+            "stat_sources must map a source name to "
+            "{build_dir, data_id?, cache_storage_path?, project_root?, cache_dir?}")
         if not isinstance(stat_sources, dict):
             raise bad
         for name, spec in stat_sources.items():
@@ -210,6 +231,9 @@ class StatSourceSet:
                 raise bad
             if any(spec.get(k) is not None and not isinstance(spec[k], str)
                     for k in ("cache_storage_path", "project_root")):
+                raise bad
+            cache_dir = spec.get("cache_dir")
+            if cache_dir is not None and not (isinstance(cache_dir, str) and os.path.isabs(cache_dir)):
                 raise bad
         return stat_sources
 
