@@ -476,17 +476,6 @@ class LoadExprHandler(tornado.web.RequestHandler):
                 "message": f"cache_dir must be an absolute path, got {cache_dir!r}"})
             return
 
-        # Config-bearing fields that change how the result is computed or
-        # rendered. If the caller passes any of these on a warm POST we must
-        # re-run the pipeline — returning cached metadata would silently
-        # ignore the new config. stats_tier and stats_delivery are not in this
-        # tuple: it tests truthiness, and a host that sends the pair on every
-        # POST would never get the warm exit (#944). They are compared with the
-        # session's stored pair below instead.
-        has_config = any(body.get(k) for k in (
-            "component_config", "column_config_overrides", "extra_grid_config",
-            "init_sd", "skip_stat_columns"))
-
         # Companion telemetry endpoint (#943): when present, the firstpull.*
         # spans POST themselves to the companion as session-correlated records.
         # Built before the warm-session early-exit so a warm re-POST still
@@ -498,8 +487,9 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # build_dir (and no new config was supplied), skip the expensive
         # pipeline and return cached metadata. Only fires when the caller
         # explicitly passes back a session_id from a prior response
-        # (UUID-generated ids are always new). Pass force_reload=true — or any
-        # config-bearing field — to bypass this and re-run the full pipeline.
+        # (UUID-generated ids are always new). Pass force_reload=true — or a
+        # config-bearing field that differs from the session's — to bypass
+        # this and re-run the full pipeline.
         sessions = self.application.settings["sessions"]
         existing = sessions.get(session_id)
         # cache_dir carries over like the rest of a loaded session: a re-POST
@@ -525,6 +515,22 @@ class LoadExprHandler(tornado.web.RequestHandler):
         existing_kwargs = (existing.dataflow_kwargs or {}) if existing is not None else {}
         if data_id is None and existing is not None and existing.build_dir == build_dir:
             data_id = existing_kwargs.get("data_id")
+        # Config-bearing fields that change how the result is computed or
+        # rendered. A warm POST that carries one that differs from what the
+        # session holds must re-run the pipeline — returning cached metadata
+        # would silently ignore the new config. One equal to the session's
+        # changes nothing, so a client that sends its saved config on every
+        # open (#1037) still takes the early-exit. stats_tier and
+        # stats_delivery are not in this tuple: a host that sends the pair on
+        # every POST would never get the warm exit (#944). They are compared
+        # with the session's stored pair in the exit condition below instead.
+        held_config = dict(existing_kwargs)
+        if existing is not None:
+            held_config["component_config"] = existing.component_config
+        has_config = any(
+            body.get(k) and body[k] != held_config.get(k)
+            for k in ("component_config", "column_config_overrides",
+                "extra_grid_config", "init_sd", "skip_stat_columns"))
         # /load swaps a session to pandas without clearing build_dir, so the
         # backend is checked too — else its pandas metadata comes back here.
         if (not force_reload and not has_config and existing
