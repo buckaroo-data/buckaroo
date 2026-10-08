@@ -421,6 +421,21 @@ def _stats_policy_from_body(body: dict, current_tier: str, current_delivery: str
     return stats_tier, stats_delivery, None
 
 
+# The /load_expr fields that name the expressions some columns' stats are
+# computed over (#1092).
+STAT_SOURCE_FIELDS = ("stat_sources", "column_stat_sources")
+
+
+def _release_failed_load(xorq_loading, expr, stat_source_set) -> None:
+    """Release what a failed /load_expr loaded: the stats may already have
+    executed the expression and its sources, registering their memtables on
+    xorq's default backend (#896)."""
+    if expr is not None:
+        xorq_loading.release_memtables(expr)
+    if stat_source_set is not None:
+        stat_source_set.release()
+
+
 class LoadExprHandler(tornado.web.RequestHandler):
     """POST /load_expr — load a xorq/ibis expression from a build dir
     and serve it via the xorq-backed buckaroo dataflow.
@@ -482,7 +497,7 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # ignore the new config. stats_tier and stats_delivery are not in this
         # tuple: it tests truthiness, and a host that sends the pair on every
         # POST would never get the warm exit (#944). They are compared with the
-        # session's stored pair below instead.
+        # session's stored pair below instead, as are the column stat sources.
         has_config = any(body.get(k) for k in (
             "component_config", "column_config_overrides", "extra_grid_config",
             "init_sd", "skip_stat_columns"))
@@ -525,11 +540,19 @@ class LoadExprHandler(tornado.web.RequestHandler):
         existing_kwargs = (existing.dataflow_kwargs or {}) if existing is not None else {}
         if data_id is None and existing is not None and existing.build_dir == build_dir:
             data_id = existing_kwargs.get("data_id")
+        # The column stat sources (#1092) carry over the same way, since they
+        # name the build's columns. A re-POST that sends them, null to clear
+        # them, rebuilds only when they changed.
+        stat_source_fields = {
+            k: body[k] if k in body else (
+                existing_kwargs.get(k) if existing is not None and existing.build_dir == build_dir else None)
+            for k in STAT_SOURCE_FIELDS}
         # /load swaps a session to pandas without clearing build_dir, so the
         # backend is checked too — else its pandas metadata comes back here.
         if (not force_reload and not has_config and existing
                 and existing.backend == "xorq" and existing.build_dir == build_dir
                 and existing.cache_dir == cache_dir and existing_kwargs.get("data_id") == data_id
+                and all(existing_kwargs.get(k) == v for k, v in stat_source_fields.items())
                 and existing.metadata
                 and (existing.stats_tier, existing.stats_delivery) == (stats_tier, stats_delivery)):
             # The pipeline is skipped, but the refreshed page still opens a new
@@ -572,22 +595,35 @@ class LoadExprHandler(tornado.web.RequestHandler):
         # skip_stat_columns: columns whose summary stats are supplied via init_sd
         # and must not be recomputed (e.g. a diff reusing each source column's
         # stats).
+        # stat_sources / column_stat_sources: columns whose summary stats are
+        # computed over a column of another expression (#1092), e.g. a compare
+        # grid showing each version's own stats beside the join's.
         dataflow_kwargs = {
             "cache_storage_path": body.get("cache_storage_path"),
             "data_id": data_id,
             "column_config_overrides": body.get("column_config_overrides"),
             "extra_grid_config": body.get("extra_grid_config"),
             "init_sd": body.get("init_sd"),
-            "skip_stat_columns": body.get("skip_stat_columns")}
+            "skip_stat_columns": body.get("skip_stat_columns"),
+            **stat_source_fields}
 
         project_root = body.get("project_root")
+        expr = stat_source_set = None
 
         try:
             with telemetry.firstpull_load(session_id, tele_sink, "load_expr", build_dir=build_dir):
+                # A malformed request fails before anything is loaded. The
+                # sources' builds load in the session's cache_dir, as its own
+                # does.
+                stat_source_set = xorq_loading.StatSourceSet.from_fields(
+                    stat_source_fields["stat_sources"], stat_source_fields["column_stat_sources"],
+                    cache_dir=cache_dir)
                 # The harness reads "expression build" as just this call, so it
                 # gets its own span rather than being outer-minus-inner residual.
                 with perf_log.perf_span("firstpull.expr_load", session=session_id):
                     expr = xorq_loading.load_expr_build_dir(build_dir, cache_dir=cache_dir)
+                if stat_source_set is not None:
+                    stat_source_set.validate(expr)
                 if cache_dir:
                     # Runs cached sub-graphs, so it is timed apart from the
                     # expression build. Runs before the dataflow, whose queries
@@ -604,12 +640,18 @@ class LoadExprHandler(tornado.web.RequestHandler):
                     xorq_dataflow = xorq_loading.XorqServerDataflow(
                         expr, skip_main_serial=True, extra_klasses=extra_klasses,
                         stats_tier=dataflow_stats_tier(stats_tier, stats_delivery),
-                        **dataflow_kwargs)
+                        stat_source_set=stat_source_set, **dataflow_kwargs)
                 # Spanning metadata too leaves only the small klass-load step
                 # unmeasured inside the outer firstpull.load_expr total.
                 with perf_log.perf_span("firstpull.metadata", session=session_id):
                     metadata = xorq_loading.get_xorq_metadata(xorq_dataflow, build_dir)
+        except xorq_loading.StatSourceError as e:
+            _release_failed_load(xorq_loading, expr, stat_source_set)
+            self.set_status(400)
+            self.write({"error_code": e.error_code, "message": e.message})
+            return
         except Exception:
+            _release_failed_load(xorq_loading, expr, stat_source_set)
             tb = traceback.format_exc()
             log.error("load_expr error build_dir=%s: %s", build_dir, tb)
             resp: dict = {"error_code": "load_expr_error",
@@ -846,7 +888,8 @@ class ReloadExprHandler(tornado.web.RequestHandler):
     and the rebuild replays the session's stored ``/load_expr`` config
     (``SessionState.dataflow_kwargs``) — so stats already in the
     ``cache_storage_path`` store are cache hits, and column overrides,
-    extra grid config, init_sd and skip_stat_columns survive the reload.
+    extra grid config, init_sd, skip_stat_columns and the column stat sources
+    (``stat_sources``, ``column_stat_sources``) survive the reload.
 
     The session's stored ``stats_tier`` / ``stats_delivery`` are replayed too.
     The body is optional; a pair in it replaces the stored one (and is stored)
@@ -903,16 +946,22 @@ class ReloadExprHandler(tornado.web.RequestHandler):
                 "Install with `pip install buckaroo[xorq]`."})
             return
 
+        stat_source_set = None
         try:
             extra_klasses = (
                 xorq_loading.load_project_stat_klasses(session.project_root)
                 + xorq_loading.load_project_post_processing_klasses(session.project_root)
                 + xorq_loading.load_project_display_klasses(session.project_root))
+            # Its sources load in the session's cache_dir, as on /load_expr.
+            stat_source_set = xorq_loading.StatSourceSet.from_fields(
+                *(session.dataflow_kwargs.get(k) for k in STAT_SOURCE_FIELDS), cache_dir=session.cache_dir)
             xorq_dataflow = xorq_loading.XorqServerDataflow(
                 session.expr, skip_main_serial=True, extra_klasses=extra_klasses,
                 stats_tier=dataflow_stats_tier(stats_tier, stats_delivery),
-                **session.dataflow_kwargs)
+                stat_source_set=stat_source_set, **session.dataflow_kwargs)
         except Exception:
+            if stat_source_set is not None:
+                stat_source_set.release()
             tb = traceback.format_exc()
             log.error("reload_expr error session=%s: %s", session_id, tb)
             resp: dict = {"error_code": "reload_expr_error",
@@ -936,7 +985,10 @@ class ReloadExprHandler(tornado.web.RequestHandler):
         if bs.get("quick_command_args"):
             xorq_dataflow.quick_command_args = bs["quick_command_args"]
 
+        replaced = session.xorq_dataflow
         session.xorq_dataflow = xorq_dataflow
+        if replaced.stat_source_set is not None:
+            replaced.stat_source_set.release()
         session.stats_tier = stats_tier
         session.stats_delivery = stats_delivery
         refresh_session_snapshot(session, xorq_dataflow)
