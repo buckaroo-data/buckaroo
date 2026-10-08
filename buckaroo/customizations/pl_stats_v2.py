@@ -122,6 +122,9 @@ def pl_histogram_series(ser: RawSeries) -> HistogramSeriesResult:
         return {'histogram_args': {}, 'histogram_bins': []}
 
     vals = ser.drop_nulls()
+    if vals.dtype.is_float():
+        # Infinities belong in the tail buckets, not in the quantiles (see histogram_series in pd_stats_v2).
+        vals = vals.filter(~vals.is_infinite())
     if len(vals) == 0:
         return {'histogram_args': {}, 'histogram_bins': []}
 

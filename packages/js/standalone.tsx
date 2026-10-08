@@ -287,7 +287,8 @@ async function main() {
     // Show connecting state
     rootEl.textContent = "Connecting...";
 
-    const ws = new WebSocket(wsUrl);
+    // The server reads capabilities from the URL at open.
+    const ws = new WebSocket(srt.withStatsCapability(wsUrl));
     ws.binaryType = "arraybuffer";
 
     // Wait for connection

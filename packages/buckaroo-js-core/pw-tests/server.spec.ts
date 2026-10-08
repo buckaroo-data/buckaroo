@@ -485,6 +485,22 @@ test.describe('WebSocket data flow', () => {
     expect(await getCellText(page, COL.name, 0)).toBe('Alice');
   });
 
+  test('standalone page advertises stats_update on its WebSocket URL', async ({ page, request }) => {
+    const session = `ws-caps-${Date.now()}`;
+    await loadSession(request, session, csvPath);
+
+    // The server reads capabilities from ?caps= at open, before the client
+    // sends anything, so the page has to put them on the URL it connects to.
+    const socketUrls: string[] = [];
+    page.on('websocket', (socket) => socketUrls.push(socket.url()));
+    await page.goto(`${BASE}/s/${session}`);
+    await waitForGrid(page);
+
+    const wsUrls = socketUrls.filter((u) => u.includes(`/ws/${session}`));
+    expect(wsUrls).toHaveLength(1);
+    expect(new URL(wsUrls[0]).searchParams.get('caps')).toBe('stats_update');
+  });
+
   test('WebSocket receives data for scrolled rows', async ({ page, request }) => {
     // Create a larger dataset (100 rows) to force infinite scrolling
     const rows = [];

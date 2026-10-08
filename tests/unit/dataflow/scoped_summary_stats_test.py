@@ -15,6 +15,8 @@ the source of truth for bare keys, which makes that staleness directly
 observable in ``merged_sd``.
 """
 
+import copy
+
 import pandas as pd
 
 from typing import Any, TypedDict
@@ -22,7 +24,8 @@ from buckaroo.customizations.pandas_commands import (DropCol, FillNA, GroupBy, N
 from buckaroo.customizations.pd_autoclean_conf import NoCleaningConf
 from buckaroo.customizations.pd_stats_v2 import PD_ANALYSIS_V2, PD_AUTOCLEAN_DEFAULT_V2, cleaning_gen_ops
 from buckaroo.dataflow.autocleaning import (AutocleaningConfig, PandasAutocleaning)
-from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis
+from buckaroo.dataflow.dataflow import CustomizableDataflow, StylingAnalysis, assemble_merged_sd
+from buckaroo.dataflow.sd_cache import split_chain_by_scope
 from buckaroo.pluggable_analysis_framework.stat_func import stat
 
 
@@ -249,3 +252,64 @@ def test_analysis_klasses_change_invalidates_scoped_sd():
         f"got the same key {key1} for both — likely the cache key still "
         f"omits analysis_klasses identity (Codex P2)"
     )
+
+
+def _scope_inputs(dfc):
+    """The pieces ``_merged_sd`` assembles, read back from the dataflow."""
+    cache = dfc.summary_stats_cache
+    return dict(
+        init_sd=dfc.init_sd, cleaned_sd=dfc.cleaned_sd, raw_sd=cache[dfc.raw_sd_key],
+        processed_sd=dfc.processed_sd, processed_df=dfc.processed_df,
+        chains=split_chain_by_scope(dfc.operations),
+        clean_sd=cache[dfc.clean_sd_key], filt_sd=cache[dfc.filt_sd_key])
+
+
+def _assembly_dataflow():
+    df = pd.DataFrame({'amount': ['10', '20', '30', '40', '50', '60', '70'],
+        'word': ['foo', 'bar', 'foo', 'baz', 'foo', 'bar', 'foo']})
+    # init_sd is keyed by the original column name; 'amount' is rewritten to 'a'.
+    dfc = ScopedDataflow(df, init_sd={
+        'amount': {'displayer_args': {'displayer': 'string', 'max_length': 99}, 'init_only': 1}})
+    dfc.cleaning_method = 'default'
+    dfc.quick_command_args = {'search': ['foo']}
+    return dfc
+
+
+def test_assemble_merged_sd_equals_merged_sd_with_init_sd_and_cleaning():
+    """``assemble_merged_sd`` is the body of the ``merged_sd`` observer as a
+    pure function, so a server can assemble wire stats from an accumulating
+    raw sd without going through the traitlets cascade."""
+    dfc = _assembly_dataflow()
+    sd = dfc.merged_sd['a']
+    assert sd['init_only'] == 1, "init_sd override must reach merged_sd under the rewritten name"
+    assert 'cleaned_mean' in sd and 'filtered_mean' in sd, "cleaning and filter layers must be active"
+
+    assembled = assemble_merged_sd(**_scope_inputs(dfc))
+
+    assert assembled == dfc.merged_sd
+
+
+def test_assemble_merged_sd_without_a_processed_df_merges_the_unrewritten_sds():
+    assembled = assemble_merged_sd(
+        init_sd={'x': {'init': 1}}, cleaned_sd={'x': {'cleaned': 2}}, raw_sd={'x': {'raw': 3}},
+        processed_sd={'x': {'processed': 4}}, processed_df=None,
+        chains={'raw': [], 'clean': [], 'filt': []})
+    assert assembled == {'x': {'init': 1, 'cleaned': 2, 'raw': 3, 'processed': 4}}
+
+
+def test_assemble_merged_sd_does_not_mutate_its_inputs():
+    dfc = _assembly_dataflow()
+    inputs = _scope_inputs(dfc)
+    sd_names = ('init_sd', 'cleaned_sd', 'raw_sd', 'processed_sd', 'clean_sd', 'filt_sd')
+
+    def key_sets():
+        return {name: {col: sorted(stats) for col, stats in inputs[name].items()} for name in sd_names}
+
+    before, chains_before = key_sets(), copy.deepcopy(inputs['chains'])
+
+    assemble_merged_sd(**inputs)
+
+    # Layering cleaned_* / filtered_* into a result column that shared its dict
+    # with an input would add keys to that input.
+    assert key_sets() == before
+    assert inputs['chains'] == chains_before

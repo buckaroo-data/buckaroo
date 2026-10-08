@@ -200,8 +200,13 @@ def histogram_series(ser: RawSeries) -> HistogramSeriesResult:
     vals = ser.dropna()
     if len(vals) == 0:
         return {'histogram_args': {}, 'histogram_bins': []}
-    low_tail = np.quantile(vals, 0.01)
-    high_tail = np.quantile(vals, 0.99)
+    # Infinities belong in the tail buckets, not in the quantiles: np.quantile is NaN (or inf) when its
+    # interpolation lands beside one, and a NaN tail leaves the middle empty.
+    finite = vals[np.isfinite(vals)]
+    if len(finite) == 0:
+        return {'histogram_args': {}, 'histogram_bins': []}
+    low_tail = np.quantile(finite, 0.01)
+    high_tail = np.quantile(finite, 0.99)
     low_pass = ser > low_tail
     high_pass = ser < high_tail
     meat = vals[low_pass & high_pass]

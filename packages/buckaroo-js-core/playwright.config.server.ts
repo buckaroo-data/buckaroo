@@ -32,6 +32,9 @@ export default defineConfig({
     command: `${PYTHON} -m buckaroo.server --no-browser --port ${PORT}`,
     cwd: '../..',
     url: `http://localhost:${PORT}/health`,
+    // Full stats on a deferred session wait this long, so a test can see the
+    // session between its rows and its stats (BUCKAROO_TEST_STATS_DELAY_S).
+    env: { BUCKAROO_TEST_STATS_DELAY_S: process.env.BUCKAROO_TEST_STATS_DELAY_S ?? '1' },
     reuseExistingServer: !process.env.CI,
     timeout: 15_000,
   },

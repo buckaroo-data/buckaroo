@@ -133,7 +133,6 @@ _DDD_KNOWN_FAILURES = {
     "polars-pl_df_with_temporal_edges-new_york": "#1053: a fold=1 datetime isn't cached",
     "polars-pl_df_with_temporal_edges-far_kolkata": "#1053: a datetime before year 1 UTC isn't cached",
     "df_with_far_future_fixed_offset_timestamps": "#1053: a pytz.FixedOffset datetime isn't cached",
-    "df_with_infinity": "#1057: the failing histogram is the run's last query, never cached",
     "pl_df_with_temporal_edges": "#1057: the failing time histogram is the run's last query, never cached"}
 
 
