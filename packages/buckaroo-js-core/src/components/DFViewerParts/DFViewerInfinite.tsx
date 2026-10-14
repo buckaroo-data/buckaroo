@@ -26,6 +26,10 @@ import {
     TooltipModule,
     TextFilterModule,
     ScrollApiModule,
+    EventApiModule,
+    RowApiModule,
+    RenderApiModule,
+    ClientSideRowModelApiModule,
     SortChangedEvent,
     CellClassParams,
     RefreshCellsParams,
@@ -53,6 +57,10 @@ ModuleRegistry.registerModules([
     TooltipModule,
     TextFilterModule,
     ScrollApiModule,
+    EventApiModule,
+    RowApiModule,
+    RenderApiModule,
+    ClientSideRowModelApiModule,
 ]);
 
 const AccentColor = "#2196F3"
@@ -154,12 +162,14 @@ export function DFViewerInfinite({
     max_rows_in_configs,
     view_name,
     data_key,
+    onGridApiReady,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
     summary_stats_data?: DFData;
     activeCol?: [string, string];
     setActiveCol: SetColumnFunc;
+    onGridApiReady?: (api: GridApi) => void;
     // these are the parameters that could affect the table,
     // dfviewer doesn't need to understand them, but it does need to use
     // them as keys to get updated data
@@ -237,6 +247,7 @@ export function DFViewerInfinite({
                     effectiveScheme={effectiveScheme}
                     view_name={view_name}
                     data_key={data_key}
+                    onGridApiReady={onGridApiReady}
                 />
             </div>
         </div>)
@@ -254,6 +265,7 @@ export function DFViewerInfiniteInner({
     effectiveScheme,
     view_name,
     data_key,
+    onGridApiReady,
 }: {
     data_wrapper: DatasourceOrRaw;
     df_viewer_config: DFViewerConfig;
@@ -270,6 +282,7 @@ export function DFViewerInfiniteInner({
     effectiveScheme?: 'light' | 'dark';
     view_name?: string;
     data_key?: string;
+    onGridApiReady?: (api: GridApi) => void;
 }) {
     /*
     const lastProps = useRef<any>(null);
@@ -604,6 +617,9 @@ export function DFViewerInfiniteInner({
                             // Ensure pinned rows are applied once API is ready
                             params.api.setGridOption('pinnedTopRowData', topRowsRef.current || []);
                         } catch (_e) {}
+                        try {
+                            onGridApiReady?.(params.api);
+                        } catch (_e) {}
                     }}
                     context={{ outside_df_params, ...extra_context }}
                 ></AgGridReact>
@@ -657,16 +673,18 @@ const getDsGridOptions = (origGridOptions: GridOptions, maxRowsWithoutScrolling:
     return dsGridOptions;
 };export function DFViewer({
     df_data, df_viewer_config, summary_stats_data, activeCol, setActiveCol,
+    onGridApiReady,
 }: {
     df_data: DFData;
     df_viewer_config: DFViewerConfig;
     summary_stats_data?: DFData;
     activeCol?: [string, string];
     setActiveCol?: SetColumnFunc;
+    onGridApiReady?: (api: GridApi) => void;
 }) {
   const defaultSetColumnFunc = (_newCol:[string, string]):void => {}
     const sac:SetColumnFunc = setActiveCol || defaultSetColumnFunc;
-    
+
     return (
         <DFViewerInfinite
             data_wrapper={{
@@ -677,7 +695,8 @@ const getDsGridOptions = (origGridOptions: GridOptions, maxRowsWithoutScrolling:
             df_viewer_config={df_viewer_config}
             summary_stats_data={summary_stats_data}
             activeCol={activeCol}
-            setActiveCol={sac} />
+            setActiveCol={sac}
+            onGridApiReady={onGridApiReady} />
     );
 }
 
