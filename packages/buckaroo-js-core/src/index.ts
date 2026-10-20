@@ -20,6 +20,7 @@ import { BuckarooView } from './server/BuckarooView';
 import { WebSocketModel } from './server/WebSocketModel';
 import { makeLatestDictDecoder } from './server/latestDictDecoder';
 import { withStatsCapability } from './server/StatsChannel';
+import { version } from './version';
 
 import { HistogramCell } from "./components/DFViewerParts/HistogramCell";
 import { InfiniteEx } from "./components/DFViewerParts/TableInfinite";
@@ -64,6 +65,7 @@ export default {
     WebSocketModel,
     makeLatestDictDecoder,
     withStatsCapability,
+    version,
 };
 
 // Named exports for direct imports
@@ -95,6 +97,7 @@ export {
     WebSocketModel,
     makeLatestDictDecoder,
     withStatsCapability,
+    version,
 };
 
 export type { IModel } from './server/IModel';
