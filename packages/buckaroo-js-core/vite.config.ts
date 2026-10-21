@@ -24,7 +24,11 @@ export default defineConfig({
     transform: {
 	"^.+\\.tsx?$": "ts-jest",
     },
-    plugins: [dts()], // Uses the 'vite-plugin-dts' plugin for generating TypeScript declaration files (d.ts).
+    plugins: [
+        // Generates TypeScript declaration files (d.ts). package.json is in tsconfig's include so src/version.ts can
+        // import it under `composite`; it gets no declaration of its own.
+        dts({ beforeWriteFile: (filePath) => (filePath.endsWith("package.json.d.ts") ? false : undefined) }),
+    ],
     test: {
         globals: true,
         environment: "jsdom",
