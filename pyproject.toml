@@ -134,7 +134,7 @@ xorq = [
 # Pinned <2: mcp 2.x renamed FastMCP to MCPServer and changed other APIs
 # (see https://py.sdk.modelcontextprotocol.io/v2/migration/#fastmcp-renamed-to-mcpserver);
 # buckaroo_mcp_tool.py still targets the 1.x API.
-mcp = ["buckaroo[server]", "mcp<2"]
+mcp = ["buckaroo[server]", "mcp<3"]
 marimo = [
     "marimo>=0.19.7",
     "pandas; python_version >= '3.13'",
