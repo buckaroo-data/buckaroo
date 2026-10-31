@@ -89,3 +89,57 @@ def test_load_file_polars_ndjson_still_works():
 def test_load_file_polars_unsupported_extension():
     with pytest.raises(ValueError, match="Unsupported file format"):
         load_file_polars("/tmp/foo.xyz")
+
+
+def test_polars_server_dataflow_uses_polars_autocleaning():
+    """#900: ``PolarsServerDataflow`` must use the polars-aware
+    ``PolarsAutocleaning`` (like ``PolarsBuckarooWidget``), not
+    ``PandasAutocleaning``."""
+    from buckaroo.polars_buckaroo import PolarsAutocleaning, PolarsBuckarooWidget
+    from buckaroo.server.data_loading_polars import PolarsServerDataflow
+
+    assert PolarsServerDataflow.autocleaning_klass is PolarsAutocleaning
+    assert (PolarsServerDataflow.autocleaning_klass
+            is PolarsBuckarooWidget.autocleaning_klass)
+    dataflow = create_polars_dataflow(pl.DataFrame({"a": [1, 2, 3]}))
+    assert isinstance(dataflow.ac_obj, PolarsAutocleaning)
+
+
+def test_polars_server_dataflow_autocleaning_with_add_orig():
+    """With a real cleaning conf the polars ``make_origs`` path must run:
+    the cleaned frame keeps the original column next to the cleaned one."""
+    from typing import Any, TypedDict
+
+    from buckaroo.customizations.pl_autocleaning_conf import NoCleaningConfPl
+    from buckaroo.customizations.pl_stats_v2 import pl_cleaning_stats
+    from buckaroo.customizations.polars_commands import (
+        DropCol, FillNA, GroupBy, NoOp, PlSafeInt)
+    from buckaroo.dataflow.autocleaning import AutocleaningConfig
+    from buckaroo.pluggable_analysis_framework.stat_func import stat
+    from buckaroo.server.data_loading_polars import PolarsServerDataflow
+
+    _Result = TypedDict('_Result', {'cleaning_ops': Any, 'add_orig': Any})
+
+    @stat()
+    def _add_orig_cleaning(int_parse: float, int_parse_fail: float) -> _Result:
+        if int_parse > 0.3:
+            return {'cleaning_ops': [{'symbol': 'safe_int', 'meta': {'auto_clean': True}},
+                                     {'symbol': 'df'}],
+                    'add_orig': True}
+        return {'cleaning_ops': [], 'add_orig': False}
+
+    class IntCleaningConf(AutocleaningConfig):
+        autocleaning_analysis_klasses = [pl_cleaning_stats, _add_orig_cleaning]
+        command_klasses = [PlSafeInt, DropCol, FillNA, GroupBy, NoOp]
+        name = "default"
+
+    class CleaningServerDataflow(PolarsServerDataflow):
+        autoclean_conf = tuple([IntCleaningConf, NoCleaningConfPl])
+
+    df = pl.DataFrame({"realname": ["30", "40"]})
+    dataflow = CleaningServerDataflow(df, skip_main_serial=True)
+    dataflow.cleaning_method = "default"
+    assert isinstance(dataflow.cleaned_df, pl.DataFrame)
+    assert dataflow.cleaned_df.to_dicts() == [
+        {"realname": 30, "realname_orig": "30"},
+        {"realname": 40, "realname_orig": "40"}]
