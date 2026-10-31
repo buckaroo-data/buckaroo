@@ -155,6 +155,9 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
 
     data_id = None
     _fallback_data_id = None
+    # A ``StatSourceSet`` (xorq_loading) when some columns' stats come from
+    # another expression. Set by XorqServerDataflow.
+    stat_source_set = None
 
     def populate_df_meta(self) -> None:
         if self.processed_df is None:
@@ -228,6 +231,11 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
         scope_id = self._stat_scope_id(chain) if cache_storage is not None else None
         if scope_id is None:
             cache_storage = None
+        # Columns mapped to another expression get no query here, in any scope:
+        # their stats are the source column's, over the source's own view.
+        sources = self.stat_source_set
+        mapped = sources.mapped_columns(processed_df.columns) if sources is not None else []
+        skip = set(getattr(self, 'skip_stat_columns', None) or ()) | set(mapped)
         # The owning widget injects XorqDfStatsV2 as DFStatsClass (via its
         # InnerDataFlow subclass); the cast exposes cache_run_stats() below.
         stats_klass = cast("type[XorqDfStatsV2]", self.DFStatsClass)
@@ -235,7 +243,7 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
             stats = stats_klass(
                 processed_df, self.analysis_klasses, self.df_name,
                 debug=self.debug, cache_storage=cache_storage,
-                skip_columns=getattr(self, 'skip_stat_columns', None), scope_id=scope_id)
+                skip_columns=skip or None, scope_id=scope_id)
             self._seed_row_counts(processed_df, getattr(stats, 'length', None), chain)
             # Attach the summary-stat cache signal (#944) to the span so a
             # telemetry consumer learns whether the stats were cached — the one
@@ -254,16 +262,17 @@ class XorqDataflow(CustomizableDataflow["XorqExpr | pd.DataFrame"]):
                 cache_snapshots=cs.get("snapshots"), cache_bytes=cs.get("bytes"),
                 cache_write_errors=cs.get("write_errors"), cache_parts_read=cs.get("parts_read"),
                 cache_parts_written=cs.get("parts_written"), cache_errors_cached=cs.get("errors_cached"))
+            source_sd, source_errs = sources.summarize(mapped) if mapped else ({}, {})
         sdf = stats.sdf
-        if stats.errs:
-            if self.debug:
-                raise Exception("Error executing analysis")
-            errs = stats.errs
-        else:
-            errs = {}
+        errs = {**stats.errs, **source_errs}
+        if errs and self.debug:
+            raise Exception("Error executing analysis")
         rewritten = {}
         for orig_col, rewritten_col in old_col_new_col(processed_df):
             col_meta = dict(sdf.get(orig_col, {}))
+            if orig_col in source_sd:
+                summary, replaces = source_sd[orig_col]
+                col_meta = {**({} if replaces else col_meta), **summary}
             col_meta['orig_col_name'] = orig_col
             col_meta['rewritten_col_name'] = rewritten_col
             rewritten[rewritten_col] = col_meta

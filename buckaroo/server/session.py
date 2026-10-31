@@ -132,6 +132,11 @@ class SessionState:
             # Lazy: xorq is optional, and an expr means it is installed.
             from buckaroo.server.xorq_loading import release_memtables  # noqa: PLC0415
             release_memtables(self.expr)
+        # The sources whose stats the dataflow's mapped columns read hold
+        # memtables of their own.
+        sources = getattr(self.xorq_dataflow, "stat_source_set", None)
+        if sources is not None:
+            sources.release()
         self.expr = None
         self.xorq_dataflow = None
 

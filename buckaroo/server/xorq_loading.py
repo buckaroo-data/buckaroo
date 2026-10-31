@@ -12,14 +12,19 @@ import builtins
 import inspect
 import logging
 import os
+import threading
 import traceback
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import pyarrow.parquet as pq
 
+from buckaroo.customizations.xorq_stats_v2 import XORQ_STATS_V2
 from buckaroo.pluggable_analysis_framework.source_digest import text_digest, text_md5
-from buckaroo.pluggable_analysis_framework.stat_cache import StatCache
+from buckaroo.pluggable_analysis_framework.stat_cache import StatCache, make_scope_id
+from buckaroo.pluggable_analysis_framework.stat_pipeline import errors_to_errdict
+from buckaroo.pluggable_analysis_framework.xorq_stat_pipeline import XorqStatPipeline, fallback_data_id
 from buckaroo.server.git_state_guard import install_git_state_guard
 from buckaroo.server.window import clamp_window
 from buckaroo.serialization_utils import make_infinite_resp
@@ -76,7 +81,8 @@ class XorqServerDataflow(XorqDataflow):
     DFStatsClass = XorqDfStatsV2
     analysis_klasses = _XORQ_ANALYSIS_KLASSES
 
-    def __init__(self, expr, *args, extra_klasses=None, cache_storage_path=None, data_id=None, **kwargs):
+    def __init__(self, expr, *args, extra_klasses=None, cache_storage_path=None, data_id=None,
+            stat_sources=None, column_stat_sources=None, stat_source_set=None, **kwargs):
         if extra_klasses:
             # Per-instance override — class-level _XORQ_ANALYSIS_KLASSES is
             # left untouched so other sessions / direct widget usage don't
@@ -84,7 +90,268 @@ class XorqServerDataflow(XorqDataflow):
             self.analysis_klasses = list(_XORQ_ANALYSIS_KLASSES) + list(extra_klasses)
         self.cache_storage = _make_cache_storage(cache_storage_path)
         self.data_id = data_id
+        # Set before super().__init__, which runs the stats. A caller that has
+        # built and validated the set passes it in; /reload_expr replays the
+        # raw fields and has it built here.
+        if stat_source_set is None:
+            stat_source_set = StatSourceSet.from_fields(stat_sources, column_stat_sources)
+        self.stat_source_set = stat_source_set
         super().__init__(expr, *args, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# column stat sources (/load_expr ``stat_sources`` + ``column_stat_sources``)
+# ---------------------------------------------------------------------------
+
+
+class StatSourceError(ValueError):
+    """A ``stat_sources`` / ``column_stat_sources`` request that can't be
+    honoured. ``/load_expr`` answers it with a 400 carrying ``error_code``."""
+
+    def __init__(self, error_code: str, message: str):
+        super().__init__(message)
+        self.error_code = error_code
+        self.message = message
+
+
+@dataclass(frozen=True)
+class SourceColumn:
+    """One source column feeding a mapped column. ``prefix`` is empty for the
+    column's one unprefixed source."""
+    source: str
+    column: str
+    prefix: str = ""
+
+
+class _StatSource:
+    """One stat source: an expression loaded from its build on first use, the
+    stat set its own session runs, and its own stat cache.
+
+    ``cache_dir`` is the directory its build's cache nodes resolve in: the
+    spec's own, else the loading session's. The build is loaded and healed
+    in it as ``/load_expr`` loads a session's (#972), so its stat queries read
+    the embedder's snapshots rather than recomputing them under
+    ``~/.cache/xorq``, and a ``data_id``-less scope hashes the same
+    expression the source's own session does."""
+
+    def __init__(self, name: str, spec: dict, cache_dir=None):
+        self.name = name
+        self.spec = spec
+        self.cache_dir = spec.get("cache_dir") or cache_dir
+        self.cache = _make_cache_storage(spec.get("cache_storage_path"))
+        self._expr = None
+        self._load_error = None
+        self._klasses = None
+
+    def expr(self):
+        """The loaded expression. A build that failed to load raises the same
+        error on every call, and is not loaded again."""
+        if self._expr is None and self._load_error is None:
+            try:
+                expr = load_expr_build_dir(self.spec["build_dir"], cache_dir=self.cache_dir)
+                if self.cache_dir:
+                    heal_missing_snapshots(expr)
+                self._expr = expr
+            except Exception as e:
+                log.warning("stat source %s: build %s failed to load: %s", self.name, self.spec["build_dir"], e)
+                self._load_error = e
+        if self._load_error is not None:
+            raise self._load_error
+        return self._expr
+
+    def loaded_expr(self):
+        return self._expr
+
+    def scope_id(self) -> str:
+        """The scope the source's own session caches its raw view under."""
+        data_id = self.spec.get("data_id")
+        return make_scope_id(fallback_data_id(self.expr()) if data_id is None else data_id)
+
+    def stat_klasses(self) -> list:
+        """The source's own stat set: the built-in stats and those of its
+        ``project_root``, never the loading session's."""
+        if self._klasses is None:
+            root = self.spec.get("project_root")
+            self._klasses = list(XORQ_STATS_V2) + (load_project_stat_klasses(root) if root else [])
+        return self._klasses
+
+
+def _is_name(value) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
+class StatSourceSet:
+    """Columns of a loaded expression whose summary stats are computed over a
+    column of another expression.
+
+    ``stat_sources`` names expressions by the fields that would load each as a
+    session of its own (``build_dir``, and optionally ``data_id``,
+    ``cache_storage_path``, ``project_root`` and ``cache_dir``). A source
+    without a ``cache_dir`` takes the set's, the loading session's. ``column_stat_sources`` maps a
+    column of the session's expression to its source columns, each
+    ``{"source", "column"}`` and optionally ``"prefix"``. A mapped column has
+    exactly one unprefixed source, whose summary replaces the column's; a
+    prefixed source's keys are added as ``<prefix><key>``.
+
+    A source is loaded to run stats over, never to serve rows. Its stats are
+    the ones its own session shows for the column: the unprocessed, unfiltered
+    view, in the source's stat cache, from the source's own stat set. Cells
+    missing from that cache are computed and written to it. The summaries do
+    not depend on the session's scope, so each is computed once per set.
+
+    Construction raises ``StatSourceError`` for a malformed request; ``validate``
+    checks it against the session's expression."""
+
+    def __init__(self, stat_sources, column_stat_sources, cache_dir=None):
+        specs = self._parse_sources(stat_sources)
+        self.mapping = self._parse_mapping(column_stat_sources, specs)
+        self.sources = {name: _StatSource(name, spec, cache_dir) for name, spec in specs.items()}
+        self._lock = threading.Lock()
+        self._runs: dict = {}
+
+    @classmethod
+    def from_fields(cls, stat_sources, column_stat_sources, cache_dir=None):
+        """The set for a session's ``stat_sources`` / ``column_stat_sources``
+        fields, or ``None`` when neither is set."""
+        if stat_sources is None and column_stat_sources is None:
+            return None
+        return cls(stat_sources, column_stat_sources, cache_dir=cache_dir)
+
+    @staticmethod
+    def _parse_sources(stat_sources) -> dict:
+        if stat_sources is None:
+            return {}
+        bad = StatSourceError("invalid_stat_sources",
+            "stat_sources must map a source name to "
+            "{build_dir, data_id?, cache_storage_path?, project_root?, cache_dir?}")
+        if not isinstance(stat_sources, dict):
+            raise bad
+        for name, spec in stat_sources.items():
+            if not (_is_name(name) and isinstance(spec, dict) and _is_name(spec.get("build_dir"))):
+                raise bad
+            if any(spec.get(k) is not None and not isinstance(spec[k], str)
+                    for k in ("cache_storage_path", "project_root")):
+                raise bad
+            cache_dir = spec.get("cache_dir")
+            if cache_dir is not None and not (isinstance(cache_dir, str) and os.path.isabs(cache_dir)):
+                raise bad
+        return stat_sources
+
+    @staticmethod
+    def _parse_mapping(column_stat_sources, specs: dict) -> dict:
+        if column_stat_sources is None:
+            return {}
+        bad = StatSourceError("invalid_column_stat_sources",
+            "column_stat_sources must map a column to a list of {source, column, prefix?}, "
+            "exactly one of them without a prefix")
+        if not isinstance(column_stat_sources, dict):
+            raise bad
+        mapping: dict = {}
+        for target, entries in column_stat_sources.items():
+            if not (_is_name(target) and isinstance(entries, list) and entries):
+                raise bad
+            parsed = []
+            for entry in entries:
+                if not (isinstance(entry, dict) and _is_name(entry.get("source")) and _is_name(entry.get("column"))
+                        and isinstance(entry.get("prefix"), (str, type(None)))):
+                    raise bad
+                if entry["source"] not in specs:
+                    raise StatSourceError("unknown_stat_source",
+                        f"column {target!r} names source {entry['source']!r}, which is not in stat_sources")
+                parsed.append(SourceColumn(entry["source"], entry["column"], entry.get("prefix") or ""))
+            if sum(1 for e in parsed if not e.prefix) != 1:
+                raise bad
+            mapping[target] = parsed
+        return mapping
+
+    def mapped_columns(self, columns) -> list:
+        """The mapped columns among ``columns``."""
+        present = set(columns)
+        return [c for c in self.mapping if c in present]
+
+    def validate(self, expr) -> None:
+        """Check the mapping against the session's expression and the sources'
+        schemas. A source that fails to load can't be checked; it shows as a
+        stat error on the mapped columns instead."""
+        columns = set(expr.columns)
+        for target, entries in self.mapping.items():
+            if target not in columns:
+                raise StatSourceError("column_not_found",
+                    f"column_stat_sources names {target!r}, which is not a column of the loaded expression")
+            for entry in entries:
+                try:
+                    source_columns = set(self.sources[entry.source].expr().columns)
+                except Exception:
+                    continue
+                if entry.column not in source_columns:
+                    raise StatSourceError("stat_source_column_not_found",
+                        f"source {entry.source!r} has no column {entry.column!r} (mapped from {target!r})")
+
+    def summarize(self, targets) -> tuple:
+        """The summaries of the mapped columns ``targets``, and their stat
+        errors.
+
+        Returns ``({target: (summary, replaces)}, {(target, stat): (error,
+        None)})``. ``replaces`` is whether ``summary`` is the whole summary of
+        the column, which it is when the unprefixed source ran; otherwise it
+        holds only the prefixed keys that did. A source that failed to load, or
+        a stat that errored over it, is an error keyed by the target column."""
+        needed: dict = {}
+        for target in targets:
+            for entry in self.mapping[target]:
+                columns = needed.setdefault(entry.source, [])
+                if entry.column not in columns:
+                    columns.append(entry.column)
+        runs = {name: self._run(name, columns) for name, columns in needed.items()}
+
+        summaries: dict = {}
+        errs: dict = {}
+        for target in targets:
+            summary: dict = {}
+            replaces = False
+            for entry in self.mapping[target]:
+                sdf, source_errs = runs[entry.source]
+                for (column, stat), err in source_errs.items():
+                    if column == entry.column:
+                        errs[(target, f"{entry.prefix}{stat}")] = err
+                if entry.column not in sdf:
+                    errs.setdefault((target, f"{entry.prefix}stat_source"), (
+                        KeyError(f"source {entry.source!r} produced no summary for {entry.column!r}"), None))
+                    continue
+                if entry.prefix:
+                    summary.update({f"{entry.prefix}{k}": v for k, v in sdf[entry.column].items()})
+                else:
+                    summary = {**sdf[entry.column], **summary}
+                    replaces = True
+            summaries[target] = (summary, replaces)
+        return summaries, errs
+
+    def _run(self, name: str, columns: list) -> tuple:
+        """``(sdf, errs)`` of the stats over ``columns`` of source ``name``,
+        keyed by source column; computed once per set."""
+        key = (name, tuple(columns))
+        with self._lock:
+            if key not in self._runs:
+                self._runs[key] = self._compute(self.sources[name], columns)
+            return self._runs[key]
+
+    @staticmethod
+    def _compute(source: _StatSource, columns: list) -> tuple:
+        try:
+            pipeline = XorqStatPipeline(source.stat_klasses(), unit_test=False, cache_storage=source.cache)
+            sdf, errors = pipeline.process_table(source.expr(), stat_columns=columns, scope_id=source.scope_id())
+        except Exception as e:
+            log.warning("stat source %s: stats over %s failed: %s", source.name, columns, e)
+            return {}, {(column, "stat_source"): (e, None) for column in columns}
+        return sdf, errors_to_errdict(errors)
+
+    def release(self) -> None:
+        """Release the memtables the loaded sources left on xorq's default
+        backend (#896)."""
+        for source in self.sources.values():
+            expr = source.loaded_expr()
+            if expr is not None:
+                release_memtables(expr)
 
 
 def load_expr_build_dir(build_dir: str, cache_dir=None):
