@@ -25,11 +25,11 @@ import polars as pl
 
 from buckaroo.dataflow.dataflow import CustomizableDataflow
 from buckaroo.dataflow.styling_core import InitSD
-from buckaroo.dataflow.autocleaning import PandasAutocleaning
 from buckaroo.customizations.pl_autocleaning_conf import NoCleaningConfPl
 from buckaroo.pluggable_analysis_framework.df_stats_v2 import PlDfStatsV2
 from buckaroo.polars_buckaroo import (
-    PLSampling, local_analysis_klasses, prepare_df_for_serialization)
+    PLSampling, PolarsAutocleaning, local_analysis_klasses,
+    prepare_df_for_serialization)
 from buckaroo.serialization_utils import pd_to_obj, make_infinite_resp
 
 
@@ -44,7 +44,7 @@ class PolarsServerSampling(PLSampling):
 class PolarsServerDataflow(CustomizableDataflow[pl.DataFrame]):
     """Headless polars dataflow matching ``PolarsBuckarooInfiniteWidget``."""
     analysis_klasses = local_analysis_klasses
-    autocleaning_klass = PandasAutocleaning
+    autocleaning_klass = PolarsAutocleaning
     autoclean_conf = tuple([NoCleaningConfPl])
     DFStatsClass = PlDfStatsV2
     sampling_klass = PolarsServerSampling
